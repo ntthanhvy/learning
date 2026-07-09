@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 2 · Ownership &amp; Borrowing</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Rust Intensive · Day 2 · ~75 min</p>
+<h1>Ownership &amp; borrowing</h1>
+<p class="byline">THE Rust feature — the reason there's no garbage collector and no <code>nil</code> panic at 3am. Today the mysterious <code>.clone()</code> from your Day 1 code finally gets explained.</p>
+
+<h2>Warm-up: yesterday, from memory</h2>
+<div class="quiz">
+  <div class="q" data-why="match must cover every variant — error[E0004] at compile time. You triggered it on purpose in the Day 1 practice.">
+    <p class="stem">You delete the <code>Command::Help</code> arm from your match. What happens?</p>
+    <button class="opt" data-ok>Compilation fails: non-exhaustive patterns</button>
+    <button class="opt">Help inputs panic at runtime</button>
+    <button class="opt">Help inputs are silently ignored</button>
+  </div>
+  <div class="q" data-why="Each variant carries its own fields: Save{code,url} holds two, Get{code} one, Help none — one type, three shapes.">
+    <p class="stem">What makes <code>enum Command</code> more than a list of constants?</p>
+    <button class="opt" data-ok>Variants can carry their own data</button>
+    <button class="opt">Variants can inherit from each other</button>
+    <button class="opt">Variants can change name at runtime</button>
+  </div>
+  <div class="q" data-why="The last expression of a block, without a semicolon, IS the block's value — that's why describe has no return keyword.">
+    <p class="stem">In <code>fn describe(&amp;self) -&gt; String { format!(…) }</code>, why no <code>return</code>?</p>
+    <button class="opt" data-ok>The final expression becomes the value</button>
+    <button class="opt">Methods never use return in Rust</button>
+    <button class="opt">format! returns on the caller's behalf</button>
+  </div>
+</div>
+
+<h2>1 · Three rules, no garbage collector</h2>
+<p>Go answers "when is this memory freed?" with a garbage collector that runs behind your back. Rust answers it with three compile-time rules — <dfn data-en="Every value has exactly one owner variable; when the owner goes out of scope, the value is freed (dropped). This replaces the garbage collector with bookkeeping the compiler does for free." data-vn="giữ nguyên 'ownership' — mỗi value đúng 1 chủ, chủ ra khỏi scope là value được giải phóng.">ownership</dfn>:</p>
+<ol>
+<li>Every value has exactly <strong>one owner</strong>.</li>
+<li>Assigning or passing the value <strong>moves</strong> ownership.</li>
+<li>When the owner goes out of scope, the value is <strong>freed</strong>. Deterministic, immediate, no GC pause.</li>
+</ol>
+<p>Rule 2 is the one that bites. Watch the memory:</p>
+<pre><code><span class="kw">let</span> a = String::from(<span class="cm">"go"</span>);
+<span class="cm">//  STACK              HEAP
+//  a ─ptr──────────►  "go"        one value, owner: a</span>
+
+<span class="kw">let</span> b = a;             <span class="cm">// MOVE — the pointer is copied, ownership transfers</span>
+<span class="cm">//  a ─✗ (dead)
+//  b ─ptr──────────►  "go"        STILL one value, owner: b</span>
+
+println!(<span class="cm">"{}"</span>, a);    <span class="cm">// ✗ compile error — a no longer owns anything</span></code></pre>
+<p>In Go, <code>b := a</code> leaves both usable and the GC figures out lifetimes later. In Rust the old binding is <em>dead</em> — so there's never a question of who frees the heap data: exactly one owner does, exactly once (<a href="https://doc.rust-lang.org/book/ch04-01-what-is-ownership.html">Book ch. 4.1</a>).</p>
+<p>Exception: small fixed-size types — <code>i32</code>, <code>bool</code>, <code>char</code>, <code>f64</code> — implement <dfn data-en="A marker trait for types that are cheap to duplicate bit-for-bit on the stack. Assigning a Copy value duplicates it instead of moving it — both variables stay usable. Integers, bools, chars, floats are Copy; String and Vec are not." data-vn="giữ nguyên 'Copy' — type nhỏ, gán là nhân bản chứ không move.">Copy</dfn>: assignment duplicates them and both variables stay alive. That's why yesterday's E0382 message said <em>"…because <code>code</code> has type <code>String</code>, which does not implement the <code>Copy</code> trait."</em> Heap-owning types move; stack-trivial types copy.</p>
+
+<h2>2 · Feel it in your own code</h2>
+<p>Open <code>linkshort-rs/src/main.rs</code>. In the <code>Command::Save</code> arm, add one line right <em>after</em> the push:</p>
+<pre><code>Command::Save { code, url } => {
+    links.push(Link { code, url });        <span class="cm">// code and url MOVE into the new Link…</span>
+    println!(<span class="cm">"saved {}"</span>, code);            <span class="cm">// …so this line uses a dead variable</span></code></pre>
+<p><code>cargo check</code>:</p>
+<pre><code><span style="color:var(--bad)">error[E0382]</span>: borrow of moved value: `code`
+   |
+   |  Command::Save { code, url } => {
+   |                  ---- move occurs because `code` has type `String`,
+   |                       which does not implement the `Copy` trait</code></pre>
+<p>Read it like a story: the match arm bound <code>code</code>, the struct literal <em>moved</em> it into the new <code>Link</code>, the <code>println!</code> arrived too late. Fix: print <em>before</em> the push (or borrow — next section). Keep the fix; this is part of today's practice.</p>
+<p>And now yesterday's mystery dissolves: <code>parse_command</code> receives <code>args</code> as a <em>borrow</em> (it doesn't own the strings), but <code>Command::Save</code> needs to <em>own</em> its fields — so <code>.clone()</code> manufactures an owned copy. It wasn't ceremony; it was the type system telling the truth about who keeps what.</p>
+
+<h2>3 · Borrowing: use without taking</h2>
+<p>Moving everything everywhere would be unbearable — usually you just want to <em>look at</em> a value. That's a <dfn data-en="A reference that lets you use a value without taking ownership: &v to read, &mut v to modify. The owner keeps the value; the borrow must end before the owner goes away." data-vn="giữ nguyên 'borrow' — mượn xem (&) hoặc mượn sửa (&mut), không lấy quyền sở hữu.">borrow</dfn>:</p>
+<pre><code><span class="kw">fn</span> print_link(links: &amp;[Link], code: &amp;str) { … }   <span class="cm">// borrows: reads only</span>
+
+print_link(&amp;links, &amp;code);   <span class="cm">// links and code still fully usable after the call</span></code></pre>
+<p>The <dfn data-en="The compiler pass enforcing the borrowing rules: any number of shared &-borrows OR exactly one exclusive &mut-borrow, never both at once, and no borrow may outlive the owner." data-vn="giữ nguyên 'borrow checker' — công an của Rust, check luật mượn lúc compile.">borrow checker</dfn> enforces one law:</p>
+<div class="callout"><strong>Many readers <em>or</em> one writer — never both.</strong> Any number of <code>&amp;T</code> at once, OR exactly one <code>&amp;mut T</code>. This single rule kills data races at compile time — it's why yesterday's glossary called Rust concurrency "fearless".</div>
+<p>Feel this one too. Inside your <code>Get</code> arm's loop, try pushing while iterating:</p>
+<pre><code><span class="kw">for</span> l <span class="kw">in</span> &amp;links {                         <span class="cm">// shared borrow of links (reader)</span>
+    links.push(Link { … });               <span class="cm">// &mut borrow (writer) — while readers exist!</span></code></pre>
+<pre><code><span style="color:var(--bad)">error[E0502]</span>: cannot borrow `links` as mutable because it is also borrowed as immutable
+   |
+   |  for l in &amp;links {
+   |           ------ immutable borrow occurs here</code></pre>
+<p>Go would compile this and let the slice reallocate under your feet. Rust names both borrows and refuses. Delete the line after reading the error — the point was meeting it.</p>
+
+<h2>4 · <code>String</code> vs <code>&amp;str</code></h2>
+<p>The pair you'll see in every signature from now on:</p>
+<table class="gloss">
+<tr><th>Type</th><th>What it is</th><th>Use it for</th></tr>
+<tr><td><code>String</code></td><td>Owned, growable, heap-allocated text</td><td>struct fields, building/keeping text</td></tr>
+<tr><td><code>&amp;str</code></td><td>A borrowed view into text someone else owns</td><td>function parameters — accept broadly</td></tr>
+</table>
+<p>Two automatic conversions make this ergonomic: <code>&amp;String</code> coerces to <code>&amp;str</code>, and <code>&amp;Vec&lt;Link&gt;</code> coerces to <code>&amp;[Link]</code> (a slice — a borrowed view into a sequence). So <code>print_link(&amp;links, &amp;code)</code> just works even though the parameters say slice and str. Rule of thumb, same spirit as Go's "accept interfaces": <strong>parameters borrow (<code>&amp;str</code>, <code>&amp;[T]</code>), fields own (<code>String</code>, <code>Vec&lt;T&gt;</code>)</strong>.</p>
+
+<h2>5 · Practice: refactor with borrows</h2>
+<p>All in <code>linkshort-rs/src/main.rs</code>.</p>
+<p><strong>Step 1 — trigger and fix E0382</strong> (section 2, if you haven't already): add the too-late <code>println!</code>, read the error, then move the print <em>above</em> the push so it borrows <code>code</code> while it's still alive:</p>
+<pre><code>println!(<span class="cm">"saving {}"</span>, code);           <span class="cm">// borrow happens BEFORE the move — fine</span>
+links.push(Link { code, url });</code></pre>
+
+<p><strong>Step 2 — extract <code>print_link</code>.</strong> Above <code>main</code>, write this function — signature given, body is yours (it's the loop currently living in your <code>Get</code> arm):</p>
+<pre><code><span class="cm">// Borrows at a function boundary: &[Link] = "let me look at the list",</span>
+<span class="cm">// &str = "let me look at some text". Caller keeps ownership of both.</span>
+<span class="kw">fn</span> print_link(links: &amp;[Link], code: &amp;str) {
+    <span class="cm">// TODO: move the found/loop/not-found logic from the Get arm here.</span>
+    <span class="cm">// Inside, iterate `for l in links` — it's already a borrowed slice.</span>
+}</code></pre>
+<p>Then the <code>Get</code> arm shrinks to one line:</p>
+<pre><code>Command::Get { code } => {
+    print_link(&amp;links, &amp;code);  <span class="cm">// &Vec<Link> → &[Link], &String → &str: coercion</span>
+}</code></pre>
+
+<p><strong>Step 3 — trigger E0502</strong> (section 3): the push-inside-loop experiment, inside <code>print_link</code>'s loop or the old arm. Read the error until "immutable borrow occurs here" makes sense, then delete the line.</p>
+
+<p><strong>Step 4 — prove it.</strong></p>
+<pre><code>cargo check     <span class="cm"># quiet</span>
+cargo test      <span class="cm"># 2 passed (Day 1's tests still green)</span>
+cargo run -- get rust
+cargo run -- get nope
+cargo run -- save cc https://claude.com</code></pre>
+<p>Expected: <code>get rust</code> prints the link; <code>get nope</code> prints <code>no link with code 'nope'</code>; the save prints <code>saving cc</code> then lists three links. <code>cargo clippy</code> should stay silent too.</p>
+
+<div class="callout"><strong>Done when:</strong> <code>cargo check</code> quiet · <code>cargo test</code> green · the three runs behave — and you can say out loud what E0382 and E0502 each protected you from.</div>
+
+<h2>Check yourself</h2>
+<div class="quiz">
+  <div class="q" data-why="String owns heap data, so assignment MOVES it — the old binding dies at compile time, not runtime. One owner, always.">
+    <p class="stem">After <code>let b = a;</code> where <code>a</code> is a <code>String</code>, using <code>a</code> gives…</p>
+    <button class="opt" data-ok>A compile error about moves</button>
+    <button class="opt">A runtime panic about drops</button>
+    <button class="opt">A silent copy of it</button>
+  </div>
+  <div class="q" data-why="i32 implements Copy: assignment duplicates the bits on the stack, both variables stay usable. Heap-owning types like String don't get this.">
+    <p class="stem">Why does the same pattern work fine when <code>a</code> is an <code>i32</code>?</p>
+    <button class="opt" data-ok>i32 is Copy, so duplicated</button>
+    <button class="opt">i32 is small, so shared</button>
+    <button class="opt">i32 is stack, so cloned</button>
+  </div>
+  <div class="q" data-why="The borrow checker's one law: any number of shared readers (&T) OR exactly one exclusive writer (&mut T) — never both at once.">
+    <p class="stem">What does the borrow checker allow at any one moment?</p>
+    <button class="opt" data-ok>Many readers or one writer</button>
+    <button class="opt">Many writers or one reader</button>
+    <button class="opt">One reader and one writer</button>
+  </div>
+  <div class="q" data-why="&str is a borrowed view into text owned elsewhere — which is why parameters prefer it: they accept String, literals, and slices alike.">
+    <p class="stem">What is a <code>&amp;str</code>, exactly?</p>
+    <button class="opt" data-ok>A borrowed view of text</button>
+    <button class="opt">An owned growable text buffer</button>
+    <button class="opt">A pointer to heap always</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://doc.rust-lang.org/book/ch04-00-understanding-ownership.html">The Book, ch. 4 — Understanding Ownership</a> (~40 min, the most important chapter in the book; the diagrams there extend today's). Faster second angle: <a href="https://google.github.io/comprehensive-rust/borrowing.html">Comprehensive Rust — Borrowing</a>.</p>
+<p>New terms are in the <a href="../reference/glossary.html#day2">glossary — Day 2 section</a>. Today's questions just joined your <a href="../daily.html">daily practice</a> bank.</p>
+
+<p class="next">Tomorrow: <strong>Option, Result &amp; errors</strong> — what Rust does instead of nil and exceptions, and why your Go <code>ErrNotFound</code> instincts transfer almost directly.<br><br>
+💬 A borrow error you can't read? Paste the whole thing — the compiler's notes are half the lesson. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/quiz.js"></script>
+<script src="../assets/gloss.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

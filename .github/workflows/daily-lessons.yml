@@ -1,0 +1,57 @@
+name: daily-lessons
+
+on:
+  schedule:
+    - cron: "0 23 * * *" # 06:00 Asia/Ho_Chi_Minh (UTC+7)
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: daily-lessons
+  cancel-in-progress: false
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # Rust (stable) and psql are preinstalled on ubuntu-latest runners.
+
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Generate today's lessons
+        env:
+          # Subscription auth (claude setup-token) — or swap for ANTHROPIC_API_KEY.
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          LEARNING_DB_URL: ${{ secrets.LEARNING_DB_URL }}
+          TZ: Asia/Ho_Chi_Minh # "today" must be the learner's today, not UTC's
+        run: |
+          claude -p "$(cat daily-lessons-prompt.md)" \
+            --permission-mode acceptEdits \
+            --allowedTools "Read,Write,Edit,Glob,Grep,Bash(date:*),Bash(ls:*),Bash(mkdir:*),Bash(cat:*),Bash(cp:*),Bash(grep:*),Bash(go vet:*),Bash(go build:*),Bash(go mod:*),Bash(go test:*),Bash(go run:*),Bash(gofmt:*),Bash(cargo check:*),Bash(cargo test:*),Bash(cargo run:*),Bash(cargo clippy:*),Bash(cargo new:*),Bash(node:*),Bash(psql:*),Bash(bin/record-progress:*)" \
+            | tee gen-output.txt
+          # The prompt ends with a per-course summary; if it never appeared,
+          # the run died mid-way (see 2026-07-09 incident) — fail loudly.
+          grep -q "go:" gen-output.txt
+          rm -f gen-output.txt
+
+      - name: Commit & push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --staged --quiet || git commit -m "lessons: $(TZ=Asia/Ho_Chi_Minh date +%F)"
+          git push

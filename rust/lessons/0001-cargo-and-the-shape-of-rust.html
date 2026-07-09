@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 1 · Cargo &amp; the Shape of Rust</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Rust Intensive · Day 1 · ~75 min</p>
+<h1>Cargo &amp; the shape of Rust</h1>
+<p class="byline">Your first Rust program is the linkshort project again — this time you'll meet the two things Go simply doesn't have: enums that carry data, and a compiler that refuses to let you forget a case.</p>
+
+<div class="callout"><strong>Today's win:</strong> a working <code>linkshort-rs</code> CLI — <code>save</code>, <code>get</code>, <code>help</code> — where the command itself is an enum and the compiler proves you handled every case.</div>
+
+<h2>1 · Cargo in five commands</h2>
+<p>In Go you juggled <code>go mod init</code>, <code>go vet</code>, <code>go test</code>, <code>go run</code>. Rust rolls all of it into <dfn data-en="Rust's build tool and package manager in one. It creates projects, compiles, runs tests, and manages dependencies. You almost never invoke the compiler (rustc) directly." data-vn="giữ nguyên 'cargo' — tool build + quản lý package, ít khi gọi rustc trực tiếp.">cargo</dfn>:</p>
+<table class="gloss">
+<tr><th>Command</th><th>Does</th><th>Go equivalent</th></tr>
+<tr><td><code>cargo new x</code></td><td>new project (a <dfn data-en="Rust's unit of compilation and distribution — what other ecosystems call a package or library. A binary crate is a program; a library crate is code for others to import." data-vn="giữ nguyên 'crate' — như package/module.">crate</dfn>) with git + folders</td><td><code>mkdir + go mod init</code></td></tr>
+<tr><td><code>cargo check</code></td><td>compile-check, no binary — fast, use constantly</td><td><code>go vet</code>-ish</td></tr>
+<tr><td><code>cargo run</code></td><td>build + run (<code>-- args</code> after the <code>--</code>)</td><td><code>go run .</code></td></tr>
+<tr><td><code>cargo test</code></td><td>run all tests</td><td><code>go test ./...</code></td></tr>
+<tr><td><code>cargo clippy</code></td><td>the official linter, with idiom hints</td><td><code>go vet</code> + more</td></tr>
+</table>
+<p>Project layout after <code>cargo new</code>: <code>Cargo.toml</code> (like <code>go.mod</code> — name, version, dependencies) and <code>src/main.rs</code> (like <code>main.go</code>). That's it.</p>
+
+<h2>2 · <code>let</code>, <code>mut</code>, and "everything is an expression"</h2>
+<pre><code><span class="kw">let</span> x = 5;          <span class="cm">// immutable — `x = 6` later is a COMPILE ERROR</span>
+<span class="kw">let mut</span> y = 5;      <span class="cm">// opt in to change — the reverse of Go's default</span>
+<span class="kw">let</span> x = x + 1;      <span class="cm">// legal! a NEW x replaces the old one (even a new type)</span></code></pre>
+<p>Line three is <dfn data-en="Declaring a new variable with the same name as an old one. The old variable is gone from that point on; the new one may even have a different type. Idiomatic in Rust, unlike Go where := of an existing name in the same scope is an error." data-vn="khai báo đè tên cũ bằng let mới — đổi cả type cũng được.">shadowing</dfn> — idiomatic Rust, where Go would refuse.</p>
+<p>The deeper shift: almost everything is an <dfn data-en="Code that produces a value. In Rust, if/else, match, and even a {} block are expressions — they evaluate to something. A statement (like `let x = 5;`) produces nothing. The last line of a block WITHOUT a semicolon is the block's value." data-vn="expression = có trả về value; dòng cuối block không có ; chính là kết quả.">expression</dfn> — it produces a value. Go's <code>if</code> does things; Rust's <code>if</code> <em>is</em> a value:</p>
+<pre><code><span class="kw">let</span> label = <span class="kw">if</span> count > 0 { <span class="cm">"some"</span> } <span class="kw">else</span> { <span class="cm">"none"</span> };  <span class="cm">// if as a value (no ternary needed)</span>
+
+<span class="kw">fn</span> double(n: i32) -> i32 {
+    n * 2               <span class="cm">// last line, NO semicolon → this IS the return value</span>
+}</code></pre>
+<p>Add a semicolon to <code>n * 2</code> and it becomes a statement returning nothing — the compiler will complain the function returns <code>()</code>. This "missing semicolon as return" is everywhere in real Rust; read it as <em>the block's final value</em> (<a href="https://doc.rust-lang.org/book/ch03-03-how-functions-work.html">Book ch. 3.3</a>).</p>
+
+<h2>3 · Structs and <code>impl</code></h2>
+<p>Structs look like Go. Methods don't live on receivers — they live in an <dfn data-en="The block where a type's methods and associated functions are defined: impl Link { fn describe(&self) -> String {…} }. Called like link.describe(). The &self parameter is the method's handle on the instance." data-vn="giữ nguyên 'impl block' — nơi viết method cho type.">impl block</dfn>:</p>
+<pre><code><span class="kw">struct</span> Link {
+    code: String,
+    url: String,
+}
+
+<span class="kw">impl</span> Link {
+    <span class="kw">fn</span> describe(&amp;self) -> String {              <span class="cm">// &self ≈ Go's (l *Link) receiver — Day 2 explains the &</span>
+        format!(<span class="cm">"{} -> {}"</span>, self.code, self.url) <span class="cm">// format! builds a String, like fmt.Sprintf</span>
+    }
+}
+
+<span class="kw">let</span> l = Link { code: String::from(<span class="cm">"rs"</span>), url: String::from(<span class="cm">"https://rust-lang.org"</span>) };
+println!(<span class="cm">"{}"</span>, l.describe());</code></pre>
+<p><code>println!</code> and <code>format!</code> end in <code>!</code> because they're <dfn data-en="Code that writes code at compile time, invoked with a bang: println!, vec!, format!, todo!. For now treat them as 'function-like things with a !' — writing your own is out of scope." data-vn="giữ nguyên 'macro' — gọi có dấu chấm than.">macros</dfn>, not functions. For now: a function-like thing with a bang.</p>
+
+<h2>4 · The star: enums with data + <code>match</code></h2>
+<p>In Go, "one of several kinds of thing" meant <code>iota</code> constants, or an interface, or a struct with unused fields — and nothing checked you covered every kind. Rust makes it a first-class type: each <dfn data-en="One of the listed shapes of an enum. Unlike C/Go-style constants, a Rust variant can carry its own fields: Command::Save { code, url } holds data; Command::Help holds none." data-vn="giữ nguyên 'variant' — mỗi nhánh của enum mang được data riêng.">variant</dfn> can carry its own data:</p>
+<pre><code><span class="kw">enum</span> Command {
+    Save { code: String, url: String },  <span class="cm">// this variant carries two fields</span>
+    Get { code: String },                <span class="cm">// this one carries one</span>
+    Help,                                <span class="cm">// this one carries nothing</span>
+}</code></pre>
+<p>A <code>Command</code> is <em>exactly one</em> of these shapes. And <code>match</code> takes them apart, binding the fields as it goes:</p>
+<pre><code><span class="kw">match</span> cmd {
+    Command::Save { code, url } => links.push(Link { code, url }),
+    Command::Get { code } => println!(<span class="cm">"looking up {code}"</span>),
+    Command::Help => println!(<span class="cm">"usage: …"</span>),
+}</code></pre>
+<p>The contract: <code>match</code> must be <dfn data-en="Covering every possible variant, verified by the compiler. Miss one and compilation fails with error E0004 'non-exhaustive patterns'. This turns 'forgot to handle a case' from a production bug into a build failure." data-vn="đủ hết mọi case — thiếu là compile fail luôn.">exhaustive</dfn>. Forget a variant and the build fails — you'll trigger this on purpose in the practice. Adding a fourth variant next month? Every <code>match</code> in the codebase becomes a compile error until it's handled. That's the feature backend teams rave about (<a href="https://doc.rust-lang.org/book/ch06-00-enums.html">Book ch. 6</a>).</p>
+
+<h2>5 · Practice: <code>linkshort-rs</code></h2>
+<p><strong>Step 1 — scaffold.</strong> In a terminal:</p>
+<pre><code>cd ~/learning/rust/project
+cargo new linkshort-rs
+cd linkshort-rs
+cargo run</code></pre>
+<p>Expect <code>Hello, world!</code>. You now have:</p>
+<pre><code>linkshort-rs/
+├── Cargo.toml      <span class="cm"># like go.mod</span>
+└── src/
+    └── main.rs     <span class="cm"># everything lives here today</span></code></pre>
+
+<p><strong>Step 2 — the skeleton.</strong> Replace the whole of <code>src/main.rs</code> with this. Everything is given except three TODOs — read the given parts, they use today's sections:</p>
+<pre><code><span class="kw">use</span> std::env;
+
+<span class="cm">// A short link: a code that redirects to a URL. Same domain as your Go project.</span>
+<span class="kw">struct</span> Link {
+    code: String,
+    url: String,
+}
+
+<span class="kw">impl</span> Link {
+    <span class="cm">// TODO 3: return "&lt;code&gt; -&gt; &lt;url&gt;" using format!(…) as an EXPRESSION body:</span>
+    <span class="cm">// no `return`, no trailing `;`. Until then, todo!() keeps the compiler happy.</span>
+    <span class="kw">fn</span> describe(&amp;self) -> String {
+        todo!()
+    }
+}
+
+<span class="cm">// TODO 1: define `enum Command` with three variants:</span>
+<span class="cm">//   Save { code: String, url: String }   — save a new link</span>
+<span class="cm">//   Get  { code: String }                — look one up</span>
+<span class="cm">//   Help                                 — no data at all</span>
+<span class="cm">// (This is the heart of today. Write it, then run `cargo check`.)</span>
+
+<span class="cm">// GIVEN: turns CLI words into a Command. `match` on a slice: each pattern</span>
+<span class="cm">// describes a SHAPE of the arguments ([three words], [two words], anything else).</span>
+<span class="kw">fn</span> parse_command(args: &amp;[String]) -> Command {
+    <span class="kw">match</span> args {
+        [cmd, code, url] <span class="kw">if</span> cmd == <span class="cm">"save"</span> => Command::Save {
+            code: code.clone(), <span class="cm">// .clone(): make an owned copy — the why is Day 2</span>
+            url: url.clone(),
+        },
+        [cmd, code] <span class="kw">if</span> cmd == <span class="cm">"get"</span> => Command::Get { code: code.clone() },
+        _ => Command::Help,
+    }
+}
+
+<span class="kw">fn</span> main() {
+    <span class="kw">let</span> args: Vec&lt;String&gt; = env::args().skip(1).collect();
+    <span class="kw">let</span> cmd = parse_command(&amp;args); <span class="cm">// &amp;: lend it, don't give it away — Day 2's topic</span>
+
+    <span class="kw">let mut</span> links = vec![
+        Link { code: String::from(<span class="cm">"go"</span>), url: String::from(<span class="cm">"https://go.dev"</span>) },
+        Link { code: String::from(<span class="cm">"rust"</span>), url: String::from(<span class="cm">"https://www.rust-lang.org"</span>) },
+    ];
+
+    <span class="cm">// TODO 2: `match cmd { … }` — step 5 walks you through it.</span>
+}
+
+#[cfg(test)]
+<span class="kw">mod</span> tests {
+    <span class="kw">use super</span>::*;
+
+    #[test]
+    <span class="kw">fn</span> empty_args_means_help() {
+        <span class="kw">let</span> cmd = parse_command(&amp;[]);
+        assert!(matches!(cmd, Command::Help)); <span class="cm">// matches!: "does cmd have this shape?"</span>
+    }
+
+    #[test]
+    <span class="kw">fn</span> save_parses_code_and_url() {
+        <span class="kw">let</span> args = vec![
+            <span class="cm">"save"</span>.to_string(),
+            <span class="cm">"rs"</span>.to_string(),
+            <span class="cm">"https://www.rust-lang.org"</span>.to_string(),
+        ];
+        assert!(matches!(parse_command(&amp;args), Command::Save { .. }));
+    }
+}</code></pre>
+
+<p><strong>Step 3 — TODO 1, the enum.</strong> Write <code>enum Command</code> where the TODO 1 comment sits (the comment tells you the three variants exactly). Then:</p>
+<pre><code>cargo check</code></pre>
+<p>It should <em>pass</em>, with ~7 warnings about unused things — fine, the code that uses them is coming. If you see <span style="color:var(--bad)">error</span> instead, read it: the compiler names the line and usually suggests the fix. Rust's errors are the best in the business — reading them is a skill this course trains on purpose.</p>
+
+<p><strong>Step 4 — TODO 3, the method.</strong> Replace <code>todo!()</code> in <code>describe</code> with a <code>format!</code> expression producing <code>go -> https://go.dev</code> style output. No <code>return</code>, no semicolon (section 2!). <code>cargo check</code> again — still passing?</p>
+
+<p><strong>Step 5 — TODO 2, the match.</strong> Where the TODO 2 comment sits, start with <em>only one arm</em>, deliberately incomplete:</p>
+<pre><code><span class="kw">match</span> cmd {
+    Command::Help => {
+        println!(<span class="cm">"usage: linkshort-rs save &lt;code&gt; &lt;url&gt; | get &lt;code&gt;"</span>);
+    }
+}</code></pre>
+<p>Run <code>cargo check</code> and read the failure — this is today's lesson in one error:</p>
+<pre><code><span style="color:var(--bad)">error[E0004]</span>: non-exhaustive patterns: `Command::Save { .. }` and `Command::Get { .. }` not covered</code></pre>
+<p>Go would have shipped that bug. Now add the two missing arms — <code>Save</code> pushes and lists, <code>Get</code> searches:</p>
+<pre><code>Command::Save { code, url } => {
+    links.push(Link { code, url });
+    println!(<span class="cm">"saved. {} links now:"</span>, links.len());
+    <span class="kw">for</span> l <span class="kw">in</span> &amp;links {
+        println!(<span class="cm">"  {}"</span>, l.describe());
+    }
+}
+Command::Get { code } => {
+    <span class="kw">let mut</span> found = <span class="kw">false</span>;
+    <span class="kw">for</span> l <span class="kw">in</span> &amp;links {
+        <span class="kw">if</span> l.code == code {
+            println!(<span class="cm">"{}"</span>, l.describe());
+            found = <span class="kw">true</span>;
+        }
+    }
+    <span class="kw">if</span> !found {
+        println!(<span class="cm">"no link with code '{}'"</span>, code);
+    }
+}</code></pre>
+
+<p><strong>Step 6 — prove it.</strong></p>
+<pre><code>cargo check          <span class="cm"># quiet — zero warnings now</span>
+cargo test           <span class="cm"># test result: ok. 2 passed</span>
+cargo run -- get rust
+cargo run -- save cc https://claude.com
+cargo run            <span class="cm"># no args → usage line</span></code></pre>
+<p>Expected: <code>get rust</code> prints <code>rust -&gt; https://www.rust-lang.org</code>; the save prints <code>saved. 3 links now:</code> and lists all three; no args prints usage. (Links vanish between runs — it's an in-memory <code>Vec</code>, exactly like your Go MemStore before Day 5.)</p>
+
+<div class="callout"><strong>Done when:</strong> <code>cargo check</code> quiet · <code>cargo test</code> shows <code>2 passed</code> · the three runs above print what they should. Bonus polish: <code>cargo clippy</code> stays silent too.</div>
+
+<h2>Check yourself</h2>
+<div class="quiz">
+  <div class="q" data-why="Bindings are immutable by default; reassignment needs `let mut`. (Shadowing with a fresh `let x = …` is a different, legal thing — it makes a NEW x.)">
+    <p class="stem">After <code>let x = 5;</code>, what does a later <code>x = 6;</code> do?</p>
+    <button class="opt" data-ok>Fails to compile without mut</button>
+    <button class="opt">Compiles and rebinds x fine</button>
+    <button class="opt">Panics when the program runs</button>
+  </div>
+  <div class="q" data-why="if/else, match, and blocks all produce values in Rust — that's why `let label = if … {…} else {…};` works and no ternary operator exists.">
+    <p class="stem">In Rust, <code>if</code> is best described as…</p>
+    <button class="opt" data-ok>An expression that produces values</button>
+    <button class="opt">A statement that produces nothing</button>
+    <button class="opt">A macro that expands inline</button>
+  </div>
+  <div class="q" data-why="match must be exhaustive: error[E0004] 'non-exhaustive patterns' at compile time. Nothing waits until runtime — that's the whole point.">
+    <p class="stem">A <code>match</code> on an enum misses one variant. What happens?</p>
+    <button class="opt" data-ok>The compiler rejects the program</button>
+    <button class="opt">It panics when that arrives</button>
+    <button class="opt">It silently skips that case</button>
+  </div>
+  <div class="q" data-why="Unlike Go/C-style constants, each Rust enum variant can carry its own fields — Save{code,url} holds data, Help holds none. That's what makes enum+match a modeling tool.">
+    <p class="stem">Which is true of Rust enum variants?</p>
+    <button class="opt" data-ok>Each variant can carry data</button>
+    <button class="opt">Each variant is an integer</button>
+    <button class="opt">Each variant needs a struct</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://doc.rust-lang.org/book/ch06-00-enums.html">The Book, ch. 6 — Enums and Pattern Matching</a> (~25 min, the single highest-value chapter for a Go developer). Skim <a href="https://doc.rust-lang.org/book/ch03-00-common-programming-concepts.html">ch. 3</a> if variables/functions felt fast. Second angle: <a href="https://google.github.io/comprehensive-rust/">Comprehensive Rust</a> day 1 — built for experienced devs like you.</p>
+<p>All of today's terms are in the <a href="../reference/glossary.html#day1">glossary — Day 1 section</a>. Today's questions also entered your <a href="../daily.html">daily practice</a> bank.</p>
+
+<p class="next">Tomorrow: <strong>ownership &amp; borrowing</strong> — why <code>.clone()</code> was in the given code, what <code>&amp;</code> really lends, and the borrow checker's actual rules.<br><br>
+💬 Stuck on a step, or an error message reads like noise? Paste it to your teacher — hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/quiz.js"></script>
+<script src="../assets/gloss.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

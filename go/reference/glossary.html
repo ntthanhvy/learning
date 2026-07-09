@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Glossary · terms in software context</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Reference · Glossary</p>
+<h1>Go course glossary</h1>
+<p class="byline">Every jargon term from the lessons: what it means <em>in software</em> (English), then the Vietnamese the way developers actually say it — mixed EN–VN, not textbook translation. Grows each day.</p>
+
+<h2 id="basics">Basics — declarations, pointers &amp; construction</h2>
+<table class="gloss">
+<tr><th>Term</th><th>In software</th><th>Tiếng Việt (dev-style)</th></tr>
+<tr><td>zero value</td><td>The default a declared variable gets with no initializer: 0, <code>""</code>, false; nil for pointers, maps, slices, interfaces, channels.</td><td>giá trị mặc định khi khai báo</td></tr>
+<tr><td>short declaration <code>:=</code></td><td>Declare and assign in one step, type inferred. Only inside functions.</td><td>khai báo nhanh, tự suy kiểu</td></tr>
+<tr><td>composite literal</td><td><code>T{...}</code> — create a struct/slice/map value and fill its contents in one expression. Unset struct fields get zero values.</td><td>tạo value kèm nội dung: <code>T{...}</code></td></tr>
+<tr><td>pointer <code>*T</code></td><td>A value holding the address of another value; lets two places share ONE value instead of copies. In a type position, <code>*T</code> reads "pointer to T."</td><td>con trỏ</td></tr>
+<tr><td>address-of <code>&amp;</code></td><td><code>&amp;v</code> gives a pointer to v. <code>&amp;T{...}</code> creates the value AND takes its address in one step.</td><td>lấy địa chỉ, trả về con trỏ</td></tr>
+<tr><td>dereference <code>*p</code></td><td>Follow the pointer to the value it points at. With fields Go auto-dereferences: <code>p.Field</code> just works.</td><td>đọc value mà con trỏ trỏ tới</td></tr>
+<tr><td>receiver</td><td>The <code>(s *MemStore)</code> part of a method — what the method is called on. Pointer receiver shares the original; value receiver gets a copy.</td><td>giữ nguyên "receiver"</td></tr>
+<tr><td>make vs new</td><td><code>make</code> initializes maps/slices/channels ready for use; <code>new(T)</code> returns a zeroed <code>*T</code> — in practice <code>&amp;T{}</code> is preferred.</td><td>make cho map/slice/chan; new hiếm dùng</td></tr>
+<tr><td>nil</td><td>The "points at nothing / not yet set" value of pointers, maps, slices, interfaces, channels, funcs. Writing to a nil map panics.</td><td>giữ nguyên "nil"</td></tr>
+<tr><td>panic</td><td>The program stops immediately and prints a stack trace — a crash, distinct from returning an error value. Idiomatic Go returns errors; panics are for impossible states.</td><td>giữ nguyên "panic"</td></tr>
+</table>
+
+<h2>Day 1 — Interfaces &amp; composition</h2>
+<table class="gloss">
+<tr><th>Term</th><th>In software</th><th>Tiếng Việt (dev-style)</th></tr>
+<tr><td>interface</td><td>A named list of methods. Any type that has those methods can be used wherever the interface is asked for.</td><td>giữ nguyên "interface"</td></tr>
+<tr><td>satisfy</td><td>To have every method an interface lists, so the compiler accepts the type as that interface. Automatic — nothing declared.</td><td>thỏa mãn / "có đủ method"</td></tr>
+<tr><td>implicit</td><td>Happens automatically without you writing anything to declare it. Opposite: explicit.</td><td>ngầm định, tự động</td></tr>
+<tr><td>consumer / implementer</td><td>Consumer = the code that <em>calls</em> the behavior (receives the interface). Implementer = the code that <em>provides</em> the method bodies.</td><td>bên dùng / bên hiện thực</td></tr>
+<tr><td>concrete type</td><td>A real struct or named type — not an interface. All fields and methods visible.</td><td>kiểu cụ thể (struct thật)</td></tr>
+<tr><td>abstraction</td><td>Hiding details so callers deal only with what matters — an interface is an abstraction over concrete types.</td><td>trừu tượng hóa</td></tr>
+<tr><td>composition</td><td>Building bigger things by combining small parts, instead of inheriting from a parent class.</td><td>ghép từ nhiều phần nhỏ (vs. kế thừa)</td></tr>
+<tr><td>embedding</td><td>Declaring a field with only a type, no name, inside a struct. The inner type's methods become usable on the outer type.</td><td>nhúng type vào struct</td></tr>
+<tr><td>promoted method</td><td>A method "lifted" from the embedded value to the outer type: <code>outer.Method()</code> forwards automatically.</td><td>method bên trong được gọi thẳng trên type ngoài</td></tr>
+<tr><td>delegate</td><td>To pass the call through to the wrapped inner value, which does the real work — e.g. <code>s.Store.Save(ctx, l)</code>.</td><td>chuyển việc cho bên trong xử lý</td></tr>
+<tr><td>wrapper / wrap</td><td>A type holding another value inside, adding behavior around its calls (logging, caching, retries).</td><td>giữ nguyên "wrap" — bọc thêm hành vi</td></tr>
+<tr><td>decorator</td><td>A wrapper that changes ONE behavior and delegates everything else. Same idea as middleware.</td><td>giữ nguyên "decorator"</td></tr>
+<tr><td>middleware</td><td>A layer wrapped around HTTP request handling that adds one concern (logging, auth, rate limits) then passes the request on. Built hands-on in Day 4.</td><td>giữ nguyên "middleware"</td></tr>
+<tr><td>idiomatic</td><td>Written the way experienced Go programmers expect — not just "works," but "looks right" in code review.</td><td>đúng "chuẩn" của cộng đồng Go</td></tr>
+<tr><td>scaffold</td><td>To create a project's first skeleton: folders, module, empty types — the frame you build on.</td><td>dựng khung ban đầu</td></tr>
+<tr><td>test fake</td><td>A tiny hand-written stand-in (e.g. a fake Store) used in tests instead of the real implementation.</td><td>object giả để test</td></tr>
+</table>
+
+<h2 id="day2">Day 2 — Errors as values</h2>
+<table class="gloss">
+<tr><th>Term</th><th>In software</th><th>Tiếng Việt (dev-style)</th></tr>
+<tr><td>error (interface)</td><td>Not a special mechanism — an ordinary one-method interface: <code>Error() string</code>. Errors are values you return, compare, and store.</td><td>giữ nguyên "error" — chỉ là interface một method</td></tr>
+<tr><td>sentinel error</td><td>A single package-level pre-declared error value (like <code>ErrNotFound</code>) that callers compare against with <code>errors.Is</code>. Named with the <code>Err</code> prefix.</td><td>giữ nguyên "sentinel error" — error khai báo sẵn để so sánh</td></tr>
+<tr><td>wrap (an error) / <code>%w</code></td><td>Attach context around an error with <code>fmt.Errorf("…: %w", err)</code>, keeping the original inside and findable through the layers.</td><td>giữ nguyên "wrap" — bọc error, error gốc vẫn bên trong</td></tr>
+<tr><td>error chain</td><td>The nested sequence wrapping creates: outer context first, root cause innermost. <code>errors.Is</code>/<code>As</code> walk it; <code>errors.Unwrap</code> exposes one step.</td><td>chuỗi error bọc nhau, đi từ ngoài vào gốc</td></tr>
+<tr><td><code>errors.Is</code></td><td>"Is this specific error value anywhere in the chain?" — the correct replacement for <code>==</code> once wrapping exists.</td><td>check error CÓ trong chain không (thay cho <code>==</code>)</td></tr>
+<tr><td><code>errors.As</code></td><td>"Is there an error of this TYPE in the chain?" — finds it and copies it out so you can read its fields (e.g. a DB error code).</td><td>tìm error theo TYPE trong chain rồi lấy data ra</td></tr>
+<tr><td>handle once</td><td>Exactly one layer decides what an error means (404? retry? crash?). Layers below only add context and return — never log-and-return.</td><td>xử lý error đúng một nơi, không vừa log vừa return</td></tr>
+<tr><td>comma-ok</td><td>The two-value read <code>v, ok := m[k]</code> — <code>ok</code> says whether the key existed, separating "missing" from "zero value stored".</td><td>đọc map 2 giá trị, <code>ok</code> báo key có tồn tại không</td></tr>
+</table>
+
+<h2 id="day3">Day 3 — Goroutines, channels, select</h2>
+<table class="gloss">
+<tr><th>Term</th><th>In software</th><th>Tiếng Việt (dev-style)</th></tr>
+<tr><td>concurrency / parallelism</td><td>Concurrency = structuring work as independent tasks. Parallelism = tasks literally running at the same instant. Go gives you the first; the runtime supplies the second.</td><td>đồng thời / song song</td></tr>
+<tr><td>goroutine</td><td>A function running concurrently, managed by the Go runtime — a few KB each. Started with <code>go f()</code>; all die instantly when <code>main</code> returns.</td><td>giữ nguyên "goroutine"</td></tr>
+<tr><td>WaitGroup</td><td>Counter from <code>sync</code>: <code>Add(1)</code> before launching, <code>defer Done()</code> inside, <code>Wait()</code> blocks until zero — the standard "wait for all workers" tool.</td><td>giữ nguyên "WaitGroup" — bộ đếm chờ xong hết</td></tr>
+<tr><td>channel</td><td>Typed pipe between goroutines: <code>ch &lt;- v</code> sends, <code>&lt;-ch</code> receives. Unbuffered = send and receive wait for each other (sync point); buffered = sends queue until full.</td><td>giữ nguyên "channel"</td></tr>
+<tr><td>close (a channel)</td><td>Sender's signal that no more values are coming. Receivers detect it via comma-ok: <code>r, open := &lt;-ch</code>, <code>open == false</code> when closed and drained.</td><td>giữ nguyên "close" — báo hết dữ liệu</td></tr>
+<tr><td>select</td><td>switch for channels: blocks until one case can proceed, random pick if several are ready. The "result, timeout, or cancel — whichever first" tool.</td><td>giữ nguyên "select" — chờ nhiều channel, cái nào xong trước chạy</td></tr>
+<tr><td>data race</td><td>Two goroutines touching the same data at once, at least one writing — the result depends on scheduling luck. Found by <code>go test -race</code>.</td><td>giữ nguyên "data race" — tranh chấp dữ liệu</td></tr>
+<tr><td>mutex</td><td>Mutual-exclusion lock (<code>sync.Mutex</code>): <code>Lock()</code>/<code>Unlock()</code> so only one goroutine touches shared data at a time.</td><td>giữ nguyên "mutex" — khóa dữ liệu chung</td></tr>
+<tr><td>race detector</td><td>The <code>-race</code> flag: instruments memory accesses and prints both guilty stack traces when a data race happens during tests or runs.</td><td>giữ nguyên "race detector" — cờ <code>-race</code></td></tr>
+<tr><td>fan-out / fan-in</td><td>Fan-out: launch N workers for N tasks. Fan-in: collect their results into one channel. Today's checkAll is both.</td><td>tỏa ra nhiều worker / gom kết quả về một mối</td></tr>
+</table>
+
+<h2>Coming this week (Days 4–7)</h2>
+<table class="gloss">
+<tr><th>Term</th><th>In software</th><th>Tiếng Việt (dev-style)</th></tr>
+<tr><td>cancellation / timeout</td><td>Telling in-progress work to stop early: the caller left, or a deadline passed.</td><td>hủy sớm / quá hạn chờ</td></tr>
+<tr><td>graceful shutdown</td><td>Stop accepting new work, finish in-flight requests, then exit — never kill mid-request.</td><td>giữ nguyên — tắt server an toàn</td></tr>
+<tr><td>constraint (SQL)</td><td>A rule the database itself enforces: UNIQUE, NOT NULL, CHECK, FOREIGN KEY.</td><td>ràng buộc</td></tr>
+<tr><td>invariant</td><td>A condition that must ALWAYS hold (e.g. "every click points to an existing link").</td><td>điều kiện luôn luôn đúng</td></tr>
+<tr><td>normalization</td><td>Organizing tables so each fact is stored exactly once — no duplication, no contradiction.</td><td>chuẩn hóa</td></tr>
+<tr><td>migration (DB)</td><td>A versioned SQL script changing the schema step by step, replayable in every environment.</td><td>giữ nguyên "migration"</td></tr>
+<tr><td>index</td><td>An extra lookup structure making certain reads fast, at some cost to writes.</td><td>giữ nguyên "index" / chỉ mục</td></tr>
+<tr><td>transaction</td><td>A group of statements that succeed or fail as one unit — all-or-nothing.</td><td>giữ nguyên "transaction"</td></tr>
+<tr><td>query plan</td><td>The step-by-step strategy Postgres picks to answer a query — shown by <code>EXPLAIN</code>.</td><td>kế hoạch chạy query</td></tr>
+<tr><td>pagination (keyset / offset)</td><td>Returning results page by page. Keyset = "rows after this one" (fast). Offset = "skip N rows" (slow when deep).</td><td>phân trang</td></tr>
+<tr><td>table-driven test</td><td>One test function looping over a slice of cases — the standard Go testing style.</td><td>test theo bảng case</td></tr>
+<tr><td>benchmark</td><td>A test measuring how fast code runs (<code>go test -bench</code>).</td><td>đo hiệu năng</td></tr>
+</table>
+
+<p class="next">Back to <a href="../lessons/0001-interfaces-and-composition.html">Day 1 lesson</a> · <a href="interfaces-cheatsheet.html">Interfaces cheat sheet</a> · <a href="../index.html">Course home</a><br><br>
+💬 A Vietnamese phrasing still sounds off, or a term is missing? Tell your teacher — this page is yours.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

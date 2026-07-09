@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 3 · The API Contract</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 3 · ~20 min</p>
+<h1>The API contract</h1>
+<p class="byline">Resources, verbs, and who decides the status code — the other side of every fetch() you've ever written.</p>
+
+<p>Lesson 2 ended with entities living in tables: customers, orders, order_items. Today's question: how does the outside world get at them? You already know half the answer from the consumer side — you've typed <code>fetch("/api/orders/42")</code> a thousand times. Today you sit on the other side and <em>decide</em> what that URL is, what the verbs mean, and what comes back when things go wrong. That set of decisions is the <dfn data-en="the agreed shape of an API: its URLs, verbs, request/response bodies, and error format — the promise the backend makes that frontends build against" data-vn="API contract (giữ nguyên) — 'hợp đồng' giữa backend và mọi client">API contract</dfn>.</p>
+
+<h2>Resources are nouns, not functions</h2>
+
+<p>The frontend instinct is to name endpoints after <em>actions</em> — <code>/getOrder</code>, <code>/createOrder</code>, <code>/updateOrderStatus</code> — one URL per function you wish you could call. Backend design flips it: expose <dfn data-en="a thing the API lets clients address by URL — usually an entity or a collection of them; the noun that HTTP verbs act on" data-vn="resource (giữ nguyên) — 'danh từ' mà API expose ra">resources</dfn> (nouns), and let the HTTP verbs be the actions:</p>
+
+<pre><code>GET    /orders          <span class="cm">-- the collection</span>
+POST   /orders          <span class="cm">-- create one (server picks the id)</span>
+GET    /orders/42       <span class="cm">-- one item</span>
+PATCH  /orders/42       <span class="cm">-- change part of it</span>
+DELETE /orders/42       <span class="cm">-- remove it</span>
+GET    /orders/42/items <span class="cm">-- a nested collection, when it only makes sense inside its parent</span></code></pre>
+
+<p>Notice what happened: five "functions" collapsed into one noun. The entities you extracted in Lesson 2 usually <em>are</em> your resources — that's why schema design came first. When you catch yourself inventing <code>/getX</code> or <code>/doY</code> URLs, that's the same instinct Lesson 2 retrained: shaping the interface around one caller's convenience instead of around the things themselves.</p>
+
+<h2>Verbs come with promises</h2>
+
+<p>The verbs aren't decoration — each carries a promise the whole internet relies on:</p>
+
+<table class="gloss">
+  <tr><th>Verb</th><th>Means</th><th>The promise</th></tr>
+  <tr><td>GET</td><td>read</td><td>Safe: changes nothing, ever. Cacheable because of it.</td></tr>
+  <tr><td>POST</td><td>create / do</td><td>No promise — the one verb allowed to have side effects per call.</td></tr>
+  <tr><td>PUT</td><td>replace whole</td><td>Idempotent: replaying it lands in the same state.</td></tr>
+  <tr><td>PATCH</td><td>change part</td><td>Partial update; idempotency depends on your design.</td></tr>
+  <tr><td>DELETE</td><td>remove</td><td>Idempotent: deleting twice = deleted.</td></tr>
+</table>
+
+<p>That word matters enough to be a whole interview topic: <dfn data-en="an operation that produces the same end state whether performed once or many times — safe to retry blindly; GET/PUT/DELETE promise this, POST does not" data-vn="idempotent (giữ nguyên) — gọi 1 lần hay N lần, kết quả cuối như nhau">idempotent</dfn>. You've met the problem from the frontend: the user double-clicks "Đặt hàng", two POSTs fire, two orders exist. The verb promises are why only POST needs special protection (dedup tokens, disabled buttons) — retrying a GET or DELETE was <em>always</em> safe. As the backend designer, you now own keeping those promises: a GET handler that mutates state breaks every cache and prefetcher between you and the user.</p>
+
+<h2>Status codes: who's at fault?</h2>
+
+<p>Your handler — the code — decides the <dfn data-en="the three-digit result code of an HTTP response; the first digit assigns blame: 2xx worked, 4xx the client's request was wrong, 5xx the server broke" data-vn="status code (giữ nguyên) — số 3 chữ số, chữ số đầu nói ai 'có lỗi'">status code</dfn>, and the first digit is a blame assignment:</p>
+
+<table class="gloss">
+  <tr><th>Code</th><th>Say it when</th><th>Frontend translation</th></tr>
+  <tr><td>200</td><td>read/update worked, here's the body</td><td>render it</td></tr>
+  <tr><td>201</td><td>POST created something (return it + its new URL)</td><td>navigate to the new thing</td></tr>
+  <tr><td>204</td><td>worked, nothing to say (typical for DELETE)</td><td>just update local state</td></tr>
+  <tr><td>400</td><td>request unreadable / fails validation</td><td>show the form errors</td></tr>
+  <tr><td>401 / 403</td><td>who are you? / you specifically may not</td><td>redirect to login / show "no access"</td></tr>
+  <tr><td>404</td><td>that resource doesn't exist (your <code>ErrNotFound</code>!)</td><td>show the empty state</td></tr>
+  <tr><td>409</td><td>conflicts with current state (duplicate, stale edit)</td><td>ask user to reload/rename</td></tr>
+  <tr><td>500</td><td>we broke; the client did nothing wrong</td><td>generic "try again later"</td></tr>
+</table>
+
+<p>The instinct to build: <strong>4xx is information, 5xx is an alarm.</strong> A spike of 404s might be a bad link; a spike of 500s pages someone at 3am. This maps exactly to the error-handling layer you built in the Go course — <code>errors.Is(err, ErrNotFound)</code> at the top of the handler is precisely the code that chooses 404 over 500. One decides <em>what happened</em>, the other tells the world <em>whose problem it is</em>.</p>
+
+<h2>The error contract</h2>
+
+<p>Success bodies get all the design attention; error bodies get an afterthought — and every frontend dev has suffered the result: sometimes a string, sometimes HTML, sometimes <code>{message}</code>, sometimes <code>{error: {msg}}</code>. Pick ONE <dfn data-en="the single agreed JSON shape every error response uses, regardless of which handler failed — so clients can parse failures without guessing" data-vn="error contract — MỘT format lỗi thống nhất cho cả API">error contract</dfn> and use it everywhere:</p>
+
+<pre><code>{
+  <span class="kw">"error"</span>: {
+    <span class="kw">"code"</span>: <span class="kw">"order_not_found"</span>,      <span class="cm">-- machine-readable, stable, for code to branch on</span>
+    <span class="kw">"message"</span>: <span class="kw">"Order 42 does not exist"</span>  <span class="cm">-- human-readable, for developers (not end users)</span>
+  }
+}</code></pre>
+
+<p>The <code>code</code> field is the frontend's <code>errors.Is</code> — string comparison instead of sentinel values, same idea: something stable to branch on that survives message rewording.</p>
+
+<h2>The instinct retrain</h2>
+
+<table class="gloss">
+  <tr><th>Frontend habit</th><th>Contract designer's habit</th></tr>
+  <tr><td>"what endpoint do I wish existed for this screen?"</td><td>"what resources exist, and do the verbs already cover this?"</td></tr>
+  <tr><td>endpoint per action: /getOrder, /cancelOrder</td><td>noun + verb: GET /orders/42, PATCH /orders/42</td></tr>
+  <tr><td>status codes are the backend's mood</td><td>status codes are a contract: 4xx = your request, 5xx = my bug</td></tr>
+  <tr><td>retry and hope</td><td>retry what's idempotent; protect what isn't (POST)</td></tr>
+</table>
+
+<h2>Check yourself</h2>
+<div class="quiz">
+  <div class="q" data-why="Resources are nouns; the verbs supply the actions. GET /orders/42 replaces getOrder, PATCH replaces updateOrder — five functions collapse into one noun.">
+    <p class="stem">Your teammate proposes <code>POST /api/cancelOrder?id=42</code>. The contract-shaped version is…</p>
+    <button class="opt" data-ok>PATCH /orders/42 with status canceled</button>
+    <button class="opt">POST /orders/cancel with body 42</button>
+    <button class="opt">DELETE /cancelOrder/42 with query flag</button>
+  </div>
+  <div class="q" data-why="Idempotent = same end state whether run once or many times. Deleting an already-deleted thing is still deleted; a POST creates something NEW each time.">
+    <p class="stem">Which verb is the odd one out for blind retries?</p>
+    <button class="opt" data-ok>POST, it creates each time</button>
+    <button class="opt">DELETE, it removes each time</button>
+    <button class="opt">PUT, it replaces each time</button>
+  </div>
+  <div class="q" data-why="4xx blames the request (client can fix it); 5xx blames the server (client can't). A validation failure is the client's to fix: 400/422 territory.">
+    <p class="stem">A user submits an order form with a negative quantity. Your handler returns…</p>
+    <button class="opt" data-ok>400, the request is invalid</button>
+    <button class="opt">500, the operation has failed</button>
+    <button class="opt">200, with error text inside</button>
+  </div>
+  <div class="q" data-why="The machine-readable code is for the frontend's if/switch — stable across message rewording, exactly like comparing sentinel errors instead of error strings in Go.">
+    <p class="stem">Why does the error body carry <code>"code": "order_not_found"</code> next to the message?</p>
+    <button class="opt" data-ok>Clients branch on it, like sentinels</button>
+    <button class="opt">Loggers require it for indexing errors</button>
+    <button class="opt">Proxies read it to route retries</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the <a href="https://opensource.zalando.com/restful-api-guidelines/">Zalando RESTful API Guidelines</a> — read the "General guidelines" and "HTTP requests" sections (~20 min). It's a real company's complete contract rulebook, the document this lesson is a miniature of. Keep <a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Status">MDN's status code reference</a> in your bookmarks — everyone does.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup. <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> who are you? — sessions, tokens, and why a stateless backend forgets you between every request.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

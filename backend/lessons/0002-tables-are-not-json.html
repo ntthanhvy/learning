@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 2 · Tables are not JSON</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 2 · ~20 min</p>
+<h1>Tables are not JSON</h1>
+<p class="byline">How backend devs decide what becomes an entity — before any SQL is written.</p>
+
+<p>Recall Lesson 1's punchline: <em>the backend is stateless; the database is the state.</em> Today's question follows directly: if the database holds everything, what shape should it hold it in? Your frontend instinct says "the shape my screen needs" — one nested JSON tree per view. That instinct is exactly what this lesson retrains.</p>
+
+<h2>Two shapes for the same data</h2>
+
+<p>Here's the order screen you'd happily render from:</p>
+
+<pre><code>{
+  <span class="kw">"id"</span>: 42,
+  <span class="kw">"customer"</span>: { <span class="kw">"name"</span>: <span class="kw">"Lan Phạm"</span>, <span class="kw">"email"</span>: <span class="kw">"lan@example.com"</span> },
+  <span class="kw">"items"</span>: [
+    { <span class="kw">"product"</span>: <span class="kw">"Bàn phím cơ"</span>, <span class="kw">"qty"</span>: 1, <span class="kw">"price"</span>: 89.00 },
+    { <span class="kw">"product"</span>: <span class="kw">"USB hub"</span>,    <span class="kw">"qty"</span>: 2, <span class="kw">"price"</span>: 15.50 }
+  ],
+  <span class="kw">"total"</span>: 120.00
+}</code></pre>
+
+<p>And here's what a backend dev stores instead — four tables, no nesting:</p>
+
+<pre><code><span class="cm">-- illustration, not a SQL lesson — you know the syntax</span>
+customers   (id, name, email)
+products    (id, name, price)
+orders      (id, customer_id, created_at)          <span class="cm">-- customer_id → customers.id</span>
+order_items (order_id, product_id, qty, unit_price) <span class="cm">-- one row per line item</span></code></pre>
+
+<p>Why does the stored shape differ so much from the rendered shape? Because they answer to different masters:</p>
+
+<div class="callout">
+<p><strong>A JSON response is shaped for one screen. A <dfn data-en="the set of tables, columns, and rules that defines what data can exist — the database's shape, shared by every feature" data-vn="schema (giữ nguyên) — cấu trúc bảng của DB">schema</dfn> is shaped for every feature — including the ones nobody has asked for yet.</strong> The response is a view, rebuilt per request; the schema is the truth it's built from. Confuse the two and you've designed a database for one screen.</p>
+</div>
+
+<p>The nested JSON above is fine — as <em>output</em>. The handler assembles it per request by joining tables. What you must never do is <em>store</em> that tree as-is: the same customer would be copied into every order they place, and the day Lan changes her email you'd be updating a thousand frozen copies — or missing some.</p>
+
+<h2>Finding the entities</h2>
+
+<p>An <dfn data-en="a thing in the product with its own identity and lifecycle — it gets an id, usually its own table, and other things refer to it" data-vn="entity (giữ nguyên) — thực thể, có id riêng">entity</dfn> is a noun with identity: it exists on its own, changes over time, and other things point at it. The working test, applied to the JSON above:</p>
+
+<ul>
+  <li><strong>Would two screens refer to the same one?</strong> The customer appears on the order screen, the profile screen, the admin list — same person everywhere. Entity.</li>
+  <li><strong>Does it have a lifecycle of its own?</strong> A product is created, repriced, discontinued — independent of any order. Entity.</li>
+  <li><strong>Or is it just a fact about something else?</strong> <code>qty: 2</code> describes one line of one order. <code>total</code> is arithmetic over the items. Not entities — a column and a computed value.</li>
+</ul>
+
+<p>Each entity gets a table and a <dfn data-en="the column that uniquely identifies one row — usually an id — which other tables point at" data-vn="primary key / khóa chính (hay nói tắt PK)">primary key</dfn>. The JSON's nesting then turns into pointers: <code>orders.customer_id</code> is a <dfn data-en="a column holding another table's primary key, expressing 'this row belongs to that row'" data-vn="foreign key / khóa ngoại (hay nói tắt FK)">foreign key</dfn> saying "this order belongs to that customer". And <code>order_items</code> is a <dfn data-en="a table whose rows each connect two other tables' rows — how a many-to-many relationship is stored" data-vn="join table / bảng trung gian">join table</dfn>: many orders contain many products, and each row of it ties one order to one product.</p>
+
+<h2>One fact, one place</h2>
+
+<p>The principle behind all that splitting is <dfn data-en="structuring tables so each fact is stored exactly once and everything else references it by key" data-vn="normalization / chuẩn hóa dữ liệu">normalization</dfn>. You don't need the textbook normal forms yet; you need the instinct: <strong>every fact lives in exactly one row, and everyone else points at it.</strong> Lan's email lives in <code>customers</code>, nowhere else. When it changes, one <code>UPDATE</code>, and every screen that joins to <code>customers</code> is instantly right. Duplicated facts drift apart — and a database that disagrees with itself is worse than a slow one.</p>
+
+<p>Now the interesting judgment call. Look again at <code>order_items.unit_price</code> — the price is <em>copied</em> from <code>products</code>, not joined. Isn't that duplication? Deliberately, yes: this is <dfn data-en="deliberately storing a fact in more than one place, accepted as a trade-off you must be able to justify" data-vn="denormalization (giữ nguyên) — cố ý lưu trùng dữ liệu">denormalization</dfn> — because it's a <em>different fact</em>. <code>products.price</code> is "what this costs <em>now</em>"; <code>order_items.unit_price</code> is "what the customer paid <em>then</em>". If you joined instead of copying, repricing the keyboard next week would silently rewrite last month's invoices. Same-looking number, two facts. Backend design interviews love this distinction, and so do auditors.</p>
+
+<h2>The instinct retrain</h2>
+
+<table class="gloss">
+  <tr><th>Frontend habit</th><th>Schema thinking</th></tr>
+  <tr><td>Shape data for the component rendering it</td><td>Shape data for every feature, present and future</td></tr>
+  <tr><td>Nest what appears together into one tree</td><td>Split things with identity into tables, linked by keys</td></tr>
+  <tr><td>Copy a value into props wherever it's needed</td><td>Store each fact once — copies drift and lie</td></tr>
+  <tr><td>Compute derived values (<code>total</code>) in render</td><td>Compute them in the query — rarely store them</td></tr>
+</table>
+
+<p>Where this meets your other track: your <a href="../../go/lessons/">Go week</a> makes this concrete on Days 5–6 (Jul 11–12) — constraints that <em>enforce</em> "one fact, one place", the indexes that make the joins fast, and the linkshort schema you'll defend line by line. Today's lesson is the "why" you'll carry into that practice.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Users and orders have identity and lifecycle, and other things refer to them. The avatar is a fact about a user; the total is arithmetic over items — a column and a computed value.">
+    <p class="stem">A feature shows a user's avatar, their orders, and each order's total. Which of these are entities?</p>
+    <button class="opt" data-ok>Users and orders</button>
+    <button class="opt">Avatars and totals</button>
+    <button class="opt">Orders and totals</button>
+    <button class="opt">Users and avatars</button>
+  </div>
+  <div class="q" data-why="One fact, one place: the name lives in one row of customers, and every screen joins to it. Duplicated copies drift apart the day the name changes.">
+    <p class="stem">A customer's name appears on three different screens. In the schema, it should be stored…</p>
+    <button class="opt" data-ok>once, in the customers table</button>
+    <button class="opt">three times, once per screen</button>
+    <button class="opt">twice, for safety and speed</button>
+    <button class="opt">nowhere, sent by the frontend</button>
+  </div>
+  <div class="q" data-why="Nesting in JSON becomes a pointer in the schema: each order_items row carries the order's primary key as a foreign key. The tree shape is rebuilt per request by joining.">
+    <p class="stem">An API response nests an array of items inside an order. In the schema, that nesting becomes…</p>
+    <button class="opt" data-ok>a foreign key on order_items</button>
+    <button class="opt">a JSON column on orders</button>
+    <button class="opt">an array column on orders</button>
+    <button class="opt">one wider row per order</button>
+  </div>
+  <div class="q" data-why="They are two different facts: products.price is the price now; order_items.unit_price is the price when the order was placed. Joining instead of copying would rewrite history at every repricing.">
+    <p class="stem">Products get repriced over time. Why does <code>order_items</code> copy the price instead of joining to <code>products</code>?</p>
+    <button class="opt" data-ok>orders must keep the historical price</button>
+    <button class="opt">joins are too slow to run</button>
+    <button class="opt">copying avoids writing a join query</button>
+    <button class="opt">JSON responses cannot include joined data</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://dataintensive.net">Designing Data-Intensive Applications</a>, chapter 2 (<em>Data Models and Query Languages</em>) — read the "Relational Model Versus Document Model" section (~15 min). It's this exact lesson argued with 40 years of history, including when the nested-document shape actually wins. The <a href="https://www.postgresql.org/docs/current/ddl.html">PostgreSQL DDL docs</a> are your arbiter once the Go week makes this hands-on.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> the contract — how an API presents entities to the outside world: resources, verbs, and who decides the status code.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

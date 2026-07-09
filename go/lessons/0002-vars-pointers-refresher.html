@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Refresher · Variables, Pointers &amp; the &amp;T{} Construct</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Go Intensive · Day 1 supplement · ~20 min</p>
+<h1>Variables, pointers, and <code>&amp;T{}</code></h1>
+<p class="byline">A refresher on what the declaration forms actually mean — then a re-read of your own scaffold code, symbol by symbol.</p>
+
+<h2>1. The three ways to create a variable</h2>
+<pre><code><span class="kw">var</span> count int          <span class="cm">// ① declare with a type → gets the ZERO VALUE (0 here)</span>
+<span class="kw">var</span> name = <span class="cm">"go"</span>        <span class="cm">// ② declare with a value → type is inferred (string)</span>
+code := <span class="cm">"abc"</span>          <span class="cm">// ③ short form of ② — only allowed INSIDE functions</span></code></pre>
+<p>①–③ all create the same kind of thing; they differ only in what you spell out. The important concept is the <dfn data-en="The default every declared variable gets when you give no initial value. Numbers: 0. Strings: empty. Bools: false. Pointers, maps, slices, interfaces: nil." data-vn="giá trị mặc định khi chỉ khai báo mà chưa gán.">zero value</dfn>: in Go a variable is <em>never</em> uninitialized — <code>var x int</code> is 0, <code>var s string</code> is <code>""</code>, and <code>var m map[string]Link</code> is <code>nil</code> (<a href="https://go.dev/tour/basics/12">Tour of Go</a>).</p>
+
+<div class="callout"><strong>The nil-map trap:</strong> a nil map can be <em>read</em> (returns zero values) but <em>writing to it <dfn data-en="The program stops immediately and prints a stack trace. A panic is a crash, different from returning an error value." data-vn="giữ nguyên 'panic' — chương trình dừng ngay lập tức.">panics</dfn></em>. That's exactly why <code>NewMemStore</code> exists in your scaffold — it replaces the nil map with a real, empty one before anyone writes.</div>
+
+<h2>2. Constructing values: <code>T{}</code>, the composite literal</h2>
+<p>A <dfn data-en="The T{...} syntax: creates a value of a struct, slice, map, or array and fills in its contents, all in one expression." data-vn="cú pháp T{...} — tạo value và điền nội dung cùng lúc.">composite literal</dfn> creates a value and fills it in one expression:</p>
+<pre><code>l := Link{Code: <span class="cm">"go"</span>, URL: <span class="cm">"https://go.dev"</span>}  <span class="cm">// struct: named fields (unset ones → zero value)</span>
+m := <span class="kw">map</span>[string]Link{}                        <span class="cm">// empty-but-real map (writable, unlike nil)</span>
+s := []string{<span class="cm">"a"</span>, <span class="cm">"b"</span>}                       <span class="cm">// slice with two elements</span></code></pre>
+<p>For maps, slices, and channels you can also use <code>make</code>: <code>make(map[string]Link)</code> is the same as <code>map[string]Link{}</code>; <code>make</code> earns its keep when you pre-size, e.g. <code>make([]Link, 0, 100)</code> (<a href="https://go.dev/doc/effective_go#allocation_new">Effective Go — allocation</a>).</p>
+
+<h2>3. <code>&amp;</code> and <code>*</code> — three jobs, two symbols</h2>
+<p>This is the usual blur point, because <code>*</code> has <strong>two different jobs</strong> depending on where it appears:</p>
+<table class="gloss">
+<tr><th>You see</th><th>Where</th><th>It means</th></tr>
+<tr><td><code>*MemStore</code></td><td>in a <em>type</em> position</td><td>"<dfn data-en="A value that holds the memory address of another value. Through it, you reach and can modify the original instead of a copy." data-vn="con trỏ — giữ địa chỉ của value khác.">pointer</dfn> to MemStore" — a type, like <code>int</code> or <code>string</code></td></tr>
+<tr><td><code>*p</code></td><td>in an <em>expression</em></td><td><dfn data-en="Follow the pointer and use the value it points at. Written *p. With struct fields Go does it for you: p.Field works without writing (*p).Field." data-vn="đọc/ghi value mà con trỏ đang trỏ tới.">dereference</dfn>: the value <code>p</code> points at</td></tr>
+<tr><td><code>&amp;v</code></td><td>in an <em>expression</em></td><td><dfn data-en="Take the address of a value, producing a pointer to it. &Link{...} creates the value AND takes its address in one step." data-vn="lấy địa chỉ — tạo con trỏ trỏ tới value.">address-of</dfn>: a pointer to <code>v</code></td></tr>
+</table>
+<p>So <code>&amp;MemStore{links: …}</code> is just two things you now know, stacked: a composite literal (<code>MemStore{…}</code> — create and fill the struct) wrapped in address-of (<code>&amp;</code> — and give me a pointer to it). One expression, one new struct, one pointer to it.</p>
+
+<h3>Why pointers at all?</h3>
+<p>Go <strong>copies</strong> values when you assign or pass them. A pointer is how two places share <em>one</em> value instead of each holding copies:</p>
+<pre><code><span class="kw">func</span> reset(n *int) { *n = 0 }   <span class="cm">// writes through the pointer → caller sees it</span>
+
+x := 5
+reset(&amp;x)                        <span class="cm">// pass x's address, not a copy of 5</span>
+fmt.Println(x)                   <span class="cm">// 0</span></code></pre>
+<p>The same logic drives <dfn data-en="The (s *MemStore) part of a method declaration — the value the method is called on. A pointer receiver shares the original; a value receiver works on a copy." data-vn="receiver (giữ nguyên) — đối tượng mà method được gọi lên.">receivers</dfn>: <code>func (s *MemStore) Save(…)</code> means "Save runs against the original store," so every caller sees the same map. Rule of thumb: if <em>any</em> method needs the pointer, give <em>all</em> methods of that type pointer receivers (<a href="https://go.dev/wiki/CodeReviewComments#receiver-type">Code Review Comments</a>). And no pointer arithmetic exists in Go — a pointer is a reference, not a number.</p>
+
+<h2>4. Now re-read your own scaffold</h2>
+<p>Every mystery symbol from yesterday's practice, decoded:</p>
+<pre><code><span class="kw">func</span> NewMemStore() *MemStore {          <span class="cm">// returns POINTER-TO-MemStore: all users share one store</span>
+    <span class="kw">return</span> &amp;MemStore{                   <span class="cm">// composite literal + address-of: build it, point at it</span>
+        links: <span class="kw">map</span>[string]Link{},       <span class="cm">// real empty map, not nil — writable</span>
+    }
+}
+
+<span class="kw">func</span> (s *MemStore) Save(…) <span class="kw">error</span> {      <span class="cm">// pointer receiver: Save touches the original, not a copy</span>
+    s.links[l.Code] = l                 <span class="cm">// s.links auto-dereferences — no (*s).links needed</span>
+    …
+}
+
+<span class="kw">var</span> _ Store = (*MemStore)(<span class="kw">nil</span>)          <span class="cm">// hardest line: "(*MemStore)(nil)" = a nil pointer that has</span>
+                                        <span class="cm">// the TYPE *MemStore; assigning it to a Store variable makes</span>
+                                        <span class="cm">// the compiler verify *MemStore satisfies Store. The "_"</span>
+                                        <span class="cm">// means: keep no variable, I only wanted the check.</span></code></pre>
+
+<h2>Check yourself</h2>
+<div class="quiz">
+  <div class="q" data-why="Zero value of a map is nil. Reading a nil map is safe (returns zero values); writing panics. Constructors like NewMemStore exist to replace nil with a real empty map.">
+    <p class="stem">After <code>var m map[string]int</code>, what is <code>m</code>?</p>
+    <button class="opt" data-ok>A nil map; writing panics</button>
+    <button class="opt">An empty map; writing works</button>
+    <button class="opt">A zero map; writing blocks</button>
+  </div>
+  <div class="q" data-why="&Link{} is a composite literal (create + fill) wrapped in address-of: a new Link exists, and p holds its address.">
+    <p class="stem">After <code>p := &amp;Link{}</code>, what is <code>p</code>?</p>
+    <button class="opt" data-ok>A pointer to a new Link</button>
+    <button class="opt">A copy of an empty Link</button>
+    <button class="opt">A nil pointer to a Link</button>
+  </div>
+  <div class="q" data-why="In a type position, * means pointer-to. The function returns the address of one MemStore so every caller shares the same store.">
+    <p class="stem">In <code>func NewMemStore() *MemStore</code>, what does the <code>*</code> mean?</p>
+    <button class="opt" data-ok>It returns a pointer to MemStore</button>
+    <button class="opt">It dereferences the new MemStore value</button>
+    <button class="opt">It marks MemStore as reference type</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://go.dev/tour/moretypes/1">A Tour of Go — Pointers, structs, maps</a> (interactive, ~15 min — worth actually clicking through). Then <a href="https://go.dev/doc/effective_go#allocation_new">Effective Go — Allocation with new and make</a> for the <code>make</code>/<code>new</code>/<code>&amp;T{}</code> distinctions.</p>
+<p>All of today's terms are in the <a href="../reference/glossary.html#basics">glossary — Basics section</a>.</p>
+
+<p class="next">↩ Back to the <a href="0001-interfaces-and-composition.html">Day 1 lesson</a> — the practice should read differently now.<br><br>
+💬 Still blurry on any line? Paste it to your teacher and say which symbol — hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/quiz.js"></script>
+<script src="../assets/gloss.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

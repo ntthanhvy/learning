@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 1 · Interfaces &amp; Composition</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Go Intensive · Day 1 of 7 · Mon 7 Jul 2026</p>
+<h1>Interfaces &amp; composition</h1>
+<p class="byline">The one design choice that shapes every idiomatic Go codebase — and the foundation for everything else this week.</p>
+
+<p>You already write Go, so today isn't "what is an interface." It's the three <dfn data-en="Community-standard ways of writing something — not just code that works, but code that looks right to experienced Go reviewers." data-vn="cách viết 'chuẩn' theo cộng đồng Go.">idioms</dfn> that separate working Go from Go that passes review — and interviews: <strong>implicit satisfaction</strong>, <strong>small consumer-defined interfaces</strong>, and <strong>composition by embedding</strong>.</p>
+
+<div class="callout"><strong>Terms:</strong> click any <dfn data-en="A short explanation of the term as used in software — shown in a popup like this one, in English first." data-vn="Bên dưới là phần tiếng Việt, theo cách dev hay nói.">dotted term</dfn> to get a popup — the software meaning in English first, then Vietnamese. Every term is also in the <a href="../reference/glossary.html">glossary</a>.</div>
+
+<h2>1. Satisfaction is implicit — and that changes where interfaces live</h2>
+<p>A type <dfn data-en="Has every method the interface lists, so the compiler lets it be used as that interface. Checked at compile time; nothing is declared." data-vn="thỏa mãn interface — có đủ các method mà interface yêu cầu là tự động được tính.">satisfies</dfn> an interface simply by having the methods. No <code>implements</code> keyword, no declaration, no import of the interface's package (<a href="https://go.dev/doc/effective_go#interfaces_and_types">Effective Go</a>). This is not a syntax nicety — it flips who owns the abstraction: because the <dfn data-en="The code that provides the behavior — the struct with the actual method bodies." data-vn="bên hiện thực — code viết ra các method thật.">implementer</dfn> doesn't need to know an interface exists, <em>the <dfn data-en="The code that calls the behavior — the function that receives the interface as a parameter." data-vn="bên sử dụng — code gọi method qua interface.">consumer</dfn> gets to define it</em>.</p>
+
+<div class="callout"><strong>The rule:</strong> define interfaces in the package that <em>uses</em> them, not the package that implements them. Return concrete types; let consumers abstract as they need (<a href="https://go.dev/wiki/CodeReviewComments#interfaces">Go Code Review Comments</a>). A central <code>interfaces</code> package is a Java habit, not a Go one.</div>
+
+<h2>2. Small interfaces: the bigger the interface, the weaker the abstraction</h2>
+<p>That's a <a href="https://go-proverbs.github.io/">Go proverb</a>, and the stdlib lives it: <a href="https://pkg.go.dev/io#Reader"><code>io.Reader</code></a> is one method, and half the ecosystem composes around it. A one- or two-method interface is trivially satisfied, trivially faked in tests, and combines freely (<code>io.ReadWriter</code> is just two embedded interfaces).</p>
+
+<div class="good-bad">
+<div class="no"><div class="label">✗ Fat, implementer-defined</div>
+<pre><code><span class="kw">type</span> UserService <span class="kw">interface</span> {
+    Create(u User) <span class="kw">error</span>
+    Get(id string) (User, <span class="kw">error</span>)
+    Update(u User) <span class="kw">error</span>
+    Delete(id string) <span class="kw">error</span>
+    List() ([]User, <span class="kw">error</span>)
+    Validate(u User) <span class="kw">error</span>
+}</code></pre></div>
+<div class="yes"><div class="label">✓ Small, consumer-defined</div>
+<pre><code><span class="cm">// in the handler package,</span>
+<span class="cm">// which only needs lookups:</span>
+<span class="kw">type</span> UserGetter <span class="kw">interface</span> {
+    Get(id string) (User, <span class="kw">error</span>)
+}
+
+<span class="kw">func</span> ShowUser(g UserGetter, id string)</code></pre></div>
+</div>
+
+<h2>3. Accept interfaces, return structs</h2>
+<p>Parameters name the <em>behavior you need</em>; return values give callers the <em>full concrete type</em>. If your function takes <code>*os.File</code> but only calls <code>Read</code>, it should take <code>io.Reader</code> — now it works with buffers, network connections, and test fixtures for free.</p>
+
+<h2>4. Composition by embedding</h2>
+<p>Go has no inheritance; it has <dfn data-en="Declaring a field with only a type and no name inside a struct. Go then treats the inner type's methods as if the outer type had them." data-vn="nhúng — khai báo field chỉ có type, không đặt tên, trong struct.">embedding</dfn>. Embed a type and its methods are <dfn data-en="Lifted up to the outer type: calling outer.Method() automatically forwards to the embedded value." data-vn="method của type bên trong được gọi thẳng trên type bên ngoài.">promoted</dfn> — the outer type satisfies whatever the inner one satisfies, and you override by redeclaring (<a href="https://go.dev/doc/effective_go#embedding">Effective Go — Embedding</a>):</p>
+<pre><code><span class="kw">type</span> LoggingStore <span class="kw">struct</span> {
+    Store              <span class="cm">// embedded interface — promotes all its methods</span>
+    log *slog.Logger
+}
+
+<span class="kw">func</span> (s LoggingStore) Save(ctx context.Context, l Link) <span class="kw">error</span> {
+    s.log.Info(<span class="cm">"saving"</span>, <span class="cm">"code"</span>, l.Code)
+    <span class="kw">return</span> s.Store.Save(ctx, l)  <span class="cm">// delegate to the wrapped value</span>
+}</code></pre>
+<p>This <dfn data-en="A type that holds another value inside and adds behavior around its calls (logging, caching, retries) without changing the inner value." data-vn="type 'bọc' bên ngoài một value khác để thêm hành vi — dev hay nói 'wrap'.">wrapper</dfn> pattern changes just one method and <dfn data-en="Passes the call through to the wrapped inner value, which does the real work. In the code above, s.Store.Save(ctx, l) is the delegation." data-vn="chuyển việc cho value bên trong xử lý — kiểu 'nhờ làm tiếp phần còn lại'.">delegates</dfn> the rest: <code>LoggingStore</code> logs, then hands the actual saving to the wrapped <code>Store</code>. This is how <dfn data-en="A layer wrapped around request handling that adds one concern (logging, auth, rate limits) then passes the request on — the HTTP version of this exact pattern. You build one on Day 4." data-vn="giữ nguyên 'middleware' — lớp bọc quanh xử lý request.">middleware</dfn>, logging, and caching layers are built all over production Go.</p>
+
+<div class="interview">
+"Why doesn't Go have inheritance?" and "where do you define interfaces?" are stock questions. Strong answer in one breath: <em>implicit satisfaction lets consumers define minimal interfaces at the point of use, so packages stay decoupled without a shared type hierarchy; reuse comes from embedding, which is composition, not inheritance.</em>
+</div>
+
+<h2>Practice: scaffold <code>linkshort</code> (~60–90 min)</h2>
+<p>This week's running project is a stdlib-only URL shortener. Today you build its spine — designed around a consumer-defined interface. The <em>mechanics</em> (files, paths, commands) are spelled out completely below; your effort belongs only in the parts marked <strong>you write</strong>, which are the interface ideas from this lesson.</p>
+<div class="callout"><strong>Symbols blurry?</strong> If <code>*MemStore</code>, <code>&amp;MemStore{}</code>, or <code>var _ Store = …</code> don't read clearly, take the <a href="0002-vars-pointers-refresher.html">20-minute variables &amp; pointers refresher</a> first — it decodes this exact code line by line.</div>
+
+<h3>Step 1 — create the module and layout</h3>
+<pre><code>mkdir -p ~/learning/go/project/linkshort/link
+cd ~/learning/go/project/linkshort
+go mod init linkshort</code></pre>
+<p><code>go mod init</code> creates <code>go.mod</code> — the file naming your module and pinning its Go version. In Go, <strong>one directory = one package</strong>; you are building toward exactly this tree:</p>
+<pre><code>linkshort/
+├── go.mod             <span class="cm">← created by go mod init</span>
+├── main.go            <span class="cm">← step 5: wires everything together</span>
+└── link/              <span class="cm">← package link</span>
+    ├── link.go        <span class="cm">← step 2: domain type + Store interface</span>
+    ├── memstore.go    <span class="cm">← step 3: in-memory implementation</span>
+    ├── logging.go     <span class="cm">← step 4: wrapper via embedding</span>
+    └── store_test.go  <span class="cm">← step 6: proves the design with a fake</span></code></pre>
+
+<h3>Step 2 — <code>link/link.go</code> (given, copy it)</h3>
+<pre><code><span class="kw">package</span> link
+
+<span class="kw">import</span> (
+    <span class="cm">"context"</span>
+    <span class="cm">"errors"</span>
+    <span class="cm">"time"</span>
+)
+
+<span class="cm">// Link is one shortened URL.</span>
+<span class="kw">type</span> Link <span class="kw">struct</span> {
+    Code      string    <span class="cm">// the short code, e.g. "go"</span>
+    URL       string    <span class="cm">// the destination</span>
+    CreatedAt time.Time
+}
+
+<span class="cm">// ErrNotFound is returned when a code has no link. (Day 2 names this pattern: sentinel error.)</span>
+<span class="kw">var</span> ErrNotFound = errors.New(<span class="cm">"link: not found"</span>)
+
+<span class="cm">// Store is what consumers of this package need from storage — nothing more.</span>
+<span class="kw">type</span> Store <span class="kw">interface</span> {
+    Save(ctx context.Context, l Link) <span class="kw">error</span>
+    Get(ctx context.Context, code string) (Link, <span class="kw">error</span>)
+}</code></pre>
+
+<h3>Step 3 — <code>link/memstore.go</code> (<strong>you write</strong> ~5 lines)</h3>
+<pre><code><span class="kw">package</span> link
+
+<span class="kw">import</span> <span class="cm">"context"</span>
+
+<span class="cm">// Compile-time proof that *MemStore satisfies Store (see the cheat sheet).</span>
+<span class="kw">var</span> _ Store = (*MemStore)(<span class="kw">nil</span>)
+
+<span class="kw">type</span> MemStore <span class="kw">struct</span> {
+    links <span class="kw">map</span>[string]Link  <span class="cm">// no locking yet — Day 3 shows why that's a problem</span>
+}
+
+<span class="kw">func</span> NewMemStore() *MemStore {
+    <span class="kw">return</span> &amp;MemStore{links: <span class="kw">map</span>[string]Link{}}
+}
+
+<span class="kw">func</span> (s *MemStore) Save(ctx context.Context, l Link) <span class="kw">error</span> {
+    <span class="cm">// TODO you write: put l into the map, keyed by l.Code. One line, then return nil.</span>
+}
+
+<span class="kw">func</span> (s *MemStore) Get(ctx context.Context, code string) (Link, <span class="kw">error</span>) {
+    <span class="cm">// TODO you write: look up code with the `value, ok := map[key]` form.</span>
+    <span class="cm">// Found → return it. Missing → return Link{}, ErrNotFound. ~4 lines.</span>
+}</code></pre>
+
+<h3>Step 4 — <code>link/logging.go</code> (<strong>you write</strong> the Save body)</h3>
+<pre><code><span class="kw">package</span> link
+
+<span class="kw">import</span> (
+    <span class="cm">"context"</span>
+    <span class="cm">"log/slog"</span>
+)
+
+<span class="kw">type</span> LoggingStore <span class="kw">struct</span> {
+    Store              <span class="cm">// embedded — Get is promoted; do NOT write a Get method</span>
+    log *slog.Logger
+}
+
+<span class="kw">func</span> NewLoggingStore(s Store, log *slog.Logger) LoggingStore {
+    <span class="kw">return</span> LoggingStore{Store: s, log: log}
+}
+
+<span class="kw">func</span> (s LoggingStore) Save(ctx context.Context, l Link) <span class="kw">error</span> {
+    <span class="cm">// TODO you write: log first — s.log.Info("saving", "code", l.Code)</span>
+    <span class="cm">// — then delegate: return s.Store.Save(ctx, l)</span>
+}</code></pre>
+
+<h3>Step 5 — <code>main.go</code> (given, copy it)</h3>
+<pre><code><span class="kw">package</span> main
+
+<span class="kw">import</span> (
+    <span class="cm">"context"</span>
+    <span class="cm">"fmt"</span>
+    <span class="cm">"log/slog"</span>
+    <span class="cm">"time"</span>
+
+    <span class="cm">"linkshort/link"</span>  <span class="cm">// module name from go.mod + package directory</span>
+)
+
+<span class="kw">func</span> main() {
+    store := link.NewLoggingStore(link.NewMemStore(), slog.Default())
+    ctx := context.Background()
+
+    <span class="kw">if</span> err := store.Save(ctx, link.Link{Code: <span class="cm">"go"</span>, URL: <span class="cm">"https://go.dev"</span>, CreatedAt: time.Now()}); err != <span class="kw">nil</span> {
+        panic(err)
+    }
+
+    got, err := store.Get(ctx, <span class="cm">"go"</span>)  <span class="cm">// promoted — you never wrote Get on LoggingStore</span>
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        panic(err)
+    }
+    fmt.Println(got.Code, <span class="cm">"→"</span>, got.URL)
+}</code></pre>
+<p>Now <code>go run .</code> — you should see a log line for the save (from <em>your</em> code) followed by <code>go → https://go.dev</code>.</p>
+
+<h3>Step 6 — <code>link/store_test.go</code> (<strong>you write</strong> the fake)</h3>
+<pre><code><span class="kw">package</span> link
+
+<span class="kw">import</span> (
+    <span class="cm">"context"</span>
+    <span class="cm">"log/slog"</span>
+    <span class="cm">"testing"</span>
+)
+
+<span class="cm">// TODO you write: fakeStore — a struct with a `saved []Link` field and the two</span>
+<span class="cm">// Store methods; Save appends to saved. Under 10 lines. If it takes more, the</span>
+<span class="cm">// interface is too big — that's the whole lesson.</span>
+
+<span class="kw">func</span> TestLoggingStoreDelegates(t *testing.T) {
+    fake := &amp;fakeStore{}
+    s := NewLoggingStore(fake, slog.Default())
+
+    <span class="kw">if</span> err := s.Save(context.Background(), Link{Code: <span class="cm">"x"</span>, URL: <span class="cm">"https://go.dev"</span>}); err != <span class="kw">nil</span> {
+        t.Fatal(err)
+    }
+    <span class="kw">if</span> len(fake.saved) != 1 || fake.saved[0].Code != <span class="cm">"x"</span> {
+        t.Fatalf(<span class="cm">"save was not delegated to the inner store: %+v"</span>, fake.saved)
+    }
+}</code></pre>
+
+<h3>Done when</h3>
+<p><code>go vet ./...</code> is silent, <code>go test ./...</code> passes, and <code>go run .</code> prints the link. Three commands, three green lights.</p>
+
+<div class="callout"><strong>Stuck on a step?</strong> Paste the exact command and error message to your teacher — don't spend more than ~10 minutes blocked. And if an instruction ever says "create X" without showing where the file goes or what's in it, that's a lesson bug: report it and the next lesson gets written better.</div>
+
+<h2>Check yourself</h2>
+<div class="quiz">
+  <div class="q" data-why="Satisfaction is structural: have the methods, satisfy the interface. Nothing is declared, which is exactly what lets consumers define interfaces the implementer has never heard of.">
+    <p class="stem">What makes a Go type satisfy an interface?</p>
+    <button class="opt" data-ok>Declaring the methods the interface lists</button>
+    <button class="opt">Adding an explicit implements declaration clause</button>
+    <button class="opt">Embedding the interface inside the struct</button>
+  </div>
+  <div class="q" data-why="Consumer-side definition keeps interfaces minimal and packages decoupled — the implementer doesn't even need to know the interface exists.">
+    <p class="stem">Idiomatically, where is an interface defined?</p>
+    <button class="opt" data-ok>In the package that consumes it</button>
+    <button class="opt">In the package that implements it</button>
+    <button class="opt">In a shared central interfaces package</button>
+  </div>
+  <div class="q" data-why="Name the behavior you need, nothing more. io.Reader makes the function work with files, buffers, network connections, and test fakes alike.">
+    <p class="stem">Your function takes <code>*os.File</code> but only calls <code>Read</code>. The idiomatic fix?</p>
+    <button class="opt" data-ok>Accept an io.Reader parameter instead</button>
+    <button class="opt">Accept an io.ReadWriter parameter instead</button>
+    <button class="opt">Keep *os.File for concrete clarity</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://go.dev/doc/effective_go#interfaces_and_types">Effective Go — Interfaces and other types</a> (~20 min, from the Go team). Skim <a href="https://100go.co/#interface-pollution-5">100 Go Mistakes #5: interface pollution</a> for the failure mode.</p>
+<p>Keep the <a href="../reference/interfaces-cheatsheet.html">interfaces cheat sheet</a> handy — it compresses today into one page.</p>
+
+<p class="next">📅 <strong>Tomorrow (Day 2):</strong> errors as values — wrapping, <code>errors.Is</code>/<code>As</code>, and giving linkshort a real error taxonomy. Full week: <a href="../index.html">course home</a>.<br><br>
+💬 Stuck, curious, or want your <code>linkshort</code> code reviewed? Ask your teacher — tell Claude what's unclear and it will adapt tomorrow's lesson to match. Hỏi bằng tiếng Việt cũng được — asking in Vietnamese is completely fine, and any confusing English term will be explained both ways.</p>
+
+<script src="../assets/quiz.js"></script>
+<script src="../assets/gloss.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

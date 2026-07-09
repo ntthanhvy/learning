@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 3 · Goroutines, Channels, select</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Go Intensive · Day 3 · ~90 min</p>
+<h1>Goroutines, channels, <code>select</code></h1>
+<p class="byline">The feature Go is famous for. Today linkshort checks all its links at once — and you meet the tool that catches concurrency bugs before production does.</p>
+
+<h2>Warm-up: yesterday, from memory</h2>
+<div class="quiz">
+  <div class="q" data-why="You missed this one yesterday — worth a second pass: %w WRAPS (the original error stays inside, errors.Is can still find it); %v only prints the text, so identity is lost.">
+    <p class="stem">Yesterday's resolver used <code>fmt.Errorf("resolve %q: %w", code, err)</code>. Swap <code>%w</code> for <code>%v</code> — what breaks?</p>
+    <button class="opt" data-ok>errors.Is stops finding the sentinel</button>
+    <button class="opt">The message loses its formatting</button>
+    <button class="opt">The compiler rejects the verb</button>
+  </div>
+  <div class="q" data-why="The comma-ok read separates 'key missing' (ok=false) from 'zero value stored'. Your Get returns Link{}, ErrNotFound on a miss now.">
+    <p class="stem">In your fixed <code>Get</code>, what does the <code>ok</code> in <code>l, ok := s.links[code]</code> tell you?</p>
+    <button class="opt" data-ok>Whether the key actually existed there</button>
+    <button class="opt">Whether the value was non zero</button>
+    <button class="opt">Whether the map was correctly initialized</button>
+  </div>
+  <div class="q" data-why="Exactly one layer decides what an error means; everyone below wraps and returns. That's why main has the switch and resolve just adds context.">
+    <p class="stem">Why does <code>resolve</code> wrap-and-return while <code>main</code> has the <code>errors.Is</code> switch?</p>
+    <button class="opt" data-ok>Errors are handled once, at top</button>
+    <button class="opt">Wrapping is faster than switching everywhere</button>
+    <button class="opt">main is allowed to call panic</button>
+  </div>
+</div>
+
+<h2>1 · Goroutines: <code>go</code> and gone</h2>
+<p>A <dfn data-en="A function running concurrently with the rest of the program, managed by the Go runtime rather than the OS. Starting one costs a few KB — servers run hundreds of thousands." data-vn="giữ nguyên 'goroutine' — hàm chạy đồng thời, siêu nhẹ.">goroutine</dfn> is a function running concurrently, started with one keyword:</p>
+<pre><code><span class="kw">go</span> checkOne(l)   <span class="cm">// returns IMMEDIATELY; checkOne runs... whenever, on some core</span></code></pre>
+<p>Two facts with teeth. First: <code>go f()</code> doesn't wait — the next line runs before <code>f</code> likely even starts. Second: <strong>when <code>main</code> returns, every goroutine dies instantly, mid-sentence</strong>. So launching is trivial; the real skill is <em>waiting correctly</em>. The standard tool is a <dfn data-en="A counter from package sync: Add(1) before starting each goroutine, Done() when one finishes, Wait() blocks until the counter hits zero." data-vn="giữ nguyên 'WaitGroup' — bộ đếm chờ goroutine xong hết.">WaitGroup</dfn>:</p>
+<pre><code><span class="kw">var</span> wg sync.WaitGroup
+<span class="kw">for</span> _, l := <span class="kw">range</span> links {
+    wg.Add(1)                    <span class="cm">// +1 BEFORE starting, never inside the goroutine</span>
+    <span class="kw">go func</span>() {
+        <span class="kw">defer</span> wg.Done()          <span class="cm">// -1 when this worker finishes, even on panic</span>
+        <span class="cm">// ... work ...</span>
+    }()
+}
+wg.Wait()                        <span class="cm">// blocks until the counter is zero</span></code></pre>
+
+<h2>2 · Channels: how goroutines talk</h2>
+<p>Goroutines don't return values to their starter — they send them over a <dfn data-en="A typed pipe between goroutines: ch <- v sends, v := <-ch receives. An unbuffered channel makes sender and receiver wait for each other — communication is also synchronization." data-vn="giữ nguyên 'channel' — ống dẫn dữ liệu giữa các goroutine.">channel</dfn>:</p>
+<pre><code>results := make(<span class="kw">chan</span> result)     <span class="cm">// unbuffered: send blocks until someone receives</span>
+results &lt;- r                      <span class="cm">// send (inside a worker)</span>
+r := &lt;-results                    <span class="cm">// receive (in the collector)</span></code></pre>
+<p>Unbuffered channels are a <em>meeting point</em>: the send and the receive happen together, or both wait. <code>make(chan result, 8)</code> adds a buffer — sends don't block until it's full. Start unbuffered; add buffers only with a reason (<a href="https://go.dev/doc/effective_go#channels">Effective Go</a>).</p>
+<p>When no more values are coming, the <em>sender side</em> calls <code>close(ch)</code>. Receivers detect it with the comma-ok pattern you already know from maps:</p>
+<pre><code>r, open := &lt;-results   <span class="cm">// open == false → channel closed AND drained</span></code></pre>
+<p>Same two-value shape, same job: distinguishing "a real zero value" from "there's nothing there".</p>
+
+<h2>3 · <code>select</code>: waiting on several things at once</h2>
+<p><dfn data-en="A switch for channel operations: blocks until ONE of its cases can proceed, picks randomly if several can. The tool for 'give me a result, a timeout, or a cancellation — whichever comes first'." data-vn="giữ nguyên 'select' — chờ nhiều channel cùng lúc, cái nào sẵn sàng trước thì chạy.">select</dfn> is <code>switch</code> for channels — it waits until one case is ready:</p>
+<pre><code><span class="kw">select</span> {
+<span class="kw">case</span> r := &lt;-results:              <span class="cm">// a worker reported</span>
+    out[r.code] = r.ok
+<span class="kw">case</span> &lt;-time.After(timeout):       <span class="cm">// ... or the clock won</span>
+    <span class="kw">return</span> out                    <span class="cm">// partial results beat hanging forever</span>
+}</code></pre>
+<p>This is the backend heartbeat pattern: <em>result, timeout, or cancellation — whichever arrives first</em>. Tomorrow <code>context</code> replaces <code>time.After</code> for the cancellation half; the <code>select</code> stays identical.</p>
+
+<h2>4 · The race detector: your new reflex</h2>
+<p>Two goroutines touching the same variable, at least one writing, with no coordination — a <dfn data-en="Two goroutines access the same memory concurrently and at least one access is a write. The result depends on scheduling luck: works in dev, corrupts in production." data-vn="giữ nguyên 'data race' — hai goroutine đụng cùng biến, kết quả hên xui.">data race</dfn>. <code>count++</code> is secretly read-modify-write, so 1000 goroutines incrementing yields... some number ≤ 1000, different each run. The fix is a <dfn data-en="A mutual-exclusion lock from package sync: Lock() before touching shared data, Unlock() after — only one goroutine can hold it at a time." data-vn="giữ nguyên 'mutex' — khóa để mỗi lúc chỉ một goroutine đụng dữ liệu chung.">mutex</dfn>, and the detector is a flag:</p>
+<pre><code>go test -race ./...</code></pre>
+<p>Go instruments every memory access and prints the two guilty stack traces. The mission says this should be a reflex, not an afterthought — you'll trigger it deliberately in a minute (<a href="https://go.dev/blog/race-detector">Go blog: race detector</a>).</p>
+
+<h2>5 · Practice: check every link at once</h2>
+<p>In <code>~/learning/go/project/linkshort</code> — two new files, package <code>main</code>.</p>
+
+<p><strong>Step 1 — the checker skeleton.</strong> Create <code>checker.go</code>. Given except three TODOs:</p>
+<pre><code><span class="kw">package</span> main
+
+<span class="kw">import</span> (
+    <span class="cm">"strings"</span>
+    <span class="cm">"sync"</span>
+    <span class="cm">"time"</span>
+
+    <span class="cm">"linkshort/link"</span>
+)
+
+<span class="cm">// result carries one link's health check back over the channel.</span>
+<span class="kw">type</span> result <span class="kw">struct</span> {
+    code string
+    ok   <span class="kw">bool</span>
+}
+
+<span class="cm">// checkOne simulates a network health check (~50ms). Deterministic on purpose:</span>
+<span class="cm">// a real http.Get here would make the tests flaky.</span>
+<span class="kw">func</span> checkOne(l link.Link) result {
+    time.Sleep(50 * time.Millisecond)
+    <span class="kw">return</span> result{code: l.Code, ok: strings.HasPrefix(l.URL, <span class="cm">"https://"</span>)}
+}
+
+<span class="cm">// checkAll fans out one goroutine per link, collects results over a channel,</span>
+<span class="cm">// and gives up (returning partial results) after timeout.</span>
+<span class="kw">func</span> checkAll(links []link.Link, timeout time.Duration) <span class="kw">map</span>[string]<span class="kw">bool</span> {
+    results := make(<span class="kw">chan</span> result)
+
+    <span class="cm">// TODO 1: loop over links; for each one wg.Add(1) and launch a goroutine</span>
+    <span class="cm">//         that defer wg.Done()s and sends checkOne(l) into results.</span>
+    <span class="cm">//         (Section 1 has this shape almost verbatim.)</span>
+    <span class="kw">var</span> wg sync.WaitGroup
+
+    <span class="cm">// GIVEN — the closer: when every worker is done, close the channel so</span>
+    <span class="cm">// the receive loop knows nothing else is coming. This runs in its OWN</span>
+    <span class="cm">// goroutine because wg.Wait() blocks — and we need to start receiving NOW.</span>
+    <span class="kw">go func</span>() {
+        wg.Wait()
+        close(results)
+    }()
+
+    out := make(<span class="kw">map</span>[string]<span class="kw">bool</span>, len(links))
+    deadline := time.After(timeout)
+    <span class="kw">for</span> {
+        <span class="cm">// TODO 2: select over two cases —</span>
+        <span class="cm">//   receive `r, open := <-results`: if !open return out, else store r</span>
+        <span class="cm">//   receive from deadline: return out (partial results)</span>
+        <span class="cm">//   (Section 3 is this select, minus the loop.)</span>
+    }
+}</code></pre>
+
+<p><strong>Step 2 — the tests (given, create <code>checker_test.go</code>).</strong></p>
+<pre><code><span class="kw">package</span> main
+
+<span class="kw">import</span> (
+    <span class="cm">"testing"</span>
+    <span class="cm">"time"</span>
+
+    <span class="cm">"linkshort/link"</span>
+)
+
+<span class="kw">func</span> TestCheckAllChecksEveryLink(t *testing.T) {
+    links := []link.Link{
+        {Code: <span class="cm">"go"</span>, URL: <span class="cm">"https://go.dev"</span>},
+        {Code: <span class="cm">"bad"</span>, URL: <span class="cm">"http://insecure.example"</span>},
+        {Code: <span class="cm">"rust"</span>, URL: <span class="cm">"https://www.rust-lang.org"</span>},
+    }
+    got := checkAll(links, time.Second)
+    <span class="kw">if</span> len(got) != 3 {
+        t.Fatalf(<span class="cm">"checked %d links, want 3: %v"</span>, len(got), got)
+    }
+    <span class="kw">if</span> !got[<span class="cm">"go"</span>] || got[<span class="cm">"bad"</span>] || !got[<span class="cm">"rust"</span>] {
+        t.Fatalf(<span class="cm">"wrong verdicts: %v"</span>, got)
+    }
+}
+
+<span class="kw">func</span> TestCheckAllTimesOut(t *testing.T) {
+    links := []link.Link{{Code: <span class="cm">"a"</span>, URL: <span class="cm">"https://a.dev"</span>}, {Code: <span class="cm">"b"</span>, URL: <span class="cm">"https://b.dev"</span>}}
+    got := checkAll(links, time.Millisecond) <span class="cm">// far below checkOne's 50ms</span>
+    <span class="kw">if</span> len(got) == 2 {
+        t.Fatal(<span class="cm">"expected partial results under a 1ms timeout, got all of them"</span>)
+    }
+}</code></pre>
+<p>Run <code>go test ./...</code> — both should pass once TODOs 1–2 are in. The timeout test is the interesting one: it proves your <code>select</code> really races the clock.</p>
+
+<p><strong>Step 3 — TODO 3, meet the race detector.</strong> Create <code>race_test.go</code> with a counter test: 1000 goroutines, each incrementing a shared <code>count</code> guarded by <code>var mu sync.Mutex</code> (<code>mu.Lock(); count++; mu.Unlock()</code>), a WaitGroup, then assert <code>count == 1000</code>. Then:</p>
+<pre><code>go test -race ./...        <span class="cm"># passes — the mutex serializes the writes</span></code></pre>
+<p>Now <em>delete the three mutex lines</em> and run it again. This is what a production bug looks like when you're lucky enough to catch it in CI:</p>
+<pre><code><span style="color:var(--bad)">WARNING: DATA RACE</span>
+Read at 0x00c0000941e8 by goroutine 10:
+  ... race_test.go:17
+Previous write at 0x00c0000941e8 by goroutine 9:
+  ... race_test.go:17</code></pre>
+<p>Two goroutines, same address, one line of your code named twice. Restore the mutex, watch it pass. From today, <code>-race</code> rides along on every test run.</p>
+
+<p><strong>Step 4 — wire it into <code>main</code>.</strong> At the end of <code>main</code>, health-check a demo batch:</p>
+<pre><code>health := checkAll([]link.Link{
+    {Code: <span class="cm">"go"</span>, URL: <span class="cm">"https://golang.org"</span>},
+    {Code: <span class="cm">"old"</span>, URL: <span class="cm">"http://legacy.example"</span>},
+}, time.Second)
+fmt.Println(<span class="cm">"health:"</span>, health)</code></pre>
+
+<div class="callout"><strong>Done when:</strong> <code>go vet ./...</code> silent · <code>go test -race ./...</code> green (with the mutex back!) · <code>go run .</code> ends with <code>health: map[go:true old:false]</code>. That's a concurrent fan-out with timeout — the shape inside every Go backend you'll interview at.</div>
+
+<h2>Check yourself</h2>
+<div class="quiz">
+  <div class="q" data-why="go f() returns immediately, and when main returns, ALL goroutines are killed mid-work — that's why waiting (WaitGroup, channels) is the actual skill.">
+    <p class="stem">What happens to running goroutines when <code>main</code> returns?</p>
+    <button class="opt" data-ok>They are all killed immediately, unfinished</button>
+    <button class="opt">They finish their current function first</button>
+    <button class="opt">They keep running until process exit</button>
+  </div>
+  <div class="q" data-why="An unbuffered channel synchronizes: the send blocks until a receiver is ready (and vice versa). That's a feature — communication doubles as coordination.">
+    <p class="stem">On an unbuffered channel, <code>ch &lt;- v</code> with no receiver ready will…</p>
+    <button class="opt" data-ok>Block until some receiver takes it</button>
+    <button class="opt">Drop the value and continue on</button>
+    <button class="opt">Panic because nothing is listening there</button>
+  </div>
+  <div class="q" data-why="close() is the sender's signal that nothing more is coming. Receivers see open==false after the buffer drains — same comma-ok shape as map reads.">
+    <p class="stem">Who should call <code>close(ch)</code>, and what does it mean?</p>
+    <button class="opt" data-ok>The sender; no more values coming</button>
+    <button class="opt">The receiver; it stops listening now</button>
+    <button class="opt">The runtime; the channel got collected</button>
+  </div>
+  <div class="q" data-why="select blocks until one case can proceed; if several are ready at the same moment it picks one at random — no priority order, by design.">
+    <p class="stem">Two <code>select</code> cases become ready at the same instant. Which runs?</p>
+    <button class="opt" data-ok>One of them, chosen at random</button>
+    <button class="opt">The first one written in source</button>
+    <button class="opt">Both of them, one after another</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> Rob Pike's talk <a href="https://go.dev/blog/waza-talk">"Concurrency is not Parallelism"</a> (~30 min video — the distinction interviewers fish for, from the source). Then <a href="https://go.dev/blog/pipelines">Go blog: Pipelines and cancellation</a> — today's fan-out pattern, industrial strength.</p>
+<p>New terms are in the <a href="../reference/glossary.html#day3">glossary — Day 3 section</a>.</p>
+
+<p class="next">Tomorrow: <strong><code>context</code>, <code>sync</code> &amp; the HTTP server</strong> — the timeout in your <code>select</code> becomes a real request deadline, and linkshort finally listens on a port.<br><br>
+💬 Deadlock? Test hanging forever? Paste what you see — hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/quiz.js"></script>
+<script src="../assets/gloss.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

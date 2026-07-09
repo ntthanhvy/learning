@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 2 · Errors as Values</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Go Intensive · Day 2 · ~90 min</p>
+<h1>Errors as values</h1>
+<p class="byline">Yesterday you shipped a bug that Go's error philosophy exists to prevent. Today you find it, name it, fix it — and learn the three tools every Go backend uses daily: sentinel errors, wrapping, and <code>errors.Is</code>.</p>
+
+<h2>Warm-up: yesterday, from memory</h2>
+<div class="quiz">
+  <div class="q" data-why="(*MemStore)(nil) is a nil pointer carrying only the type; assigning it to a Store forces the compiler to verify every method exists. The _ keeps no variable.">
+    <p class="stem">What does <code>var _ Store = (*MemStore)(nil)</code> do?</p>
+    <button class="opt" data-ok>Compile-time check of interface satisfaction</button>
+    <button class="opt">Run-time check of interface satisfaction</button>
+    <button class="opt">Creates an empty store value</button>
+  </div>
+  <div class="q" data-why="You never wrote Get on LoggingStore — it's promoted from the embedded Store field, and the call forwards automatically.">
+    <p class="stem">Your <code>LoggingStore</code> has no <code>Get</code> method, yet <code>store.Get(…)</code> compiles. Why?</p>
+    <button class="opt" data-ok>The embedded interface promotes its methods</button>
+    <button class="opt">The compiler generates a stub method</button>
+    <button class="opt">The interface provides a default body</button>
+  </div>
+  <div class="q" data-why="Reading a missing key never panics — it returns the value type's zero value. (Writing to a NIL map is what panics.) Hold this thought; it's today's opening bug.">
+    <p class="stem">Reading a missing key from a non-nil map returns…</p>
+    <button class="opt" data-ok>The zero value, without any panic</button>
+    <button class="opt">A panic, unless checked with ok</button>
+    <button class="opt">A nil, whatever the value type</button>
+  </div>
+</div>
+
+<h2>1 · The bug in your own code</h2>
+<p>This is your <code>memstore.go</code>, as of last night:</p>
+<pre><code><span class="kw">func</span> (s *MemStore) Get(ctx context.Context, code string) (Link, <span class="kw">error</span>) {
+    <span class="kw">return</span> s.links[code], <span class="kw">nil</span>
+}</code></pre>
+<p>Ask it for a code that doesn't exist and it returns <code>Link{}</code> — empty <code>Code</code>, empty <code>URL</code> — and says <code>nil</code>: <em>"everything went fine."</em> In a real shortener that's a redirect to an empty URL, and nobody finds out until a user does. The map read gave you the zero value (warm-up question 3), and the function turned a missing link into a fake success.</p>
+<p>The fix has two halves, and they're today's whole lesson: <em>detect</em> the miss (the comma-ok read), and <em>report</em> it as a value the caller can check (a sentinel error).</p>
+
+<h2>2 · <code>error</code> is just an interface</h2>
+<p>Go has no exceptions. <code>error</code> is an ordinary interface from Day 1's world:</p>
+<pre><code><span class="kw">type</span> error <span class="kw">interface</span> {
+    Error() string
+}</code></pre>
+<p>An error is a <em>value</em> you return, pass, compare, and store — the same as an <code>int</code> or a <code>Link</code> (<a href="https://go.dev/blog/errors-are-values">Rob Pike, "Errors are values"</a>). You make one with <code>errors.New</code> or <code>fmt.Errorf</code>, and the calling convention is the pair return you've been writing since yesterday: <code>(Link, error)</code>, where exactly one of the two is meaningful.</p>
+<p>Coming from languages with exceptions this feels manual. The payoff: the error path is visible in the code — every <code>if err != nil</code> is a place a reviewer can see a decision being made, instead of an invisible jump to a handler three files away.</p>
+
+<h2>3 · Sentinel errors and <code>errors.Is</code></h2>
+<p>A <dfn data-en="A single, package-level, pre-declared error value that callers compare against to recognize one specific condition — like io.EOF, or your ErrNotFound. Declared once, returned everywhere the condition occurs." data-vn="giữ nguyên 'sentinel error' — error khai báo sẵn một lần để caller so sánh.">sentinel error</dfn> is a package-level error declared once, so callers can recognize it:</p>
+<pre><code><span class="cm">// in package link</span>
+<span class="kw">var</span> ErrNotFound = errors.New(<span class="cm">"link: not found"</span>)</code></pre>
+<p>You already wrote one! But you named it <code>ErrorNotFound</code> — the <a href="https://go.dev/wiki/CodeReviewComments#error-naming">convention</a> is a terse <code>Err</code> prefix: <code>ErrNotFound</code>. Interviewers notice this stuff; part of today's practice is the rename.</p>
+<p>Callers check for it with <code>errors.Is</code> — <strong>not</strong> <code>==</code>:</p>
+<pre><code><span class="kw">if</span> errors.Is(err, link.ErrNotFound) {
+    <span class="cm">// show a friendly 404, don't page anyone at 3am</span>
+}</code></pre>
+<p>Why not <code>==</code>? Because of what section 4 does to errors on their way up the call stack.</p>
+
+<h2>4 · Wrapping: add context on the way up</h2>
+<p>A bare <code>"link: not found"</code> arriving at the top of a server tells you nothing about <em>which request, which code, which layer</em>. So each layer <dfn data-en="To wrap an error inside a new one that adds context, using fmt.Errorf with the %w verb. The original stays inside — errors.Is and errors.As can still find it through any number of layers." data-vn="giữ nguyên 'wrap' — bọc error kèm context, error gốc vẫn nằm bên trong.">wraps</dfn> what it got with <code>fmt.Errorf</code> and the <code>%w</code> verb:</p>
+<pre><code>l, err := store.Get(ctx, code)
+<span class="kw">if</span> err != <span class="kw">nil</span> {
+    <span class="kw">return</span> Link{}, fmt.Errorf(<span class="cm">"resolve %q: %w"</span>, code, err)
+}</code></pre>
+<p>Now the message reads <code>resolve "missing": link: not found</code> — an <dfn data-en="The linked sequence formed by wrapped errors: outermost context first, original cause innermost. errors.Is walks this chain link by link; errors.Unwrap exposes one step." data-vn="chuỗi error bọc nhau — errors.Is đi dọc chain để tìm error gốc.">error chain</dfn> — and <code>errors.Is</code> still finds <code>ErrNotFound</code> <em>through</em> the wrapping, which plain <code>==</code> never would (<a href="https://go.dev/blog/go1.13-errors">Go blog: Working with Errors in Go 1.13</a>). That's the whole division of labor:</p>
+<table class="gloss">
+<tr><th>Layer</th><th>Job</th></tr>
+<tr><td>where the error is born</td><td>return a checkable value (<code>ErrNotFound</code>)</td></tr>
+<tr><td>every layer it passes through</td><td>add context with <code>%w</code>, return — <em>don't</em> log-and-continue</td></tr>
+<tr><td>ONE layer at the top</td><td>decide: 404? retry? log? crash? — <dfn data-en="The rule that exactly one place decides what an error means. Logging it AND returning it makes duplicate noise; swallowing it hides failures. Every layer either handles or passes it up — never both." data-vn="xử lý error đúng một nơi — không vừa log vừa return.">handle once</dfn></td></tr>
+</table>
+<p>One more tool for your interview belt: when callers need <em>data</em> out of an error (not just identity), you define a custom error type and dig it out with <code>errors.As(err, &amp;target)</code> — same chain-walking, but by type. Read it today, use it on Day 5 when Postgres errors carry codes.</p>
+
+<h2>5 · Practice: make the bug impossible to ignore</h2>
+<p>All in <code>~/learning/go/project/linkshort</code> — your real code, three files touched, one created.</p>
+
+<p><strong>Step 1 — the rename.</strong> In <code>link/link.go</code>, rename <code>ErrorNotFound</code> → <code>ErrNotFound</code> (convention, section 3). It's referenced nowhere else yet, so a plain edit is safe.</p>
+
+<p><strong>Step 2 — fix <code>Get</code>.</strong> In <code>link/memstore.go</code>, use the comma-ok read (refresher lesson, now for real):</p>
+<pre><code><span class="kw">func</span> (s *MemStore) Get(ctx context.Context, code string) (Link, <span class="kw">error</span>) {
+    l, ok := s.links[code]
+    <span class="kw">if</span> !ok {
+        <span class="kw">return</span> Link{}, ErrNotFound
+    }
+    <span class="kw">return</span> l, <span class="kw">nil</span>
+}</code></pre>
+<p>While you're in the package: delete the stray <code>// todo:</code> in <code>logging.go</code>.</p>
+
+<p><strong>Step 3 — a wrapping layer.</strong> In <code>main.go</code>, above <code>main</code>, add the resolver (this is given — read the <code>%w</code> line until it makes sense):</p>
+<pre><code><span class="cm">// resolve looks up a code and wraps any failure with context about THIS call.</span>
+<span class="cm">// The %w verb keeps the original error inside the new one, findable by errors.Is.</span>
+<span class="kw">func</span> resolve(ctx context.Context, store link.Store, code string) (link.Link, <span class="kw">error</span>) {
+    l, err := store.Get(ctx, code)
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        <span class="kw">return</span> link.Link{}, fmt.Errorf(<span class="cm">"resolve %q: %w"</span>, code, err)
+    }
+    <span class="kw">return</span> l, <span class="kw">nil</span>
+}</code></pre>
+
+<p><strong>Step 4 — handle once, at the top.</strong> Replace the <code>Get</code>/print part of <code>main</code> (keep the <code>Save</code>) with a loop that hits both the happy and the missing path:</p>
+<pre><code><span class="kw">for</span> _, code := <span class="kw">range</span> []string{<span class="cm">"go"</span>, <span class="cm">"missing"</span>} {
+    l, err := resolve(ctx, store, code)
+    <span class="kw">switch</span> {
+    <span class="kw">case</span> errors.Is(err, link.ErrNotFound): <span class="cm">// matches even through the %w wrap</span>
+        fmt.Printf(<span class="cm">"no link for %q — try another code\n"</span>, code)
+    <span class="kw">case</span> err != <span class="kw">nil</span>:
+        fmt.Fprintln(os.Stderr, <span class="cm">"unexpected:"</span>, err)
+        os.Exit(1)
+    <span class="kw">default</span>:
+        fmt.Println(l.Code, <span class="cm">"→"</span>, l.URL)
+    }
+}</code></pre>
+<p>Add <code>"errors"</code> and <code>"os"</code> to main.go's imports (<code>gopls</code>/your editor likely does it for you).</p>
+
+<p><strong>Step 5 — the tests you owe from Day 1, plus today's.</strong> Create <code>link/store_test.go</code>. The fake and the delegation test are given (they're Day 1's unfinished step 6); <strong>you write the two <code>Get</code> tests</strong> — the patterns are in sections 3 and 4:</p>
+<pre><code><span class="kw">package</span> link
+
+<span class="kw">import</span> (
+    <span class="cm">"context"</span>
+    <span class="cm">"errors"</span>
+    <span class="cm">"log/slog"</span>
+    <span class="cm">"testing"</span>
+)
+
+<span class="kw">type</span> fakeStore <span class="kw">struct</span> {
+    saved []Link
+}
+
+<span class="kw">func</span> (f *fakeStore) Save(ctx context.Context, l Link) <span class="kw">error</span> {
+    f.saved = append(f.saved, l)
+    <span class="kw">return</span> <span class="kw">nil</span>
+}
+
+<span class="kw">func</span> (f *fakeStore) Get(ctx context.Context, code string) (Link, <span class="kw">error</span>) {
+    <span class="kw">return</span> Link{}, ErrNotFound
+}
+
+<span class="kw">func</span> TestLoggingStoreDelegates(t *testing.T) {
+    fake := &amp;fakeStore{}
+    s := NewLoggingStore(fake, slog.Default())
+
+    <span class="kw">if</span> err := s.Save(context.Background(), Link{Code: <span class="cm">"x"</span>, URL: <span class="cm">"https://go.dev"</span>}); err != <span class="kw">nil</span> {
+        t.Fatal(err)
+    }
+    <span class="kw">if</span> len(fake.saved) != 1 || fake.saved[0].Code != <span class="cm">"x"</span> {
+        t.Fatalf(<span class="cm">"save was not delegated to the inner store: %+v"</span>, fake.saved)
+    }
+}
+
+<span class="cm">// TODO A — TestGetMissingReturnsErrNotFound:</span>
+<span class="cm">//   NewMemStore, Get a code you never saved, assert errors.Is(err, ErrNotFound).</span>
+<span class="cm">//   If it fails with "want ErrNotFound, got &lt;nil&gt;" — that's yesterday's bug talking.</span>
+
+<span class="cm">// TODO B — TestSaveThenGet:</span>
+<span class="cm">//   Save a Link, Get it back, assert err is nil and got == want.</span>
+<span class="cm">//   (Link is comparable — plain == works on the whole struct.)</span></code></pre>
+
+<p><strong>Step 6 — prove it.</strong></p>
+<pre><code>gofmt -l .        <span class="cm"># prints nothing</span>
+go vet ./...      <span class="cm"># prints nothing</span>
+go test ./link/ -v
+go run .</code></pre>
+<p>Expected: three tests <code>PASS</code>; the run logs the save, prints <code>go → https://golang.org</code>, then <code>no link for "missing" — try another code</code>. If the missing line panics instead — check step 4's <code>switch</code> order.</p>
+
+<div class="callout"><strong>Done when:</strong> <code>go vet</code> silent · <code>go test ./...</code> green with your two new tests · <code>go run .</code> shows the friendly not-found line. Your project now handles its first failure like a production service.</div>
+
+<h2>Check yourself</h2>
+<div class="quiz">
+  <div class="q" data-why="%w wraps: the original error stays inside the new one, so errors.Is/As can find it. %v only prints the text — identity is lost, matching breaks.">
+    <p class="stem">In <code>fmt.Errorf("resolve %q: %w", code, err)</code>, what does <code>%w</code> do that <code>%v</code> wouldn't?</p>
+    <button class="opt" data-ok>Keeps the original error findable inside</button>
+    <button class="opt">Formats the original error more precisely</button>
+    <button class="opt">Copies the original error stack trace</button>
+  </div>
+  <div class="q" data-why="== compares one value; after any layer wraps with %w, the outer error is a different value and == is false. errors.Is unwraps the chain step by step.">
+    <p class="stem">Why <code>errors.Is(err, ErrNotFound)</code> instead of <code>err == ErrNotFound</code>?</p>
+    <button class="opt" data-ok>It matches through any wrapped layers</button>
+    <button class="opt">It compares error messages as strings</button>
+    <button class="opt">It avoids a possible nil panic</button>
+  </div>
+  <div class="q" data-why="Exactly one layer decides. Everyone below adds context and returns; log-and-return at every level produces the same failure five times in the logs.">
+    <p class="stem">A middle layer receives an error it can't fix. Idiomatically it should…</p>
+    <button class="opt" data-ok>Wrap with context and return it</button>
+    <button class="opt">Log it and return it too</button>
+    <button class="opt">Handle it and continue running quietly</button>
+  </div>
+  <div class="q" data-why="errors.Is answers 'is this specific value in the chain?'; errors.As answers 'is there a value of this TYPE in the chain?' and extracts it so you can read its fields.">
+    <p class="stem">When do you reach for <code>errors.As</code> over <code>errors.Is</code>?</p>
+    <button class="opt" data-ok>To extract data from typed errors</button>
+    <button class="opt">To compare two sentinel error values</button>
+    <button class="opt">To convert an error to string</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://go.dev/blog/go1.13-errors">Working with Errors in Go 1.13</a> (official Go blog, ~15 min — Is/As/%w straight from the source). Then <a href="https://go.dev/blog/errors-are-values">Errors are values</a> (Rob Pike — the philosophy in 5 minutes, quotable in interviews).</p>
+<p>New terms are in the <a href="../reference/glossary.html#day2">glossary — Day 2 section</a>.</p>
+
+<p class="next">Tomorrow: <strong>goroutines, channels, select</strong> — errors keep flowing as values, just across concurrent code.<br><br>
+💬 Anything unclear — the %w mechanics, why not log everywhere, a test that won't pass? Ask your teacher. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/quiz.js"></script>
+<script src="../assets/gloss.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

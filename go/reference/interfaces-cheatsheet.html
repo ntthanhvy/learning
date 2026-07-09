@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reference · Go Interfaces &amp; Composition</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Reference sheet · Interfaces &amp; Composition</p>
+<h1>Go interfaces, on one page</h1>
+
+<h2>Rules of thumb</h2>
+<ul>
+<li><strong>Satisfaction is <dfn data-en="Automatic — a type counts as an interface just by having the methods; nothing is declared." data-vn="ngầm định, tự động — không cần khai báo.">implicit</dfn>.</strong> Have the methods → satisfy the interface. No keyword, no registration.</li>
+<li><strong>Define at the <dfn data-en="The code that calls the behavior — the function receiving the interface as a parameter." data-vn="bên dùng — code gọi method qua interface.">consumer</dfn>.</strong> The package that <em>calls</em> the behavior declares the interface. Implementers return <dfn data-en="Real structs or named types — not interfaces; all fields and methods visible." data-vn="kiểu cụ thể — struct thật, không phải interface.">concrete types</dfn>.</li>
+<li><strong>Keep them small.</strong> 1–2 methods is normal. <em>"The bigger the interface, the weaker the abstraction."</em> — <a href="https://go-proverbs.github.io/">Go proverb</a></li>
+<li><strong>Accept interfaces, return structs.</strong> Params = behavior you need. Returns = full concrete type.</li>
+<li><strong>Compose by embedding.</strong> <dfn data-en="Methods lifted from the embedded value to the outer type — outer.Method() forwards automatically." data-vn="method bên trong được gọi thẳng trên type ngoài.">Promoted</dfn> methods, override by redeclaring, <dfn data-en="Pass the call through to the wrapped inner value, which does the real work." data-vn="chuyển việc cho bên trong xử lý.">delegate</dfn> with <code>outer.Inner.Method()</code>.</li>
+<li><strong>Don't abstract preemptively.</strong> Add an interface when a second implementation (or a <dfn data-en="A tiny hand-written stand-in used in tests instead of the real implementation." data-vn="object giả để test.">test fake</dfn>) needs it — not before (<a href="https://100go.co/#interface-pollution-5">100 Go Mistakes #5</a>).</li>
+</ul>
+
+<h2>Snippets</h2>
+<h3>Consumer-defined interface</h3>
+<pre><code><span class="cm">// package handler — needs only lookups</span>
+<span class="kw">type</span> UserGetter <span class="kw">interface</span> {
+    Get(id string) (User, <span class="kw">error</span>)
+}</code></pre>
+
+<h3>Compose interfaces from interfaces</h3>
+<pre><code><span class="kw">type</span> ReadWriter <span class="kw">interface</span> {
+    Reader
+    Writer
+}</code></pre>
+
+<h3>Decorator via embedding (middleware pattern)</h3>
+<pre><code><span class="kw">type</span> LoggingStore <span class="kw">struct</span> {
+    Store
+    log *slog.Logger
+}
+<span class="kw">func</span> (s LoggingStore) Save(ctx context.Context, l Link) <span class="kw">error</span> {
+    s.log.Info(<span class="cm">"saving"</span>, <span class="cm">"code"</span>, l.Code)
+    <span class="kw">return</span> s.Store.Save(ctx, l)
+}</code></pre>
+
+<h3>Compile-time satisfaction check</h3>
+<pre><code><span class="kw">var</span> _ Store = (*MemStore)(<span class="kw">nil</span>)  <span class="cm">// breaks the build if MemStore stops satisfying Store</span></code></pre>
+
+<h2>Interview one-liners</h2>
+<ul>
+<li><em>Why implicit satisfaction?</em> Decouples packages: consumers abstract without implementers opting in.</li>
+<li><em>Why no inheritance?</em> Embedding gives reuse via composition without fragile hierarchies.</li>
+<li><em>nil-interface gotcha:</em> an interface holding a nil <em>pointer</em> is not itself <code>nil</code> — an interface value is (type, value); it's <code>nil</code> only when both are unset. Never return concrete-typed nils as interfaces.</li>
+</ul>
+
+<h2>Sources</h2>
+<p><a href="https://go.dev/doc/effective_go#interfaces_and_types">Effective Go — Interfaces</a> · <a href="https://go.dev/wiki/CodeReviewComments#interfaces">Code Review Comments</a> · <a href="https://pkg.go.dev/io">pkg.go.dev/io</a></p>
+
+<p class="next">Back to <a href="../lessons/0001-interfaces-and-composition.html">Day 1 lesson</a> · <a href="glossary.html">Glossary</a> · <a href="../index.html">Course home</a></p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

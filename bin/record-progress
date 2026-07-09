@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Record a learning-progress event in the Neon DB.
+# Works locally (creds from ~/.config/learning/db.env) and in CI (LEARNING_DB_URL env).
+# Usage: record-progress <course> <kind> [--day N] [--lesson FILE] [--detail '{"json":"here"}']
+#   course: go | rust | backend
+#   kind:   lesson_generated | lesson_completed | quiz | kata | review | note
+# Examples:
+#   record-progress go lesson_completed --day 2 --lesson 0003-errors-as-values.html \
+#     --detail '{"outcome":"all green","weak":["errors.As"]}'
+#   record-progress rust quiz --day 1 --detail '{"score":"5/6","missed":["d1-06"]}'
+set -euo pipefail
+if [ -z "${LEARNING_DB_URL:-}" ]; then
+  source ~/.config/learning/db.env
+fi
+
+course="${1:?course required (go|rust|backend)}"; kind="${2:?kind required}"; shift 2
+day="" lesson="" detail="{}"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --day)    day="$2";    shift 2 ;;
+    --lesson) lesson="$2"; shift 2 ;;
+    --detail) detail="$2"; shift 2 ;;
+    *) echo "unknown flag: $1" >&2; exit 1 ;;
+  esac
+done
+
+psql "$LEARNING_DB_URL" -q -v ON_ERROR_STOP=1 \
+  -v c="$course" -v k="$kind" -v d="${day:-NULL}" -v l="$lesson" -v j="$detail" << 'SQL'
+INSERT INTO course_progress (course, kind, day, lesson, detail)
+VALUES (:'c', :'k', NULLIF(:'d','NULL')::int, NULLIF(:'l',''), :'j'::jsonb);
+SQL
+echo "recorded: $course/$kind day=${day:-∅} lesson=${lesson:-∅}"

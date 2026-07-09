@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 1 · What happens after fetch()?</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 1 · ~20 min</p>
+<h1>What happens after <code>fetch()</code>?</h1>
+<p class="byline">The anatomy of one request through a backend — and the one mindset shift that changes how you read every backend file from now on.</p>
+
+<p>You already know half of this conversation. From the frontend you send <code>fetch("/api/orders/42")</code> and you get JSON and a status code back. This lesson names everything that happens <em>in between</em>, so that when you open a backend codebase you know what each layer is for.</p>
+
+<h2>The journey of one request</h2>
+
+<pre>
+browser ── GET /api/orders/42 ──▶ ┌───────────── server process ─────────────┐
+                                  │ router ▶ middleware ▶ handler            │
+                                  │                        │                 │
+                                  │                 business logic           │
+                                  │                        │                 │
+                                  │                 connection pool          │
+                                  └────────────────────────│─────────────────┘
+                                                           ▼
+                                                       PostgreSQL
+◀── 200 OK + JSON ── (serialize) ◀─────────────── rows come back
+</pre>
+
+<ol>
+  <li>A <dfn data-en="a long-running program that listens on a port and answers requests — the process, not the physical machine" data-vn="server (giữ nguyên) / máy chủ">server</dfn> — one long-running program — is listening on a <dfn data-en="a number (8080, 5432…) that addresses one listening program among many on the same machine" data-vn="port / cổng (thường giữ nguyên)">port</dfn>. Your request arrives as plain text: a method, a path, headers, maybe a body. Nothing frontend about it survives — no components, no framework, just HTTP.</li>
+  <li>The <dfn data-en="the rule table mapping method + path patterns to functions; 'routing' is the act of matching a request against it" data-vn="route (giữ nguyên); routing = định tuyến request">router</dfn> matches <code>GET /api/orders/{id}</code> and picks one function to run.</li>
+  <li>Before that function runs, <dfn data-en="code wrapped around handlers for cross-cutting work — logging, auth checks, timeouts — so each handler doesn't repeat it" data-vn="middleware (giữ nguyên) — lớp chạy trước/sau handler">middleware</dfn> gets its turn: log the request, check the auth token, set a timeout. Cross-cutting jobs live here, not copy-pasted into every function.</li>
+  <li>The <dfn data-en="the function that receives one request and produces one response — the backend's event handler" data-vn="handler (giữ nguyên) — hàm xử lý request">handler</dfn> runs: parse the input (<code>id = "42"</code>), call the <dfn data-en="the product's rules ('orders over $100 ship free'), kept apart from HTTP parsing and SQL" data-vn="logic nghiệp vụ / business logic">business logic</dfn>, choose a status code.</li>
+  <li>The logic needs data, so it borrows a database connection from the <dfn data-en="a kept-warm set of DB connections that handlers borrow and return — opening a fresh one per request is too slow" data-vn="connection pool (giữ nguyên) — pool kết nối DB">connection pool</dfn>, runs a query, gets rows back.</li>
+  <li>The result is turned into JSON — <dfn data-en="turning an in-memory value into bytes for the wire (struct → JSON); deserialization is the reverse" data-vn="serialize (giữ nguyên) — chuyển object thành JSON/bytes">serialization</dfn> — and sent back with the status code. Done. The server forgets everything and waits for the next request.</li>
+</ol>
+
+<p>In Go (your work stack), the whole skeleton is visible in a few lines:</p>
+
+<pre><code><span class="kw">mux</span> := http.NewServeMux()
+mux.HandleFunc(<span class="kw">"GET /api/orders/{id}"</span>, getOrder)  <span class="cm">// route → handler</span>
+
+<span class="kw">func</span> getOrder(w http.ResponseWriter, r *http.Request) {
+    id := r.PathValue(<span class="kw">"id"</span>)                    <span class="cm">// parse input</span>
+    order, err := store.Find(r.Context(), id)  <span class="cm">// logic + DB via the pool</span>
+    <span class="kw">if</span> err != nil {
+        http.Error(w, <span class="kw">"not found"</span>, http.StatusNotFound)
+        <span class="kw">return</span>
+    }
+    json.NewEncoder(w).Encode(order)           <span class="cm">// serialize the response</span>
+}</code></pre>
+
+<h2>The mindset shift</h2>
+
+<div class="callout">
+<p><strong>The backend is stateless; the database is the state.</strong> Step 6 above is the heart of it: the server keeps <em>nothing</em> between requests. Being <dfn data-en="keeping nothing in memory between requests; each request starts from zero, and durable state lives in the database" data-vn="stateless (giữ nguyên) — không giữ trạng thái giữa các request">stateless</dfn> is deliberate — it lets you run five copies of the server behind a load balancer, restart any of them anytime, and lose nothing. Anything that must survive is <dfn data-en="stored so it outlives the process — in practice, written to the database" data-vn="persist / lưu xuống DB">persisted</dfn>.</p>
+</div>
+
+<p>This inverts your frontend instincts, where state living in memory (<code>useState</code>, a store) is the normal case. The mapping:</p>
+
+<table class="gloss">
+  <tr><th>Frontend habit</th><th>Backend equivalent</th></tr>
+  <tr><td>Component receives props</td><td>Handler receives a request</td></tr>
+  <tr><td><code>useState</code> holds state between renders</td><td>Nothing is held between requests — the database holds state</td></tr>
+  <tr><td>State change → re-render</td><td>Every request re-runs the handler from zero</td></tr>
+  <tr><td>One user's browser, one user's state</td><td>One database, <em>every</em> user's state — shared and concurrent</td></tr>
+  <tr><td>Handle the status code <code>fetch()</code> gives you</td><td><em>You</em> choose the status code and error body</td></tr>
+</table>
+
+<p>That fourth row is why backend design is its own discipline: the database is shared, concurrent, and permanent. Schema design (coming lessons, plus your <a href="../../go/lessons/">Go week</a> Days 5–6) is high-stakes for the same reason.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Routing is exactly this: match method + path pattern, pick one handler. Middleware runs around the choice; it doesn't make it.">
+    <p class="stem">A request arrives: <code>GET /api/orders/42</code>. Which piece decides which function runs?</p>
+    <button class="opt" data-ok>The router</button>
+    <button class="opt">The middleware</button>
+    <button class="opt">The handler</button>
+    <button class="opt">The database</button>
+  </div>
+  <div class="q" data-why="Stateless: the handler re-runs from zero every time. Locals die with the request — and the next request may even hit a different server copy.">
+    <p class="stem">Your handler sets a local variable while serving a request. On the <em>next</em> request, that variable is…</p>
+    <button class="opt" data-ok>gone, starting from zero</button>
+    <button class="opt">still there, in memory</button>
+    <button class="opt">moved into a cookie</button>
+    <button class="opt">saved by the router</button>
+  </div>
+  <div class="q" data-why="Logged-in state must survive restarts and be visible to every server copy — so it lives outside the process (database, or a store like Redis), keyed by a session ID the browser sends back.">
+    <p class="stem">In a well-designed backend, where does “this user is logged in” live between two requests?</p>
+    <button class="opt" data-ok>Outside the server process</button>
+    <button class="opt">Inside the handler function</button>
+    <button class="opt">Inside a global variable</button>
+    <button class="opt">Inside the router table</button>
+  </div>
+  <div class="q" data-why="Logging and auth apply to every endpoint — cross-cutting — so they wrap handlers as middleware instead of being repeated inside each one.">
+    <p class="stem">Logging every request and checking auth tokens are jobs for which layer?</p>
+    <button class="opt" data-ok>Middleware</button>
+    <button class="opt">Handlers</button>
+    <button class="opt">Routers</button>
+    <button class="opt">Databases</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://github.com/alex/what-happens-when">“What happens when…”</a> — the community-maintained trace of a request from keystroke to response. Read from the <em>“HTTP protocol”</em> section onward (~10 min); the DNS/TLS part before it is optional today.</p>
+
+<p class="next">All terms from this lesson are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term above for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; ask “why” questions especially.<br><br>
+<em>Next lesson:</em> tables are not JSON — how backend devs decide what becomes an entity, before any SQL is written.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

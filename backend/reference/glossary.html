@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Backend Glossary</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Reference</p>
+<h1>Glossary</h1>
+<p class="byline">Every jargon term used in the lessons, in one place. Tiếng Việt column is dev-style — how Vietnamese devs actually say it, not textbook translation.</p>
+
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>server</td><td>server (giữ nguyên)</td><td>A long-running program that listens on a port and answers requests. Not the physical machine — the <em>process</em>.</td></tr>
+  <tr><td>port</td><td>port / cổng (thường giữ nguyên)</td><td>A number (like 8080 or 5432) that lets one machine run many listening programs; the address <em>within</em> a machine.</td></tr>
+  <tr><td>endpoint</td><td>endpoint (giữ nguyên)</td><td>One callable URL + method that an API exposes, e.g. <code>GET /api/orders/{id}</code>.</td></tr>
+  <tr><td>route / routing</td><td>route (giữ nguyên); routing = định tuyến</td><td>The rule mapping a method + path pattern to the function that should handle it; routing is the act of matching.</td></tr>
+  <tr><td>handler</td><td>handler (giữ nguyên) — hàm xử lý request</td><td>The function that receives one request and produces one response. The backend equivalent of an event handler.</td></tr>
+  <tr><td>middleware</td><td>middleware (giữ nguyên) — lớp chạy trước/sau handler</td><td>Code wrapped around handlers to do cross-cutting work — logging, auth checks, timeouts — so every handler doesn't repeat it.</td></tr>
+  <tr><td>business logic</td><td>logic nghiệp vụ / business logic</td><td>The rules of your product ("an order over $100 ships free"), kept separate from HTTP parsing and database code.</td></tr>
+  <tr><td>stateless</td><td>stateless (giữ nguyên) — không giữ trạng thái giữa các request</td><td>The server keeps nothing in memory between requests; each request starts from zero. State that must survive goes to the database.</td></tr>
+  <tr><td>persistence</td><td>persist / lưu xuống DB</td><td>Storing data so it survives after the process stops — usually meaning "write it to the database".</td></tr>
+  <tr><td>connection pool</td><td>connection pool (giữ nguyên) — pool kết nối DB</td><td>A kept-warm set of database connections that handlers borrow and return, because opening a fresh connection per request is too slow.</td></tr>
+  <tr><td>serialization</td><td>serialize (giữ nguyên) — chuyển object thành JSON/bytes</td><td>Turning an in-memory value into bytes to send over the wire (e.g. struct → JSON); deserialization is the reverse.</td></tr>
+  <tr><td>schema</td><td>schema (giữ nguyên) — cấu trúc bảng của DB</td><td>The set of tables, columns, and rules defining what data can exist — the database's shape, shared by every feature.</td></tr>
+  <tr><td>entity</td><td>entity (giữ nguyên) — thực thể, có id riêng</td><td>A thing in the product with its own identity and lifecycle — it gets an id, usually its own table, and other things refer to it.</td></tr>
+  <tr><td>primary key</td><td>primary key / khóa chính (hay nói tắt PK)</td><td>The column that uniquely identifies one row — usually an id — which other tables point at.</td></tr>
+  <tr><td>foreign key</td><td>foreign key / khóa ngoại (hay nói tắt FK)</td><td>A column holding another table's primary key, expressing "this row belongs to that row".</td></tr>
+  <tr><td>join table</td><td>join table / bảng trung gian</td><td>A table whose rows each connect two other tables' rows — how a many-to-many relationship is stored (e.g. order_items between orders and products).</td></tr>
+  <tr><td>normalization</td><td>normalization / chuẩn hóa dữ liệu</td><td>Structuring tables so each fact is stored exactly once and everything else references it by key. Instinct version: one fact, one place.</td></tr>
+  <tr><td>denormalization</td><td>denormalization (giữ nguyên) — cố ý lưu trùng dữ liệu</td><td>Deliberately storing a fact in more than one place — a trade-off you must justify (e.g. snapshotting a price onto an order line).</td></tr>
+  <tr><td>API contract</td><td>API contract (giữ nguyên) — hợp đồng giữa backend và client</td><td>The agreed shape of an API — URLs, verbs, bodies, error format. The promise frontends build against; breaking it breaks them.</td></tr>
+  <tr><td>resource</td><td>resource (giữ nguyên) — "danh từ" mà API expose</td><td>A thing clients address by URL — usually an entity or collection (/orders, /orders/42). Verbs act on it; you don't make /getX endpoints.</td></tr>
+  <tr><td>idempotent</td><td>idempotent (giữ nguyên) — gọi N lần như gọi 1 lần</td><td>Same end state whether performed once or many times, so blind retries are safe. GET/PUT/DELETE promise it; POST does not.</td></tr>
+  <tr><td>status code</td><td>status code (giữ nguyên) — chữ số đầu nói ai có lỗi</td><td>The response's three-digit result. 2xx worked; 4xx the client's request was wrong (fixable by caller); 5xx the server broke (alarm).</td></tr>
+  <tr><td>error contract</td><td>error contract — MỘT format lỗi thống nhất</td><td>The single JSON error shape every failing response uses, with a stable machine-readable code clients branch on — the API's sentinel errors.</td></tr>
+</table>
+
+<p class="next">Back to <a href="../lessons/0001-what-happens-after-fetch.html">Lesson 1</a>. New lessons add their terms here — if a term in a lesson is unclear, it should be in this table; if it isn't, ask your teacher (the agent) to add it.</p>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

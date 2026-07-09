@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Glossary · Rust terms in software context</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Reference · Glossary</p>
+<h1>Rust course glossary</h1>
+<p class="byline">Every jargon term from the lessons: what it means <em>in software</em> (English), then the Vietnamese the way developers actually say it — mixed EN–VN, not textbook translation. Grows each day.</p>
+
+<h2 id="day1">Day 1 — Cargo &amp; the shape of Rust</h2>
+<table class="gloss">
+<tr><th>Term</th><th>In software</th><th>Tiếng Việt (dev-style)</th></tr>
+<tr><td>cargo</td><td>Rust's build tool and package manager in one: <code>cargo new / check / run / test / clippy</code>. You almost never call the compiler directly.</td><td>giữ nguyên "cargo" — tool build + quản lý package</td></tr>
+<tr><td>crate</td><td>A Rust compilation unit / package — what other languages call a library or module you depend on. Binary crate = a program; library crate = code for others to use.</td><td>giữ nguyên "crate" — như package/module</td></tr>
+<tr><td>immutable by default</td><td><code>let x = 5</code> cannot be reassigned; you must opt in to change with <code>let mut</code>. The opposite default from Go.</td><td>mặc định không đổi được, muốn sửa phải <code>mut</code></td></tr>
+<tr><td>shadowing</td><td>Declaring a new variable with the same name: <code>let x = x + 1</code>. The old one is gone; even the type may change. Legal and idiomatic in Rust.</td><td>khai báo đè tên cũ bằng <code>let</code> mới</td></tr>
+<tr><td>expression vs statement</td><td>Almost everything in Rust returns a value: an <code>if</code>, a block <code>{}</code>, a <code>match</code>. The last line of a block without <code>;</code> IS its value.</td><td>hầu hết mọi thứ đều trả về value, dòng cuối không <code>;</code> là kết quả</td></tr>
+<tr><td>enum (with data)</td><td>A type that is exactly ONE of several variants, and each variant can carry its own data: <code>Shape::Circle(f64)</code>. Go has nothing like this.</td><td>giữ nguyên "enum" — mỗi variant mang được data riêng</td></tr>
+<tr><td>match</td><td>Compare a value against patterns and run the matching arm. The compiler forces you to handle EVERY variant — forget one and it won't compile.</td><td>giữ nguyên "match" — compiler bắt xử lý đủ mọi case</td></tr>
+<tr><td>exhaustive</td><td>Covering every possible case, checked by the compiler. The reason match + enum eliminates a whole class of bugs.</td><td>đủ hết mọi case, compiler kiểm tra</td></tr>
+<tr><td>macro</td><td>Code that writes code at compile time; called with <code>!</code>: <code>println!</code>, <code>vec!</code>. For now: "function-like thing with a bang".</td><td>giữ nguyên "macro" — gọi có dấu <code>!</code></td></tr>
+<tr><td>impl block</td><td>Where a type's methods live: <code>impl Link { fn describe(&amp;self) -&gt; String {…} }</code>. Rust's version of Go's receiver methods, gathered in one block.</td><td>giữ nguyên "impl block" — nơi viết method cho type</td></tr>
+<tr><td>variant</td><td>One of the listed shapes of an enum. Each variant can carry its own fields: <code>Save { code, url }</code> holds data, <code>Help</code> holds none.</td><td>giữ nguyên "variant" — một nhánh của enum</td></tr>
+<tr><td>clone</td><td><code>.clone()</code> makes an owned deep copy of a value. Cheap escape hatch from ownership fights early on; Day 2 explains when it's needed.</td><td>giữ nguyên "clone" — copy riêng một bản</td></tr>
+<tr><td>todo!() / matches!()</td><td><code>todo!()</code>: placeholder body that compiles but panics if reached. <code>matches!(v, Pattern)</code>: true if the value has that shape — handy in tests.</td><td>giữ nguyên — <code>todo!</code> giữ chỗ, <code>matches!</code> so shape</td></tr>
+</table>
+
+<h2 id="day2">Day 2 — Ownership &amp; borrowing</h2>
+<table class="gloss">
+<tr><th>Term</th><th>In software</th><th>Tiếng Việt (dev-style)</th></tr>
+<tr><td>ownership</td><td>Every value has exactly one owner variable; when the owner goes out of scope the value is freed. This replaces the garbage collector.</td><td>giữ nguyên "ownership" — mỗi value có đúng 1 chủ</td></tr>
+<tr><td>move</td><td>Assigning or passing a value transfers ownership — the old variable becomes unusable, at compile time (error E0382). The compiler enforces it.</td><td>giữ nguyên "move" — chuyển quyền sở hữu, biến cũ hết dùng được</td></tr>
+<tr><td>Copy (trait)</td><td>Marker for small stack-only types (i32, bool, char, f64): assignment duplicates instead of moving, both variables stay usable. String/Vec are NOT Copy.</td><td>giữ nguyên "Copy" — gán là nhân bản, không move</td></tr>
+<tr><td>borrow <code>&amp;</code> / <code>&amp;mut</code></td><td>Temporarily use a value without taking ownership. Many readers (<code>&amp;</code>) OR one writer (<code>&amp;mut</code>) — never both at once (error E0502 when violated).</td><td>giữ nguyên "borrow" — mượn tạm, nhiều người đọc hoặc 1 người ghi</td></tr>
+<tr><td>borrow checker</td><td>The compiler pass that verifies the borrowing rules. Rust's famous gatekeeper: fights you early, saves you in production.</td><td>giữ nguyên "borrow checker"</td></tr>
+<tr><td>lifetime</td><td>How long a reference is guaranteed valid. Mostly inferred; you'll read <code>'a</code> long before you write it.</td><td>giữ nguyên "lifetime" — reference sống được bao lâu</td></tr>
+<tr><td><code>String</code> vs <code>&amp;str</code></td><td><code>String</code> = owned, growable text (like a Go string builder you own). <code>&amp;str</code> = a borrowed view into text someone else owns. Parameters borrow (&amp;str), fields own (String).</td><td><code>String</code> là sở hữu, <code>&amp;str</code> là mượn xem</td></tr>
+<tr><td>slice <code>&amp;[T]</code></td><td>A borrowed view into a sequence (part or all of a Vec or array). <code>&amp;Vec&lt;T&gt;</code> auto-coerces to <code>&amp;[T]</code> at call sites — accept slices in parameters.</td><td>giữ nguyên "slice" — mượn xem một dãy</td></tr>
+</table>
+
+<h2>Coming this week (Days 3–7)</h2>
+<table class="gloss">
+<tr><th>Term</th><th>In software</th><th>Tiếng Việt (dev-style)</th></tr>
+<tr><td>Option&lt;T&gt;</td><td>"Maybe a value": <code>Some(v)</code> or <code>None</code>. Rust has no null — this type replaces it, and match forces you to handle the None case.</td><td>giữ nguyên "Option" — thay cho null</td></tr>
+<tr><td>Result&lt;T, E&gt;</td><td>"Success or failure": <code>Ok(v)</code> or <code>Err(e)</code>. Errors are values (like Go!), but the compiler won't let you ignore them.</td><td>giữ nguyên "Result" — như error value bên Go nhưng compiler bắt xử lý</td></tr>
+<tr><td><code>?</code> operator</td><td>"If this is Err/None, return it to my caller now; otherwise unwrap and continue." Go's <code>if err != nil {return err}</code> in one character.</td><td>toán tử <code>?</code> — như <code>if err != nil</code> của Go gói trong 1 ký tự</td></tr>
+<tr><td>trait</td><td>A named set of behavior a type can implement — Rust's version of a Go interface, but implementations are declared explicitly with <code>impl Trait for Type</code>.</td><td>giữ nguyên "trait" — như interface bên Go nhưng khai báo tường minh</td></tr>
+<tr><td>derive</td><td><code>#[derive(Debug, Clone)]</code> — ask the compiler to auto-write standard trait implementations for your type.</td><td>giữ nguyên "derive" — compiler tự viết impl chuẩn</td></tr>
+<tr><td>generics / trait bound</td><td>Code over any type <code>T</code>, constrained by what it can do: <code>fn f&lt;T: Display&gt;(x: T)</code>. Resolved at compile time — no runtime cost.</td><td>giữ nguyên "generics", ràng buộc bằng trait</td></tr>
+<tr><td>closure</td><td>An anonymous function that can capture variables around it: <code>|x| x + 1</code>.</td><td>giữ nguyên "closure" — hàm nặc danh bắt biến xung quanh</td></tr>
+<tr><td>iterator adapter</td><td>Chainable lazy operations on sequences: <code>.map(...).filter(...).collect()</code>. Nothing runs until <code>collect</code>/consumption.</td><td>chuỗi <code>map/filter/collect</code>, chạy lazy</td></tr>
+<tr><td>serde / (de)serialization</td><td>THE Rust framework for converting structs to/from JSON and friends, via <code>#[derive(Serialize, Deserialize)]</code>.</td><td>giữ nguyên "serde" — struct ⇄ JSON</td></tr>
+<tr><td>async / await</td><td>Write non-blocking code that reads like blocking code. An <code>async fn</code> returns a future; <code>.await</code> is where it can pause.</td><td>giữ nguyên "async/await"</td></tr>
+<tr><td>future</td><td>A value representing work not finished yet. Does NOTHING until awaited — unlike a goroutine, which runs immediately.</td><td>giữ nguyên "future" — chưa chạy cho tới khi await</td></tr>
+<tr><td>tokio</td><td>The standard async runtime: the scheduler that actually runs futures, plus async IO, timers, tasks. Rust ships no runtime of its own.</td><td>giữ nguyên "tokio" — runtime chạy async</td></tr>
+<tr><td>axum</td><td>The de-facto standard web framework (by the tokio team): routing, extractors, middleware via tower.</td><td>giữ nguyên "axum" — web framework chuẩn hiện nay</td></tr>
+<tr><td>clippy</td><td>The official linter: <code>cargo clippy</code>. Like <code>go vet</code> plus hundreds of idiom hints.</td><td>giữ nguyên "clippy" — linter chính chủ</td></tr>
+</table>
+
+<p class="next">Back to <a href="../index.html">Course home</a> · <a href="../daily.html">Daily practice</a><br><br>
+💬 A Vietnamese phrasing still sounds off, or a term is missing? Tell your teacher — this page is yours.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

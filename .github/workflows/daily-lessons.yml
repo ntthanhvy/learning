@@ -32,6 +32,23 @@ jobs:
       - name: Install Claude Code
         run: npm install -g @anthropic-ai/claude-code
 
+      - name: Check secrets are sane
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          LEARNING_DB_URL: ${{ secrets.LEARNING_DB_URL }}
+        run: |
+          # Diagnose bad secrets without ever printing them.
+          fail=0
+          if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
+            echo "::error::CLAUDE_CODE_OAUTH_TOKEN is empty"; fail=1
+          elif [ "${CLAUDE_CODE_OAUTH_TOKEN:0:11}" != "sk-ant-oat0" ]; then
+            echo "::error::CLAUDE_CODE_OAUTH_TOKEN does not look like an OAuth token (length ${#CLAUDE_CODE_OAUTH_TOKEN}, expected prefix sk-ant-oat0…). Re-run 'claude setup-token' and paste the token itself."; fail=1
+          fi
+          if [ -z "$LEARNING_DB_URL" ]; then
+            echo "::error::LEARNING_DB_URL is empty"; fail=1
+          fi
+          exit $fail
+
       - name: Generate today's lessons
         env:
           # Subscription auth (claude setup-token) — or swap for ANTHROPIC_API_KEY.

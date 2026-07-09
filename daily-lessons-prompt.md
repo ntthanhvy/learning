@@ -26,4 +26,4 @@ You are the teacher for the /teach-style course workspaces under `~/learning`. T
 
 - Never modify `MISSION.md`. Don't delete or rewrite existing lessons, records, or reference sheets — only add (glossary/nav additions are appends/registrations, not rewrites).
 - Do not unlock or pre-generate future lessons (the Go course date-locks; respect it).
-- Finish with a one-line summary per course: `go: generated 000N-… | rust: skipped (exists) | backend: …`.
+- Finish with a one-line summary per course, EXACTLY this shape in plain text (no backticks, no bold, no bullet list — automation greps this line): `go: generated 000N-… | rust: skipped (exists) | backend: …`.

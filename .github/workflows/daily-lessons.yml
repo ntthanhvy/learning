@@ -62,7 +62,8 @@ jobs:
             | tee gen-output.txt
           # The prompt ends with a per-course summary; if it never appeared,
           # the run died mid-way (see 2026-07-09 incident) — fail loudly.
-          grep -q "go:" gen-output.txt
+          # Tolerant of markdown decoration around course names (backticks, bold).
+          grep -Eiq '\bbackend\b.{0,4}:.{0,4}(generated|skipped)' gen-output.txt
           rm -f gen-output.txt
 
       - name: Commit & push

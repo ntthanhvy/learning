@@ -43,6 +43,18 @@
 <tr><td>slice <code>&amp;[T]</code></td><td>A borrowed view into a sequence (part or all of a Vec or array). <code>&amp;Vec&lt;T&gt;</code> auto-coerces to <code>&amp;[T]</code> at call sites — accept slices in parameters.</td><td>giữ nguyên "slice" — mượn xem một dãy</td></tr>
 </table>
 
+<h2 id="day3">Day 3 — Option, Result &amp; errors</h2>
+<table class="gloss">
+<tr><th>Term</th><th>In software</th><th>Tiếng Việt (dev-style)</th></tr>
+<tr><td>Option&lt;T&gt;</td><td>The standard-library "maybe a value" enum: <code>Some(v)</code> or <code>None</code>. Replaces null entirely — match forces you to handle the empty case.</td><td>giữ nguyên "Option" — thay hẳn cho null</td></tr>
+<tr><td>if let</td><td>A one-armed match: <code>if let Some(x) = opt { … }</code> runs only on the case you care about, skipping a do-nothing arm.</td><td>giữ nguyên "if let" — match rút gọn, chỉ quan tâm 1 nhánh</td></tr>
+<tr><td>Result&lt;T, E&gt;</td><td>Success-or-failure enum: <code>Ok(v)</code> or <code>Err(e)</code>, generic over both. Marked <code>#[must_use]</code> — the compiler warns if you silently drop one.</td><td>giữ nguyên "Result" — như error value bên Go nhưng compiler ép kiểm tra</td></tr>
+<tr><td><code>?</code> operator</td><td>On <code>Err</code>/<code>None</code>: return it from the current function immediately. On <code>Ok</code>/<code>Some</code>: unwrap and continue. Only legal in a function that itself returns <code>Result</code>/<code>Option</code>.</td><td>toán tử <code>?</code> — như <code>if err != nil</code> của Go gói trong 1 ký tự</td></tr>
+<tr><td>thiserror</td><td>Crate providing <code>#[derive(Error)]</code>: writes <code>Display</code> + <code>std::error::Error</code> from <code>#[error("...")]</code> attributes. The library-code choice — name specific variants callers can match on.</td><td>giữ nguyên "thiserror" — derive macro viết lỗi kiểu enum</td></tr>
+<tr><td>anyhow</td><td>Crate providing one universal <code>anyhow::Error</code> that any error converts into via <code>?</code>. The application-code choice — propagate and print, don't match.</td><td>giữ nguyên "anyhow" — kiểu lỗi chung ở tầng ứng dụng</td></tr>
+<tr><td>lifetime <code>'a</code></td><td>A name tying a returned reference's validity to an input's: <code>fn f&lt;'a&gt;(x: &amp;'a T) -&gt; &amp;'a T</code>. Written explicitly only when a function both borrows and returns a borrow from it.</td><td>giữ nguyên "lifetime" — buộc reference trả về không sống lâu hơn input</td></tr>
+</table>
+
 <h2>Coming this week (Days 3–7)</h2>
 <table class="gloss">
 <tr><th>Term</th><th>In software</th><th>Tiếng Việt (dev-style)</th></tr>

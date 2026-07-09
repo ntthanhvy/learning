@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 4 · context, sync &amp; the HTTP Server</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Go Intensive · Day 4 · ~90 min</p>
+<h1><code>context</code>, <code>sync</code> &amp; the HTTP server</h1>
+<p class="byline">Today linkshort finally listens on a port. If yesterday's <code>checkAll</code> practice is still mid-build, no problem — nothing here depends on it finishing; the goroutine/channel/select shape carries forward untouched, and <code>context</code> simply replaces yesterday's raw <code>time.After</code> with a cancellation signal a whole request can share.</p>
+
+<h2>Warm-up: yesterday, from memory</h2>
+<div class="quiz">
+  <div class="q" data-why="An unbuffered channel is a meeting point — the send doesn't complete until a receiver is ready to take it, so checkOne's goroutine simply waits at results <- r.">
+    <p class="stem">In <code>checkAll</code>, <code>results := make(chan result)</code> has no buffer. A worker finishes before <code>select</code> is ready to receive it — what happens to that worker?</p>
+    <button class="opt" data-ok>It blocks on the send until select receives</button>
+    <button class="opt">Its result is silently dropped</button>
+    <button class="opt">It panics: send on unready channel</button>
+  </div>
+  <div class="q" data-why="Losing the select race doesn't kill anyone — goroutines only stop when THEIR code returns. They keep running, discovering later that nobody's listening; that's the seed of a goroutine leak, today's new term.">
+    <p class="stem">The timeout wins the <code>select</code> in <code>checkAll</code> before every worker reported. What happens to the workers still running?</p>
+    <button class="opt" data-ok>They keep running in the background, unseen</button>
+    <button class="opt">They are killed the instant select returns</button>
+    <button class="opt">checkAll blocks until they all finish anyway</button>
+  </div>
+  <div class="q" data-why="WaitGroup only counts completions — it says nothing about two goroutines touching count at the same instant. Mutex is the only one of the two that actually serializes the read-modify-write.">
+    <p class="stem"><code>race_test.go</code> uses both a <code>WaitGroup</code> and a <code>sync.Mutex</code>. Why isn't the WaitGroup enough on its own?</p>
+    <button class="opt" data-ok>It only tracks completion, not safe access</button>
+    <button class="opt">WaitGroup is slower than Mutex</button>
+    <button class="opt">Add and Done already need a lock</button>
+  </div>
+</div>
+
+<h2>1 · <code>context</code>: one cancellation signal, threaded everywhere</h2>
+<p>Every <code>Store</code> method has taken a <code>ctx context.Context</code> since Day 1 — today it stops being decoration. <dfn data-en="A value carrying a cancellation signal and an optional deadline, passed as the first argument through a whole call chain. ctx.Done() is a channel that closes when the work should stop; ctx.Err() says why." data-vn="giữ nguyên 'context' — tín hiệu hủy/deadline truyền xuyên suốt lời gọi.">context.Context</dfn> is the same idea as yesterday's <code>time.After</code> in <code>checkAll</code>'s <code>select</code>, generalized: instead of one hardcoded timer, any caller — an HTTP middleware, a test, another goroutine — can set a <dfn data-en="A specific point in time after which the context is cancelled — context.WithDeadline sets one directly; context.WithTimeout(ctx, d) is deadline = now + d, the common case." data-vn="giữ nguyên 'deadline' — mốc thời gian context bị hủy.">deadline</dfn> and every function downstream that checks <code>ctx.Done()</code> obeys it, without knowing who set it or why.</p>
+<pre><code>ctx, cancel := context.WithTimeout(parent, 2*time.Second)
+<span class="kw">defer</span> cancel()   <span class="cm">// ALWAYS defer cancel — releases the timer even if you return early</span>
+
+<span class="kw">select</span> {
+<span class="kw">case</span> r := &lt;-resultCh:
+    <span class="kw">return</span> r, <span class="kw">nil</span>
+<span class="kw">case</span> &lt;-ctx.Done():
+    <span class="kw">return</span> zero, ctx.Err()   <span class="cm">// context.DeadlineExceeded or context.Canceled</span>
+}</code></pre>
+<p>That <code>select</code> is exactly yesterday's shape — <code>ctx.Done()</code> is just a channel, same as <code>time.After</code>'s. The difference is composability: an HTTP server can set one timeout in a middleware, and every store call, every query, every goroutine three layers down shares it automatically, because the same <code>ctx</code> value gets passed down. That's why the rule is "ctx first parameter, always" — it's not style, it's how cancellation actually propagates.</p>
+
+<h2>2 · Goroutine leaks — the bug <code>context</code> exists to prevent</h2>
+<p>Warm-up question 2 named it without a term: a <dfn data-en="A goroutine that never returns because it's blocked forever — waiting on a channel nobody sends to, or nobody reads from — and so never gets garbage collected. Small ones are invisible; under load they exhaust memory." data-vn="giữ nguyên 'goroutine leak' — goroutine kẹt mãi mãi, không bao giờ return.">goroutine leak</dfn> is a goroutine still blocked on a channel operation that will never happen. Yesterday's orphaned workers weren't leaked — they finished on their own and their send just found nobody listening (a `select` with only one receive attempt, not blocked forever). The real leak pattern is subtler: a goroutine send with <strong>no timeout and no cancellation path at all</strong>. The fix is always the same: give every blocking operation a way out via <code>ctx.Done()</code> in its own <code>select</code>. Rule of thumb for interviews: <em>"never start a goroutine without knowing how it stops."</em></p>
+<p>One stdlib-adjacent tool worth knowing by name (not required in linkshort, which stays stdlib-only): <code>golang.org/x/sync/errgroup</code> bundles "launch N goroutines, cancel all of them the moment one fails, wait for the rest" into a few lines — the production version of yesterday's <code>WaitGroup</code> fan-out when any worker's error should stop the others.</p>
+
+<h2>3 · ServeMux, 1.22-style</h2>
+<p>Go 1.22 added method- and wildcard-matching to the standard router — no framework needed:</p>
+<pre><code>mux := http.NewServeMux()
+mux.HandleFunc(<span class="cm">"POST /links"</span>, srv.handleCreate)
+mux.HandleFunc(<span class="cm">"GET /{code}"</span>, srv.handleRedirect)
+mux.HandleFunc(<span class="cm">"GET /{code}/stats"</span>, srv.handleStats)</code></pre>
+<p><code>{code}</code> is a <dfn data-en="A named segment in a ServeMux route (Go 1.22+) that matches one path element and binds it; read inside the handler with r.PathValue(&quot;name&quot;). No third-party router needed for this anymore." data-vn="giữ nguyên 'wildcard segment' — phần path đặt tên, lấy ra bằng r.PathValue.">wildcard segment</dfn>; the handler reads it with <code>r.PathValue("code")</code>. Method prefixes (<code>"GET "</code>, <code>"POST "</code>) mean the mux itself rejects the wrong verb with <code>405</code> — no manual <code>if r.Method != ...</code> anywhere (<a href="https://go.dev/blog/routing-enhancements">Routing Enhancements for Go 1.22</a>).</p>
+
+<h2>4 · Middleware is still just a decorator</h2>
+<p>Nothing new in shape here — a <code>func(http.Handler) http.Handler</code> wraps a handler exactly the way <code>LoggingStore</code> wrapped a <code>Store</code> on Day 1: one job, delegate the rest.</p>
+<pre><code><span class="kw">func</span> loggingMiddleware(log *slog.Logger, next http.Handler) http.Handler {
+    <span class="kw">return</span> http.HandlerFunc(<span class="kw">func</span>(w http.ResponseWriter, r *http.Request) {
+        start := time.Now()
+        next.ServeHTTP(w, r)                 <span class="cm">// delegate first (or after — logging needs "after")</span>
+        log.Info(<span class="cm">"request"</span>, <span class="cm">"method"</span>, r.Method, <span class="cm">"path"</span>, r.URL.Path, <span class="cm">"took"</span>, time.Since(start))
+    })
+}</code></pre>
+<p>Today's second middleware — the timeout — is today's TODO (section 5 practice): it does the same wrapping, but calls <code>context.WithTimeout</code> and swaps the request's context before delegating.</p>
+
+<h2>5 · Graceful shutdown</h2>
+<p>Killing a server mid-request drops whatever it was doing. The idiomatic shape: catch the OS signal, stop <em>accepting new</em> connections, let in-flight ones finish, then exit.</p>
+<pre><code>ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+<span class="kw">defer</span> stop()
+
+<span class="kw">go func</span>() { httpServer.ListenAndServe() }()   <span class="cm">// non-blocking: main must reach the line below</span>
+
+&lt;-ctx.Done()                                    <span class="cm">// blocks here until Ctrl-C / SIGTERM</span>
+httpServer.Shutdown(shutdownCtx)                <span class="cm">// stop taking new conns, drain in-flight, then return</span></code></pre>
+<p><code>signal.NotifyContext</code> turns an OS signal into the exact same <code>ctx.Done()</code> shape you've used all lesson — <dfn data-en="Stop accepting new connections, let requests already in flight finish, then return — as opposed to killing the process mid-request. http.Server.Shutdown implements this; it blocks until every in-flight handler returns or its own context expires." data-vn="giữ nguyên 'graceful shutdown' — tắt server: ngừng nhận request mới, chờ request đang chạy xong rồi mới thoát.">graceful shutdown</dfn> is just one more cancellation signal, same tool, different source (<a href="https://go.dev/blog/context">Go blog: Context</a>).</p>
+
+<h2>6 · Practice: linkshort listens on a port</h2>
+<p>In <code>~/learning/go/project/linkshort</code> — two files created, <code>main.go</code> replaced.</p>
+<pre><code>linkshort/
+├── link/                  (untouched)
+├── middleware.go          (new — logging given, timeout is TODO)
+├── server.go              (new — handlers; one TODO)
+└── main.go                (replaced — wiring; one TODO)</code></pre>
+
+<p><strong>Step 1 — <code>middleware.go</code>.</strong> Logging is given; you write the timeout wrapper (section 1's pattern, four lines):</p>
+<pre><code><span class="kw">package</span> main
+
+<span class="kw">import</span> (
+    <span class="cm">"context"</span>
+    <span class="cm">"log/slog"</span>
+    <span class="cm">"net/http"</span>
+    <span class="cm">"time"</span>
+)
+
+<span class="cm">// loggingMiddleware is a decorator: same shape as Day 1's LoggingStore, one</span>
+<span class="cm">// layer wide, delegates everything else through.</span>
+<span class="kw">func</span> loggingMiddleware(log *slog.Logger, next http.Handler) http.Handler {
+    <span class="kw">return</span> http.HandlerFunc(<span class="kw">func</span>(w http.ResponseWriter, r *http.Request) {
+        start := time.Now()
+        next.ServeHTTP(w, r)
+        log.Info(<span class="cm">"request"</span>, <span class="cm">"method"</span>, r.Method, <span class="cm">"path"</span>, r.URL.Path, <span class="cm">"took"</span>, time.Since(start))
+    })
+}
+
+<span class="cm">// TODO: timeoutMiddleware bounds every request's context to d.</span>
+<span class="cm">//   1. context.WithTimeout(r.Context(), d) -> ctx, cancel</span>
+<span class="cm">//   2. defer cancel()</span>
+<span class="cm">//   3. next.ServeHTTP(w, r.WithContext(ctx))  -- NOT the original r</span>
+<span class="kw">func</span> timeoutMiddleware(d time.Duration, next http.Handler) http.Handler {
+    <span class="kw">return</span> http.HandlerFunc(<span class="kw">func</span>(w http.ResponseWriter, r *http.Request) {
+
+    })
+}</code></pre>
+
+<p><strong>Step 2 — <code>server.go</code> (given, except one TODO).</strong> <code>handleCreate</code> and <code>resolve</code> reuse Day 2's wrapping pattern; <code>hits</code> is a plain map guarded by a mutex — you fill in the guard:</p>
+<pre><code><span class="kw">package</span> main
+
+<span class="kw">import</span> (
+    <span class="cm">"crypto/rand"</span>
+    <span class="cm">"encoding/base64"</span>
+    <span class="cm">"encoding/json"</span>
+    <span class="cm">"errors"</span>
+    <span class="cm">"fmt"</span>
+    <span class="cm">"net/http"</span>
+    <span class="cm">"sync"</span>
+    <span class="cm">"time"</span>
+
+    <span class="cm">"linkshort/link"</span>
+)
+
+<span class="kw">type</span> server <span class="kw">struct</span> {
+    store link.Store
+    mu    sync.Mutex
+    hits  <span class="kw">map</span>[string]<span class="kw">int</span>
+}
+
+<span class="kw">func</span> newServer(store link.Store) *server {
+    <span class="kw">return</span> &amp;server{store: store, hits: <span class="kw">make</span>(<span class="kw">map</span>[string]<span class="kw">int</span>)}
+}
+
+<span class="kw">func</span> newCode() (string, <span class="kw">error</span>) {
+    buf := <span class="kw">make</span>([]byte, 4)
+    <span class="kw">if</span> _, err := rand.Read(buf); err != <span class="kw">nil</span> {
+        <span class="kw">return</span> <span class="cm">""</span>, err
+    }
+    <span class="kw">return</span> base64.RawURLEncoding.EncodeToString(buf), <span class="kw">nil</span>
+}
+
+<span class="kw">type</span> createRequest <span class="kw">struct</span> {
+    URL string `json:"url"`
+}
+
+<span class="kw">type</span> createResponse <span class="kw">struct</span> {
+    Code string `json:"code"`
+    URL  string `json:"url"`
+}
+
+<span class="cm">// handleCreate: POST /links {"url": "..."} -> {"code": "...", "url": "..."}</span>
+<span class="kw">func</span> (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
+    <span class="kw">var</span> req createRequest
+    <span class="kw">if</span> err := json.NewDecoder(r.Body).Decode(&amp;req); err != <span class="kw">nil</span> || req.URL == <span class="cm">""</span> {
+        http.Error(w, <span class="cm">`body must be {"url": "..."}`</span>, http.StatusBadRequest)
+        <span class="kw">return</span>
+    }
+    code, err := newCode()
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        http.Error(w, <span class="cm">"internal error"</span>, http.StatusInternalServerError)
+        <span class="kw">return</span>
+    }
+    l := link.Link{Code: code, URL: req.URL, CreatedAt: time.Now()}
+    <span class="kw">if</span> err := s.store.Save(r.Context(), l); err != <span class="kw">nil</span> {
+        http.Error(w, <span class="cm">"internal error"</span>, http.StatusInternalServerError)
+        <span class="kw">return</span>
+    }
+    w.Header().Set(<span class="cm">"Content-Type"</span>, <span class="cm">"application/json"</span>)
+    w.WriteHeader(http.StatusCreated)
+    json.NewEncoder(w).Encode(createResponse{Code: l.Code, URL: l.URL})
+}
+
+<span class="cm">// resolve wraps the store lookup with request-scoped context — Day 2's</span>
+<span class="cm">// pattern, now carrying whatever deadline the timeout middleware set.</span>
+<span class="kw">func</span> (s *server) resolve(r *http.Request, code string) (link.Link, <span class="kw">error</span>) {
+    l, err := s.store.Get(r.Context(), code)
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        <span class="kw">return</span> link.Link{}, fmt.Errorf(<span class="cm">"resolve %q: %w"</span>, code, err)
+    }
+    <span class="kw">return</span> l, <span class="kw">nil</span>
+}
+
+<span class="cm">// handleRedirect: GET /{code} -> 302 to the target URL, counts the hit.</span>
+<span class="kw">func</span> (s *server) handleRedirect(w http.ResponseWriter, r *http.Request) {
+    code := r.PathValue(<span class="cm">"code"</span>)
+    l, err := s.resolve(r, code)
+    <span class="kw">switch</span> {
+    <span class="kw">case</span> errors.Is(err, link.ErrNotFound):
+        http.NotFound(w, r)
+        <span class="kw">return</span>
+    <span class="kw">case</span> err != <span class="kw">nil</span>:
+        http.Error(w, <span class="cm">"internal error"</span>, http.StatusInternalServerError)
+        <span class="kw">return</span>
+    }
+
+    <span class="cm">// TODO: s.hits[code]++ is a data race under concurrent redirects —</span>
+    <span class="cm">// guard it: s.mu.Lock(); s.hits[code]++; s.mu.Unlock()</span>
+
+    http.Redirect(w, r, l.URL, http.StatusFound)
+}
+
+<span class="kw">type</span> statsResponse <span class="kw">struct</span> {
+    Code string `json:"code"`
+    URL  string `json:"url"`
+    Hits int    `json:"hits"`
+}
+
+<span class="cm">// handleStats: GET /{code}/stats -> {"code", "url", "hits"} (given).</span>
+<span class="kw">func</span> (s *server) handleStats(w http.ResponseWriter, r *http.Request) {
+    code := r.PathValue(<span class="cm">"code"</span>)
+    l, err := s.resolve(r, code)
+    <span class="kw">switch</span> {
+    <span class="kw">case</span> errors.Is(err, link.ErrNotFound):
+        http.NotFound(w, r)
+        <span class="kw">return</span>
+    <span class="kw">case</span> err != <span class="kw">nil</span>:
+        http.Error(w, <span class="cm">"internal error"</span>, http.StatusInternalServerError)
+        <span class="kw">return</span>
+    }
+    s.mu.Lock()
+    hits := s.hits[code]
+    s.mu.Unlock()
+    w.Header().Set(<span class="cm">"Content-Type"</span>, <span class="cm">"application/json"</span>)
+    json.NewEncoder(w).Encode(statsResponse{Code: l.Code, URL: l.URL, Hits: hits})
+}</code></pre>
+<p><strong>Step 3 — <code>main.go</code> (replaces the CLI demo). Wiring is given; the shutdown block is your TODO.</strong></p>
+<pre><code><span class="kw">package</span> main
+
+<span class="kw">import</span> (
+    <span class="cm">"context"</span>
+    <span class="cm">"errors"</span>
+    <span class="cm">"log/slog"</span>
+    <span class="cm">"net/http"</span>
+    <span class="cm">"os/signal"</span>
+    <span class="cm">"syscall"</span>
+    <span class="cm">"time"</span>
+
+    <span class="cm">"linkshort/link"</span>
+)
+
+<span class="kw">func</span> main() {
+    store := link.NewMemStore()
+    srv := newServer(store)
+
+    mux := http.NewServeMux()
+    mux.HandleFunc(<span class="cm">"POST /links"</span>, srv.handleCreate)
+    mux.HandleFunc(<span class="cm">"GET /{code}"</span>, srv.handleRedirect)
+    mux.HandleFunc(<span class="cm">"GET /{code}/stats"</span>, srv.handleStats)
+
+    <span class="kw">var</span> handler http.Handler = mux
+    handler = timeoutMiddleware(2*time.Second, handler)
+    handler = loggingMiddleware(slog.Default(), handler)
+
+    httpServer := &amp;http.Server{Addr: <span class="cm">":8080"</span>, Handler: handler}
+
+    <span class="cm">// TODO: graceful shutdown —</span>
+    <span class="cm">//   1. ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM); defer stop()</span>
+    <span class="cm">//   2. go func() { httpServer.ListenAndServe() ... }() — log the error unless it's http.ErrServerClosed</span>
+    <span class="cm">//   3. <-ctx.Done()  — blocks here until Ctrl-C</span>
+    <span class="cm">//   4. shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second); defer cancel()</span>
+    <span class="cm">//   5. httpServer.Shutdown(shutdownCtx)</span>
+    <span class="cm">// (Section 5 has every line of this almost verbatim.)</span>
+}</code></pre>
+
+<p><strong>Step 4 — prove it.</strong></p>
+<pre><code>go vet ./...
+go run .
+<span class="cm"># in another terminal:</span>
+curl -X POST localhost:8080/links -d <span class="cm">'{"url":"https://go.dev"}'</span>
+<span class="cm"># -> {"code":"...","url":"https://go.dev"}</span>
+curl -i localhost:8080/&lt;code&gt;          <span class="cm"># -> 302, Location: https://go.dev</span>
+curl localhost:8080/&lt;code&gt;/stats       <span class="cm"># -> {"code":"...","url":"...","hits":1}</span>
+curl -i localhost:8080/nope             <span class="cm"># -> 404</span>
+<span class="cm"># then Ctrl-C: the log should print "shutting down" and exit clean, not hang</span></code></pre>
+
+<div class="callout"><strong>Done when:</strong> <code>go vet ./...</code> silent · all four curl checks above match · Ctrl-C logs the shutdown line and the process exits within a couple seconds instead of hanging or dying mid-request. That's a real, cancellable, gracefully-stoppable Go HTTP service — the shape behind every backend job's take-home test.</div>
+
+<h2>Check yourself</h2>
+<div class="quiz">
+  <div class="q" data-why="context.WithTimeout returns a NEW ctx and a cancel func; the deadline is set on the child, and every downstream call must receive that child ctx (via r.WithContext) to be bound by it.">
+    <p class="stem">In <code>timeoutMiddleware</code>, why must you call <code>next.ServeHTTP(w, r.WithContext(ctx))</code> instead of just <code>next.ServeHTTP(w, r)</code>?</p>
+    <button class="opt" data-ok>The handler must receive the new, timed context</button>
+    <button class="opt">ServeHTTP requires WithContext by signature</button>
+    <button class="opt">It avoids copying the ResponseWriter</button>
+  </div>
+  <div class="q" data-why="defer cancel() releases the timer goroutine backing WithTimeout as soon as the function returns. Skip it and each request leaks a small timer until the deadline itself fires — a slow, real goroutine leak.">
+    <p class="stem">What actually leaks if you forget <code>defer cancel()</code> after <code>context.WithTimeout</code>?</p>
+    <button class="opt" data-ok>The timer goroutine, until the deadline passes</button>
+    <button class="opt">The HTTP connection stays open forever</button>
+    <button class="opt">Nothing — cancel is only cosmetic</button>
+  </div>
+  <div class="q" data-why="ServeMux's method prefix means the router itself returns 405 for the wrong verb on a registered path — no manual if r.Method != check needed anymore.">
+    <p class="stem"><code>mux.HandleFunc("POST /links", ...)</code> — a GET request to <code>/links</code> gets…</p>
+    <button class="opt" data-ok>405, handled by the mux itself</button>
+    <button class="opt">200, method is ignored by ServeMux</button>
+    <button class="opt">A panic inside handleCreate</button>
+  </div>
+  <div class="q" data-why="Shutdown stops the listener from accepting NEW connections immediately, but waits for in-flight handlers to finish (or the passed context to expire) before returning — that's the whole point of 'graceful'.">
+    <p class="stem">Once you call <code>httpServer.Shutdown(ctx)</code>, what happens to a request already mid-handler?</p>
+    <button class="opt" data-ok>It's allowed to finish before the process exits</button>
+    <button class="opt">It's cut off immediately, same as a kill</button>
+    <button class="opt">Shutdown blocks new requests but doesn't wait</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://go.dev/blog/context">Go blog — Context</a> (official, ~15 min — the package straight from the team that built it, and where the "always defer cancel" rule comes from). Then <a href="https://go.dev/blog/routing-enhancements">Routing Enhancements for Go 1.22</a> for the mux patterns used today.</p>
+<p>New terms are in the <a href="../reference/glossary.html#day4">glossary — Day 4 section</a>.</p>
+
+<p class="next">Tomorrow: <strong>data modeling in PostgreSQL</strong> — linkshort's <code>MemStore</code> gets a real database twin, and the <code>Store</code> interface from Day 1 finally pays for itself.<br><br>
+💬 Stuck on the shutdown TODO, or a curl call not behaving? Paste what you see — hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/quiz.js"></script>
+<script src="../assets/gloss.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

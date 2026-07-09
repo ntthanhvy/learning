@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 3 · Option, Result &amp; Errors</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Rust Intensive · Day 3 · ~75 min</p>
+<h1><code>Option</code>, <code>Result</code> &amp; errors</h1>
+<p class="byline">If yesterday's <code>print_link</code> extraction is still sitting half-done, that's fine — nothing here depends on it. Today works directly on the <code>Get</code> arm's found/loop code exactly as Day 1 left it, and turns it into the pattern every Rust backend uses: no null, no exceptions, errors as typed values the compiler won't let you drop.</p>
+
+<h2>Warm-up: yesterday, from memory</h2>
+<div class="quiz">
+  <div class="q" data-why="&String auto-coerces to &str at call sites — the same coercion that let &Vec<Link> work as &[Link] yesterday. Parameters borrow the narrowest useful type; callers don't need to convert by hand.">
+    <p class="stem">Today's <code>find_link</code> takes <code>code: &amp;str</code>, but you'll call it with <code>&amp;code</code> where <code>code</code> is a <code>String</code>. Why does that just work?</p>
+    <button class="opt" data-ok>&amp;String coerces to &amp;str automatically</button>
+    <button class="opt">String and str are the same type</button>
+    <button class="opt">Rust copies the string implicitly</button>
+  </div>
+  <div class="q" data-why="Using a String after it's been moved (assigned elsewhere, passed by value) is a compile-time error, E0382 — never a runtime surprise. That's the whole ownership pitch from yesterday.">
+    <p class="stem">You pass a <code>String</code> by value into a struct literal, then try to print the original variable below. What happens?</p>
+    <button class="opt" data-ok>Compile error: value was moved</button>
+    <button class="opt">Prints the value, now shared</button>
+    <button class="opt">Panics the first time it runs</button>
+  </div>
+  <div class="q" data-why="Any number of shared &-borrows OR exactly one exclusive &mut — never both. Pushing while a shared-borrow loop is live breaks that rule; E0502 catches it before the program ever runs.">
+    <p class="stem"><code>for l in &amp;links { links.push(...) }</code> fails to compile. Which rule does it break?</p>
+    <button class="opt" data-ok>Many readers or one writer, not both</button>
+    <button class="opt">Vectors can't be modified in a loop</button>
+    <button class="opt">push always needs an empty vector</button>
+  </div>
+</div>
+
+<h2>1 · <code>Option&lt;T&gt;</code>: no null, ever</h2>
+<p>Rust has no <code>nil</code>/<code>null</code> value that can secretly hide inside any type. "Maybe nothing" is instead a real, ordinary enum from the standard library:</p>
+<pre><code><span class="kw">enum</span> Option&lt;T&gt; {
+    Some(T),
+    None,
+}</code></pre>
+<p><dfn data-en="The standard-library enum for 'maybe a value': Some(v) or None. Every place another language could hand you null instead becomes a type you must match on — the compiler forces you to handle the empty case." data-vn="giữ nguyên 'Option' — thay hẳn cho null, bắt xử lý cả 2 nhánh.">Option&lt;T&gt;</dfn> shows up the moment "not found" is a normal, expected outcome — like <code>Vec::iter().find(...)</code>, which returns <code>Option&lt;&amp;T&gt;</code>. You handle it with the <code>match</code> you already know, or a shortcut when you only care about one branch:</p>
+<pre><code><span class="kw">if let</span> Some(l) = links.iter().find(|l| l.code == code) {
+    println!(<span class="cm">"{}"</span>, l.describe());
+} <span class="kw">else</span> {
+    println!(<span class="cm">"not found"</span>);
+}</code></pre>
+<p><dfn data-en="Shorthand for a match with exactly one arm you care about: if let Some(x) = opt { ... } runs only when opt is Some, binding x — skips writing a None arm that does nothing." data-vn="giữ nguyên 'if let' — match rút gọn, chỉ quan tâm 1 nhánh.">if let</dfn> is a one-armed <code>match</code> — reach for it when you only need the "yes" case and nothing happens on "no".</p>
+
+<h2>2 · <code>Result&lt;T, E&gt;</code>: your Go instincts, enforced</h2>
+<p>You already think this way — Go's <code>(Link, error)</code> return and <code>ErrNotFound</code> sentinel <em>are</em> this idea. Rust just makes it one generic type instead of a convention:</p>
+<pre><code><span class="kw">enum</span> Result&lt;T, E&gt; {
+    Ok(T),
+    Err(E),
+}</code></pre>
+<p>The difference that matters: <dfn data-en="Rust's success-or-failure enum: Ok(v) or Err(e), generic over both. #[must_use] on the type means the compiler warns if you silently drop a Result without checking it — Go's if err != nil is a convention; Rust's is enforced." data-vn="giữ nguyên 'Result' — như error value bên Go nhưng compiler ép kiểm tra.">Result&lt;T, E&gt;</dfn> is marked <code>#[must_use]</code> — ignore one and the compiler warns you, in a way Go's <code>if err != nil</code> convention can't enforce (nothing stops a Go dev from skipping the check). And <code>E</code> is a real type parameter: instead of one shared <code>error</code> interface, you write a small enum naming exactly your failure modes:</p>
+<pre><code><span class="kw">use</span> thiserror::Error;
+
+<span class="cm">// #[derive(Error)] writes Display + std::error::Error for you — you only</span>
+<span class="cm">// write the shape and the message. Same job as Go's ErrNotFound, but the</span>
+<span class="cm">// compiler knows the TYPE, not just a sentinel value it has to trust you compare right.</span>
+#[derive(Debug, Error)]
+<span class="kw">enum</span> LinkError {
+    #[error(<span class="cm">"no link with code '{0}'"</span>)]
+    NotFound(String),
+}</code></pre>
+<p><dfn data-en="A crate providing #[derive(Error)]: writes std::error::Error and Display for your enum from #[error(&quot;...&quot;)] attributes on each variant. The standard choice for LIBRARY code with typed, specific error variants." data-vn="giữ nguyên 'thiserror' — derive macro viết Display + Error cho enum lỗi của bạn.">thiserror</dfn> is the standard pick when you're naming specific error shapes — the library-code side of Rust error handling.</p>
+
+<h2>3 · <code>?</code>: Go's <code>if err != nil</code> in one character</h2>
+<p>Every layer in yesterday's Go project wrapped and returned on error — that's <em>exactly</em> what <code>?</code> automates:</p>
+<pre><code><span class="kw">let</span> l = find_link(&amp;links, &amp;code)?;   <span class="cm">// Ok(l) -> l, continue. Err(e) -> return Err(e) from THIS function, now.</span></code></pre>
+<p>Side by side:</p>
+<table class="gloss">
+<tr><th>Go</th><th>Rust</th></tr>
+<tr><td><code>l, err := store.Get(ctx, code)<br>if err != nil { return err }</code></td><td><code>let l = store.get(code)?;</code></td></tr>
+</table>
+<p>Same idea, same "handle once at the top" discipline from your Go Day 2 — <code>?</code> just removes the four lines of ceremony every layer used to repeat. It only works in a function that itself returns <code>Result</code> (or <code>Option</code>, for <code>?</code> on an <code>Option</code>) — which is why today's practice changes <code>fn main()</code>'s signature.</p>
+
+<h2>4 · <code>anyhow</code> vs <code>thiserror</code>: which one, when</h2>
+<table class="gloss">
+<tr><th>Crate</th><th>Use it for</th><th>Trade-off</th></tr>
+<tr><td>thiserror</td><td>Library code: callers need to <code>match</code> on specific variants</td><td>You name every variant up front</td></tr>
+<tr><td>anyhow</td><td>Application code (like <code>main</code>): "something failed, show it and stop"</td><td>One opaque <code>anyhow::Error</code> holds any error; convenient, not <code>match</code>-able</td></tr>
+</table>
+<p><dfn data-en="A crate providing one universal error type (anyhow::Error) that any std::error::Error can convert into via ?. The standard choice for APPLICATION top levels that just need to propagate and print, not match on specific error kinds." data-vn="giữ nguyên 'anyhow' — kiểu lỗi chung, ? tự convert error nào cũng được, dùng ở tầng ứng dụng.">anyhow</dfn> is why <code>fn main() -> anyhow::Result&lt;()&gt;</code> can use <code>?</code> on <em>any</em> error type without you writing a conversion — and if <code>main</code> returns <code>Err</code>, the process prints <code>Error: {the message}</code> and exits non-zero, automatically. Today: <code>thiserror</code> at the library boundary (<code>LinkError</code>), <code>anyhow</code> at <code>main</code> — the two almost always travel together.</p>
+
+<h2>5 · Practice: <code>find_link</code>, typed and enforced</h2>
+<p>All in <code>linkshort-rs/src/main.rs</code>. If you already extracted <code>print_link</code> yesterday, apply step 2 inside it instead of the <code>Get</code> arm — the change is the same either way.</p>
+
+<p><strong>Step 1 — add the crates.</strong> In <code>Cargo.toml</code>:</p>
+<pre><code>[dependencies]
+thiserror = <span class="cm">"2"</span>
+anyhow = <span class="cm">"1"</span></code></pre>
+
+<p><strong>Step 2 — derive <code>Debug</code> on <code>Link</code>.</strong> One line above the struct (needed so tests can print a <code>Link</code> on failure):</p>
+<pre><code>#[derive(Debug)]
+<span class="kw">struct</span> Link { … }</code></pre>
+
+<p><strong>Step 3 — <code>LinkError</code> (given, section 2's exact code).</strong> Add this above <code>main</code>, and <code>use thiserror::Error;</code> at the top of the file:</p>
+<pre><code>#[derive(Debug, Error)]
+<span class="kw">enum</span> LinkError {
+    #[error(<span class="cm">"no link with code '{0}'"</span>)]
+    NotFound(String),
+}</code></pre>
+
+<p><strong>Step 4 — TODO: write <code>find_link</code>.</strong> Same loop shape as your current <code>Get</code> arm, returning a value instead of printing:</p>
+<pre><code><span class="cm">// find_link borrows the list, returns a borrowed Link OR a typed error —</span>
+<span class="cm">// no found-flag, no sentinel zero value. The signature IS the contract.</span>
+<span class="cm">// TODO: loop `for l in links`, `if l.code == code { return Ok(l); }`,</span>
+<span class="cm">//       then after the loop: `Err(LinkError::NotFound(code.to_string()))`</span>
+<span class="kw">fn</span> find_link&lt;'a&gt;(links: &amp;'a [Link], code: &amp;str) -> Result&lt;&amp;'a Link, LinkError&gt; {
+
+}</code></pre>
+<p>The <code>'a</code> is a <dfn data-en="A named lifetime tying the returned reference's validity to the input's: fn f<'a>(links: &'a [Link]) -> &'a Link means the returned Link can't outlive the links slice it borrowed from. Usually elided; here it's written because the signature borrows AND returns a borrow." data-vn="giữ nguyên 'lifetime' — buộc reference trả về không sống lâu hơn input.">lifetime</dfn> saying "the <code>Link</code> I return can't outlive the <code>links</code> slice you gave me" — the compiler needs this spelled out whenever a function both borrows and returns a borrow from the same input.</p>
+
+<p><strong>Step 5 — TODO: wire it into <code>main</code>.</strong> Change the signature and the <code>Get</code> arm:</p>
+<pre><code><span class="kw">fn</span> main() -> anyhow::Result&lt;()&gt; {
+    <span class="cm">// ...unchanged...</span>
+
+    <span class="kw">match</span> cmd {
+        Command::Help => { <span class="cm">/* unchanged */</span> }
+        Command::Save { code, url } => { <span class="cm">/* unchanged */</span> }
+        Command::Get { code } => {
+            <span class="cm">// TODO: replace the found/loop body with:</span>
+            <span class="cm">//   let l = find_link(&links, &code)?;</span>
+            <span class="cm">//   println!("{}", l.describe());</span>
+        }
+    }
+
+    <span class="cm">// TODO: the match no longer returns a value the function needs — end with:</span>
+    Ok(())
+}</code></pre>
+
+<p><strong>Step 6 — prove it.</strong></p>
+<pre><code>cargo check              <span class="cm"># quiet</span>
+cargo test               <span class="cm"># 2 passed (Day 1's) + write the 2 below, then 4 passed</span>
+cargo run -- get rust    <span class="cm"># -> rust -> https://www.rust-lang.org</span>
+cargo run -- get nope    <span class="cm"># -> Error: no link with code 'nope'   (exit code 1)</span></code></pre>
+<p>Add these two tests inside <code>mod tests</code> — they exercise both branches of <code>find_link</code> directly, no CLI needed:</p>
+<pre><code>#[test]
+<span class="kw">fn</span> find_link_returns_err_for_missing_code() {
+    <span class="kw">let</span> links = vec![Link { code: <span class="cm">"go"</span>.to_string(), url: <span class="cm">"https://go.dev"</span>.to_string() }];
+    <span class="kw">let</span> err = find_link(&amp;links, <span class="cm">"missing"</span>).unwrap_err();
+    assert_eq!(err.to_string(), <span class="cm">"no link with code 'missing'"</span>);
+}
+
+#[test]
+<span class="kw">fn</span> find_link_finds_existing_code() {
+    <span class="kw">let</span> links = vec![Link { code: <span class="cm">"go"</span>.to_string(), url: <span class="cm">"https://go.dev"</span>.to_string() }];
+    assert_eq!(find_link(&amp;links, <span class="cm">"go"</span>).unwrap().url, <span class="cm">"https://go.dev"</span>);
+}</code></pre>
+
+<div class="callout"><strong>Done when:</strong> <code>cargo check</code> quiet · <code>cargo test</code> shows <code>4 passed</code> · <code>get rust</code> prints the link · <code>get nope</code> prints <code>Error: no link with code 'nope'</code> and exits non-zero. That's a typed, enforced error path — no found-flags, no forgetting to check.</div>
+
+<h2>Check yourself</h2>
+<div class="quiz">
+  <div class="q" data-why="Option<T> and Result<T, E> are ordinary enums with Some/None or Ok/Err variants — no separate null concept exists anywhere in the type system.">
+    <p class="stem">What IS <code>Option&lt;T&gt;</code>, mechanically?</p>
+    <button class="opt" data-ok>An enum with Some(T) and None</button>
+    <button class="opt">A special compiler-only null type</button>
+    <button class="opt">A trait every type implements</button>
+  </div>
+  <div class="q" data-why="? on an Err returns that Err immediately from the CURRENT function — which is why the function's own return type must be a Result (or Option) so the early return type-checks.">
+    <p class="stem">Why must a function using <code>?</code> itself return <code>Result</code> (or <code>Option</code>)?</p>
+    <button class="opt" data-ok>? early-returns Err from that function</button>
+    <button class="opt">? only compiles inside main</button>
+    <button class="opt">? converts Result to a plain value always</button>
+  </div>
+  <div class="q" data-why="thiserror is for library code that names specific error variants callers might match on; anyhow is for application code (like main) that just needs to propagate and print any error.">
+    <p class="stem">You're writing <code>main</code>'s top-level error handling, not a library API. Which crate fits?</p>
+    <button class="opt" data-ok>anyhow — propagate and print, don't match</button>
+    <button class="opt">thiserror — name every variant precisely</button>
+    <button class="opt">Neither — main can't return Result</button>
+  </div>
+  <div class="q" data-why="#[must_use] on Result means the compiler warns when a Result value is produced and never used — dropping an error silently becomes visible, unlike Go where nothing enforces checking err.">
+    <p class="stem">What does <code>#[must_use]</code> on <code>Result</code> actually buy you over Go's convention?</p>
+    <button class="opt" data-ok>A compiler warning if you drop it unchecked</button>
+    <button class="opt">Automatic retries on every Err value</button>
+    <button class="opt">A runtime panic if err is nonzero</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://doc.rust-lang.org/book/ch09-00-error-handling.html">The Book, ch. 9 — Error Handling</a> (~30 min, covers <code>panic!</code> vs <code>Result</code>, <code>?</code>, and when each fits). Then skim the <a href="https://docs.rs/thiserror">thiserror</a> and <a href="https://docs.rs/anyhow">anyhow</a> docs front pages — five minutes each, mostly examples.</p>
+<p>New terms are in the <a href="../reference/glossary.html#day3">glossary — Day 3 section</a>. Today's questions also entered your <a href="../daily.html">daily practice</a> bank.</p>
+
+<p class="next">Tomorrow: <strong>traits, generics &amp; iterators</strong> — Rust's version of Go's interfaces, and the <code>.map().filter().collect()</code> style that replaces most of your loops.<br><br>
+💬 A lifetime error, or <code>?</code> not doing what you expect? Paste the whole message — hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/quiz.js"></script>
+<script src="../assets/gloss.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

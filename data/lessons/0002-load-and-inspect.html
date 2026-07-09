@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 2 · Load &amp; Inspect Real Files</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 2 · ~20 min · 10 Jul 2026</p>
+<h1>Load &amp; inspect real files</h1>
+<p class="byline">If yesterday's three practice checks aren't all green yet, that's fine — today doesn't build on the code, only the mask idea, and there's a quick recap below. Today: <code>read_csv</code>, dtypes that lie, and the ritual you run the instant someone hands you an unknown file.</p>
+
+<h2>Recap, in one line</h2>
+<p>Lesson 1's whole point: pandas operations run on entire columns at once — <dfn data-en="applying an operation to an entire column/array in one call, executed in compiled C — instead of looping over elements in Python" data-vn="thao tác trên CẢ cột một lượt (chạy bằng C bên dưới), không loop từng phần tử — giữ nguyên 'vectorized'">vectorized</dfn>, same instinct as a SQL <code>WHERE</code> — and a <dfn data-en="a True/False Series aligned to the rows; indexing a DataFrame with it keeps only the True rows — pandas' WHERE clause" data-vn="mảng True/False dùng để lọc hàng — đóng vai trò WHERE của SQL; hay gọi tắt là 'mask'">boolean mask</dfn> is how you filter without a loop. Today assumes just that idea, nothing else — the DataFrame you built by hand yesterday is now one you'll load from disk, messy on arrival.</p>
+
+<h2>1 · <code>read_csv</code>: your SQL <code>SELECT *</code> from a file</h2>
+<p>In SQL, a table already has declared column types before you query it. A CSV has none of that — it's just text, and pandas has to <em>guess</em> a <dfn data-en="the data type of an entire column (int64, float64, object/string, datetime64…) — per column, not per cell" data-vn="kiểu dữ liệu của CẢ một cột (int64, float64, object…) — giữ nguyên 'dtype'">dtype</dfn> per column by looking at the values:</p>
+<pre><code>df = pd.read_csv(<span class="cm">"orders_raw.csv"</span>)</code></pre>
+<p>That single call is doing real work: splitting rows, inferring one dtype per column, and turning recognizable blanks into <dfn data-en="pandas'/NumPy's marker for missing floating-point data — Not a Number. isna() detects it; ordinary equality (== ) does NOT, because NaN != NaN by IEEE float rules." data-vn="giữ nguyên 'NaN' — giá trị thiếu, so sánh == luôn ra False">NaN</dfn> automatically. It usually gets numbers and clean dates right. "Usually" is doing a lot of work in that sentence — which is the whole lesson.</p>
+
+<h2>2 · The dtype that lies</h2>
+<p>Load a file with one dirty value and check what pandas actually inferred:</p>
+<pre><code>&gt;&gt;&gt; df.dtypes
+order_id       int64
+customer         str
+amount           str    <span class="cm">-- should be numbers. one bad row poisoned the WHOLE column.</span>
+order_date       str    <span class="cm">-- dates are just text until YOU say otherwise</span></code></pre>
+<div class="callout"><strong>One non-numeric value forces the whole column to text.</strong> pandas 3.0 (Sept 2025) names this the <code>str</code> dtype — a real, honestly-named text type. (Older books and pre-3.0 pandas call the same situation <code>dtype('O')</code>/"object" — same problem, older name.) Either way, the fix is identical: one bad row anywhere in a column, and every number in it becomes text, silently. <code>df["amount"].sum()</code> won't crash — it'll concatenate strings or raise, depending on version, neither of which is the number you wanted.</p></div>
+<p>The fix is an explicit, <em>coercing</em> conversion — "convert what you can, and tell me clearly what you can't" instead of guessing:</p>
+<pre><code>amount_clean = pd.to_numeric(df[<span class="cm">"amount"</span>], errors=<span class="cm">"coerce"</span>)
+<span class="cm">-- every parseable value becomes a float; "unknown" becomes NaN, not a crash</span>
+
+order_date_clean = pd.to_datetime(df[<span class="cm">"order_date"</span>], errors=<span class="cm">"coerce"</span>)
+<span class="cm">-- every parseable date becomes a real datetime64; the blank field becomes NaT</span></code></pre>
+<p><code>errors="coerce"</code> is the move you'll reuse constantly: it's the SQL equivalent of a <code>TRY_CAST</code> that returns <code>NULL</code> on failure instead of blowing up the whole query. A missing timestamp specifically gets its own value, <dfn data-en="pandas' missing-value marker specifically for datetime columns — the datetime64 equivalent of NaN" data-vn="giữ nguyên 'NaT' — NaN dành riêng cho cột datetime">NaT</dfn> ("not a time"), so you can still ask "which rows lack a date" without special-casing strings.</p>
+
+<h2>3 · The Index — pandas' extra column you didn't ask for</h2>
+<p>A SQL table's rows have no inherent order; a DataFrame's rows always carry an <dfn data-en="the labels attached to a DataFrame's rows — separate from the data columns. Default is a RangeIndex (0, 1, 2, …); .loc looks up BY this label, .iloc looks up by raw position regardless of it." data-vn="giữ nguyên 'Index' — nhãn hàng, tách biệt với các cột dữ liệu">Index</dfn> — a label per row, separate from the data columns. Fresh from <code>read_csv</code> it's a plain <dfn data-en="the default pandas Index: 0, 1, 2, 3… — just positions, carrying no business meaning" data-vn="giữ nguyên 'RangeIndex' — index mặc định 0,1,2,3..., không mang ý nghĩa nghiệp vụ">RangeIndex</dfn> (0, 1, 2…) — meaningless positions. If a column is really your row's identity (here, <code>order_id</code>), promote it:</p>
+<pre><code>df = df.set_index(<span class="cm">"order_id"</span>)   <span class="cm">-- now df.loc[3] finds the row FOR order 3, not position 3</span></code></pre>
+<p>This matters because two different lookups exist and only one respects a custom index: <code>.loc["label"]</code> looks up <em>by index label</em>; <code>.iloc[2]</code> always means "the 3rd row physically," ignoring the index entirely. Mixing them up is a classic bug the moment a DataFrame gets sorted or filtered and the RangeIndex stops matching row position.</p>
+
+<h2>4 · The first-look ritual</h2>
+<p>Handed an unknown file, run these before writing a single transform — this is Lesson 1's teaser, answered:</p>
+<pre><code>df.shape          <span class="cm"># (rows, cols) — the SELECT COUNT(*) reflex</span>
+df.dtypes         <span class="cm"># one line per column — catches the lying dtypes above</span>
+df.head()          <span class="cm"># first 5 rows — eyeball it</span>
+df.info()          <span class="cm"># dtypes + non-null counts + memory, in one call</span>
+df.isna().sum()    <span class="cm"># missing values PER COLUMN — your GROUP BY, one-liner style</span></code></pre>
+<p><code>df.isna().sum()</code> is worth pausing on: <code>isna()</code> vectorizes a True/False mask over the whole frame (section 2's mask idea, applied to missingness), and <code>.sum()</code> adds each column's Trues — vectorized end to end, zero loops, and it's the fastest way to answer "which columns actually need cleaning."</p>
+
+<div class="interview">
+<p><strong>Q: "You're handed a CSV you've never seen. Walk me through the first five minutes."</strong> A strong answer, out loud: <em>"First <code>shape</code> and <code>head()</code> to see scale and eyeball the content. Then <code>dtypes</code> and <code>info()</code> — I'm specifically hunting for numeric or date columns that got read as text, because that means dirty rows are hiding in there. Then <code>isna().sum()</code> per column to quantify missingness before deciding whether to drop, fill, or flag it. Only after that do I write any transform — cleaning blind is how silent bugs get shipped."</em> The subtext interviewers want: you don't trust the file, you verify it.</p>
+</div>
+
+<h2>Try it — self-checking practice (~8 min)</h2>
+<p>Open <code>practice/02_load_and_inspect.py</code>, replace each <code>...</code>, and re-run until all three checks print ✓:</p>
+<pre><code>cd ~/learning/data
+uv run --with pandas python3 practice/02_load_and_inspect.py</code></pre>
+<p>The file is <code>practice/data/orders_raw.csv</code> — six orders, one bad <code>amount</code>, one blank <code>order_date</code>. Exercise 1 loads it plain; exercises 2–3 are today's two coercions.</p>
+
+<h2>Check yourself</h2>
+<div class="quiz">
+  <div class="q" data-why="One non-numeric value in a column forces pandas to infer the WHOLE column as text (str, or 'object' pre-3.0) — not just that one cell. Every number in the column silently becomes a string.">
+    <p class="stem">A CSV column is all numbers except one row containing "unknown". <code>read_csv</code> infers that column's dtype as…</p>
+    <button class="opt" data-ok>Text, for the entire column</button>
+    <button class="opt">Numeric, with one NaN cell</button>
+    <button class="opt">Numeric, skipping that one row</button>
+  </div>
+  <div class="q" data-why="errors='coerce' converts what it can and turns anything unparseable into NaN (or NaT for dates) instead of raising — the pandas equivalent of a TRY_CAST that returns NULL on failure.">
+    <p class="stem"><code>pd.to_numeric(col, errors="coerce")</code> does what to an unparseable value?</p>
+    <button class="opt" data-ok>Turns it into NaN instead of crashing</button>
+    <button class="opt">Raises immediately, stopping the script</button>
+    <button class="opt">Silently drops that entire row</button>
+  </div>
+  <div class="q" data-why=".loc looks up by index LABEL — after set_index('order_id'), df.loc[3] means order_id 3, wherever it physically sits. .iloc[3] always means the 4th row by position, ignoring labels.">
+    <p class="stem">After <code>df.set_index("order_id")</code>, what does <code>df.loc[3]</code> return?</p>
+    <button class="opt" data-ok>The row whose order_id label is 3</button>
+    <button class="opt">The row in physical position 3</button>
+    <button class="opt">A KeyError, loc needs a slice</button>
+  </div>
+  <div class="q" data-why="isna() vectorizes a True/False mask over the whole frame (True where missing), and .sum() adds each column's Trues — one vectorized line answering 'how much is missing, per column'.">
+    <p class="stem">What does <code>df.isna().sum()</code> compute, column by column?</p>
+    <button class="opt" data-ok>The count of missing values</button>
+    <button class="opt">The count of duplicate rows</button>
+    <button class="opt">The average of non-null values</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official <a href="https://pandas.pydata.org/docs/user_guide/io.html#io-read-csv-table">read_csv User Guide</a> section (~10 min) — dtype inference, <code>na_values</code>, and parsing dates are all there straight from the source. For the Index model specifically, Wes McKinney's <a href="https://wesmckinney.com/book/pandas-basics.html">ch. 5</a> has the clearest diagrams.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a>.<br>
+<strong>Next lesson:</strong> missing data &amp; cleaning — deciding when to drop, fill, or flag, and why "just fill with 0" is usually the wrong instinct.<br><br>
+💬 Anything unclear — <code>errors="coerce"</code>, <code>.loc</code> vs <code>.iloc</code>, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -36,6 +36,13 @@
   <tr><td>idempotent</td><td>idempotent (giữ nguyên) — gọi N lần như gọi 1 lần</td><td>Same end state whether performed once or many times, so blind retries are safe. GET/PUT/DELETE promise it; POST does not.</td></tr>
   <tr><td>status code</td><td>status code (giữ nguyên) — chữ số đầu nói ai có lỗi</td><td>The response's three-digit result. 2xx worked; 4xx the client's request was wrong (fixable by caller); 5xx the server broke (alarm).</td></tr>
   <tr><td>error contract</td><td>error contract — MỘT format lỗi thống nhất</td><td>The single JSON error shape every failing response uses, with a stable machine-readable code clients branch on — the API's sentinel errors.</td></tr>
+  <tr><td>authentication</td><td>authentication (giữ nguyên) — xác minh "bạn là ai"</td><td>Proving who is making a request — distinct from authorization, which decides what they're allowed to do once known.</td></tr>
+  <tr><td>cookie</td><td>cookie (giữ nguyên)</td><td>A small piece of data the browser stores and automatically re-sends to the same domain on every request.</td></tr>
+  <tr><td>session token</td><td>session token / session ID (giữ nguyên)</td><td>An opaque random identifier naming one row in a server-side sessions table — meaningless by itself until looked up.</td></tr>
+  <tr><td>session store</td><td>session store (giữ nguyên) — bảng lưu session ở server</td><td>The server-side table (or Redis) mapping session tokens to user ids and metadata — where session state actually lives, keeping handlers stateless.</td></tr>
+  <tr><td>JWT</td><td>giữ nguyên "JWT" — token tự chứa thông tin, ký bằng chữ ký số</td><td>JSON Web Token: a signed, self-contained blob of claims (user id, role, expiry) any server can verify by signature alone, no database lookup.</td></tr>
+  <tr><td>XSS</td><td>giữ nguyên "XSS" — chèn JS độc hại chạy trên trang của bạn</td><td>Cross-Site Scripting: an attacker's JavaScript runs on your page, able to read anything JS can read — including a token in localStorage.</td></tr>
+  <tr><td>CSRF</td><td>giữ nguyên "CSRF" — trang độc hại giả mạo request bằng cookie có sẵn</td><td>Cross-Site Request Forgery: a malicious page makes the victim's browser fire an authenticated request, since cookies attach automatically.</td></tr>
 </table>
 
 <p class="next">Back to <a href="../lessons/0001-what-happens-after-fetch.html">Lesson 1</a>. New lessons add their terms here — if a term in a lesson is unclear, it should be in this table; if it isn't, ask your teacher (the agent) to add it.</p>

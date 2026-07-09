@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 4 · Who Are You?</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 4 · ~20 min</p>
+<h1>Who are you?</h1>
+<p class="byline">Lesson 1's stateless server forgets everything between requests — so how does it recognize the same logged-in user, request after request?</p>
+
+<p>Lesson 1's punchline was <em>the backend is stateless; the database is the state</em>. That raises an obvious problem: if the server keeps nothing in memory, how does request #2 know it's the same person as request #1? The browser doesn't re-send a password on every click. Something has to travel with each request that proves "this is Lan, still logged in" — and deciding what that something is, is <dfn data-en="the process of proving who is making a request — as opposed to authorization, which decides what they're allowed to do once known" data-vn="authentication (giữ nguyên) — xác minh 'bạn là ai'">authentication</dfn>. Two designs dominate; today you learn both and when each earns its place.</p>
+
+<h2>Design 1: sessions — a claim ticket for server-side state</h2>
+
+<p>The login handler checks the password once, then hands back a claim ticket instead of making the browser re-prove itself every time:</p>
+
+<pre>
+1. POST /login {email, password}  ──▶  handler verifies password
+2. handler creates a row: sessions(id=<span class="cm">"a1b2c3..."</span>, user_id=42, expires_at=...)
+3. response: Set-Cookie: session_id=a1b2c3...; HttpOnly; Secure
+4. every later request ──▶  browser auto-attaches the cookie
+5. middleware: SELECT user_id FROM sessions WHERE id = 'a1b2c3...' ──▶  42, attach to request
+</pre>
+
+<p>Name the pieces: the <dfn data-en="a small piece of data the browser stores and automatically re-sends to the same domain on every request — the mechanism, not the auth design itself" data-vn="cookie (giữ nguyên)">cookie</dfn> carries only a random, meaningless <dfn data-en="an opaque random identifier naming one row in a server-side sessions table; by itself the string proves nothing until looked up" data-vn="session token / session ID (giữ nguyên)">session token</dfn> — a lookup key, not the user's identity itself. The identity — which user, what role, when it expires — lives in a <dfn data-en="the server-side table (or Redis store) mapping session tokens to user ids and metadata; this is where session state actually lives, keeping the request handler itself stateless" data-vn="session store (giữ nguyên) — bảng lưu session ở server">session store</dfn>: a database table (or Redis) row per logged-in session. Note what did <em>not</em> break: the handler still starts from zero every request (Lesson 1's rule intact) — it just does one extra lookup, in the database, same as looking up an order.</p>
+
+<h2>Design 2: tokens (JWT) — a self-contained claim</h2>
+
+<p>A session lookup is one more query per request. What if the claim ticket could prove itself, with no database at all?</p>
+
+<pre><code>header:  {"alg": "HS256"}
+payload: {"user_id": 42, "role": "admin", "exp": 1799999999}
+signature: HMAC(header + payload, server's secret key)   <span class="cm">-- the part that can't be forged</span>
+
+<span class="cm">-- the three parts, base64-joined with dots, IS the token:</span>
+eyJhbGciOiJIUzI1NiJ9.eyJ1c2VyX2lkIjo0Mn0.k3f9a2...</code></pre>
+
+<p>A <dfn data-en="JSON Web Token: a signed, self-contained blob encoding claims (user id, role, expiry) plus a cryptographic signature. Any server holding the same secret key can verify it with pure computation — no database lookup, no shared session store." data-vn="giữ nguyên 'JWT' — token tự chứa thông tin, ký bằng chữ ký số">JWT</dfn> carries the user's claims directly, signed so that tampering (changing <code>role</code> to <code>"admin"</code>) invalidates the signature and gets rejected. Verification is math, not a query — that's the entire appeal: any of your five server copies behind the load balancer can verify it alone, no shared session store required. The bill comes due on revocation: a session row can be deleted the instant you want someone logged out; a JWT is valid until it expires, full stop, unless you build a second system (a denylist) to check against — at which point you've reinvented a database lookup and lost the point of tokens.</p>
+
+<table class="gloss">
+  <tr><th></th><th>Session</th><th>JWT</th></tr>
+  <tr><td>Where identity lives</td><td>Server-side store, looked up by token</td><td>Inside the token itself</td></tr>
+  <tr><td>Per-request cost</td><td>One DB/cache lookup</td><td>Signature check only (no lookup)</td></tr>
+  <tr><td>Instant revoke ("log this user out now")</td><td>Delete the row — done</td><td>Not until expiry, without extra machinery</td></tr>
+  <tr><td>Scales across servers with no shared store</td><td>Needs a shared session store</td><td>Yes — that's the whole selling point</td></tr>
+</table>
+
+<p>Rule of thumb going into an interview: <strong>sessions when you control the backend and want easy revocation (most first-party web apps); tokens when multiple independent services must verify identity without calling each other back (microservices, third-party APIs).</strong> Neither is "more secure" by default — they trade off differently.</p>
+
+<h2>Where this sits in the request journey</h2>
+
+<p>This is Lesson 1's middleware layer, finally given a job: before the handler runs, middleware reads the cookie or <code>Authorization: Bearer &lt;token&gt;</code> header, resolves it to a user (a lookup for sessions, a signature check for JWTs), and attaches that identity to the request. The handler never parses auth itself — it just asks "who is this request from," already answered.</p>
+
+<h2>The frontend habit this retrains</h2>
+
+<p>You've stored a token in <code>localStorage</code> before because it's easy to read in JS. That ease is the risk: any script running on your page — including an injected one from an <dfn data-en="Cross-Site Scripting: an attacker gets their own JavaScript to run on your page (e.g. via unescaped user input), able to read anything JS can read, including localStorage" data-vn="giữ nguyên 'XSS' — chèn JS độc hại chạy trên trang của bạn">XSS</dfn> bug — can read <code>localStorage</code> and steal the token. An <code>HttpOnly</code> cookie (the session example above) is invisible to JavaScript entirely, closing that hole — at the cost of opening a different one: the browser attaches cookies automatically to <em>any</em> request to your domain, including ones a malicious page tricks the browser into firing, called <dfn data-en="Cross-Site Request Forgery: a malicious page makes the victim's browser fire a request to your site, and if auth travels via auto-attached cookies, it looks legitimate — defended against with CSRF tokens or SameSite cookies" data-vn="giữ nguyên 'CSRF' — trang độc hại giả mạo request bằng cookie có sẵn của nạn nhân">CSRF</dfn>. Neither storage choice is free of trade-offs; "where do I put the token" is itself a security decision, not a implementation detail.</p>
+
+<table class="gloss">
+  <tr><th>Frontend habit</th><th>Backend designer's habit</th></tr>
+  <tr><td>"Just put the token in localStorage, it's easier to read"</td><td>Storage location is a security decision: XSS exposure vs CSRF exposure</td></tr>
+  <tr><td>Auth is "the login page"</td><td>Auth is a per-request check, run by middleware before every handler</td></tr>
+  <tr><td>"Log the user out" = clear local state</td><td>Sessions: delete the row. JWT: wait for expiry, or build a denylist</td></tr>
+</table>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="The cookie only carries a random lookup key; the actual user id and role live in the session store row it points at. That's what keeps the handler itself stateless — the state lives in the database, not the process.">
+    <p class="stem">In session-based auth, what does the cookie itself actually contain?</p>
+    <button class="opt" data-ok>An opaque token, meaningless alone</button>
+    <button class="opt">The user's id and role directly</button>
+    <button class="opt">The user's hashed password</button>
+    <button class="opt">A copy of the sessions table</button>
+  </div>
+  <div class="q" data-why="A JWT's claims are verified by signature check alone — no database round trip needed, which is exactly why independent services can verify it without calling a shared store.">
+    <p class="stem">Why can a JWT be verified without a database lookup?</p>
+    <button class="opt" data-ok>Its signature proves the claims weren't altered</button>
+    <button class="opt">JWTs are always stored in a fast cache</button>
+    <button class="opt">The browser verifies it before sending</button>
+  </div>
+  <div class="q" data-why="Sessions revoke instantly by deleting the row the token points to. A JWT stays valid until it expires unless you add a separate denylist to check against — at which point you've reintroduced a lookup.">
+    <p class="stem">You need to log a user out <em>immediately</em>, company-wide. Which is simpler to guarantee?</p>
+    <button class="opt" data-ok>Sessions — delete the store row now</button>
+    <button class="opt">JWTs — they always expire in seconds</button>
+    <button class="opt">Both are equally instant by design</button>
+  </div>
+  <div class="q" data-why="HttpOnly cookies can't be read by any JavaScript, including an attacker's injected script — closing the localStorage-theft path that XSS relies on. The trade-off is CSRF exposure instead, handled separately.">
+    <p class="stem">Storing a session token in an <code>HttpOnly</code> cookie instead of <code>localStorage</code> mainly defends against…</p>
+    <button class="opt" data-ok>XSS scripts reading the token</button>
+    <button class="opt">CSRF requests forging the token</button>
+    <button class="opt">The token expiring too early</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://thecopenhagenbook.com">The Copenhagen Book</a> — read the "Sessions" and "Cookies" sections (~15 min); it's a free, focused, implementation-level guide built exactly for this track. For the security trade-offs, skim the <a href="https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html">OWASP Session Management Cheat Sheet</a>'s intro.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> what "should I add an index" actually means — reasoning about runtime behavior without waiting for production to tell you.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

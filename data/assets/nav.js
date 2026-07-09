@@ -8,6 +8,8 @@
   const LESSONS = [
     { n: 1, date: "2026-07-09", title: "Think in tables, not loops",
       file: "lessons/0001-think-in-tables-not-loops.html" },
+    { n: 2, date: "2026-07-10", title: "Load & inspect real files",
+      file: "lessons/0002-load-and-inspect.html" },
   ];
 
   const REFS = [

@@ -22,6 +22,11 @@
   <tr><td>NumPy</td><td>NumPy (giữ nguyên) — thư viện mảng nền tảng, pandas chạy trên nó</td><td>The foundational library for fast typed arrays in Python. Each DataFrame column is a NumPy array — that's where pandas' speed comes from.</td></tr>
   <tr><td>vectorized</td><td>vectorized (giữ nguyên) — thao tác cả cột một lượt, không loop</td><td>Applying an operation to a whole column/array in one call, executed in compiled C, instead of looping over elements in the Python interpreter. The core pandas methodology.</td></tr>
   <tr><td>boolean mask</td><td>mask (hay nói tắt) — mảng True/False để lọc hàng</td><td>A True/False Series aligned to the rows; indexing a DataFrame with it keeps only the True rows. pandas' WHERE clause: <code>df[df["amount"] &gt; 100]</code>.</td></tr>
+  <tr><td>NaN</td><td>giữ nguyên "NaN" — giá trị thiếu, so sánh == luôn ra False</td><td>pandas'/NumPy's marker for missing floating-point data. Detected with <code>isna()</code> — never with <code>==</code>, since NaN != NaN by IEEE float rules.</td></tr>
+  <tr><td>NaT</td><td>giữ nguyên "NaT" — NaN dành riêng cho cột datetime</td><td>pandas' missing-value marker specifically for datetime columns — the datetime64 equivalent of NaN.</td></tr>
+  <tr><td>Index</td><td>giữ nguyên "Index" — nhãn hàng, tách biệt với các cột dữ liệu</td><td>The labels attached to a DataFrame's rows, separate from the data columns. <code>.loc</code> looks up by this label; <code>.iloc</code> looks up by raw position regardless of it.</td></tr>
+  <tr><td>RangeIndex</td><td>giữ nguyên "RangeIndex" — index mặc định 0,1,2,3..., không mang ý nghĩa nghiệp vụ</td><td>The default pandas Index after loading data: 0, 1, 2, 3… — just positions, carrying no business meaning until you <code>set_index</code> a real key.</td></tr>
+  <tr><td>coerce (errors="coerce")</td><td>giữ nguyên "coerce" — ép kiểu, lỗi thì thành NaN chứ không crash</td><td>A conversion mode (<code>pd.to_numeric</code>/<code>pd.to_datetime</code>) that turns unparseable values into NaN/NaT instead of raising — the pandas equivalent of SQL's TRY_CAST.</td></tr>
 </table>
 
 <p class="next">Back to <a href="../lessons/0001-think-in-tables-not-loops.html">Lesson 1</a>. New lessons add their terms here — if a term in a lesson is unclear, it should be in this table; if it isn't, ask your teacher (the agent) to add it.</p>

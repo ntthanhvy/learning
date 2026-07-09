@@ -76,6 +76,17 @@
 <tr><td>fan-out / fan-in</td><td>Fan-out: launch N workers for N tasks. Fan-in: collect their results into one channel. Today's checkAll is both.</td><td>tỏa ra nhiều worker / gom kết quả về một mối</td></tr>
 </table>
 
+<h2 id="day4">Day 4 — context, sync &amp; the HTTP server</h2>
+<table class="gloss">
+<tr><th>Term</th><th>In software</th><th>Tiếng Việt (dev-style)</th></tr>
+<tr><td>context.Context</td><td>A value carrying a cancellation signal and optional deadline, passed as the first argument down a whole call chain. <code>ctx.Done()</code> closes when work should stop; <code>ctx.Err()</code> says why.</td><td>giữ nguyên "context" — tín hiệu hủy/deadline truyền xuyên suốt</td></tr>
+<tr><td>deadline</td><td>The specific point in time a context is cancelled at. <code>context.WithTimeout(ctx, d)</code> is shorthand for deadline = now + d.</td><td>giữ nguyên "deadline" — mốc thời gian bị hủy</td></tr>
+<tr><td>goroutine leak</td><td>A goroutine blocked forever on a channel op that will never happen, so it's never collected. Small ones are invisible; under load they exhaust memory. Fixed by always giving blocking ops a <code>ctx.Done()</code> exit.</td><td>giữ nguyên "goroutine leak" — goroutine kẹt mãi mãi</td></tr>
+<tr><td>wildcard segment</td><td>A named path segment in a Go 1.22+ ServeMux route (<code>"GET /{code}"</code>), read in the handler via <code>r.PathValue("code")</code>. No third-party router required for this anymore.</td><td>giữ nguyên "wildcard segment" — phần path đặt tên trong route</td></tr>
+<tr><td>graceful shutdown</td><td>Stop accepting new connections, let in-flight requests finish, then exit. <code>http.Server.Shutdown(ctx)</code> implements it, blocking until every handler returns or ctx expires.</td><td>giữ nguyên "graceful shutdown" — tắt server: ngừng nhận request mới, chờ request cũ xong rồi thoát</td></tr>
+<tr><td>errgroup</td><td><code>golang.org/x/sync/errgroup</code>: launch N goroutines, cancel all of them the moment one errors, wait for the rest — the production upgrade of a plain WaitGroup fan-out.</td><td>giữ nguyên "errgroup"</td></tr>
+</table>
+
 <h2>Coming this week (Days 4–7)</h2>
 <table class="gloss">
 <tr><th>Term</th><th>In software</th><th>Tiếng Việt (dev-style)</th></tr>

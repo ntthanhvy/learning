@@ -62,3 +62,11 @@ by the user there; they apply here identically.
   local helper `progress-sync` (Go server, ~/learning/bin/progress-sync, 127.0.0.1:8477),
   which holds the DB creds and inserts into course_progress. Pages stay credential-free
   and publishable. Helper persisted by launchd `com.ntthanhvy.progress-sync`.
+- 2026-07-10 (Day 3 generation): DB unreachable from the headless generator run, so
+  pacing was decided from learning-records + project file state alone. `linkshort-rs/src/main.rs`
+  still showed Day 1's found/loop `Get` arm with no `print_link` extraction and no
+  `.clone()`-triggered-E0382/E0502 experiments — Day 2's practice looks unstarted or
+  unfinished. Day 3 was written to open gently and work directly on the actual current
+  file (not the post-Day-2 state PLAN.md assumes), noting both possible starting points
+  in the practice steps. If Day 2's practice does get done later, verify it still lines
+  up with Day 3's `find_link` refactor.

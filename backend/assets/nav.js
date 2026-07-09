@@ -12,6 +12,8 @@
       file: "lessons/0002-tables-are-not-json.html" },
     { n: 3, date: "2026-07-09", title: "The API contract",
       file: "lessons/0003-the-api-contract.html" },
+    { n: 4, date: "2026-07-10", title: "Who are you?",
+      file: "lessons/0004-who-are-you.html" },
   ];
 
   const REFS = [

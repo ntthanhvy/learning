@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 1 · Think in tables, not loops</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 1 · ~20 min · 9 Jul 2026</p>
+<h1>Think in tables, not loops</h1>
+<p class="byline">One idea powers everything pandas does — and it's an idea you already use every day in SQL.</p>
+
+<h2>Where this sits in a pipeline</h2>
+<p>Data teams talk about pipelines in two shapes. In <dfn data-en="Extract–Transform–Load: pull data from sources, reshape/clean it in a processing step, then load the finished result into the destination" data-vn="rút dữ liệu ra, biến đổi/làm sạch xong rồi mới nạp vào kho — pipeline kiểu cổ điển">ETL</dfn>, data is transformed <em>before</em> it lands in the warehouse; in <dfn data-en="Extract–Load–Transform: load raw data into the warehouse first, then transform it there (usually with SQL/dbt)" data-vn="nạp dữ liệu thô vào warehouse trước, biến đổi sau ngay trong đó (thường bằng SQL/dbt)">ELT</dfn>, raw data lands first and is transformed inside the warehouse (<a href="https://www.getdbt.com/blog/etl-vs-elt">dbt: ETL vs ELT</a>). Either way, the <strong>T</strong> is where the real work is — and when that work happens in Python, it happens in <a href="https://pandas.pydata.org/docs/user_guide/index.html">pandas</a>. This whole activity — cleaning, reshaping, combining messy data until it's usable — is what job posts call <dfn data-en="cleaning, restructuring, and enriching raw data into a usable shape; the hands-on craft this course trains" data-vn="'xử lý / làm sạch dữ liệu thô' — dân data hay nói wrangle / munge, thường giữ nguyên tiếng Anh">data wrangling</dfn>.</p>
+
+<h2>You already know the data model</h2>
+<p>pandas has one central object: the <dfn data-en="pandas' 2-dimensional table: named, typed columns and labeled rows — the direct analog of a SQL table" data-vn="bảng dữ liệu 2 chiều của pandas, giống hệt table trong SQL — giữ nguyên 'DataFrame'">DataFrame</dfn>. It is a table. Each column of it is a <dfn data-en="one column of a DataFrame: a 1-dimensional labeled array where every value shares one type" data-vn="một cột của DataFrame — mảng 1 chiều có nhãn; giữ nguyên 'Series'">Series</dfn>, and every value in a column shares one <dfn data-en="the data type of an entire column (int64, float64, object/string, datetime64…) — per column, not per cell" data-vn="kiểu dữ liệu của CẢ một cột (int64, float64, object…) — giữ nguyên 'dtype'">dtype</dfn> — exactly like a typed column in Postgres. Under the hood each column is a <dfn data-en="the foundational Python library for fast typed arrays; pandas columns are NumPy arrays, which is where the speed comes from" data-vn="thư viện mảng số học nền tảng của Python — pandas chạy trên NumPy; giữ nguyên">NumPy</dfn> array. So your SQL instincts transfer almost line for line (<a href="https://pandas.pydata.org/docs/getting_started/comparison/comparison_with_sql.html">official SQL ↔ pandas comparison</a>):</p>
+
+<table class="gloss">
+  <tr><th>SQL</th><th>pandas</th><th>Reading it</th></tr>
+  <tr><td>SELECT customer, amount</td><td>df[["customer", "amount"]]</td><td>double brackets = "give me a smaller table with these columns"</td></tr>
+  <tr><td>SELECT amount</td><td>df["amount"]</td><td>single brackets = one column (a Series, not a table)</td></tr>
+  <tr><td>WHERE amount &gt; 100</td><td>df[df["amount"] &gt; 100]</td><td>filter with a boolean mask — see below</td></tr>
+  <tr><td>ORDER BY amount DESC</td><td>df.sort_values("amount", ascending=False)</td><td>expressions return a <em>new</em> frame; chain them</td></tr>
+  <tr><td>LIMIT 5</td><td>df.head(5)</td><td>peek at the first rows — your inspection reflex</td></tr>
+</table>
+
+<h2>The one idea: vectorization</h2>
+<p>Here is the mental shift. Coming from application code, your reflex for "compute unit price for every order" is a loop. In pandas, operations are <dfn data-en="applying an operation to an entire column/array in one call, executed in compiled C — instead of looping over elements in Python" data-vn="thao tác trên CẢ cột một lượt (chạy bằng C bên dưới), không loop từng phần tử — giữ nguyên 'vectorized'">vectorized</dfn>: you write the expression <em>as if columns were single values</em>, and pandas applies it to every row at once.</p>
+
+<div class="good-bad">
+  <div class="no"><div class="label">✗ App-code reflex (slow, un-idiomatic)</div>
+<pre><code><span class="cm"># row-by-row, in the Python interpreter</span>
+prices = []
+<span class="kw">for</span> _, row <span class="kw">in</span> df.iterrows():
+    prices.append(row[<span class="kw">"amount"</span>] / row[<span class="kw">"qty"</span>])
+df[<span class="kw">"unit_price"</span>] = prices</code></pre>
+  </div>
+  <div class="yes"><div class="label">✓ Table thinking (fast, idiomatic)</div>
+<pre><code><span class="cm"># whole columns at once, in compiled C</span>
+df[<span class="kw">"unit_price"</span>] = df[<span class="kw">"amount"</span>] / df[<span class="kw">"qty"</span>]</code></pre>
+  </div>
+</div>
+
+<p>Filtering works the same way. <code>df["amount"] &gt; 100</code> doesn't return <code>True</code> or <code>False</code> — it compares the <em>whole column</em> at once and returns a <dfn data-en="a True/False Series aligned to the rows; indexing a DataFrame with it keeps only the True rows — pandas' WHERE clause" data-vn="mảng True/False dùng để lọc hàng — đóng vai trò WHERE của SQL; hay gọi tắt là 'mask'">boolean mask</dfn>. Putting that mask inside <code>df[...]</code> keeps the rows where it's <code>True</code>. That's your <code>WHERE</code> clause: build a mask, index with it.</p>
+
+<div class="callout"><strong>Same thinking as SQL.</strong> You never write <code>WHERE</code> as a loop over rows — you declare a condition and let the engine apply it to the whole table. Vectorization is that exact habit, moved into Python. When you catch yourself reaching for <code>for</code> over rows, ask: "how would I say this in SQL?" — the pandas spelling is usually one expression away (<a href="https://wesmckinney.com/book/pandas-basics.html">McKinney ch. 5</a>).</div>
+
+<div class="interview">
+<p><strong>Q: "Why is vectorized pandas so much faster than a Python loop?"</strong> — a classic warm-up question. A strong answer, out loud: <em>"A DataFrame column is a NumPy array — contiguous memory with one dtype. A vectorized operation hands the whole array to compiled C code in one call. A Python loop instead pays interpreter overhead per row: unboxing each value into a Python object, dispatching each operation dynamically. Same work, but one path runs in C over packed memory and the other re-enters the interpreter millions of times."</em> Bonus point that interviewers like: <code>iterrows()</code> in review code is a smell — the fix is almost always a column expression, a mask, or (later) a groupby.</p>
+</div>
+
+<h2>Try it — self-checking practice (~8 min)</h2>
+<p>pandas isn't installed globally; run practice through <code>uv</code>, which fetches it on the fly. Open <code>practice/01_tables_not_loops.py</code>, replace each <code>...</code>, and re-run until all three checks print ✓:</p>
+<pre><code>cd ~/learning/data
+uv run --with pandas python3 practice/01_tables_not_loops.py</code></pre>
+<p>The three exercises are the three moves from the table above: SELECT columns, WHERE with a mask, and one vectorized derived column. No loops allowed.</p>
+
+<h2>Check yourself</h2>
+<div class="quiz">
+  <div class="q" data-why="Double brackets select a list of columns and return a smaller DataFrame. Single brackets with a tuple is a KeyError, and .select() doesn't exist in pandas — that's Polars/PySpark.">
+    <p class="stem">Which pandas expression matches <code>SELECT customer, amount FROM orders</code>?</p>
+    <button class="opt" data-ok><code>orders[["customer", "amount"]]</code></button>
+    <button class="opt"><code>orders["customer", "amount"]</code></button>
+    <button class="opt"><code>orders.select("customer", "amount")</code></button>
+  </div>
+  <div class="q" data-why="df[df['amount'] > 100] — the comparison runs on the whole column at once and yields a True/False Series; indexing with it keeps the True rows. No loop, no per-row callback.">
+    <p class="stem">What's the pandas methodology for <code>WHERE amount &gt; 100</code>?</p>
+    <button class="opt" data-ok>Index the frame with a boolean mask</button>
+    <button class="opt">Loop over rows and test each one</button>
+    <button class="opt">Call filter() with a lambda per row</button>
+  </div>
+  <div class="q" data-why="It's vectorized: pandas aligns the two columns and multiplies them element-wise in one compiled-C call. No Python-level loop runs over the rows.">
+    <p class="stem">In <code>df["price"] * df["qty"]</code>, what actually happens?</p>
+    <button class="opt" data-ok>The two columns multiply element-wise, all at once</button>
+    <button class="opt">Python multiplies each pair inside a slow loop</button>
+    <button class="opt">Only the first values of each column multiply</button>
+  </div>
+  <div class="q" data-why="ELT = Extract, Load, then Transform: raw data lands in the warehouse first and is transformed there (typically with SQL/dbt). In ETL the transform happens before loading — that's where pandas jobs usually live.">
+    <p class="stem">In an ELT pipeline, where does the heavy transformation happen?</p>
+    <button class="opt" data-ok>Inside the warehouse, after the data is loaded</button>
+    <button class="opt">Inside the extract job, before anything gets loaded</button>
+    <button class="opt">During the transfer, while data streams between systems</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official <a href="https://pandas.pydata.org/docs/getting_started/comparison/comparison_with_sql.html">Comparison with SQL</a> page (10 min) — it extends today's bridge table to GROUP BY, JOIN, UNION and more, and it's written for exactly your starting point. For the full picture, Wes McKinney's open-access <a href="https://wesmckinney.com/book/pandas-basics.html"><em>Python for Data Analysis</em>, ch. 5</a> is this course's canonical text.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a>.<br>
+<strong>Next lesson:</strong> loading and inspecting real files — <code>read_csv</code>, dtypes that lie to you, and the first thing to type when handed unknown data.<br><br>
+💬 Anything unclear — the popups, the mask idea, Python syntax itself? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

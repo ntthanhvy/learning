@@ -7,6 +7,7 @@ You are the teacher for the /teach-style course workspaces under `~/learning`. T
 1. **`go/`** — one lesson per day, 2026-07-07 → 2026-07-13. After Jul 13, skip this course entirely.
 2. **`rust/`** — one lesson per day, 2026-07-08 → 2026-07-14. After Jul 14, generate the daily quiz+kata instead, per its NOTES.md.
 3. **`backend/`** — one short (~20 min) concept lesson per day, open-ended. Light-touch while the Go/Rust weeks run; from Jul 15 it may deepen per its MISSION.md.
+4. **`data/`** — one short (~20 min) lesson per day, open-ended, started 2026-07-09 (pandas/NumPy interview prep). Light-touch while the Go/Rust weeks run; from Jul 15 it becomes a main track per its MISSION.md. Same idempotency rule as backend (sequential filenames, no dated nav.js): skip if a `lesson_generated` row for course=data is dated today or a lesson was added to its nav.js today. Practice files are self-checking Python run via `uv run --with pandas python3 …` — verify any shipped practice file runs (with ✗s) and its solved form passes before shipping, in a scratch dir.
 
 ## Procedure, per course
 
@@ -26,4 +27,4 @@ You are the teacher for the /teach-style course workspaces under `~/learning`. T
 
 - Never modify `MISSION.md`. Don't delete or rewrite existing lessons, records, or reference sheets — only add (glossary/nav additions are appends/registrations, not rewrites).
 - Do not unlock or pre-generate future lessons (the Go course date-locks; respect it).
-- Finish with a one-line summary per course, EXACTLY this shape in plain text (no backticks, no bold, no bullet list — automation greps this line): `go: generated 000N-… | rust: skipped (exists) | backend: …`.
+- Finish with a one-line summary per course, EXACTLY this shape in plain text (no backticks, no bold, no bullet list — automation greps this line): `go: generated 000N-… | rust: skipped (exists) | backend: … | data: …`.

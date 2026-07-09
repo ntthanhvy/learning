@@ -29,6 +29,9 @@ jobs:
 
       # Rust (stable) and psql are preinstalled on ubuntu-latest runners.
 
+      # uv runs the data/ course's Python practice files (uv run --with pandas …)
+      - uses: astral-sh/setup-uv@v5
+
       - name: Install Claude Code
         run: npm install -g @anthropic-ai/claude-code
 
@@ -58,7 +61,7 @@ jobs:
         run: |
           claude -p "$(cat daily-lessons-prompt.md)" \
             --permission-mode acceptEdits \
-            --allowedTools "Read,Write,Edit,Glob,Grep,Bash(date:*),Bash(ls:*),Bash(mkdir:*),Bash(cat:*),Bash(cp:*),Bash(grep:*),Bash(go vet:*),Bash(go build:*),Bash(go mod:*),Bash(go test:*),Bash(go run:*),Bash(gofmt:*),Bash(cargo check:*),Bash(cargo test:*),Bash(cargo run:*),Bash(cargo clippy:*),Bash(cargo new:*),Bash(node:*),Bash(psql:*),Bash(bin/record-progress:*)" \
+            --allowedTools "Read,Write,Edit,Glob,Grep,Bash(date:*),Bash(ls:*),Bash(mkdir:*),Bash(cat:*),Bash(cp:*),Bash(grep:*),Bash(go vet:*),Bash(go build:*),Bash(go mod:*),Bash(go test:*),Bash(go run:*),Bash(gofmt:*),Bash(cargo check:*),Bash(cargo test:*),Bash(cargo run:*),Bash(cargo clippy:*),Bash(cargo new:*),Bash(node:*),Bash(uv run:*),Bash(psql:*),Bash(bin/record-progress:*)" \
             | tee gen-output.txt
           # The prompt ends with a per-course summary; if it never appeared,
           # the run died mid-way (see 2026-07-09 incident) — fail loudly.

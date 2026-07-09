@@ -15,7 +15,7 @@ LOG="$HOME/learning/.daily-gen.log"
 run_generation() {
   claude -p "$(cat "$HOME/learning/daily-lessons-prompt.md")" \
     --permission-mode acceptEdits \
-    --allowedTools "Read,Write,Edit,Glob,Grep,Bash(date:*),Bash(ls:*),Bash(mkdir:*),Bash(cat:*),Bash(cp:*),Bash(grep:*),Bash(source:*),Bash(go vet:*),Bash(go build:*),Bash(go mod:*),Bash(go test:*),Bash(go run:*),Bash(gofmt:*),Bash(cargo check:*),Bash(cargo test:*),Bash(cargo run:*),Bash(cargo clippy:*),Bash(cargo new:*),Bash(node:*),Bash(psql:*),Bash(bin/record-progress:*),Bash(~/learning/bin/record-progress:*)"
+    --allowedTools "Read,Write,Edit,Glob,Grep,Bash(date:*),Bash(ls:*),Bash(mkdir:*),Bash(cat:*),Bash(cp:*),Bash(grep:*),Bash(source:*),Bash(go vet:*),Bash(go build:*),Bash(go mod:*),Bash(go test:*),Bash(go run:*),Bash(gofmt:*),Bash(cargo check:*),Bash(cargo test:*),Bash(cargo run:*),Bash(cargo clippy:*),Bash(cargo new:*),Bash(node:*),Bash(uv run:*),Bash(psql:*),Bash(bin/record-progress:*),Bash(~/learning/bin/record-progress:*)"
 }
 
 # The 2026-07-09 06:00 run died on "API Error: Connection closed" after

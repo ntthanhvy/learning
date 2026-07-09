@@ -1,0 +1,183 @@
+/* Shared stylesheet for the Data Wrangling course — linked by every lesson and reference sheet.
+   Forked from ~/learning/backend/assets/course.css; violet accent distinguishes this course. */
+:root {
+  --bg: #fffff8;
+  --ink: #1a1a1a;
+  --muted: #666;
+  --accent: #5a3d99;      /* violet, darkened for contrast */
+  --rule: #ddd;
+  --code-bg: #f4f4ee;
+  --good: #1a7f37;
+  --bad: #b42318;
+  --callout-bg: #f0ecf8;
+  font-size: 17px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #151515;
+    --ink: #ddd;
+    --muted: #999;
+    --accent: #b39ddb;
+    --rule: #333;
+    --code-bg: #202020;
+    --good: #4ade80;
+    --bad: #f87171;
+    --callout-bg: #211a2e;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: Palatino, "Palatino Linotype", Georgia, serif;
+  line-height: 1.55;
+  max-width: 46rem;
+  margin: 0 auto;
+  padding: 2.5rem 1.25rem 5rem;
+}
+h1 { font-size: 1.9rem; line-height: 1.15; margin: 0 0 .25rem; font-weight: 600; }
+h2 { font-size: 1.25rem; margin: 2.2rem 0 .6rem; font-weight: 600; }
+h3 { font-size: 1.02rem; margin: 1.5rem 0 .4rem; font-weight: 700; }
+.kicker {
+  font-family: -apple-system, "Helvetica Neue", sans-serif;
+  font-size: .72rem; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--accent); margin-bottom: .8rem;
+}
+.byline { color: var(--muted); font-style: italic; margin: 0 0 2rem; }
+a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+hr { border: none; border-top: 1px solid var(--rule); margin: 2.5rem 0; }
+code, pre {
+  font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+  font-size: .82em;
+}
+code { background: var(--code-bg); padding: .1em .35em; border-radius: 3px; }
+pre {
+  background: var(--code-bg); padding: 1rem 1.1rem; border-radius: 6px;
+  overflow-x: auto; line-height: 1.5; border: 1px solid var(--rule);
+}
+pre code { background: none; padding: 0; }
+pre .cm { color: var(--muted); font-style: italic; }   /* comment */
+pre .kw { color: var(--accent); font-weight: 600; }    /* keyword */
+.callout {
+  background: var(--callout-bg); border-left: 3px solid var(--accent);
+  padding: .8rem 1.1rem; border-radius: 0 6px 6px 0; margin: 1.4rem 0;
+}
+.callout strong:first-child { color: var(--accent); }
+.interview {
+  border: 1px solid var(--rule); border-radius: 6px; padding: .8rem 1.1rem; margin: 1.4rem 0;
+}
+.interview::before {
+  content: "Interview angle";
+  display: block; font-family: -apple-system, sans-serif; font-size: .7rem;
+  letter-spacing: .12em; text-transform: uppercase; color: var(--muted); margin-bottom: .35rem;
+}
+.good-bad { display: grid; grid-template-columns: 1fr; gap: .8rem; margin: 1.2rem 0; }
+@media (min-width: 700px) { .good-bad { grid-template-columns: 1fr 1fr; } }
+.good-bad > div { min-width: 0; }
+.good-bad .label { font-family: -apple-system, sans-serif; font-size: .75rem; font-weight: 700; margin-bottom: .3rem; }
+.good-bad .yes .label { color: var(--good); }
+.good-bad .no .label { color: var(--bad); }
+.good-bad pre { margin: 0; height: calc(100% - 1.4rem); }
+.next {
+  margin-top: 3rem; padding-top: 1.2rem; border-top: 1px solid var(--rule);
+  color: var(--muted); font-size: .95rem;
+}
+/* Course navigation bar (injected by nav.js on every page) */
+.course-nav {
+  position: sticky; top: 0; z-index: 50;
+  display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .9rem;
+  background: var(--bg); border-bottom: 1px solid var(--rule);
+  padding: .6rem 0; margin-bottom: 1.8rem;
+  font-family: -apple-system, "Helvetica Neue", sans-serif; font-size: .8rem;
+}
+.course-nav a { text-decoration: none; color: var(--ink); }
+.nav-home {
+  font-weight: 700; font-size: .7rem; letter-spacing: .12em;
+  text-transform: uppercase; color: var(--accent) !important;
+}
+.nav-days { display: flex; gap: .3rem; flex-wrap: wrap; }
+.day-chip {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 1.7rem; height: 1.7rem; padding: 0 .35rem;
+  border: 1px solid var(--rule); border-radius: 999px;
+}
+a.day-chip:hover { border-color: var(--accent); color: var(--accent); }
+.day-chip.current { background: var(--accent); border-color: var(--accent); color: var(--bg) !important; }
+.day-chip.locked { color: var(--muted); opacity: .5; cursor: not-allowed; }
+.nav-right { margin-left: auto; display: flex; gap: .9rem; }
+.nav-right a.current-ref { color: var(--accent); font-weight: 600; }
+
+/* Course home lists (index.html) */
+.idx-day {
+  display: flex; gap: 1rem; align-items: baseline;
+  padding: .8rem 0; border-bottom: 1px solid var(--rule);
+}
+.idx-num {
+  font-family: -apple-system, sans-serif; font-size: .68rem; font-weight: 700;
+  letter-spacing: .1em; text-transform: uppercase; color: var(--muted);
+  min-width: 3.6rem; white-space: nowrap;
+}
+.idx-body { min-width: 0; }
+.idx-body a { font-weight: 600; }
+.idx-day.locked .idx-body { color: var(--muted); }
+.idx-extra { display: block; font-size: .88rem; font-weight: 400; margin-top: .2rem; }
+.idx-status {
+  margin-left: auto; font-family: -apple-system, sans-serif;
+  font-size: .72rem; color: var(--muted); white-space: nowrap;
+}
+
+/* Glossed terms: click for a popup — English software-context meaning first, then Vietnamese.
+   Markup: <dfn data-en="..." data-vn="...">term</dfn> + gloss.js */
+dfn {
+  font-style: normal; font-weight: 600;
+  border-bottom: 1px dotted var(--accent);
+  cursor: help; position: relative;
+}
+dfn .gloss-pop {
+  display: none; position: absolute; left: 0; top: calc(100% + .45rem); z-index: 10;
+  width: min(24rem, 82vw);
+  background: var(--bg); border: 1px solid var(--rule); border-radius: 8px;
+  padding: .75rem .95rem; box-shadow: 0 4px 20px rgba(0, 0, 0, .18);
+  font-weight: 400; font-size: .85rem; line-height: 1.5; text-align: left;
+}
+dfn.open .gloss-pop { display: block; }
+dfn.pop-right .gloss-pop { left: auto; right: 0; }
+.gloss-pop .pop-en, .gloss-pop .pop-vn { display: block; }
+.gloss-pop .pop-en::before, .gloss-pop .pop-vn::before {
+  display: block; font-family: -apple-system, sans-serif; font-size: .62rem;
+  letter-spacing: .12em; text-transform: uppercase; color: var(--accent); margin-bottom: .15rem;
+}
+.gloss-pop .pop-en::before { content: "In software"; }
+.gloss-pop .pop-vn { margin-top: .55rem; color: var(--muted); }
+.gloss-pop .pop-vn::before { content: "Tiếng Việt"; }
+/* Glossary table */
+table.gloss { border-collapse: collapse; width: 100%; margin: 1.2rem 0; font-size: .92rem; }
+table.gloss th, table.gloss td {
+  text-align: left; padding: .5rem .7rem; border-bottom: 1px solid var(--rule);
+  vertical-align: top;
+}
+table.gloss th {
+  font-family: -apple-system, sans-serif; font-size: .72rem;
+  letter-spacing: .1em; text-transform: uppercase; color: var(--muted);
+}
+table.gloss td:first-child { font-weight: 600; white-space: nowrap; }
+table.gloss td:nth-child(2) { color: var(--accent); white-space: nowrap; }
+
+/* Quiz component (used with quiz.js) */
+.quiz { margin: 1.4rem 0; }
+.quiz .q {
+  border: 1px solid var(--rule); border-radius: 6px;
+  padding: 1rem 1.1rem; margin-bottom: 1rem;
+}
+.quiz .q p.stem { margin: 0 0 .7rem; font-weight: 600; }
+.quiz button.opt {
+  display: block; width: 100%; text-align: left;
+  font: inherit; font-size: .92rem; color: var(--ink);
+  background: var(--code-bg); border: 1px solid var(--rule); border-radius: 5px;
+  padding: .5rem .8rem; margin: .35rem 0; cursor: pointer;
+}
+.quiz button.opt:hover { border-color: var(--accent); }
+.quiz button.opt.correct { border-color: var(--good); background: color-mix(in srgb, var(--good) 12%, var(--bg)); }
+.quiz button.opt.wrong { border-color: var(--bad); background: color-mix(in srgb, var(--bad) 12%, var(--bg)); }
+.quiz .why { display: none; margin: .6rem 0 0; font-size: .9rem; color: var(--muted); }
+.quiz .q.answered .why { display: block; }

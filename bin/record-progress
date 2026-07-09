@@ -2,7 +2,7 @@
 # Record a learning-progress event in the Neon DB.
 # Works locally (creds from ~/.config/learning/db.env) and in CI (LEARNING_DB_URL env).
 # Usage: record-progress <course> <kind> [--day N] [--lesson FILE] [--detail '{"json":"here"}']
-#   course: go | rust | backend
+#   course: go | rust | backend | data
 #   kind:   lesson_generated | lesson_completed | quiz | kata | review | note
 # Examples:
 #   record-progress go lesson_completed --day 2 --lesson 0003-errors-as-values.html \
@@ -13,7 +13,7 @@ if [ -z "${LEARNING_DB_URL:-}" ]; then
   source ~/.config/learning/db.env
 fi
 
-course="${1:?course required (go|rust|backend)}"; kind="${2:?kind required}"; shift 2
+course="${1:?course required (go|rust|backend|data)}"; kind="${2:?kind required}"; shift 2
 day="" lesson="" detail="{}"
 while [[ $# -gt 0 ]]; do
   case "$1" in

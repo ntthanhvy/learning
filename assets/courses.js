@@ -42,6 +42,17 @@ window.COURSES = [
       { label: "Glossary", href: "backend/reference/glossary.html" },
     ],
   },
+  {
+    id: "data",
+    accent: "#5a3d99",
+    title: "Data Wrangling",
+    desc: "pandas + NumPy for ETL/ELT interviews: tables-not-loops thinking, cleaning, groupby, joins, reshaping — taught through SQL you already know. Light daily lessons now, main track after the intensives.",
+    start: "2026-07-09",
+    links: [
+      { label: "Open course", href: "data/index.html" },
+      { label: "Glossary", href: "data/reference/glossary.html" },
+    ],
+  },
 ];
 
 (() => {

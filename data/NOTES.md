@@ -14,3 +14,14 @@
 - **Progress DB:** course id is `data`. The `course_progress_course_check` constraint in Neon was widened on 2026-07-09 to `('go','rust','backend','data')`. Record events with `~/learning/bin/record-progress data <kind> ...`; same idempotency rule as backend for the 06:00 job (skip if a `lesson_generated` row for course=data exists today, or a lesson was added to nav.js today).
 - **Daily generation:** registered as course 4 in `~/learning/daily-lessons-prompt.md` (06:00 launchd job `com.ntthanhvy.daily-lessons`).
 - **Curriculum spine (front-loaded by interview frequency):** 1) tables-not-loops / vectorization + SQL bridge → 2) load & inspect real files (dtypes, index) → 3) missing data & cleaning → 4) groupby split–apply–combine → 5) merge/join → 6) reshape (pivot/melt) → 7) rank/cumulative/window-ish → 8) method chaining & pipeline shape (ETL framing) → then timed drills (LeetCode pandas / StrataScratch) with review lessons targeting recorded weak spots. Adjust order freely based on learning records.
+- 2026-07-11 generation (Lesson 3): Neon DB and shell commands needing interactive
+  approval (psql, `uv run`, `bin/record-progress`) were unavailable in this headless
+  run — no user present to approve in a sandboxed agent session. No learning record
+  exists yet beyond the baseline, so Lesson 3 was generated conservatively from
+  Lesson 2's own teaser ("missing data & cleaning... just fill with 0 is usually
+  wrong") plus its file state, not a reported outcome. Practice file
+  `03_missing_data_cleaning.py` was hand-verified against the fixture's known values
+  (median of the 5 non-null amounts = 99.9, one NaT row = order_id 4) but could NOT
+  actually be executed with `uv run --with pandas` this round — run it once and
+  confirm the ✓/✗ output before trusting it blindly. `lesson_generated` could not be
+  recorded; do it manually once DB access is back.

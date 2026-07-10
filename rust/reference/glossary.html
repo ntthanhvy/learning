@@ -55,6 +55,17 @@
 <tr><td>lifetime <code>'a</code></td><td>A name tying a returned reference's validity to an input's: <code>fn f&lt;'a&gt;(x: &amp;'a T) -&gt; &amp;'a T</code>. Written explicitly only when a function both borrows and returns a borrow from it.</td><td>giữ nguyên "lifetime" — buộc reference trả về không sống lâu hơn input</td></tr>
 </table>
 
+<h2 id="day4">Day 4 — Traits, generics &amp; iterators</h2>
+<table class="gloss">
+<tr><th>Term</th><th>In software</th><th>Tiếng Việt (dev-style)</th></tr>
+<tr><td>trait</td><td>A named set of method signatures a type can implement. Unlike Go, satisfaction is never implicit — <code>impl Trait for Type</code> must be written explicitly, even for a type that already has a matching method.</td><td>giữ nguyên "trait" — như interface bên Go nhưng khai báo tường minh</td></tr>
+<tr><td>generics / trait bound</td><td>A function written once over a type parameter <code>T</code>, constrained by a trait bound (<code>T: Summary</code>) naming what <code>T</code> must do. Resolved at compile time (monomorphization) — zero runtime cost.</td><td>giữ nguyên "generics", ràng buộc bằng trait — resolve lúc compile</td></tr>
+<tr><td>monomorphization</td><td>The compiler's process of generating one specialized copy of a generic function per concrete type actually used, at compile time — why Rust generics cost nothing at runtime.</td><td>giữ nguyên "monomorphization" — sinh bản riêng cho từng type lúc compile</td></tr>
+<tr><td>dyn Trait</td><td>Dynamic dispatch: the concrete type is decided at runtime via a vtable pointer, not compile time. Used for mixed collections where the type genuinely varies — closer to how Go interface values always work.</td><td>giữ nguyên "dyn Trait" — quyết định type lúc runtime qua vtable</td></tr>
+<tr><td>closure</td><td>An anonymous, inline function that can capture variables from its surrounding scope: <code>|l| l.code == code</code>. Iterator adapters take closures to describe per-element work.</td><td>giữ nguyên "closure" — hàm nặc danh bắt biến xung quanh</td></tr>
+<tr><td>iterator adapter</td><td>Chainable, lazy methods on anything implementing Iterator — <code>.find()</code>, <code>.map()</code>, <code>.filter()</code>, <code>.collect()</code>. Nothing runs until the chain is consumed.</td><td>chuỗi <code>find/map/filter/collect</code>, chạy lazy tới khi bị tiêu thụ</td></tr>
+</table>
+
 <h2>Coming this week (Days 3–7)</h2>
 <table class="gloss">
 <tr><th>Term</th><th>In software</th><th>Tiếng Việt (dev-style)</th></tr>

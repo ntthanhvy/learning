@@ -14,6 +14,8 @@
       file: "lessons/0003-the-api-contract.html" },
     { n: 4, date: "2026-07-10", title: "Who are you?",
       file: "lessons/0004-who-are-you.html" },
+    { n: 5, date: "2026-07-11", title: "Should I add an index?",
+      file: "lessons/0005-should-i-add-an-index.html" },
   ];
 
   const REFS = [

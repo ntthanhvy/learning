@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 5 · Should I Add an Index?</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 5 · ~20 min</p>
+<h1>Should I add an index?</h1>
+<p class="byline">If Lesson 4's auth quiz still has a fuzzy answer, no problem — today is a different track (runtime behavior) and doesn't build on it. A PR adds a new query; someone comments "should this have an index?" This lesson is the reasoning you run before answering, not yet the SQL itself.</p>
+
+<p>Lesson 2's punchline was <em>tables are shared state, and the schema is a promise everyone codes against</em>. An index is a promise of a different kind: "this specific access pattern will stay fast, at the cost of every write doing a little more work." The mistake frontend instincts make here is treating "add an index" like adding a cache — a free speedup with no downside. It isn't. Reasoning about whether one earns its place is itself the skill; the Go track (this week's Days 5–6) covers the Postgres mechanics — B-tree structure, composite columns, <code>EXPLAIN</code> — in depth. This lesson is the frame you bring <em>before</em> you open that toolbox.</p>
+
+<h2>1 · An index is a trade, not a freebie</h2>
+<p>A database <dfn data-en="an extra on-disk structure that lets the database jump straight to matching rows instead of scanning every row in the table — at the cost of extra work on every write to that table" data-vn="index (giữ nguyên) — cấu trúc phụ giúp tìm nhanh, nhưng ghi dữ liệu sẽ chậm hơn chút">index</dfn> makes specific reads fast by paying for it on every write: insert, update, or delete on that table now has to update every index on it too, not just the row itself. So the real question is never "would this query benefit from an index" — almost any query would. It's: <strong>does this table get read that way often enough, relative to how often it's written, to justify slower writes forever?</strong> A table written once and read a million times a day is an easy yes. A table written on every request and read for a monthly report is not.</p>
+
+<h2>2 · Selectivity: the question before the index</h2>
+<p>An index only helps if the column actually narrows things down. <dfn data-en="how much a WHERE condition on a column narrows the result set — a column where most values are unique (like an email) is highly selective; a column with only 2–3 possible values (like a boolean flag) is not, and an index on it rarely helps" data-vn="selectivity (giữ nguyên) — cột lọc được bao nhiêu dữ liệu; email chọn lọc cao, cột boolean chọn lọc thấp">Selectivity</dfn> is that measure: a <code>user_id</code> or <code>email</code> column is highly selective — most values pick out a handful of rows, so an index skips almost the entire table. A boolean <code>is_active</code> column is nearly the opposite: if 95% of rows are <code>true</code>, "find all active users" still means reading almost the whole table, index or not — the database may reasonably ignore the index entirely and scan the table anyway, because scanning is cheaper than jumping around for that many matches.</p>
+<div class="callout"><strong>Frontend-habit trap:</strong> "this column is in a lot of <code>WHERE</code> clauses, so index it" skips selectivity entirely. The column that actually deserves the index is the one that's both frequently queried <em>and</em> narrows the result to a small slice of the table.</div>
+
+<h2>3 · The trap that isn't about indexes at all: N+1</h2>
+<p>Before reaching for an index, check whether the real problem is <em>how many queries run</em>, not how slow one of them is. The classic version: fetch a list, then loop over it fetching something per row —</p>
+<pre>
+orders := SELECT * FROM orders WHERE user_id = 42        -- 1 query
+for each order:
+    SELECT * FROM products WHERE id = order.product_id   -- N more queries, one per order
+</pre>
+<p>That's the <dfn data-en="a performance bug where code fetches a list (1 query), then loops over it firing one more query per item (N queries) — instead of one query that fetches everything together via a JOIN or a batched IN (...) lookup" data-vn="giữ nguyên 'N+1 query problem' — 1 query lấy danh sách, rồi lặp N lần query thêm cho từng dòng, thay vì gộp lại 1 lần">N+1 query problem</dfn>: 1 query became 1 + N, and every one of those N pays full network-and-parse round-trip cost. No index fixes this — the fix is restructuring the access pattern itself: one <code>JOIN</code>, or one batched <code>WHERE id IN (...)</code> covering every product at once. This is the single most common runtime-behavior bug ORMs introduce silently (lazy-loading a related field inside a loop looks like a normal field access in the code, hiding the extra query completely) — worth naming by symptom: a list page that gets linearly slower as the list grows is almost always N+1, not a missing index.</p>
+
+<h2>4 · Three questions before you touch the schema</h2>
+<p>In order, before adding an index to anything:</p>
+<ol>
+<li><strong>What exact query needs to be fast?</strong> Not "this table" — a specific <code>WHERE</code>/<code>ORDER BY</code> shape. An index tuned for one query can do nothing for a differently-shaped one on the same table.</li>
+<li><strong>How does its read frequency compare to the table's write frequency?</strong> Hot-read, cold-write tables are the easy case; the reverse usually isn't worth it.</li>
+<li><strong>How selective is the column?</strong> (Section 2.) Low-selectivity columns rarely pay for themselves alone — they sometimes help as the second column in a composite index instead, once one query pattern is already proven to need it.</li>
+</ol>
+<p>Only after those three does "what index, exactly" become a Postgres syntax question — B-tree vs. composite vs. partial, and reading <code>EXPLAIN</code> to confirm it actually got used. That's precisely the Go course's Day 5–6 material: worth a look this week if the syntax itself is the gap, not the reasoning.</p>
+
+<div class="interview">
+<p><strong>Q: "A list endpoint got slow as the table grew. Walk me through your first move."</strong> A strong answer, out loud: <em>"Before touching the schema, I check whether it's actually N+1 — one query per row hiding inside a loop, which no index fixes. If it's genuinely one query getting slow, I ask what specific WHERE/ORDER BY shape it uses, how often it runs versus how often the table is written, and how selective the filtered column is — a low-selectivity column rarely earns an index on its own. Only then do I reach for EXPLAIN to confirm the index I'm considering would actually get picked, instead of guessing and hoping."</em> The subtext: indexes are a considered trade, not a reflex — and half of "slow query" bugs aren't about indexes at all.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Indexes speed reads but every index on a table must be updated on every insert/update/delete to it — so the real trade is read frequency and selectivity against that ongoing write cost, not a free win.">
+    <p class="stem">What's the actual cost of adding an index to a table?</p>
+    <button class="opt" data-ok>Every write to that table gets slower</button>
+    <button class="opt">Reads become slightly less accurate</button>
+    <button class="opt">The table can no longer be joined</button>
+  </div>
+  <div class="q" data-why="Selectivity measures how much a WHERE condition narrows the result set. A near-boolean column with 95% one value doesn't narrow much — an index rarely helps, and the database may skip it and scan anyway.">
+    <p class="stem">Why does an index on a boolean column with 95% <code>true</code> values rarely help?</p>
+    <button class="opt" data-ok>Low selectivity — it barely narrows the results</button>
+    <button class="opt">Booleans cannot be indexed at all</button>
+    <button class="opt">Indexes only work on numeric columns</button>
+  </div>
+  <div class="q" data-why="N+1 is 1 query to fetch a list plus one more query per item in a loop — no index fixes it, since the problem is the NUMBER of round trips, not any single query's speed. The fix is a JOIN or a batched IN (...) lookup.">
+    <p class="stem">A list page gets linearly slower as the list grows. What's the most likely cause?</p>
+    <button class="opt" data-ok>N+1 queries — one extra query per row</button>
+    <button class="opt">A missing index on the primary key</button>
+    <button class="opt">The database running out of disk space</button>
+  </div>
+  <div class="q" data-why="The reasoning order is: name the exact query shape, compare its read frequency to the table's write frequency, then check selectivity — schema/syntax questions (which index type) only come after those three.">
+    <p class="stem">Before picking what kind of index to add, what should you determine first?</p>
+    <button class="opt" data-ok>The exact query shape that needs speed</button>
+    <button class="opt">Whether the ORM supports that index type</button>
+    <button class="opt">The total number of rows in the table</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://use-the-index-luke.com/">Use The Index, Luke</a> — read the "Anatomy of an Index" and "The Where Clause" chapters (~20 min); it's written for exactly this reasoning, before any Postgres-specific syntax. For the N+1 pattern specifically, search "N+1 query problem" in the <a href="https://dataintensive.net">Designing Data-Intensive Applications</a> index — Kleppmann touches it in the context of ORMs in ch. 2.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> what actually happens inside a transaction — and why "wrap it in a transaction" isn't automatically the safe move it sounds like.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

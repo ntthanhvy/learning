@@ -87,6 +87,21 @@
 <tr><td>errgroup</td><td><code>golang.org/x/sync/errgroup</code>: launch N goroutines, cancel all of them the moment one errors, wait for the rest — the production upgrade of a plain WaitGroup fan-out.</td><td>giữ nguyên "errgroup"</td></tr>
 </table>
 
+<h2 id="day5">Day 5 — Data modeling in PostgreSQL</h2>
+<table class="gloss">
+<tr><th>Term</th><th>In software</th><th>Tiếng Việt (dev-style)</th></tr>
+<tr><td>invariant</td><td>A condition that must ALWAYS hold, no matter what code runs — e.g. "every click points to an existing link." Constraints are how the database enforces invariants itself.</td><td>giữ nguyên "invariant" — điều kiện luôn luôn đúng, DB tự ép</td></tr>
+<tr><td>constraint</td><td>A rule the database enforces on every write, from every caller: PRIMARY KEY, NOT NULL, UNIQUE, CHECK, FOREIGN KEY. Beats trusting every code path to remember the rule.</td><td>giữ nguyên "constraint" — luật DB tự ép, không cần code nhớ</td></tr>
+<tr><td>normalization / denormalization</td><td>Normalized: each fact stored once, derived facts computed by query. Denormalized: a fact deliberately duplicated/pre-computed for read speed — a trade-off that must be justified, not a default.</td><td>chuẩn hóa (mỗi sự thật 1 chỗ) / giữ nguyên "denormalization" (cố ý lưu trùng để đọc nhanh)</td></tr>
+<tr><td>foreign key</td><td>A column holding another table's primary key, enforcing that every row here points at a row that actually exists there — no dangling references, checked on every write.</td><td>giữ nguyên "foreign key" (FK) — cột trỏ sang khóa chính bảng khác</td></tr>
+<tr><td>natural key</td><td>A primary key that is itself an already-unique business value (linkshort's <code>code</code>) — no extra column needed.</td><td>giữ nguyên "natural key" — khóa chính là giá trị nghiệp vụ có sẵn</td></tr>
+<tr><td>surrogate key</td><td>A primary key manufactured purely to identify a row, no business meaning — an auto-incrementing integer (<code>GENERATED ALWAYS AS IDENTITY</code>) or UUID. Used when nothing is naturally unique.</td><td>giữ nguyên "surrogate key" — khóa chính tự sinh, không mang ý nghĩa nghiệp vụ</td></tr>
+<tr><td>B-tree index</td><td>Postgres's default index structure: lets the database jump to matching rows instead of scanning the whole table. Good for equality, ranges, and ORDER BY on the indexed column(s).</td><td>giữ nguyên "B-tree" — cấu trúc index mặc định, tốt cho so sánh bằng/khoảng</td></tr>
+<tr><td>composite index</td><td>An index over more than one column, ordered left-to-right. Serves queries filtering on the first column alone, or the first AND second together — not the second alone.</td><td>giữ nguyên "composite index" — index gộp nhiều cột, thứ tự quan trọng</td></tr>
+<tr><td>partial index</td><td>An index built over only the rows matching a WHERE clause — smaller and cheaper when just a hot subset of a big table is ever queried.</td><td>giữ nguyên "partial index" — chỉ đánh index một phần bảng thỏa điều kiện</td></tr>
+<tr><td>migration (DB)</td><td>A numbered, checked-in SQL script that changes the schema by one step. Applying migrations in order reproduces the exact same schema in any environment.</td><td>giữ nguyên "migration" — file SQL đánh số, chạy lại được ở mọi môi trường</td></tr>
+</table>
+
 <h2>Coming this week (Days 4–7)</h2>
 <table class="gloss">
 <tr><th>Term</th><th>In software</th><th>Tiếng Việt (dev-style)</th></tr>

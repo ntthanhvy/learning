@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 4 · Traits, Generics &amp; Iterators</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Rust Intensive · Day 4 · ~75 min</p>
+<h1>Traits, generics &amp; iterators</h1>
+<p class="byline">If Day 2's borrow practice or Day 3's <code>find_link</code>/<code>LinkError</code> are still sitting half-done, that's fine — today doesn't need either finished. It works directly on <code>main.rs</code> exactly as Day 1 left it: the <code>Get</code> arm's found-flag loop is today's running example too, just from a different angle — Go's version of "interface" and "for range", Rust-style.</p>
+
+<h2>Warm-up: yesterday, from memory</h2>
+<div class="quiz">
+  <div class="q" data-why="Option and Result are ordinary standard-library enums (Some/None, Ok/Err) — there is no separate null concept or special compiler magic behind either one.">
+    <p class="stem">What IS <code>Option&lt;T&gt;</code>, mechanically?</p>
+    <button class="opt" data-ok>An enum with Some(T) and None</button>
+    <button class="opt">A special compiler-only null type</button>
+    <button class="opt">A trait every type implements</button>
+  </div>
+  <div class="q" data-why="? on an Err/None returns it immediately from the CURRENT function — so that function's own return type must itself be Result (or Option) for the early return to type-check.">
+    <p class="stem">Why must a function using <code>?</code> itself return <code>Result</code> (or <code>Option</code>)?</p>
+    <button class="opt" data-ok>? early-returns Err from that function</button>
+    <button class="opt">? only compiles inside main</button>
+    <button class="opt">? converts Result to a plain value always</button>
+  </div>
+  <div class="q" data-why="thiserror names specific error variants a caller can match on — the library-code side. anyhow is for application top levels (like main) that just need to propagate and print any error without matching on it.">
+    <p class="stem">Writing <code>main</code>'s top-level error handling, not a library API — which crate fits?</p>
+    <button class="opt" data-ok>anyhow — propagate and print, don't match</button>
+    <button class="opt">thiserror — name every variant precisely</button>
+    <button class="opt">Neither — main can't return Result</button>
+  </div>
+</div>
+
+<h2>1 · <code>trait</code>: Go's interface, said out loud</h2>
+<p>Go's <code>Store</code> interface (Day 1 of your other course) works by <em>implicit satisfaction</em> — any type with the right methods qualifies, with no declaration anywhere. Rust's version, a <dfn data-en="A named set of method signatures a type can implement. Unlike Go, satisfaction is NEVER implicit — you must write impl Trait for Type explicitly, even if the methods already exist, so the compiler (and readers) always know exactly which traits a type claims." data-vn="giữ nguyên 'trait' — như interface bên Go nhưng khai báo tường minh, không tự động">trait</dfn>, requires the opposite: an explicit <code>impl Trait for Type</code> block, always, even if the type already happens to have a method of the right shape by coincidence:</p>
+<pre><code><span class="kw">trait</span> Summary {
+    <span class="kw">fn</span> summary(&amp;<span class="kw">self</span>) -&gt; String;
+}
+
+<span class="kw">impl</span> Summary <span class="kw">for</span> Link {
+    <span class="kw">fn</span> summary(&amp;<span class="kw">self</span>) -&gt; String {
+        format!(<span class="cm">"[{}] {}"</span>, <span class="kw">self</span>.code, <span class="kw">self</span>.url)
+    }
+}</code></pre>
+<p>Nothing here is new mechanically — it's the same <code>impl</code> block you've used since Day 1 for inherent methods. What's new is that this <code>impl</code> is now <em>for a trait</em>, which means any code that only knows "something implementing <code>Summary</code>" can call <code>.summary()</code> on it, without knowing it's a <code>Link</code> at all. That's the whole pitch: swap implicit-by-accident (Go) for explicit-by-declaration (Rust) — a type can never accidentally satisfy an interface it wasn't meant to.</p>
+
+<h2>2 · Generics + trait bounds: one function, many types</h2>
+<p>A function written over a type parameter <code>T</code>, constrained by what <code>T</code> can do, is <dfn data-en="Code written once over a type parameter T, usable with any concrete type — constrained by a trait bound (T: Summary) naming what T must be able to do. Resolved entirely at compile time (monomorphization): zero runtime cost, unlike Go's generics-via-interface-boxing in some cases." data-vn="giữ nguyên 'generics', ràng buộc bằng trait — resolve lúc compile, không tốn chi phí runtime">generic</dfn>:</p>
+<pre><code><span class="kw">fn</span> print_all&lt;T: Summary&gt;(items: &amp;[T]) {
+    <span class="kw">for</span> item <span class="kw">in</span> items {
+        println!(<span class="cm">"{}"</span>, item.summary());
+    }
+}</code></pre>
+<p><code>T: Summary</code> is a <dfn data-en="The 'T: Trait' part of a generic signature, naming exactly which capabilities the caller's type must have. The compiler rejects any call where T doesn't implement that trait, at compile time — no runtime type check needed." data-vn="giữ nguyên 'trait bound' — ràng buộc T phải có capability nào, compiler check lúc compile">trait bound</dfn>: "any <code>T</code> works here, as long as it implements <code>Summary</code>." The compiler generates a separate, specialized copy of <code>print_all</code> for every concrete type you actually call it with — a process called monomorphization — so there's no runtime cost at all, unlike Go's generics (which the runtime handles more dynamically in some cases) or any language doing this via boxing.</p>
+
+<h2>3 · <code>dyn Trait</code>: when you need it decided at runtime</h2>
+<p>Sometimes you genuinely don't know the concrete type until runtime — a list holding several different types that all implement the same trait. That's <code>dyn Trait</code>, dynamic dispatch via a vtable, closer to how Go's interface values always work under the hood:</p>
+<pre><code><span class="kw">fn</span> print_one(item: &amp;<span class="kw">dyn</span> Summary) {
+    println!(<span class="cm">"{}"</span>, item.summary());
+}</code></pre>
+<table class="gloss">
+<tr><th></th><th><code>T: Summary</code> (static)</th><th><code>dyn Summary</code> (dynamic)</th></tr>
+<tr><td>Resolved</td><td>Compile time, monomorphized</td><td>Runtime, via a vtable pointer</td></tr>
+<tr><td>Cost</td><td>Zero — same as calling the concrete type directly</td><td>One indirect call, small but nonzero</td></tr>
+<tr><td>Use when</td><td>The type is known per call site</td><td>You need a mixed collection, or the type genuinely varies at runtime</td></tr>
+</table>
+<p>Default to <code>T: Trait</code> (or <code>impl Trait</code> in argument position, its shorthand) unless you specifically need a heterogeneous collection or a trait object stored behind a pointer — that's the idiomatic Rust default, and the interview-ready answer for "why does Rust have two ways to do this."</p>
+
+<h2>4 · Iterator adapters: the loop you don't write</h2>
+<p>Your <code>Get</code> arm right now is a found-flag loop — the exact shape a <dfn data-en="Chainable, lazy methods on anything implementing Iterator: .filter(), .map(), .find(), .collect(). Nothing runs until the chain is consumed (by collect, a for loop, or similar) — each adapter just describes one more step of the pipeline." data-vn="chuỗi map/filter/find/collect — không chạy gì cho tới khi bị 'tiêu thụ'; giữ nguyên 'iterator adapter'">iterator adapter</dfn> chain replaces:</p>
+<div class="good-bad">
+  <div class="no"><div class="label">✗ Found-flag loop (Day 1, still in your file)</div>
+<pre><code><span class="kw">let</span> <span class="kw">mut</span> found = <span class="kw">false</span>;
+<span class="kw">for</span> l <span class="kw">in</span> &amp;links {
+    <span class="kw">if</span> l.code == code {
+        println!(<span class="cm">"Found: {}"</span>, l.describe());
+        found = <span class="kw">true</span>;
+    }
+}
+<span class="kw">if</span> !found {
+    println!(<span class="cm">"No link found for code: {}"</span>, code);
+}</code></pre>
+  </div>
+  <div class="yes"><div class="label">✓ One adapter, no flag</div>
+<pre><code><span class="kw">match</span> links.iter().find(|l| l.code == code) {
+    Some(l) =&gt; println!(<span class="cm">"Found: {}"</span>, l.describe()),
+    <span class="kw">None</span> =&gt; println!(<span class="cm">"No link found for code: {}"</span>, code),
+}</code></pre>
+  </div>
+</div>
+<p><code>|l| l.code == code</code> is a <dfn data-en="An anonymous, inline function that can capture variables from the surrounding scope — |params| expression. iterator adapters take closures to describe what to do with each element." data-vn="giữ nguyên 'closure' — hàm nặc danh bắt biến xung quanh">closure</dfn>: an anonymous function, here capturing <code>code</code> from the enclosing scope. <code>.find(...)</code> returns <code>Option&lt;&amp;Link&gt;</code> directly — the "did we find it" bookkeeping the found-flag loop hand-rolled is now the adapter's job, and there's no way to forget to reset the flag because there's no flag. This is the same instinct as SQL's declarative <code>WHERE</code>, or your Go course's own vectorized-thinking lesson: describe <em>what</em> you want, let the engine do the looping.</p>
+<p>Adapters chain. <code>.iter().map(|l| l.code.clone()).collect::&lt;Vec&lt;String&gt;&gt;()</code> turns a slice of links into a <code>Vec&lt;String&gt;</code> of just their codes — one line replacing a manual loop with a fresh <code>Vec</code> and a manual push. Nothing runs until <code>.collect()</code> (or a <code>for</code> loop) actually consumes the chain — each adapter just describes one more step, lazily.</p>
+
+<h2>5 · Practice: <code>Summary</code>, generics, and a real iterator refactor</h2>
+<p>All in <code>linkshort-rs/src/main.rs</code> — works on the file exactly as it stands today, whichever of Day 2/3's TODOs did or didn't land.</p>
+
+<p><strong>Step 1 — the <code>Summary</code> trait (given, section 1's exact code).</strong> Add above <code>impl Link</code>:</p>
+<pre><code><span class="kw">trait</span> Summary {
+    <span class="kw">fn</span> summary(&amp;<span class="kw">self</span>) -&gt; String;
+}
+
+<span class="kw">impl</span> Summary <span class="kw">for</span> Link {
+    <span class="kw">fn</span> summary(&amp;<span class="kw">self</span>) -&gt; String {
+        format!(<span class="cm">"[{}] {}"</span>, <span class="kw">self</span>.code, <span class="kw">self</span>.url)
+    }
+}</code></pre>
+
+<p><strong>Step 2 — TODO: <code>print_all</code>, generic over anything <code>Summary</code>.</strong> Section 2 has the exact shape:</p>
+<pre><code><span class="cm">// TODO: fn print_all&lt;T: Summary&gt;(items: &amp;[T]) — loop over items, println! item.summary()</span>
+<span class="kw">fn</span> print_all&lt;T: Summary&gt;(items: &amp;[T]) {
+
+}</code></pre>
+
+<p><strong>Step 3 — TODO: refactor the <code>Get</code> arm.</strong> Replace the found-flag loop (section 4's "before") with the one-liner (section 4's "after") — same behavior, no flag variable:</p>
+<pre><code>Command::Get { code } =&gt; {
+    <span class="cm">// TODO: match links.iter().find(|l| l.code == code) { Some(l) => ..., None => ... }</span>
+    <span class="cm">// use l.describe() in the Some arm, same message text as before in None</span>
+}</code></pre>
+
+<p><strong>Step 4 — wire <code>print_all</code> into the <code>Save</code> arm.</strong> It already loops and prints each link with <code>describe()</code> — replace that loop with a call to <code>print_all(&amp;links)</code>. (This only compiles once Step 1 is in — <code>Link</code> must implement <code>Summary</code> for <code>print_all::&lt;Link&gt;</code> to be callable.)</p>
+
+<p><strong>Step 5 — prove it.</strong></p>
+<pre><code>cargo check                          <span class="cm"># quiet</span>
+cargo test                            <span class="cm"># still green — behavior unchanged</span>
+cargo run -- save rs https://www.rust-lang.org
+cargo run -- get rs                   <span class="cm"># -&gt; Found: [rs] https://www.rust-lang.org</span>
+cargo run -- get nope                 <span class="cm"># -&gt; No link found for code: nope</span></code></pre>
+<div class="callout"><strong>Done when:</strong> <code>cargo check</code> quiet · <code>cargo test</code> still green · both <code>get</code> calls above print the right line, with no <code>found</code> boolean anywhere in the file. Same behavior, zero flags — that's the iterator-adapter habit landing for good.</div>
+
+<h2>Check yourself</h2>
+<div class="quiz">
+  <div class="q" data-why="Rust never infers trait satisfaction from method shape alone — impl Trait for Type must be written explicitly, even if the type already has a matching method. Go's implicit satisfaction has no equivalent here.">
+    <p class="stem">A type already has a method matching a trait's exact signature, but no <code>impl Trait for Type</code> block. Does it satisfy the trait?</p>
+    <button class="opt" data-ok>No — satisfaction is never implicit in Rust</button>
+    <button class="opt">Yes — the compiler infers it automatically</button>
+    <button class="opt">Only inside the same module</button>
+  </div>
+  <div class="q" data-why="Generic functions are monomorphized: the compiler generates one specialized copy per concrete type actually used, resolved entirely at compile time — zero runtime dispatch cost, unlike dyn Trait's vtable call.">
+    <p class="stem"><code>fn f&lt;T: Summary&gt;(x: T)</code> — when is the concrete type of <code>T</code> decided?</p>
+    <button class="opt" data-ok>At compile time, one copy per type used</button>
+    <button class="opt">At runtime, via a vtable lookup</button>
+    <button class="opt">Never — T stays generic in the binary</button>
+  </div>
+  <div class="q" data-why="dyn Trait is for when the concrete type genuinely isn't known until runtime — e.g. a mixed collection — and costs one indirect vtable call. T: Trait is the default: zero-cost, resolved at compile time.">
+    <p class="stem">When should you reach for <code>dyn Trait</code> instead of a generic <code>T: Trait</code>?</p>
+    <button class="opt" data-ok>A mixed collection needs one shared type at runtime</button>
+    <button class="opt">Always — dyn Trait is strictly faster</button>
+    <button class="opt">Never — dyn Trait was removed from Rust</button>
+  </div>
+  <div class="q" data-why=".find(predicate) returns Option<&T> directly — Some on a match, None otherwise — replacing a found-flag loop with no flag variable and no chance of forgetting to reset it.">
+    <p class="stem"><code>links.iter().find(|l| l.code == code)</code> replaces a found-flag loop. What does it return?</p>
+    <button class="opt" data-ok>Option&lt;&amp;Link&gt; — Some or None, no flag needed</button>
+    <button class="opt">A plain bool, true if any link matched</button>
+    <button class="opt">The full Vec, filtered down to matches</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://doc.rust-lang.org/book/ch10-00-generics.html">The Book, ch. 10 — Generic Types, Traits, and Lifetimes</a> (~30 min, traits and bounds straight from the source). For iterators specifically, <a href="https://doc.rust-lang.org/book/ch13-02-iterators.html">ch. 13.2 — Processing a Series of Items with Iterators</a> is the natural follow-on.</p>
+<p>New terms are in the <a href="../reference/glossary.html#day4">glossary — Day 4 section</a>. Today's questions also entered your <a href="../daily.html">daily practice</a> bank.</p>
+
+<p class="next">Tomorrow: <strong>collections, modules &amp; serde</strong> — <code>Vec</code>/<code>HashMap</code> in depth, splitting this file into modules, and JSON in and out with <code>#[derive(Serialize, Deserialize)]</code>.<br><br>
+💬 A trait-bound error, or unsure when to reach for <code>dyn</code>? Paste the whole message — hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/quiz.js"></script>
+<script src="../assets/gloss.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

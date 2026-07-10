@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 3 · Missing Data &amp; Cleaning</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 3 · ~20 min · 11 Jul 2026</p>
+<h1>Missing data &amp; cleaning</h1>
+<p class="byline">If Lesson 2's practice isn't all green yet, no problem — today reuses the same file and the same two coerced columns, so finishing this one also finishes that one. Today's actual question: once you know what's missing, what do you <em>do</em> about it — and why "just fill with 0" is usually the wrong instinct.</p>
+
+<h2>Recap, in one line</h2>
+<p>Lesson 2 turned silent problems into visible ones: <code>pd.to_numeric(..., errors="coerce")</code> and <code>pd.to_datetime(..., errors="coerce")</code> convert what they can and turn the rest into <dfn data-en="pandas'/NumPy's marker for missing floating-point data" data-vn="giữ nguyên 'NaN' — giá trị thiếu">NaN</dfn> / <dfn data-en="pandas' missing-value marker for datetime columns" data-vn="giữ nguyên 'NaT' — NaN dành riêng cho cột datetime">NaT</dfn> instead of crashing. That's detection. Today is the decision that comes after: drop it, fill it, or flag it — and each is a different claim about what the missing value <em>means</em>.</p>
+
+<h2>1 · Three moves, and their SQL cousins</h2>
+<table class="gloss">
+<tr><th>Move</th><th>pandas</th><th>SQL cousin</th></tr>
+<tr><td>Drop</td><td><code>df.dropna(subset=["col"])</code></td><td><code>WHERE col IS NOT NULL</code></td></tr>
+<tr><td>Fill</td><td><code>df["col"].fillna(value)</code></td><td><code>COALESCE(col, value)</code></td></tr>
+<tr><td>Flag</td><td><code>df["col_missing"] = df["col"].isna()</code></td><td>An extra computed boolean column</td></tr>
+</table>
+<p>All three are one-liners; none of them is the automatically-correct one. The question that picks between them is always the same: <strong>what does "missing" mean for this specific column, in this specific analysis?</strong> A missing <code>order_date</code> and a missing <code>discount_code</code> are not the same kind of absence, and shouldn't get the same treatment by reflex.</p>
+
+<h2>2 · Why "just fill with 0" is usually wrong</h2>
+<p>Filling a numeric gap with <code>0</code> is tempting because it's fast and keeps every downstream <code>.sum()</code>/<code>.mean()</code> from choking on <code>NaN</code>. The problem: <code>0</code> is not "we don't know" — it's a specific, real claim ("this order was worth nothing"), and it silently becomes indistinguishable from a genuine zero-value row that really did mean zero. Two consequences that bite in practice:</p>
+<ul>
+<li><strong>Averages lie.</strong> <code>amount.mean()</code> over five real orders plus one fake <code>0</code> pulls the average down — you've quietly told every downstream consumer "orders are cheaper than they are," and nothing in the output flags that one row was fabricated.</li>
+<li><strong>"Missing" and "actually zero" become the same bucket forever.</strong> Once filled, there is no query that can tell you which rows were originally unknown — that information is destroyed, not just hidden.</li>
+</ul>
+<div class="good-bad">
+  <div class="no"><div class="label">✗ Fill and forget</div>
+<pre><code>df[<span class="kw">"amount"</span>] = df[<span class="kw">"amount"</span>].fillna(0)
+<span class="cm"># now indistinguishable from a REAL $0 order — mean() is quietly wrong</span></code></pre>
+  </div>
+  <div class="yes"><div class="label">✓ Fill AND flag</div>
+<pre><code>df[<span class="kw">"amount_was_missing"</span>] = df[<span class="kw">"amount"</span>].isna()
+df[<span class="kw">"amount"</span>] = df[<span class="kw">"amount"</span>].fillna(df[<span class="kw">"amount"</span>].median())
+<span class="cm"># median is a defensible stand-in AND you can still ask "which rows were fabricated?"</span></code></pre>
+  </div>
+</div>
+<p>The reasoning that picks a fill value: a <dfn data-en="the middle value of a sorted column — half the values are above it, half below. Unlike the mean, a single extreme outlier barely moves it, which is why it's the safer default fill value for skewed real-world data." data-vn="giữ nguyên 'median' — giá trị giữa khi sắp xếp, ít bị outlier kéo lệch hơn mean">median</dfn> is usually a safer default fill than the mean, because one extreme outlier barely moves it — a $50,000 typo in an otherwise $20–200 order column would drag the mean far from reality, but leaves the median almost untouched.</p>
+
+<h2>3 · When to drop instead</h2>
+<p><code>dropna</code> is the right call when the column is essential to the row's meaning and no fill value is honest — a missing <code>order_id</code>, or a missing <code>order_date</code> in an analysis specifically about ordering timing. Dropping is a decision with a cost, though: you're discarding whatever else that row knew. Always check how much you're actually throwing away before doing it:</p>
+<pre><code>df[<span class="kw">"order_date"</span>].isna().sum()             <span class="cm"># how many rows would this drop?</span>
+df = df.dropna(subset=[<span class="kw">"order_date"</span>])    <span class="cm"># SQL: DELETE FROM ... WHERE order_date IS NULL,</span>
+                                          <span class="cm"># but on a copy — the original df is untouched unless reassigned</span></code></pre>
+
+<div class="interview">
+<p><strong>Q: "A numeric column has some missing values. What's your default move?"</strong> A strong answer, out loud: <em>"It depends what the column means, so first I check how much is missing and whether it's essential to the row. If it's essential and there's no honest fill value, I drop those rows — after checking how many that actually is. If a fill is defensible, I use the median over the mean, since it resists outliers, and I ALSO add a boolean flag column so 'originally missing' isn't silently indistinguishable from a real value later. Filling with a bare 0 without a flag is the mistake I'm avoiding — it quietly corrupts every average downstream."</em> The subtext: missing data is a design decision with a paper trail, not a call to <code>fillna(0)</code> and move on.</p>
+</div>
+
+<h2>Try it — self-checking practice (~8 min)</h2>
+<p>Open <code>practice/03_missing_data_cleaning.py</code>, replace each <code>...</code>, and re-run until all three checks print ✓:</p>
+<pre><code>cd ~/learning/data
+uv run --with pandas python3 practice/03_missing_data_cleaning.py</code></pre>
+<p>Same file as Lesson 2 (<code>practice/data/orders_raw.csv</code>) — one missing <code>amount</code>, one missing <code>order_date</code>. Exercise 1 fills with the median; exercise 2 adds the flag column that makes the fill honest; exercise 3 drops instead, for the column where a fill wouldn't make sense.</p>
+
+<h2>Check yourself</h2>
+<div class="quiz">
+  <div class="q" data-why="Filling with 0 makes a missing value indistinguishable from a genuine zero-value row, and drags any mean()/sum() downward with a fabricated number nothing flags as fake.">
+    <p class="stem">What's the main problem with <code>fillna(0)</code> on a numeric column with no flag column added?</p>
+    <button class="opt" data-ok>Missing and real-zero become indistinguishable</button>
+    <button class="opt">pandas raises an error on 0 values</button>
+    <button class="opt">Zero cannot be stored as a float</button>
+  </div>
+  <div class="q" data-why="The median is the middle value when sorted — a single extreme outlier barely shifts it, unlike the mean, which any one huge or tiny value can drag far from the typical case.">
+    <p class="stem">Why prefer the median over the mean as a default fill value for skewed data?</p>
+    <button class="opt" data-ok>One outlier barely moves the median</button>
+    <button class="opt">The median is always exactly zero</button>
+    <button class="opt">pandas can only fillna with a median</button>
+  </div>
+  <div class="q" data-why="A flag column (isna() before filling) preserves the information that a value was originally missing, so later analysis can still separate fabricated fill values from genuinely observed ones.">
+    <p class="stem">What does adding an <code>_was_missing</code> flag column before <code>fillna</code> actually preserve?</p>
+    <button class="opt" data-ok>Which rows had a value fabricated by the fill</button>
+    <button class="opt">The original column's data type only</button>
+    <button class="opt">Nothing — flags are cosmetic only</button>
+  </div>
+  <div class="q" data-why="dropna(subset=[...]) is the right call when a column is essential to the row's meaning and no fill value would be honest — but always check isna().sum() first to know how much data that discards.">
+    <p class="stem">When is <code>dropna</code> the better choice over filling?</p>
+    <button class="opt" data-ok>The column is essential and no fill is honest</button>
+    <button class="opt">Whenever more than one value is missing</button>
+    <button class="opt">Never — filling is always safer than dropping</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official <a href="https://pandas.pydata.org/docs/user_guide/missing_data.html">Working with missing data</a> user guide (~15 min) — covers <code>isna</code>, <code>fillna</code>, <code>dropna</code>, and interpolation straight from the source. Wes McKinney's <a href="https://wesmckinney.com/book/data-cleaning.html">ch. 7</a> has the clearest worked examples of the drop-vs-fill decision.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a>.<br>
+<strong>Next lesson:</strong> groupby — split, apply, combine, and the pandas answer to SQL's <code>GROUP BY</code> + aggregate functions.<br><br>
+💬 Anything unclear — median vs mean, when to drop vs flag, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

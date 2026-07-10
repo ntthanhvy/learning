@@ -70,3 +70,19 @@ by the user there; they apply here identically.
   file (not the post-Day-2 state PLAN.md assumes), noting both possible starting points
   in the practice steps. If Day 2's practice does get done later, verify it still lines
   up with Day 3's `find_link` refactor.
+- 2026-07-11 (Day 4 generation): DB and all shell commands requiring interactive
+  approval (including `cargo check`) were unavailable in this headless run — no user
+  present to approve in a sandboxed agent session. Pacing again came from
+  learning-records + file state alone; `lesson_generated` could not be recorded via
+  `bin/record-progress`, record it manually once DB access is back. `main.rs` is
+  still exactly Day 1's shape — no `LinkError`/`find_link`/`thiserror` from Day 3
+  either, on top of Day 2 still pending. Day 4 (traits/generics/iterators) doesn't
+  need either day's TODOs done: it adds a `Summary` trait + a generic `print_all`
+  and refactors the SAME found-flag `Get` loop via `.iter().find()`, independent of
+  the Result-based rewrite Day 3 proposed for that same code. Could not run
+  `cargo check` to compile-verify the scaffold this round (same approval
+  restriction) — written carefully against known-correct Rust/std APIs but
+  unverified by the compiler; run `cargo check` yourself before/while doing the
+  practice. If Day 2/3 land later, reconcile the `Get` arm — Day 3 wants it
+  returning `Result` via `find_link`, Day 4 wants the `.iter().find()` refactor;
+  both can compose (`find_link` can just BE the iterator one-liner internally).

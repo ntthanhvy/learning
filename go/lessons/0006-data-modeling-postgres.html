@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 5 · Data Modeling in PostgreSQL</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Go Intensive · Day 5 · ~90 min</p>
+<h1>Data modeling in PostgreSQL</h1>
+<p class="byline">If Day 3's <code>checkAll</code> or Day 4's HTTP server are still unfinished, no problem — today doesn't touch either. It only extends the <code>link</code> package and swaps one line in <code>main</code>, because Day 1's whole bet — "code against <code>Store</code>, the interface, not a concrete type" — pays off exactly now: <code>MemStore</code> gets a sibling that talks to a real database, and nothing else in the program has to know.</p>
+
+<h2>Warm-up: yesterday, from memory</h2>
+<div class="quiz">
+  <div class="q" data-why="context.WithTimeout returns a NEW context with the deadline attached to it — the original parent ctx is untouched. Every downstream call must receive the CHILD to be bound by the deadline.">
+    <p class="stem"><code>ctx2, cancel := context.WithTimeout(ctx, 2*time.Second)</code> — what happens to the original <code>ctx</code>?</p>
+    <button class="opt" data-ok>Unchanged — ctx2 holds the deadline</button>
+    <button class="opt">ctx itself gains the deadline directly</button>
+    <button class="opt">ctx gets cancelled immediately as well</button>
+  </div>
+  <div class="q" data-why="ServeMux's method-prefix routing (Go 1.22+) rejects the wrong verb itself, with 405 — no manual if r.Method != check anywhere in the handler.">
+    <p class="stem"><code>mux.HandleFunc("GET /{code}", h)</code> — a POST to that same path gets…</p>
+    <button class="opt" data-ok>405, from the mux itself</button>
+    <button class="opt">200, ServeMux ignores the method</button>
+    <button class="opt">A panic inside h</button>
+  </div>
+  <div class="q" data-why="Shutdown stops the listener from accepting NEW connections right away, but lets any handler already running finish (or the passed context expire) before it returns — that's the entire point of 'graceful'.">
+    <p class="stem">Once <code>httpServer.Shutdown(ctx)</code> is called, an in-flight request currently inside a handler…</p>
+    <button class="opt" data-ok>Is allowed to finish before the process exits</button>
+    <button class="opt">Is cut off immediately, same as a kill</button>
+    <button class="opt">Restarts from the top once shutdown ends</button>
+  </div>
+</div>
+
+<h2>1 · Schema design as invariant design</h2>
+<p>linkshort needs two tables. <code>links</code> you already know — it's <code>Link{Code, URL, CreatedAt}</code>, one row per short code. The new one is <code>clicks</code>: one row every time <code>handleRedirect</code> fires. The design question worth pausing on: should a link's hit count live as a plain integer column on <code>links</code> (like Day 4's in-memory <code>hits map[string]int</code>), or as a separate log of individual click events?</p>
+<p>A single counter column is <dfn data-en="Deliberately storing a fact in more than one derivable place, as a performance trade-off — e.g. a running total instead of recomputing it from source rows. Must be justified; it can drift out of sync with the source of truth if writes are missed." data-vn="giữ nguyên 'denormalization' — cố ý lưu trùng/tính sẵn để đọc nhanh hơn">denormalized</dfn>: fast to read, but it's a fact derived from something else (the clicks themselves), stored redundantly, and it can drift if a write path forgets to increment it. A <code>clicks</code> table with one row per hit is <dfn data-en="Structuring tables so each fact is stored exactly once, and everything else references it by key, instead of being duplicated or pre-computed redundantly. The counter becomes a query (COUNT(*)), not a stored fact that can drift." data-vn="giữ nguyên 'normalization' — mỗi sự thật lưu đúng một nơi">normalized</dfn>: the count becomes a query (<code>COUNT(*) ... GROUP BY link_code</code>, Day 6's territory) instead of a number that can lie. It also gives you things a counter never could — <em>when</em> each click happened, which Day 6's pagination and aggregation both need. Start normalized; denormalize later only with a measured reason (a cache column, refreshed deliberately) — never as the first draft.</p>
+<p>Either way, the schema is really a set of <dfn data-en="A condition that must ALWAYS hold, no matter what code runs against the database — e.g. 'every click points to an existing link.' Constraints are how the database enforces invariants itself, instead of trusting every caller to remember." data-vn="giữ nguyên 'invariant' — điều kiện luôn luôn đúng, DB tự ép chứ không tin code">invariants</dfn> you're choosing to make impossible to violate: every click must point at a link that exists; every link must have a non-empty URL; a code names at most one link. Section 2 turns each of those into a line of DDL.</p>
+
+<h2>2 · Constraints: the first line of correctness</h2>
+<p>A <dfn data-en="A rule the database itself enforces on every write, regardless of which code path performs it — PRIMARY KEY, NOT NULL, UNIQUE, CHECK, FOREIGN KEY. The alternative is trusting every caller (including future-you, six months from now) to remember the rule in application code." data-vn="giữ nguyên 'constraint' — luật DB tự ép, không cần code nhớ">constraint</dfn> is an invariant the database enforces on every write, from every caller, forever — including code you haven't written yet. That beats remembering "always check the URL isn't empty" in every handler:</p>
+<pre><code><span class="kw">CREATE</span> <span class="kw">TABLE</span> links (
+    code       text <span class="kw">PRIMARY KEY</span>,
+    url        text <span class="kw">NOT NULL</span> <span class="kw">CHECK</span> (url &lt;&gt; <span class="cm">''</span>),
+    created_at timestamptz <span class="kw">NOT NULL</span> <span class="kw">DEFAULT</span> now()
+);
+
+<span class="kw">CREATE</span> <span class="kw">TABLE</span> clicks (
+    id         bigint <span class="kw">GENERATED</span> <span class="kw">ALWAYS</span> <span class="kw">AS</span> <span class="kw">IDENTITY</span> <span class="kw">PRIMARY KEY</span>,
+    link_code  text <span class="kw">NOT NULL</span> <span class="kw">REFERENCES</span> links(code) <span class="kw">ON</span> <span class="kw">DELETE</span> <span class="kw">CASCADE</span>,
+    clicked_at timestamptz <span class="kw">NOT NULL</span> <span class="kw">DEFAULT</span> now()
+);</code></pre>
+<p>Four constraints, four invariants: <code>PRIMARY KEY</code> on <code>code</code> says "at most one link per code" (Go's map already assumed this — now the database enforces it too). <code>NOT NULL</code> + <code>CHECK (url &lt;&gt; '')</code> says "a link without a destination isn't a link." <code>REFERENCES links(code)</code> is a <dfn data-en="A column holding another table's primary key, enforcing that every row here points at a row that actually exists there — the database-level version of 'this pointer isn't dangling.'" data-vn="giữ nguyên 'foreign key' (FK) — cột trỏ sang khóa chính bảng khác, DB đảm bảo không trỏ vào chỗ trống">foreign key</dfn>: no click can ever point at a nonexistent link, checked on every insert, not just the ones your code remembers to validate. <code>ON DELETE CASCADE</code> decides what happens when a link is deleted — its clicks go with it. That's the right call for linkshort's domain (an orphaned click means nothing); in a different domain (say, an audit log) you'd pick <code>RESTRICT</code> instead and refuse the delete. The cascade behavior is itself a design decision, not a default to accept blindly.</p>
+
+<h2>3 · Choosing keys: natural vs. surrogate</h2>
+<p>Two different key decisions sit in that DDL, on purpose. <code>links.code</code> is a <dfn data-en="A primary key that is itself a meaningful business value already unique in the domain — here, the short code the user actually types into a browser. No extra column needed; the thing IS its own identity." data-vn="giữ nguyên 'natural key' — khóa chính là chính giá trị nghiệp vụ có sẵn">natural key</dfn>: the short code is already unique by the nature of the problem (two links can't share a redirect target path), so it doubles as its own primary key — matching the Go side, where <code>MemStore</code> was already keyed by <code>code</code> in a map. <code>clicks.id</code> is the opposite: a click has no natural identity — "the click that happened at 14:02:03 for code X" isn't guaranteed unique (two people can click the same link the same millisecond) — so it gets a <dfn data-en="A primary key manufactured purely to identify a row, with no business meaning of its own — an auto-incrementing integer or UUID. Used when the row has no naturally-unique field, or when the natural field might change." data-vn="giữ nguyên 'surrogate key' — khóa chính tự sinh, không mang ý nghĩa nghiệp vụ">surrogate key</dfn>: <code>GENERATED ALWAYS AS IDENTITY</code>, Postgres's modern auto-incrementing integer (the SQL-standard replacement for the older <code>SERIAL</code>). Rule of thumb for interviews: reach for a natural key when one field is already guaranteed unique and stable; reach for a surrogate the moment that's not true, or the "natural" field could ever need to change.</p>
+
+<h2>4 · Indexes: paying for reads with writes</h2>
+<p>Every <code>PRIMARY KEY</code> and <code>UNIQUE</code> constraint above silently created an <dfn data-en="An extra on-disk structure that lets Postgres jump straight to matching rows instead of scanning the whole table. Postgres's default index type, good for equality and range lookups (=, &lt;, &gt;, BETWEEN) and for ORDER BY on the indexed column(s)." data-vn="giữ nguyên 'B-tree' — cấu trúc index mặc định của Postgres, tốt cho so sánh bằng/khoảng">B-tree index</dfn> — Postgres's default, and the right choice for the vast majority of lookups (equality, ranges, sorting). Indexes aren't free: every write updates every index on that table too, so an index is a bet that this column gets searched on far more often than the table gets written to. For linkshort, the bet that matters is Day 6's aggregate query — "how many clicks per link, most recent first" — so today you add the index that query will need before you've even written it:</p>
+<pre><code><span class="kw">CREATE</span> <span class="kw">INDEX</span> clicks_link_code_clicked_at_idx
+    <span class="kw">ON</span> clicks (link_code, clicked_at <span class="kw">DESC</span>);</code></pre>
+<p>That's a <dfn data-en="An index built on more than one column together, ordered left-to-right. Speeds up queries that filter/sort by the FIRST column alone, or by the first column AND the second — but not the second column alone." data-vn="giữ nguyên 'composite index' — index gộp nhiều cột, thứ tự cột quan trọng">composite index</dfn>: it serves "all clicks for link X" alone, and "all clicks for link X, newest first" even faster, because the second column is already sorted within each first-column group — exactly the shape Day 6's keyset pagination wants. Column order matters: this index is useless for "all clicks at time T across every link," because <code>link_code</code> isn't fixed in that query.</p>
+<p>One more shape worth knowing by name, even though linkshort doesn't need it yet: a <dfn data-en="An index built over only the rows matching a WHERE clause, instead of the whole table — smaller and cheaper to maintain when only a small, frequently-queried subset of rows matters." data-vn="giữ nguyên 'partial index' — chỉ đánh index cho một phần bảng thỏa điều kiện">partial index</dfn> covers only rows matching a condition, e.g. <code>CREATE INDEX ... ON links (code) WHERE created_at &gt; now() - interval '30 days'</code> for a table where only recent rows are ever looked up hot-path. Smaller index, same B-tree, a fraction of the maintenance cost — the tool for "this table is huge but 99% of queries only touch a sliver of it."</p>
+
+<h2>5 · Migrations: schema changes as versioned artifacts</h2>
+<p>A <dfn data-en="A numbered, checked-in SQL script that changes the schema by one step — CREATE TABLE, ALTER TABLE, add an index. Applying migrations 1..N in order, in any environment, reproduces the exact same schema. The alternative — hand-editing a database — isn't reproducible or reviewable." data-vn="giữ nguyên 'migration' — file SQL đánh số, thay đổi schema từng bước, chạy lại được ở mọi môi trường">migration</dfn> is just a SQL file with a number in front of its name, committed to the repo like any other code: <code>0001_init.sql</code>, <code>0002_add_something.sql</code>. Running them in order, in any environment — your laptop, a teammate's, a fresh Neon branch for Day 7's integration tests — reproduces the exact same schema, and the migration file itself is the reviewable record of <em>why</em> the schema looks the way it does. Today's practice writes exactly one: <code>0001_init.sql</code>.</p>
+
+<h2>6 · Practice: linkshort gets a real database</h2>
+<p>No Docker needed — <a href="https://neon.tech">Neon</a>'s free tier is a hosted Postgres, which is why the course picked it.</p>
+
+<p><strong>Step 1 — create the database.</strong> Sign up at <a href="https://neon.tech">neon.tech</a>, create a project named <code>linkshort</code>, and copy the connection string it shows you (starts <code>postgresql://...neon.tech/...?sslmode=require</code>). Set it as an environment variable — never commit it:</p>
+<pre><code><span class="cm"># in your shell profile (~/.zshrc or ~/.bashrc):</span>
+<span class="kw">export</span> LINKSHORT_DB_URL=<span class="cm">"postgresql://USER:PASSWORD@HOST/linkshort?sslmode=require"</span></code></pre>
+
+<p><strong>Step 2 — write the migration.</strong> In <code>~/learning/go/project/linkshort</code>, create <code>migrations/0001_init.sql</code>. Columns are given; you fill in the constraints from section 2 (each TODO names exactly which one):</p>
+<pre><code><span class="cm">-- migrations/0001_init.sql</span>
+<span class="kw">CREATE</span> <span class="kw">TABLE</span> links (
+    code       text,                                  <span class="cm">-- TODO: PRIMARY KEY (section 3 — code is the natural key)</span>
+    url        text,                                  <span class="cm">-- TODO: NOT NULL, plus CHECK (url &lt;&gt; '')</span>
+    created_at timestamptz <span class="kw">DEFAULT</span> now()             <span class="cm">-- TODO: NOT NULL</span>
+);
+
+<span class="kw">CREATE</span> <span class="kw">TABLE</span> clicks (
+    id         bigint <span class="kw">GENERATED</span> <span class="kw">ALWAYS</span> <span class="kw">AS</span> <span class="kw">IDENTITY</span>,  <span class="cm">-- TODO: PRIMARY KEY (surrogate — section 3)</span>
+    link_code  text,                                  <span class="cm">-- TODO: NOT NULL, REFERENCES links(code) ON DELETE CASCADE</span>
+    clicked_at timestamptz <span class="kw">DEFAULT</span> now()             <span class="cm">-- TODO: NOT NULL</span>
+);
+
+<span class="cm">-- TODO: composite index on clicks(link_code, clicked_at DESC) — section 4, Day 6 needs it</span></code></pre>
+
+<p><strong>Step 3 — apply it.</strong></p>
+<pre><code>psql <span class="cm">"$LINKSHORT_DB_URL"</span> -f migrations/0001_init.sql
+psql <span class="cm">"$LINKSHORT_DB_URL"</span> -c <span class="cm">"\d links"</span>   <span class="cm"># eyeball the constraints landed</span></code></pre>
+
+<p><strong>Step 4 — add the driver.</strong></p>
+<pre><code>go get github.com/jackc/pgx/v5</code></pre>
+
+<p><strong>Step 5 — <code>link/postgres.go</code> (new file). <code>Get</code> is given; <code>Save</code> is your TODO.</strong></p>
+<pre><code><span class="kw">package</span> link
+
+<span class="kw">import</span> (
+    <span class="cm">"context"</span>
+    <span class="cm">"errors"</span>
+
+    <span class="cm">"github.com/jackc/pgx/v5"</span>
+    <span class="cm">"github.com/jackc/pgx/v5/pgxpool"</span>
+)
+
+<span class="kw">var</span> _ Store = (*PostgresStore)(<span class="kw">nil</span>)
+
+<span class="kw">type</span> PostgresStore <span class="kw">struct</span> {
+    pool *pgxpool.Pool
+}
+
+<span class="kw">func</span> NewPostgresStore(ctx context.Context, connString <span class="kw">string</span>) (*PostgresStore, <span class="kw">error</span>) {
+    pool, err := pgxpool.New(ctx, connString)
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        <span class="kw">return</span> <span class="kw">nil</span>, err
+    }
+    <span class="kw">return</span> &amp;PostgresStore{pool: pool}, <span class="kw">nil</span>
+}
+
+<span class="cm">// TODO: Save upserts a link — INSERT ... ON CONFLICT (code) DO UPDATE SET</span>
+<span class="cm">// url = EXCLUDED.url, using s.pool.Exec(ctx, query, l.Code, l.URL, l.CreatedAt).</span>
+<span class="cm">// Return the Exec error directly; pgx reports constraint violations as a</span>
+<span class="cm">// typed error, same job as Go's own error values.</span>
+<span class="kw">func</span> (s *PostgresStore) Save(ctx context.Context, l Link) <span class="kw">error</span> {
+
+}
+
+<span class="cm">// Get: given. Note the shape — this is your comma-ok/ErrNotFound pattern</span>
+<span class="cm">// from Day 2, translated to SQL: pgx.ErrNoRows means "no row", mapped to</span>
+<span class="cm">// the SAME sentinel MemStore already returns. Callers never know which</span>
+<span class="cm">// Store they're talking to — that's the whole point of Day 1's interface.</span>
+<span class="kw">func</span> (s *PostgresStore) Get(ctx context.Context, code <span class="kw">string</span>) (Link, <span class="kw">error</span>) {
+    <span class="kw">var</span> l Link
+    err := s.pool.QueryRow(ctx,
+        <span class="cm">`SELECT code, url, created_at FROM links WHERE code = $1`</span>, code,
+    ).Scan(&amp;l.Code, &amp;l.URL, &amp;l.CreatedAt)
+    <span class="kw">if</span> errors.Is(err, pgx.ErrNoRows) {
+        <span class="kw">return</span> Link{}, ErrNotFound
+    }
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        <span class="kw">return</span> Link{}, err
+    }
+    <span class="kw">return</span> l, <span class="kw">nil</span>
+}</code></pre>
+
+<p><strong>Step 6 — wire it into <code>main</code>.</strong> One TODO: pick <code>PostgresStore</code> when a connection string is set, otherwise keep the <code>MemStore</code> you already have:</p>
+<pre><code><span class="kw">func</span> main() {
+    ctx := context.Background()
+
+    <span class="kw">var</span> store link.Store
+    <span class="kw">if</span> dsn := os.Getenv(<span class="cm">"LINKSHORT_DB_URL"</span>); dsn != <span class="cm">""</span> {
+        <span class="cm">// TODO: pg, err := link.NewPostgresStore(ctx, dsn)</span>
+        <span class="cm">//       if err != nil { panic(err) }</span>
+        <span class="cm">//       store = link.NewLoggingStore(pg, slog.Default())</span>
+    } <span class="kw">else</span> {
+        store = link.NewLoggingStore(link.NewMemStore(), slog.Default())
+    }
+
+    <span class="cm">// ...rest of main unchanged: Save/resolve calls now hit whichever store got picked.</span>
+}</code></pre>
+
+<p><strong>Step 7 — prove it.</strong></p>
+<pre><code>go vet ./...
+go run .                                    <span class="cm"># with LINKSHORT_DB_URL set</span>
+psql <span class="cm">"$LINKSHORT_DB_URL"</span> -c <span class="cm">"SELECT * FROM links;"</span>   <span class="cm"># the row main.go saved is really there</span></code></pre>
+<div class="callout"><strong>Done when:</strong> <code>go vet ./...</code> silent · the migration applied without error · <code>go run .</code> against Postgres behaves identically to the MemStore version, but <code>psql</code> shows the row survives after the process exits. That's persistence — and Day 1's interface just proved it was worth designing.</div>
+
+<h2>Check yourself</h2>
+<div class="quiz">
+  <div class="q" data-why="A counter column is a derived fact stored redundantly — it can drift if any write path forgets to update it. A clicks-per-event log makes the count a query, always consistent with the rows that actually exist.">
+    <p class="stem">Why prefer a <code>clicks</code> table with one row per hit over a single <code>hit_count</code> column on <code>links</code>?</p>
+    <button class="opt" data-ok>A counter column can drift; a query can't</button>
+    <button class="opt">Postgres cannot store integer counters</button>
+    <button class="opt">Counters are always slower to read</button>
+  </div>
+  <div class="q" data-why="FOREIGN KEY REFERENCES links(code) makes it impossible, at the database level, for any insert to create a click pointing at a code that doesn't exist in links — enforced on every write, from every caller.">
+    <p class="stem">What does <code>REFERENCES links(code)</code> on <code>clicks.link_code</code> actually guarantee?</p>
+    <button class="opt" data-ok>Every click's code names an existing link</button>
+    <button class="opt">Clicks and links are stored in one table</button>
+    <button class="opt">Deleting a link deletes nothing else</button>
+  </div>
+  <div class="q" data-why="Surrogate keys are for rows with no naturally-unique, stable field — a click event has no such field (two clicks can share every observable attribute). A short code, by contrast, IS already unique by the domain's own rules.">
+    <p class="stem">Why does <code>clicks</code> get a surrogate <code>id</code> while <code>links</code> keeps <code>code</code> as its own primary key?</p>
+    <button class="opt" data-ok>A click has no naturally-unique field; a code does</button>
+    <button class="opt">Postgres requires every table to have an id column</button>
+    <button class="opt">Surrogate keys are always faster to index</button>
+  </div>
+  <div class="q" data-why="A composite index (link_code, clicked_at DESC) serves lookups on link_code alone, and link_code + ordering by clicked_at, because the second column is pre-sorted within each first-column group. It does NOT help a query that only filters on clicked_at.">
+    <p class="stem"><code>CREATE INDEX ... ON clicks (link_code, clicked_at DESC)</code> speeds up which query?</p>
+    <button class="opt" data-ok>All clicks for one link, newest first</button>
+    <button class="opt">All clicks at one instant, across every link</button>
+    <button class="opt">Only exact-match lookups on clicked_at</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://www.postgresql.org/docs/current/ddl-constraints.html">PostgreSQL docs — DDL &amp; Constraints</a> (~20 min, straight from the source that enforces every rule above). For indexes specifically, start <a href="https://use-the-index-luke.com/">Use The Index, Luke</a> — you'll finish it properly on Day 6, but the first chapter previews today's B-tree/composite material.</p>
+<p>New terms are in the <a href="../reference/glossary.html#day5">glossary — Day 5 section</a>.</p>
+
+<p class="next">Tomorrow: <strong>queries from Go, and generics in the wild</strong> — <code>pgx</code> patterns, <code>pgx.CollectRows[T]</code> doing real work, transactions, and reading <code>EXPLAIN</code> to prove today's index actually earns its keep.<br><br>
+💬 A constraint that won't apply, or a Neon connection error? Paste what you see — hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/quiz.js"></script>
+<script src="../assets/gloss.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -10,6 +10,8 @@
       file: "lessons/0001-think-in-tables-not-loops.html" },
     { n: 2, date: "2026-07-10", title: "Load & inspect real files",
       file: "lessons/0002-load-and-inspect.html" },
+    { n: 3, date: "2026-07-11", title: "Missing data & cleaning",
+      file: "lessons/0003-missing-data-and-cleaning.html" },
   ];
 
   const REFS = [

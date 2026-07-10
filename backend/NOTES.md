@@ -30,3 +30,10 @@
   Register every generated lesson in nav.js and record it with record-progress.
   Sessions SHOULD still read recent course_progress rows (all three courses) to know
   what the user studied elsewhere.
+- 2026-07-11 generation: the Neon DB and shell commands needing interactive approval
+  (psql, `bin/record-progress`) were unavailable in this headless run — no user
+  present to approve in a sandboxed agent session. Only one learning record exists
+  (Lesson 1's baseline), so Lessons 2–5 have all been generated conservatively from
+  Lesson-N's own teaser plus file state, never a reported outcome — Lesson 5 follows
+  that same pattern. `lesson_generated` could not be recorded; do it manually once
+  DB access is back.

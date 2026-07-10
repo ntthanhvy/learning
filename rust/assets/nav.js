@@ -119,3 +119,49 @@
     });
   }
 })();
+
+// ---- copy button on code blocks ----
+// Every <pre> gets a "Copy" button (top-right). Wrapping in a div keeps the
+// button pinned while the <pre> scrolls horizontally, and keeps the button
+// text out of the copied/selected content. Styles live in course.css.
+(() => {
+  const copyText = (text) => {
+    if (navigator.clipboard && navigator.clipboard.writeText)
+      return navigator.clipboard.writeText(text);
+    return new Promise((resolve, reject) => {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.cssText = "position:fixed;opacity:0";
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand("copy");
+      ta.remove();
+      ok ? resolve() : reject(new Error("copy failed"));
+    });
+  };
+
+  document.querySelectorAll("pre").forEach((pre) => {
+    const wrap = document.createElement("div");
+    wrap.className = "code-wrap";
+    pre.parentNode.insertBefore(wrap, pre);
+    wrap.appendChild(pre);
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "copy-btn";
+    btn.textContent = "Copy";
+    btn.setAttribute("aria-label", "Copy code to clipboard");
+    btn.addEventListener("click", () => {
+      const code = pre.querySelector("code");
+      copyText((code || pre).textContent.replace(/\n$/, "")).then(() => {
+        btn.textContent = "Copied!";
+        btn.classList.add("copied");
+        setTimeout(() => {
+          btn.textContent = "Copy";
+          btn.classList.remove("copied");
+        }, 1500);
+      }).catch(() => { btn.textContent = "Press ⌘C"; });
+    });
+    wrap.appendChild(btn);
+  });
+})();

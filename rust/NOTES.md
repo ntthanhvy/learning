@@ -86,3 +86,17 @@ by the user there; they apply here identically.
   practice. If Day 2/3 land later, reconcile the `Get` arm — Day 3 wants it
   returning `Result` via `find_link`, Day 4 wants the `.iter().find()` refactor;
   both can compose (`find_link` can just BE the iterator one-liner internally).
+- 2026-07-12 (Day 5 generation): direct `psql "$LEARNING_DB_URL" ...` and reading
+  `~/.config/learning/db.env` were both blocked in this headless run (shell-variable
+  expansion and out-of-workspace file reads disallowed for this session) — paced
+  from learning-records + file state alone. `bin/record-progress` did work though
+  (sources the DB env internally), so `lesson_generated` was recorded. `main.rs` on
+  disk still showed Day 1's shape only (found-flag `Get` loop, no `Summary` trait,
+  no `LinkError`) — Days 2–4 practice looks unstarted. Day 5 was written to not
+  need any of them: it works on the Day-1 file directly, swapping the `Vec` scan
+  for a `HashMap` (which happens to resolve the found-flag loop Day 4 also wanted
+  gone, via a different mechanism — noted explicitly in the lesson so it doesn't
+  read as a contradiction). `cargo check`/`test`/`clippy` access WAS available this
+  round — the full `link.rs` + `main.rs` (HashMap + serde export) scaffold was
+  compile-checked clean in a scratch dir, network access to crates.io confirmed
+  working, before shipping.

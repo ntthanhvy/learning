@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 6 · What Actually Happens Inside a Transaction</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 6 · ~20 min</p>
+<h1>What actually happens inside a transaction</h1>
+<p class="byline">Same runtime-behavior track as Lesson 5 — no dependency on it, no dependency on Lessons 2–4 either. "Wrap it in a transaction" is the reflex answer to almost any data-safety worry, frontend or backend. Today's lesson is about the specific, common case where that reflex is wrong.</p>
+
+<h2>1 · What a transaction actually promises</h2>
+<p>A <dfn data-en="a group of one or more database statements that either all take effect together, or none do — started with BEGIN, ended with COMMIT (keep everything) or ROLLBACK (discard everything)" data-vn="transaction (giữ nguyên) — nhóm câu lệnh, hoặc tất cả cùng thành công hoặc tất cả cùng bị hủy">transaction</dfn> guarantees two different things, and the trap is treating them as one. The part everyone already gets right: <strong>atomicity</strong> — creating an order and its line items as two <code>INSERT</code>s either both land or neither does; a crash mid-way never leaves an order with no items.</p>
+<p>The part "wrap it in a transaction" quietly assumes, and doesn't actually deliver for free, is <dfn data-en="how much a transaction is protected from the effects of OTHER transactions running at the same time — what one transaction sees or doesn't see of another's uncommitted or concurrently-committed changes" data-vn="isolation (giữ nguyên) — mức độ transaction này bị ảnh hưởng bởi transaction khác chạy song song">isolation</dfn>: what happens when two transactions run <em>at the same time</em>, touching the same row. Postgres's default isolation level lets each individual statement see whatever was committed at the moment it runs — which sounds safe, and is, for a single statement. It stops being safe the moment your "one operation" is actually two statements: a read, then a write based on what you read.</p>
+
+<h2>2 · The bug: check-then-act, twice, at once</h2>
+<p>Picture a flash sale with one ticket left. Two requests arrive within the same millisecond, each inside its own transaction:</p>
+<pre><code><span class="cm">-- both transactions run this first, both see remaining = 1</span>
+SELECT remaining FROM tickets WHERE id = 7;
+
+<span class="cm">-- both transactions then run this — both think it's safe</span>
+UPDATE tickets SET remaining = remaining - 1 WHERE id = 7;</code></pre>
+<p>Both transactions read <code>1</code>. Both decide, correctly given what they saw, that selling one more is fine. Both commit. The ticket count goes to <code>-1</code> — sold twice. Nothing here violated atomicity; each transaction's own statements all committed together, exactly as promised. What broke is that neither transaction knew about the other's read — this specific failure has a name, a <dfn data-en="a race condition where two concurrent transactions each read the same value, both decide to update it based on that stale read, and one update silently overwrites the other's effect instead of the two combining correctly" data-vn="giữ nguyên 'lost update' — 2 transaction cùng đọc rồi cùng ghi đè, một bên bị mất tác dụng">lost update</dfn>.</p>
+<div class="callout"><strong>Frontend-habit trap:</strong> "I wrapped my read and my write in one transaction, so it's safe from races" — atomicity says those two statements commit together as a unit; it says nothing about whether another transaction's read-then-write interleaved with yours in between. Those are different guarantees, and only one of them is automatic.</div>
+
+<h2>3 · Two real fixes — pick one, know why</h2>
+<p>The fix is never "wrap it harder." Either make the check part of the write itself, or explicitly claim the row before reading it.</p>
+<p><strong>Make the write atomic and self-checking</strong> — the check and the act become one statement, so there's no gap for another transaction to land in:</p>
+<pre><code>UPDATE tickets SET remaining = remaining - 1
+WHERE id = 7 AND remaining &gt; 0
+RETURNING remaining;
+<span class="cm">-- 0 rows returned = someone else got there first; your code checks that, not a prior SELECT</span></code></pre>
+<p><strong>Or, when the logic between read and write is too complex to fold into one statement</strong>, explicitly lock the row on read with a <dfn data-en="a SELECT ... FOR UPDATE clause that locks the returned row(s) until the transaction ends — any other transaction trying to SELECT ... FOR UPDATE or UPDATE the same row simply waits its turn, instead of both proceeding on stale data" data-vn="row lock (giữ nguyên) — SELECT ... FOR UPDATE khóa dòng đó, transaction khác phải chờ">row lock</dfn>:</p>
+<pre><code>SELECT remaining FROM tickets WHERE id = 7 FOR UPDATE;
+<span class="cm">-- the second transaction's FOR UPDATE now BLOCKS here until the first commits or rolls back</span>
+<span class="cm">-- ...application logic here, safely...</span>
+UPDATE tickets SET remaining = remaining - 1 WHERE id = 7;</code></pre>
+<p><code>FOR UPDATE</code> makes the second transaction wait instead of racing ahead on a stale read — the isolation guarantee the plain <code>SELECT</code> never gave you. (Postgres also offers stricter isolation levels — <code>REPEATABLE READ</code>, <code>SERIALIZABLE</code> — that catch this class of conflict automatically and force one transaction to retry; worth knowing the knob exists, though the two patterns above cover the vast majority of real cases without reaching for it.)</p>
+
+<div class="interview">
+<p><strong>Q: "Two requests could both try to decrement the same limited-stock counter at once. How do you prevent it going negative?"</strong> A strong answer, out loud: <em>"A plain transaction around a SELECT-then-UPDATE doesn't fix this — that's a classic lost update, both transactions can read the same value before either writes. I'd either fold the check into the UPDATE itself — WHERE stock &gt; 0, check the row count returned — or, if the logic between read and write needs to be more than one statement, take an explicit row lock with SELECT ... FOR UPDATE so the second transaction waits instead of racing on stale data."</em> The subtext: naming the failure mode (lost update) and knowing two concrete fixes reads very differently from "I'd wrap it in a transaction."</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Atomicity guarantees the statements inside one transaction commit together or not at all. It says nothing about another transaction's statements interleaving with yours — that's isolation, a separate guarantee.">
+    <p class="stem">Wrapping a read and a write in one transaction guarantees what, by itself?</p>
+    <button class="opt" data-ok>Those statements commit together, atomically</button>
+    <button class="opt">No other transaction can run concurrently</button>
+    <button class="opt">The read always sees the latest write</button>
+  </div>
+  <div class="q" data-why="A lost update is exactly this: two transactions each read the same stale value, both decide to write based on it, and one write silently overwrites the other's effect — no error, no atomicity violation, just a wrong final result.">
+    <p class="stem">Two transactions both read <code>remaining = 1</code>, both decrement it, both commit. What is this bug called?</p>
+    <button class="opt" data-ok>A lost update</button>
+    <button class="opt">A deadlock</button>
+    <button class="opt">An atomicity violation</button>
+  </div>
+  <div class="q" data-why="Folding the check into the UPDATE's WHERE clause (remaining > 0) makes the check-and-write one atomic statement — there is no gap between reading and writing for another transaction to land in.">
+    <p class="stem"><code>UPDATE tickets SET remaining = remaining - 1 WHERE id = 7 AND remaining &gt; 0</code> avoids the race by doing what?</p>
+    <button class="opt" data-ok>Making the check and the write one statement</button>
+    <button class="opt">Running twice as fast as two statements</button>
+    <button class="opt">Skipping the transaction entirely</button>
+  </div>
+  <div class="q" data-why="SELECT ... FOR UPDATE locks the row for the rest of the transaction — a second transaction's own FOR UPDATE (or UPDATE) on that row blocks and waits, instead of proceeding on a stale read the way a plain SELECT would let it.">
+    <p class="stem">What does <code>SELECT ... FOR UPDATE</code> do that a plain <code>SELECT</code> doesn't?</p>
+    <button class="opt" data-ok>Locks the row, blocking other writers</button>
+    <button class="opt">Skips the transaction log for speed</button>
+    <button class="opt">Returns only already-updated rows</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://www.postgresql.org/docs/current/transaction-iso.html">PostgreSQL docs — Transaction Isolation</a> (~15 min; read down through "Read Committed" and the lost-update example — that's today's whole lesson, from the source). For the concept in more depth, Kleppmann's <a href="https://dataintensive.net">Designing Data-Intensive Applications</a>, ch. 7 ("Transactions") is the primary source the industry cites. The Go track's own Day 6 lesson shows the atomic-<code>UPDATE</code> and explicit-transaction patterns applied to real pgx code, if you want the syntax alongside this reasoning.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> your API returns a 500 — what should the client actually be able to tell from that, and what should never leak into it.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 6 · Queries from Go (+ generics in the wild)</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Go Intensive · Day 6 · ~90 min</p>
+<h1>Queries from Go (+ generics in the wild)</h1>
+<p class="byline">If Day 5's <code>postgres.go</code> is still unfinished, or you haven't stood up a Neon database yet, don't worry — <strong>Step 0</strong> below hands you a complete, working copy of yesterday's file so you start today from the same place either way. Everything from here builds new material only: real queries, one generic helper doing the boring part for you, and a transaction that actually needs to be a transaction.</p>
+
+<h2>Warm-up: yesterday, from memory</h2>
+<div class="quiz">
+  <div class="q" data-why="A counter column is a derived fact stored redundantly — it can drift if any write path forgets to update it. clicks makes the count a query, always consistent with the rows that actually exist. That's exactly the table today's queries read.">
+    <p class="stem">Why does linkshort store one row per click instead of a <code>hit_count</code> column?</p>
+    <button class="opt" data-ok>A counter can drift; a query over real rows can't</button>
+    <button class="opt">Postgres cannot store integer counters</button>
+    <button class="opt">Counter columns are always slower to read</button>
+  </div>
+  <div class="q" data-why="REFERENCES links(code) is a foreign key: Postgres refuses any insert into clicks whose link_code doesn't already exist in links, checked on every write, no matter which code path performs it.">
+    <p class="stem"><code>clicks.link_code REFERENCES links(code)</code> — what does that block?</p>
+    <button class="opt" data-ok>Inserting a click for a code with no matching link</button>
+    <button class="opt">Deleting a link that still has clicks</button>
+    <button class="opt">Two links sharing the same code</button>
+  </div>
+  <div class="q" data-why="CREATE INDEX ... ON clicks (link_code, clicked_at DESC) is a composite index: it serves lookups on link_code alone, or link_code plus ordering by clicked_at, because the second column is pre-sorted within each first-column group. Today's RecentClicks query is built to hit exactly this index.">
+    <p class="stem">The Day 5 index <code>clicks (link_code, clicked_at DESC)</code> is built for which query shape?</p>
+    <button class="opt" data-ok>All clicks for one link, newest first</button>
+    <button class="opt">All clicks at one instant, across every link</button>
+    <button class="opt">Counting every row in the table</button>
+  </div>
+</div>
+
+<h2>0 · Catch-up: yesterday's file, given</h2>
+<p>Create (or overwrite, if yours is incomplete) <code>link/postgres.go</code> with this — it's Day 5's finished shape, <code>Save</code> included, nothing new to write here:</p>
+<pre><code><span class="kw">package</span> link
+
+<span class="kw">import</span> (
+    <span class="cm">"context"</span>
+    <span class="cm">"errors"</span>
+
+    <span class="cm">"github.com/jackc/pgx/v5"</span>
+    <span class="cm">"github.com/jackc/pgx/v5/pgxpool"</span>
+)
+
+<span class="kw">var</span> _ Store = (*PostgresStore)(<span class="kw">nil</span>)
+
+<span class="kw">type</span> PostgresStore <span class="kw">struct</span> {
+    pool *pgxpool.Pool
+}
+
+<span class="kw">func</span> NewPostgresStore(ctx context.Context, connString <span class="kw">string</span>) (*PostgresStore, <span class="kw">error</span>) {
+    pool, err := pgxpool.New(ctx, connString)
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        <span class="kw">return</span> <span class="kw">nil</span>, err
+    }
+    <span class="kw">return</span> &amp;PostgresStore{pool: pool}, <span class="kw">nil</span>
+}
+
+<span class="kw">func</span> (s *PostgresStore) Save(ctx context.Context, l Link) <span class="kw">error</span> {
+    _, err := s.pool.Exec(ctx,
+        <span class="cm">`INSERT INTO links (code, url) VALUES ($1, $2)
+         ON CONFLICT (code) DO UPDATE SET url = EXCLUDED.url`</span>,
+        l.Code, l.URL,
+    )
+    <span class="kw">return</span> err
+}
+
+<span class="kw">func</span> (s *PostgresStore) Get(ctx context.Context, code <span class="kw">string</span>) (Link, <span class="kw">error</span>) {
+    <span class="kw">var</span> l Link
+    err := s.pool.QueryRow(ctx,
+        <span class="cm">`SELECT code, url, created_at FROM links WHERE code = $1`</span>, code,
+    ).Scan(&amp;l.Code, &amp;l.URL, &amp;l.CreatedAt)
+    <span class="kw">if</span> errors.Is(err, pgx.ErrNoRows) {
+        <span class="kw">return</span> Link{}, ErrNotFound
+    }
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        <span class="kw">return</span> Link{}, err
+    }
+    <span class="kw">return</span> l, <span class="kw">nil</span>
+}</code></pre>
+<p>No Neon project yet? Go back to Day 5, section 6, steps 1–3 (sign up, create the <code>linkshort</code> project, apply <code>migrations/0001_init.sql</code>) — five minutes, then come back here.</p>
+
+<h2>1 · pgx v5: three ways to run a query</h2>
+<p><code>*pgxpool.Pool</code> — a <dfn data-en="A small set of already-open database connections, reused across calls instead of opening a new TCP + auth handshake per query. Each call borrows one connection for the duration of a query and returns it to the pool afterward." data-vn="giữ nguyên 'connection pool' — giữ sẵn vài kết nối DB, dùng lại thay vì mở mới mỗi lần">connection pool</dfn>, not a single connection; <code>Save</code> and <code>Get</code> already use two of its three query methods. <code>Exec</code> runs a statement that returns no rows (INSERT/UPDATE/DELETE) and gives you back a row count. <code>QueryRow</code> expects exactly one row back and <code>.Scan</code>s it directly into variables — <code>Get</code> above. <code>Query</code> is for anything returning zero-to-many rows: it hands back a <code>pgx.Rows</code> you iterate, one column set per call to <code>.Scan</code>. That manual iteration — <code>for rows.Next() { rows.Scan(&amp;a, &amp;b) }</code>, checking <code>rows.Err()</code> after the loop — is correct but repetitive: the same five lines, in every function, for every query shape. Section 2 is the fix.</p>
+
+<h2>2 · Generics in the wild: <code>pgx.CollectRows</code></h2>
+<p>A <dfn data-en="A function or type written once, parameterized over a type argument T, that works for any T satisfying its constraints — instead of one copy per concrete type. Go's generics, added in 1.18." data-vn="giữ nguyên 'generic' — viết một lần, dùng cho nhiều kiểu T khác nhau">generic</dfn> function is written once, parameterized over a type <code>T</code>, and works for any <code>T</code> that fits — instead of a hand-copied Scan loop per query. <code>pgx.CollectRows[T any](rows pgx.Rows, fn RowToFunc[T]) ([]T, error)</code> is exactly that: it drives the <code>Next</code>/<code>Scan</code>/<code>Err</code> loop internally and returns a plain <code>[]T</code>. The <code>fn</code> argument is itself generic — <code>pgx.RowToStructByName[T]</code> — and does the column-to-field matching for you:</p>
+<pre><code><span class="kw">type</span> LinkStats <span class="kw">struct</span> {
+    Code   <span class="kw">string</span>
+    Clicks <span class="kw">int64</span>
+}
+
+<span class="kw">func</span> ClicksPerLink(ctx context.Context, pool *pgxpool.Pool) ([]LinkStats, <span class="kw">error</span>) {
+    rows, err := pool.Query(ctx, <span class="cm">`
+        SELECT link_code AS code, count(*) AS clicks
+        FROM clicks
+        GROUP BY link_code
+        ORDER BY clicks DESC`</span>)
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        <span class="kw">return</span> <span class="kw">nil</span>, err
+    }
+    <span class="kw">return</span> pgx.CollectRows(rows, pgx.RowToStructByName[LinkStats])
+}</code></pre>
+<p><code>RowToStructByName</code> matches a returned column to a struct field by name, case-insensitively, ignoring underscores — <code>clicked_at</code> matches a field named <code>ClickedAt</code> with no tag needed; <code>count(*) AS clicks</code> is aliased to line up with the <code>Clicks</code> field. This is the aggregate query the Day 5 index earns its keep on: <em>how many clicks per link, most-clicked first</em>. <code>Clicks</code> is <code>int64</code>, not <code>int</code> — Postgres's <code>count(*)</code> returns <code>bigint</code>, and matching the width avoids a silent truncation on a link popular enough to overflow a 32-bit count.</p>
+<p>Compare this to Day 3's goroutines or Day 4's <code>context.Context</code>: those were generic-shaped problems Go solved with interfaces and channels instead. This is genuinely the case generics were added for — one Scan loop, reused for <code>LinkStats</code>, <code>Click</code>, or any future row shape, with the compiler (not a reflection-heavy ORM) checking that <code>T</code> lines up.</p>
+
+<h2>3 · Keyset pagination: never <code>OFFSET</code></h2>
+<p><dfn data-en="Returning results page by page by skipping a count of rows from the start — OFFSET n LIMIT m in SQL. Simple, but Postgres still has to walk and discard the first n rows every time, so it gets slower the deeper you page." data-vn="giữ nguyên 'offset pagination' — phân trang bằng cách bỏ qua n dòng đầu">Offset pagination</dfn> — <code>LIMIT 20 OFFSET 4000</code> — asks Postgres to walk and discard four thousand rows on every request for page 201, then throw them away. <dfn data-en="Pagination using a WHERE clause on the last row's own sort key instead of a row count — WHERE clicked_at &lt; $1 ORDER BY clicked_at DESC LIMIT 20. The next page's WHERE value is the last row's clicked_at from the previous page. Cost stays flat no matter how deep you page, and it's exactly what the Day 5 composite index was built to serve." data-vn="giữ nguyên 'keyset pagination' — phân trang bằng điều kiện WHERE trên giá trị dòng cuối, không đếm bỏ qua">Keyset pagination</dfn> instead filters on the last row you already saw — no counting, no discarding, and it's exactly the query shape the Day 5 composite index was built to serve:</p>
+<pre><code><span class="kw">type</span> Click <span class="kw">struct</span> {
+    ClickedAt time.Time
+}
+
+<span class="cm">// RecentClicks returns the next page of clicks for code, newest first.
+// before is the keyset cursor: time.Now() for page one, then the ClickedAt
+// of the last row from the previous page for page two, and so on.</span>
+<span class="kw">func</span> RecentClicks(ctx context.Context, pool *pgxpool.Pool, code <span class="kw">string</span>, before time.Time, limit <span class="kw">int</span>) ([]Click, <span class="kw">error</span>) {
+    <span class="cm">// TODO: pool.Query(ctx, `
+    //     SELECT clicked_at
+    //     FROM clicks
+    //     WHERE link_code = $1 AND clicked_at < $2
+    //     ORDER BY clicked_at DESC
+    //     LIMIT $3`, code, before, limit)
+    // then pgx.CollectRows(rows, pgx.RowToStructByName[Click]) — same shape
+    // as ClicksPerLink above, different T.</span>
+}</code></pre>
+<p>Your TODO: fill in the body using the exact pattern from section 2 — <code>pool.Query</code>, check the error, <code>pgx.CollectRows</code> with <code>pgx.RowToStructByName[Click]</code>. The <code>WHERE link_code = $1 AND clicked_at &lt; $2 ORDER BY clicked_at DESC</code> shape is precisely <code>clicks (link_code, clicked_at DESC)</code>'s reason to exist — section 5 proves it with <code>EXPLAIN</code>.</p>
+
+<h2>4 · Transactions: when one statement isn't enough</h2>
+<p>A <dfn data-en="A group of one or more statements that succeed or fail together as a single unit — either every change in it takes effect, or none does. Started with BEGIN (pgx: pool.Begin), ended with COMMIT (all changes take effect) or ROLLBACK (all changes discarded)." data-vn="giữ nguyên 'transaction' — nhóm câu lệnh, hoặc tất cả cùng thành công hoặc tất cả cùng bị hủy">transaction</dfn> matters the moment more than one statement has to succeed or fail together. A single <code>INSERT ... ON CONFLICT</code> is already atomic on its own — no transaction needed. But seeding demo data needs two statements — insert the link, then insert its clicks — and they must not be allowed to half-succeed: a crash between them would either leave clicks pointing at a link that was never saved (impossible here, the foreign key blocks it and the second statement would simply fail) or leave a link with no clicks when the caller expected both. Wrapping both in one transaction makes "both or neither" true regardless:</p>
+<pre><code><span class="kw">func</span> SeedDemoClicks(ctx context.Context, pool *pgxpool.Pool, code, url <span class="kw">string</span>, n <span class="kw">int</span>) <span class="kw">error</span> {
+    tx, err := pool.Begin(ctx)
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        <span class="kw">return</span> err
+    }
+    <span class="kw">defer</span> tx.Rollback(ctx) <span class="cm">// no-op once Commit succeeds</span>
+
+    <span class="cm">// TODO: tx.Exec(ctx,
+    //     `INSERT INTO links (code, url) VALUES ($1, $2) ON CONFLICT (code) DO NOTHING`,
+    //     code, url,
+    // ) — check the error, return it if non-nil.</span>
+
+    <span class="kw">for</span> i := 0; i &lt; n; i++ {
+        <span class="cm">// TODO: tx.Exec(ctx, `INSERT INTO clicks (link_code) VALUES ($1)`, code)
+        // — check the error, return it if non-nil.</span>
+    }
+
+    <span class="kw">return</span> tx.Commit(ctx)
+}</code></pre>
+<p><code>defer tx.Rollback(ctx)</code> right after a successful <code>Begin</code> is the idiomatic pgx shape: if the function returns early on any error, the deferred rollback undoes whatever partial work happened; if <code>Commit</code> already ran, the deferred <code>Rollback</code> is a documented no-op. Notice what did <em>not</em> need a transaction: <code>ClicksPerLink</code> and <code>RecentClicks</code> are single <code>SELECT</code>s, already atomic by themselves. Reach for a transaction when a caller-visible "unit of work" spans more than one statement — not as a default wrapper around every query.</p>
+
+<h2>5 · Reading <code>EXPLAIN</code>: proving the index earns its keep</h2>
+<p>An <dfn data-en="The step-by-step strategy Postgres actually picks to answer a query — which index (if any), which join method, how many rows it expects at each step. Shown by prefixing any query with EXPLAIN, or EXPLAIN ANALYZE to also run it and show real timings." data-vn="giữ nguyên 'query plan' — kế hoạch Postgres chọn để chạy query, xem bằng EXPLAIN">EXPLAIN</dfn> shows what Postgres actually decided to do, not what you hope it did. Run the exact shape from section 3 against your Neon database, with and without the Day 5 index (you built it in the migration — this just confirms it's being used):</p>
+<pre><code>psql <span class="cm">"$LINKSHORT_DB_URL"</span> -c <span class="cm">"EXPLAIN ANALYZE
+  SELECT clicked_at FROM clicks
+  WHERE link_code = 'go' AND clicked_at &lt; now()
+  ORDER BY clicked_at DESC LIMIT 20;"</span></code></pre>
+<p>Look for <code>Index Scan using clicks_link_code_clicked_at_idx</code> in the output — that's the composite index from Day 5 doing exactly the job section 4's docstring said it would. If you instead see <code>Seq Scan on clicks</code>, the planner decided a full table scan was cheaper — normal on a tiny seeded table (Postgres estimates cost from row counts; an index lookup plus a table fetch can lose to "just read the whole table" when the table is a few dozen rows). <code>SeedDemoClicks</code> from section 4 exists partly to make this demo repeatable: seed a few hundred clicks for one code, a handful for others, and re-run <code>EXPLAIN ANALYZE</code> — the skew is enough to tip the planner toward the index.</p>
+
+<h2>6 · Practice: wire it into <code>main</code></h2>
+<p><strong>Step 1.</strong> Save section 2–4's code as <code>link/queries.go</code> (package <code>link</code>, same imports as <code>postgres.go</code> plus <code>"time"</code>). Fill in the two TODOs from sections 3 and 4.</p>
+<p><strong>Step 2.</strong> In <code>main.go</code>, after the store is wired to Postgres (Day 5's <code>if dsn := ...</code> branch), add a small demo run. One TODO — the rest is given:</p>
+<pre><code><span class="kw">func</span> main() {
+    ctx := context.Background()
+    dsn := os.Getenv(<span class="cm">"LINKSHORT_DB_URL"</span>)
+
+    pg, err := link.NewPostgresStore(ctx, dsn)
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        panic(err)
+    }
+    store := link.NewLoggingStore(pg, slog.Default())
+    _ = store <span class="cm">// wired the same way Day 5 left it</span>
+
+    <span class="cm">// A *pgxpool.Pool, not a Store — ClicksPerLink/RecentClicks/SeedDemoClicks
+    // work at the SQL level directly, same database, different door in.</span>
+    pool, err := pgxpool.New(ctx, dsn)
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        panic(err)
+    }
+
+    <span class="cm">// TODO: link.SeedDemoClicks(ctx, pool, "go", "https://golang.org", 5)
+    // then link.ClicksPerLink(ctx, pool) and print each LinkStats — check
+    // both errors, panic like the calls above if non-nil.</span>
+}</code></pre>
+<p><strong>Step 3 — prove it.</strong></p>
+<pre><code>go vet ./...
+go run .                                        <span class="cm"># with LINKSHORT_DB_URL set</span>
+psql <span class="cm">"$LINKSHORT_DB_URL"</span> -c <span class="cm">"SELECT link_code, count(*) FROM clicks GROUP BY link_code;"</span></code></pre>
+<div class="callout"><strong>Done when:</strong> <code>go vet ./...</code> silent · <code>go run .</code> prints at least one <code>LinkStats</code> line · the <code>psql</code> count matches what your program printed · <code>EXPLAIN ANALYZE</code> from section 5 shows the index scan, not a sequential one.</div>
+
+<h2>Check yourself</h2>
+<div class="quiz">
+  <div class="q" data-why="pgx.CollectRows drives the Next/Scan/Err loop internally and returns a plain []T — the generic parameter lets one function serve any row shape, instead of a hand-written Scan loop per query.">
+    <p class="stem">What does <code>pgx.CollectRows[T]</code> save you from writing by hand?</p>
+    <button class="opt" data-ok>A Next/Scan/Err loop, once per query shape</button>
+    <button class="opt">The SQL query text itself</button>
+    <button class="opt">The database connection string</button>
+  </div>
+  <div class="q" data-why="Offset pagination (LIMIT/OFFSET n) makes Postgres walk and discard n rows on every request, getting slower the deeper you page. Keyset pagination filters on the last-seen row's own sort key, so the cost stays flat no matter how deep you page.">
+    <p class="stem">Why does deep pagination favor keyset over <code>OFFSET</code>?</p>
+    <button class="opt" data-ok>OFFSET discards rows every time; keyset doesn't</button>
+    <button class="opt">OFFSET is not valid SQL syntax</button>
+    <button class="opt">Keyset pagination needs no ORDER BY</button>
+  </div>
+  <div class="q" data-why="A transaction matters once a caller-visible unit of work spans more than one statement that must succeed or fail together. A single INSERT ... ON CONFLICT is already atomic by itself, so wrapping it in BEGIN/COMMIT adds nothing.">
+    <p class="stem">Why does <code>SeedDemoClicks</code> need a transaction but <code>ClicksPerLink</code> doesn't?</p>
+    <button class="opt" data-ok>It's two statements that must succeed together</button>
+    <button class="opt">SELECT statements cannot run in transactions</button>
+    <button class="opt">Transactions are required for every INSERT</button>
+  </div>
+  <div class="q" data-why="EXPLAIN ANALYZE actually runs the query and shows the real plan Postgres chose, including which index (if any) it used — the only way to confirm an index is actually being read instead of just existing unused.">
+    <p class="stem">What does <code>EXPLAIN ANALYZE</code> prove that just having an index doesn't?</p>
+    <button class="opt" data-ok>The planner actually chose to use it</button>
+    <button class="opt">The query returns the correct rows</button>
+    <button class="opt">The index has no duplicate entries</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://pkg.go.dev/github.com/jackc/pgx/v5#hdr-Query_Interface">pgx v5 docs — Query Interface</a> (~15 min, straight from the library you used today). For pagination specifically, <a href="https://use-the-index-luke.com/no-offset">Use The Index, Luke — "no offset"</a> makes the keyset case in more depth than today's practice needed.</p>
+<p>New terms are in the <a href="../reference/glossary.html#day6">glossary — Day 6 section</a>.</p>
+
+<p class="next">Tomorrow: <strong>testing, tooling &amp; the capstone</strong> — table-driven tests against a real Neon branch, <code>go test -race</code> across the whole week's concurrency work, and tying linkshort's Days 1–6 together into one working service.<br><br>
+💬 An <code>EXPLAIN</code> plan that won't budge, or a transaction question? Paste what you see — hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/quiz.js"></script>
+<script src="../assets/gloss.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

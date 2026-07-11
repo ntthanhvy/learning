@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 5 · Collections, Modules &amp; Serde</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Rust Intensive · Day 5 · ~75 min</p>
+<h1>Collections, modules &amp; serde</h1>
+<p class="byline">Days 2–4's TODOs (borrow practice, <code>Result</code>-based <code>find_link</code>, the <code>Summary</code> trait) don't need to be finished for today — this lesson works on <code>main.rs</code> exactly as Day 1 left it. It does three things: splits the file into modules, swaps the <code>Vec</code> scan for a <code>HashMap</code> lookup (which quietly also fixes the found-flag loop Day 4 wanted gone — from a completely different angle), and gets links in and out of JSON.</p>
+
+<h2>Warm-up: yesterday, from memory</h2>
+<div class="quiz">
+  <div class="q" data-why="Rust never infers trait satisfaction from method shape alone — impl Trait for Type must be written explicitly, even if the type already has a matching method.">
+    <p class="stem">A type has a method matching a trait's signature exactly, but no <code>impl Trait for Type</code>. Does it satisfy the trait?</p>
+    <button class="opt" data-ok>No — satisfaction is never implicit</button>
+    <button class="opt">Yes — the compiler infers it always</button>
+    <button class="opt">Only inside the same file</button>
+  </div>
+  <div class="q" data-why="Generic functions are monomorphized: the compiler generates one specialized copy per concrete type actually used, at compile time — zero runtime dispatch cost.">
+    <p class="stem"><code>fn f&lt;T: Summary&gt;(x: T)</code> — when is the concrete type of T decided?</p>
+    <button class="opt" data-ok>At compile time, one copy per type</button>
+    <button class="opt">At runtime, via a vtable lookup</button>
+    <button class="opt">Never — T stays generic in the binary</button>
+  </div>
+  <div class="q" data-why=".find(predicate) returns Option<&T> directly — Some on a match, None otherwise — replacing a found-flag loop with no flag variable at all.">
+    <p class="stem"><code>links.iter().find(|l| l.code == code)</code> returns what?</p>
+    <button class="opt" data-ok>Option&lt;&amp;Link&gt; — Some or None</button>
+    <button class="opt">A plain bool, true if matched</button>
+    <button class="opt">The full Vec, filtered to matches</button>
+  </div>
+</div>
+
+<h2>1 · Modules: <code>main.rs</code> stops being one file</h2>
+<p>Go's file layout is a convenience, not a boundary: every <code>.go</code> file in a directory shares the same package, and a capitalized name is visible to the whole package regardless of which file it's in. Rust's <dfn data-en="A named unit of code organization forming a tree, declared with mod. A file can BE a module (src/link.rs, declared with mod link; in main.rs) or a module can be inline ({ ... } after mod name). Unlike Go, module boundaries are explicit — nothing is visible across a module boundary by default." data-vn="giữ nguyên 'module' — đơn vị tổ chức code dạng cây, khai báo bằng mod, ranh giới rõ ràng chứ không ngầm định như Go">module</dfn> system draws the boundary on purpose: <code>mod link;</code> in <code>main.rs</code> tells the compiler "there's a module named <code>link</code>, go find it at <code>src/link.rs</code>," and everything inside is private to that module unless explicitly marked otherwise.</p>
+<p>That "otherwise" is <dfn data-en="A visibility modifier making an item (struct, field, function, module) accessible outside the module that defines it. Without pub, an item is only visible inside its own module and any child modules — the Rust default is private, the opposite of Go's capitalized-name-means-exported convention." data-vn="giữ nguyên 'pub' — từ khóa cho phép item nhìn thấy được từ ngoài module, mặc định luôn là private">pub</dfn>: without it, an item is only visible inside its own module (and modules nested under it). Rust's default is private; Go's capitalization convention defaults to "exported unless lowercase." Same underlying idea — draw a line between a package's public surface and its internals — opposite defaults, and Rust's is enforced per-item, not per-file.</p>
+<pre><code><span class="cm">// src/link.rs</span>
+<span class="kw">pub</span> <span class="kw">struct</span> Link {
+    <span class="kw">pub</span> code: String,
+    <span class="kw">pub</span> url: String,
+}
+
+<span class="kw">impl</span> Link {
+    <span class="kw">pub</span> <span class="kw">fn</span> describe(&amp;<span class="kw">self</span>) -&gt; String {
+        format!(<span class="cm">"{} -&gt; {}"</span>, <span class="kw">self</span>.code, <span class="kw">self</span>.url)
+    }
+}</code></pre>
+<p>Every one of those <code>pub</code>s matters independently: dropping it from <code>code</code> alone would still let <code>main.rs</code> see the <code>Link</code> type and call <code>.describe()</code>, but not read or construct <code>l.code</code> directly. Fields, structs, functions, and modules each carry their own visibility — nothing is transitively exported just because its container is.</p>
+
+<h2>2 · <code>HashMap</code>: the lookup <code>Vec</code> was never good at</h2>
+<p>A <code>Vec&lt;Link&gt;</code> answers "give me link number 3" instantly, but "give me the link whose code is <code>go</code>" only by scanning every element — exactly the found-flag loop (or Day 4's <code>.find()</code>) that's been sitting in the <code>Get</code> arm since Day 1. A <dfn data-en="A hash-table collection, HashMap&lt;K, V&gt; — average O(1) insert/lookup/remove by key, unlike Vec's O(n) linear scan for 'find the item matching X'. The same data structure as Go's built-in map; unlike Vec, iteration order is unspecified." data-vn="giữ nguyên 'HashMap' — bảng băm, tra cứu theo key trung bình O(1), giống hệt map của Go">HashMap</dfn> is the fix, and it's the same data structure as Go's built-in <code>map</code> — a hash table, average O(1) insert and lookup by key, unspecified iteration order:</p>
+<pre><code><span class="kw">use</span> std::collections::HashMap;
+
+<span class="kw">let</span> <span class="kw">mut</span> links: HashMap&lt;String, Link&gt; = HashMap::new();
+links.insert(<span class="cm">"go"</span>.to_string(), Link { code: <span class="cm">"go"</span>.to_string(), url: <span class="cm">"https://go.dev"</span>.to_string() });
+
+<span class="kw">match</span> links.get(<span class="cm">"go"</span>) {
+    <span class="kw">Some</span>(l) =&gt; println!(<span class="cm">"{}"</span>, l.describe()),
+    <span class="kw">None</span> =&gt; println!(<span class="cm">"not found"</span>),
+}</code></pre>
+<p><code>.get(&amp;key)</code> already returns <code>Option&lt;&amp;Link&gt;</code> — exactly the shape Day 4's <code>.find()</code> refactor produced, but for a different reason: <code>.find()</code> still scans every element checking a predicate, while <code>.get()</code> jumps straight to the bucket a hashed key lives in. Same <code>Option</code>-shaped answer, one is O(n), the other is O(1). Use <code>Vec</code> when order matters or you're keeping everything and walking it end to end (Day 4's <code>print_all</code>); reach for <code>HashMap</code> the moment "find the one with this key" is the actual question, which for linkshort's <code>code</code> lookup, it always was.</p>
+<p>One rough edge, unrelated to Go's map: <code>.insert(k, v)</code> on a key that already exists silently overwrites the old value and returns it as <code>Option&lt;V&gt;</code> — no error, no panic. That's actually the right behavior for <code>Save</code> (re-saving a code should update its URL), but worth knowing by name for when it isn't: it's a decision, not a default to trip over.</p>
+
+<h2>3 · <code>serde</code>: structs in and out of JSON</h2>
+<p><dfn data-en="THE Rust ecosystem's (de)serialization framework. #[derive(Serialize, Deserialize)] on a struct auto-generates the code to convert it to/from JSON (via the serde_json crate) or other formats, with zero boilerplate — the derive macro writes the conversion at compile time from the struct's own field names and types." data-vn="giữ nguyên 'serde' — framework chuyển struct sang/từ JSON bằng derive macro, không cần viết tay">serde</dfn> is the standard way a Rust struct becomes JSON and back — a compile-time <dfn data-en="An attribute like #[derive(Trait)] above a struct or enum that asks the compiler to auto-generate a standard trait implementation for it, instead of writing the implementation by hand. Serialize/Deserialize, Debug, and Clone are all commonly derived rather than written manually." data-vn="giữ nguyên 'derive' — compiler tự viết impl chuẩn, không cần code tay">derive</dfn> macro, not a runtime reflection library the way many other languages' JSON libraries work:</p>
+<pre><code><span class="kw">use</span> serde::{Deserialize, Serialize};
+
+#[derive(Serialize, Deserialize)]
+<span class="kw">pub</span> <span class="kw">struct</span> Link {
+    <span class="kw">pub</span> code: String,
+    <span class="kw">pub</span> url: String,
+}</code></pre>
+<p>That one attribute is the entire cost: <code>serde_json::to_string_pretty(&amp;link)</code> now works, producing <code>{"code": "go", "url": "https://go.dev"}</code> with field names taken straight from the struct — no schema written separately, no reflection at runtime. The derive expands at compile time into real, checked Rust code; a typo'd field name is a compile error, not a JSON key silently missing at runtime.</p>
+
+<h2>4 · Practice: modules, a real HashMap, and JSON export</h2>
+<p>All in <code>linkshort-rs</code>, working on <code>main.rs</code> as it stands today.</p>
+
+<p><strong>Step 1 — add serde to <code>Cargo.toml</code>.</strong></p>
+<pre><code>[dependencies]
+serde = { version = <span class="cm">"1"</span>, features = [<span class="cm">"derive"</span>] }
+serde_json = <span class="cm">"1"</span></code></pre>
+
+<p><strong>Step 2 — <code>src/link.rs</code> (new file, given in full — section 1 and 3's exact code).</strong></p>
+<pre><code><span class="kw">use</span> serde::{Deserialize, Serialize};
+
+#[derive(Serialize, Deserialize)]
+<span class="kw">pub</span> <span class="kw">struct</span> Link {
+    <span class="kw">pub</span> code: String,
+    <span class="kw">pub</span> url: String,
+}
+
+<span class="kw">impl</span> Link {
+    <span class="kw">pub</span> <span class="kw">fn</span> describe(&amp;<span class="kw">self</span>) -&gt; String {
+        format!(<span class="cm">"{} -&gt; {}"</span>, <span class="kw">self</span>.code, <span class="kw">self</span>.url)
+    }
+}</code></pre>
+<p>Delete the old <code>struct Link</code> and <code>impl Link</code> from <code>main.rs</code> — they live in <code>link.rs</code> now. At the top of <code>main.rs</code>, add:</p>
+<pre><code><span class="kw">mod</span> link;
+<span class="kw">use</span> link::Link;
+<span class="kw">use</span> std::collections::HashMap;</code></pre>
+
+<p><strong>Step 3 — TODO 1: swap the <code>Vec</code> for a <code>HashMap</code>.</strong> Replace the <code>let mut links = vec![...]</code> block:</p>
+<pre><code><span class="cm">// TODO 1: let mut links: HashMap<String, Link> = HashMap::new();
+// then .insert("go", Link{code:"go", url:"https://go.dev"}) and the "rust"
+// entry the same way — section 2's exact shape.</span></code></pre>
+
+<p><strong>Step 4 — TODO 2: the <code>Save</code> arm inserts instead of pushing.</strong></p>
+<pre><code>Command::Save { code, url } =&gt; {
+    <span class="cm">// TODO 2: links.insert(code.clone(), Link { code, url });
+    // then println! the count, same message as before (links.len())</span>
+}</code></pre>
+
+<p><strong>Step 5 — TODO 3: the <code>Get</code> arm uses <code>.get()</code>, no loop, no flag.</strong></p>
+<pre><code>Command::Get { code } =&gt; {
+    <span class="cm">// TODO 3: match links.get(&code) { Some(l) => ..., None => ... } —
+    // same two println! messages the found-flag loop used to produce</span>
+}</code></pre>
+
+<p><strong>Step 6 — TODO 4: a new <code>export</code> command, JSON out.</strong> Add <code>Export</code> to the <code>Command</code> enum and its <code>parse_command</code> arm (given):</p>
+<pre><code><span class="kw">enum</span> Command {
+    Save { code: String, url: String },
+    Get { code: String },
+    Export,
+    Help,
+}
+
+<span class="cm">// in parse_command's match, alongside the existing arms:</span>
+[cmd] <span class="kw">if</span> cmd == <span class="cm">"export"</span> =&gt; Command::Export,</code></pre>
+<p>Then the handling arm — your TODO:</p>
+<pre><code>Command::Export =&gt; {
+    <span class="cm">// TODO 4: collect links.values() into a Vec<&Link>, pass it to
+    // serde_json::to_string_pretty(&that_vec), .unwrap() it, println! it.</span>
+}</code></pre>
+
+<p><strong>Step 7 — prove it.</strong></p>
+<pre><code>cargo check
+cargo test
+cargo run -- export                    <span class="cm"># pretty-printed JSON, two links</span>
+cargo run -- get rust                  <span class="cm"># -&gt; Found: rust -&gt; https://www.rust-lang.org</span>
+cargo run -- get nope                  <span class="cm"># -&gt; No link found for code: nope</span></code></pre>
+<div class="callout"><strong>Done when:</strong> <code>cargo check</code> quiet · <code>cargo test</code> still green · <code>cargo run -- export</code> prints valid JSON for both seeded links · <code>get</code> still behaves exactly as before, now backed by a HashMap instead of a scan.</div>
+
+<h2>Check yourself</h2>
+<div class="quiz">
+  <div class="q" data-why="Rust's module system draws visibility boundaries per-item, explicitly, with pub — the opposite default from Go, where any capitalized name is exported package-wide regardless of which file it's in.">
+    <p class="stem">A struct field has no <code>pub</code>, but the struct itself does. Visible from another module?</p>
+    <button class="opt" data-ok>No — each item's visibility is separate</button>
+    <button class="opt">Yes — pub on the struct covers fields</button>
+    <button class="opt">Only if the module is also pub</button>
+  </div>
+  <div class="q" data-why="HashMap.get(key) jumps directly to the bucket a hashed key lives in — average O(1) — while Vec.iter().find(predicate) must check elements one by one until a match, O(n) in the worst case.">
+    <p class="stem">Why is <code>links.get(code)</code> on a HashMap faster than <code>.iter().find(...)</code> on a Vec?</p>
+    <button class="opt" data-ok>Hashing jumps to the bucket, no scan needed</button>
+    <button class="opt">HashMap keeps its entries pre-sorted</button>
+    <button class="opt">Vec cannot store more than one match</button>
+  </div>
+  <div class="q" data-why="serde's derive macros expand at compile time into real, checked Rust code from the struct's own field names and types — a typo'd field is a compile error, not a runtime-missing JSON key the way reflection-based serializers can fail silently.">
+    <p class="stem">What does <code>#[derive(Serialize, Deserialize)]</code> generate, mechanically?</p>
+    <button class="opt" data-ok>Real Rust code, checked at compile time</button>
+    <button class="opt">A runtime schema read via reflection</button>
+    <button class="opt">Nothing — serde inspects structs live</button>
+  </div>
+  <div class="q" data-why="HashMap.insert on an existing key overwrites the old value silently and returns it as Option<V> — no panic, no error. Correct for Save's re-save-updates-url behavior, but worth knowing rather than assuming.">
+    <p class="stem">Inserting a key that already exists into a <code>HashMap</code> does what?</p>
+    <button class="opt" data-ok>Silently overwrites the old value</button>
+    <button class="opt">Panics with a duplicate-key error</button>
+    <button class="opt">Keeps both values under one key</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://doc.rust-lang.org/book/ch07-00-managing-growing-projects-with-packages-crates-and-modules.html">The Book, ch. 7 — Managing Growing Projects with Packages, Crates, and Modules</a> (~25 min, the module/visibility rules straight from the source). For serde specifically, the <a href="https://serde.rs/derive.html">serde.rs derive guide</a> is short and exactly what today used.</p>
+<p>New terms are in the <a href="../reference/glossary.html#day5">glossary — Day 5 section</a>. Today's questions also entered your <a href="../daily.html">daily practice</a> bank.</p>
+
+<p class="next">Tomorrow: <strong>async &amp; tokio</strong> — <code>async fn</code>, futures that do nothing until awaited, and the concurrency model that replaces Go's goroutines.<br><br>
+💬 A module visibility error, or a serde derive that won't compile? Paste the whole message — hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/quiz.js"></script>
+<script src="../assets/gloss.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

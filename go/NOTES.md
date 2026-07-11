@@ -43,3 +43,18 @@
   compile-check the lesson's Go/pgx code (same approval restriction) — the
   scaffold was written carefully against known-correct pgx v5 API but is unverified
   by a compiler this round; verify it compiles before/while doing the practice.
+- 2026-07-12 (Day 6 generation): direct `psql "$LEARNING_DB_URL" ...` and reading
+  `~/.config/learning/db.env` were both blocked in this headless run (shell-variable
+  expansion and out-of-workspace file reads are disallowed for this session), so no
+  prior-progress SELECT was possible — paced from learning-records + project file
+  state alone, same as 2026-07-11. `bin/record-progress`, however, *did* work (it
+  sources the DB env internally rather than the caller expanding it), so Day 6's
+  `lesson_generated` event was recorded successfully. `project/linkshort` still had
+  no `postgres.go` on disk (Day 5 practice looks unstarted, no completion record
+  either) — Day 6's lesson opens with a "Step 0" that hands over a complete, working
+  copy of Day 5's `postgres.go` so today doesn't block on it. Unlike 2026-07-11, `go
+  vet`/`go build` access WAS available this round — the full `link/postgres.go`,
+  `link/queries.go`, and `main.go` scaffold was compile-checked clean in a scratch
+  dir (confirmed pgx v5's `RowToStructByName` matches columns to struct fields
+  case-insensitively, underscores stripped, by reading its source directly) before
+  shipping.

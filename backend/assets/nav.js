@@ -16,6 +16,8 @@
       file: "lessons/0004-who-are-you.html" },
     { n: 5, date: "2026-07-11", title: "Should I add an index?",
       file: "lessons/0005-should-i-add-an-index.html" },
+    { n: 6, date: "2026-07-12", title: "What actually happens inside a transaction",
+      file: "lessons/0006-what-actually-happens-in-a-transaction.html" },
   ];
 
   const REFS = [

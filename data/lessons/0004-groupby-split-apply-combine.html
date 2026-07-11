@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 4 · GroupBy: Split, Apply, Combine</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 4 · ~20 min · 12 Jul 2026</p>
+<h1>GroupBy: split, apply, combine</h1>
+<p class="byline">If Lesson 3's practice isn't all green yet, no problem — today reuses the exact same file and the exact same coerced <code>amount</code> column, so finishing this one also finishes that one. Today's question is the one every interview wrangling task eventually asks: totals, counts, or averages <em>per group</em> — the pandas answer to SQL's <code>GROUP BY</code>.</p>
+
+<h2>Recap, in one line</h2>
+<p>Lesson 3 decided what to do with a missing value in one column at a time. Today's operations look at the whole table again, but sliced into groups first — same vectorized instinct, one level up.</p>
+
+<h2>1 · Split, apply, combine — and its SQL cousin</h2>
+<p>A <dfn data-en="the three-step model behind every groupby operation: SPLIT the rows into groups by a key, APPLY a function independently to each group, COMBINE the per-group results back into one Series or DataFrame. pandas' groupby() only does step one — the split — until you chain an aggregation onto it." data-vn="giữ nguyên 'split-apply-combine' — chia nhóm, tính từng nhóm, rồi gộp kết quả lại">groupby</dfn> operation is always the same three steps, and naming them is the whole mental model: split the rows into groups by a key, apply some function to each group independently, combine the per-group results back into one answer. <code>df.groupby("customer")</code> alone does only the first step — it produces a lazy "grouped" object, nothing computed yet — until you chain an aggregation onto it:</p>
+<table class="gloss">
+<tr><th>SQL</th><th>pandas</th></tr>
+<tr><td><code>SELECT customer, SUM(amount) FROM orders GROUP BY customer</code></td><td><code>df.groupby("customer")["amount"].sum()</code></td></tr>
+<tr><td><code>SELECT customer, COUNT(*) FROM orders GROUP BY customer</code></td><td><code>df.groupby("customer").size()</code></td></tr>
+<tr><td><code>SELECT customer, AVG(amount) FROM orders GROUP BY customer</code></td><td><code>df.groupby("customer")["amount"].mean()</code></td></tr>
+</table>
+<p>The result of <code>.sum()</code>/<code>.mean()</code> on a grouped single column is a <dfn data-en="one column of a DataFrame — a 1-dimensional labeled array where every value shares one dtype" data-vn="giữ nguyên 'Series' — một cột của DataFrame">Series</dfn> indexed by the group key — <code>customer</code> becomes the row label, not a regular column, until you call <code>.reset_index()</code> to put it back as one. That's the "combine" step made visible: one row per group, automatically.</p>
+
+<h2>2 · <code>.size()</code> vs <code>.count()</code>: the NaN gotcha</h2>
+<p>These look interchangeable and aren't, the moment a column has missing values. <code>.size()</code> counts <em>rows</em> per group, full stop — it doesn't look at any column's values. <code>.count()</code>, called on a specific column, counts only the <strong>non-null</strong> values in that column per group:</p>
+<pre><code>df.groupby(<span class="kw">"customer"</span>).size()               <span class="cm"># rows per group — NaN or not, doesn't matter</span>
+df.groupby(<span class="kw">"customer"</span>)[<span class="kw">"amount"</span>].count()    <span class="cm"># non-null amount values per group — NaN rows don't count</span></code></pre>
+<p>SQL's <code>COUNT(*)</code> matches <code>.size()</code>; SQL's <code>COUNT(amount)</code> — a much less commonly reached-for form, but it exists precisely for this — matches <code>.count()</code> on that column. Picking the wrong one silently answers a different question: "how many orders does this customer have" (<code>.size()</code>) is not the same fact as "how many orders have a known amount" (<code>.count()</code>), and an interview task that asks for the first while you reach for the second will look right until someone checks a customer with a gap.</p>
+
+<h2>3 · Multiple aggregations at once: <code>.agg()</code></h2>
+<p>Chaining <code>.sum()</code> directly gets one number per group. The moment you want several — total <em>and</em> count <em>and</em> average, say — <code>.agg()</code> takes a dict (or named arguments) and returns them all in one DataFrame, one pass over the data instead of three separate groupby calls:</p>
+<pre><code>df.groupby(<span class="kw">"customer"</span>)[<span class="kw">"amount"</span>].agg(
+    total=(<span class="kw">"sum"</span>),
+    orders=(<span class="kw">"count"</span>),
+    avg=(<span class="kw">"mean"</span>),
+)</code></pre>
+<p>Each keyword becomes a column name in the result — this is <dfn data-en="the .agg(new_col=('source_col', 'func')) or, on a single already-selected column, .agg(new_col='func') form — names the output column directly, instead of getting pandas' default (and sometimes ugly) auto-generated column names from a plain dict" data-vn="giữ nguyên 'named aggregation' — đặt tên cột kết quả trực tiếp trong .agg()">named aggregation</dfn>, and it's the version worth typing from muscle memory: the plain-dict form of <code>.agg()</code> works too, but its default column names are uglier and easy to get wrong under interview pressure.</p>
+
+<h2>4 · The SQL <code>HAVING</code> step: filtering groups</h2>
+<p>SQL's <code>GROUP BY</code> ... <code>HAVING count(*) &gt; 1</code> filters on the <em>aggregated</em> result, not the original rows — pandas has no separate keyword for this, because it doesn't need one: the groupby result is just a Series/DataFrame, and you filter it the same boolean-mask way as any other:</p>
+<pre><code>totals = df.groupby(<span class="kw">"customer"</span>)[<span class="kw">"amount"</span>].sum()
+counts = df.groupby(<span class="kw">"customer"</span>).size()
+totals[counts &gt; <span class="kw">1</span>]     <span class="cm"># SQL: ... GROUP BY customer HAVING count(*) > 1</span></code></pre>
+<p>Nothing new here mechanically — it's Lesson 1's boolean-mask filtering, just applied to a groupby result instead of the raw table.</p>
+
+<div class="interview">
+<p><strong>Q: "Given an orders table, find customers whose total spend is above $150, ordered highest first."</strong> A strong answer, out loud: <em>"That's split-apply-combine: group by customer, sum the amount column per group — that's the SQL GROUP BY plus SUM. Then I filter the resulting Series the same way I'd filter any Series, totals greater than 150 — that's the HAVING step, just as a boolean mask instead of a separate keyword. Last, sort_values descending. One line per step, no loop over customers anywhere."</em> The subtext: naming split-apply-combine explicitly, and knowing HAVING isn't a separate pandas concept, reads as fluency rather than pattern-matching a snippet.</p>
+</div>
+
+<h2>Try it — self-checking practice (~8 min)</h2>
+<p>Open <code>practice/04_groupby_split_apply_combine.py</code>, replace each <code>...</code>, and re-run until all three checks print ✓:</p>
+<pre><code>cd ~/learning/data
+uv run --with pandas python3 practice/04_groupby_split_apply_combine.py</code></pre>
+<p>Same file as Lessons 2–3 (<code>practice/data/orders_raw.csv</code>): three customers, one missing <code>amount</code>. Exercise 1 totals per customer; exercise 2 is the <code>.size()</code> vs <code>.count()</code> gotcha from section 2, made concrete; exercise 3 is the <code>HAVING</code>-style filter from section 4.</p>
+
+<h2>Check yourself</h2>
+<div class="quiz">
+  <div class="q" data-why="groupby() alone only performs the SPLIT step, producing a lazy grouped object — nothing is computed until an aggregation like .sum() or .agg() is chained onto it, which does the apply-and-combine.">
+    <p class="stem"><code>df.groupby("customer")</code> alone, with nothing chained after it, does what?</p>
+    <button class="opt" data-ok>Splits into groups; nothing computed yet</button>
+    <button class="opt">Returns the sum of every numeric column</button>
+    <button class="opt">Raises an error without an aggregation</button>
+  </div>
+  <div class="q" data-why=".size() counts rows per group regardless of column values. .count() on a specific column counts only its non-null values per group — a customer with one missing amount shows a smaller .count() than .size() for that column.">
+    <p class="stem">A customer has 3 orders, one with a missing <code>amount</code>. What do <code>.size()</code> and <code>.count()</code> on that column report?</p>
+    <button class="opt" data-ok>size 3, amount count 2 — count skips the NaN</button>
+    <button class="opt">Both report 3 — they're interchangeable</button>
+    <button class="opt">Both report 2 — NaN rows are dropped first</button>
+  </div>
+  <div class="q" data-why="Named aggregation, .agg(new_col=('source_col','func')) or .agg(new_col='func') on an already-selected column, computes several aggregations in one pass and names each output column directly, instead of pandas' uglier default auto-generated names from a plain dict.">
+    <p class="stem">What does named aggregation (<code>.agg(total="sum", orders="count")</code>) buy you over calling <code>.sum()</code> three separate times?</p>
+    <button class="opt" data-ok>One pass, several results, columns named clearly</button>
+    <button class="opt">It runs the aggregation without reading NaN</button>
+    <button class="opt">It automatically sorts the result descending</button>
+  </div>
+  <div class="q" data-why="pandas has no separate HAVING keyword — filtering an aggregated groupby result uses the exact same boolean-mask indexing as filtering any other Series or DataFrame, e.g. totals[counts > 1].">
+    <p class="stem">SQL's <code>HAVING count(*) &gt; 1</code> after a <code>GROUP BY</code> — what's the pandas equivalent mechanism?</p>
+    <button class="opt" data-ok>A boolean mask on the groupby result itself</button>
+    <button class="opt">A separate .having() method on the DataFrame</button>
+    <button class="opt">Passing having= into .groupby() directly</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official <a href="https://pandas.pydata.org/docs/user_guide/groupby.html">Group by: split-apply-combine</a> user guide (~20 min) — the section headers literally mirror today's lesson structure, straight from the source. Wes McKinney's <a href="https://wesmckinney.com/book/data-wrangling.html">ch. 10</a> has the clearest worked examples of named aggregation.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a>.<br>
+<strong>Next lesson:</strong> merge/join — combining two tables, and every pandas <code>merge()</code> argument mapped to the SQL join type it matches.<br><br>
+💬 Anything unclear — size vs count, named aggregation, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

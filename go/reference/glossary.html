@@ -102,6 +102,17 @@
 <tr><td>migration (DB)</td><td>A numbered, checked-in SQL script that changes the schema by one step. Applying migrations in order reproduces the exact same schema in any environment.</td><td>giữ nguyên "migration" — file SQL đánh số, chạy lại được ở mọi môi trường</td></tr>
 </table>
 
+<h2 id="day6">Day 6 — Queries from Go (+ generics in the wild)</h2>
+<table class="gloss">
+<tr><th>Term</th><th>In software</th><th>Tiếng Việt (dev-style)</th></tr>
+<tr><td>connection pool</td><td>A small set of already-open database connections, reused across calls instead of opening a new TCP + auth handshake per query. <code>*pgxpool.Pool</code> is the pgx v5 pool type.</td><td>giữ nguyên "connection pool" — giữ sẵn vài kết nối DB, dùng lại thay vì mở mới</td></tr>
+<tr><td>generic</td><td>A function or type written once, parameterized over a type argument T, that works for any T satisfying its constraints — instead of one hand-copied version per concrete type. <code>pgx.CollectRows[T]</code> is a real-world use.</td><td>giữ nguyên "generic" — viết một lần, dùng cho nhiều kiểu T khác nhau</td></tr>
+<tr><td>offset pagination</td><td>Returning results page by page by skipping a row count from the start (<code>LIMIT m OFFSET n</code>). Simple, but gets slower the deeper you page — Postgres still walks and discards the first n rows every time.</td><td>giữ nguyên "offset pagination" — phân trang bằng cách bỏ qua n dòng đầu</td></tr>
+<tr><td>keyset pagination</td><td>Pagination using a WHERE clause on the last row's own sort key instead of a row count. Cost stays flat no matter how deep you page — exactly what a composite index like <code>clicks (link_code, clicked_at DESC)</code> is built to serve.</td><td>giữ nguyên "keyset pagination" — phân trang bằng điều kiện WHERE trên giá trị dòng cuối</td></tr>
+<tr><td>transaction</td><td>A group of statements that succeed or fail together as one unit — BEGIN, then COMMIT (all changes take effect) or ROLLBACK (all discarded). Needed once a unit of work spans more than one statement; a single statement is already atomic.</td><td>giữ nguyên "transaction" — nhóm câu lệnh, hoặc tất cả cùng thành công hoặc tất cả cùng bị hủy</td></tr>
+<tr><td>query plan / EXPLAIN</td><td>The step-by-step strategy Postgres actually picked to answer a query — which index (if any), which scan type. <code>EXPLAIN ANALYZE</code> runs the query for real and shows both the plan and real timings.</td><td>giữ nguyên "query plan" — kế hoạch Postgres chọn để chạy query, xem bằng EXPLAIN</td></tr>
+</table>
+
 <h2>Coming this week (Days 4–7)</h2>
 <table class="gloss">
 <tr><th>Term</th><th>In software</th><th>Tiếng Việt (dev-style)</th></tr>

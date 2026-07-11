@@ -37,3 +37,11 @@
   Lesson-N's own teaser plus file state, never a reported outcome — Lesson 5 follows
   that same pattern. `lesson_generated` could not be recorded; do it manually once
   DB access is back.
+- 2026-07-12 generation: direct `psql "$LEARNING_DB_URL" ...` and reading
+  `~/.config/learning/db.env` were both blocked in this headless run (shell-variable
+  expansion and out-of-workspace file reads disallowed for this session) — still no
+  reported outcome for any of Lessons 1–5, so Lesson 6 continues the conservative
+  pattern, picking up Lesson 5's own teaser (transactions) rather than any recorded
+  gap. `bin/record-progress` DID work this round (it sources the DB env internally
+  rather than the caller expanding it) — `lesson_generated` was recorded
+  successfully for the first time since Lesson 1.

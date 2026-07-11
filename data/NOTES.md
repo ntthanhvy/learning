@@ -25,3 +25,14 @@
   actually be executed with `uv run --with pandas` this round — run it once and
   confirm the ✓/✗ output before trusting it blindly. `lesson_generated` could not be
   recorded; do it manually once DB access is back.
+- 2026-07-12 generation (Lesson 4): direct `psql "$LEARNING_DB_URL" ...` and reading
+  `~/.config/learning/db.env` were both blocked in this headless run (shell-variable
+  expansion and out-of-workspace file reads disallowed for this session) — still no
+  learning record beyond the baseline, so Lesson 4 continues the conservative
+  pattern from the curriculum spine (groupby, per Lesson 3's own teaser) rather than
+  a reported outcome. `uv run --with pandas` access WAS available this round though:
+  `practice/04_groupby_split_apply_combine.py` was actually executed — confirmed it
+  prints all ✗ with the shipped `...` placeholders, then all ✓ once solved, against
+  the real `orders_raw.csv` fixture (An 162.0/3 orders, Binh 215.5/2, Chi 99.9/1).
+  `bin/record-progress` also worked (sources the DB env internally) — `lesson_generated`
+  was recorded for the first time since Lesson 1's baseline.

@@ -12,6 +12,8 @@
       file: "lessons/0002-load-and-inspect.html" },
     { n: 3, date: "2026-07-11", title: "Missing data & cleaning",
       file: "lessons/0003-missing-data-and-cleaning.html" },
+    { n: 4, date: "2026-07-12", title: "GroupBy: split, apply, combine",
+      file: "lessons/0004-groupby-split-apply-combine.html" },
   ];
 
   const REFS = [

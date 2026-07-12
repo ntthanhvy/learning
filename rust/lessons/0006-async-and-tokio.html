@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 6 · Async &amp; Tokio</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Rust Intensive · Day 6 · ~75 min</p>
+<h1>Async &amp; tokio</h1>
+<p class="byline">Same as yesterday: Days 2–5's TODOs don't need to be finished for today — this lesson works on <code>main.rs</code> exactly as Day 1 left it (<code>Vec&lt;Link&gt;</code>, the found-flag <code>Get</code> loop, all of it). Today adds one thing to that file: a new <code>check</code> command that pings every saved link <em>concurrently</em> instead of one at a time. That's the whole practice surface — the concept underneath is Rust's answer to the goroutines you've spent this same week writing in Go.</p>
+
+<h2>Warm-up: yesterday, from memory</h2>
+<div class="quiz">
+  <div class="q" data-why="pub is per-item, not transitive — a struct being pub says nothing about its fields. Link's url field needs its own pub keyword, or main.rs can see the type but not read that field directly.">
+    <p class="stem"><code>mod link;</code> in <code>main.rs</code>, with no <code>pub</code> on <code>Link</code>'s <code>url</code> field — can <code>main.rs</code> read <code>link.url</code> directly?</p>
+    <button class="opt" data-ok>No, url needs its own pub keyword</button>
+    <button class="opt">Yes, pub on Link covers every field</button>
+    <button class="opt">Only if link.rs also imports serde derive</button>
+  </div>
+  <div class="q" data-why="HashMap.insert on a key that already exists silently replaces the value and hands back the old one as Option<V> — no panic, no error, a decision worth knowing by name.">
+    <p class="stem">Calling <code>links.insert</code> on a code already present — what happens to the link that was there before?</p>
+    <button class="opt" data-ok>Overwritten silently, the caller gets no error</button>
+    <button class="opt">The insert call panics on any duplicate</button>
+    <button class="opt">Both links stay stored under that key</button>
+  </div>
+  <div class="q" data-why="Go's encoding/json reads struct tags at runtime via reflection on every call. serde's derive macros expand once, at compile time, into ordinary Rust code generated from the struct's own field names and types — a typo becomes a compile error, not a runtime surprise.">
+    <p class="stem">Unlike Go's <code>encoding/json</code> (runtime reflection), what does serde's derive do differently?</p>
+    <button class="opt" data-ok>It generates real Rust code at compile time</button>
+    <button class="opt">It also relies on runtime reflection like Go</button>
+    <button class="opt">It skips type checking for faster JSON output</button>
+  </div>
+</div>
+
+<h2>1 · A future does nothing by itself</h2>
+<p>In Go, <code>go f()</code> starts running immediately — the goroutine is scheduled the instant that statement executes, whether or not anything ever reads its result. Rust's <dfn data-en="Async functions in Rust are lazy: calling one does not run its body. async fn f() -> T actually returns a value of a hidden type implementing Future&lt;Output = T&gt;, and nothing inside f runs until that future is polled — by .await, or by handing it to an executor like tokio::spawn." data-vn="giữ nguyên 'future' — đại diện cho việc chưa xong, không tự chạy cho tới khi được await hoặc spawn">future</dfn> is the opposite: writing <code>async fn check_link(...)</code> and calling <code>check_link(l)</code> builds a future value and does <strong>nothing</strong> — no code inside the function body runs — until something drives it forward. That "something" is either <dfn data-en="The point where an async function can pause, handing control back to whatever is driving it, and resume later when the awaited future is ready. Written as a suffix: some_future.await. Unlike a blocking call, the underlying thread is free to run other work while this future is paused." data-vn="giữ nguyên 'await' — điểm hàm async có thể tạm dừng, nhường CPU cho việc khác, rồi chạy tiếp sau">.await</dfn>, which drives the future to completion right where you write it and pauses the surrounding async function while doing so, or <code>tokio::spawn</code>, which hands the future to a scheduler to run independently — section 3.</p>
+
+<h2>2 · No built-in runtime — that's what tokio is</h2>
+<p>Go's runtime — the scheduler that actually runs goroutines — is compiled into every Go binary; you never install it separately. Rust's standard library ships <code>async</code>/<code>await</code> as language syntax but deliberately no runtime to execute futures on — that's a library decision, not a language one, so different projects can pick different tradeoffs (embedded systems need a tinier one than a web server does). <dfn data-en="The de-facto standard async runtime for Rust: the scheduler that actually polls futures to completion, plus async-flavored versions of IO, timers, and channels. #[tokio::main] is a macro that wraps your async fn main() body in code that starts a tokio runtime and blocks on it — the one place a normal, non-async fn actually kicks off the whole async program." data-vn="giữ nguyên 'tokio' — runtime chuẩn chạy future, kèm IO/timer bản async">tokio</dfn> is that runtime — the industry-standard choice, and what axum (Day 7's capstone) is built on:</p>
+<pre><code>#[tokio::main]
+<span class="kw">async</span> <span class="kw">fn</span> main() {
+    <span class="cm">// everything in here can .await</span>
+}</code></pre>
+<p><code>#[tokio::main]</code> is sugar: it rewrites that <code>async fn main()</code> into an ordinary, synchronous <code>fn main()</code> that starts a tokio runtime and blocks on your async body — the one seam where a plain, non-async function actually kicks off an async program at all.</p>
+
+<h2>3 · <code>tokio::spawn</code>: fan-out, Go's shape, Rust's rules</h2>
+<p><code>tokio::spawn(future)</code> is Rust's <code>go f()</code> — it hands a future to the runtime and returns immediately, letting that future run concurrently with everything else. The difference from Go shows up at the return value: <code>tokio::spawn</code> gives back a <code>JoinHandle&lt;T&gt;</code>, and <code>.await</code>ing that handle is how you get the task's result back — closer to Go's pattern of a goroutine sending its result down a channel for the caller to receive, made explicit instead of needing a channel you wire up by hand.</p>
+<pre><code><span class="kw">let</span> handle = tokio::spawn(<span class="kw">async</span> <span class="kw">move</span> {
+    <span class="cm">// runs concurrently with the rest of main</span>
+    42
+});
+<span class="kw">let</span> result: i32 = handle.<span class="kw">await</span>.unwrap(); <span class="cm">// .await gives Result<T, JoinError></span>
+</code></pre>
+<p>That <code>Result</code> wrapper is not decoration: <code>.await</code> on a <code>JoinHandle</code> returns <code>Ok(value)</code> if the task finished normally, or <code>Err(JoinError)</code> if it panicked — a panic inside a spawned task doesn't crash your program the way an unrecovered panic on the main thread does; it's reported back through this <code>Result</code> instead, another Rust error-as-value moment (Day 3).</p>
+<p>The rule that trips people up first: a spawned future must be <code>'static</code> — it can't borrow anything from the function that spawned it. The runtime may run that task on another thread, at some later, unknown time, possibly after the spawning function has already returned — a borrowed reference could be dangling by then. The fix is always the same one Go never forces on you explicitly: <strong>own your data, don't borrow it.</strong> That's why section 5's <code>check_link</code> takes <code>link: Link</code> by value, not <code>&amp;Link</code> — the task owns the link it's checking, for exactly as long as it needs it.</p>
+
+<h2>4 · Threads vs. tasks, and Send/Sync in one sketch</h2>
+<p><code>std::thread::spawn</code> — Rust's direct equivalent of an OS thread, like Go used to require before goroutines existed — creates one real OS thread per call: heavier, but true parallelism, no runtime needed. A tokio <dfn data-en="A unit of async work spawned via tokio::spawn — NOT an OS thread. Many tasks are scheduled cooperatively onto a small pool of OS threads by the tokio runtime, the same M:N idea Go's own scheduler uses for goroutines, just a separate library implementing it instead of being built into the language runtime." data-vn="giữ nguyên 'task' — đơn vị công việc async, nhiều task chạy trên ít OS thread, giống mô hình goroutine của Go">task</dfn> is much cheaper: tokio's multi-threaded runtime schedules many tasks cooperatively across a small pool of OS threads — the same M:N idea behind Go's own goroutine scheduler, implemented as a library instead of built into the language.</p>
+<p>Both still answer to two compiler-checked traits, automatically derived for almost every ordinary type — nothing to write by hand, unlike yesterday's <code>#[derive(...)]</code>:</p>
+<ul>
+<li><dfn data-en="A marker trait meaning a value of this type is safe to move to another thread. Automatically implemented by the compiler for a type when every field of it is itself Send — no manual derive needed for ordinary owned data like String, Vec, or Link." data-vn="giữ nguyên 'Send' — an toàn khi chuyển giá trị sang thread khác">Send</dfn> — safe to move a value to a different thread. <code>Link</code>, being just two <code>String</code>s, is <code>Send</code> automatically.</li>
+<li><dfn data-en="A marker trait meaning a reference to this type (&T) is safe to share across threads at the same time. Also automatically derived when it's safe; a type wrapping raw, unsynchronized mutable state (like a raw pointer) would need to opt out or wrap it in something like Mutex to become Sync." data-vn="giữ nguyên 'Sync' — an toàn khi nhiều thread cùng đọc qua tham chiếu">Sync</dfn> — safe for multiple threads to hold <code>&amp;T</code> to the same value at once.</li>
+</ul>
+<p><code>tokio::spawn</code> requires its future's output to be <code>Send</code> (it might finish on a different worker thread than it started on) — the same requirement <code>std::thread::spawn</code>'s closure has always had. Tasks and threads share the ownership rules; tasks are just far lighter weight to create.</p>
+
+<h2>5 · Practice: linkshort-rs checks its links concurrently</h2>
+<p><strong>Step 1 — add tokio to <code>Cargo.toml</code>.</strong></p>
+<pre><code>[dependencies]
+tokio = { version = <span class="cm">"1"</span>, features = [<span class="cm">"rt-multi-thread"</span>, <span class="cm">"macros"</span>, <span class="cm">"time"</span>] }</code></pre>
+
+<p><strong>Step 2 — at the top of <code>main.rs</code>, add:</strong></p>
+<pre><code><span class="kw">use</span> std::time::Duration;</code></pre>
+
+<p><strong>Step 3 — TODO 1: <code>check_link</code>, a new async function.</strong> Simulates a network check — the delay stands in for a real HTTP request Day 7's axum service could actually make:</p>
+<pre><code><span class="cm">// TODO 1: async fn check_link(link: Link) -> (String, bool) {
+//     let delay = Duration::from_millis(100 + link.code.len() as u64 * 50);
+//     tokio::time::sleep(delay).await;
+//     (link.code, true)
+// }
+// Takes `link` BY VALUE (not &Link) — section 3's 'static rule: a spawned
+// task can't borrow from main, it has to own what it checks.</span></code></pre>
+
+<p><strong>Step 4 — TODO 2: a new <code>Check</code> command.</strong> Add the variant and its <code>parse_command</code> arm (given):</p>
+<pre><code><span class="kw">enum</span> Command {
+    Save { code: String, url: String },
+    Get { code: String },
+    Check,
+    Help,
+}
+
+<span class="cm">// in parse_command's match, alongside the existing arms, BEFORE the `_` catch-all:</span>
+[cmd] <span class="kw">if</span> cmd == <span class="cm">"check"</span> =&gt; Command::Check,</code></pre>
+<p>Then the handling arm — join-and-print is given, the fan-out loop is your TODO:</p>
+<pre><code>Command::Check =&gt; {
+    <span class="kw">let</span> <span class="kw">mut</span> handles = Vec::new();
+    <span class="cm">// TODO 2: for link in links { handles.push(tokio::spawn(check_link(link))); }
+    // `links` moves into this loop by value — fine, Check is the last thing
+    // that touches it, and only one match arm ever runs.</span>
+
+    <span class="kw">for</span> handle <span class="kw">in</span> handles {
+        <span class="kw">let</span> (code, ok) = handle.<span class="kw">await</span>.unwrap();
+        println!(<span class="cm">"{}: {}"</span>, code, <span class="kw">if</span> ok { <span class="cm">"reachable"</span> } <span class="kw">else</span> { <span class="cm">"unreachable"</span> });
+    }
+}</code></pre>
+
+<p><strong>Step 5 — make <code>main</code> async (given, replaces the <code>fn main()</code> line only — the body and its existing <code>match</code> stay exactly as they are):</strong></p>
+<pre><code>#[tokio::main]
+<span class="kw">async</span> <span class="kw">fn</span> main() {
+    <span class="cm">// unchanged: let args = ...; let cmd = parse_command(&args); let mut links = vec![...];</span>
+    <span class="kw">match</span> cmd {
+        <span class="cm">// Help, Save, Get arms: unchanged from Day 1</span>
+        <span class="cm">// Check arm: Step 4, above</span>
+    }
+}</code></pre>
+
+<p><strong>Step 6 — prove it.</strong></p>
+<pre><code>cargo check
+cargo test
+cargo run -- check    <span class="cm"># two lines, "go" prints before "rust" — shorter code, shorter delay</span>
+</code></pre>
+<div class="callout"><strong>Done when:</strong> <code>cargo check</code> quiet · <code>cargo test</code> still green · <code>cargo run -- check</code> prints one <code>reachable</code> line per seeded link · timing it (roughly) shows both checks overlapping, not the sum of both delays — that overlap is the entire point.</div>
+
+<h2>Check yourself</h2>
+<div class="quiz">
+  <div class="q" data-why="A future is inert until something drives it — .await or a spawn onto an executor. A goroutine, by contrast, is scheduled and starts running the instant `go f()` executes, whether or not its result is ever used.">
+    <p class="stem">What makes a Rust future different from a Go goroutine started with <code>go f()</code>?</p>
+    <button class="opt" data-ok>A future does nothing until it's awaited</button>
+    <button class="opt">A future starts running the moment created</button>
+    <button class="opt">A future requires no runtime to execute</button>
+  </div>
+  <div class="q" data-why="A spawned task may run on another worker thread, at an unknown later time, possibly after the function that spawned it has already returned — a borrowed reference could be dangling by then. Owning the data sidesteps the whole problem.">
+    <p class="stem">Why must <code>tokio::spawn</code>'s future own its data instead of borrowing it?</p>
+    <button class="opt" data-ok>The task may outlive the borrow's original scope</button>
+    <button class="opt">Borrowed data always compiles slower than owned data</button>
+    <button class="opt">References cannot be stored inside async function bodies</button>
+  </div>
+  <div class="q" data-why="#[tokio::main] is a macro that rewrites your async fn main() into a plain, synchronous fn main() whose body starts a tokio runtime and blocks on your original async code — the one seam where an ordinary function launches an async program.">
+    <p class="stem">What does <code>#[tokio::main]</code> actually do?</p>
+    <button class="opt" data-ok>Wraps main's body in an async runtime</button>
+    <button class="opt">Runs main on a background OS thread</button>
+    <button class="opt">Compiles main twice for sync and async</button>
+  </div>
+  <div class="q" data-why="Send means a value is safe to hand off to another thread entirely. Sync (the second option here) means a shared reference to it is safe to read from multiple threads at once — a related but distinct guarantee.">
+    <p class="stem"><code>Send</code> vs <code>Sync</code> — what does <code>Send</code> mean for a type?</p>
+    <button class="opt" data-ok>Safe to move the value between threads</button>
+    <button class="opt">Safe to share a reference across threads</button>
+    <button class="opt">Required only for structs deriving Clone manually</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://tokio.rs/tokio/tutorial">tokio.rs — the official tutorial</a> (~30 min; the "Spawning" and "Shared state" chapters land directly on today's material). For the future/executor model underneath tokio, the <a href="https://rust-lang.github.io/async-book/">Async Book</a> is the deeper, slower read.</p>
+<p>New terms are in the <a href="../reference/glossary.html#day6">glossary — Day 6 section</a>. Today's questions also entered your <a href="../daily.html">daily practice</a> bank.</p>
+
+<p class="next">Tomorrow: the <strong>capstone</strong> — linkshort-rs becomes a real axum HTTP service: routing, extractors, shared state (today's Send/Sync made concrete), tests, clippy. The last day of the parallel Go/Rust week.<br><br>
+💬 A borrow-checker error on a spawned task, or a <code>.await</code> that won't compile? Paste the whole message — hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/quiz.js"></script>
+<script src="../assets/gloss.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

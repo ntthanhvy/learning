@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 5 · Merge &amp; Join</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 5 · ~20 min · 13 Jul 2026</p>
+<h1>Merge &amp; join</h1>
+<p class="byline">Lessons 1–4 worked on one table at a time. Real data almost never lives in one table — an <code>orders</code> table and a <code>customers</code> table, exactly like your Go-week Postgres schema, need to be combined before most interview questions can even be asked. Today: <code>pd.merge()</code>, mapped one-to-one to the SQL joins you already know, plus the two gotchas that bite hardest — where <code>JOIN</code> and <code>merge</code> stop being a 1:1 translation.</p>
+
+<h2>Recap, in one line</h2>
+<p>Lesson 4 answered questions about rows sliced into groups <em>within</em> one table. Today's questions need a second table before "group" even means anything — same table instincts, one level wider.</p>
+
+<h2>1 · <code>pd.merge()</code> is <code>JOIN</code>, <code>how=</code> is the join type</h2>
+<p>A <dfn data-en="pandas' function for combining two DataFrames row-wise on a shared key column — the direct equivalent of a SQL JOIN. pd.merge(left, right, on='key', how='inner'/'left'/'right'/'outer') controls both which column to match on and which unmatched rows to keep." data-vn="giữ nguyên 'merge' — hàm gộp 2 DataFrame theo cột khóa, tương đương JOIN trong SQL">merge</dfn> is pandas' <code>JOIN</code>, and the <code>how=</code> argument is exactly the join type — no new concept, only new spelling:</p>
+<table class="gloss">
+<tr><th>SQL</th><th>pandas</th></tr>
+<tr><td><code>SELECT * FROM orders JOIN customers ON orders.customer = customers.customer</code></td><td><code>orders.merge(customers, on="customer", how="inner")</code></td></tr>
+<tr><td><code>SELECT * FROM orders LEFT JOIN customers ON ...</code></td><td><code>orders.merge(customers, on="customer", how="left")</code></td></tr>
+<tr><td><code>SELECT * FROM orders RIGHT JOIN customers ON ...</code></td><td><code>orders.merge(customers, on="customer", how="right")</code></td></tr>
+<tr><td><code>SELECT * FROM orders FULL OUTER JOIN customers ON ...</code></td><td><code>orders.merge(customers, on="customer", how="outer")</code></td></tr>
+</table>
+<p><code>on="customer"</code> is the join condition — both frames need a column with that name (use <code>left_on=</code>/<code>right_on=</code> if the key is spelled differently in each). <strong>inner</strong> (the default) keeps only rows whose key exists on both sides; <strong>left</strong> keeps every row from the left frame, filling missing right-side columns with <code>NaN</code> where nothing matched — the shape you reach for constantly, because "keep everything I started with, plus whatever matched" is the far more common real question than "only keep rows that matched."</p>
+
+<h2>2 · Finding the gap: <code>indicator=True</code></h2>
+<p>The single most common real-world join question isn't "combine these tables" — it's "which rows on one side had <em>no</em> match on the other." <code>indicator=True</code> adds a <code>_merge</code> column naming exactly that, per row:</p>
+<pre><code>merged = customers.merge(orders, on=<span class="kw">"customer"</span>, how=<span class="kw">"left"</span>, indicator=<span class="kw">True</span>)
+merged[merged[<span class="kw">"_merge"</span>] == <span class="kw">"left_only"</span>]   <span class="cm"># customers with NO matching order — never ordered</span></code></pre>
+<p><code>_merge</code> takes one of three values: <code>"both"</code> (matched on both sides), <code>"left_only"</code> (only in the left frame), <code>"right_only"</code> (only in the right — only possible with <code>how="outer"</code>, since <code>how="left"</code> drops unmatched right-side rows entirely). This is the pandas way to answer "customers who never ordered," "orders with no matching customer record," or any other one-sided-gap question — filter <code>_merge</code>, don't reach for a manual set-difference.</p>
+
+<h2>3 · Two gotchas that break the 1:1 mental model</h2>
+<p><strong>Row multiplication.</strong> SQL warns about this too, but it's easy to forget in pandas specifically because nothing raises an error. If the join key isn't unique on one side — one customer, three orders — merging produces <em>one row per match</em>, not one row per input row. Merging a 3-row <code>customers</code> table against a 6-row <code>orders</code> table (where one customer alone has three orders) can come back with <em>more</em> rows than either table started with. Not a bug — that's what "one row per match" means — but a number that looks wrong at a glance if you expected row counts to be preserved.</p>
+<p><strong>Column name collisions.</strong> If both frames have a same-named column that <em>isn't</em> the join key (both have a <code>date</code> column, say), pandas doesn't error and doesn't silently pick one — it renames both automatically, <code>date_x</code> (from the left frame) and <code>date_y</code> (from the right), and leaves you to figure out which is which unless you pass <code>suffixes=("_orders", "_customers")</code> yourself to name them clearly.</p>
+<div class="callout"><strong>SQL-habit trap:</strong> in SQL, an ambiguous column name is a compile-time error you must resolve with a table prefix before the query even runs. pandas resolves the same ambiguity silently, after the fact, with <code>_x</code>/<code>_y</code> — nothing stops you from shipping code that reads the wrong one.</div>
+
+<div class="interview">
+<p><strong>Q: "Given an orders table and a customers table, find every customer who has never placed an order."</strong> A strong answer, out loud: <em>"That's a left join from customers to orders on the customer key, with indicator=True, then filter for _merge equal to left_only — those are the customers with no matching row on the orders side. I wouldn't use how='inner' here, since inner join is exactly the rows I want to exclude."</em> The subtext: naming <code>indicator</code>/<code>_merge</code> by name, and explicitly ruling out <code>inner</code>, reads as someone who has hit this exact gap-finding problem before, not someone guessing at merge syntax live.</p>
+</div>
+
+<h2>Try it — self-checking practice (~8 min)</h2>
+<p>Open <code>practice/05_merge_and_join.py</code>, replace each <code>...</code>, and re-run until all three checks print ✓:</p>
+<pre><code>cd ~/learning/data
+uv run --with pandas python3 practice/05_merge_and_join.py</code></pre>
+<p>New fixture today: <code>practice/data/customers.csv</code> (An/Binh/Danh, one region each) alongside the familiar <code>orders_raw.csv</code> (An/Binh/Chi). Notice the two customer lists don't match — Danh has never ordered, Chi has an order but no customer record — that mismatch is the whole practice.</p>
+
+<h2>Check yourself</h2>
+<div class="quiz">
+  <div class="q" data-why="how='left' keeps every row from the left DataFrame regardless of whether it matched, filling right-side columns with NaN where nothing matched — as opposed to 'inner', which drops unmatched rows from both sides.">
+    <p class="stem"><code>df1.merge(df2, on="key", how="left")</code> keeps which rows?</p>
+    <button class="opt" data-ok>Every row from df1, whether matched or not</button>
+    <button class="opt">Only rows that are present in both frames</button>
+    <button class="opt">Every row from df2, whether matched or not</button>
+  </div>
+  <div class="q" data-why="indicator=True adds a _merge column with one of three values per row: 'both' (matched), 'left_only', or 'right_only' — the direct way to find rows present on only one side of a join.">
+    <p class="stem">What does <code>indicator=True</code> add to a merge result?</p>
+    <button class="opt" data-ok>A _merge column marking both, left_only, or right_only</button>
+    <button class="opt">A boolean column marking whether any duplicates exist</button>
+    <button class="opt">A numeric column counting how many matches occurred</button>
+  </div>
+  <div class="q" data-why="A merge produces one output row per MATCH, not per input row — if a key isn't unique on one side, each of its matches produces a separate row, so the result can end up larger than either original table.">
+    <p class="stem">Merging a 3-row <code>customers</code> table against <code>orders</code>, where one customer has 3 orders, can result in what?</p>
+    <button class="opt" data-ok>More result rows than either original table had</button>
+    <button class="opt">Exactly the same row count as customers table</button>
+    <button class="opt">An error, since merge keys must stay unique</button>
+  </div>
+  <div class="q" data-why="pandas doesn't error on a non-key column name collision — it silently renames both columns with _x (left) and _y (right) suffixes, unless you pass suffixes=(...) yourself to name them clearly.">
+    <p class="stem">Both DataFrames have a column named <code>date</code> that isn't the merge key — what does pandas do by default?</p>
+    <button class="opt" data-ok>Renames both columns automatically with suffixes added</button>
+    <button class="opt">Raises an error demanding an explicit suffix</button>
+    <button class="opt">Silently keeps only the left DataFrame's column</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official <a href="https://pandas.pydata.org/docs/user_guide/merging.html">Merge, join, concatenate and compare</a> user guide (~20 min) — read through the "Database-style DataFrame or named Series joining/merging" section, which is today's lesson in full detail. The <a href="https://pandas.pydata.org/docs/getting_started/comparison/comparison_with_sql.html#compare-with-sql-join">Comparison with SQL — join</a> page is the fastest cross-reference if a specific SQL join type needs double-checking.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a>.<br>
+<strong>Next lesson:</strong> reshape — pivoting rows into columns and back, the pandas answer to a spreadsheet-style "wide" report built from a SQL-style "long" table.<br><br>
+💬 Anything unclear — how= choices, the _merge column, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

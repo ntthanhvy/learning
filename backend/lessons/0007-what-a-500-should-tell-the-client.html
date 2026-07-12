@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 7 · What a 500 Should (and Shouldn't) Tell the Client</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 7 · ~20 min</p>
+<h1>What a 500 should (and shouldn't) tell the client</h1>
+<p class="byline">Same runtime/security track as Lesson 6 — no dependency on it. Lesson 3 gave your API an <dfn data-en="the single JSON error shape every failing response uses, with a stable machine-readable code clients branch on" data-vn="error contract — MỘT format lỗi thống nhất">error contract</dfn>: a stable shape every failure returns. Today is the other half of that promise — what's actually allowed to go <em>inside</em> it when the failure is your server's own bug, not the client's mistake.</p>
+
+<h2>1 · A 500 has two audiences, and they want opposite things</h2>
+<p>A frontend habit carries over here in a way that quietly turns dangerous: <code>console.error(err)</code> in the browser is fine to print in full — the stack trace, the file paths, the library versions — because only the one developer looking at that console ever sees it. A server's error response goes over the network, to whoever sent the request, which might be your own frontend, or might be anyone with a URL and curl.</p>
+<p>The two people who care about a 500 want different things from it. The engineer debugging it wants everything: the full stack trace, the exact query that failed, which internal service timed out. The client code that receives the response wants almost nothing: just enough to decide what to do next — retry, show a generic error, or give up. Every backend framework's default error page (a raw stack trace rendered as HTML or JSON) is built for the first audience and shipped, by default, to the second one too — that's the actual bug.</p>
+
+<h2>2 · What never belongs in the response body</h2>
+<p>OWASP calls this class of bug <dfn data-en="leaking internal implementation details — stack traces, file paths, library versions, raw database errors — through an application's normal responses, giving an attacker a map of the system without needing to break in" data-vn="giữ nguyên 'information disclosure' — lộ thông tin nội bộ qua response, giúp attacker vẽ bản đồ hệ thống">information disclosure</dfn>: none of the following should ever reach a client, no matter how convenient it is while you're debugging locally.</p>
+<ul>
+<li><strong>Stack traces.</strong> Every frame names a file path, a function, sometimes a line of your actual source — free reconnaissance for an attacker mapping your stack.</li>
+<li><strong>Raw exception/driver messages.</strong> A Postgres error like <code>duplicate key value violates unique constraint "users_email_key"</code> just told the caller your table and column names, and that the row already exists — useful for enumerating valid accounts.</li>
+<li><strong>Library and version strings.</strong> "Express 4.17.1" or a specific ORM version tells an attacker exactly which known CVEs to try.</li>
+<li><strong>Internal file paths.</strong> <code>/app/src/services/payment/charge.go:142</code> reveals your project layout for no benefit to a legitimate client.</li>
+</ul>
+<p>The tell that something's wrong: if turning on a debug flag would change what a <em>production</em> response body contains, the non-debug version is already leaking too much reasoning about internals — the safe response shouldn't need a flag to become safe.</p>
+
+<h2>3 · What replaces it: a generic message plus a correlation ID</h2>
+<p>The fix isn't "tell the client nothing" — an API that returns <code>{"error": "something went wrong"}</code> with no way to reference it is nearly as bad for support and debugging as leaking a stack trace is for security. The fix is separating the two audiences at the response boundary: the client gets a safe, stable message from Lesson 3's error contract; the engineer gets everything, but from the <em>server's own logs</em>, connected by one shared value.</p>
+<pre><code><span class="cm">// what the client actually receives — nothing here can be used to attack anything</span>
+{
+  <span class="cm">"error"</span>: {
+    <span class="cm">"code"</span>: <span class="cm">"internal_error"</span>,
+    <span class="cm">"message"</span>: <span class="cm">"Something went wrong on our end. Please try again."</span>,
+    <span class="cm">"request_id"</span>: <span class="cm">"req_8f3a1c9e"</span>
+  }
+}</code></pre>
+<p>That <code>request_id</code> is a <dfn data-en="a unique identifier generated for one incoming request, attached to every log line produced while handling it and (safely) returned to the client — the bridge that lets a support ticket or bug report be matched back to the exact server-side log entries, without exposing any of those entries' actual contents" data-vn="giữ nguyên 'correlation ID' / 'request ID' — mã nối một request với các dòng log server tương ứng">correlation ID</dfn> (also called a request ID): meaningless by itself, safe to hand to anyone, and useless to an attacker — but paired with your own logs, it's the exact thread that unspools into the full stack trace, the failing query, everything the engineer wanted in section 1. On the server side, that detail lives in <dfn data-en="logging as structured key-value data (often JSON) instead of free-text sentences, so fields like request_id, user_id, or error can be filtered and searched precisely across millions of log lines — as opposed to grepping for a substring and hoping the format didn't change" data-vn="giữ nguyên 'structured logging' — log dạng key-value/JSON, lọc/tìm chính xác theo field">structured logs</dfn> keyed by that same <code>request_id</code>, queryable the moment a user reports "it broke, here's the ID from the error screen."</p>
+<div class="callout"><strong>Frontend-habit trap:</strong> "I'll just forward the caught exception's message to the client, it's more helpful than a generic string." Helpful to whom — the same person who could also just read the server logs, or an anonymous caller who now knows your schema? If a message is genuinely useful to a legitimate client (e.g. "email already registered"), that's a 4xx with its own stable error code from Lesson 3 — not a 500's internals leaking through.</p></div>
+
+<div class="interview">
+<p><strong>Q: "How do you avoid leaking internal details in error responses while still being able to debug production issues?"</strong> A strong answer, out loud: <em>"Every response follows one error contract — a stable code and a safe, generic message for anything that isn't the client's own mistake. I attach a request ID to every incoming request, log it alongside the full stack trace and query details server-side, and return that same ID in the error body. So the client and any support ticket get something to reference, but nothing that helps an attacker map the system — the actual detail only exists in logs I control."</em> The subtext: naming <em>where</em> the detail goes (structured server logs, not the wire) is the part that separates this from "I'd just be more careful about what I send back."</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A stack trace names files, functions, and often internal structure — free reconnaissance handed to anyone who can trigger a 500, whether or not they're a legitimate client.">
+    <p class="stem">What's wrong with putting a raw stack trace in a client-facing error response?</p>
+    <button class="opt" data-ok>It leaks internal details attackers can map easily</button>
+    <button class="opt">It makes the response body too large only</button>
+    <button class="opt">It slows down how fast the client parses</button>
+  </div>
+  <div class="q" data-why="A correlation ID is meaningless and safe by itself, but it's the exact key that lets a support ticket or client-reported error be matched to the full detail sitting in server-side logs — without ever putting that detail on the wire.">
+    <p class="stem">What does a correlation/request ID actually let you do?</p>
+    <button class="opt" data-ok>Match a client report to server logs</button>
+    <button class="opt">Replace the need for server side logging</button>
+    <button class="opt">Automatically fix whatever bug actually caused it</button>
+  </div>
+  <div class="q" data-why="The full detail — stack trace, failing query, internal state — belongs in structured server-side logs, keyed by the same request ID the client received, never in the response body itself.">
+    <p class="stem">Where should the full stack trace of a 500 actually go?</p>
+    <button class="opt" data-ok>Server-side structured logs, keyed by request id</button>
+    <button class="opt">The response body, right beside the message</button>
+    <button class="opt">Nowhere — stack traces should never be kept</button>
+  </div>
+  <div class="q" data-why="err's underlying message might contain a table name, a query fragment, or other internal detail never meant for a client — the handler logs it (or lets it flow into structured logs) and returns only the safe, generic string over the wire.">
+    <p class="stem">Why does the Go server's <code>http.Error(w, "internal error", 500)</code> never pass <code>err</code> itself?</p>
+    <button class="opt" data-ok>Passing err risks leaking internal system details</button>
+    <button class="opt">err values simply cannot convert to strings</button>
+    <button class="opt">The handler had already logged it earlier</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://cheatsheetseries.owasp.org/cheatsheets/Error_Handling_Cheat_Sheet.html">OWASP Error Handling Cheat Sheet</a> (~10 min — this lesson is a compressed version of it). For the request-ID/structured-logging pattern in more depth, <a href="https://12factor.net/logs">The Twelve-Factor App — Logs</a> is the classic short read. The Go track's own <code>handleCreate</code>/<code>handleStats</code> (Day 4) already follow this rule in miniature — <code>http.Error(w, "internal error", http.StatusInternalServerError)</code> never forwards the underlying <code>err</code> to the client, even though it's right there in scope.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> your service just got a second instance behind a load balancer — what breaks the moment "the server" stops being one process.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

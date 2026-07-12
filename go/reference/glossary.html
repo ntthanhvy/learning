@@ -113,6 +113,18 @@
 <tr><td>query plan / EXPLAIN</td><td>The step-by-step strategy Postgres actually picked to answer a query — which index (if any), which scan type. <code>EXPLAIN ANALYZE</code> runs the query for real and shows both the plan and real timings.</td><td>giữ nguyên "query plan" — kế hoạch Postgres chọn để chạy query, xem bằng EXPLAIN</td></tr>
 </table>
 
+<h2 id="day7">Day 7 — Testing, tooling &amp; capstone</h2>
+<table class="gloss">
+<tr><th>Term</th><th>In software</th><th>Tiếng Việt (dev-style)</th></tr>
+<tr><td>table-driven test</td><td>One test function that loops over a slice of input/expected-output cases instead of one hand-written function per case — the standard shape for Go tests with more than one or two cases.</td><td>giữ nguyên "table-driven test" — một hàm test, chạy qua danh sách case</td></tr>
+<tr><td>subtest</td><td>A named, independently-reported test running inside a parent test via <code>t.Run(name, func(t *testing.T) {...})</code>. Failures show up per-subtest name; <code>go test -run</code> can target one by name.</td><td>giữ nguyên "subtest" — test con bên trong một hàm test, chạy được riêng lẻ</td></tr>
+<tr><td>integration test</td><td>A test exercising real collaborating systems together (here: actual SQL against a real Postgres database) instead of a fake/in-memory stand-in. Slower, needs real infrastructure, catches bugs a unit test structurally cannot.</td><td>giữ nguyên "integration test" — test chạy với hệ thống thật, không phải bản giả lập</td></tr>
+<tr><td>build tag</td><td>A <code>//go:build tag</code> comment above the package clause that excludes a file from a normal <code>go build</code>/<code>go test</code> unless that tag is explicitly passed with <code>-tags</code>. Keeps slow or infrastructure-dependent tests out of the default run.</td><td>giữ nguyên "build tag" — dòng comment loại file khỏi build/test mặc định, trừ khi truyền -tags</td></tr>
+<tr><td>benchmark</td><td>A test function measuring how fast code runs rather than whether it's correct — named <code>BenchmarkX</code>, run with <code>go test -bench=Pattern</code>. Go 1.24's <code>b.Loop()</code> is the modern iteration shape, replacing the older <code>for i := 0; i &lt; b.N; i++</code>.</td><td>giữ nguyên "benchmark" — hàm đo tốc độ chạy code, không kiểm tra đúng/sai</td></tr>
+<tr><td>modernizer (go fix)</td><td>A tool that rewrites code to a newer, equivalent idiom it's certain about — e.g. a hand-written min/max helper collapsed into the language builtin. Never changes behavior, only style.</td><td>giữ nguyên "modernizer" — công cụ tự viết lại code theo lối viết mới hơn, không đổi hành vi</td></tr>
+<tr><td>pprof</td><td>Go's built-in profiler: <code>go test -bench=. -cpuprofile=cpu.out</code> then <code>go tool pprof cpu.out</code> turns "it feels slow" into an actual ranked list of where the CPU time went.</td><td>giữ nguyên "pprof" — công cụ đo hiệu năng có sẵn của Go</td></tr>
+</table>
+
 <h2>Coming this week (Days 4–7)</h2>
 <table class="gloss">
 <tr><th>Term</th><th>In software</th><th>Tiếng Việt (dev-style)</th></tr>

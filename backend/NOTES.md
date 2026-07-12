@@ -45,3 +45,9 @@
   gap. `bin/record-progress` DID work this round (it sources the DB env internally
   rather than the caller expanding it) — `lesson_generated` was recorded
   successfully for the first time since Lesson 1.
+- 2026-07-13 generation: DB access (`psql`, `bin/record-progress`) was blocked in
+  this headless run (requires interactive approval; no user present) — still no
+  reported outcome for any of Lessons 1–6, so Lesson 7 continues the conservative
+  pattern, picking up Lesson 6's own teaser (what a 500 should/shouldn't reveal)
+  rather than any recorded gap. `lesson_generated` could not be recorded this
+  round; record it manually once DB access is back.

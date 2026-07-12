@@ -100,3 +100,20 @@ by the user there; they apply here identically.
   round — the full `link.rs` + `main.rs` (HashMap + serde export) scaffold was
   compile-checked clean in a scratch dir, network access to crates.io confirmed
   working, before shipping.
+- 2026-07-13 (Day 6 generation): DB access (`psql`, `bin/record-progress`) and the
+  `cargo`/`go`/`uv` toolchains were all blocked in this headless run (each requires
+  interactive approval; no user present) — paced from learning-records + project
+  file state alone, same limitation as prior headless rounds. `lesson_generated`
+  could not be recorded, record it manually once access is back. `main.rs` on disk
+  is still exactly Day 1's shape (found-flag `Get` loop, `Vec<Link>`, no HashMap/
+  modules/serde from Day 5, no `Summary` trait from Day 4) — Days 2–5 practice
+  looks unstarted. Day 6 was written to not need any of them: it adds a `check_link`
+  async fn and a new `Check` command directly onto Day 1's `main.rs`, same pattern
+  Day 5 used. `cargo check`/`test`/`clippy` were not available this round to
+  compile-verify the `tokio::spawn`/`JoinHandle`/`b.Loop`-style scaffold — written
+  carefully against known-correct tokio 1.x APIs (`#[tokio::main]`, `tokio::spawn`,
+  `tokio::time::sleep`, the `'static` bound on spawned futures) but unverified by
+  the compiler this round; run `cargo check` before/while doing the Day 6 practice.
+  If Days 2–5 land later, reconcile: Day 6's `Check` arm does `for link in links`
+  (moves a `Vec<Link>`) — once Day 5's HashMap conversion is applied, that becomes
+  `for link in links.into_values()` instead, same idea, different collection.

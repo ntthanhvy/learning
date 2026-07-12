@@ -76,6 +76,18 @@
 <tr><td>derive</td><td>An attribute like <code>#[derive(Trait)]</code> asking the compiler to auto-generate a standard trait implementation, instead of writing it by hand. Used for <code>Serialize</code>/<code>Deserialize</code>, <code>Debug</code>, <code>Clone</code>, and more.</td><td>giữ nguyên "derive" — compiler tự viết impl chuẩn, không cần code tay</td></tr>
 </table>
 
+<h2 id="day6">Day 6 — Async &amp; tokio</h2>
+<table class="gloss">
+<tr><th>Term</th><th>In software</th><th>Tiếng Việt (dev-style)</th></tr>
+<tr><td>future</td><td>Async functions in Rust are lazy: calling one builds a value implementing <code>Future&lt;Output = T&gt;</code> and runs nothing until that future is polled — by <code>.await</code>, or by handing it to an executor like <code>tokio::spawn</code>. Unlike a goroutine, nothing runs on its own.</td><td>giữ nguyên "future" — đại diện việc chưa xong, không tự chạy cho tới khi được await/spawn</td></tr>
+<tr><td>.await</td><td>The point where an async function can pause, handing control back to whatever is driving it, and resume once the awaited future is ready. The underlying thread is free to run other work while paused — not a blocking call.</td><td>giữ nguyên "await" — điểm hàm async tạm dừng, nhường CPU, chạy tiếp sau</td></tr>
+<tr><td>tokio</td><td>The de-facto standard async runtime for Rust — the scheduler that actually polls futures to completion, plus async IO, timers, and channels. Rust's stdlib ships no runtime of its own; tokio is a library choice, not part of the language.</td><td>giữ nguyên "tokio" — runtime chuẩn chạy future, kèm IO/timer bản async</td></tr>
+<tr><td>task</td><td>A unit of async work spawned via <code>tokio::spawn</code> — NOT an OS thread. Many tasks are scheduled cooperatively onto a small pool of OS threads, the same M:N idea Go's scheduler uses for goroutines, as a library instead of a language runtime.</td><td>giữ nguyên "task" — đơn vị công việc async, nhiều task chạy trên ít OS thread, giống mô hình goroutine của Go</td></tr>
+<tr><td>Send</td><td>A marker trait meaning a value is safe to move to another thread. Automatically implemented by the compiler when every field of a type is itself Send — no manual derive needed for ordinary owned data like String or Vec.</td><td>giữ nguyên "Send" — an toàn khi chuyển giá trị sang thread khác</td></tr>
+<tr><td>Sync</td><td>A marker trait meaning a shared reference (<code>&amp;T</code>) is safe for multiple threads to hold at once. Also automatically derived when safe; a type with unsynchronized interior mutability would need something like <code>Mutex</code> to become Sync.</td><td>giữ nguyên "Sync" — an toàn khi nhiều thread cùng đọc qua tham chiếu</td></tr>
+<tr><td>'static bound (spawned tasks)</td><td>A future handed to <code>tokio::spawn</code> can't borrow anything from its spawning function — it may run later, on another thread, after that function has returned. The fix is to own the data (move it in), not borrow it.</td><td>giữ nguyên "'static" — task spawn phải sở hữu dữ liệu, không mượn tham chiếu</td></tr>
+</table>
+
 <h2>Coming this week (Days 3–7)</h2>
 <table class="gloss">
 <tr><th>Term</th><th>In software</th><th>Tiếng Việt (dev-style)</th></tr>

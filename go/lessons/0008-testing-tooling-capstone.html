@@ -1,0 +1,514 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 7 · Testing, tooling &amp; capstone</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Go Intensive · Day 7 · ~120 min · Capstone</p>
+<h1>Testing, tooling &amp; capstone</h1>
+<p class="byline">Whatever state your <code>project/linkshort</code> is actually in — Day 1–2's <code>link</code> package is solid either way, but Days 3–6's HTTP server and Postgres store may or may not be wired up yet — <strong>Step 0</strong> hands you a complete, working copy of everything through Day 6 so today starts from the same place regardless. Everything else is new: table-driven tests with subtests, <code>httptest</code> for the HTTP layer, integration tests against a real Postgres branch, benchmarks, and the tooling that keeps all of it honest. Then the capstone: run the whole suite, and a self-review to say the story out loud.</p>
+
+<h2>Warm-up: the week, from memory</h2>
+<div class="quiz">
+  <div class="q" data-why="errors.Is walks the chain built by %w — it also matches an error several layers deep that was wrapped with context at each level. A plain == only matches the exact same error value with nothing wrapped around it.">
+    <p class="stem">What does <code>errors.Is(err, ErrNotFound)</code> catch that a plain <code>err == ErrNotFound</code> misses?</p>
+    <button class="opt" data-ok>It also matches errors wrapped with %w</button>
+    <button class="opt">It only compares raw error message text</button>
+    <button class="opt">It requires manually unwrapping every wrapped error</button>
+  </div>
+  <div class="q" data-why="The race detector instruments every memory read and write at compile time and flags any pair of unsynchronized accesses to the same memory from different goroutines where at least one is a write — exactly the s.hits[code]++ bug section 6 of Day 4 guarded with a mutex.">
+    <p class="stem">Why does <code>go test -race</code> catch bugs manual review often misses?</p>
+    <button class="opt" data-ok>It instruments memory access to detect concurrent writes</button>
+    <button class="opt">It runs test functions in random execution order</button>
+    <button class="opt">It automatically adds mutex locks around shared variables</button>
+  </div>
+  <div class="q" data-why="Shutdown immediately stops accepting new connections, but blocks — returning only once every handler already in flight has returned on its own, or the ctx passed to Shutdown expires, whichever comes first.">
+    <p class="stem">What does <code>http.Server.Shutdown(ctx)</code> wait for before returning?</p>
+    <button class="opt" data-ok>Every in-flight handler to finish or timeout</button>
+    <button class="opt">The process to receive a second signal</button>
+    <button class="opt">All open goroutines anywhere in the program</button>
+  </div>
+</div>
+
+<h2>0 · Catch-up: the week, given</h2>
+<p>Your <code>link/</code> package (Day 1–2: <code>Link</code>, <code>Store</code>, <code>MemStore</code>, <code>LoggingStore</code>) is untouched and doesn't need replacing. These four files are Days 4–6's finished shape — create (or overwrite, if yours diverges) whichever ones you haven't gotten to yet. Nothing new to write in this section; today's new material starts at Section 1.</p>
+
+<p><strong><code>middleware.go</code></strong> (Day 4 — logging and the timeout wrapper):</p>
+<pre><code><span class="kw">package</span> main
+
+<span class="kw">import</span> (
+    <span class="cm">"context"</span>
+    <span class="cm">"log/slog"</span>
+    <span class="cm">"net/http"</span>
+    <span class="cm">"time"</span>
+)
+
+<span class="cm">// loggingMiddleware is a decorator: same shape as Day 1's LoggingStore, one</span>
+<span class="cm">// layer wide, delegates everything else through.</span>
+<span class="kw">func</span> loggingMiddleware(log *slog.Logger, next http.Handler) http.Handler {
+    <span class="kw">return</span> http.HandlerFunc(<span class="kw">func</span>(w http.ResponseWriter, r *http.Request) {
+        start := time.Now()
+        next.ServeHTTP(w, r)
+        log.Info(<span class="cm">"request"</span>, <span class="cm">"method"</span>, r.Method, <span class="cm">"path"</span>, r.URL.Path, <span class="cm">"took"</span>, time.Since(start))
+    })
+}
+
+<span class="cm">// timeoutMiddleware bounds every request's context to d, so nothing downstream</span>
+<span class="cm">// can block past it — Day 4 section 1's pattern, wired at the handler boundary.</span>
+<span class="kw">func</span> timeoutMiddleware(d time.Duration, next http.Handler) http.Handler {
+    <span class="kw">return</span> http.HandlerFunc(<span class="kw">func</span>(w http.ResponseWriter, r *http.Request) {
+        ctx, cancel := context.WithTimeout(r.Context(), d)
+        <span class="kw">defer</span> cancel()
+        next.ServeHTTP(w, r.WithContext(ctx))
+    })
+}</code></pre>
+
+<p><strong><code>server.go</code></strong> (Day 4 — handlers, <code>hits</code> now correctly guarded):</p>
+<pre><code><span class="kw">package</span> main
+
+<span class="kw">import</span> (
+    <span class="cm">"crypto/rand"</span>
+    <span class="cm">"encoding/base64"</span>
+    <span class="cm">"encoding/json"</span>
+    <span class="cm">"errors"</span>
+    <span class="cm">"fmt"</span>
+    <span class="cm">"net/http"</span>
+    <span class="cm">"sync"</span>
+    <span class="cm">"time"</span>
+
+    <span class="cm">"linkshort/link"</span>
+)
+
+<span class="kw">type</span> server <span class="kw">struct</span> {
+    store link.Store
+    mu    sync.Mutex
+    hits  <span class="kw">map</span>[string]<span class="kw">int</span>
+}
+
+<span class="kw">func</span> newServer(store link.Store) *server {
+    <span class="kw">return</span> &amp;server{store: store, hits: <span class="kw">make</span>(<span class="kw">map</span>[string]<span class="kw">int</span>)}
+}
+
+<span class="kw">func</span> newCode() (string, <span class="kw">error</span>) {
+    buf := <span class="kw">make</span>([]byte, 4)
+    <span class="kw">if</span> _, err := rand.Read(buf); err != <span class="kw">nil</span> {
+        <span class="kw">return</span> <span class="cm">""</span>, err
+    }
+    <span class="kw">return</span> base64.RawURLEncoding.EncodeToString(buf), <span class="kw">nil</span>
+}
+
+<span class="kw">type</span> createRequest <span class="kw">struct</span> {
+    URL string `json:"url"`
+}
+
+<span class="kw">type</span> createResponse <span class="kw">struct</span> {
+    Code string `json:"code"`
+    URL  string `json:"url"`
+}
+
+<span class="cm">// handleCreate: POST /links {"url": "..."} -> {"code": "...", "url": "..."}</span>
+<span class="kw">func</span> (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
+    <span class="kw">var</span> req createRequest
+    <span class="kw">if</span> err := json.NewDecoder(r.Body).Decode(&amp;req); err != <span class="kw">nil</span> || req.URL == <span class="cm">""</span> {
+        http.Error(w, <span class="cm">`body must be {"url": "..."}`</span>, http.StatusBadRequest)
+        <span class="kw">return</span>
+    }
+    code, err := newCode()
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        http.Error(w, <span class="cm">"internal error"</span>, http.StatusInternalServerError)
+        <span class="kw">return</span>
+    }
+    l := link.Link{Code: code, URL: req.URL, CreatedAt: time.Now()}
+    <span class="kw">if</span> err := s.store.Save(r.Context(), l); err != <span class="kw">nil</span> {
+        http.Error(w, <span class="cm">"internal error"</span>, http.StatusInternalServerError)
+        <span class="kw">return</span>
+    }
+    w.Header().Set(<span class="cm">"Content-Type"</span>, <span class="cm">"application/json"</span>)
+    w.WriteHeader(http.StatusCreated)
+    json.NewEncoder(w).Encode(createResponse{Code: l.Code, URL: l.URL})
+}
+
+<span class="cm">// resolve wraps the store lookup with request-scoped context — Day 2's</span>
+<span class="cm">// pattern, carrying whatever deadline the timeout middleware set.</span>
+<span class="kw">func</span> (s *server) resolve(r *http.Request, code string) (link.Link, <span class="kw">error</span>) {
+    l, err := s.store.Get(r.Context(), code)
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        <span class="kw">return</span> link.Link{}, fmt.Errorf(<span class="cm">"resolve %q: %w"</span>, code, err)
+    }
+    <span class="kw">return</span> l, <span class="kw">nil</span>
+}
+
+<span class="cm">// handleRedirect: GET /{code} -> 302 to the target URL, counts the hit.</span>
+<span class="kw">func</span> (s *server) handleRedirect(w http.ResponseWriter, r *http.Request) {
+    code := r.PathValue(<span class="cm">"code"</span>)
+    l, err := s.resolve(r, code)
+    <span class="kw">switch</span> {
+    <span class="kw">case</span> errors.Is(err, link.ErrNotFound):
+        http.NotFound(w, r)
+        <span class="kw">return</span>
+    <span class="kw">case</span> err != <span class="kw">nil</span>:
+        http.Error(w, <span class="cm">"internal error"</span>, http.StatusInternalServerError)
+        <span class="kw">return</span>
+    }
+
+    s.mu.Lock()
+    s.hits[code]++
+    s.mu.Unlock()
+
+    http.Redirect(w, r, l.URL, http.StatusFound)
+}
+
+<span class="kw">type</span> statsResponse <span class="kw">struct</span> {
+    Code string `json:"code"`
+    URL  string `json:"url"`
+    Hits int    `json:"hits"`
+}
+
+<span class="cm">// handleStats: GET /{code}/stats -> {"code", "url", "hits"}</span>
+<span class="kw">func</span> (s *server) handleStats(w http.ResponseWriter, r *http.Request) {
+    code := r.PathValue(<span class="cm">"code"</span>)
+    l, err := s.resolve(r, code)
+    <span class="kw">switch</span> {
+    <span class="kw">case</span> errors.Is(err, link.ErrNotFound):
+        http.NotFound(w, r)
+        <span class="kw">return</span>
+    <span class="kw">case</span> err != <span class="kw">nil</span>:
+        http.Error(w, <span class="cm">"internal error"</span>, http.StatusInternalServerError)
+        <span class="kw">return</span>
+    }
+    s.mu.Lock()
+    hits := s.hits[code]
+    s.mu.Unlock()
+    w.Header().Set(<span class="cm">"Content-Type"</span>, <span class="cm">"application/json"</span>)
+    json.NewEncoder(w).Encode(statsResponse{Code: l.Code, URL: l.URL, Hits: hits})
+}</code></pre>
+
+<p><strong><code>link/postgres.go</code></strong> (Day 5–6 — unchanged from yesterday, given again for completeness):</p>
+<pre><code><span class="kw">package</span> link
+
+<span class="kw">import</span> (
+    <span class="cm">"context"</span>
+    <span class="cm">"errors"</span>
+
+    <span class="cm">"github.com/jackc/pgx/v5"</span>
+    <span class="cm">"github.com/jackc/pgx/v5/pgxpool"</span>
+)
+
+<span class="kw">var</span> _ Store = (*PostgresStore)(<span class="kw">nil</span>)
+
+<span class="kw">type</span> PostgresStore <span class="kw">struct</span> {
+    pool *pgxpool.Pool
+}
+
+<span class="kw">func</span> NewPostgresStore(ctx context.Context, connString <span class="kw">string</span>) (*PostgresStore, <span class="kw">error</span>) {
+    pool, err := pgxpool.New(ctx, connString)
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        <span class="kw">return</span> <span class="kw">nil</span>, err
+    }
+    <span class="kw">return</span> &amp;PostgresStore{pool: pool}, <span class="kw">nil</span>
+}
+
+<span class="kw">func</span> (s *PostgresStore) Save(ctx context.Context, l Link) <span class="kw">error</span> {
+    _, err := s.pool.Exec(ctx,
+        <span class="cm">`INSERT INTO links (code, url) VALUES ($1, $2)
+         ON CONFLICT (code) DO UPDATE SET url = EXCLUDED.url`</span>,
+        l.Code, l.URL,
+    )
+    <span class="kw">return</span> err
+}
+
+<span class="kw">func</span> (s *PostgresStore) Get(ctx context.Context, code <span class="kw">string</span>) (Link, <span class="kw">error</span>) {
+    <span class="kw">var</span> l Link
+    err := s.pool.QueryRow(ctx,
+        <span class="cm">`SELECT code, url, created_at FROM links WHERE code = $1`</span>, code,
+    ).Scan(&amp;l.Code, &amp;l.URL, &amp;l.CreatedAt)
+    <span class="kw">if</span> errors.Is(err, pgx.ErrNoRows) {
+        <span class="kw">return</span> Link{}, ErrNotFound
+    }
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        <span class="kw">return</span> Link{}, err
+    }
+    <span class="kw">return</span> l, <span class="kw">nil</span>
+}</code></pre>
+
+<p><strong><code>main.go</code></strong> (new today — the first file where Day 4's server and Day 5–6's Postgres store actually meet):</p>
+<pre><code><span class="kw">package</span> main
+
+<span class="kw">import</span> (
+    <span class="cm">"context"</span>
+    <span class="cm">"errors"</span>
+    <span class="cm">"log/slog"</span>
+    <span class="cm">"net/http"</span>
+    <span class="cm">"os"</span>
+    <span class="cm">"os/signal"</span>
+    <span class="cm">"syscall"</span>
+    <span class="cm">"time"</span>
+
+    <span class="cm">"linkshort/link"</span>
+)
+
+<span class="kw">func</span> main() {
+    ctx := context.Background()
+
+    <span class="kw">var</span> store link.Store
+    <span class="kw">if</span> dsn := os.Getenv(<span class="cm">"LINKSHORT_DB_URL"</span>); dsn != <span class="cm">""</span> {
+        pg, err := link.NewPostgresStore(ctx, dsn)
+        <span class="kw">if</span> err != <span class="kw">nil</span> {
+            panic(err)
+        }
+        store = pg
+    } <span class="kw">else</span> {
+        store = link.NewMemStore() <span class="cm">// no LINKSHORT_DB_URL set — fine for today's tests</span>
+    }
+    srv := newServer(link.NewLoggingStore(store, slog.Default()))
+
+    mux := http.NewServeMux()
+    mux.HandleFunc(<span class="cm">"POST /links"</span>, srv.handleCreate)
+    mux.HandleFunc(<span class="cm">"GET /{code}"</span>, srv.handleRedirect)
+    mux.HandleFunc(<span class="cm">"GET /{code}/stats"</span>, srv.handleStats)
+
+    <span class="kw">var</span> handler http.Handler = mux
+    handler = timeoutMiddleware(2*time.Second, handler)
+    handler = loggingMiddleware(slog.Default(), handler)
+
+    httpServer := &amp;http.Server{Addr: <span class="cm">":8080"</span>, Handler: handler}
+
+    shutdownCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+    <span class="kw">defer</span> stop()
+
+    <span class="kw">go func</span>() {
+        <span class="kw">if</span> err := httpServer.ListenAndServe(); err != <span class="kw">nil</span> &amp;&amp; !errors.Is(err, http.ErrServerClosed) {
+            slog.Error(<span class="cm">"server error"</span>, <span class="cm">"err"</span>, err)
+        }
+    }()
+
+    &lt;-shutdownCtx.Done()
+    stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+    <span class="kw">defer</span> cancel()
+    httpServer.Shutdown(stopCtx)
+}</code></pre>
+<div class="callout"><strong>Sanity-check Step 0:</strong> <code>go vet ./...</code> should be silent, and <code>go run .</code> should sit listening on <code>:8080</code>. If either fails, fix it before section 1 — everything below assumes this compiles.</div>
+
+<h2>1 · Table-driven tests &amp; subtests</h2>
+<p>A <dfn data-en="One test function that loops over a slice of input/expected-output cases, instead of one hand-written function per case. The standard shape for Go tests with more than one or two cases." data-vn="giữ nguyên 'table-driven test' — một hàm test, chạy qua danh sách case">table-driven test</dfn> is one function, one loop, many cases — instead of copy-pasting <code>TestX</code>, <code>TestY</code>, <code>TestZ</code> with the same three lines each. <code>t.Run(name, func(t *testing.T) {...})</code> spins up a <dfn data-en="A named, independently-reported test running inside a parent test function, started with t.Run(name, func(t *testing.T) {...}). Failures show up per-subtest name; go test -run can target one by name." data-vn="giữ nguyên 'subtest' — test con bên trong một hàm test, chạy được riêng lẻ">subtest</dfn> per case: each gets its own pass/fail line and its own name in the output, and <code>go test -run TestMemStoreTable/empty_url_segment</code> can target exactly one case.</p>
+<p>Add this to the existing <code>link/store_test.go</code> — same package, same imports already in that file, nothing new to add:</p>
+<pre><code><span class="kw">func</span> TestMemStoreTable(t *testing.T) {
+    cases := []<span class="kw">struct</span> {
+        name string
+        code string
+        url  string
+    }{
+        {<span class="cm">"short code"</span>, <span class="cm">"go"</span>, <span class="cm">"https://golang.org"</span>},
+        {<span class="cm">"url with a path"</span>, <span class="cm">"ex"</span>, <span class="cm">"https://example.com/docs"</span>},
+    }
+    <span class="kw">for</span> _, tc := <span class="kw">range</span> cases {
+        t.Run(tc.name, <span class="kw">func</span>(t *testing.T) {
+            s := NewMemStore()
+            <span class="kw">if</span> err := s.Save(context.Background(), Link{Code: tc.code, URL: tc.url}); err != <span class="kw">nil</span> {
+                t.Fatal(err)
+            }
+            got, err := s.Get(context.Background(), tc.code)
+            <span class="kw">if</span> err != <span class="kw">nil</span> {
+                t.Fatal(err)
+            }
+            <span class="kw">if</span> got.URL != tc.url {
+                t.Fatalf(<span class="cm">"got %q, want %q"</span>, got.URL, tc.url)
+            }
+        })
+    }
+}</code></pre>
+<p>Notice each subtest builds its own fresh <code>NewMemStore()</code> — cases share the loop, not state. A case that mutated a shared store would make later cases depend on earlier ones passing first, which defeats the point of naming them independently.</p>
+
+<h2>2 · <code>httptest</code>: testing handlers without a port</h2>
+<p><code>net/http/httptest</code> lets a test call a handler directly — no <code>ListenAndServe</code>, no real socket, no port to clash with another test running in parallel. <code>httptest.NewRequest</code> builds an <code>*http.Request</code> in memory; <code>httptest.NewRecorder</code> is an <code>http.ResponseWriter</code> that captures the status code, headers, and body instead of writing them to a real connection. Route through the actual <code>mux</code>, not the bare handler function — <code>r.PathValue("code")</code> is only populated once <code>ServeMux</code> has matched the route:</p>
+<pre><code><span class="kw">package</span> main
+
+<span class="kw">import</span> (
+    <span class="cm">"context"</span>
+    <span class="cm">"net/http"</span>
+    <span class="cm">"net/http/httptest"</span>
+    <span class="cm">"testing"</span>
+
+    <span class="cm">"linkshort/link"</span>
+)
+
+<span class="kw">func</span> TestHandleRedirect(t *testing.T) {
+    ctx := context.Background()
+    store := link.NewMemStore()
+    <span class="kw">if</span> err := store.Save(ctx, link.Link{Code: <span class="cm">"go"</span>, URL: <span class="cm">"https://golang.org"</span>}); err != <span class="kw">nil</span> {
+        t.Fatal(err)
+    }
+    srv := newServer(store)
+    mux := http.NewServeMux()
+    mux.HandleFunc(<span class="cm">"GET /{code}"</span>, srv.handleRedirect)
+
+    req := httptest.NewRequest(http.MethodGet, <span class="cm">"/go"</span>, <span class="kw">nil</span>)
+    rec := httptest.NewRecorder()
+    mux.ServeHTTP(rec, req)
+
+    <span class="kw">if</span> rec.Code != http.StatusFound {
+        t.Fatalf(<span class="cm">"status = %d, want %d"</span>, rec.Code, http.StatusFound)
+    }
+    <span class="kw">if</span> got := rec.Header().Get(<span class="cm">"Location"</span>); got != <span class="cm">"https://golang.org"</span> {
+        t.Fatalf(<span class="cm">"Location = %q, want %q"</span>, got, <span class="cm">"https://golang.org"</span>)
+    }
+}
+
+<span class="cm">// TODO — TestHandleRedirectMissing: same shape, but skip the Save, request
+// GET /missing, and assert rec.Code == http.StatusNotFound.</span>
+<span class="kw">func</span> TestHandleRedirectMissing(t *testing.T) {
+
+}</code></pre>
+<p>Save this as <code>server_test.go</code>. This is the same guarantee <code>errors.Is(err, link.ErrNotFound)</code> gave you at the store layer on Day 2 — now proven one layer up, at the HTTP boundary, without needing a browser or <code>curl</code> to check it.</p>
+
+<h2>3 · Integration tests against real Postgres</h2>
+<p>An <dfn data-en="A test that exercises real collaborating systems together — here, actual SQL against a real Postgres database — instead of a fake or in-memory stand-in. Slower and needs real infrastructure, but catches bugs a unit test against MemStore structurally cannot: wrong SQL, a constraint that doesn't do what you think, a type mismatch pgx only surfaces against a real column." data-vn="giữ nguyên 'integration test' — test chạy với hệ thống thật (DB thật), không phải bản giả lập">integration test</dfn> for <code>PostgresStore</code> can't run against <code>MemStore</code>'s fast in-memory world — it needs a real database. Without Docker, the substitute for a disposable testcontainer is a <a href="https://neon.tech/docs/introduction/branching">Neon branch</a>: an instant, free copy of your <code>linkshort</code> database, safe to write throwaway rows into and delete. A <dfn data-en="A build constraint comment — //go:build integration — at the top of a file, above the package clause, that excludes the file from a normal go build or go test unless that tag is explicitly passed with -tags. Keeps slow or infrastructure-dependent tests out of the default fast test run." data-vn="giữ nguyên 'build tag' — dòng comment loại file khỏi build/test mặc định, trừ khi truyền -tags">build tag</dfn> keeps this test out of your everyday, fast <code>go test ./...</code>:</p>
+<pre><code><span class="cm">//go:build integration</span>
+
+<span class="kw">package</span> main
+
+<span class="kw">import</span> (
+    <span class="cm">"context"</span>
+    <span class="cm">"os"</span>
+    <span class="cm">"testing"</span>
+    <span class="cm">"time"</span>
+
+    <span class="cm">"linkshort/link"</span>
+)
+
+<span class="kw">func</span> TestPostgresStoreSaveThenGet(t *testing.T) {
+    dsn := os.Getenv(<span class="cm">"LINKSHORT_TEST_DB_URL"</span>)
+    <span class="kw">if</span> dsn == <span class="cm">""</span> {
+        t.Skip(<span class="cm">"LINKSHORT_TEST_DB_URL not set — point it at a throwaway Neon branch"</span>)
+    }
+    ctx := context.Background()
+    store, err := link.NewPostgresStore(ctx, dsn)
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        t.Fatal(err)
+    }
+    want := link.Link{Code: <span class="cm">"it-test"</span>, URL: <span class="cm">"https://go.dev"</span>, CreatedAt: time.Now()}
+    <span class="kw">if</span> err := store.Save(ctx, want); err != <span class="kw">nil</span> {
+        t.Fatal(err)
+    }
+    got, err := store.Get(ctx, want.Code)
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        t.Fatal(err)
+    }
+    <span class="kw">if</span> got.Code != want.Code || got.URL != want.URL {
+        t.Fatalf(<span class="cm">"got %+v, want %+v"</span>, got, want)
+    }
+}</code></pre>
+<p>Save this as <code>postgres_integration_test.go</code>. The <code>//go:build integration</code> line must be the first line of the file, followed by a blank line before <code>package main</code> — Go's build-tag parser requires that exact shape. <code>t.Skip</code> rather than <code>t.Fatal</code> when the env var is unset means the test suite still passes green in CI or on a laptop with no Neon branch configured — skipped, not failed, is the honest signal for "this test needs infrastructure I don't have right now."</p>
+<p><strong>Neon branch, five minutes:</strong> in the Neon console, open your <code>linkshort</code> project → Branches → <em>New branch</em> from <code>main</code> (this copies today's schema and data instantly, copy-on-write — no dump/restore). Copy its connection string into <code>LINKSHORT_TEST_DB_URL</code>. Run <code>go test -tags=integration ./...</code>; delete the branch afterward, or keep it and re-run against it tomorrow — either way, <code>main</code> stayed untouched.</p>
+
+<h2>4 · Benchmarks: measuring, not guessing</h2>
+<p>A <dfn data-en="A test function measuring how fast code runs, not whether it's correct — named BenchmarkX, run with go test -bench=Pattern instead of go test's default (which skips benchmarks entirely)." data-vn="giữ nguyên 'benchmark' — hàm đo tốc độ chạy code, không kiểm tra đúng/sai">benchmark</dfn> answers "how fast," a test answers "how correct" — different question, different function shape, same file is fine. Go 1.24 added <code>b.Loop()</code>, now the preferred shape over the classic <code>for i := 0; i < b.N; i++</code>: it fixes a longstanding footgun where the compiler could sometimes optimize away work inside the old loop entirely (nothing appeared to use the result), silently reporting a bogus near-zero time.</p>
+<pre><code><span class="kw">package</span> main
+
+<span class="kw">import</span> (
+    <span class="cm">"context"</span>
+    <span class="cm">"testing"</span>
+
+    <span class="cm">"linkshort/link"</span>
+)
+
+<span class="kw">func</span> BenchmarkMemStoreGet(b *testing.B) {
+    s := link.NewMemStore()
+    s.Save(context.Background(), link.Link{Code: <span class="cm">"go"</span>, URL: <span class="cm">"https://golang.org"</span>})
+
+    <span class="kw">for</span> b.Loop() {
+        s.Get(context.Background(), <span class="cm">"go"</span>)
+    }
+}</code></pre>
+<p>Save this as <code>bench_test.go</code>. Setup (the <code>Save</code> above) runs once, outside the loop — only the code inside <code>for b.Loop()</code> is timed, and the testing package runs it enough iterations to get a stable measurement, adjusting automatically the way <code>b.N</code> used to require you to reason about by hand. Run it with:</p>
+<pre><code>go test -bench=. -benchmem ./...</code></pre>
+<p><code>-benchmem</code> adds allocations-per-op alongside time-per-op — for <code>MemStore.Get</code>, expect something close to zero allocations; a map read shouldn't need to allocate anything.</p>
+
+<h2>5 · Tooling: <code>vet</code>, <code>fix</code>, and a taste of <code>pprof</code></h2>
+<p><code>go vet ./...</code> catches real bugs that still compile — a <code>Printf</code> verb that doesn't match its argument, a struct copied by value that contains a mutex, a range variable captured wrong. Run it before every commit; it's fast and it's been silent through this whole week for a reason.</p>
+<p><code>go fix</code> is Go's built-in <dfn data-en="A tool that rewrites code to a newer, equivalent idiom automatically — e.g. go fix can replace a hand-written min/max helper with the language's built-in min/max, or an old-style for loop with a modern range-over-int. Doesn't change behavior, only style, and only where it's certain." data-vn="giữ nguyên 'modernizer' — công cụ tự viết lại code theo lối viết mới hơn, không đổi hành vi">modernizer</dfn>: it rewrites code to newer, equivalent idioms it's certain about — a hand-rolled <code>min</code>/<code>max</code> helper collapsed into the 1.21 builtin, an old three-clause counting loop turned into <code>for i := range n</code> (1.22). Run <code>go fix ./...</code> against the whole <code>linkshort</code> tree; it's a no-op if there's nothing to modernize, and it never changes behavior — only style it's certain is equivalent.</p>
+<p><code>pprof</code> is where "it feels slow" turns into a number. One line added to a benchmark run produces a CPU profile:</p>
+<pre><code>go test -bench=. -cpuprofile=cpu.out ./...
+go tool pprof cpu.out
+<span class="cm">(pprof) top10</span></code></pre>
+<p><code>top10</code> lists the functions eating the most CPU time in that run. For today's tiny <code>MemStore.Get</code> benchmark this will look almost empty — that's fine, the point today is knowing the three-command shape exists and reaching for it the moment a benchmark number looks worse than expected, not memorizing flame-graph reading in one sitting.</p>
+
+<h2>6 · Practice: prove the whole week</h2>
+<p><strong>Step 1.</strong> Drop Section 0's four files into <code>project/linkshort</code> (skip any you already have and haven't diverged from). Tree, once everything from today is added:</p>
+<pre><code>linkshort/
+├── link/
+│   ├── link.go, memstore.go, logging.go, postgres.go   (Day 1–2, 5–6)
+│   └── store_test.go                                    (+ TestMemStoreTable, Section 1)
+├── middleware.go                                         (Day 4)
+├── server.go                                             (Day 4)
+├── server_test.go                                        (new — Section 2, one TODO)
+├── postgres_integration_test.go                          (new — Section 3)
+├── bench_test.go                                         (new — Section 4)
+└── main.go                                                (new today — Section 0)</code></pre>
+<p><strong>Step 2.</strong> Fill in the two open TODOs: <code>TestHandleRedirectMissing</code> (Section 2) and <code>TestGetMissingReturnsErrNotFound</code>/<code>TestSaveThenGet</code> if they're still open from Day 1 (<code>link/store_test.go</code> — check, they may already be done).</p>
+<p><strong>Step 3 — prove it, in order:</strong></p>
+<pre><code>go vet ./...
+go fix ./...
+go test -race ./...
+go test -bench=. -benchmem ./...
+<span class="cm"># optional, needs a Neon branch (Section 3):</span>
+LINKSHORT_TEST_DB_URL=<span class="cm">"..."</span> go test -tags=integration ./...</code></pre>
+<div class="callout"><strong>Done when:</strong> <code>go vet ./...</code> silent · <code>go test -race ./...</code> all green, including the new subtests and <code>server_test.go</code> · <code>go test -bench=.</code> prints a <code>ns/op</code> number for <code>BenchmarkMemStoreGet</code> · the integration test either passes or skips cleanly (never fails from a missing env var).</div>
+
+<h2>Capstone: the mock-interview self-review</h2>
+<p>Say each of these out loud, or write two sentences — the test isn't whether you remember the syntax, it's whether you can explain the <em>why</em> to someone who didn't spend the week with you:</p>
+<ul>
+<li><strong>Day 1.</strong> Why does <code>Store</code> live in the <code>link</code> package as a small, consumer-defined interface — and what would break if <code>MemStore</code> and <code>PostgresStore</code> had no shared interface at all?</li>
+<li><strong>Day 2.</strong> Walk through what <code>fmt.Errorf("resolve %q: %w", code, err)</code> buys you that <code>fmt.Errorf("resolve %q: %v", code, err)</code> silently throws away.</li>
+<li><strong>Day 3.</strong> Two goroutines call <code>handleRedirect</code> for the same code at the same instant. Trace exactly where the mutex in Section 0 matters and what breaks without it.</li>
+<li><strong>Day 4.</strong> A deploy sends <code>SIGTERM</code> mid-request. Narrate what happens, in order, from <code>signal.NotifyContext</code> firing to the process actually exiting.</li>
+<li><strong>Day 5.</strong> Defend one schema decision — why <code>clicks</code> is a table of rows and not a <code>hit_count</code> column, or why <code>code</code> is a natural key — as if a reviewer just asked "why not the simpler thing?"</li>
+<li><strong>Day 6.</strong> Explain keyset over offset pagination using the actual index shape, and what <code>EXPLAIN ANALYZE</code> would show you if you got it wrong.</li>
+<li><strong>Day 7.</strong> Why does the Postgres integration test carry a build tag instead of just living next to the rest of <code>go test ./...</code>?</li>
+</ul>
+<p>If any of these feels shaky, that's the actual output of today's review — not a grade, a map of exactly what to revisit before an interview.</p>
+
+<h2>Check yourself</h2>
+<div class="quiz">
+  <div class="q" data-why="Table-driven tests trade N copy-pasted test functions for one loop over a slice of cases — each case still gets its own subtest report, but the boilerplate is written once.">
+    <p class="stem">What's the main benefit of a table-driven test over one test function per case?</p>
+    <button class="opt" data-ok>One loop covers many cases with less duplication</button>
+    <button class="opt">It runs faster than separate test functions do</button>
+    <button class="opt">It removes the need for assertions in tests</button>
+  </div>
+  <div class="q" data-why="httptest.NewRecorder plus routing through the real mux exercises the exact handler and routing logic that would run in production, but entirely in memory — no port binding, no network stack, safe to run in parallel with other tests.">
+    <p class="stem">Why use <code>httptest.NewRecorder</code> instead of starting a real server?</p>
+    <button class="opt" data-ok>It tests handlers directly without binding a port</button>
+    <button class="opt">It automatically starts a real server for you</button>
+    <button class="opt">It skips calling the handler function completely instead</button>
+  </div>
+  <div class="q" data-why="A //go:build tag excludes the file from a normal go build/go test unless that exact tag is passed with -tags — the standard way to keep slow, infrastructure-dependent tests out of the everyday fast test run.">
+    <p class="stem">What does the <code>//go:build integration</code> tag do?</p>
+    <button class="opt" data-ok>Excludes the file from normal go test runs</button>
+    <button class="opt">Forces the file to compile before other files</button>
+    <button class="opt">Marks the file as requiring root permissions only</button>
+  </div>
+  <div class="q" data-why="The old for i := 0; i < b.N; i++ shape could let the compiler notice a loop iteration's result was never used and optimize the work away, under-reporting the real cost. b.Loop() closes that gap and also handles the iteration-count tuning for you.">
+    <p class="stem">Why does Go 1.24's <code>b.Loop()</code> beat the classic <code>for i := 0; i &lt; b.N; i++</code> pattern?</p>
+    <button class="opt" data-ok>It stops the compiler from optimizing away work</button>
+    <button class="opt">It runs every benchmark exactly one single time</button>
+    <button class="opt">It removes the need for a benchmark function</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://quii.gitbook.io/learn-go-with-tests">Learn Go with Tests</a> — the table-driven and <code>httptest</code> chapters especially are worth the full read beyond today's slice. For <code>pprof</code> specifically, the <a href="https://go.dev/blog/pprof">Go blog's profiling post</a> goes deeper than today's three-command taste.</p>
+<p>New terms are in the <a href="../reference/glossary.html#day7">glossary — Day 7 section</a>.</p>
+
+<p class="next">That's the week. <strong>linkshort</strong> went from a bare <code>Store</code> interface on Monday to a tested, Postgres-backed HTTP service with graceful shutdown and a defensible schema — the whole thing is now sitting in one <code>go test ./...</code> run. Two spaced reviews are worth calendar-blocking: <strong>Jul 20</strong> and <strong>Aug 3</strong> — reread the <a href="../reference/">reference sheets</a>, then re-run this week's tests from memory before peeking at the code.<br><br>
+💬 A test that won't go green, or a step in the self-review that felt shaky? Paste what you see — hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/quiz.js"></script>
+<script src="../assets/gloss.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

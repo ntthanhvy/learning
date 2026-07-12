@@ -58,3 +58,20 @@
   dir (confirmed pgx v5's `RowToStructByName` matches columns to struct fields
   case-insensitively, underscores stripped, by reading its source directly) before
   shipping.
+- 2026-07-13 (Day 7 generation, capstone): DB access (`psql`, `bin/record-progress`)
+  and the `go`/`cargo`/`uv` toolchains were all blocked in this headless run (each
+  requires interactive approval; no user present) — paced from learning-records +
+  project file state alone, same limitation as 2026-07-11/12; `lesson_generated`
+  could not be recorded, record it manually once access is back. `project/linkshort`
+  on disk still only shows Day 1–2 (`link/` package: `link.go`, `memstore.go`,
+  `logging.go`, `store_test.go`); Days 3–6 (goroutines, HTTP server, Postgres store,
+  queries) look unstarted in the actual project even though each day's lesson
+  handed over working code. Day 7's Step 0 therefore hands over Day 4's server
+  files (`middleware.go`, `server.go`, both TODOs filled in) and Day 5–6's
+  `postgres.go` again, plus a **new** `main.go` that's the first place the HTTP
+  server and the Postgres store are wired together in one file. `go vet`/`go build`
+  were not available this round to compile-check the new `main.go`, `server_test.go`,
+  `postgres_integration_test.go`, or `bench_test.go` — they're written carefully
+  against the exact, previously-shipped and already-referenced code from Days 4–6,
+  but are unverified by a compiler this round; verify with `go vet ./...` before/while
+  doing the Day 7 practice.

@@ -14,6 +14,8 @@
       file: "lessons/0003-missing-data-and-cleaning.html" },
     { n: 4, date: "2026-07-12", title: "GroupBy: split, apply, combine",
       file: "lessons/0004-groupby-split-apply-combine.html" },
+    { n: 5, date: "2026-07-13", title: "Merge & join",
+      file: "lessons/0005-merge-and-join.html" },
   ];
 
   const REFS = [

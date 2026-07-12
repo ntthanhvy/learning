@@ -36,3 +36,18 @@
   the real `orders_raw.csv` fixture (An 162.0/3 orders, Binh 215.5/2, Chi 99.9/1).
   `bin/record-progress` also worked (sources the DB env internally) — `lesson_generated`
   was recorded for the first time since Lesson 1's baseline.
+- 2026-07-13 generation (Lesson 5): DB access (`psql`, `bin/record-progress`) and
+  `uv run --with pandas` were all blocked in this headless run (each requires
+  interactive approval; no user present) — still no learning record beyond the
+  baseline, so Lesson 5 continues the conservative pattern from the curriculum
+  spine (merge/join, per Lesson 4's own teaser) rather than a reported outcome.
+  New fixture added: `practice/data/customers.csv` (An/Binh/Danh + region),
+  deliberately mismatched against `orders_raw.csv`'s customers (An/Binh/Chi) so
+  the practice exercises have a real "customer with no orders" (Danh) and a real
+  "order with no customer record" (Chi, order_id 4) to find via
+  `indicator=True`/`_merge`. Hand-traced against both CSVs: inner join = 5 rows
+  (Chi's order excluded), `never_ordered == ["Danh"]`, `orphan_order_ids == [4]` —
+  but `practice/05_merge_and_join.py` could NOT actually be executed with
+  `uv run --with pandas` this round. Run it once and confirm the ✓/✗ output
+  before trusting it blindly; `lesson_generated` could not be recorded either,
+  do it manually once DB access is back.

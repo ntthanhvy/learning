@@ -18,6 +18,8 @@
       file: "lessons/0005-should-i-add-an-index.html" },
     { n: 6, date: "2026-07-12", title: "What actually happens inside a transaction",
       file: "lessons/0006-what-actually-happens-in-a-transaction.html" },
+    { n: 7, date: "2026-07-13", title: "What a 500 should (and shouldn't) tell the client",
+      file: "lessons/0007-what-a-500-should-tell-the-client.html" },
   ];
 
   const REFS = [

@@ -51,3 +51,14 @@
   pattern, picking up Lesson 6's own teaser (what a 500 should/shouldn't reveal)
   rather than any recorded gap. `lesson_generated` could not be recorded this
   round; record it manually once DB access is back.
+- 2026-07-14 generation (Lesson 8): still no `lesson_completed` record exists for
+  any of Lessons 1–7, so Lesson 8 continues the conservative pattern once more,
+  picking up Lesson 7's own teaser (a second instance behind a load balancer,
+  and what breaks when "the server" stops being one process) rather than any
+  recorded outcome. Covered: the naive one-process mental model, concrete
+  in-memory-state failure modes (sessions, rate limiters/caches, local file
+  writes), the fix (push shared state to Postgres/Redis), and sticky sessions as
+  a band-aid to avoid. `bin/record-progress backend lesson_generated --day 8
+  --lesson 0008-two-instances-break-your-server.html --detail
+  '{"by":"launchd"}'` ran directly this round and succeeded (no approval
+  blocker this time) — `lesson_generated` was recorded successfully.

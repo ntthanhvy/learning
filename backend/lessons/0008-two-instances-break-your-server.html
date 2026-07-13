@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 8 · Why Two Instances Break Your "Stateless" Server</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 8 · ~20 min</p>
+<h1>Why two instances break your "stateless" server</h1>
+<p class="byline">Lesson 7 left off here: your service just got a second instance behind a <dfn data-en="a component that sits in front of multiple server instances and distributes incoming requests across them, usually round-robin or by least-connections" data-vn="giữ nguyên 'load balancer' — bộ phân phối request tới nhiều instance">load balancer</dfn> — what breaks the moment "the server" stops being one process. Lessons 2 and 6 already used the word <dfn data-en="the property that a server keeps nothing in memory between requests, so any request can be handled by any process with no loss of information" data-vn="giữ nguyên 'stateless' — không giữ trạng thái giữa các request">stateless</dfn> as a design goal. Today is where that stops being a nice phrase and becomes a hard requirement — because the moment there are two processes, any state you quietly left in memory becomes state that only half your users can see.</p>
+
+<h2>1 · The mental model that breaks</h2>
+<p>Up through Lesson 7, "the server" meant one running process. One process means one place any in-memory value lives — a cache map, a counter, a variable holding the last thing a client did. Even if you never thought about it, the mental model was: whatever this process remembers, every future request from any client will see, because there's only one process to ask.</p>
+<p><dfn data-en="scaling by adding more instances of a process running the same code, as opposed to vertical scaling which gives one instance more CPU/RAM" data-vn="giữ nguyên 'horizontal scaling' — chạy thêm instance thay vì máy mạnh hơn">Horizontal scaling</dfn> — running two, five, or fifty copies of the exact same Go binary — breaks that model without changing a single line of handler code. A load balancer sits in front, and on every incoming request it picks one instance to send it to, usually round-robin or by whichever instance is least busy right now. Nothing guarantees the same client's next request lands on the same instance. Nothing even guarantees it lands on a <em>different</em> one — it's genuinely arbitrary from the client's point of view. The moment that's true, "whatever this process remembers" quietly becomes "whatever <em>this one out of N</em> processes remembers" — and every other instance has no idea it happened.</p>
+
+<h2>2 · Where in-memory state hides, and what it costs you</h2>
+<p>None of these bugs show up with one instance. All of them show up in production the day someone adds a second one — which is exactly why they're dangerous: they pass every test that only ever ran one process.</p>
+<ul>
+<li><strong>In-memory session store.</strong> Lesson 4 introduced the <dfn data-en="the server-side table (or cache) mapping session tokens to user ids and metadata" data-vn="giữ nguyên 'session store' — nơi lưu session ở server">session store</dfn> as the place login state actually lives. If a handler kept it as a package-level Go map instead of a database table, a user who logs in and lands on instance A gets a session only instance A knows about. Their very next request — routed by the load balancer to instance B — looks unauthenticated, because instance B's map never heard about that login. From the user's side this looks like "I keep getting randomly logged out," which is one of the most common horizontal-scaling bugs there is.</li>
+<li><strong>In-memory rate limiter or cache.</strong> A rate limiter meant to allow "5 requests per minute per user" that counts in a local variable is actually enforcing 5 requests per minute <em>per instance</em>. Behind 4 instances, the same user can make up to 20 requests a minute by pure luck of which instance answers each one — the limit silently multiplies by your replica count, and nobody configured that on purpose.</li>
+<li><strong>Local file writes.</strong> A handler that saves an uploaded file to local disk (e.g. <code>./uploads/avatar.png</code>) writes it to whichever instance happened to handle that request. The next request that tries to read it back — an image tag loading the avatar — might land on a different instance whose disk never received that file, and 404s on something that was "just uploaded a second ago."</li>
+</ul>
+<p>The common thread: each of these is state that only makes sense if there's exactly one process. The moment there's more than one, it either silently disappears (the session, the file) or silently multiplies (the rate limit) — and it always looks like a bug in something else first, because nobody suspects "the number of instances" as the cause.</p>
+<pre><code><span class="cm">// the bug in miniature — this compiles, passes local tests, and is wrong the moment N &gt; 1</span>
+<span class="kw">var</span> cache = <span class="kw">map</span>[<span class="ty">string</span>]<span class="ty">int</span>{} <span class="cm">// lives in THIS process's memory only</span>
+
+<span class="kw">func</span> handleHitCount(w http.ResponseWriter, r *http.Request) {
+    key := r.URL.Query().Get(<span class="cm">"page"</span>)
+    cache[key]++ <span class="cm">// instance A and instance B each keep their OWN count</span>
+    fmt.Fprintf(w, <span class="cm">"%d"</span>, cache[key])
+}</code></pre>
+
+<h2>3 · The fix: push shared state somewhere every instance can reach</h2>
+<p>The fix is the same idea in all three cases, and it's exactly what "stateless" was promising back in Lesson 2 and Lesson 6, made concrete now that replication is real: a handler is allowed to hold state only for the duration of one request. Anything that must survive past that request — a login, a counter, an uploaded file — belongs somewhere every instance can read and write the same copy of it: the Postgres database, or a shared cache like <dfn data-en="an in-memory data store used as a shared cache or fast key-value store that every instance connects to over the network, instead of each instance keeping its own local copy" data-vn="giữ nguyên 'Redis' — cache/key-value store dùng chung qua network">Redis</dfn>.</p>
+<ul>
+<li>Session store → a <code>sessions</code> table in Postgres (or a Redis hash keyed by token) — either way, one shared source that any instance can look up by token.</li>
+<li>Rate limiter → a counter in Redis with a TTL, incremented atomically per user per window — every instance increments the <em>same</em> counter, so the limit means what it says regardless of which instance handles which request.</li>
+<li>Uploaded files → written to shared object storage (or at minimum a shared network volume), not a given instance's local disk — any instance can serve the file back, because none of them "own" it.</li>
+</ul>
+<p>Once every instance is reading and writing the same shared state instead of its own local copy, the instances become genuinely interchangeable — this is the property sometimes called <dfn data-en="an architecture where no server instance holds any data that isn't also recoverable from a shared store, so any instance can be killed or replaced without losing anything" data-vn="giữ nguyên 'shared-nothing' — instance không giữ gì độc quyền, mọi state đều ở chỗ dùng chung">shared-nothing</dfn> at the instance level: nothing any one instance holds is unique to it, so losing an instance loses nothing, and the load balancer's arbitrary routing decision stops mattering.</p>
+
+<h2>4 · The band-aid: sticky sessions, and why it's usually the wrong fix</h2>
+<p>There's a shortcut that looks like it solves this without touching any code: configure the load balancer to always send the same client back to the same instance, based on a cookie or their IP — called <dfn data-en="a load balancer configuration that routes a given client's requests to the same backend instance every time, instead of distributing freely" data-vn="giữ nguyên 'sticky sessions' / 'session affinity' — LB luôn route 1 client về đúng 1 instance">sticky sessions</dfn> (or session affinity). If instance A always sees the same user, its in-memory session map "works again."</p>
+<p>It's usually the wrong fix. It defeats the actual point of load balancing — traffic can no longer spread evenly, because a client is pinned regardless of how busy their instance is. And it breaks in exactly the moments you need scaling to help most: restart that instance, or scale down during a quiet period, and every client pinned to it loses their session at once, with no other instance able to pick up where it left off — because the state was never anywhere else. Sticky sessions treat the symptom (which instance a client hits) instead of the disease (state that shouldn't have been local in the first place).</p>
+<div class="callout"><strong>Frontend-habit trap:</strong> this is the server-side mirror of a bug you'd never make in the browser — you wouldn't store a value in one tab's memory and expect a different tab to see it. Two server instances are exactly two tabs that happen to share a URL; the fix is the same instinct you already have: shared state goes somewhere both can read, not in either one's local memory.</div>
+
+<div class="interview">
+<p><strong>Q: "How would you scale this API horizontally?"</strong> A strong answer, out loud: <em>"First I'd check what state the handlers are keeping in-process — sessions, caches, rate limit counters, file writes — because none of that survives having more than one instance unless it's already in the database or a shared cache like Redis. Once that's true, I can put a load balancer in front and add instances freely, since any instance can handle any request. I'd avoid sticky sessions as the fix — it just hides state that's still only on one instance, and it breaks the first time that instance restarts or gets scaled down."</em> The subtext: naming <em>which specific things</em> tend to leak into memory (sessions, caches, uploads) is what separates this from reciting "make it stateless" as a slogan.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A load balancer can route any client's request to any instance with no guarantee of repeat routing, so any state a handler kept only in that instance's memory is invisible to every other instance.">
+    <p class="stem">Why does adding a second instance break in-memory session storage?</p>
+    <button class="opt" data-ok>The load balancer may route to a different instance</button>
+    <button class="opt">Go's built-in maps break entirely under multiple running processes</button>
+    <button class="opt">Postgres cannot reliably support more than one connected instance</button>
+  </div>
+  <div class="q" data-why="Each instance keeps its own separate counter, so a limit meant to be per-user becomes, in effect, per-user-per-instance — multiplying the real allowed rate by however many instances are running.">
+    <p class="stem">What happens to an in-memory "5 requests/min" limiter behind 4 instances?</p>
+    <button class="opt" data-ok>The effective limit multiplies by instance count</button>
+    <button class="opt">The limiter automatically syncs across all instances</button>
+    <button class="opt">Requests split evenly across all four counters</button>
+  </div>
+  <div class="q" data-why="Shared state — sessions, counters, uploaded files — has to live somewhere every instance can read and write the same copy: the database or a shared cache like Redis, not any one instance's local memory or disk.">
+    <p class="stem">Where should cross-request state actually live once there's more than one instance?</p>
+    <button class="opt" data-ok>The database, or a shared cache like Redis</button>
+    <button class="opt">In whichever instance originally handled the first request</button>
+    <button class="opt">Split evenly across every single running instance's memory</button>
+  </div>
+  <div class="q" data-why="Sticky sessions pin a client to one instance, which defeats even load distribution and loses that client's state entirely the moment that specific instance restarts or is scaled down — it hides the underlying problem rather than fixing it.">
+    <p class="stem">Why are sticky sessions usually the wrong fix for in-memory state?</p>
+    <button class="opt" data-ok>They break on instance restart and hurt balancing</button>
+    <button class="opt">Load balancers are technically unable to support them</button>
+    <button class="opt">They require rewriting every client-side request code entirely</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://12factor.net/processes">The Twelve-Factor App — Processes</a> (~5 min) states this exact rule directly: "twelve-factor processes are stateless and share-nothing... any data that needs to persist must be stored in a stateful backing service, typically a database." Its companion section, <a href="https://12factor.net/concurrency">Concurrency</a>, is the direct source for why this makes horizontal scaling (running more processes) the default scaling strategy rather than an afterthought.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> once instances can be added freely, the next question is what happens when they all keep hitting the database for the same unchanging data on every request — where caching actually belongs, and what "invalidate the cache" really means.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

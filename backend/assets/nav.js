@@ -20,6 +20,8 @@
       file: "lessons/0006-what-actually-happens-in-a-transaction.html" },
     { n: 7, date: "2026-07-13", title: "What a 500 should (and shouldn't) tell the client",
       file: "lessons/0007-what-a-500-should-tell-the-client.html" },
+    { n: 8, date: "2026-07-14", title: "Why two instances break your \"stateless\" server",
+      file: "lessons/0008-two-instances-break-your-server.html" },
   ];
 
   const REFS = [

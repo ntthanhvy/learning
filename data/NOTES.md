@@ -51,3 +51,16 @@
   `uv run --with pandas` this round. Run it once and confirm the ✓/✗ output
   before trusting it blindly; `lesson_generated` could not be recorded either,
   do it manually once DB access is back.
+- 2026-07-14 generation (Lesson 6): direct `psql "$LEARNING_DB_URL" ...` reads
+  were still blocked in this headless run (shell-variable expansion of that
+  specific name is disallowed for this session), so no `course_progress` rows
+  could be read — still no learning record beyond the baseline, so Lesson 6
+  continues the conservative pattern from the curriculum spine (reshape,
+  pivot/melt, per Lesson 5's own teaser) rather than a reported outcome.
+  `uv run --with pandas` and `bin/record-progress` BOTH worked this round
+  (invoked directly, not through a wrapper script) — `practice/06_reshape_pivot_melt.py`
+  was actually executed in a scratch copy (`.scratch/`, deleted after): the
+  shipped (unsolved) version printed all ✗, and a solved version (pivot_table
+  then melt on the pre-cleaned 4-row slice of `orders_raw.csv`) printed all ✓
+  before the unsolved file was copied into `practice/`. `lesson_generated` was
+  recorded successfully.

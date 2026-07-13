@@ -16,6 +16,8 @@
       file: "lessons/0004-groupby-split-apply-combine.html" },
     { n: 5, date: "2026-07-13", title: "Merge & join",
       file: "lessons/0005-merge-and-join.html" },
+    { n: 6, date: "2026-07-14", title: "Reshape: pivot & melt",
+      file: "lessons/0006-reshape-pivot-and-melt.html" },
   ];
 
   const REFS = [

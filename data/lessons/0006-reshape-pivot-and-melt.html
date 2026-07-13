@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 6 · Reshape: Pivot &amp; Melt</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 6 · ~20 min · 14 Jul 2026</p>
+<h1>Reshape: pivot &amp; melt</h1>
+<p class="byline">Lesson 5 ended with a teaser: pivoting rows into columns and back, the pandas answer to a spreadsheet-style "wide" report built from a SQL-style "long" table. Every table you've touched Lessons 1–5 has been <dfn data-en="a table shape where each row is one observation and each column is one variable — the shape SQL tables and groupby/merge results naturally have" data-vn="giữ nguyên 'long format' — mỗi hàng 1 quan sát, mỗi cột 1 biến">long format</dfn>: one row per order. Today builds the other shape people actually ask for in a report — one row per customer, one column per date — and, just as often, undoes it.</p>
+
+<h2>Recap, in one line</h2>
+<p>Lesson 4's groupby answered "one number per group." Lesson 5's merge answered "combine two tables." Today answers a different question entirely: same data, same values, just laid out differently on the page.</p>
+
+<h2>1 · Long vs. wide, and why SQL never needed this word</h2>
+<p>A SQL query result is always <dfn data-en="tabular data laid out with more rows and fewer columns than a report view of the same information — the natural output shape of SELECT and GROUP BY" data-vn="giữ nguyên 'long' — nhiều hàng, ít cột">long</dfn>: every `GROUP BY customer` you've ever written comes back as one row per customer, full stop. A <dfn data-en="the same data laid out with a distinct value spread across separate columns instead of separate rows — the shape a spreadsheet pivot table or a monthly report typically wants" data-vn="giữ nguyên 'wide' — dàn 1 giá trị thành nhiều cột riêng">wide</dfn> report — customers down the side, dates across the top, amounts in the grid — is a presentation choice, not a query result; SQL people build it with a wall of <code>SUM(CASE WHEN order_date = '...' THEN amount END)</code> columns, one per date, because SQL has no single keyword for "spread this column out." pandas does: <dfn data-en="a pandas DataFrame method that reshapes long data into wide: one row per index value, one column per distinct value found in the columns argument, cell values from the values argument" data-vn="giữ nguyên 'pivot_table' — hàm dàn bảng long thành wide">pivot_table</dfn>.</p>
+
+<h2>2 · <code>pivot_table</code>: index, columns, values, aggfunc</h2>
+<p>Four arguments answer four questions, and mapping them to the SQL wall of <code>CASE WHEN</code>s makes each one obvious:</p>
+<table class="gloss">
+<tr><th>Argument</th><th>Answers</th><th>SQL equivalent</th></tr>
+<tr><td><code>index=</code></td><td>what goes down the rows?</td><td><code>GROUP BY</code> column</td></tr>
+<tr><td><code>columns=</code></td><td>what gets spread across the top?</td><td>one <code>CASE WHEN col = '...'</code> per distinct value</td></tr>
+<tr><td><code>values=</code></td><td>what fills each cell?</td><td>the column inside <code>SUM(...)</code></td></tr>
+<tr><td><code>aggfunc=</code></td><td>how to combine if more than one row lands in the same cell?</td><td>the aggregate itself — <code>SUM</code>, <code>COUNT</code>, <code>MEAN</code></td></tr>
+</table>
+<pre><code>wide = clean.pivot_table(
+    index=<span class="kw">"customer"</span>, columns=<span class="kw">"order_date"</span>,
+    values=<span class="kw">"amount"</span>, aggfunc=<span class="kw">"sum"</span>, fill_value=<span class="kw">0</span>,
+)</code></pre>
+<p><code>fill_value=0</code> is the piece with no SQL equivalent to lean on: a customer with no order on a given date has no row to aggregate at all, so that cell would otherwise be <code>NaN</code> — "no data," not "zero." <code>fill_value</code> decides what goes there instead. 0 reads naturally for a money total; it would be the wrong choice for, say, an average price, where "no orders" and "average order was $0" are different facts worth keeping apart as <code>NaN</code>.</p>
+<div class="callout"><strong>Gotcha:</strong> <code>pivot_table</code>'s default <code>dropna=True</code> silently drops any row whose <code>index</code> or <code>columns</code> key is itself <code>NaN</code> — a customer with a missing order_date wouldn't get a row at all, not even a zero-filled one. That's a second, quieter reason (beyond Lesson 3's cleaning) to resolve missing keys before pivoting, not after.</div>
+
+<h2>3 · <code>melt</code>: wide back to long</h2>
+<p>The reverse operation, <dfn data-en="a pandas DataFrame method that reshapes wide data back into long: id_vars stay as columns, every other column becomes two columns — one naming which original column a row came from (var_name), one holding that column's value (value_name)" data-vn="giữ nguyên 'melt' — hàm dàn bảng wide về lại long">melt</dfn>, un-spreads columns back into rows — needed constantly, because a wide report is a dead end for further analysis (try grouping by "which date column" when the date is a column name, not a value).</p>
+<pre><code>long = wide.reset_index().melt(
+    id_vars=<span class="kw">"customer"</span>, var_name=<span class="kw">"order_date"</span>, value_name=<span class="kw">"amount"</span>,
+)</code></pre>
+<p><code>reset_index()</code> comes first for a reason worth noticing: <code>pivot_table</code> moved <code>customer</code> out of the columns and into the <em>index</em> (visible in section 2's output as its own row above the data, not a normal column). <code>melt</code> only reshapes ordinary columns, so <code>customer</code> has to move back into one before melting can see it — <code>id_vars</code> names the column(s) that stay put; every other column becomes two new columns: <code>var_name</code> (which original column a row came from) and <code>value_name</code> (that column's value).</p>
+<div class="callout"><strong>SQL-habit trap:</strong> melting a pivoted table does not hand you back the exact original table — it hands you back every cell of the <em>grid you built</em>, fill_value padding included. Pivoting An/Binh's 4 real orders into a 2×4 grid and melting it back produces 8 rows, not 4; the 4 extra rows are the zero-filled combinations that never existed. Filtering them back out (<code>amount != 0</code>, or whatever <code>fill_value</code> was) is a manual step, not something melt knows to do for you.</div>
+
+<div class="interview">
+<p><strong>Q: "You have a long orders table and need a report with one row per customer and one column per month. How do you build it?"</strong> A strong answer, out loud: <em>"pivot_table with index=customer, columns=month, values=amount, aggfunc=sum, and fill_value=0 so customers with no orders that month show zero instead of NaN. If I need to reshape it back to long for further analysis — say, to join it with something else — reset_index and melt undo it, with id_vars=customer. The one thing I'd double check is whether melting gets me back the original rows exactly, or the padded grid — those aren't the same table if fill_value introduced zeros that weren't really there."</em> The subtext: knowing pivot and melt are inverses, but not perfect inverses once fill_value is involved, is the detail that separates "knows the two function names" from "has actually hit this."</p>
+</div>
+
+<h2>Try it — self-checking practice (~8 min)</h2>
+<p>Open <code>practice/06_reshape_pivot_melt.py</code>, replace each <code>...</code>, and re-run until all three checks print ✓:</p>
+<pre><code>cd ~/learning/data
+uv run --with pandas python3 practice/06_reshape_pivot_melt.py</code></pre>
+<p>Same <code>orders_raw.csv</code> as Lessons 2–5. Today's file starts from a pre-cleaned slice (Lesson 3's move: drop the unparseable amount and the missing order_date) so the reshape mechanics stay the whole point — 4 clean rows, An and Binh, two dates each.</p>
+
+<h2>Check yourself</h2>
+<div class="quiz">
+  <div class="q" data-why="index= names what goes down the rows (like a GROUP BY column); columns= names what gets spread across the top, one output column per distinct value found there.">
+    <p class="stem">In <code>pivot_table(index="customer", columns="order_date", ...)</code>, what does <code>columns=</code> control?</p>
+    <button class="opt" data-ok>Which column's distinct values become new columns</button>
+    <button class="opt">Which column becomes the new row-level index</button>
+    <button class="opt">Which column gets dropped from the output</button>
+  </div>
+  <div class="q" data-why="Without fill_value, a customer/date combination with no matching rows has nothing to aggregate, so pandas leaves that cell as NaN (no data) rather than assuming zero (a known, specific value).">
+    <p class="stem">Without <code>fill_value=0</code>, what does an empty customer/date combination show in a pivot_table?</p>
+    <button class="opt" data-ok>NaN, since there was nothing there to aggregate</button>
+    <button class="opt">Zero, pandas assumes an empty combination is zero</button>
+    <button class="opt">The row is dropped entirely from the result</button>
+  </div>
+  <div class="q" data-why="pivot_table moves the index= column out of the ordinary columns and into the DataFrame's index; melt only reshapes ordinary columns, so reset_index() is needed to bring it back before melting.">
+    <p class="stem">Why call <code>reset_index()</code> before melting a pivoted DataFrame?</p>
+    <button class="opt" data-ok>Pivoting already moved that column into the index</button>
+    <button class="opt">Melt requires a plain RangeIndex on every DataFrame</button>
+    <button class="opt">Resetting simply sorts the rows before melting occurs</button>
+  </div>
+  <div class="q" data-why="fill_value padded customer/date combinations that never actually existed with explicit zeros — melting the pivoted grid brings those padding rows back too, so the round trip yields more rows than the original had.">
+    <p class="stem">Melting a table that was pivoted with <code>fill_value=0</code> — does it recreate the exact original rows?</p>
+    <button class="opt" data-ok>No, it also recreates the zero-filled padding rows</button>
+    <button class="opt">Yes, melt always reverses pivot_table exactly every time</button>
+    <button class="opt">Yes, but only when the aggfunc is sum</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official <a href="https://pandas.pydata.org/docs/user_guide/reshaping.html">Reshaping and pivot tables</a> user guide (~20 min) — covers <code>pivot_table</code>, <code>melt</code>, and <code>stack</code>/<code>unstack</code> (a related pair worth knowing by name, out of scope for today) in full. The <a href="https://pandas.pydata.org/docs/getting_started/intro_tutorials/07_reshape_table_layout.html">"How to reshape the layout of tables"</a> getting-started tutorial is a gentler first pass if the user guide moves too fast.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a>.<br>
+<strong>Next lesson:</strong> rank and cumulative operations — answering "top N per group" and running totals without a single Python loop.<br><br>
+💬 Anything unclear — pivot_table's four arguments, the fill_value gotcha, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

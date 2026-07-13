@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 7 · Capstone: an axum service</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Rust Intensive · Day 7 · Capstone · ~90 min</p>
+<h1>Capstone: linkshort-rs becomes an axum service</h1>
+<p class="byline">The last day of the parallel Go/Rust week. Every day this week worked on <code>main.rs</code> exactly as Day 1 left it — a CLI tool with a <code>Vec&lt;Link&gt;</code> and a hand-written <code>match</code> on command-line words — because each day's TODOs didn't depend on the others being finished. Today is the one day that doesn't fit that pattern: turning linkshort-rs into a real HTTP service is a bigger shape change than any single day's add-on, so this lesson gives you a complete, working rewrite of <code>main.rs</code> to build from scratch, section by section — pulling together <dfn data-en="pandas-independent note: here meaning Rust's Result/? from Day 3, made concrete as real HTTP error responses" data-vn="giữ nguyên — Result/? áp dụng thật vào HTTP response">Result-based errors</dfn> (Day 3), <dfn data-en="Rust's HashMap, Day 5's storage upgrade from a linear-scan Vec" data-vn="giữ nguyên 'HashMap' — nâng cấp lưu trữ từ Vec">HashMap</dfn> storage (Day 5), <code>serde</code> JSON (Day 5), and the <dfn data-en="Send/Sync and shared ownership across concurrently-running async tasks, Day 6's concurrency model made concrete" data-vn="giữ nguyên — Send/Sync áp dụng thật khi nhiều request chạy đồng thời">Send/Sync sharing model</dfn> (Day 6) into one coherent service. If you did apply any of Days 2–6's TODOs to your own <code>main.rs</code> already, see the reconciliation note at the very end.</p>
+
+<h2>Warm-up: the week, from memory</h2>
+<div class="quiz">
+  <div class="q" data-why="A future does nothing until it's driven forward by .await or by being handed to an executor like tokio::spawn — unlike a goroutine, which starts running the instant go f() executes.">
+    <p class="stem">What does calling an <code>async fn</code> actually do, before anything <code>.await</code>s it?</p>
+    <button class="opt" data-ok>Builds a future — nothing inside it runs yet</button>
+    <button class="opt">Starts running the function on a new thread</button>
+    <button class="opt">Blocks the caller entirely until the function completes</button>
+  </div>
+  <div class="q" data-why="? returns Err/None to the caller immediately if that's what it sees, or unwraps Ok/Some and continues — only legal inside a function whose own return type is Result or Option.">
+    <p class="stem">What does the <code>?</code> operator do when applied to an <code>Err</code> value?</p>
+    <button class="opt" data-ok>Returns that Err from the current function immediately</button>
+    <button class="opt">Panics the whole program with that error value</button>
+    <button class="opt">Converts the Err into an Ok default value</button>
+  </div>
+  <div class="q" data-why="derive(Serialize, Deserialize) generates real Rust code at compile time from the struct's own field names and types — a typo becomes a compile error, not a runtime surprise the way Go's reflection-based encoding/json would treat it.">
+    <p class="stem"><code>#[derive(Serialize, Deserialize)]</code> on a struct — when does the JSON conversion code get generated?</p>
+    <button class="opt" data-ok>At compile time, from the struct's own definition</button>
+    <button class="opt">At runtime, only the first time it's serialized</button>
+    <button class="opt">Never — serde always just uses runtime reflection instead</button>
+  </div>
+</div>
+
+<h2>1 · What an HTTP framework is actually for</h2>
+<p>Your Go project's server (<code>net/http</code>) and today's Rust service solve the identical problem: turn incoming bytes on a socket into a Rust value your code can work with, and turn your return value back into bytes to send. <code>axum</code> is the de-facto standard Rust web framework, built on <code>tokio</code> (Day 6) — and its central idea is one you already half-know from Go's <code>http.HandlerFunc</code>: a <dfn data-en="in axum, an ordinary async fn whose parameters are types implementing FromRequestParts (extractors) and whose return type implements IntoResponse — no special trait to implement by hand, axum wires it up via a macro-free trait system" data-vn="giữ nguyên 'handler' — hàm async xử lý 1 request">handler</dfn> is just an async function. The difference is what a handler's *signature* is allowed to say.</p>
+<p>In Go, every handler has the identical signature — <code>func(w http.ResponseWriter, r *http.Request)</code> — and you manually parse the URL, the body, the query string out of <code>r</code> yourself, by hand, every time. axum handlers instead declare exactly what they need as typed parameters, and axum extracts it for you before your code ever runs:</p>
+<pre><code><span class="kw">async</span> <span class="kw">fn</span> get_link(Path(code): Path&lt;String&gt;) -&gt; ... { <span class="cm">/* code is already a String */</span> }</code></pre>
+<p>Each parameter type here is called an <dfn data-en="a type implementing axum's FromRequestParts/FromRequest trait, letting a handler declare exactly what part of the request it needs (a path segment, the JSON body, shared state) as an ordinary typed function parameter instead of parsing the raw request by hand" data-vn="giữ nguyên 'extractor' — khai báo thẳng phần request cần dùng làm tham số hàm">extractor</dfn>. <code>Path&lt;String&gt;</code> pulls a URL segment; <code>Json&lt;T&gt;</code> parses (and, via <code>T: Deserialize</code>, type-checks) the request body; <code>State&lt;S&gt;</code> hands back whatever shared state you registered with the router. Get the type wrong — ask for a <code>Path&lt;u32&gt;</code> on a segment that isn't numeric — and axum rejects the request with a 400 automatically, before your handler body runs at all.</p>
+
+<h2>2 · Shared state: the HashMap needs a lock now</h2>
+<p>Day 5 put your links in a <code>HashMap&lt;String, Link&gt;</code>. Day 6 spawned concurrent tasks that each only <em>read</em> data they owned outright — no conflict possible. An HTTP server is different: tokio may run many request-handling tasks <em>at the same time</em>, and now they all need to read and write the <strong>same</strong> HashMap — the one holding every saved link. That's exactly the shared-mutable-state problem Day 6's <code>Send</code>/<code>Sync</code> discussion was building toward:</p>
+<pre><code><span class="kw">type</span> Db = Arc&lt;Mutex&lt;HashMap&lt;String, Link&gt;&gt;&gt;;</code></pre>
+<p><dfn data-en="atomic reference-counted pointer: multiple owners of the same heap value, each a cheap-to-clone handle; the value is freed once the last owner drops it. The thread-safe cousin of Rc" data-vn="giữ nguyên 'Arc' — con trỏ đếm tham chiếu, nhiều nơi cùng sở hữu 1 giá trị, an toàn giữa các thread">Arc</dfn> lets every request handler hold its own cheap, clonable pointer to the *same* underlying map — like a Go pointer shared across goroutines, but the compiler enforces that sharing is safe (that's what makes <code>Arc&lt;T&gt;</code>'s <code>T</code> require <code>Send + Sync</code> in the first place, straight from Day 6). <dfn data-en="a mutual-exclusion lock: only one thread/task can hold the lock (via .lock()) at a time; any other locker blocks until it's released, guaranteeing no two tasks mutate the data simultaneously" data-vn="giữ nguyên 'Mutex' — khóa loại trừ, chỉ 1 nơi được sửa dữ liệu tại một thời điểm">Mutex</dfn> is the actual safety mechanism: <code>.lock()</code> blocks until no one else is holding the lock, guaranteeing two concurrent requests can never corrupt the map by writing at the same instant — Go's <code>sync.Mutex</code>, same idea, except the borrow checker won't let you touch the data inside without going through the lock at all (there's no way to accidentally forget to lock — the <code>HashMap</code> isn't reachable except through the <code>Mutex</code>).</p>
+
+<h2>3 · Errors become real HTTP responses</h2>
+<p>Day 3 made errors a value you <code>match</code> on or propagate with <code>?</code>. In a web service, an error has to become bytes on the wire — some status code, some body — and axum's answer is one trait: <dfn data-en="axum's trait for anything that can be turned into an HTTP response; implementing it for your own error type lets that type BE the Err side of a handler's Result, with axum calling into_response() automatically whenever the ? operator returns it early" data-vn="giữ nguyên 'IntoResponse' — trait chuyển 1 giá trị Rust thành HTTP response thật">IntoResponse</dfn>. Implement it once for your own error enum, and <code>?</code> inside a handler works exactly like Day 3 — except now "returning early" means axum sends the matching HTTP response for you:</p>
+<pre><code><span class="kw">enum</span> LinkError {
+    NotFound(String),
+}
+
+<span class="kw">impl</span> IntoResponse <span class="kw">for</span> LinkError {
+    <span class="kw">fn</span> into_response(self) -&gt; Response {
+        <span class="kw">match</span> self {
+            LinkError::NotFound(code) =&gt;
+                (StatusCode::NOT_FOUND, <span class="cm">format!("no link for code: {code}")</span>).into_response(),
+        }
+    }
+}</code></pre>
+<p>A handler returning <code>Result&lt;Json&lt;Link&gt;, LinkError&gt;</code> can now use <code>?</code> exactly like any other Rust function this week — <code>db.get(&amp;code).cloned().ok_or(LinkError::NotFound(code))?</code> — and a missing link becomes a real 404 response, without a single <code>if err != nil</code>-style manual status-code call anywhere in the handler body.</p>
+
+<h2>4 · Practice: build the service</h2>
+<p><strong>Step 1 — dependencies.</strong> Edit <code>Cargo.toml</code>:</p>
+<pre><code>[dependencies]
+axum = <span class="cm">"0.8"</span>
+tokio = { version = <span class="cm">"1"</span>, features = [<span class="cm">"rt-multi-thread"</span>, <span class="cm">"macros"</span>] }
+serde = { version = <span class="cm">"1"</span>, features = [<span class="cm">"derive"</span>] }</code></pre>
+
+<p><strong>Step 2 — GIVEN: types, state, and the error type.</strong> Replace the top of <code>main.rs</code> with:</p>
+<pre><code><span class="kw">use</span> axum::{
+    extract::{Path, State},
+    http::StatusCode,
+    response::{IntoResponse, Response},
+    routing::get,
+    Json, Router,
+};
+<span class="kw">use</span> serde::{Deserialize, Serialize};
+<span class="kw">use</span> std::collections::HashMap;
+<span class="kw">use</span> std::sync::{Arc, Mutex};
+
+<span class="cm">#[derive(Clone, Serialize, Deserialize)]</span>
+<span class="kw">struct</span> Link {
+    code: String,
+    url: String,
+}
+
+<span class="cm">#[derive(Deserialize)]</span>
+<span class="kw">struct</span> NewLink {
+    code: String,
+    url: String,
+}
+
+<span class="kw">type</span> Db = Arc&lt;Mutex&lt;HashMap&lt;String, Link&gt;&gt;&gt;;
+
+<span class="cm">#[derive(Clone)]</span>
+<span class="kw">struct</span> AppState {
+    db: Db,
+}
+
+<span class="kw">enum</span> LinkError {
+    NotFound(String),
+}
+
+<span class="kw">impl</span> IntoResponse <span class="kw">for</span> LinkError {
+    <span class="kw">fn</span> into_response(self) -&gt; Response {
+        <span class="kw">match</span> self {
+            LinkError::NotFound(code) =&gt;
+                (StatusCode::NOT_FOUND, <span class="cm">format!("no link for code: {code}")</span>).into_response(),
+        }
+    }
+}
+
+<span class="kw">fn</span> seed() -&gt; Db {
+    <span class="kw">let</span> <span class="kw">mut</span> m = HashMap::new();
+    m.insert(<span class="cm">"go"</span>.to_string(), Link { code: <span class="cm">"go"</span>.to_string(), url: <span class="cm">"https://go.dev"</span>.to_string() });
+    m.insert(<span class="cm">"rust"</span>.to_string(), Link { code: <span class="cm">"rust"</span>.to_string(), url: <span class="cm">"https://www.rust-lang.org"</span>.to_string() });
+    Arc::new(Mutex::new(m))
+}</code></pre>
+
+<p><strong>Step 3 — TODO 1: <code>get_link</code>.</strong> Uses <code>Path</code> + <code>State</code> extractors, returns the Day 3 <code>?</code>-then-<code>IntoResponse</code> pattern from section 3:</p>
+<pre><code><span class="cm">// TODO 1:
+// async fn get_link(State(state): State<AppState>, Path(code): Path<String>)
+//     -> Result<Json<Link>, LinkError> {
+//     let db = state.db.lock().unwrap();
+//     let link = db.get(&code).cloned().ok_or(LinkError::NotFound(code))?;
+//     Ok(Json(link))
+// }
+// .lock().unwrap() — Day 3's other lesson: a poisoned Mutex (a previous
+// holder panicked mid-lock) is the one case .unwrap() is the idiomatic
+// choice, not a shortcut — there's no sane value to recover to.</span></code></pre>
+
+<p><strong>Step 4 — TODO 2: <code>create_link</code>.</strong> Uses <code>Json</code> as an extractor (the request body) AND as a response wrapper (the reply) — same type, both directions:</p>
+<pre><code><span class="cm">// TODO 2:
+// async fn create_link(State(state): State<AppState>, Json(new_link): Json<NewLink>)
+//     -> impl IntoResponse {
+//     let link = Link { code: new_link.code.clone(), url: new_link.url };
+//     let mut db = state.db.lock().unwrap();
+//     db.insert(new_link.code, link.clone());
+//     (StatusCode::CREATED, Json(link))
+// }</span></code></pre>
+
+<p><strong>Step 5 — GIVEN: <code>list_links</code> and <code>main</code>, wiring it all together:</strong></p>
+<pre><code><span class="kw">async</span> <span class="kw">fn</span> list_links(State(state): State&lt;AppState&gt;) -&gt; Json&lt;Vec&lt;Link&gt;&gt; {
+    <span class="kw">let</span> db = state.db.lock().unwrap();
+    Json(db.values().cloned().collect())
+}
+
+<span class="cm">#[tokio::main]</span>
+<span class="kw">async</span> <span class="kw">fn</span> main() {
+    <span class="kw">let</span> state = AppState { db: seed() };
+
+    <span class="kw">let</span> app = Router::new()
+        .route(<span class="cm">"/links"</span>, get(list_links).post(create_link))
+        .route(<span class="cm">"/links/{code}"</span>, get(get_link))
+        .with_state(state);
+
+    <span class="kw">let</span> listener = tokio::net::TcpListener::bind(<span class="cm">"127.0.0.1:3000"</span>).<span class="kw">await</span>.unwrap();
+    println!(<span class="cm">"listening on {}"</span>, listener.local_addr().unwrap());
+    axum::serve(listener, app).<span class="kw">await</span>.unwrap();
+}</code></pre>
+<p>Note what disappeared: the old <code>Command</code> enum and hand-rolled <code>parse_command</code> from Day 1 are gone entirely — <code>Router::new().route(path, method(handler))</code> IS the command dispatch now, just addressed by URL + HTTP verb instead of CLI words. Same shape (match an input against known cases, run the matching handler), different address space.</p>
+
+<p><strong>Step 6 — TODO 3: tests, calling handlers directly (no server needed).</strong> An axum handler is just an async function — you can call it directly in a test with hand-built extractor values, no HTTP round trip required:</p>
+<pre><code><span class="cm">#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn get_link_found_returns_ok() {
+        let state = AppState { db: seed() };
+        let result = get_link(State(state), Path("go".to_string())).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn get_link_missing_returns_not_found() {
+        let state = AppState { db: seed() };
+        let result = get_link(State(state), Path("missing".to_string())).await;
+        assert!(result.is_err());
+    }
+
+    // TODO 3: write create_link_then_get_it_back — call create_link with a
+    // NewLink { code: "rs", url: "https://www.rust-lang.org" }, then call
+    // get_link for "rs" on the SAME state (state.clone() into create_link,
+    // move state into get_link) and assert the result is_ok(). This is the
+    // one test that proves create and get share the same Db, not two copies.
+}</span></code></pre>
+
+<p><strong>Step 7 — prove it.</strong></p>
+<pre><code>cargo check
+cargo test
+cargo clippy
+cargo run
+<span class="cm"># in another terminal:</span>
+curl http://127.0.0.1:3000/links
+curl -X POST http://127.0.0.1:3000/links -H <span class="cm">'content-type: application/json'</span> -d <span class="cm">'{"code":"rs","url":"https://www.rust-lang.org"}'</span>
+curl http://127.0.0.1:3000/links/rs
+curl http://127.0.0.1:3000/links/nope   <span class="cm"># -> 404</span>
+</code></pre>
+<div class="callout"><strong>Done when:</strong> <code>cargo check</code> quiet · <code>cargo test</code> green (3 tests) · <code>cargo clippy</code> quiet · <code>cargo run</code> starts the server and all four <code>curl</code> commands behave as commented above, including the 404.</div>
+
+<h2>5 · What this week actually built</h2>
+<p>Line up the whole week: <strong>enums + exhaustive match</strong> (Day 1) → <strong>ownership</strong>, why <code>Arc</code> needs to exist at all (Day 2) → <strong>Result/?</strong>, now a real HTTP error path (Day 3) → <strong>traits</strong>, <code>IntoResponse</code>/<code>Serialize</code>/<code>Deserialize</code> being exactly that (Day 4) → <strong>HashMap + serde</strong>, today's actual storage and wire format (Day 5) → <strong>Send/Sync/tokio</strong>, today's concurrency safety net (Day 6) → today, all six wired into one running service. Every concept this week was, without exception, in service of this one file.</p>
+
+<div class="interview">
+<p><strong>Q: "Pitch Rust for backend work, compared to Go."</strong> A strong answer, out loud: <em>"Both give you real concurrency and a fast compiled binary. The difference shows up in what the compiler catches before it ships: Rust's ownership model rules out data races at compile time rather than catching them with the race detector at runtime, exhaustive match on enums means a new variant is a compile error everywhere it's unhandled, and Result forces every error path to be handled somewhere. It's a steeper first week — the borrow checker is real — but a lot of a Go on-call's 'someone forgot to check this' bugs simply don't compile in Rust."</em> The subtext: contrasting *when* each language catches a bug (compile time vs. runtime vs. code review) is what separates this from "Rust is just faster."</p>
+</div>
+
+<h2>Check yourself</h2>
+<div class="quiz">
+  <div class="q" data-why="Extractors are typed parameters in the handler's own signature — Path<String>, Json<T>, State<S> — and axum parses/validates the request into them before the handler body runs, unlike Go's http.HandlerFunc(w, r) where you parse everything from r yourself.">
+    <p class="stem">How does an axum handler receive a URL path segment or JSON body, compared to a Go <code>http.HandlerFunc</code>?</p>
+    <button class="opt" data-ok>As a typed extractor parameter that axum parses automatically</button>
+    <button class="opt">By manually parsing the raw request, same as Go</button>
+    <button class="opt">Through a global variable axum sets before calling it</button>
+  </div>
+  <div class="q" data-why="Multiple concurrently-running request handlers all need to read and write the SAME map at once — Arc shares one heap allocation across owners safely, and Mutex ensures only one task mutates it at a time; neither alone is enough.">
+    <p class="stem">Why does the shared link storage need both <code>Arc</code> AND <code>Mutex</code>, not just one?</p>
+    <button class="opt" data-ok>Arc shares ownership, and Mutex serializes the writes</button>
+    <button class="opt">Arc alone already prevents any data races entirely</button>
+    <button class="opt">Mutex alone already allows sharing across many tasks</button>
+  </div>
+  <div class="q" data-why="Implementing IntoResponse for a custom error enum lets that type be the Err side of a handler's Result — the ? operator returns it early exactly like any other Rust function, and axum converts it to a real HTTP response automatically.">
+    <p class="stem">What does implementing <code>IntoResponse</code> for a custom error enum actually enable?</p>
+    <button class="opt" data-ok>Using ? inside handlers so errors become responses</button>
+    <button class="opt">Automatically retrying the failed request a few times</button>
+    <button class="opt">Logging every error message to stdout before crashing</button>
+  </div>
+  <div class="q" data-why="An axum handler is just an ordinary async function — its extractor parameters are ordinary struct values you can construct by hand (State(state), Path(code)) and call directly, with no HTTP server or request needed at all.">
+    <p class="stem">Why can <code>get_link</code> be tested by calling it directly, with no running server?</p>
+    <button class="opt" data-ok>It's an ordinary async fn whose extractors are just structs</button>
+    <button class="opt">axum starts a hidden test server for every unit test</button>
+    <button class="opt">Handlers are entirely exempt from Rust's normal function call rules</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official <a href="https://docs.rs/axum/latest/axum/">axum documentation</a> (~30 min) — read the crate-level docs page top to bottom; it covers extractors, <code>State</code>, and <code>IntoResponse</code> in exactly this order. The <a href="https://github.com/tokio-rs/axum/tree/main/examples">axum examples</a> repo (see <code>todos</code> and <code>error-handling</code>) is the fastest way to see a slightly larger service than today's. For where to go after this capstone, <a href="https://www.zero2prod.com/">Zero To Production in Rust</a> is the standard reference for taking a service like this toward production.</p>
+<p>New terms are in the <a href="../reference/glossary.html#day7">glossary — Day 7 section</a>. Today's questions also entered your <a href="../daily.html">daily practice</a> bank.</p>
+
+<div class="callout"><strong>Reconciliation, if you already worked on Days 2–6's TODOs in your own <code>main.rs</code>:</strong> today's rewrite doesn't need any of them — it replaces the whole file. If you'd rather keep your own progress and layer today's service on top: keep your <code>Link</code>/error types (Day 3's, if you wrote them) and your Day 5 <code>HashMap</code> conversion, wrap that same map in <code>Arc&lt;Mutex&lt;...&gt;&gt;</code> for section 2's reason, drop Day 1's CLI <code>Command</code>/<code>parse_command</code> entirely (axum's router replaces it), and carry over Day 6's <code>check_link</code> as an optional extra axum route (<code>POST /links/{code}/check</code>) if you want the concurrent-check feature to survive into the service.</div>
+
+<p class="next">That's the week. From tomorrow (Tue Jul 15), <a href="../daily.html">daily practice</a> takes over: ~15 min/day, a quiz sampled from everything you've learned plus one small kata, open-ended.<br><br>
+💬 Any axum error, a borrow-checker fight in the handlers, or something not compiling? Paste the whole message — hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/quiz.js"></script>
+<script src="../assets/gloss.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -117,3 +117,24 @@ by the user there; they apply here identically.
   If Days 2–5 land later, reconcile: Day 6's `Check` arm does `for link in links`
   (moves a `Vec<Link>`) — once Day 5's HashMap conversion is applied, that becomes
   `for link in links.into_values()` instead, same idea, different collection.
+- 2026-07-14 (Day 7 generation, capstone): direct `psql "$LEARNING_DB_URL" ...`
+  reads were still blocked in this headless run (shell-variable expansion of
+  that specific name disallowed for this session) — no `course_progress` rows
+  could be read, so pacing came from learning-records + file state alone, same
+  as every prior round. `main.rs` on disk is still exactly Day 1's shape (no
+  HashMap, serde, traits, or async from Days 2–6 applied) — since turning the
+  CLI into an HTTP service is a much bigger shape change than any single day's
+  add-on, Day 7 doesn't try to layer onto whatever Days 2–6 left in place (they
+  all still assume the CLI). Instead it hands over a complete, self-contained
+  axum service (Link+NewLink w/ serde derive, `Arc<Mutex<HashMap>>` shared
+  state, a `LinkError: IntoResponse` type, `get_link`/`create_link`/`list_links`
+  handlers, tests calling handlers directly with no HTTP round trip) as
+  given-code-plus-3-TODOs, with an explicit reconciliation callout at the end
+  for whoever *did* apply earlier days' TODOs to their own file. `cargo check`,
+  `cargo test` (4 tests incl. the kata's `delete_link`), and `cargo clippy` were
+  all available this round and run clean against the full solved version in a
+  scratch cargo project (`.scratch/rust-capstone/`, deleted after) — network
+  access to crates.io for axum/tokio/serde confirmed working. `bin/record-progress`
+  also worked this round — `lesson_generated` was recorded successfully. Added
+  a `#day7` glossary section (handler, extractor, IntoResponse, Arc, Mutex,
+  State) and 4 quiz-bank questions + 1 kata (`k7`, a DELETE route) tagged day 7.

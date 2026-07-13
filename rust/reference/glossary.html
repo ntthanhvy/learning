@@ -88,6 +88,17 @@
 <tr><td>'static bound (spawned tasks)</td><td>A future handed to <code>tokio::spawn</code> can't borrow anything from its spawning function — it may run later, on another thread, after that function has returned. The fix is to own the data (move it in), not borrow it.</td><td>giữ nguyên "'static" — task spawn phải sở hữu dữ liệu, không mượn tham chiếu</td></tr>
 </table>
 
+<h2 id="day7">Day 7 — Capstone: an axum service</h2>
+<table class="gloss">
+<tr><th>Term</th><th>In software</th><th>Tiếng Việt (dev-style)</th></tr>
+<tr><td>handler</td><td>In axum, an ordinary <code>async fn</code> whose parameters are types implementing an extractor trait and whose return type implements <code>IntoResponse</code> — no special base trait to implement by hand.</td><td>giữ nguyên "handler" — hàm async xử lý 1 request</td></tr>
+<tr><td>extractor</td><td>A type implementing axum's request-extraction trait, letting a handler declare exactly what part of the request it needs (<code>Path</code>, <code>Json</code>, <code>State</code>) as an ordinary typed parameter instead of parsing the raw request by hand.</td><td>giữ nguyên "extractor" — khai báo thẳng phần request cần dùng làm tham số hàm</td></tr>
+<tr><td>IntoResponse</td><td>axum's trait for anything convertible into an HTTP response. Implementing it for a custom error type lets that type be the <code>Err</code> side of a handler's <code>Result</code>, with axum calling <code>into_response()</code> automatically when <code>?</code> returns it early.</td><td>giữ nguyên "IntoResponse" — trait chuyển 1 giá trị Rust thành HTTP response thật</td></tr>
+<tr><td>Arc</td><td>Atomic reference-counted pointer: multiple owners of the same heap value, each a cheap-to-clone handle; freed once the last owner drops it. The thread-safe cousin of <code>Rc</code>, required whenever shared data crosses task/thread boundaries.</td><td>giữ nguyên "Arc" — con trỏ đếm tham chiếu, nhiều nơi cùng sở hữu 1 giá trị, an toàn giữa các thread</td></tr>
+<tr><td>Mutex</td><td>A mutual-exclusion lock: only one task can hold it (via <code>.lock()</code>) at a time; any other locker blocks until release, guaranteeing two concurrent requests never mutate shared data at the same instant.</td><td>giữ nguyên "Mutex" — khóa loại trừ, chỉ 1 nơi được sửa dữ liệu tại một thời điểm</td></tr>
+<tr><td>State extractor</td><td><code>State&lt;S&gt;</code> hands a handler the shared application state (here, the <code>Arc&lt;Mutex&lt;HashMap&gt;&gt;</code>) registered on the router via <code>.with_state(...)</code> — axum's dependency-injection mechanism for handlers.</td><td>giữ nguyên "State" — lấy state dùng chung đã đăng ký ở router</td></tr>
+</table>
+
 <h2>Coming this week (Days 3–7)</h2>
 <table class="gloss">
 <tr><th>Term</th><th>In software</th><th>Tiếng Việt (dev-style)</th></tr>

@@ -62,3 +62,16 @@
   --lesson 0008-two-instances-break-your-server.html --detail
   '{"by":"launchd"}'` ran directly this round and succeeded (no approval
   blocker this time) — `lesson_generated` was recorded successfully.
+- 2026-07-15 generation (Lesson 9): the Go/Rust intensives ended Jul 13/14, so
+  per MISSION.md the pace "may deepen" from today — but with still no
+  `lesson_completed` record for any of Lessons 1–8, there's no reported outcome
+  to deepen in response to, so this round keeps the established ~20 min/day
+  format rather than unilaterally changing course structure with no user in
+  the loop; that's a call better left for an interactive session. Lesson 9
+  continues the conservative pattern, picking up Lesson 8's own teaser
+  (caching: where it belongs, what invalidation means) rather than a recorded
+  gap. Direct `psql "$LEARNING_DB_URL" ...` was still blocked in this headless
+  run (shell-variable expansion of that name disallowed for this sandboxed
+  session), so no `course_progress` rows could be read — but `bin/record-progress`
+  worked when invoked directly (it sources the DB env internally), and
+  `lesson_generated` was recorded successfully for day 9.

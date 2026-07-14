@@ -18,6 +18,8 @@
       file: "lessons/0005-merge-and-join.html" },
     { n: 6, date: "2026-07-14", title: "Reshape: pivot & melt",
       file: "lessons/0006-reshape-pivot-and-melt.html" },
+    { n: 7, date: "2026-07-15", title: "Rank & cumulative operations",
+      file: "lessons/0007-rank-and-cumulative-operations.html" },
   ];
 
   const REFS = [

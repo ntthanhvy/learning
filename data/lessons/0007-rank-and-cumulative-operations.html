@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 7 · Rank &amp; Cumulative Operations</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 7 · ~20 min · 15 Jul 2026</p>
+<h1>Rank &amp; cumulative operations</h1>
+<p class="byline">Lesson 6 ended with a teaser: rank and cumulative operations, answering "top N per group" and running totals without a single Python loop. You already know the SQL side of this — window basics were called out as comfortable ground in this course's baseline. Today is the pandas spelling of exactly that: <code>RANK()/ROW_NUMBER() OVER (PARTITION BY ... ORDER BY ...)</code> and <code>SUM() OVER (...)</code>, no new concept, new syntax only.</p>
+
+<h2>Recap, in one line</h2>
+<p>Lesson 4's groupby answered "one number per group" (a single aggregate, rows collapse). Lesson 6's reshape answered "same data, different layout." Today's question keeps every row but adds a per-row answer computed <em>within its group</em> — a rank, or a running total — which is exactly what a SQL <dfn data-en="a SQL feature computing a value across a set of related rows (a PARTITION) without collapsing them into one row per group, unlike GROUP BY" data-vn="window function (giữ nguyên) — tính theo nhóm nhưng KHÔNG gộp hàng, khác GROUP BY">window function</dfn> does: compute per-group, but don't collapse the rows.</p>
+
+<h2>1 · <code>rank()</code>: the pandas <code>RANK() OVER (PARTITION BY ...)</code></h2>
+<p><dfn data-en="a pandas Series method assigning each value its rank within an ordering — the direct analog of SQL's RANK()/ROW_NUMBER() OVER (...) window functions, computed per group when chained after groupby()" data-vn="rank() (giữ nguyên) — đánh số thứ hạng, giống RANK()/ROW_NUMBER() OVER trong SQL">rank()</dfn> assigns each value its position within an ordering. Alone, on a whole column, it ranks globally — chained after <code>groupby()</code>, it ranks <em>within each group independently</em>, the direct pandas equivalent of adding <code>PARTITION BY customer</code> to a SQL window function:</p>
+<pre><code><span class="cm"># SQL: RANK() OVER (PARTITION BY customer ORDER BY amount DESC)</span>
+clean[<span class="kw">"amount_rank"</span>] = clean.groupby(<span class="kw">"customer"</span>)[<span class="kw">"amount"</span>].rank(
+    method=<span class="kw">"first"</span>, ascending=<span class="kw">False</span>
+)</code></pre>
+<p><code>ascending=False</code> makes rank 1 the <em>biggest</em> value, matching "top N" intuition. The <dfn data-en="rank()'s method= argument decides what happens when two values tie: 'first' breaks ties by row order (like ROW_NUMBER()), 'min'/'dense' give tied rows the same rank (like RANK()/DENSE_RANK())" data-vn="rank tie-breaking (method=) — cách xử lý khi 2 giá trị bằng nhau">tie-breaking method</dfn> matters more than it looks: <code>method="first"</code> breaks ties by row order — the <code>ROW_NUMBER()</code> flavor, always assigning 1, 2, 3 with no repeats. <code>method="min"</code> or <code>"dense"</code> give tied values the <em>same</em> rank — the <code>RANK()</code>/<code>DENSE_RANK()</code> flavor. Same SQL distinction, same reason to pick one over the other: use <code>"first"</code> when you need exactly N rows out no matter what; use <code>"min"</code>/<code>"dense"</code> when ties should visibly share a place.</p>
+
+<h2>2 · Top N per group: filter the rank, don't sort-and-slice by hand</h2>
+<p>Once every row has a per-group rank, <dfn data-en="a common interview pattern: within each group, keep only the highest (or lowest) k rows by some ordering — solved in pandas via rank() <= k or sort_values().groupby().head(k), and in SQL via ROW_NUMBER() OVER (PARTITION BY ...) filtered to <= k" data-vn="top N per group (giữ nguyên) — lấy k dòng đứng đầu mỗi nhóm">top N per group</dfn> is just a filter — the same move as wrapping a SQL window function in an outer <code>WHERE rn <= N</code>:</p>
+<pre><code>top_1_per_customer = clean[clean[<span class="kw">"amount_rank"</span>] == <span class="kw">1</span>]</code></pre>
+<p>A second, equally common way reaches the same answer without <code>rank()</code> at all: <code>clean.sort_values("amount", ascending=False).groupby("customer").head(1)</code> — sort first, then take the first <em>N</em> rows of each group. Both are idiomatic; <code>rank()</code> wins when you need the rank <em>number itself</em> kept as data (e.g. to show "this is your #2 order"), <code>sort_values().groupby().head(N)</code> wins when you only need the rows and never care what number they'd have been.</p>
+
+<h2>3 · <code>cumsum()</code>: the pandas <code>SUM() OVER (ORDER BY ...)</code></h2>
+<p><dfn data-en="a running/cumulative sum: each row's output is the sum of itself and every prior row (in the current order) — the pandas analog of SQL's SUM() OVER (PARTITION BY ... ORDER BY ...) window frame" data-vn="cumsum() (giữ nguyên) — tổng dồn, tương đương SUM() OVER (...)">cumsum()</dfn> is a running total: each row gets the sum of itself plus everything before it, <em>in whatever order the rows currently are</em>. That last clause is the one gotcha — <code>cumsum()</code> has no <code>ORDER BY</code> argument the way SQL's window frame does; it just walks the DataFrame top to bottom. So the order has to already be right before you call it:</p>
+<pre><code><span class="cm"># SQL: SUM(amount) OVER (PARTITION BY customer ORDER BY order_date)</span>
+by_date = clean.sort_values(<span class="kw">"order_date"</span>)  <span class="cm"># cumsum trusts row order — sort FIRST</span>
+by_date[<span class="kw">"running_total"</span>] = by_date.groupby(<span class="kw">"customer"</span>)[<span class="kw">"amount"</span>].cumsum()</code></pre>
+<div class="callout"><strong>Gotcha:</strong> skip the <code>sort_values</code> and <code>cumsum()</code> still runs — silently, with no error — it just accumulates in whatever order the rows happened to arrive from <code>read_csv</code>, which is rarely the order you meant. Unlike SQL, where <code>ORDER BY</code> inside the window is mandatory syntax you can't forget, pandas' <code>cumsum()</code> has nothing to force you to get this right — the sort has to happen as a deliberate step before it, every time.</div>
+
+<div class="interview">
+<p><strong>Q: "Find each customer's top 2 orders by amount, and their running total spend over time."</strong> A strong answer, out loud: <em>"For the top-2, I'd groupby customer, rank amount descending with method='first' so ties don't produce ambiguous duplicates, then filter to rank <= 2 — same idea as ROW_NUMBER() OVER PARTITION BY customer wrapped in a WHERE. For the running total, cumsum only accumulates in row order, not by any column I name, so I sort by order_date within customer first, then groupby customer and cumsum the amount — that ordering step is the one difference from SQL's SUM() OVER, which takes ORDER BY as part of the window itself."</em> The subtext: naming that <code>cumsum()</code> has no built-in ordering clause — and catching that gap before it produces a wrong answer — is what separates "knows the function name" from "has been burned by this once."</p>
+</div>
+
+<h2>Try it — self-checking practice (~8 min)</h2>
+<p>Open <code>practice/07_rank_cumulative.py</code>, replace each <code>...</code>, and re-run until all five checks print ✓:</p>
+<pre><code>cd ~/learning/data
+uv run --with pandas python3 practice/07_rank_cumulative.py</code></pre>
+<p>Same <code>orders_raw.csv</code>, same clean 4-row slice as Lesson 6 (An x2, Binh x2) — the mechanics are the whole point today, not the cleaning.</p>
+
+<h2>Check yourself</h2>
+<div class="quiz">
+  <div class="q" data-why="groupby before rank() is what makes the ranking restart at 1 within each customer, instead of ranking every row against the entire table — the direct equivalent of adding PARTITION BY to a SQL window function.">
+    <p class="stem">Why does <code>clean.groupby("customer")["amount"].rank(...)</code> rank per customer, not globally?</p>
+    <button class="opt" data-ok>groupby splits the ranking into independent per-group orderings</button>
+    <button class="opt">rank() always restarts numbering at every new row</button>
+    <button class="opt">amount values are automatically grouped by size range</button>
+  </div>
+  <div class="q" data-why="method='first' assigns 1, 2, 3... with no repeats, breaking ties by row order — the ROW_NUMBER() flavor. method='min' or 'dense' instead give tied values the same rank, the RANK()/DENSE_RANK() flavor.">
+    <p class="stem">What does <code>rank(method="first")</code> do differently from <code>rank(method="min")</code> on tied values?</p>
+    <button class="opt" data-ok>It breaks ties by row order, not shared ranks</button>
+    <button class="opt">It ignores tied values and drops them from results</button>
+    <button class="opt">It sorts tied rows alphabetically before assigning any numbers</button>
+  </div>
+  <div class="q" data-why="cumsum() has no ORDER BY-style argument — it strictly accumulates in whatever order the rows are currently in, so the DataFrame must be sorted correctly before calling it, unlike SQL's window frame which takes ORDER BY directly.">
+    <p class="stem">Before calling <code>groupby("customer")["amount"].cumsum()</code> for a running total by date, what must happen first?</p>
+    <button class="opt" data-ok>Sort rows by date first, since cumsum trusts order</button>
+    <button class="opt">Nothing else, cumsum already accepts its own ordering argument</button>
+    <button class="opt">Convert the amount column into a NumPy array first</button>
+  </div>
+  <div class="q" data-why="Filtering rows down to where a per-group rank equals a cutoff (rank <= N) keeps the actual rows, which is the point of top-N-per-group — sort_values().groupby().head(N) reaches the same rows a different way.">
+    <p class="stem">Once every row has a per-customer <code>amount_rank</code>, how do you get each customer's single biggest order?</p>
+    <button class="opt" data-ok>Filter the DataFrame to where amount_rank equals 1</button>
+    <button class="opt">Call cumsum directly on the amount_rank column itself</button>
+    <button class="opt">Re-run groupby a second time without any ordering</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official pandas <a href="https://pandas.pydata.org/docs/user_guide/window.html">Window Operations</a> user guide (~15 min) covers <code>rank</code>, <code>cumsum</code>, and the wider expanding/rolling family in one place — the <a href="https://pandas.pydata.org/docs/getting_started/comparison/comparison_with_sql.html#window-functions">"Window functions"</a> section of the SQL comparison page (this course's backbone resource) is the fastest direct RANK()/SUM() OVER ↔ pandas translation if today's mapping needs reinforcing.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a>.<br>
+<strong>Next lesson:</strong> method chaining and the ETL pipeline shape — stringing today's and earlier lessons' operations into one readable pipeline instead of a wall of reassigned variables.<br><br>
+💬 Anything unclear — the method= tie-breaking choice, the cumsum ordering gotcha, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

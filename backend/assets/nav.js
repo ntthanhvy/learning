@@ -22,6 +22,8 @@
       file: "lessons/0007-what-a-500-should-tell-the-client.html" },
     { n: 8, date: "2026-07-14", title: "Why two instances break your \"stateless\" server",
       file: "lessons/0008-two-instances-break-your-server.html" },
+    { n: 9, date: "2026-07-15", title: "Where caching belongs",
+      file: "lessons/0009-where-caching-belongs.html" },
   ];
 
   const REFS = [

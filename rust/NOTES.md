@@ -138,3 +138,14 @@ by the user there; they apply here identically.
   also worked this round — `lesson_generated` was recorded successfully. Added
   a `#day7` glossary section (handler, extractor, IntoResponse, Arc, Mutex,
   State) and 4 quiz-bank questions + 1 kata (`k7`, a DELETE route) tagged day 7.
+- 2026-07-15 (first day past the Jul 8–14 intensive): per PLAN.md the "daily
+  lesson" now means `daily.html` — a fixed page that samples `assets/quiz-bank.js`
+  (days 1–7, 7 katas) via `assets/srs.js`'s Leitner schedule — not a new dated
+  authored artifact. That page was already built and shipped during the Day 7
+  capstone round (2026-07-14), so there was nothing new to author for today;
+  this round confirmed daily.html/srs.js/quiz-bank.js are all in place and left
+  them untouched. No new day-N bank content was added — PLAN.md doesn't call
+  for the bank to keep growing post-week, only for daily.html to keep serving
+  it. If the user wants the bank to keep growing (fresh katas/questions on a
+  cadence) rather than only reviewing days 1–7 forever, that's a scope change
+  to raise with them, not assume here.

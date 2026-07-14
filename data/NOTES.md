@@ -64,3 +64,18 @@
   then melt on the pre-cleaned 4-row slice of `orders_raw.csv`) printed all ✓
   before the unsolved file was copied into `practice/`. `lesson_generated` was
   recorded successfully.
+- 2026-07-15 generation (Lesson 7): per MISSION.md this course "becomes a main
+  track" from today, but with still no `lesson_completed` record beyond the
+  Lesson 1 baseline, there's no reported outcome to size a bigger lesson
+  against — so this round keeps the established ~20 min/day format and the
+  curriculum spine's next topic (rank & cumulative operations, per Lesson 6's
+  own teaser) rather than unilaterally deepening pace with no user in the
+  loop; revisit pace in an interactive session. `uv run --with pandas` and
+  `bin/record-progress` both worked this round (invoked directly): the shipped
+  (unsolved) `practice/07_rank_cumulative.py` was executed in a scratch dir
+  and printed all ✗ against the real `orders_raw.csv` fixture, then a solved
+  version (groupby+rank with method="first", groupby+cumsum after sort_values
+  by date) printed all ✓ before the unsolved file was copied into `practice/`.
+  `lesson_generated` was recorded successfully. Direct `psql "$LEARNING_DB_URL"
+  ...` was still blocked (shell-variable expansion of that name disallowed for
+  this sandboxed session), so no `course_progress` rows could be read.

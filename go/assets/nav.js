@@ -22,6 +22,8 @@
       file: "lessons/0007-queries-from-go.html" },
     { day: 7, date: "2026-07-13", title: "Testing, tooling & capstone",
       file: "lessons/0008-testing-tooling-capstone.html" },
+    { day: 8, date: "2026-07-15", title: "Mutex & the memory model",
+      file: "lessons/0009-mutex-and-the-memory-model.html" },
   ];
 
   const REFS = [

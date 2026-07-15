@@ -113,6 +113,18 @@
 <tr><td>query plan / EXPLAIN</td><td>The step-by-step strategy Postgres actually picked to answer a query — which index (if any), which scan type. <code>EXPLAIN ANALYZE</code> runs the query for real and shows both the plan and real timings.</td><td>giữ nguyên "query plan" — kế hoạch Postgres chọn để chạy query, xem bằng EXPLAIN</td></tr>
 </table>
 
+<h2 id="day8">Day 8 — Mutex &amp; the memory model (Week 2)</h2>
+<table class="gloss">
+<tr><th>Term</th><th>In software</th><th>Tiếng Việt (dev-style)</th></tr>
+<tr><td>synchronization</td><td>Forcing concurrent accesses to shared data into a defined order, so the result stops depending on scheduling luck. Mutexes, channels, and atomics all provide it. A plain read/write with none is a data race.</td><td>đồng bộ hóa — ép thứ tự truy cập dữ liệu chung, hết "hên xui"</td></tr>
+<tr><td>critical section</td><td>The stretch of code between <code>Lock()</code> and <code>Unlock()</code> where a goroutine touches the shared data alone. Keep it tiny — never do I/O (HTTP, DB) inside it, or you serialize the whole program behind the lock.</td><td>giữ nguyên "critical section" — đoạn code giữa Lock/Unlock, chỉ một goroutine vào</td></tr>
+<tr><td>sync.Mutex</td><td>Mutual-exclusion lock: <code>Lock()</code> blocks until no one holds it then grants entry, <code>Unlock()</code> releases. Must be used via a pointer receiver — copying it makes a separate lock guarding nothing (<code>go vet</code> warns).</td><td>giữ nguyên "Mutex" — khóa, mỗi lúc một goroutine; không được copy</td></tr>
+<tr><td>sync.RWMutex</td><td>A read/write lock: <code>RLock</code>/<code>RUnlock</code> let many readers hold it at once; <code>Lock</code>/<code>Unlock</code> give a writer exclusive access. Wins when reads dominate (Get vs Save); a plain Mutex is often faster when writes are frequent.</td><td>giữ nguyên "RWMutex" — nhiều reader cùng lúc, writer độc quyền</td></tr>
+<tr><td>share memory by communicating</td><td>Go proverb: prefer passing data over a channel (one goroutine owns it at a time) to guarding shared memory with a lock. A guideline, not a law — a mutex around a small counter or cache is still idiomatic.</td><td>"chia sẻ bộ nhớ bằng cách giao tiếp" — ưu tiên truyền qua channel hơn là khóa</td></tr>
+<tr><td>memory model / happens-before</td><td>The rules for when one goroutine's write is guaranteed visible to another's read. Without a synchronizing operation there is NO guarantee — the compiler and CPU may reorder unsynchronized access. A lock is also the happens-before edge, not just mutual exclusion.</td><td>giữ nguyên "memory model" — quy tắc khi nào goroutine kia thấy được ghi của mình; không đồng bộ = không đảm bảo</td></tr>
+<tr><td>concurrent map writes</td><td>Go's runtime actively detects two goroutines writing a built-in map at once and deliberately crashes: <code>fatal error: concurrent map writes</code> — un-recoverable. The reason a bare <code>map</code> field needs a mutex the instant more than one goroutine writes it.</td><td>lỗi ghi map đồng thời — runtime cố tình panic, phải khóa map lại</td></tr>
+</table>
+
 <h2 id="day7">Day 7 — Testing, tooling &amp; capstone</h2>
 <table class="gloss">
 <tr><th>Term</th><th>In software</th><th>Tiếng Việt (dev-style)</th></tr>

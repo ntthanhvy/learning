@@ -50,3 +50,52 @@ Table-driven tests, subtests, `httptest`, integration tests against real Postgre
 - Each lesson opens with 3 recall questions from earlier days (retrieval practice), interleaving Go and SQL topics from Day 5 on.
 - Reference sheets accumulate in [./reference/](./reference/) — review the pile, not the lessons.
 - After Day 7: schedule two spaced reviews (Jul 20, Aug 3) using the reference sheets and the linkshort codebase.
+
+---
+
+# Week 2 — Concurrency in Depth (2026-07-15 → 2026-07-20)
+
+Added 2026-07-15 at the user's request: after the Week-1 intensive, go deeper on the
+concurrency toolbox for interview-grade fluency. It starts **today** (Jul 15 = Day 8);
+Jul 14 was the only rest gap. Zone of proximal development: Day 3's channel/`WaitGroup`
+health-checker (`checker.go`, `race_test.go`) is done; **Day 4's `sync.Mutex` practice was
+never done** (no `server.go`/`middleware.go` on disk), so Week 2 opens on mutex and builds
+the project's missing concurrent pieces as it goes. Files 0009–0014; each ends by inviting
+VN questions.
+
+## Day 8 — Tue Jul 15 · Mutex & the memory model
+`sync.Mutex`/`RWMutex`, guarding a struct's invariants, data race vs race condition,
+happens-before, and the judgment call: **"share memory by communicating" vs guarding
+shared memory with a lock** — when each is idiomatic.
+**Project:** mutex-guarded in-memory click counter for linkshort; prove it with `-race`.
+**Primary source:** [The Go Memory Model](https://go.dev/ref/mem)
+
+## Day 9 — Wed Jul 16 · Worker pools & pipelines 🔒
+Fan-out/fan-in, bounded concurrency, semaphore channels, backpressure, draining safely.
+**Project:** upgrade the Day-3 health-checker into a bounded worker pool.
+**Primary source:** [Go Blog — Pipelines and cancellation](https://go.dev/blog/pipelines)
+
+## Day 10 — Thu Jul 17 · context, cancellation & errgroup 🔒
+Deadlines/timeouts, cancellation propagation, `errgroup`, and killing goroutine leaks on
+early return — the depth beyond Day 4's intro.
+**Project:** cancel in-flight checks the instant the caller's context is done.
+**Primary source:** [Go Blog — Context](https://go.dev/blog/context)
+
+## Day 11 — Fri Jul 18 · Debugging concurrency 🔒
+Goroutine leaks, deadlocks, the race detector as a reflex, and the classic bug patterns
+(send on closed channel, closing twice, pre-1.22 loop-var capture, forgotten `Done`).
+**Project:** plant and then fix a leak/deadlock in linkshort under `go test -race`.
+**Primary source:** [Go Blog — Introducing the Race Detector](https://go.dev/blog/race-detector)
+
+## Day 12 — Sat Jul 19 · The rest of `sync` 🔒
+`sync.Once`, `sync.Pool`, `sync/atomic`, `sync.Map`, `singleflight` — and when each beats
+a plain mutex or channel.
+**Project:** lazy singleton config via `sync.Once`; atomic counter vs mutex, benchmarked.
+**Primary source:** [pkg.go.dev — sync](https://pkg.go.dev/sync)
+
+## Day 13 — Sun Jul 20 · Concurrency capstone + interview drills (+ spaced review #1) 🔒
+Build one production-shaped concurrent component end to end; whiteboard-explain
+goroutines/channels/`select`/`context` under pressure (a MISSION success criterion).
+Opens with the **Jul 20 spaced review** from Spacing & retention.
+**Project:** concurrent rate limiter / click aggregator in linkshort, `-race` + benchmarked.
+**Primary source:** [Learn Go with Tests — Sync / Select / Context](https://quii.gitbook.io/learn-go-with-tests)

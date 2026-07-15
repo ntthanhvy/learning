@@ -59,6 +59,7 @@ fn main() {
             println!("Usage: linkshort-rs save <code> <url> | get <code>");
         }
         Command::Save { code, url } => {
+            println!("Saved {}", code);
             links.push(Link { code, url });
             println!("Saved link, {} links now:", links.len());
             for l in &links {

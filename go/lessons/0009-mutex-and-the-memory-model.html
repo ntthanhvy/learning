@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 8 · Mutex &amp; the Memory Model</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Go Intensive · Week 2 · Day 8 · ~90 min</p>
+<h1>Mutex &amp; the memory model</h1>
+<p class="byline">Week 2 goes deep on concurrency. Day 3 you made goroutines <em>talk</em> over channels; today you make them <em>share</em> safely — and meet the judgment call every Go backend turns on: lock it, or hand it off?</p>
+
+<h2>Warm-up: from memory</h2>
+<div class="quiz">
+  <div class="q" data-why="A value receiver gets a COPY; assigning to its fields changes only that copy. Mutating methods — and any struct holding a sync.Mutex — must use a pointer receiver, or the lock you take guards nothing.">
+    <p class="stem">A method with a value receiver <code>(s T)</code> that assigns to a field changes…</p>
+    <button class="opt" data-ok>only its own throwaway copy</button>
+    <button class="opt">the caller's original struct too</button>
+    <button class="opt">nothing; the compiler will complain</button>
+  </div>
+  <div class="q" data-why="Data race = concurrent access to the same memory with at least one write. It is not about cores (that's parallelism), and channels are the fix, not the cause. Found by go test -race.">
+    <p class="stem">A <dfn data-en="Two goroutines access the same memory concurrently and at least one writes; the outcome depends on scheduling luck." data-vn="giữ nguyên 'data race' — tranh chấp dữ liệu">data race</dfn> is when two goroutines…</p>
+    <button class="opt" data-ok>touch one variable, one writing</button>
+    <button class="opt">run on two different cores</button>
+    <button class="opt">share a channel to communicate</button>
+  </div>
+  <div class="q" data-why="The sender closes to signal 'no more values coming'; receivers detect it with comma-ok. Closing from the receiver, or closing twice, panics.">
+    <p class="stem">On a channel, whose job is it to call <code>close(ch)</code>?</p>
+    <button class="opt" data-ok>the sending side, when done</button>
+    <button class="opt">the receiving side, when bored</button>
+    <button class="opt">the runtime, during garbage collection</button>
+  </div>
+</div>
+
+<h2>1 · The bug you can't see: shared state</h2>
+<p>Your <code>MemStore</code> from Day 1 has a quiet flaw. Look at it with today's eyes:</p>
+<pre><code><span class="kw">type</span> MemStore <span class="kw">struct</span> {
+    links <span class="kw">map</span>[string]Link   <span class="cm">// no protection — fine for ONE goroutine, a bomb for many</span>
+}
+<span class="kw">func</span> (s *MemStore) Save(ctx context.Context, l Link) error { s.links[l.Code] = l; <span class="kw">return nil</span> }
+<span class="kw">func</span> (s *MemStore) Get(ctx context.Context, code string) (Link, error) { l, ok := s.links[code]; <span class="cm">/* ... */</span> }</code></pre>
+<p>The moment a real HTTP server calls this — and it will, next lesson — two requests run <code>Save</code> and <code>Get</code> at the <em>same instant</em>, each on its own goroutine, both touching <code>s.links</code>. That's a data race. Worse: Go's runtime actively detects concurrent map writes and <strong>panics on purpose</strong> — <code>fatal error: concurrent map writes</code>, un-recoverable, straight to a crash. This is the single most common way a Go service that "worked in dev" falls over under load.</p>
+<p>The fix is <dfn data-en="Making concurrent accesses to shared data happen in a defined order, so the result no longer depends on scheduling luck. Locks, channels, and atomics all provide it." data-vn="đồng bộ hóa — sắp xếp thứ tự truy cập dữ liệu chung">synchronization</dfn>: force the goroutines to take turns.</p>
+
+<h2>2 · Mutex: one goroutine at a time</h2>
+<p>A <dfn data-en="Mutual-exclusion lock (sync.Mutex). Lock() blocks until no one else holds it, then grants entry; Unlock() releases. Only one goroutine is 'inside' at a time." data-vn="giữ nguyên 'mutex' — khóa, mỗi lúc chỉ một goroutine vào">mutex</dfn> is a turnstile around the shared data. One goroutine holds it; everyone else waits:</p>
+<pre><code><span class="kw">type</span> Counter <span class="kw">struct</span> {
+    mu    sync.Mutex           <span class="cm">// guards everything below it</span>
+    total <span class="kw">int</span>
+}
+<span class="kw">func</span> (c *Counter) Inc() {
+    c.mu.Lock()                <span class="cm">// wait my turn</span>
+    <span class="kw">defer</span> c.mu.Unlock()        <span class="cm">// release on the way out — even on panic</span>
+    c.total++                  <span class="cm">// now safe: I'm the only one in here</span>
+}</code></pre>
+<p>Three rules that separate people who "know mutexes" from people who ship deadlocks:</p>
+<ul>
+  <li><strong><code>defer</code> the <code>Unlock</code></strong> the line after <code>Lock</code>. Every early <code>return</code> in between then releases automatically — forget one and every other goroutine blocks forever.</li>
+  <li><strong>Pointer receiver, always.</strong> <code>(c *Counter)</code>, never <code>(c Counter)</code>. A <code>sync.Mutex</code> must not be copied — a copy is a <em>different</em> lock guarding nothing. <code>go vet</code> catches this; it's a classic interview gotcha.</li>
+  <li><strong>Keep the critical section tiny.</strong> Lock, touch the data, unlock. Never do I/O (an HTTP call, a DB query) while holding the lock — you'd serialize your whole server behind it.</li>
+</ul>
+
+<h2>3 · RWMutex: many readers <em>or</em> one writer</h2>
+<p>A plain <code>Mutex</code> blocks readers against each other too — but two goroutines just <em>reading</em> can't corrupt anything. When reads dominate (linkshort does far more <code>Get</code>s than <code>Save</code>s), a <dfn data-en="sync.RWMutex: RLock/RUnlock for readers (many can hold it at once), Lock/Unlock for writers (exclusive). Lets concurrent reads proceed in parallel." data-vn="giữ nguyên 'RWMutex' — nhiều reader cùng lúc, writer thì độc quyền">RWMutex</dfn> lets all the readers in at once and only makes them wait for a writer:</p>
+<pre><code><span class="kw">func</span> (s *MemStore) Get(...) (Link, error) {
+    s.mu.RLock()               <span class="cm">// shared: other readers may hold it too</span>
+    <span class="kw">defer</span> s.mu.RUnlock()
+    <span class="cm">// ...read the map...</span>
+}
+<span class="kw">func</span> (s *MemStore) Save(...) error {
+    s.mu.Lock()                <span class="cm">// exclusive: everyone else waits</span>
+    <span class="kw">defer</span> s.mu.Unlock()
+    <span class="cm">// ...write the map...</span>
+}</code></pre>
+<p>Rule of thumb: <strong>reach for <code>RWMutex</code> only when reads clearly dominate.</strong> If writes are frequent, the extra bookkeeping makes it slower than a plain <code>Mutex</code> — measure, don't assume. That "measure it" instinct is exactly what interviewers probe.</p>
+
+<h2>4 · The real question: lock it, or hand it off?</h2>
+<p>Go's most-quoted proverb: <em>"Don't communicate by sharing memory; <strong>share memory by communicating</strong>."</em> Two philosophies for the same problem:</p>
+<table class="gloss">
+<tr><th>Approach</th><th>Best when</th></tr>
+<tr><td><strong>Mutex</strong> — guard shared state in place</td><td>Small, long-lived shared data many goroutines poke at: a counter, an in-memory cache, a config map. Cheap, direct.</td></tr>
+<tr><td><strong>Channel</strong> — pass ownership along</td><td>Handing a <em>unit of work</em> from one stage to the next, so only one goroutine owns it at a time. Orchestration, pipelines, fan-out (tomorrow).</td></tr>
+</table>
+<p>The mistake is treating it as religion. A shared click counter behind a <code>Mutex</code> is <em>correct and simple</em>; forcing it through a channel-owning goroutine would be cargo-cult. The senior move is naming the trade-off out loud: <em>"few writers, tiny critical section → mutex; handing work between stages → channel."</em> You'll do both this week.</p>
+
+<h2>5 · Why "it's just an int" is still a race</h2>
+<p>Tempting thought: "reading an <code>int</code> another goroutine wrote is fine — no lock needed." Wrong, and this is the <dfn data-en="The Go memory model: the rules for when a write in one goroutine is guaranteed visible to a read in another. Without a synchronizing operation, there is NO such guarantee." data-vn="giữ nguyên 'memory model' — quy tắc khi nào goroutine này thấy được ghi của goroutine kia">memory model</dfn> talking. Without a synchronizing operation — a mutex, a channel send/receive, or an atomic — the language gives <strong>zero guarantee</strong> that the reader ever sees the writer's value, or sees a whole value rather than a half-written one. "Works on my machine" is a data race that hasn't lost the coin flip yet. The compiler and CPU are both allowed to reorder unsynchronized memory access.</p>
+<p>The lock isn't only mutual exclusion — it's also the <em>happens-before</em> edge that makes one goroutine's writes visible to the next. (Day 12 meets <code>sync/atomic</code>, the lightweight way to get that guarantee for a single counter.)</p>
+
+<h2>6 · Practice: make linkshort concurrency-safe</h2>
+<p>In <code>~/learning/go/project/linkshort</code>. Today you fix the store you built on Day 1 and add the click counter the stats endpoint will need.</p>
+
+<p><strong>Step 1 — guard <code>MemStore</code>.</strong> Edit <code>link/memstore.go</code>: add the <code>sync</code> import and the <code>mu</code> field (given), then fill the two lock TODOs.</p>
+<pre><code><span class="kw">package</span> link
+
+<span class="kw">import</span> (
+    <span class="cm">"context"</span>
+    <span class="cm">"sync"</span>
+)
+
+<span class="kw">var</span> _ Store = (*MemStore)(<span class="kw">nil</span>)
+
+<span class="kw">type</span> MemStore <span class="kw">struct</span> {
+    mu    sync.RWMutex          <span class="cm">// GIVEN — guards links</span>
+    links <span class="kw">map</span>[string]Link
+}
+
+<span class="kw">func</span> NewMemStore() *MemStore {
+    <span class="kw">return</span> &amp;MemStore{links: make(<span class="kw">map</span>[string]Link)}
+}
+
+<span class="kw">func</span> (s *MemStore) Save(ctx context.Context, l Link) error {
+    <span class="cm">// TODO 1: this WRITES the map — take the exclusive lock.</span>
+    <span class="cm">//         s.mu.Lock(); defer s.mu.Unlock()</span>
+    s.links[l.Code] = l
+    <span class="kw">return nil</span>
+}
+
+<span class="kw">func</span> (s *MemStore) Get(ctx context.Context, code string) (Link, error) {
+    <span class="cm">// TODO 2: this only READS the map — take the shared read lock.</span>
+    <span class="cm">//         s.mu.RLock(); defer s.mu.RUnlock()</span>
+    l, ok := s.links[code]
+    <span class="kw">if</span> !ok {
+        <span class="kw">return</span> Link{}, ErrNotFound
+    }
+    <span class="kw">return</span> l, <span class="kw">nil</span>
+}</code></pre>
+
+<p><strong>Step 2 — the click counter.</strong> New file <code>link/counter.go</code>. Fill TODOs 3–4; <code>Snapshot</code> is given as the pattern for "read shared state, then let go of the lock."</p>
+<pre><code><span class="kw">package</span> link
+
+<span class="kw">import</span> <span class="cm">"sync"</span>
+
+<span class="cm">// ClickCounter is a concurrency-safe tally of redirects per code.</span>
+<span class="kw">type</span> ClickCounter <span class="kw">struct</span> {
+    mu     sync.Mutex
+    counts <span class="kw">map</span>[string]<span class="kw">int</span>
+}
+
+<span class="kw">func</span> NewClickCounter() *ClickCounter {
+    <span class="kw">return</span> &amp;ClickCounter{counts: make(<span class="kw">map</span>[string]<span class="kw">int</span>)}
+}
+
+<span class="cm">// Inc records one click for code.</span>
+<span class="kw">func</span> (c *ClickCounter) Inc(code string) {
+    <span class="cm">// TODO 3: Lock, counts[code]++, defer Unlock.</span>
+}
+
+<span class="cm">// Count returns the clicks recorded for code so far.</span>
+<span class="kw">func</span> (c *ClickCounter) Count(code string) <span class="kw">int</span> {
+    <span class="cm">// TODO 4: Lock (defer Unlock), return counts[code].</span>
+}
+
+<span class="cm">// Snapshot returns a COPY of every tally — GIVEN. Note the pattern: copy</span>
+<span class="cm">// under the lock, return the copy, so callers read it without holding it.</span>
+<span class="kw">func</span> (c *ClickCounter) Snapshot() <span class="kw">map</span>[string]<span class="kw">int</span> {
+    c.mu.Lock()
+    <span class="kw">defer</span> c.mu.Unlock()
+    out := make(<span class="kw">map</span>[string]<span class="kw">int</span>, len(c.counts))
+    <span class="kw">for</span> k, v := <span class="kw">range</span> c.counts {
+        out[k] = v
+    }
+    <span class="kw">return</span> out
+}</code></pre>
+
+<p><strong>Step 3 — prove it with <code>-race</code>.</strong> Create <code>link/concurrent_test.go</code> (given): a thousand goroutines hammering one counter, plus concurrent reads and writes on the store.</p>
+<pre><code><span class="kw">package</span> link
+
+<span class="kw">import</span> (
+    <span class="cm">"context"</span>
+    <span class="cm">"sync"</span>
+    <span class="cm">"testing"</span>
+)
+
+<span class="kw">func</span> TestClickCounterConcurrent(t *testing.T) {
+    c := NewClickCounter()
+    <span class="kw">var</span> wg sync.WaitGroup
+    <span class="kw">for</span> i := 0; i &lt; 1000; i++ {
+        wg.Add(1)
+        <span class="kw">go func</span>() {
+            <span class="kw">defer</span> wg.Done()
+            c.Inc(<span class="cm">"go"</span>)
+        }()
+    }
+    wg.Wait()
+    <span class="kw">if</span> got := c.Count(<span class="cm">"go"</span>); got != 1000 {
+        t.Fatalf(<span class="cm">"Count(go) = %d, want 1000"</span>, got)
+    }
+}
+
+<span class="kw">func</span> TestMemStoreConcurrentReadWrite(t *testing.T) {
+    s := NewMemStore()
+    ctx := context.Background()
+    _ = s.Save(ctx, Link{Code: <span class="cm">"go"</span>, URL: <span class="cm">"https://go.dev"</span>})
+    <span class="kw">var</span> wg sync.WaitGroup
+    <span class="kw">for</span> i := 0; i &lt; 100; i++ {
+        wg.Add(1)
+        <span class="kw">go func</span>() {
+            <span class="kw">defer</span> wg.Done()
+            _, _ = s.Get(ctx, <span class="cm">"go"</span>)
+            _ = s.Save(ctx, Link{Code: <span class="cm">"go"</span>, URL: <span class="cm">"https://go.dev"</span>})
+        }()
+    }
+    wg.Wait()
+}</code></pre>
+<pre><code>go test -race ./...        <span class="cm"># green once TODOs 1–4 are in</span></code></pre>
+
+<p><strong>Step 4 — feel the race.</strong> Temporarily gut <code>Inc</code> down to just <code>c.counts[code]++</code> (no lock) and rerun. This is a production bug caught in CI:</p>
+<pre><code><span style="color:var(--bad)">WARNING: DATA RACE</span>
+Write at 0x00c000123abc by goroutine 8:
+  linkshort/link.(*ClickCounter).Inc ... counter.go
+Previous write at 0x00c000123abc by goroutine 7:
+  linkshort/link.(*ClickCounter).Inc ... counter.go</code></pre>
+<p>Two goroutines, same address, your <code>Inc</code> named on both sides. Also try <code>go test ./...</code> <em>without</em> <code>-race</code> a few times — you'll see <code>Count(go)</code> come back as some number below 1000, different each run: the lost updates the lock prevents. Then put the lock back.</p>
+
+<div class="callout"><strong>Done when:</strong> <code>go vet ./...</code> silent (it also checks you didn't copy a lock) · <code>go test -race ./...</code> green with the locks in · and you've <em>seen</em> the <code>DATA RACE</code> once with them out. That's a store safe for the concurrent HTTP server you build next lesson.</div>
+
+<h2>Check yourself</h2>
+<div class="quiz">
+  <div class="q" data-why="Copying a Mutex copies its internal state; the copy is a separate lock guarding nothing the original guards. go vet warns 'passes lock by value' — always use a pointer receiver / pass *T.">
+    <p class="stem">You pass a <code>sync.Mutex</code> to a function <em>by value</em>. What breaks?</p>
+    <button class="opt" data-ok>the copy locks nothing shared</button>
+    <button class="opt">the mutex becomes twice faster</button>
+    <button class="opt">the compiler inlines it away</button>
+  </div>
+  <div class="q" data-why="RLock lets many readers proceed together; only a writer's Lock is exclusive. That's a win when reads dominate — Get vs Save. Write-heavy workloads are often faster with a plain Mutex.">
+    <p class="stem">When does <code>sync.RWMutex</code> beat a plain <code>sync.Mutex</code>?</p>
+    <button class="opt" data-ok>reads vastly outnumber the writes</button>
+    <button class="opt">writes vastly outnumber the reads</button>
+    <button class="opt">every access mutates shared state</button>
+  </div>
+  <div class="q" data-why="The proverb favors passing data over a channel so exactly one goroutine owns it at a time. A mutex is still the right tool for guarding small shared state — know when each fits.">
+    <p class="stem">"Share memory by communicating" points you toward…</p>
+    <button class="opt" data-ok>a channel handing off ownership</button>
+    <button class="opt">a mutex around global state</button>
+    <button class="opt">a bigger read-write lock instead</button>
+  </div>
+  <div class="q" data-why="The Go memory model gives no visibility guarantee without a synchronizing op (mutex, channel, or atomic). 'It's just an int' is a data race too — the reader may never see the write, and -race flags it.">
+    <p class="stem">One goroutine writes <code>x = 1</code>, another reads <code>x</code>, no sync. Reader sees 1?</p>
+    <button class="opt" data-ok>no, without synchronization it's undefined</button>
+    <button class="opt">yes, writes are always visible</button>
+    <button class="opt">yes, ints are atomic anyway</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://go.dev/ref/mem">The Go Memory Model</a> — short, dense, and the ground truth behind every "do I need a lock here?" It's the reference interviewers respect when you cite it. Then the one-page <a href="https://go.dev/blog/codelab-share">"Share memory by communicating"</a> for the proverb in context.</p>
+<p>New terms are in the <a href="../reference/glossary.html#day8">glossary — Day 8 section</a>.</p>
+
+<p class="next">Tomorrow: <strong>worker pools &amp; pipelines</strong> — your Day 3 fan-out gets a bound, so ten thousand links don't launch ten thousand goroutines at once. Mutex + channel, working together.<br><br>
+💬 Deadlock? A lock you can't figure out where to place? Paste the code — hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/quiz.js"></script>
+<script src="../assets/gloss.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

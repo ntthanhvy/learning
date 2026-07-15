@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 8 · Method Chaining &amp; Pipeline Shape</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 8 · ~20 min · 16 Jul 2026</p>
+<h1>Method chaining &amp; the ETL pipeline shape</h1>
+<p class="byline">Lesson 7 ended with a teaser: stringing everything so far — cleaning, grouping, ranking — into one readable pipeline instead of a wall of reassigned variables. Every exercise through Lesson 7 wrote <code>clean = clean.assign(...)</code>, <code>by_date = by_date.assign(...)</code> — a fresh name for every step. Today: the same operations, written as one chain, and where that chain sits in the ETL/ELT picture.</p>
+
+<h2>1 · The problem with reassignment soup</h2>
+<p>Reassigning a variable at every step works, but it costs you two things: a growing pile of near-identical names (<code>df</code>, <code>clean</code>, <code>by_date</code>, <code>ranked</code>...) that all mean roughly the same table at different points, and the risk of accidentally reusing a stale one two cells later. pandas methods that transform a DataFrame return a <em>new</em> DataFrame rather than editing in place — which means every one of those calls is already chainable, you just haven't been chaining them.</p>
+
+<h2>2 · <dfn data-en="writing a sequence of DataFrame method calls back-to-back, each one operating on the result of the last, instead of assigning each intermediate step to its own variable name" data-vn="method chaining (giữ nguyên) — nối liên tiếp các method, không đặt tên biến trung gian">Method chaining</dfn>: one expression, wrapped in parentheses</h2>
+<p>Wrap the whole expression in parentheses and drop one method call per line — Python doesn't need the usual backslash line-continuation inside parens, and the shape reads top to bottom like a recipe:</p>
+<pre><code>top_per_customer = (
+    df
+    .assign(amount=<span class="kw">lambda</span> d: pd.to_numeric(d[<span class="kw">"amount"</span>], errors=<span class="kw">"coerce"</span>))
+    .dropna(subset=[<span class="kw">"amount"</span>, <span class="kw">"order_date"</span>])
+    .assign(amount_rank=<span class="kw">lambda</span> d: d.groupby(<span class="kw">"customer"</span>)[<span class="kw">"amount"</span>].rank(
+        method=<span class="kw">"first"</span>, ascending=<span class="kw">False</span>))
+    .query(<span class="kw">"amount_rank == 1"</span>)
+)</code></pre>
+<p>That's Lessons 3 and 7's logic — coerce, drop the unparseable rows, rank per customer, keep rank 1 — as a single expression, no intermediate name required. Compare it to a SQL query built from a chain of <code>WITH</code> clauses (CTEs): each line is one transformation step feeding the next, except pandas doesn't make you name every step the way <code>WITH cleaned AS (...)</code> does.</p>
+
+<h2>3 · The one new piece of syntax: <code>lambda d: ...</code> inside <code>assign()</code></h2>
+<p>Outside a chain, you can write <code>clean["amount_rank"] = clean.groupby(...)...</code> because <code>clean</code> already exists as a variable. Inside a chain, there is no variable yet for "the DataFrame as it looks right after <code>dropna</code>" — it only exists mid-expression. A <dfn data-en="Python's syntax for a small, unnamed, inline function — `lambda d: d + 1` is a function taking d and returning d + 1. Used inside assign() to name the in-progress DataFrame at that exact point in the chain" data-vn="lambda (giữ nguyên) — hàm không tên, viết gọn trong một dòng">lambda</dfn> solves exactly that: <code>.assign(amount_rank=lambda d: ...)</code> passes the DataFrame at that point in the chain in as <code>d</code>, so the rank computation can reference it before it has any variable name at all. Read it as "whatever comes out of the line above, call it <code>d</code> for this one step."</p>
+
+<h2>4 · <dfn data-en="a DataFrame method that calls a given function with the DataFrame as its argument and returns that function's result, letting a custom multi-line transformation stay inside a chain instead of breaking it into a separate reassigned step" data-vn=".pipe() (giữ nguyên) — nhét một hàm tùy ý vào giữa chain">.pipe()</dfn>: custom logic without breaking the chain</h2>
+<p>Not every step fits neatly in <code>.assign(lambda d: ...)</code> — sometimes the transformation is multi-line, or you want to reuse it across several chains. <code>.pipe(func)</code> calls <code>func(current_dataframe)</code> and keeps the result in the chain:</p>
+<pre><code><span class="kw">def</span> add_amount_rank(d):
+    <span class="kw">return</span> d.assign(
+        amount_rank=d.groupby(<span class="kw">"customer"</span>)[<span class="kw">"amount"</span>].rank(method=<span class="kw">"first"</span>, ascending=<span class="kw">False</span>)
+    )
+
+top_per_customer = (
+    clean
+    .pipe(add_amount_rank)
+    .query(<span class="kw">"amount_rank == 1"</span>)
+)</code></pre>
+<p><code>add_amount_rank</code> is an ordinary, independently testable function — <code>.pipe()</code> is just the plumbing that lets it slot into a chain instead of forcing <code>step = add_amount_rank(step)</code> as its own reassigned line.</p>
+<div class="callout"><strong>Trade-off, honestly:</strong> a long chain is easy to read but harder to debug — you can't set a breakpoint mid-expression the way you can inspect <code>clean</code> after a standalone reassignment. The common fix is temporary: comment out the tail of the chain and print what's left, or briefly split it back into named steps while debugging, then re-chain once it works.</div>
+
+<h2>5 · Where this fits: ETL vs ELT</h2>
+<p>This whole course has quietly been the <dfn data-en="Extract–Transform–Load: pull data from sources, clean/reshape it in a processing step (often Python/pandas), then load the finished result into the destination" data-vn="ETL (giữ nguyên) — biến đổi xong mới nạp vào kho">ETL</dfn> shape: <code>read_csv</code> is Extract, everything through Lesson 7 is Transform, and writing the result out (<code>to_csv</code>, <code>to_sql</code>) would be Load. A chain like today's makes that shape visible in the code itself — one pipeline, top to bottom. The alternative, <dfn data-en="Extract–Load–Transform: raw data lands in the warehouse first and is transformed there, usually with SQL/dbt. The modern default for analytics pipelines" data-vn="ELT (giữ nguyên) — nạp thô vào warehouse trước, biến đổi sau">ELT</dfn>, loads the raw data first and transforms it afterward inside the warehouse, usually as SQL/dbt models — the industry's modern default for analytics pipelines, precisely because warehouses got cheap and fast enough that "load first, decide the transform later" beat "decide the transform up front." Pandas chains like today's still matter even in an ELT-first world: they're exactly what a one-off script, a scheduled job upstream of the warehouse, or an interview live-coding exercise still looks like.</p>
+
+<div class="interview">
+<p><strong>Q: "Walk me through how you'd structure a pandas cleaning script."</strong> A strong answer, out loud: <em>"I'd write it as one chain: read_csv for extract, then a sequence of assign/dropna/query calls for the transform, each one operating on the result of the last — so the code reads top to bottom like the pipeline it represents, instead of a pile of reassigned variables named clean, clean2, clean3. Inside the chain, assign(lambda d: ...) lets me reference the in-progress DataFrame before it has a name; if a step needs more than one line, I'd pull it into its own function and slot it in with .pipe() instead of breaking the chain. This is the same ETL shape SQL/dbt does as ELT in the warehouse — extract, transform, load — just expressed in pandas instead of SQL."</em> The subtext: naming that this is deliberate pipeline structure, not just "chaining because it looks nice," is what interviewers are listening for.</p>
+</div>
+
+<h2>Try it — self-checking practice (~8 min)</h2>
+<p>Open <code>practice/08_method_chaining_pipeline.py</code>, replace each <code>...</code>, and re-run until all checks print ✓:</p>
+<pre><code>cd ~/learning/data
+uv run --with pandas python3 practice/08_method_chaining_pipeline.py</code></pre>
+<p>Same <code>orders_raw.csv</code> as every lesson since Lesson 3 — today the fixture is unchanged, only the shape of the code around it.</p>
+
+<h2>Check yourself</h2>
+<div class="quiz">
+  <div class="q" data-why="pandas transform methods return a new DataFrame rather than mutating in place, which is exactly what makes chaining them back-to-back possible — no special chain syntax is needed, just calling one method on another's result.">
+    <p class="stem">Why can pandas method calls be chained one after another at all?</p>
+    <button class="opt" data-ok>Each transform method call returns a brand-new DataFrame</button>
+    <button class="opt">Chaining is a special syntax that pandas adds</button>
+    <button class="opt">DataFrames automatically save every past version ever created</button>
+  </div>
+  <div class="q" data-why="Inside a chain there is no variable yet for the DataFrame mid-expression — lambda d: ... names it 'd' for just that one step, letting later logic in that same call reference the in-progress result.">
+    <p class="stem">Why does <code>.assign(amount_rank=lambda d: ...)</code> need a lambda instead of just using the variable name?</p>
+    <button class="opt" data-ok>Mid-chain, the in-progress DataFrame has no name yet</button>
+    <button class="opt">Lambdas always make pandas computations run much faster</button>
+    <button class="opt">assign() only accepts functions, never accepts plain values</button>
+  </div>
+  <div class="q" data-why=".pipe(func) calls func with the current DataFrame and keeps the return value inside the chain, letting a multi-line or reusable transformation stay chained instead of forcing a separate reassigned step.">
+    <p class="stem">What does <code>.pipe(add_amount_rank)</code> let you do inside a chain?</p>
+    <button class="opt" data-ok>Add a multi-line custom step without breaking chains</button>
+    <button class="opt">Skip validating the DataFrame's column names every time</button>
+    <button class="opt">Permanently sort every future chain by that column</button>
+  </div>
+  <div class="q" data-why="ELT loads raw data into the warehouse first and transforms it afterward, usually via SQL/dbt — the reverse order from ETL, where transformation happens before loading, which is what a pandas cleaning chain still represents.">
+    <p class="stem">How does ELT's order of operations differ from ETL's?</p>
+    <button class="opt" data-ok>ELT loads data first, then transforms it afterward</button>
+    <button class="opt">ELT skips the transform step of a pipeline</button>
+    <button class="opt">ELT and ETL always run in identical order</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> Tom Augspurger's <a href="https://tomaugspurger.net/posts/modern-1-intro/">Modern Pandas</a> series (~15 min for the intro; the series' method-chaining and <code>.pipe()</code> installment is linked from there) — this course's standing resource for idiomatic pandas, written by a pandas core developer. For the ETL/ELT framing, dbt Labs' <a href="https://www.getdbt.com/blog/etl-vs-elt">"ETL vs ELT"</a> (~8 min) is the clear industry-standard explanation.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a>.<br>
+<strong>Next lesson:</strong> timed practice begins — drilling today's and earlier lessons' patterns against fresh problems (LeetCode pandas / StrataScratch style), with review targeting whatever the practice reveals as shaky.<br><br>
+💬 Anything unclear — the lambda-in-assign syntax, when to reach for .pipe() vs assign(), or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

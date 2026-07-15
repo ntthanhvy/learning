@@ -24,6 +24,8 @@
       file: "lessons/0008-two-instances-break-your-server.html" },
     { n: 9, date: "2026-07-15", title: "Where caching belongs",
       file: "lessons/0009-where-caching-belongs.html" },
+    { n: 10, date: "2026-07-16", title: "Background jobs",
+      file: "lessons/0010-background-jobs.html" },
   ];
 
   const REFS = [

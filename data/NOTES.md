@@ -79,3 +79,17 @@
   `lesson_generated` was recorded successfully. Direct `psql "$LEARNING_DB_URL"
   ...` was still blocked (shell-variable expansion of that name disallowed for
   this sandboxed session), so no `course_progress` rows could be read.
+- 2026-07-16 generation (Lesson 8): direct `psql "$LEARNING_DB_URL" ...` reads
+  were still blocked in this headless run (referencing that exact variable
+  name in a typed command is disallowed for this sandboxed session), so no
+  `course_progress` rows could be read — still no learning record beyond the
+  Lesson 1 baseline, so Lesson 8 continues the conservative pattern from the
+  curriculum spine (method chaining & pipeline shape, per Lesson 7's own
+  teaser) rather than a reported outcome. `uv run --with pandas` and
+  `bin/record-progress` both worked this round (invoked directly): the shipped
+  (unsolved) `practice/08_method_chaining_pipeline.py` was executed in a
+  scratch dir and printed all ✗ against the real `orders_raw.csv` fixture
+  (4 clean rows after dropping order_id 3/4, same slice as Lessons 6–7), then
+  a solved version (chain + `.pipe()` reproducing Lesson 7's rank-1-per-customer
+  result) printed all ✓ before the unsolved file was copied into `practice/`.
+  `lesson_generated` was recorded successfully.

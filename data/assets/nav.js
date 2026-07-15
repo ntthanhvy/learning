@@ -20,6 +20,8 @@
       file: "lessons/0006-reshape-pivot-and-melt.html" },
     { n: 7, date: "2026-07-15", title: "Rank & cumulative operations",
       file: "lessons/0007-rank-and-cumulative-operations.html" },
+    { n: 8, date: "2026-07-16", title: "Method chaining & pipeline shape",
+      file: "lessons/0008-method-chaining-pipeline-shape.html" },
   ];
 
   const REFS = [

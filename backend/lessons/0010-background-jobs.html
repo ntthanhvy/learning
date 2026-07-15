@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 10 · Background Jobs</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 10 · ~20 min</p>
+<h1>Background jobs: work a handler shouldn't do itself</h1>
+<p class="byline">Lesson 9 closed with a teaser: some work shouldn't run inside the request/response cycle at all. Sending a receipt email, resizing an uploaded image, generating a PDF report — none of that needs to finish before the client gets a response. Today: how a handler hands that work off instead of doing it inline.</p>
+
+<h2>1 · Why "just do it in the handler" breaks down</h2>
+<p>The naive version is tempting: the handler receives the request, does the slow thing right there — call the email provider, resize the image, write the report — and only then responds. Three problems compound: the client sits waiting for work that has nothing to do with what they actually need back; the connection (and, depending on the server, a whole goroutine/thread) is held open the entire time; and if the process crashes or restarts mid-way, the work is simply lost with no record it was ever supposed to happen.</p>
+<p>A <dfn data-en="any unit of work triggered by a request but deliberately run outside that request's response cycle, so the client doesn't wait for it to finish" data-vn="background job (giữ nguyên) — việc chạy tách khỏi vòng request/response">background job</dfn> is exactly that work, deliberately pulled out of the request path. The handler's job changes from "do the work" to "make sure the work is remembered," then respond immediately.</p>
+
+<h2>2 · The pattern: enqueue now, process later</h2>
+<p>The handler writes a small record describing the work — not the result, just "do this" — to a durable place, and returns right away. A separate, independent process reads that place continuously and does the actual work. That durable place is a <dfn data-en="a durable, ordered store of pending units of work — a database table or a dedicated system like Redis/SQS/RabbitMQ — that a handler writes to and a worker reads from" data-vn="job queue (giữ nguyên) — nơi lưu tạm các việc đang chờ xử lý">job queue</dfn>; writing a job into it is <dfn data-en="the act of adding a new unit of work to a job queue, without waiting for it to be processed" data-vn="enqueue (giữ nguyên) — đưa việc vào hàng đợi">enqueueing</dfn> it. The separate process that reads jobs out and executes them is a <dfn data-en="a separate, independent process (or pool of goroutines) whose only job is to pull pending work off a queue and execute it, entirely outside any request's lifecycle" data-vn="worker (giữ nguyên) — process riêng chuyên xử lý job trong hàng đợi">worker</dfn>.</p>
+<pre><code><span class="cm">// handler: enqueue and return immediately — no email sending here</span>
+<span class="kw">func</span> createOrder(w http.ResponseWriter, r *http.Request) {
+    order, err := saveOrder(r.Context(), parseOrder(r))
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        writeError(w, err)
+        <span class="kw">return</span>
+    }
+    <span class="cm">// durable row in a "jobs" table — survives even if this process dies next</span>
+    enqueueJob(r.Context(), <span class="kw">"send_receipt_email"</span>, order.ID)
+    w.WriteHeader(http.StatusAccepted) <span class="cm">// 202: accepted, not necessarily done yet</span>
+}
+
+<span class="cm">// worker: a totally separate process, polling the same table</span>
+<span class="kw">func</span> runWorker(ctx context.Context) {
+    <span class="kw">for</span> {
+        job, ok := dequeueJob(ctx) <span class="cm">// claim one pending row</span>
+        <span class="kw">if</span> ok {
+            processJob(ctx, job) <span class="cm">// the actual slow work happens HERE, off the request path</span>
+        }
+        time.Sleep(time.Second)
+    }
+}</code></pre>
+<p>The response code matters: <code>202 Accepted</code> tells the client "I've recorded this, it's happening, but not necessarily done" — a deliberately different promise than <code>200 OK</code>'s "done, here's the result."</p>
+
+<div class="callout"><strong>Frontend-habit trap:</strong> this is the same move as pushing expensive work off a browser's main thread into a Web Worker so the UI doesn't jank — the request thread is your "main thread" here, and a background job is the backend's Web Worker. Same instinct, same reason: don't block the thing the user is actually waiting on with work they aren't.</div>
+
+<h2>3 · Jobs get retried — so they must be safe to run twice</h2>
+<p>Workers crash too — mid-job, after the email actually sent but before the queue is told the job is done. Most systems resolve that ambiguity by retrying: better to risk running a job again than to silently drop it. That guarantee has a name: <dfn data-en="a delivery guarantee where a queued job is retried until a worker confirms it finished, meaning the same job may occasionally execute more than once — the opposite risk of at-most-once, which can silently drop work instead" data-vn="at-least-once delivery (giữ nguyên) — job có thể chạy lại hơn 1 lần, không được phép mất job">at-least-once delivery</dfn>: a job might run more than once, but it is never silently dropped.</p>
+<p>That single fact drives the most important design rule for job handlers: they must be safe to run twice. Lesson 3's <a href="0003-the-api-contract.html"><dfn data-en="same end state whether performed once or many times, so blind retries are safe" data-vn="idempotent (giữ nguyên) — gọi N lần như gọi 1 lần">idempotent</dfn></a> is the same idea, applied here instead of to an HTTP endpoint. "Send an email" isn't naturally idempotent — sending it twice means two emails — so the job checks first ("has a receipt already been sent for this order?") before acting, the same way a payment job would check for an existing charge before charging again.</p>
+
+<div class="interview">
+<p><strong>Q: "A signup handler needs to send a welcome email. How would you build that?"</strong> A strong answer, out loud: <em>"I wouldn't call the email provider inside the handler — that ties the response time to a third-party API and loses the work if the process dies mid-request. I'd write a job row (or push to a queue) describing 'send welcome email for user X' and return 202 immediately; a separate worker process dequeues and sends it. Because queues are usually at-least-once — a worker can crash after sending but before marking the job done — I'd make the job idempotent, checking a welcome_email_sent_at column before sending, so a retry doesn't double-send."</em> The subtext: naming that retries are expected, not an edge case, and designing the handler to tolerate them, is what separates "used a queue" from "actually understands why."</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Doing slow, unrelated work inline ties the response time to that work and loses it entirely if the process crashes mid-request — the handler should only guarantee the work is durably recorded, then respond.">
+    <p class="stem">What's the main problem with sending a receipt email directly inside the request handler?</p>
+    <button class="opt" data-ok>The client waits on unrelated slow work</button>
+    <button class="opt">HTTP handlers cannot call external email APIs</button>
+    <button class="opt">Go servers cannot import third-party Go packages</button>
+  </div>
+  <div class="q" data-why="Enqueueing means writing a durable record describing the work to a job queue; the handler returns immediately without waiting for that work to actually run.">
+    <p class="stem">What does a handler do when it "enqueues" a background job?</p>
+    <button class="opt" data-ok>It writes a durable record, then returns immediately</button>
+    <button class="opt">It runs the job inline, then logs afterward</button>
+    <button class="opt">It blocks until a worker fully finishes it</button>
+  </div>
+  <div class="q" data-why="202 Accepted deliberately signals 'recorded, in progress' rather than 'finished' — a different promise than 200 OK, which the client should not assume means the background work is done yet.">
+    <p class="stem">Why does the handler above return <code>202 Accepted</code> instead of <code>200 OK</code>?</p>
+    <button class="opt" data-ok>It signals accepted and pending, not finished</button>
+    <button class="opt">Every POST request legally requires a 202</button>
+    <button class="opt">A 200 response cannot include any body</button>
+  </div>
+  <div class="q" data-why="At-least-once delivery means a worker crash between finishing work and marking a job done causes a retry — so the same job can run more than once, and the handler must tolerate that instead of assuming single execution.">
+    <p class="stem">Why must a background job handler be safe to run more than once?</p>
+    <button class="opt" data-ok>Queues retry on failure, so jobs repeat</button>
+    <button class="opt">Workers always run every job three times</button>
+    <button class="opt">Go's queue library silently duplicates every request</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the Twelve-Factor App's <a href="https://12factor.net/concurrency">Concurrency</a> factor (~10 min) — the standing reference for this course's runtime track — makes the case directly: scale by running different process <em>types</em> for different kinds of work (a web process for requests, a worker process for queued jobs), rather than one process trying to do everything.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> rate limiting and backpressure — what protects your own service (and its queues) from being overwhelmed faster than it can keep up.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

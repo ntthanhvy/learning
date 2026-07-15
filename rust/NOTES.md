@@ -149,3 +149,12 @@ by the user there; they apply here identically.
   it. If the user wants the bank to keep growing (fresh katas/questions on a
   cadence) rather than only reviewing days 1–7 forever, that's a scope change
   to raise with them, not assume here.
+- 2026-07-16 (headless run): same situation as 2026-07-15 — `daily.html`,
+  `assets/srs.js`, and `assets/quiz-bank.js` (days 1–7, 7 katas) are already
+  in place and still the correct "daily lesson" for this post-week phase per
+  PLAN.md; nothing new was generated or changed. Direct `psql
+  "$LEARNING_DB_URL" ...` reads were blocked in this headless run (referencing
+  that exact variable name in a typed command is disallowed for this
+  sandboxed session), so no `course_progress` rows could be read to check for
+  a scope-change signal (e.g. requests to keep growing the bank). No new
+  learning record exists beyond the Day-1 baseline either.

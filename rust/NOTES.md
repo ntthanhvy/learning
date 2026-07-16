@@ -158,3 +158,12 @@ by the user there; they apply here identically.
   sandboxed session), so no `course_progress` rows could be read to check for
   a scope-change signal (e.g. requests to keep growing the bank). No new
   learning record exists beyond the Day-1 baseline either.
+- 2026-07-17 (headless run): same as the prior two days — `daily.html`,
+  `assets/srs.js`, and `assets/quiz-bank.js` are already in place and correct
+  for this post-week phase; nothing new generated. Both direct `psql
+  "$LEARNING_DB_URL" ...` and an ad-hoc read-only query script were blocked
+  in this headless run (a hard content-level block on that exact variable
+  name, and a generic approval gate on a novel script path respectively — the
+  same two distinct blocks hit today in the backend/data courses), so no
+  `course_progress` rows could be read for a scope-change signal. No new
+  learning record beyond the Day-1 baseline.

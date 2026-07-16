@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 9 · Timed Drills</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 9 · ~20 min · 17 Jul 2026</p>
+<h1>Timed drills: Lessons 1–8, under a clock</h1>
+<p class="byline">Lesson 8 ended with a teaser: timed practice begins, drilling earlier lessons' patterns against fresh problems in the LeetCode-pandas / StrataScratch style. Today isn't a new concept — it's three short, interview-shaped problems that recombine <a href="0004-groupby-split-apply-combine.html">groupby</a>, <a href="0005-merge-and-join.html">merge</a>, and <a href="0007-rank-and-cumulative-operations.html">rank</a> from scratch, on the same fixtures you already know. Budget ~5 minutes per drill and don't peek at earlier lessons — retrieval under mild time pressure is the whole point.</p>
+
+<h2>1 · Why timed drills, not another new concept</h2>
+<p>An interview rarely asks "explain groupby." It hands you a table and a vague goal — "find the second-biggest order per customer" — and watches whether you reach for the right method within a few minutes, without re-deriving it from first principles. That's a different skill from following a lesson: it's pattern <em>recognition</em>, not pattern <em>construction</em>. The fix is the same one used for spaced repetition anywhere — solve the same shape of problem again, cold, until reaching for <code>rank()</code> or <code>merge()</code> stops requiring a conscious search.</p>
+
+<h2>2 · Drill 1 — the "Nth highest" pattern</h2>
+<p>One of the most common interview shapes, in SQL or pandas: "the second-highest X per group." You already built the machinery in Lesson 7 — <code>groupby(...).rank(ascending=False)</code> — the only new part is recognizing the shape fast: rank, then filter to the N you want. A customer with only one order simply has no rank-2 row; nothing special to handle, the filter already excludes them.</p>
+
+<h2>3 · Drill 2 — merge, then aggregate</h2>
+<p>Lesson 5's merge, applied to a fresh question: "revenue by region, but only for customers who actually ordered." An <code>inner</code> merge does the filtering for free — a customer present in <code>customers.csv</code> with zero rows in the cleaned orders simply produces zero merged rows, so they never reach the <code>groupby</code> at all. No explicit "if customer has orders" check needed; picking the right join type <em>is</em> the check.</p>
+
+<h2>4 · Drill 3 — naming the pattern you already used: anti-join</h2>
+<p>Lesson 5 found "customers with no orders" using <code>indicator=True</code> and <code>_merge == "left_only"</code>, without a name for the pattern itself. It has one: an <dfn data-en="a merge that keeps only the rows from one side that have NO matching row on the other side — in pandas, a left merge with indicator=True filtered to left_only rows" data-vn="anti-join (giữ nguyên) — merge chỉ giữ lại các hàng KHÔNG khớp bên kia">anti-join</dfn>. It answers "what's missing," the mirror image of an inner join's "what matches." SQL spells the same idea as <code>WHERE NOT EXISTS (...)</code> or <code>LEFT JOIN ... WHERE right.key IS NULL</code> — worth saying by name out loud in an interview, since "I need an anti-join here" reads as more fluent than re-deriving the left-merge-then-filter trick from scratch every time.</p>
+<p>Today's version asks for it as one chain — tying Lesson 8's chaining habit onto Lesson 5's join logic, since in practice you'd rarely leave a throwaway intermediate variable around for a check this small.</p>
+
+<div class="interview">
+<p><strong>Q: "How would you find customers who've never placed an order, given an orders table and a customers table?"</strong> A strong answer, out loud: <em>"That's an anti-join — I'd left-merge customers with orders on the customer key with indicator=True, then filter to rows where _merge is left_only, meaning that customer had no match on the orders side. In SQL I'd reach for the same idea as a LEFT JOIN with a WHERE orders.id IS NULL, or NOT EXISTS. I'd avoid a Python loop checking membership per customer — that's O(n·m) and exactly what merge is built to do in one vectorized pass."</em> The subtext: naming "anti-join" by name, and explicitly ruling out a loop, signals fluency beyond just getting the right answer.</p>
+</div>
+
+<h2>Try it — self-checking practice (~15 min, 3 drills)</h2>
+<p>Open <code>practice/09_timed_drills.py</code>, replace each <code>...</code>, and re-run until all checks print ✓. Try each drill cold before reading its section above again — that's the actual exercise:</p>
+<pre><code>cd ~/learning/data
+uv run --with pandas python3 practice/09_timed_drills.py</code></pre>
+<p>Same <code>orders_raw.csv</code> and <code>customers.csv</code> as Lesson 5 onward — today only the questions are new.</p>
+
+<h2>Check yourself</h2>
+<div class="quiz">
+  <div class="q" data-why="An inner merge only keeps rows present on both sides — a customer with zero matching order rows contributes nothing to the result, so it never reaches groupby at all.">
+    <p class="stem">What happens to a customer with zero orders in an inner merge against the orders table?</p>
+    <button class="opt" data-ok>They are excluded from the merged result</button>
+    <button class="opt">They appear once with zero total amount</button>
+    <button class="opt">They cause the whole merge to fail</button>
+  </div>
+  <div class="q" data-why="Ranking each customer's orders by amount descending and filtering to rank == 2 selects exactly the second-highest order per customer, the 'Nth highest' interview pattern.">
+    <p class="stem">In Drill 1, what does filtering to <code>amount_rank == 2</code> select?</p>
+    <button class="opt" data-ok>Each individual customer's second highest order amount</button>
+    <button class="opt">Every order placed on the second day</button>
+    <button class="opt">The two smallest orders across all customers</button>
+  </div>
+  <div class="q" data-why="An anti-join keeps only rows from one side with no matching row on the other — the mirror image of an inner join, which keeps only rows that DO match.">
+    <p class="stem">What does an anti-join find, compared to an inner join?</p>
+    <button class="opt" data-ok>Rows on one side with no match</button>
+    <button class="opt">Rows that match on every single column</button>
+    <button class="opt">Rows sorted by their key column value</button>
+  </div>
+  <div class="q" data-why="Timed drills train fast pattern recognition — reaching for rank()/merge() under mild time pressure without re-deriving it — which is closer to what an interview actually tests than untimed lesson-following.">
+    <p class="stem">What skill do timed drills specifically build, beyond untimed lessons?</p>
+    <button class="opt" data-ok>Fast recognition of which pattern to use</button>
+    <button class="opt">Memorizing every single pandas method's full signature</button>
+    <button class="opt">Writing pandas code that runs slightly faster</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the <a href="https://leetcode.com/studyplan/introduction-to-pandas/">LeetCode "Introduction to Pandas" study plan</a> (~10 problems, auto-graded) — this course's standing practice resource. Do a handful cold, timed, no notes; that's the same drill as today's, just with fresh data each time. <a href="https://www.stratascratch.com/">StrataScratch</a> is the next step up once these feel fast — real interview questions from data roles.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a>.<br>
+<strong>Next lesson:</strong> a review pass shaped by however today's drills actually go — whichever pattern comes back shakiest gets its own focused round.<br><br>
+💬 Anything unclear — the anti-join framing, why inner-merge-then-groupby beats a manual filter, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

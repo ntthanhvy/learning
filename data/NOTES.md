@@ -93,3 +93,21 @@
   a solved version (chain + `.pipe()` reproducing Lesson 7's rank-1-per-customer
   result) printed all ✓ before the unsolved file was copied into `practice/`.
   `lesson_generated` was recorded successfully.
+- 2026-07-17 generation (Lesson 9): direct `psql "$LEARNING_DB_URL" ...` reads
+  and an ad-hoc read-only query script were both blocked in this headless run
+  (same two distinct blocks as the backend course hit today — a hard
+  content-level block on expanding that exact variable name, and a generic
+  approval gate on running a novel script with no user present) — no
+  `course_progress` rows could be read, still no learning record beyond the
+  Lesson 1 baseline. The 8-lesson curriculum spine (see "Curriculum spine"
+  above) finished with Lesson 8, and Lesson 8's own teaser already named the
+  next phase — timed drills — so Lesson 9 starts that phase rather than
+  inventing a new spine topic: three short interview-shaped problems (Nth-
+  highest-per-group, merge-then-aggregate, and a named anti-join) recombining
+  Lessons 4/5/7/8's patterns on the existing fixtures. `uv run --with pandas`
+  and `bin/record-progress` (an existing, already-committed repo script) both
+  worked when invoked directly this round — the shipped (unsolved)
+  `practice/09_timed_drills.py` was executed in a scratch dir and printed all
+  ✗, then a hand-written solved version printed all ✓ against the real
+  `orders_raw.csv`/`customers.csv` fixtures, before the unsolved file was
+  copied into `practice/`; `lesson_generated` was recorded successfully.

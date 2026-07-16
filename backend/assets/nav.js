@@ -26,6 +26,8 @@
       file: "lessons/0009-where-caching-belongs.html" },
     { n: 10, date: "2026-07-16", title: "Background jobs",
       file: "lessons/0010-background-jobs.html" },
+    { n: 11, date: "2026-07-17", title: "Rate limiting & backpressure",
+      file: "lessons/0011-rate-limiting-and-backpressure.html" },
   ];
 
   const REFS = [

@@ -22,6 +22,8 @@
       file: "lessons/0007-rank-and-cumulative-operations.html" },
     { n: 8, date: "2026-07-16", title: "Method chaining & pipeline shape",
       file: "lessons/0008-method-chaining-pipeline-shape.html" },
+    { n: 9, date: "2026-07-17", title: "Timed drills",
+      file: "lessons/0009-timed-drills.html" },
   ];
 
   const REFS = [

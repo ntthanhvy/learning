@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 11 · Rate Limiting &amp; Backpressure</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 11 · ~20 min</p>
+<h1>Rate limiting &amp; backpressure: protecting your service from itself</h1>
+<p class="byline">Lesson 10 closed with a teaser: what protects your own service — and its queues — from being overwhelmed faster than it can keep up? A worker can only drain a queue so fast; a handler can only hold open so many connections. Today: the two mechanisms that keep "too much traffic" from turning into "the whole service falls over."</p>
+
+<h2>1 · Unbounded acceptance is the actual bug</h2>
+<p>A naive server accepts every request that arrives and does its best. That "best effort" model works fine until load exceeds capacity — then requests queue up in memory, database connections run out, response times climb, and eventually the process runs out of memory or every request times out anyway, including ones from well-behaved clients who did nothing wrong. The failure isn't "too much traffic" itself; it's a server with no mechanism to say no before that happens.</p>
+<p>Two related tools fix this from different ends. <dfn data-en="deliberately capping how many requests a client (or the service as a whole) may make in a given time window, rejecting the excess instead of queueing it indefinitely" data-vn="rate limiting (giữ nguyên) — giới hạn số request được phép trong một khoảng thời gian">Rate limiting</dfn> caps how much a single client can demand. <dfn data-en="a system under load signaling upstream — a client, or an earlier stage in a pipeline — to slow down or stop sending more work, rather than silently accepting everything and failing later" data-vn="backpressure (giữ nguyên) — báo ngược cho phía gửi biết phải chậm lại">backpressure</dfn> is the more general idea: any point in a system that's falling behind pushes that fact back upstream, instead of absorbing unlimited work and hoping.</p>
+
+<h2>2 · Rate limiting: the token bucket</h2>
+<p>The standard algorithm is the <dfn data-en="a rate-limiting algorithm: a bucket holds up to N tokens, refills at a fixed rate, and each request must take one token to proceed — an empty bucket means the request is rejected until it refills" data-vn="token bucket (giữ nguyên) — thuật toán giới hạn tốc độ bằng token nạp dần">token bucket</dfn>: a bucket holds up to N tokens and refills at a steady rate (say, 10/second). Every request must take one token to proceed; an empty bucket means the request gets rejected. This allows short bursts (spend the whole bucket at once) while still enforcing a long-run average rate — friendlier than a hard "N requests per fixed minute" cutoff, which punishes a client unlucky enough to burst right at a window boundary.</p>
+<pre><code><span class="kw">type</span> bucket <span class="kw">struct</span> {
+    mu           sync.Mutex
+    tokens       float64
+    capacity     float64
+    refillPerSec float64
+    last         time.Time
+}
+
+<span class="kw">func</span> (b *bucket) allow() <span class="ty">bool</span> {
+    b.mu.Lock()
+    <span class="kw">defer</span> b.mu.Unlock()
+
+    now := time.Now()
+    elapsed := now.Sub(b.last).Seconds()
+    b.tokens = math.Min(b.capacity, b.tokens+elapsed*b.refillPerSec) <span class="cm">// refill since last check</span>
+    b.last = now
+
+    <span class="kw">if</span> b.tokens &lt; 1 {
+        <span class="kw">return</span> <span class="kw">false</span> <span class="cm">// bucket empty — reject</span>
+    }
+    b.tokens--
+    <span class="kw">return</span> <span class="kw">true</span>
+}
+
+<span class="cm">// middleware: one bucket per API key, wraps any handler</span>
+<span class="kw">func</span> rateLimit(next http.Handler, buckets *sync.Map) http.Handler {
+    <span class="kw">return</span> http.HandlerFunc(<span class="kw">func</span>(w http.ResponseWriter, r *http.Request) {
+        key := r.Header.Get(<span class="kw">"X-API-Key"</span>)
+        b, _ := buckets.LoadOrStore(key, &amp;bucket{tokens: 20, capacity: 20, refillPerSec: 10, last: time.Now()})
+        <span class="kw">if</span> !b.(*bucket).allow() {
+            w.Header().Set(<span class="kw">"Retry-After"</span>, <span class="kw">"1"</span>)
+            w.WriteHeader(http.StatusTooManyRequests) <span class="cm">// 429</span>
+            <span class="kw">return</span>
+        }
+        next.ServeHTTP(w, r)
+    })
+}</code></pre>
+<p>The response code matters as much as the algorithm: <code>429 Too Many Requests</code> tells a well-behaved client exactly what happened and, via <code>Retry-After</code>, when it's worth trying again — a client SDK can back off automatically instead of hammering harder.</p>
+
+<h2>3 · Backpressure: pushing "slow down" further upstream</h2>
+<p>Rate limiting protects a service from any one client. Backpressure protects a service from itself, at every internal handoff — the clearest case is Lesson 10's job queue. A worker that processes 50 jobs/second can't magically drain a queue that's filling at 200 jobs/second; if the queue has no limit, it grows until the process runs out of memory. A bounded queue rejects (or the producer checks queue depth before enqueueing and returns <code>503 Service Unavailable</code>) once it's full, instead of accepting work it has no way to ever finish.</p>
+<div class="callout"><strong>Frontend-habit trap:</strong> this is the same shape as a frontend <dfn data-en="delaying a function's execution until a burst of calls stops, so only the last one in a rapid sequence actually runs" data-vn="debounce (giữ nguyên) — trì hoãn, chỉ chạy lần gọi cuối sau khi ngừng gọi dồn dập">debounce</dfn> on a search box: the UI protects itself from firing a network request on every keystroke by dropping the excess and only acting on the settled result. A token bucket and a bounded queue are doing the same thing server-side — refusing to do more work than the system can actually sustain, rather than accepting everything and falling behind.</div>
+
+<div class="interview">
+<p><strong>Q: "How would you protect an API from a single client hammering it with requests?"</strong> A strong answer, out loud: <em>"I'd rate-limit per client — typically a token bucket keyed by API key or user id, since it allows short bursts while still capping the long-run average, unlike a hard fixed-window count. Once the bucket's empty I'd return 429 with a Retry-After header so well-behaved clients back off automatically instead of retrying immediately. And I'd apply the same idea internally, not just at the edge — if a downstream queue or worker pool is the bottleneck, it needs its own backpressure, like a bounded queue that returns 503 once full, so one slow client or client group doesn't fill memory or starve everyone else."</em> The subtext: naming that rate limiting is about the client-facing edge and backpressure is the same idea applied to every internal hop is what shows systems thinking, not just "I know what 429 means."</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Rate limiting exists to stop one client's traffic from consuming shared server capacity that other clients need — the server has finite connections, CPU, and memory to go around.">
+    <p class="stem">What problem does rate limiting protect a service from?</p>
+    <button class="opt" data-ok>One client overwhelming shared server capacity</button>
+    <button class="opt">Slow queries missing a database index</button>
+    <button class="opt">Requests missing a valid auth token</button>
+  </div>
+  <div class="q" data-why="A token bucket refills at a steady rate and each request spends one token; if the bucket has fewer than one token left, the request is rejected until it refills.">
+    <p class="stem">How does a token bucket decide whether to allow a request?</p>
+    <button class="opt" data-ok>It checks for at least one token</button>
+    <button class="opt">It always allows every incoming request instantly</button>
+    <button class="opt">It blocks all requests after one error</button>
+  </div>
+  <div class="q" data-why="Backpressure means a system under load pushes that fact back upstream — a bounded queue rejecting new work once full, rather than growing without limit until memory runs out.">
+    <p class="stem">What does backpressure mean for a job queue under heavy load?</p>
+    <button class="opt" data-ok>Reject or slow new work deliberately</button>
+    <button class="opt">Accept everything and grow memory unbounded</button>
+    <button class="opt">Retry every failed job forever silently</button>
+  </div>
+  <div class="q" data-why="429 Too Many Requests is the status code specifically meant to tell a client it has been rate-limited, often paired with a Retry-After header.">
+    <p class="stem">Which status code tells a client it's being rate limited?</p>
+    <button class="opt" data-ok>429 Too Many Requests</button>
+    <button class="opt">202 Accepted But Pending</button>
+    <button class="opt">503 Service Currently Unavailable</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> OWASP's <a href="https://cheatsheetseries.owasp.org/cheatsheets/Denial_of_Service_Cheat_Sheet.html">Denial of Service Cheat Sheet</a> (~10 min) — this course's standing security reference — covers rate limiting and resource-exhaustion protection from the defensive-engineering angle, beyond just the token-bucket mechanics.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> auth — sessions vs JWT, and how to reason about which one fits a given service.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

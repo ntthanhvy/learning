@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Part 3 · Backend &amp; API Design</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Go Screening Kit · Part 3 · 4 questions · pick 2 per screen</p>
+<h1>Backend &amp; API design</h1>
+<p class="byline">Language depth without service-building judgment makes a good puzzle-solver, not a good backend hire. These questions test whether they've owned a service — structured it, shut it down cleanly, and survived its failure modes. Your own 5 years of fullstack work counts fully here: most answers you can evaluate against your own experience.</p>
+
+<div class="question">
+  <p class="qnum">Question 10</p>
+  <p class="ask">"Walk me through how you'd structure a new REST API service in Go — project layout, layers, how dependencies get wired together."</p>
+  <p class="why-ask">Why ask: open-ended by design. You learn what they consider normal, which reveals the codebases they've actually lived in.</p>
+
+  <p class="g-label">Answer guideline — a strong answer covers</p>
+  <ul>
+    <li>Some layering with clean direction: <strong>handler → service/domain → repository</strong> (names vary; the separation matters, not the vocabulary). Handlers do HTTP, domain does rules, repos do storage.</li>
+    <li><strong>Interfaces defined where they're consumed</strong> (the service defines the <code>Store</code> interface it needs; postgres implements it) — this is Go-idiomatic and enables testing without mock frameworks.</li>
+    <li><strong>Constructor injection</strong>: dependencies passed via <code>New...(...)</code>, wired explicitly in a thin <code>main</code>. No global state, no init-magic, usually no DI framework.</li>
+    <li>Pragmatism about layout: <code>cmd/</code> + <code>internal/</code> is common, but "start flat, split when it hurts" is an equally strong answer. Framework choice (chi/echo/stdlib) held loosely.</li>
+  </ul>
+
+  <div class="signals">
+    <div class="yes"><p class="label">Strong signals</p>
+      <ul>
+        <li>Consumer-side interfaces — the single most Go-native structural idea</li>
+        <li>Thin <code>main</code>, explicit wiring, testability as a stated goal</li>
+        <li>Can say what they'd <em>not</em> do (over-layering a small service)</li>
+      </ul>
+    </div>
+    <div class="no"><p class="label">Weak / red flags</p>
+      <ul>
+        <li>Recites a "standard layout" template with no reasoning</li>
+        <li>Everything hangs off globals / <code>init()</code> side effects</li>
+        <li>"The framework generates it" — structure outsourced entirely</li>
+      </ul>
+    </div>
+  </div>
+
+  <p class="g-label">Follow-up probe</p>
+  <p>"Why define the interface next to the consumer instead of next to the implementation?" <em>(Good: the consumer states the minimal contract it needs; implementations satisfy it implicitly; tests substitute fakes without import cycles.)</em></p>
+
+  <p class="score-hint"><strong>3/5</strong> = clean layering + injection. <strong>5/5</strong> = consumer-side interfaces with the why, plus taste about when structure is overkill.</p>
+</div>
+
+<div class="question">
+  <p class="qnum">Question 11</p>
+  <p class="ask">"Your service is behind a load balancer and gets a deploy signal. How do you shut it down without dropping requests?"</p>
+  <p class="why-ask">Why ask: graceful shutdown is a rite of passage — you implement it the first time your deploys start throwing 502s. Concrete, small, and impossible to bluff.</p>
+
+  <p class="g-label">Answer guideline — a strong answer covers</p>
+  <ul>
+    <li>Catch <strong>SIGTERM/SIGINT</strong> (<code>signal.NotifyContext</code> or <code>signal.Notify</code>).</li>
+    <li>Call <code>server.Shutdown(ctx)</code> with a deadline: stops accepting new connections, lets <strong>in-flight requests drain</strong>, returns when done or when the deadline expires.</li>
+    <li>Order matters: flip the readiness/health check first so the LB stops routing, then drain, then close DB pools / flush queues / stop background workers.</li>
+    <li>Bonus: the timeout must fit the platform's grace period (e.g. Kubernetes <code>terminationGracePeriodSeconds</code>); long-lived connections (websockets, streaming) need their own strategy.</li>
+  </ul>
+  <pre><code>ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+<span class="kw">defer</span> stop()
+<span class="cm">// ... srv.ListenAndServe() in a goroutine ...</span>
+&lt;-ctx.Done()                                  <span class="cm">// deploy signal arrives</span>
+shutCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+<span class="kw">defer</span> cancel()
+srv.Shutdown(shutCtx)                         <span class="cm">// drain in-flight, then exit</span></code></pre>
+
+  <div class="signals">
+    <div class="yes"><p class="label">Strong signals</p>
+      <ul>
+        <li>Names <code>server.Shutdown</code> and what it actually does</li>
+        <li>Thinks about the LB/readiness handshake, not just the process</li>
+        <li>Mentions cleaning up non-HTTP resources (pools, workers, consumers)</li>
+      </ul>
+    </div>
+    <div class="no"><p class="label">Weak / red flags</p>
+      <ul>
+        <li>"Just <code>os.Exit</code> / the platform handles it"</li>
+        <li>Confuses <code>Shutdown</code> with <code>Close</code></li>
+        <li>Has clearly never seen deploy-time 502s or thought about why they happen</li>
+      </ul>
+    </div>
+  </div>
+
+  <p class="score-hint"><strong>3/5</strong> = signal + Shutdown + timeout. <strong>5/5</strong> = readiness-first ordering and platform grace-period awareness.</p>
+</div>
+
+<div class="question">
+  <p class="qnum">Question 12</p>
+  <p class="ask">"You're calling a downstream service that's occasionally slow or flaky. How do you add timeouts and retries — and what can retries make worse?"</p>
+  <p class="why-ask">Why ask: the second half is the real question. Naive retries have taken down more systems than the failures they were meant to survive.</p>
+
+  <p class="g-label">Answer guideline — a strong answer covers</p>
+  <ul>
+    <li><strong>Timeouts:</strong> per-request <code>context.WithTimeout</code>; a configured <code>http.Client{Timeout: ...}</code> (never the zero-value default client, which has <em>no</em> timeout); budget awareness — the outbound deadline must fit inside the inbound request's remaining deadline.</li>
+    <li><strong>Retries:</strong> bounded attempts, <strong>exponential backoff with jitter</strong>, retry only idempotent operations or ensure idempotency (idempotency keys) before retrying writes.</li>
+    <li><strong>What goes wrong:</strong> retry storms/amplification — a struggling downstream gets 3× the traffic exactly when it can least handle it; duplicate side effects on non-idempotent writes (double-charged payment); thundering herd without jitter.</li>
+    <li>Bonus: circuit breakers / failing fast, honoring <code>Retry-After</code>, retrying on the right errors only (timeouts/5xx yes, 4xx no).</li>
+  </ul>
+
+  <div class="signals">
+    <div class="yes"><p class="label">Strong signals</p>
+      <ul>
+        <li>Says "idempotent" unprompted when discussing retried writes</li>
+        <li>Jitter, and can say why (synchronized retry waves)</li>
+        <li>Knows the default <code>http.Client</code> has no timeout</li>
+      </ul>
+    </div>
+    <div class="no"><p class="label">Weak / red flags</p>
+      <ul>
+        <li>"Retry 3 times in a loop" with no backoff, no idempotency thought</li>
+        <li>No concept of deadline budgets across hops</li>
+        <li>Can't name a single way retries make an outage worse</li>
+      </ul>
+    </div>
+  </div>
+
+  <p class="score-hint"><strong>3/5</strong> = timeout + bounded backoff retries. <strong>5/5</strong> = idempotency + retry-amplification reasoning; circuit breaker vocabulary is a bonus, not required at 3–4 yrs.</p>
+</div>
+
+<div class="question">
+  <p class="qnum">Question 13</p>
+  <p class="ask">"How do you validate and evolve API request payloads? Say a client needs a new field next month — walk me through the change."</p>
+  <p class="why-ask">Why ask: tests day-to-day craftsmanship and whether they think about clients they don't control.</p>
+
+  <p class="g-label">Answer guideline — a strong answer covers</p>
+  <ul>
+    <li><strong>Dedicated request/response structs</strong> per endpoint — never binding JSON straight into DB models (over-posting, accidental field exposure, coupled evolution).</li>
+    <li>Validation after decode: required fields, ranges, enums — via a library (<code>validator</code> tags) or plain code; returning structured 400s that name the bad field.</li>
+    <li>Go-specific nuance: <code>encoding/json</code> ignores unknown fields by default (<code>DisallowUnknownFields</code> to opt out) and zero values are ambiguous — "was <code>count</code> sent as 0 or omitted?" → pointers, or a decode-then-check pattern.</li>
+    <li><strong>Evolution:</strong> additive changes are safe (new optional field with a default); breaking changes (rename, type change, new required field) need versioning or a deprecation window. Never repurpose an existing field's meaning.</li>
+  </ul>
+
+  <div class="signals">
+    <div class="yes"><p class="label">Strong signals</p>
+      <ul>
+        <li>Separate DTOs from domain/DB models, with the why</li>
+        <li>Knows the zero-value-vs-omitted JSON ambiguity</li>
+        <li>"Additive is free, breaking needs a version/deprecation plan"</li>
+      </ul>
+    </div>
+    <div class="no"><p class="label">Weak / red flags</p>
+      <ul>
+        <li>Binds JSON directly into GORM/DB models</li>
+        <li>Validation is "the frontend checks it"</li>
+        <li>Would ship a renamed field and "tell the clients"</li>
+      </ul>
+    </div>
+  </div>
+
+  <p class="score-hint"><strong>3/5</strong> = DTOs + server-side validation. <strong>5/5</strong> = JSON zero-value nuance + a coherent compatibility story.</p>
+</div>
+
+<p class="next">Next: <a href="0004-data-infrastructure.html">Part 4 · Data &amp; infrastructure</a> — connection pools, transactions, and the "tell me about a real incident" question.</p>
+
+<script src="../assets/nav.js"></script>
+<script src="../assets/gloss.js"></script>
+</body>
+</html>

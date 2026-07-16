@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Part 5 · Testing &amp; Tooling</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Go Screening Kit · Part 5 · 2 questions · pick 1 per screen</p>
+<h1>Testing &amp; tooling</h1>
+<p class="byline">One good question here is enough for a screen — testing habits correlate strongly with everything else, so a candidate who's strong in Parts 1–4 is rarely weak here. Use the second question only if you're on the fence and have minutes to spare.</p>
+
+<div class="question">
+  <p class="qnum">Question 17</p>
+  <p class="ask">"How do you test code that depends on a database or an external API? Walk me through your actual setup on your last project."</p>
+  <p class="why-ask">Why ask: "on your last project" turns a theory question into an experience question. Everyone knows the words "mock" and "interface" — few can describe a working setup.</p>
+
+  <p class="g-label">Answer guideline — a strong answer covers</p>
+  <ul>
+    <li><strong>Design for it:</strong> the service depends on a small consumer-defined interface (ties back to Q10), so unit tests substitute a hand-written fake — in Go this rarely needs a mocking framework.</li>
+    <li><strong>Table-driven tests</strong> as the default idiom: a slice of cases, <code>t.Run(tc.name, ...)</code> subtests; <code>t.Parallel()</code> awareness is a bonus.</li>
+    <li><strong>The unit/integration split:</strong> fakes prove your logic; they don't prove your SQL. Real queries need a real database — testcontainers / dockerized Postgres, a shared test DB with per-test transactions or truncation, or sqlite-in-memory <em>with</em> the caveat that it's a dialect lie.</li>
+    <li><strong>External APIs:</strong> <code>httptest.Server</code> to fake the remote end and exercise the real HTTP client — timeouts, retries, error decoding. Bonus: <code>httptest.NewRecorder</code> for testing their own handlers.</li>
+  </ul>
+
+  <div class="signals">
+    <div class="yes"><p class="label">Strong signals</p>
+      <ul>
+        <li>Says fakes don't test SQL — knows what each layer of tests proves</li>
+        <li>Names <code>httptest</code> — the stdlib tool a real Go tester can't avoid</li>
+        <li>Describes a working CI-ready integration setup, with its warts</li>
+      </ul>
+    </div>
+    <div class="no"><p class="label">Weak / red flags</p>
+      <ul>
+        <li>"We mock everything" — 100% mocks, zero integration coverage, no discomfort about it</li>
+        <li>Or the inverse: every test hits a shared dev database, flaky and slow, no isolation story</li>
+        <li>Can't explain what a specific test they wrote actually verified</li>
+      </ul>
+    </div>
+  </div>
+
+  <p class="g-label">Follow-up probe</p>
+  <p>"Your integration tests share one Postgres. Two tests run in parallel and interfere. What are your options?" <em>(Good: per-test transactions rolled back, per-test schemas/databases, truncate between tests, or serialize the suite — with trade-offs of each.)</em></p>
+
+  <p class="score-hint"><strong>3/5</strong> = interface + fake for units, some real-DB story. <strong>5/5</strong> = layered strategy with isolation trade-offs and <code>httptest</code> fluency.</p>
+</div>
+
+<div class="question">
+  <p class="qnum">Question 18</p>
+  <p class="ask">"What does CI look like for a Go service you'd set up today — what runs on every push, and what gates a merge?"</p>
+  <p class="why-ask">Why ask: cheap question, quick answer, and it exposes whether they've owned a pipeline or only pushed into one someone else built.</p>
+
+  <p class="g-label">Answer guideline — a strong answer covers</p>
+  <ul>
+    <li>The core four: <code>go build ./...</code>, <code>go vet ./...</code>, a linter (<code>golangci-lint</code> is the de facto standard), and <code>go test -race ./...</code> — <strong>race flag in CI</strong> is the mark of someone who's absorbed Part 2.</li>
+    <li>Formatting non-negotiable: <code>gofmt</code>/<code>goimports</code> checked, not debated.</li>
+    <li>Module hygiene: <code>go.mod</code>/<code>go.sum</code> tidy check; builds are reproducible by default thanks to the module cache + sumdb.</li>
+    <li>Bonus: integration tests as a separate (possibly gated) job, coverage as a signal not a gate, <code>govulncheck</code>, multi-stage Docker build with a small final image.</li>
+  </ul>
+
+  <div class="signals">
+    <div class="yes"><p class="label">Strong signals</p>
+      <ul>
+        <li><code>-race</code> in the test invocation without being asked</li>
+        <li>Distinguishes fast per-push checks from slower merge gates</li>
+        <li>Has set one of these up themselves, can name the annoyances</li>
+      </ul>
+    </div>
+    <div class="no"><p class="label">Weak / red flags</p>
+      <ul>
+        <li>"CI runs the tests" and nothing else after prompting</li>
+        <li>Never heard of <code>go vet</code> or any linter</li>
+        <li>All of it was "the DevOps team's job" — fine once, a flag if every infra topic lands there</li>
+      </ul>
+    </div>
+  </div>
+
+  <p class="score-hint"><strong>3/5</strong> = build/vet/lint/test list. <strong>5/5</strong> = race flag + owns the pipeline shape and its trade-offs. Skip this question entirely if Q17 went deep and time is short.</p>
+</div>
+
+<p class="next">Next: <a href="0006-running-the-screen.html">Part 6 · Calibration, red flags &amp; running the screen</a> — the two questions you should <em>always</em> ask, plus the 45-minute plan.</p>
+
+<script src="../assets/nav.js"></script>
+<script src="../assets/gloss.js"></script>
+</body>
+</html>

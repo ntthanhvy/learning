@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Part 4 · Data &amp; Infrastructure</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Go Screening Kit · Part 4 · 3 questions · pick 1–2 per screen</p>
+<h1>Data &amp; infrastructure</h1>
+<p class="byline">A backend service is mostly a polite wrapper around a database. These questions check whether they understand the machinery under <code>database/sql</code> and — via the incident question — whether they've ever been the one holding the pager.</p>
+
+<div class="question">
+  <p class="qnum">Question 14</p>
+  <p class="ask">"How does Go manage database connections? What do <code>SetMaxOpenConns</code>, <code>SetMaxIdleConns</code>, and <code>SetConnMaxLifetime</code> actually control, and what happens when the pool is exhausted?"</p>
+  <p class="why-ask">Why ask: pool exhaustion is one of the most common Go-service production incidents, and the settings are invisible until it happens to you.</p>
+
+  <p class="g-label">Answer guideline — a strong answer covers</p>
+  <ul>
+    <li><code>*sql.DB</code> is <strong>not a connection — it's a pool</strong>, safe for concurrent use, opened once and shared (not per-request).</li>
+    <li><code>SetMaxOpenConns</code>: hard cap on concurrent connections (0 = unlimited — dangerous, the DB has its own limit). <code>SetMaxIdleConns</code>: how many to keep warm. <code>SetConnMaxLifetime</code>: recycle connections, which matters behind LBs/proxies and for failover.</li>
+    <li><strong>Exhaustion behavior:</strong> the next query <em>blocks waiting</em> for a free connection — the service doesn't error, it slows down, latency climbs, and with no context deadline it can hang. Symptoms: latency spikes with low CPU.</li>
+    <li>Bonus: leaking connections by not closing <code>rows</code> (<code>defer rows.Close()</code>); sizing against the DB's <code>max_connections</code> across all replicas; <code>db.Stats()</code> / metrics for pool wait counts.</li>
+  </ul>
+
+  <div class="signals">
+    <div class="yes"><p class="label">Strong signals</p>
+      <ul>
+        <li>"It's a pool, queries block when it's empty" — the core model</li>
+        <li>Has a pool-exhaustion or <code>rows.Close()</code>-leak story</li>
+        <li>Thinks about total connections across instances vs DB limits</li>
+      </ul>
+    </div>
+    <div class="no"><p class="label">Weak / red flags</p>
+      <ul>
+        <li>Opens a connection per request, or thinks <code>sql.Open</code> connects at all (it's lazy — <code>Ping</code> to verify)</li>
+        <li>Never touched the pool settings in 3–4 years ("defaults were fine" without knowing what the defaults are)</li>
+        <li>Can't describe any symptom of exhaustion</li>
+      </ul>
+    </div>
+  </div>
+
+  <p class="score-hint"><strong>3/5</strong> = pool model + what the knobs do. <strong>5/5</strong> = exhaustion symptoms and a real tuning/leak story. ORM users (GORM etc.) should still know this — it's the same pool underneath.</p>
+</div>
+
+<div class="question">
+  <p class="qnum">Question 15</p>
+  <p class="ask">"Your service layer needs to call two repository methods atomically — same transaction. How do you structure that without leaking <code>*sql.Tx</code> everywhere?"</p>
+  <p class="why-ask">Why ask: a design problem with no single right answer — you get to watch them weigh trade-offs, which is the most senior-shaped signal a screen can produce.</p>
+
+  <p class="g-label">Answer guideline — acceptable shapes (any one, argued well)</p>
+  <ul>
+    <li><strong>Explicit tx passing:</strong> repo methods take a queryer interface satisfied by both <code>*sql.DB</code> and <code>*sql.Tx</code>; the service opens the tx and passes it down. Verbose but honest.</li>
+    <li><strong>Tx-in-context or a <code>WithinTx(ctx, fn)</code> helper:</strong> a transactor wraps <code>fn</code> in begin/commit/rollback; repos pull the tx from ctx if present. Cleaner call sites, slightly magical.</li>
+    <li><strong>Unit-of-work / tx-scoped repo factory:</strong> <code>tx.UserRepo().Save(...)</code>. More machinery, clearest boundaries.</li>
+  </ul>
+  <p class="g-label">Regardless of shape, must-mention hygiene</p>
+  <ul>
+    <li><code>defer rollback</code> pattern so errors and panics can't leave a transaction open; commit as the last step.</li>
+    <li><strong>Keep transactions short</strong> — no HTTP calls or heavy computation inside; long transactions hold locks and starve the pool (ties back to Q14).</li>
+    <li>Transaction logic belongs to the <em>service</em> layer (it owns the business invariant), not inside a single repo.</li>
+  </ul>
+
+  <div class="signals">
+    <div class="yes"><p class="label">Strong signals</p>
+      <ul>
+        <li>Presents one shape and names its trade-off vs another</li>
+        <li>Rollback-on-error/panic hygiene stated without prompting</li>
+        <li>Knows why long transactions are dangerous (locks + pool)</li>
+      </ul>
+    </div>
+    <div class="no"><p class="label">Weak / red flags</p>
+      <ul>
+        <li>"The ORM handles transactions" and can't go one level deeper</li>
+        <li>Would call two repos and hope ("it usually works")</li>
+        <li>Puts a network call inside the transaction without hesitation</li>
+      </ul>
+    </div>
+  </div>
+
+  <p class="score-hint"><strong>3/5</strong> = one working shape + rollback hygiene. <strong>5/5</strong> = compares shapes, owns the trade-off, short-transaction discipline.</p>
+</div>
+
+<div class="question">
+  <p class="qnum">Question 16</p>
+  <p class="ask">"Tell me about a performance problem you personally debugged in production. What was the symptom, how did you narrow it down, and what was the actual root cause?"</p>
+  <p class="why-ask">Why ask: the single best experience-verification question in the whole kit. Invented stories collapse under two follow-ups; real ones get more specific.</p>
+
+  <p class="g-label">Answer guideline — what a real story sounds like</p>
+  <ul>
+    <li><strong>A concrete symptom with numbers:</strong> "p99 went from 80ms to 2s after the Tuesday deploy", "memory climbed 100MB/hour until OOM" — not "it was slow".</li>
+    <li><strong>A narrowing method:</strong> metrics/dashboards → logs/traces → profiling. For a Go dev, pprof should appear here: CPU profile, heap profile, goroutine dump — or an honest "we found it via query logs before profiling was needed".</li>
+    <li><strong>A specific root cause:</strong> missing index / N+1 queries, goroutine leak, unbounded cache, lock contention, connection-pool starvation, huge allocations in a hot path…</li>
+    <li><strong>Verification:</strong> how they confirmed the fix (the graph came down, the profile changed) — and ideally what they changed so it can't silently regress (alert, test, dashboard).</li>
+  </ul>
+
+  <p class="g-label">How to probe (pick two)</p>
+  <ul>
+    <li>"What did you look at <em>first</em>, and why?"</li>
+    <li>"What did pprof actually show?" — anyone who has read a flame graph can describe one; anyone who hasn't, can't.</li>
+    <li>"What was your wrong hypothesis along the way?" — real debugging always has one; polished stories with no dead ends are suspicious.</li>
+    <li>"What would you instrument differently now?"</li>
+  </ul>
+
+  <div class="signals">
+    <div class="yes"><p class="label">Strong signals</p>
+      <ul>
+        <li>Numbers, tool names, dead ends, and "I" doing specific actions</li>
+        <li>Story gets <em>more</em> detailed under follow-up questions</li>
+        <li>Ends with a prevention step, not just a fix</li>
+      </ul>
+    </div>
+    <div class="no"><p class="label">Weak / red flags</p>
+      <ul>
+        <li>Only "we" — their personal role never materializes</li>
+        <li>Story gets vaguer under follow-ups</li>
+        <li>3–4 years of backend work and no debugging story at all</li>
+      </ul>
+    </div>
+  </div>
+
+  <p class="score-hint"><strong>3/5</strong> = real story, modest tooling (logs + dashboards). <strong>5/5</strong> = profiling-driven diagnosis with verification. Weight this question heavily — it's the hardest to fake.</p>
+</div>
+
+<p class="next">Next: <a href="0005-testing-tooling.html">Part 5 · Testing &amp; tooling</a> — short section, one question is usually enough.</p>
+
+<script src="../assets/nav.js"></script>
+<script src="../assets/gloss.js"></script>
+</body>
+</html>

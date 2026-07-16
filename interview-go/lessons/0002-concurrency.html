@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Part 2 · Concurrency</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Go Screening Kit · Part 2 · 5 questions · pick 2–3 per screen</p>
+<h1>Concurrency — the core differentiator</h1>
+<p class="byline">Concurrency is <em>why companies choose Go</em>, so this is the highest-signal section of the screen. The trap to avoid as interviewer: accepting textbook theory. Every question here should be pushed toward "tell me when this actually happened to you."</p>
+
+<div class="callout"><strong>Budget:</strong> if you only have time to go deep on one section, make it this one. A candidate who is strong here and average elsewhere is usually a better Go hire than the reverse.</div>
+
+<div class="question">
+  <p class="qnum">Question 5</p>
+  <p class="ask">"What's the difference between a goroutine and an OS thread? Roughly, how does Go schedule goroutines?"</p>
+  <p class="why-ask">Why ask: baseline mental-model check. They don't need scheduler internals — they need to know why spawning 100k goroutines is normal and 100k threads is not.</p>
+
+  <p class="g-label">Answer guideline — a strong answer covers</p>
+  <ul>
+    <li>Goroutines are <strong>runtime-managed, not OS-managed</strong>: tiny growable stacks (~KB vs ~MB), cheap to create, cheap to switch.</li>
+    <li>The runtime <strong>multiplexes many goroutines onto few OS threads</strong> (M:N). Naming G/M/P is a bonus, not a requirement — the multiplexing idea is the requirement.</li>
+    <li><code>GOMAXPROCS</code> bounds how many goroutines run <em>in parallel</em>; concurrency vs parallelism distinction.</li>
+    <li>Blocking behavior: a goroutine blocked on a channel or network I/O just gets parked — it doesn't burn a thread. (Bonus: blocking syscalls/cgo do occupy a thread.)</li>
+  </ul>
+
+  <div class="signals">
+    <div class="yes"><p class="label">Strong signals</p>
+      <ul>
+        <li>"Cheap because small stacks + user-space scheduling," in their own words</li>
+        <li>Distinguishes concurrency from parallelism cleanly</li>
+        <li>Knows blocked-on-channel goroutines cost almost nothing</li>
+      </ul>
+    </div>
+    <div class="no"><p class="label">Weak / red flags</p>
+      <ul>
+        <li>"Goroutines are just lightweight threads" with nothing behind it</li>
+        <li>Thinks each goroutine gets its own OS thread</li>
+        <li>Recites GMP letters but can't apply them ("what happens when a goroutine blocks on I/O?" → blank)</li>
+      </ul>
+    </div>
+  </div>
+
+  <p class="score-hint"><strong>3/5</strong> = multiplexing model correct. <strong>5/5</strong> = can reason about blocking, parallelism limits, and why goroutine-per-request is a sane server model.</p>
+</div>
+
+<div class="question">
+  <p class="qnum">Question 6</p>
+  <p class="ask">"When do you reach for a channel, and when for a mutex? Give me a concrete example of each from your own work."</p>
+  <p class="why-ask">Why ask: this is a judgment question disguised as a knowledge question. The "from your own work" clause is load-bearing — keep them there.</p>
+
+  <p class="g-label">Answer guideline — a strong answer covers</p>
+  <ul>
+    <li><strong>Mutex</strong>: protecting long-lived shared state that many goroutines read/write in place — a counter, an in-memory cache, a config map. Small critical sections, cheap, direct.</li>
+    <li><strong>Channel</strong>: transferring <em>ownership</em> of a piece of work between goroutines — pipelines, fan-out/fan-in, worker pools, signaling (<code>done</code>/close semantics).</li>
+    <li>The proverb "share memory by communicating" is a <em>guideline</em>, not a law — a strong candidate explicitly says a mutex-guarded counter is simpler and more correct than forcing it through a channel.</li>
+    <li>Bonus: <code>sync.RWMutex</code> when reads dominate (and that it's <em>slower</em> than Mutex under write-heavy load — measure); <code>sync/atomic</code> for single counters.</li>
+  </ul>
+
+  <div class="signals">
+    <div class="yes"><p class="label">Strong signals</p>
+      <ul>
+        <li>Frames it as ownership-transfer vs in-place protection</li>
+        <li>Gives a real, specific example of each (named system, named problem)</li>
+        <li>Pushes back on channel dogma</li>
+      </ul>
+    </div>
+    <div class="no"><p class="label">Weak / red flags</p>
+      <ul>
+        <li>"Channels are more idiomatic, I always use channels"</li>
+        <li>Examples stay hypothetical after you ask for real ones</li>
+        <li>Doesn't mention <code>defer mu.Unlock()</code> or critical-section size when describing mutex use</li>
+      </ul>
+    </div>
+  </div>
+
+  <p class="g-label">Follow-up probe</p>
+  <p>"What can go wrong holding a mutex while making a database call?" <em>(Good: every other goroutine needing that lock queues behind a slow I/O — you've serialized the server. Keep critical sections tiny; never do I/O under a lock.)</em></p>
+
+  <p class="score-hint"><strong>3/5</strong> = correct split, generic examples. <strong>5/5</strong> = real examples + the I/O-under-lock hazard + "measure, don't assume" instinct.</p>
+</div>
+
+<div class="question">
+  <p class="qnum">Question 7</p>
+  <p class="ask">"What's a goroutine leak? How does one happen, and how would you find one in a running service?"</p>
+  <p class="why-ask">Why ask: leaks are the most common production concurrency failure in Go services. Theory-only candidates can define it; practitioners can <em>find</em> it.</p>
+
+  <p class="g-label">Answer guideline — a strong answer covers</p>
+  <ul>
+    <li>A goroutine <strong>blocked forever</strong> — usually on a channel send with no receiver, a receive with no sender, or waiting on a context that's never cancelled. Memory and scheduler load grow monotonically.</li>
+    <li>Classic causes: forgetting to drain a channel after an early return; <code>select</code> missing a <code>ctx.Done()</code> case; unbuffered channel send in a goroutine whose consumer errored out first; <code>time.After</code> in a hot loop (pre-1.23 timers).</li>
+    <li>Finding it: <strong>pprof</strong> — <code>/debug/pprof/goroutine?debug=2</code> shows every goroutine's stack; leaks show up as thousands of identical stacks parked on the same line. Also <code>runtime.NumGoroutine()</code> as a metric on a dashboard, trending up and to the right.</li>
+    <li>Prevention: every goroutine you start should have a known exit path — context cancellation, closed channel, or bounded work. Bonus: <code>goleak</code> in tests, <code>errgroup</code> for structured lifetimes.</li>
+  </ul>
+
+  <div class="signals">
+    <div class="yes"><p class="label">Strong signals</p>
+      <ul>
+        <li>Names pprof unprompted, ideally the goroutine profile specifically</li>
+        <li>Gives a concrete leak pattern with the fix (add <code>ctx.Done()</code> case, buffer of 1, close on sender side)</li>
+        <li>"Every goroutine needs an exit plan" phrased in any form</li>
+      </ul>
+    </div>
+    <div class="no"><p class="label">Weak / red flags</p>
+      <ul>
+        <li>Defines the leak but has no idea how to detect one</li>
+        <li>"The GC cleans up goroutines" (it doesn't — a blocked goroutine is a GC root)</li>
+        <li>Never used pprof at all in 3–4 years of Go</li>
+      </ul>
+    </div>
+  </div>
+
+  <p class="score-hint"><strong>3/5</strong> = correct definition + one real cause. <strong>5/5</strong> = detection story with pprof/metrics from an actual incident.</p>
+</div>
+
+<div class="question">
+  <p class="qnum">Question 8</p>
+  <p class="ask">"How does <code>context.Context</code> work, and how do you use it in an HTTP service?"</p>
+  <p class="why-ask">Why ask: context is ubiquitous in real Go codebases. A candidate who hand-waves here has probably not built services under load.</p>
+
+  <p class="g-label">Answer guideline — a strong answer covers</p>
+  <ul>
+    <li>A context carries <strong>cancellation, a deadline, and request-scoped values</strong> down a call tree; cancelling a parent cancels all children.</li>
+    <li>In HTTP: <code>r.Context()</code> is cancelled when the client disconnects — pass it into every DB query, outbound HTTP call, and goroutine spawned for the request, so abandoned requests stop consuming resources.</li>
+    <li>Mechanics: <code>context.WithTimeout</code>/<code>WithCancel</code>, always <code>defer cancel()</code> (leaks a timer/goroutine otherwise), check <code>ctx.Err()</code> / select on <code>ctx.Done()</code> in long loops.</li>
+    <li>Judgment: <code>context.Value</code> is for request-scoped metadata (trace ID, auth principal), <strong>not</strong> for passing business parameters or dependencies. First parameter, named <code>ctx</code>, never stored in a struct (with rare documented exceptions).</li>
+  </ul>
+
+  <div class="signals">
+    <div class="yes"><p class="label">Strong signals</p>
+      <ul>
+        <li>Connects client-disconnect → query cancellation as the practical payoff</li>
+        <li>Mentions <code>defer cancel()</code> and why</li>
+        <li>Has the <code>context.Value</code> restraint opinion</li>
+      </ul>
+    </div>
+    <div class="no"><p class="label">Weak / red flags</p>
+      <ul>
+        <li>"It's for passing values around" as the primary use</li>
+        <li>Uses <code>context.Background()</code> inside handlers out of habit, severing cancellation</li>
+        <li>Doesn't know what happens to in-flight DB queries when a client disconnects</li>
+      </ul>
+    </div>
+  </div>
+
+  <p class="score-hint"><strong>3/5</strong> = cancellation + timeout mechanics. <strong>5/5</strong> = full propagation story plus the Value discipline.</p>
+</div>
+
+<div class="question">
+  <p class="qnum">Question 9</p>
+  <p class="ask">"What is a data race, exactly? How do you detect one, and what are the limits of that detection?"</p>
+  <p class="why-ask">Why ask: precise definition + tooling + limits is a three-step ladder; each step up is a year or two of real experience.</p>
+
+  <p class="g-label">Answer guideline — a strong answer covers</p>
+  <ul>
+    <li><strong>Definition:</strong> two goroutines access the same memory concurrently, at least one is a write, with no synchronization ordering them. Result is undefined — not "sometimes wrong values" but genuinely undefined behavior (torn reads, vanished writes; concurrent map writes crash the runtime on purpose).</li>
+    <li><strong>Detection:</strong> the race detector — <code>go test -race</code>, or a <code>-race</code> build in staging. Reports the two conflicting stacks.</li>
+    <li><strong>Limits:</strong> it only catches races that <em>actually execute</em> during the run — it proves presence, never absence. It costs ~5–10× CPU/memory, so it's for tests and canaries, not usually full production.</li>
+    <li>Bonus: the memory-model point — without a synchronizing operation (mutex, channel op, atomic) there is <em>no guarantee</em> a write in one goroutine is ever visible to another; "it's just an int" is still a race.</li>
+  </ul>
+
+  <div class="signals">
+    <div class="yes"><p class="label">Strong signals</p>
+      <ul>
+        <li>Definition includes "at least one write" and "unsynchronized"</li>
+        <li>Knows <code>-race</code> only catches races that happen at runtime</li>
+        <li>Mentions running race-enabled builds in CI/staging as practice</li>
+      </ul>
+    </div>
+    <div class="no"><p class="label">Weak / red flags</p>
+      <ul>
+        <li>Thinks races are only about maps, or only about "big" values</li>
+        <li>Believes a clean <code>-race</code> run proves the code race-free</li>
+        <li>"Reading while writing is fine if you don't mind stale data" — the memory model says otherwise</li>
+      </ul>
+    </div>
+  </div>
+
+  <p class="score-hint"><strong>3/5</strong> = definition + <code>-race</code>. <strong>5/5</strong> = limits of the detector + memory-model visibility argument.</p>
+</div>
+
+<h2>Check yourself before you check them</h2>
+<div class="quiz">
+  <div class="q" data-why="A goroutine blocked on a channel forever is a leak; it's a GC root, so the GC will never collect it. Detection = pprof goroutine profile or a NumGoroutine metric — the Q7 strong answer.">
+    <p class="stem">A goroutine parked forever on a channel receive is…</p>
+    <button class="opt" data-ok>a leak the GC will never reclaim</button>
+    <button class="opt">collected by the GC once unreachable</button>
+    <button class="opt">killed by the runtime after a timeout</button>
+  </div>
+  <div class="q" data-why="The detector instruments the actual execution — a race on a code path that didn't run, or an interleaving that didn't occur, produces no report. Clean run ≠ race-free program.">
+    <p class="stem">A clean <code>go test -race</code> run proves…</p>
+    <button class="opt" data-ok>only that no race occurred during that run</button>
+    <button class="opt">the program is free of data races</button>
+    <button class="opt">the code needs no mutexes</button>
+  </div>
+  <div class="q" data-why="r.Context() is cancelled on client disconnect; passing it into the query lets the DB driver abort the work. context.Background() severs that chain — the Q8 red flag.">
+    <p class="stem">Inside an HTTP handler, a slow DB query should receive…</p>
+    <button class="opt" data-ok><code>r.Context()</code> (or a timeout child of it)</button>
+    <button class="opt"><code>context.Background()</code> for safety</button>
+    <button class="opt">no context — queries manage themselves</button>
+  </div>
+</div>
+
+<p class="next">Next: <a href="0003-backend-api-design.html">Part 3 · Backend &amp; API design</a> — from language depth to service-building judgment.</p>
+
+<script src="../assets/nav.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/gloss.js"></script>
+</body>
+</html>

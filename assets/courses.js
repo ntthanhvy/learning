@@ -43,6 +43,20 @@ window.COURSES = [
     ],
   },
   {
+    id: "interview-go",
+    accent: "#1f6e43",
+    title: "Go Interview Screening Kit",
+    desc: "The other side of the table: 20 screening questions for a 3–4 yr Go backend candidate, each with answer guidelines, red flags, follow-up probes, and a printable 1–5 scorecard. Nothing date-locked.",
+    start: "2026-07-16",
+    end: "2026-07-16",
+    days: 1,
+    after: { label: "Ready whenever an interview lands", href: "interview-go/index.html" },
+    links: [
+      { label: "Open kit", href: "interview-go/index.html" },
+      { label: "Scorecard", href: "interview-go/reference/scorecard.html" },
+    ],
+  },
+  {
     id: "data",
     accent: "#5a3d99",
     title: "Data Wrangling",

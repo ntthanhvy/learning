@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Part 6 · Running the Screen</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Go Screening Kit · Part 6 · 2 questions + the playbook · always ask both</p>
+<h1>Calibration, red flags &amp; running the screen</h1>
+<p class="byline">Parts 1–5 measure knowledge. This part measures <em>experience</em> — whether their 3–4 years were four years of growth or one year repeated four times — and gives you the structure to run the whole session.</p>
+
+<div class="question">
+  <p class="qnum">Question 19</p>
+  <p class="ask">"What's the largest Go service you've personally owned? Rough traffic, team size — and which parts were specifically yours?"</p>
+  <p class="why-ask">Why ask: calibrates every other answer in the interview. A candidate who was brilliant on Q6 but has only ever owned a cron job needs different follow-ups than one who ran a 5k-rps API.</p>
+
+  <p class="g-label">Answer guideline — what to listen for</p>
+  <ul>
+    <li><strong>"I", not "we".</strong> Let them say "we built…" once, then redirect: "and your part specifically?" A 3–4 year dev should have owned at least one service end-to-end — design through deploy through incident.</li>
+    <li><strong>Numbers with error bars are fine; no numbers is not.</strong> "Maybe 200 rps at peak, 4 services, team of 5" is a real memory. Someone who genuinely operated a service knows its rough shape.</li>
+    <li><strong>Ownership verbs:</strong> designed, migrated, was on-call for, debugged, deleted. "Worked on" and "was involved in" are participation verbs — probe them.</li>
+    <li>Scale honesty is a <em>positive</em> signal: "it was small, ~50 rps, but I owned all of it" beats inflated vagueness.</li>
+  </ul>
+
+  <div class="signals">
+    <div class="yes"><p class="label">Strong signals</p>
+      <ul>
+        <li>Concrete scope + their named slice of it</li>
+        <li>Mentions operating it (deploys, on-call, incidents), not just writing it</li>
+        <li>Comfortable saying what they did NOT do</li>
+      </ul>
+    </div>
+    <div class="no"><p class="label">Weak / red flags</p>
+      <ul>
+        <li>Every answer stays "we" after two redirects</li>
+        <li>No idea of traffic, instance count, or data size — ever operated it?</li>
+        <li>Claims sole ownership of implausibly much (matches nothing else they said)</li>
+      </ul>
+    </div>
+  </div>
+
+  <p class="score-hint">Not scored 1–5 — instead it sets the <strong>calibration context</strong> you'll use when weighing every technical score. Note their real scope at the top of the scorecard.</p>
+</div>
+
+<div class="question">
+  <p class="qnum">Question 20</p>
+  <p class="ask">"What's something about Go you dislike, or that has genuinely bitten you?"</p>
+  <p class="why-ask">Why ask: everyone with real mileage has scars and opinions. It's also a great closer — candidates relax, and relaxed candidates tell you true things.</p>
+
+  <p class="g-label">Answer guideline — any real answer works; common honest ones</p>
+  <ul>
+    <li>Error-handling boilerplate (<code>if err != nil</code> fatigue) — bonus if they can also defend it.</li>
+    <li>The typed-nil interface trap (Part 1, Q4), zero values silently hiding missing data, no real enums / <code>iota</code> awkwardness.</li>
+    <li>Ecosystem scars: module migration pain, <code>GOPATH</code> era, a specific library that burned them, generics arriving late or being clunky at the edges.</li>
+    <li>The <em>shape</em> matters more than the item: a specific story + how they adapted = experience. Generic complaints they read on Reddit = exposure.</li>
+  </ul>
+
+  <div class="signals">
+    <div class="yes"><p class="label">Strong signals</p>
+      <ul>
+        <li>A specific pain with a specific story, told with some affection</li>
+        <li>Can argue the other side (why Go chose this trade-off)</li>
+        <li>The complaint is consistent with the experience they claimed in Q19</li>
+      </ul>
+    </div>
+    <div class="no"><p class="label">Weak / red flags</p>
+      <ul>
+        <li>"Nothing really, Go is great" — shallow exposure or fear of honesty</li>
+        <li>Complaints that reveal misunderstanding ("no generics" in 2026, "you can't test in Go")</li>
+        <li>Pure language-war talking points with no personal story attached</li>
+      </ul>
+    </div>
+  </div>
+
+  <p class="score-hint"><strong>3/5</strong> = one honest specific gripe. <strong>5/5</strong> = gripe + story + steelmans the design choice. "Nothing" is a <strong>1</strong> — treat it seriously.</p>
+</div>
+
+<h2>The 45-minute playbook</h2>
+<table class="gloss">
+<tr><th>Minutes</th><th>Segment</th><th>What you're doing</th></tr>
+<tr><td>0–5</td><td>Intro</td><td>You, the role, the format. Tell them it's fine to say "I don't know" — you'll get cleaner signal all session.</td></tr>
+<tr><td>5–15</td><td>Calibration</td><td><strong>Q19 + Q20.</strong> Their answers tell you which technical questions to pick and how hard to probe.</td></tr>
+<tr><td>15–35</td><td>Technical core</td><td>2 from Part 1 · 2–3 from Part 2 · 1–2 from Part 3 or 4. Concurrency gets the most minutes. Always ask "why" at least twice — the second-level answer is the real signal.</td></tr>
+<tr><td>35–40</td><td>One deep dive</td><td>Take their <em>best</em> answer and push one level past comfortable. You're measuring where knowledge ends and how they behave at that edge.</td></tr>
+<tr><td>40–45</td><td>Their questions</td><td>Signal here too: do they ask about the codebase, the team's practices, on-call? Or only holidays? (Both are fine — but curiosity about the work is a plus.)</td></tr>
+</table>
+
+<div class="callout"><strong>Choosing questions on the fly:</strong> if Q19 revealed heavy-traffic experience, lean into Part 2 and Q14 (pools, races, leaks). If they came from a small startup owning everything, lean into Part 3 (structure, shutdown, retries). Match the questions to the experience they claim — that's how you verify the claim.</div>
+
+<h2>Cross-cutting red flags</h2>
+<ul>
+  <li><strong>Syntax without semantics:</strong> can't explain slice/map behavior beyond syntax — mostly CRUD glue, thin Go mileage.</li>
+  <li><strong>Theoretical concurrency:</strong> textbook answers in Part 2 but no personal story of a race, leak, or deadlock. For a 3–4 year Go backend dev that's a strong signal of shallow exposure.</li>
+  <li><strong>No <code>context</code> anywhere:</strong> if it never appears while discussing HTTP services, cancellation, or timeouts — it's ubiquitous in real Go codebases; its absence is loud.</li>
+  <li><strong>Everything outsourced:</strong> deploys, migrations, debugging, CI all "handled by the senior / the DevOps team." Once is fine; a pattern means they've been a passenger.</li>
+  <li><strong>Stories that shrink under follow-ups.</strong> Real experiences gain detail when probed; invented ones lose it.</li>
+</ul>
+
+<h2>Green flags worth over-weighting</h2>
+<ul>
+  <li>Says <strong>"I don't know"</strong> cleanly, then reasons toward an answer out loud.</li>
+  <li><strong>Trade-off language</strong> unprompted: "it depends on write frequency", "simpler but slower", "we chose X because Y".</li>
+  <li><strong>Corrects themselves</strong> mid-answer — self-monitoring beats fluent wrongness.</li>
+  <li>War stories where they were <strong>wrong first</strong> and describe how they found out.</li>
+</ul>
+
+<h2>Deciding</h2>
+<ul>
+  <li>Score each asked question 1–5 on the <a href="../reference/scorecard.html">scorecard</a> <em>during</em> the interview — memory reconstruction an hour later is where bias creeps in.</li>
+  <li>For a 3–4 year Go backend role: <strong>hire signal</strong> = averaging 3.5+ with at least one 5 in Part 2, and no red-flag pattern. <strong>No-hire</strong> = any two cross-cutting red flags, or concurrency averaging under 3 — you can't backfill concurrency judgment on the job as easily as, say, CI habits.</li>
+  <li>Write your verdict + three supporting observations immediately after the call, before Slack distracts you. If you can't produce three observations, you didn't probe enough — fix that next screen, not the candidate's score.</li>
+</ul>
+
+<p class="next">Reference: the <a href="../reference/scorecard.html">printable scorecard</a> has every question with a 1–5 rubric on one page — print it or keep it open per candidate.</p>
+
+<script src="../assets/nav.js"></script>
+<script src="../assets/gloss.js"></script>
+</body>
+</html>

@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Part 1 · Go Fundamentals</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Go Screening Kit · Part 1 · 4 questions · pick 2–3 per screen</p>
+<h1>Go fundamentals</h1>
+<p class="byline">These separate "writes Go daily" from "did the tour once". Every question here has a surface answer and a depth answer — a genuine 3–4 year dev gives the depth answer without prompting, because they've been bitten by each of these in production.</p>
+
+<div class="callout"><strong>How to use each card:</strong> ask the question exactly as written, stay silent, and let them finish. Then check what they covered against the guideline. The <em>follow-up probe</em> is where the real signal lives — first answers can be memorized, second-level answers can't.</div>
+
+<div class="question">
+  <p class="qnum">Question 1</p>
+  <p class="ask">"What's the difference between a slice and an array in Go? And what happens when you <code>append</code> to a slice that was passed into a function?"</p>
+  <p class="why-ask">Why ask: slices are the most-used data structure in Go, and their sharing semantics cause real bugs. Anyone who has debugged one remembers it.</p>
+
+  <p class="g-label">Answer guideline — a strong answer covers</p>
+  <ul>
+    <li>An array has a <strong>fixed size that is part of its type</strong> (<code>[3]int</code> and <code>[4]int</code> are different types); arrays are copied on assignment. Slices are what you actually use day-to-day.</li>
+    <li>A slice is a small <strong>header: pointer + length + capacity</strong> over a backing array. Passing a slice copies the header, but both copies point at the <em>same</em> backing array.</li>
+    <li>So mutating <em>elements</em> inside a function is visible to the caller, but <code>append</code> is trickier: if there's spare capacity it writes into the shared array (caller may see it); if capacity is exceeded it <strong>reallocates</strong>, and from then on the function works on a private copy the caller never sees.</li>
+    <li>Fixes: return the slice from the function, or pre-size with <code>make([]T, 0, n)</code>, or copy explicitly when you need isolation.</li>
+  </ul>
+
+  <div class="signals">
+    <div class="yes"><p class="label">Strong signals</p>
+      <ul>
+        <li>Says "pointer, length, capacity" unprompted</li>
+        <li>Explains the reallocation-on-append behavior and why it makes bugs intermittent</li>
+        <li>Mentions <code>s[a:b]</code> sub-slices sharing memory (or the three-index slice <code>s[a:b:c]</code>)</li>
+      </ul>
+    </div>
+    <div class="no"><p class="label">Weak / red flags</p>
+      <ul>
+        <li>"Slices are just dynamic arrays" and nothing more</li>
+        <li>Claims append always / never affects the caller (both wrong — it depends on capacity)</li>
+        <li>Can't say what capacity is</li>
+      </ul>
+    </div>
+  </div>
+
+  <p class="g-label">Follow-up probe</p>
+  <p>"You take a sub-slice of a 100&nbsp;MB buffer and keep it around — what's the memory consequence?" <em>(Good: the whole 100&nbsp;MB backing array stays alive; copy the small piece out if you keep it long-term.)</em></p>
+
+  <p class="score-hint"><strong>3/5</strong> = header semantics correct, append fuzzy. <strong>5/5</strong> = capacity/reallocation nailed plus the memory-retention follow-up.</p>
+</div>
+
+<div class="question">
+  <p class="qnum">Question 2</p>
+  <p class="ask">"When do you choose a pointer receiver vs a value receiver for a method?"</p>
+  <p class="why-ask">Why ask: it's an everyday decision that reveals whether they understand Go's copy semantics, not just its syntax.</p>
+
+  <p class="g-label">Answer guideline — a strong answer covers</p>
+  <ul>
+    <li><strong>Pointer receiver</strong> when the method mutates the receiver, when the struct is large (avoid copying), or when <em>any</em> method on the type needs a pointer — the method set should be consistent, not mixed.</li>
+    <li><strong>Value receiver</strong> for small immutable types (e.g. <code>time.Time</code>-style values).</li>
+    <li>Types containing a <code>sync.Mutex</code> (or any <code>sync</code> primitive, or a map/channel guard) <strong>must not be copied</strong> — a copied mutex is a different lock guarding nothing. <code>go vet</code> catches this.</li>
+    <li>Bonus: the interaction with interfaces — a value of type <code>T</code> doesn't satisfy an interface whose methods are on <code>*T</code>.</li>
+  </ul>
+
+  <div class="signals">
+    <div class="yes"><p class="label">Strong signals</p>
+      <ul>
+        <li>Mentions the mutex-copy trap without prompting</li>
+        <li>Talks about method-set consistency, not just per-method choice</li>
+        <li>Knows the <code>*T</code>-methods-vs-interface rule</li>
+      </ul>
+    </div>
+    <div class="no"><p class="label">Weak / red flags</p>
+      <ul>
+        <li>"Always use pointers, they're faster" (cargo cult; small values often aren't)</li>
+        <li>Doesn't know a value receiver gets a copy</li>
+        <li>Never heard of <code>go vet</code></li>
+      </ul>
+    </div>
+  </div>
+
+  <p class="g-label">Follow-up probe</p>
+  <p>"A method with a value receiver assigns to a struct field. What does the caller observe?" <em>(Good: nothing — the method mutated its own copy. Instant, confident answer expected at this level.)</em></p>
+
+  <p class="score-hint"><strong>3/5</strong> = mutation/copy reasoning correct. <strong>5/5</strong> = adds mutex-copy or interface method-set nuance.</p>
+</div>
+
+<div class="question">
+  <p class="qnum">Question 3</p>
+  <p class="ask">"Walk me through error handling in Go. How do you wrap errors, and how do you inspect a wrapped error later?"</p>
+  <p class="why-ask">Why ask: error handling is ~30% of any Go codebase. How someone talks about it tells you how much real Go they've read and reviewed.</p>
+
+  <p class="g-label">Answer guideline — a strong answer covers</p>
+  <ul>
+    <li>Errors are <strong>values</strong> returned, not exceptions thrown; the caller decides what to do at each level.</li>
+    <li>Wrapping with <code>fmt.Errorf("fetch user %d: %w", id, err)</code> — the <code>%w</code> verb preserves the chain and adds context at each layer.</li>
+    <li>Inspecting with <code>errors.Is(err, sql.ErrNoRows)</code> for sentinel errors and <code>errors.As(err, &amp;target)</code> for typed errors carrying data.</li>
+    <li>Judgment: wrap with context at boundaries, don't double-log-and-return, translate internal errors to API errors at the handler layer (don't leak <code>sql.ErrNoRows</code> to HTTP clients).</li>
+  </ul>
+
+  <div class="signals">
+    <div class="yes"><p class="label">Strong signals</p>
+      <ul>
+        <li>Uses <code>%w</code> / <code>errors.Is</code> / <code>errors.As</code> fluently, distinguishing Is vs As</li>
+        <li>Has opinions: where to wrap, where to handle, log once</li>
+        <li>Mentions sentinel vs custom error types trade-off</li>
+      </ul>
+    </div>
+    <div class="no"><p class="label">Weak / red flags</p>
+      <ul>
+        <li>Only knows <code>if err != nil { return err }</code> with no context-adding</li>
+        <li>Confuses <code>%w</code> with <code>%v</code> or has never used <code>errors.Is</code></li>
+        <li>Reaches for <code>panic</code>/<code>recover</code> as a control-flow strategy</li>
+      </ul>
+    </div>
+  </div>
+
+  <p class="g-label">Follow-up probe</p>
+  <p>"When is <code>panic</code> acceptable?" <em>(Good: programmer errors / impossible states, init-time failures; never for expected runtime errors like validation or a missing row. Bonus: a <code>recover</code> middleware at the HTTP layer as a last-resort crash barrier.)</em></p>
+
+  <p class="score-hint"><strong>3/5</strong> = knows wrap + Is/As mechanically. <strong>5/5</strong> = layering judgment: where context is added, where errors are translated, log-once discipline.</p>
+</div>
+
+<div class="question">
+  <p class="qnum">Question 4</p>
+  <p class="ask">"Can an interface variable holding a nil pointer still be non-nil? What's going on there?"</p>
+  <p class="why-ask">Why ask: the classic "typed nil" trap. Nearly everyone with real Go mileage has lost an afternoon to it — the reaction to this question is itself the signal.</p>
+
+  <p class="g-label">Answer guideline — a strong answer covers</p>
+  <ul>
+    <li>Yes. An interface value is a pair of <strong>(concrete type, value)</strong>. It's only <code>== nil</code> when <em>both</em> are nil.</li>
+    <li>Assigning a nil <code>*MyError</code> to an <code>error</code> variable gives an interface with type <code>*MyError</code> and value nil — so <code>err != nil</code> is <strong>true</strong>, and the nil check upstream "mysteriously" fails.</li>
+    <li>Typical source: a function with return type <code>error</code> that returns a possibly-nil concrete pointer type. Fix: return the <code>error</code> interface type and literal <code>nil</code> explicitly.</li>
+  </ul>
+  <pre><code><span class="kw">func</span> doWork() error {
+    <span class="kw">var</span> e *MyError            <span class="cm">// nil pointer</span>
+    <span class="kw">return</span> e                  <span class="cm">// non-nil interface! (type=*MyError, value=nil)</span>
+}
+<span class="cm">// caller: if err := doWork(); err != nil { ... }  ← always true</span></code></pre>
+
+  <div class="signals">
+    <div class="yes"><p class="label">Strong signals</p>
+      <ul>
+        <li>Immediate recognition — often with a war story</li>
+        <li>Explains the (type, value) pair model, not just the symptom</li>
+        <li>States the fix: return the interface type, literal nil</li>
+      </ul>
+    </div>
+    <div class="no"><p class="label">Weak / red flags</p>
+      <ul>
+        <li>"No, nil is nil" — confidence without the model</li>
+        <li>Has the model explained and still can't reason to the fix</li>
+      </ul>
+    </div>
+  </div>
+
+  <p class="score-hint"><strong>3/5</strong> = recognizes it once you sketch the code. <strong>5/5</strong> = explains the interface internals unprompted. It's OK to skip this one if Q1–Q3 already went deep — it's a depth probe, not a gate.</p>
+</div>
+
+<h2>Check yourself before you check them</h2>
+<p>You'll evaluate these answers better if you can answer them cold. Quick self-test:</p>
+<div class="quiz">
+  <div class="q" data-why="The append wrote into shared capacity OR reallocated — you can't know without checking cap. That 'it depends on capacity' is exactly the strong-answer core of Q1.">
+    <p class="stem">A function appends to a slice argument. The caller sees the new element…</p>
+    <button class="opt" data-ok>only if the backing array had spare capacity</button>
+    <button class="opt">always — slices are references</button>
+    <button class="opt">never — arguments are copies</button>
+  </div>
+  <div class="q" data-why="Interface value = (type, value) pair; it's nil only when both halves are nil. A nil *MyError in an error interface makes err != nil true — the Q4 trap.">
+    <p class="stem">An <code>error</code> variable holds a nil <code>*MyError</code>. <code>err != nil</code> is…</p>
+    <button class="opt" data-ok>true — the interface carries a non-nil type</button>
+    <button class="opt">false — the value inside is nil</button>
+    <button class="opt">a compile error</button>
+  </div>
+</div>
+
+<p class="next">Next: <a href="0002-concurrency.html">Part 2 · Concurrency</a> — the section that matters most for a Go backend role, and where you should spend the most interview minutes.</p>
+
+<script src="../assets/nav.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/gloss.js"></script>
+</body>
+</html>

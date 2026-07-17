@@ -24,6 +24,8 @@
       file: "lessons/0008-testing-tooling-capstone.html" },
     { day: 8, date: "2026-07-15", title: "Mutex & the memory model",
       file: "lessons/0009-mutex-and-the-memory-model.html" },
+    { day: 9, date: "2026-07-16", title: "Worker pools & pipelines",
+      file: "lessons/0010-worker-pools-and-pipelines.html" },
   ];
 
   const REFS = [

@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 9 · Worker Pools &amp; Pipelines</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Go Intensive · Week 2 · Day 9 · ~90 min</p>
+<h1>Worker pools &amp; pipelines</h1>
+<p class="byline">Day 3's health-checker launched one goroutine per link — fine for 3 links, a self-inflicted DDoS at 10,000. Today it gets a <em>bound</em>: a fixed crew of workers pulling from a queue, no matter how big the queue gets.</p>
+
+<h2>Warm-up: from memory</h2>
+<div class="quiz">
+  <div class="q" data-why="A sync.Mutex must never be copied — copying it makes an independent lock guarding nothing shared. Always use a pointer receiver / pass *T. go vet's 'passes lock by value' catches this.">
+    <p class="stem">Yesterday: why must a type embedding a <code>sync.Mutex</code> always use a pointer receiver?</p>
+    <button class="opt" data-ok>copying makes a separate lock</button>
+    <button class="opt">value receivers cannot have methods</button>
+    <button class="opt">pointer receivers avoid heap allocations</button>
+  </div>
+  <div class="q" data-why="RWMutex lets many readers proceed together; only a writer needs exclusivity. Worth it specifically when reads dominate — which is exactly linkshort's Get-vs-Save shape.">
+    <p class="stem">When did yesterday's lesson say to reach for <code>RWMutex</code> over a plain <code>Mutex</code>?</p>
+    <button class="opt" data-ok>when reads vastly outnumber writes</button>
+    <button class="opt">whenever any goroutines are involved</button>
+    <button class="opt">never, RWMutex is strictly slower</button>
+  </div>
+  <div class="q" data-why="Day 3's checkAll loops over links and launches one goroutine per link, unbounded. That's exactly the shape today's lesson bounds.">
+    <p class="stem">Day 3's <code>checkAll</code> launched how many goroutines for <code>N</code> links?</p>
+    <button class="opt" data-ok>exactly one goroutine per link</button>
+    <button class="opt">four workers regardless of N</button>
+    <button class="opt">one goroutine processing all links</button>
+  </div>
+</div>
+
+<h2>Step 0 — catch up: yesterday's practice, handed over</h2>
+<p>Code review shows Day 8's TODOs weren't reached on disk yet — <code>link/memstore.go</code> still has no lock, and <code>link/counter.go</code> / <code>link/concurrent_test.go</code> don't exist. Today's project doesn't strictly need them, but they're small and Day 11 (debugging concurrency) assumes they're in place, so here's the completed Day 8 work — paste it in as-is, then move to Step 1.</p>
+<p><strong><code>link/memstore.go</code></strong> (replace the whole file):</p>
+<pre><code><span class="kw">package</span> link
+
+<span class="kw">import</span> (
+    <span class="cm">"context"</span>
+    <span class="cm">"sync"</span>
+)
+
+<span class="kw">var</span> _ Store = (*MemStore)(<span class="kw">nil</span>)
+
+<span class="kw">type</span> MemStore <span class="kw">struct</span> {
+    mu    sync.RWMutex
+    links <span class="kw">map</span>[string]Link
+}
+
+<span class="kw">func</span> NewMemStore() *MemStore {
+    <span class="kw">return</span> &amp;MemStore{links: make(<span class="kw">map</span>[string]Link)}
+}
+
+<span class="kw">func</span> (s *MemStore) Save(ctx context.Context, l Link) error {
+    s.mu.Lock()
+    <span class="kw">defer</span> s.mu.Unlock()
+    s.links[l.Code] = l
+    <span class="kw">return nil</span>
+}
+
+<span class="kw">func</span> (s *MemStore) Get(ctx context.Context, code string) (Link, error) {
+    s.mu.RLock()
+    <span class="kw">defer</span> s.mu.RUnlock()
+    l, ok := s.links[code]
+    <span class="kw">if</span> !ok {
+        <span class="kw">return</span> Link{}, ErrNotFound
+    }
+    <span class="kw">return</span> l, <span class="kw">nil</span>
+}</code></pre>
+<p><strong>New file <code>link/counter.go</code></strong>:</p>
+<pre><code><span class="kw">package</span> link
+
+<span class="kw">import</span> <span class="cm">"sync"</span>
+
+<span class="cm">// ClickCounter is a concurrency-safe tally of redirects per code.</span>
+<span class="kw">type</span> ClickCounter <span class="kw">struct</span> {
+    mu     sync.Mutex
+    counts <span class="kw">map</span>[string]<span class="kw">int</span>
+}
+
+<span class="kw">func</span> NewClickCounter() *ClickCounter {
+    <span class="kw">return</span> &amp;ClickCounter{counts: make(<span class="kw">map</span>[string]<span class="kw">int</span>)}
+}
+
+<span class="kw">func</span> (c *ClickCounter) Inc(code string) {
+    c.mu.Lock()
+    <span class="kw">defer</span> c.mu.Unlock()
+    c.counts[code]++
+}
+
+<span class="kw">func</span> (c *ClickCounter) Count(code string) <span class="kw">int</span> {
+    c.mu.Lock()
+    <span class="kw">defer</span> c.mu.Unlock()
+    <span class="kw">return</span> c.counts[code]
+}
+
+<span class="kw">func</span> (c *ClickCounter) Snapshot() <span class="kw">map</span>[string]<span class="kw">int</span> {
+    c.mu.Lock()
+    <span class="kw">defer</span> c.mu.Unlock()
+    out := make(<span class="kw">map</span>[string]<span class="kw">int</span>, len(c.counts))
+    <span class="kw">for</span> k, v := <span class="kw">range</span> c.counts {
+        out[k] = v
+    }
+    <span class="kw">return</span> out
+}</code></pre>
+<p><strong>New file <code>link/concurrent_test.go</code></strong>:</p>
+<pre><code><span class="kw">package</span> link
+
+<span class="kw">import</span> (
+    <span class="cm">"context"</span>
+    <span class="cm">"sync"</span>
+    <span class="cm">"testing"</span>
+)
+
+<span class="kw">func</span> TestClickCounterConcurrent(t *testing.T) {
+    c := NewClickCounter()
+    <span class="kw">var</span> wg sync.WaitGroup
+    <span class="kw">for</span> i := 0; i &lt; 1000; i++ {
+        wg.Add(1)
+        <span class="kw">go func</span>() {
+            <span class="kw">defer</span> wg.Done()
+            c.Inc(<span class="cm">"go"</span>)
+        }()
+    }
+    wg.Wait()
+    <span class="kw">if</span> got := c.Count(<span class="cm">"go"</span>); got != 1000 {
+        t.Fatalf(<span class="cm">"Count(go) = %d, want 1000"</span>, got)
+    }
+}
+
+<span class="kw">func</span> TestMemStoreConcurrentReadWrite(t *testing.T) {
+    s := NewMemStore()
+    ctx := context.Background()
+    _ = s.Save(ctx, Link{Code: <span class="cm">"go"</span>, URL: <span class="cm">"https://go.dev"</span>})
+    <span class="kw">var</span> wg sync.WaitGroup
+    <span class="kw">for</span> i := 0; i &lt; 100; i++ {
+        wg.Add(1)
+        <span class="kw">go func</span>() {
+            <span class="kw">defer</span> wg.Done()
+            _, _ = s.Get(ctx, <span class="cm">"go"</span>)
+            _ = s.Save(ctx, Link{Code: <span class="cm">"go"</span>, URL: <span class="cm">"https://go.dev"</span>})
+        }()
+    }
+    wg.Wait()
+}</code></pre>
+<pre><code>go vet ./...          <span class="cm"># silent</span>
+go test -race ./...   <span class="cm"># green</span></code></pre>
+
+<h2>1 · The problem with "one goroutine per item"</h2>
+<p>Day 3's <code>checkAll</code> does this:</p>
+<pre><code><span class="kw">for</span> _, l := <span class="kw">range</span> links {
+    wg.Add(1)
+    <span class="kw">go func</span>(l link.Link) {
+        <span class="kw">defer</span> wg.Done()
+        results &lt;- checkOne(l)
+    }(l)
+}</code></pre>
+<p>For 3 links: fine. For 10,000 links (a real link-shortener's health sweep): 10,000 goroutines exist at once, each holding its own stack, all hammering whatever <code>checkOne</code> hits — a downstream server, a rate limiter, a database. You didn't mean to launch a thundering herd; the <code>for</code> loop did it for you. This is <dfn data-en="Concurrency work with no cap on how many operations run at once — each new input spawns a new goroutine regardless of how many are already in flight." data-vn="giữ nguyên 'unbounded concurrency' — không giới hạn số việc chạy song song">unbounded concurrency</dfn>, and it's the most common reason a Go service that handles 10 requests/sec fine falls over at 10,000.</p>
+
+<h2>2 · The fix: a worker pool</h2>
+<p>A <dfn data-en="A fixed number of long-lived goroutines (workers) that all read from one shared jobs channel, each processing one job at a time, so at most N operations run concurrently regardless of how many jobs exist." data-vn="giữ nguyên 'worker pool' — nhóm goroutine cố định, cùng lấy việc từ một channel">worker pool</dfn> flips the shape: launch a <em>fixed</em> number of workers once, and let them pull from a shared channel of jobs. Ten links or ten million, the same 4 workers handle it — just for longer.</p>
+<pre><code><span class="kw">const</span> maxWorkers = 4
+
+<span class="kw">func</span> checkAll(links []link.Link, timeout time.Duration) <span class="kw">map</span>[string]<span class="kw">bool</span> {
+    jobs := make(<span class="kw">chan</span> link.Link)      <span class="cm">// unbuffered: a job is "handed off", not queued in bulk</span>
+    results := make(<span class="kw">chan</span> result)
+
+    <span class="kw">var</span> wg sync.WaitGroup
+    <span class="kw">for</span> w := 0; w &lt; maxWorkers; w++ {   <span class="cm">// TODO 1: launch maxWorkers long-lived workers</span>
+        wg.Add(1)                        <span class="cm">//         each: defer wg.Done(), then `for l := range jobs`</span>
+        <span class="kw">go func</span>() {                     <span class="cm">//         processing each l with checkOne and sending to results</span>
+            <span class="kw">defer</span> wg.Done()
+            <span class="kw">for</span> l := <span class="kw">range</span> jobs {
+                results &lt;- checkOne(l)
+            }
+        }()
+    }
+    <span class="cm">// ...feeder and closer below...</span>
+}</code></pre>
+<p>Notice what changed and what didn't. The <em>result-collecting</em> <code>select</code> loop from Day 3 — the one with the timeout — is untouched; it doesn't care whether 3 goroutines or 3,000,000 jobs feed <code>results</code>. What's new is the <em>producing</em> side: instead of one goroutine per link, a small fixed crew shares one <code>jobs</code> channel.</p>
+
+<h2>3 · Feeding the pool and knowing when it's done</h2>
+<p>Two more goroutines complete the picture — a feeder, and a closer:</p>
+<pre><code><span class="cm">// feeder: sends every link into jobs, then closes it. Closing jobs is the</span>
+<span class="cm">// signal each worker's `for l := range jobs` uses to know there's no more work.</span>
+<span class="kw">go func</span>() {                        <span class="cm">// TODO 2: for _, l := range links { jobs &lt;- l }; close(jobs)</span>
+    <span class="kw">for</span> _, l := <span class="kw">range</span> links {
+        jobs &lt;- l
+    }
+    <span class="kw">close</span>(jobs)
+}()
+
+<span class="cm">// closer: once every worker has drained jobs and returned, close results —</span>
+<span class="cm">// same pattern as Day 3, just waiting on N workers instead of N per-link goroutines.</span>
+<span class="kw">go func</span>() {
+    wg.Wait()
+    <span class="kw">close</span>(results)
+}()</code></pre>
+<p>Three goroutines, three jobs: <strong>workers</strong> process, one at a time each, forever until <code>jobs</code> closes; the <strong>feeder</strong> hands off work then signals "no more"; the <strong>closer</strong> waits for every worker to finish, then signals the same to whoever reads <code>results</code>. This is a <dfn data-en="A chain of stages connected by channels, each stage a goroutine (or pool of goroutines) reading from one channel and writing to the next — fan-out (feeder to many workers) and fan-in (many workers to one results channel) are the two shapes this lesson builds." data-vn="giữ nguyên 'pipeline' — chuỗi các bước nối bằng channel">pipeline</dfn>: fan-out from the feeder to the workers, fan-in from the workers to <code>results</code>.</p>
+
+<h2>4 · Semaphore channels: bounding without restructuring</h2>
+<p>Sometimes a full worker-pool rewrite is more than you need — you already have Day 3's one-goroutine-per-item code and just want to cap how many run <em>at once</em>. A <dfn data-en="A buffered channel used purely for counting, not for carrying data — sending fills a slot (blocks if full), receiving frees one. Bounds concurrency to the channel's capacity without restructuring the loop into a worker pool." data-vn="giữ nguyên 'semaphore channel' — channel đệm dùng để đếm chỗ trống, không mang dữ liệu">semaphore channel</dfn> does exactly that, with a two-line change:</p>
+<pre><code>sem := make(<span class="kw">chan struct</span>{}, maxWorkers)   <span class="cm">// capacity = how many may run at once</span>
+
+<span class="kw">for</span> _, l := <span class="kw">range</span> links {
+    wg.Add(1)
+    <span class="kw">go func</span>(l link.Link) {
+        <span class="kw">defer</span> wg.Done()
+        sem &lt;- <span class="kw">struct</span>{}{}        <span class="cm">// take a slot — blocks once maxWorkers are in flight</span>
+        <span class="kw">defer func</span>() { &lt;-sem }()  <span class="cm">// release it on the way out</span>
+        results &lt;- checkOne(l)
+    }(l)
+}</code></pre>
+<p><code>struct{}{}</code> is an <dfn data-en="A struct type with zero fields — struct{}{} is its value. Occupies zero bytes; used purely as a channel token/signal, never as data." data-vn="giữ nguyên 'empty struct' — kiểu không có field, chỉ dùng làm tín hiệu">empty struct</dfn>: a signal with no payload, zero bytes. The goroutine count is still one-per-link — that part didn't change — but only <code>maxWorkers</code> of them can hold a semaphore slot simultaneously, so at most <code>maxWorkers</code> ever run <code>checkOne</code> concurrently. Use a worker pool when you're building the pipeline from scratch (today's practice); reach for a semaphore when you have existing one-goroutine-per-item code and just need a quick cap.</p>
+
+<h2>5 · Backpressure and draining safely</h2>
+<p><dfn data-en="Signal that a system is at capacity, propagated backward to whoever is producing work, so the producer slows down instead of the consumer being overwhelmed or work piling up unbounded in memory." data-vn="giữ nguyên 'backpressure' — báo ngược cho phía tạo việc biết là đã đầy, để chậm lại">Backpressure</dfn> is what an unbuffered <code>jobs</code> channel gives you for free: the feeder's <code>jobs &lt;- l</code> blocks the instant all <code>maxWorkers</code> are busy, so the feeder itself slows to the pool's pace instead of piling up 10,000 pending links in memory. This is why the pool used an <em>unbuffered</em> channel above — a large buffer would let the feeder race ahead and build an unbounded backlog, defeating the whole point of bounding concurrency.</p>
+<p><dfn data-en="Letting every remaining item in a channel or queue be consumed (or explicitly discarded) before shutting down, rather than abandoning goroutines mid-work or leaking blocked senders." data-vn="giữ nguyên 'draining' — xử lý hết phần việc còn lại trước khi dừng">Draining</dfn> matters at the other end: when the Day 3 <code>select</code>'s timeout fires, the function returns immediately with partial results — but the workers and feeder are still running, potentially still blocked trying to send into channels nobody's reading anymore. For today's practice that's an acceptable, documented tradeoff (the goroutines exit once <code>jobs</code>/<code>results</code> stop being read and everything gets garbage collected at process exit); Day 11 (debugging concurrency) comes back to close this gap properly with <code>context</code> cancellation.</p>
+
+<h2>6 · Practice: bound linkshort's health-checker</h2>
+<p>In <code>~/learning/go/project/linkshort</code>, upgrade <code>checker.go</code> from Day 3's one-per-link fan-out to a bounded worker pool.</p>
+<p><strong>Step 1 — rewrite <code>checker.go</code>.</strong> Keep <code>result</code> and <code>checkOne</code> exactly as they are. Replace the body of <code>checkAll</code>: add the <code>const maxWorkers = 4</code>, change <code>results</code> to also declare a <code>jobs</code> channel, then fill TODOs 1–2 (the worker loop and the feeder) using Sections 2–3 above as the template. The result-collecting <code>select</code> loop at the bottom is unchanged from Day 3 — don't touch it.</p>
+<pre><code><span class="kw">package</span> main
+
+<span class="kw">import</span> (
+    <span class="cm">"strings"</span>
+    <span class="cm">"sync"</span>
+    <span class="cm">"time"</span>
+
+    <span class="cm">"linkshort/link"</span>
+)
+
+<span class="kw">type</span> result <span class="kw">struct</span> {
+    code <span class="kw">string</span>
+    ok   <span class="kw">bool</span>
+}
+
+<span class="kw">func</span> checkOne(l link.Link) result {
+    time.Sleep(50 * time.Millisecond)
+    <span class="kw">return</span> result{code: l.Code, ok: strings.HasPrefix(l.URL, <span class="cm">"https://"</span>)}
+}
+
+<span class="kw">const</span> maxWorkers = 4
+
+<span class="kw">func</span> checkAll(links []link.Link, timeout time.Duration) <span class="kw">map</span>[string]<span class="kw">bool</span> {
+    jobs := make(<span class="kw">chan</span> link.Link)
+    results := make(<span class="kw">chan</span> result)
+
+    <span class="kw">var</span> wg sync.WaitGroup
+    <span class="cm">// TODO 1: launch maxWorkers workers. Each: wg.Add(1) before the goroutine,</span>
+    <span class="cm">//         defer wg.Done() inside it, then `for l := range jobs { results &lt;- checkOne(l) }`.</span>
+
+    <span class="cm">// TODO 2: feeder goroutine — for _, l := range links { jobs &lt;- l }; close(jobs).</span>
+
+    <span class="kw">go func</span>() {              <span class="cm">// GIVEN — the closer, same shape as Day 3</span>
+        wg.Wait()
+        <span class="kw">close</span>(results)
+    }()
+
+    out := make(<span class="kw">map</span>[string]<span class="kw">bool</span>, len(links))   <span class="cm">// GIVEN — unchanged from Day 3</span>
+    deadline := time.After(timeout)
+    <span class="kw">for</span> {
+        <span class="kw">select</span> {
+        <span class="kw">case</span> r, open := &lt;-results:
+            <span class="kw">if</span> !open {
+                <span class="kw">return</span> out
+            }
+            out[r.code] = r.ok
+        <span class="kw">case</span> &lt;-deadline:
+            <span class="kw">return</span> out
+        }
+    }
+}</code></pre>
+
+<p><strong>Step 2 — prove the bound is real.</strong> Add to <code>checker_test.go</code> (given): 20 links, 4 workers, 50ms each — that's ~250ms of real work if bounded, ~50ms if it's secretly still unbounded.</p>
+<pre><code><span class="kw">func</span> TestCheckAllBoundsConcurrency(t *testing.T) {
+    links := make([]link.Link, 20)
+    <span class="kw">for</span> i := <span class="kw">range</span> links {
+        links[i] = link.Link{Code: fmt.Sprintf(<span class="cm">"l%d"</span>, i), URL: <span class="cm">"https://x.dev"</span>}
+    }
+    start := time.Now()
+    got := checkAll(links, 2*time.Second)
+    elapsed := time.Since(start)
+    <span class="kw">if</span> len(got) != 20 {
+        t.Fatalf(<span class="cm">"checked %d, want 20"</span>, len(got))
+    }
+    <span class="kw">if</span> elapsed &lt; 200*time.Millisecond {
+        t.Fatalf(<span class="cm">"elapsed %v looks unbounded, not worker-pooled"</span>, elapsed)
+    }
+}</code></pre>
+<pre><code>go vet ./...          <span class="cm"># silent — also confirms no lock was copied</span>
+go test -race ./...   <span class="cm"># green, including the new timing test</span></code></pre>
+<div class="callout"><strong>Done when:</strong> <code>go vet ./...</code> silent · <code>go test -race ./...</code> green with both checker tests passing · you can explain out loud why the new test needs ~250ms instead of ~50ms. That's the whole point made physical: the pool really does bound concurrency to 4.</div>
+
+<h2>Check yourself</h2>
+<div class="quiz">
+  <div class="q" data-why="A worker pool launches a FIXED number of long-lived goroutines that all pull from a shared jobs channel — the goroutine count never scales with input size, unlike one-goroutine-per-item.">
+    <p class="stem">What makes a worker pool bounded, unlike Day 3's original <code>checkAll</code>?</p>
+    <button class="opt" data-ok>a fixed number of workers</button>
+    <button class="opt">buffered channels instead of unbuffered</button>
+    <button class="opt">processing every single job sequentially</button>
+  </div>
+  <div class="q" data-why="Closing the jobs channel is exactly what lets each worker's `for l := range jobs` loop end — range over a channel exits once the channel is closed AND drained. Without close, every worker blocks forever waiting for the next job.">
+    <p class="stem">Why must the feeder <code>close(jobs)</code> after sending every link?</p>
+    <button class="opt" data-ok>so workers' range loops end</button>
+    <button class="opt">to free the channel's memory</button>
+    <button class="opt">it's entirely optional and skippable</button>
+  </div>
+  <div class="q" data-why="An unbuffered jobs channel makes the feeder's send block the instant all workers are busy — that block IS the backpressure, keeping unprocessed work capped at maxWorkers instead of piling up in memory.">
+    <p class="stem">Why does the worker pool use an <em>unbuffered</em> <code>jobs</code> channel, not a large buffered one?</p>
+    <button class="opt" data-ok>a buffer would defeat bounding</button>
+    <button class="opt">unbuffered channels are always faster</button>
+    <button class="opt">buffered channels cannot be closed</button>
+  </div>
+  <div class="q" data-why="A semaphore channel (chan struct{} with capacity N) caps how many goroutines HOLD a slot at once, via a blocking send/receive pair around the work — without restructuring one-goroutine-per-item code into workers pulling from a shared channel.">
+    <p class="stem">A semaphore channel bounds concurrency by…</p>
+    <button class="opt" data-ok>capping goroutines holding a token</button>
+    <button class="opt">rewriting the loop into workers</button>
+    <button class="opt">limiting total values ever sent</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://go.dev/blog/pipelines">Go Blog — Pipelines and cancellation</a> — the canonical writeup of fan-out/fan-in and the shapes today's lesson borrows from. Skim past the generator-function framing straight to "Fan-out, fan-in" if short on time.</p>
+<p>New terms are in the <a href="../reference/glossary.html#day9">glossary — Day 9 section</a>.</p>
+
+<p class="next">Tomorrow: <strong>context, cancellation &amp; <code>errgroup</code></strong> — today's pool bounds <em>how many</em> run at once; tomorrow bounds <em>how long</em>, and closes the "goroutines still running after the deadline" gap Section 5 flagged.<br><br>
+💬 A worker or two seem stuck, or the timing test flakes? Paste the code — hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/quiz.js"></script>
+<script src="../assets/gloss.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

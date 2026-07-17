@@ -125,6 +125,18 @@
 <tr><td>concurrent map writes</td><td>Go's runtime actively detects two goroutines writing a built-in map at once and deliberately crashes: <code>fatal error: concurrent map writes</code> — un-recoverable. The reason a bare <code>map</code> field needs a mutex the instant more than one goroutine writes it.</td><td>lỗi ghi map đồng thời — runtime cố tình panic, phải khóa map lại</td></tr>
 </table>
 
+<h2 id="day9">Day 9 — Worker pools &amp; pipelines (Week 2)</h2>
+<table class="gloss">
+<tr><th>Term</th><th>In software</th><th>Tiếng Việt (dev-style)</th></tr>
+<tr><td>unbounded concurrency</td><td>Concurrency work with no cap on how many operations run at once — each new input spawns a new goroutine regardless of how many are already in flight. Fine at small scale, a self-inflicted overload at large scale.</td><td>giữ nguyên "unbounded concurrency" — không giới hạn số việc chạy song song</td></tr>
+<tr><td>worker pool</td><td>A fixed number of long-lived goroutines (workers) that all read from one shared jobs channel, each processing one job at a time, so at most N operations run concurrently no matter how many jobs exist.</td><td>giữ nguyên "worker pool" — nhóm goroutine cố định, cùng lấy việc từ một channel</td></tr>
+<tr><td>pipeline</td><td>A chain of stages connected by channels, each stage a goroutine (or pool of goroutines) reading from one channel and writing to the next. Fan-out (one source to many workers) and fan-in (many workers to one results channel) are the two shapes a worker pool combines.</td><td>giữ nguyên "pipeline" — chuỗi các bước nối bằng channel</td></tr>
+<tr><td>semaphore channel</td><td>A buffered channel used purely for counting, not for carrying data — sending fills a slot (blocks if full), receiving frees one. Bounds concurrency to the channel's capacity without restructuring existing one-goroutine-per-item code into a worker pool.</td><td>giữ nguyên "semaphore channel" — channel đệm dùng để đếm chỗ trống, không mang dữ liệu</td></tr>
+<tr><td>empty struct</td><td>A struct type with zero fields — <code>struct{}{}</code> is its value. Occupies zero bytes; used purely as a channel token/signal (e.g. a semaphore slot), never to carry data.</td><td>giữ nguyên "empty struct" — kiểu không có field, chỉ dùng làm tín hiệu</td></tr>
+<tr><td>backpressure</td><td>A signal that a system is at capacity, propagated backward to whoever is producing work, so the producer slows down instead of the consumer being overwhelmed or work piling up unbounded in memory. An unbuffered jobs channel gives this for free.</td><td>giữ nguyên "backpressure" — báo ngược cho phía tạo việc biết là đã đầy, để chậm lại</td></tr>
+<tr><td>draining</td><td>Letting every remaining item in a channel or queue be consumed (or explicitly discarded) before shutting down, rather than abandoning goroutines mid-work or leaking blocked senders.</td><td>giữ nguyên "draining" — xử lý hết phần việc còn lại trước khi dừng</td></tr>
+</table>
+
 <h2 id="day7">Day 7 — Testing, tooling &amp; capstone</h2>
 <table class="gloss">
 <tr><th>Term</th><th>In software</th><th>Tiếng Việt (dev-style)</th></tr>

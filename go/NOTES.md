@@ -76,3 +76,18 @@
   against the exact, previously-shipped and already-referenced code from Days 4–6,
   but are unverified by a compiler this round; verify with `go vet ./...` before/while
   doing the Day 7 practice.
+- 2026-07-17 (Day 9 backfill — automation bug): `daily-lessons-prompt.md` was never
+  updated when Week 2 was added on 2026-07-15 — it still said "go: Jul 7–13, after
+  Jul 13 skip entirely," so every nightly cron run since (Jul 16, Jul 17) skipped
+  `go` outright per that stale rule, and `0010-worker-pools-and-pipelines.html` was
+  never generated on its Jul 16 date. Fixed the window in `daily-lessons-prompt.md`
+  to reference this file's Week 2 plan (Jul 15–20), then generated the missed Day 9
+  lesson interactively. `project/linkshort` on disk still had none of Day 8's
+  practice (`link/memstore.go` unguarded, no `link/counter.go` or
+  `link/concurrent_test.go`) — Day 9's Step 0 hands over all three, completed, before
+  building the worker-pool upgrade to `checker.go` in Step 1–2. Full scaffold
+  (`memstore.go`, `counter.go`, `concurrent_test.go`, the rewritten `checker.go` +
+  its new bounding test) was compile-checked and race-tested clean (`go vet`, `go
+  build`, `go test -race ./...`) in a scratch dir before shipping.
+  `bin/record-progress` worked from this local session; `lesson_generated` for Day 9
+  is recorded.

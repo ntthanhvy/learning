@@ -111,3 +111,22 @@
   ✗, then a hand-written solved version printed all ✓ against the real
   `orders_raw.csv`/`customers.csv` fixtures, before the unsolved file was
   copied into `practice/`; `lesson_generated` was recorded successfully.
+- 2026-07-18 generation (Lesson 10): direct `psql "$LEARNING_DB_URL" ...`
+  reads were blocked in this headless run (network/credential commands need
+  interactive approval; no user present) — still no `course_progress` rows
+  readable, no learning record beyond the Lesson 1 baseline. Lesson 9's own
+  teaser promised "a review pass shaped by however today's drills actually
+  go," but with no drill-outcome signal available, guessing which pattern
+  came back shakiest isn't possible — so Lesson 10 keeps building the drill
+  library instead: three patterns not yet covered anywhere in Lessons 1–9
+  (checked the glossary for existing terms first) — `value_counts()`, the
+  `.str` accessor, and `nlargest()` contrasted against Lesson 9's per-group
+  `rank()` pattern. `uv run --with pandas` worked directly this round: the
+  shipped (unsolved) `practice/10_value_counts_str_nlargest.py` was executed
+  in place and printed all ✗, then a solved version was executed in a
+  scratch dir (`.scratch/data-lesson10/solved.py`, not shipped) against the
+  real `orders_raw.csv`/`customers.csv` fixtures and printed all ✓ (An/Binh
+  both value_counts to 2 clean orders each; North+South match `.str.contains
+  ("th")`, West doesn't; nlargest(2) is Binh/180.0 then An/120.0, no ties).
+  `bin/record-progress` also worked when invoked directly — `lesson_generated`
+  was recorded for day 10.

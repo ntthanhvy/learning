@@ -24,6 +24,8 @@
       file: "lessons/0008-method-chaining-pipeline-shape.html" },
     { n: 9, date: "2026-07-17", title: "Timed drills",
       file: "lessons/0009-timed-drills.html" },
+    { n: 10, date: "2026-07-18", title: "Timed drills, round 2: value_counts, .str & nlargest",
+      file: "lessons/0010-value-counts-str-and-nlargest.html" },
   ];
 
   const REFS = [

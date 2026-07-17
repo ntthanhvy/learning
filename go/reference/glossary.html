@@ -137,6 +137,14 @@
 <tr><td>draining</td><td>Letting every remaining item in a channel or queue be consumed (or explicitly discarded) before shutting down, rather than abandoning goroutines mid-work or leaking blocked senders.</td><td>giữ nguyên "draining" — xử lý hết phần việc còn lại trước khi dừng</td></tr>
 </table>
 
+<h2 id="day10">Day 10 — Context, cancellation &amp; errgroup (Week 2)</h2>
+<table class="gloss">
+<tr><th>Term</th><th>In software</th><th>Tiếng Việt (dev-style)</th></tr>
+<tr><td>derived context</td><td>A context created from a parent via <code>context.WithCancel</code>/<code>WithTimeout</code>/<code>errgroup.WithContext</code> — it inherits the parent's cancellation (parent Done means child Done too) and can add its own extra reason to cancel earlier.</td><td>giữ nguyên "derived context" — context con tạo từ context cha, cha hủy thì con cũng hủy theo</td></tr>
+<tr><td>errgroup.WithContext</td><td>Returns a <code>*Group</code> and a derived context that is cancelled the instant either the parent ctx is cancelled OR any <code>g.Go</code> function returns a non-nil error — whichever happens first.</td><td>giữ nguyên "errgroup.WithContext" — trả về group và context con, hủy khi cha hủy HOẶC một goroutine lỗi</td></tr>
+<tr><td>cancellation-aware select</td><td>Wrapping every blocking channel operation (a send or a receive) in a <code>select</code> with a second case on <code>ctx.Done()</code>, so a cancelled context unblocks it immediately instead of leaving it stuck forever waiting for a partner that will never show up.</td><td>giữ nguyên — thêm nhánh ctx.Done() vào mọi select có thể bị block, để hủy là thoát ngay</td></tr>
+</table>
+
 <h2 id="day7">Day 7 — Testing, tooling &amp; capstone</h2>
 <table class="gloss">
 <tr><th>Term</th><th>In software</th><th>Tiếng Việt (dev-style)</th></tr>

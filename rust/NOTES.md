@@ -167,3 +167,15 @@ by the user there; they apply here identically.
   same two distinct blocks hit today in the backend/data courses), so no
   `course_progress` rows could be read for a scope-change signal. No new
   learning record beyond the Day-1 baseline.
+- 2026-07-18 (headless run): same as the prior three days — verified
+  `daily.html`, `assets/srs.js`, and `assets/quiz-bank.js` (days 1–7, 7
+  katas) are all present and untouched; that's still the correct "daily
+  quiz+kata" for this post-week phase per PLAN.md, so nothing new was
+  generated. Direct `psql "$LEARNING_DB_URL" ...` reads were blocked by this
+  session's permission gate (network/credential commands need interactive
+  approval no one was present to grant), so no `course_progress` rows could
+  be read for a scope-change signal (e.g. a request to keep growing the
+  bank past Day 7). `bin/record-progress` (a write, not a read) does work
+  from this session — confirmed via the go course today — but there is
+  nothing to log here since no lesson/quiz/kata was generated. No new
+  learning record beyond the Day-1 baseline.

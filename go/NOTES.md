@@ -91,3 +91,22 @@
   build`, `go test -race ./...`) in a scratch dir before shipping.
   `bin/record-progress` worked from this local session; `lesson_generated` for Day 9
   is recorded.
+- 2026-07-18 (Day 10 backfill): Day 10 (`0011-context-cancellation-errgroup.html`,
+  pre-assigned to Jul 17) was still missing — the Jul 17 session only backfilled
+  Day 9 and ran out of scope before generating Day 10 itself — so today's run
+  generated Day 10 rather than jumping ahead to Day 11's Jul 18 slot; Day 11 stays
+  date-locked for tomorrow. Direct `psql "$LEARNING_DB_URL" ...` reads were blocked
+  by this session's permission gate (network/credential commands need interactive
+  approval; none available headless) — `bin/record-progress` (a write) worked fine,
+  same asymmetry as 2026-07-12. Paced from learning-records + project file state
+  alone. `project/linkshort` on disk still had none of Week 2's practice — Day 8's
+  mutex counter and Day 9's worker-pool `checker.go` were both still unbuilt (still
+  Day 3's one-goroutine-per-link shape) — so Day 10's Step 0 hands over Day 9's
+  completed worker-pool `checker.go` + its bounds-concurrency test before building
+  context/errgroup on top. Full scaffold (`checker.go`, `checker_test.go`, the
+  `main.go` call-site update) was compile-checked and race-tested clean (`go vet`,
+  `go build`, `go test -race ./...`, including a new
+  `TestCheckAllCancelledContextReturnsPromptly`) in a scratch dir before shipping —
+  the toolchain and network access for `go mod tidy`/module downloads were both
+  available this round. `bin/record-progress` worked; `lesson_generated` for Day 10
+  is recorded.

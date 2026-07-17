@@ -28,6 +28,8 @@
       file: "lessons/0010-background-jobs.html" },
     { n: 11, date: "2026-07-17", title: "Rate limiting & backpressure",
       file: "lessons/0011-rate-limiting-and-backpressure.html" },
+    { n: 12, date: "2026-07-18", title: "Authorization: what are you allowed to do?",
+      file: "lessons/0012-authorization-what-are-you-allowed-to-do.html" },
   ];
 
   const REFS = [

@@ -102,3 +102,19 @@
   tooling. The lesson's Go token-bucket snippet was compile-checked clean
   with `go vet`/`go build` in a scratch module (`.scratch/backend-lesson11/`)
   before shipping.
+- 2026-07-18 generation (Lesson 12): direct `psql "$LEARNING_DB_URL" ...`
+  reads were blocked in this headless run (network/credential commands need
+  interactive approval; no user present) — still no `lesson_completed`
+  record for any of Lessons 1–11, so pacing came from learning-records +
+  the lessons' own content alone. Lesson 11's teaser literally said "auth —
+  sessions vs JWT" next, but that's Lesson 4's actual content verbatim
+  (already shipped 2026-07-10) — treated as a stale/mistaken teaser rather
+  than repeated: Lesson 12 instead covers authorization (RBAC + record-level
+  ownership checks, IDOR, 401 vs 403), the half of "auth" Lesson 4 explicitly
+  deferred ("distinct from authorization" in its own glossary entry) and
+  never delivered — no duplication, same MISSION success-criterion #4. Fixed
+  the teaser going forward to point at logging & monitoring (also from
+  MISSION #4, still uncovered). `bin/record-progress` worked when invoked
+  directly this round — `lesson_generated` recorded for day 12. The lesson's
+  two Go handler snippets were compile-checked clean with `go vet`/`go build`
+  in a scratch module (`.scratch/backend-lesson12/`) before shipping.

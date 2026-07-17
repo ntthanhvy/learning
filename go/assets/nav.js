@@ -26,6 +26,8 @@
       file: "lessons/0009-mutex-and-the-memory-model.html" },
     { day: 9, date: "2026-07-16", title: "Worker pools & pipelines",
       file: "lessons/0010-worker-pools-and-pipelines.html" },
+    { day: 10, date: "2026-07-17", title: "Context, cancellation & errgroup",
+      file: "lessons/0011-context-cancellation-errgroup.html" },
   ];
 
   const REFS = [

@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 10 · Timed Drills, Round 2</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 10 · ~20 min · 18 Jul 2026</p>
+<h1>Timed drills, round two: value_counts, .str &amp; nlargest</h1>
+<p class="byline">Lesson 9 promised a review pass targeting whichever pattern came back shakiest. There's no drill-by-drill signal to shape that yet, so today keeps building the drill library instead of guessing: three patterns that show up in interviews constantly but haven't had their own moment — <code>value_counts()</code>, the <code>.str</code> accessor, and <code>nlargest()</code>. Same fixtures as Lesson 5 onward, budget ~5 minutes each.</p>
+
+<h2>1 · Counting without a groupby: <code>value_counts()</code></h2>
+<p>Lesson 4's <code>groupby("customer").size()</code> answers "how many rows per customer" — correct, but three words longer than it needs to be for the single most common counting question in any interview. <code>Series.value_counts()</code> does the same split-count in one call, directly on a column, sorted by count descending by default:</p>
+<pre><code>orders_per_customer = clean[<span class="kw">"customer"</span>].value_counts()
+<span class="cm"># same numbers as clean.groupby("customer").size() — value_counts() IS a groupby+count,</span>
+<span class="cm"># just spelled for the one-column case that comes up constantly</span></code></pre>
+<p>Reach for <code>value_counts()</code> the instant the question is "how many of each," full stop — no other column involved. The moment a second aggregation joins in (total revenue <em>and</em> count, say), that's back to <code>groupby(...).agg(...)</code> from Lesson 4; <code>value_counts()</code> only ever does the one thing.</p>
+
+<h2>2 · Filtering text with the <code>.str</code> accessor</h2>
+<p>SQL's <code>WHERE column LIKE '%th%'</code> has a direct pandas equivalent: <code>.str.contains()</code>. It's not "call <code>.contains()</code> on the column" — a plain Python string has no such vectorized method — it's the <dfn data-en="the .str namespace on a Series of strings, exposing vectorized string methods (contains, upper, lower, startswith, split, ...) that run the equivalent Python string method across every row at once, instead of looping" data-vn="giữ nguyên '.str accessor' — gọi hàm xử lý chuỗi trên cả cột cùng lúc">.str accessor</dfn>, a namespace that runs the equivalent per-character-string method across the whole column in one vectorized pass:</p>
+<pre><code>th_region_customers = customers[customers[<span class="kw">"region"</span>].str.contains(<span class="kw">"th"</span>, case=<span class="kw">False</span>)]
+<span class="cm"># .str.contains, .str.upper, .str.startswith, .str.split — all vectorized,</span>
+<span class="cm"># all the "obvious" string method, just reachable through .str first</span></code></pre>
+<p>The <code>case=False</code> keyword is the same idea as SQL's <code>ILIKE</code> vs <code>LIKE</code> — case-insensitive by explicit request, not by default. Forgetting <code>.str</code> and calling a string method directly on a column is one of the single most common pandas <code>AttributeError</code>s — the column is a <em>Series</em> of strings, not a string itself.</p>
+
+<h2>3 · Top N overall vs. top N per group: <code>nlargest()</code></h2>
+<p>Lesson 9's Drill 1 found each customer's <em>own</em> second-highest order — a per-group question, answered with <code>rank()</code> inside a <code>groupby</code>. A plainer, more common question skips the grouping entirely: "the two biggest orders, full stop, across everyone." That's what <code>nlargest()</code> is for — no <code>groupby</code>, no <code>rank</code>, one call:</p>
+<pre><code>top_two_orders = clean.nlargest(2, <span class="kw">"amount"</span>)
+<span class="cm"># equivalent to clean.sort_values("amount", ascending=False).head(2),</span>
+<span class="cm"># but nlargest names the intent directly and reads faster in review</span></code></pre>
+<p>The two are easy to conflate under time pressure — the fix is one question: does "top N" mean overall, or per something? Overall reaches for <code>nlargest</code>/<code>nsmallest</code>; per-group reaches for <code>groupby(...).rank()</code> (Lesson 9) or <code>groupby(...).head(n)</code> after sorting. Naming which one a question is actually asking, out loud, before writing any code, is exactly the fluency an interviewer is listening for.</p>
+
+<div class="interview">
+<p><strong>Q: "Give me the top 3 orders by amount for each customer, in one line."</strong> A strong answer, out loud: <em>"That's per-group, not overall, so nlargest by itself won't do it — I'd sort_values by amount descending, then groupby('customer').head(3), which keeps each group's first 3 rows post-sort. Or equivalently groupby('customer')['amount'].rank(ascending=False) filtered to rank &lt;= 3, same idea as Lesson 9's Nth-highest drill, generalized past N=2. I'd reach for nlargest only if the question drops 'for each customer' and just wants the biggest 3 across the whole table."</em> The subtext: catching "for each customer" as the word that rules out <code>nlargest</code> is the actual skill being tested, not the syntax.</p>
+</div>
+
+<h2>Try it — self-checking practice (~15 min, 3 drills)</h2>
+<p>Open <code>practice/10_value_counts_str_nlargest.py</code>, replace each <code>...</code>, and re-run until all checks print ✓. Try each drill cold before reading its section above again:</p>
+<pre><code>cd ~/learning/data
+uv run --with pandas python3 practice/10_value_counts_str_nlargest.py</code></pre>
+<p>Same <code>orders_raw.csv</code> and <code>customers.csv</code> as Lesson 5 onward — today only the questions are new.</p>
+
+<h2>Check yourself</h2>
+<div class="quiz">
+  <div class="q" data-why="value_counts() is a Series method answering exactly one question — how many of each value in this one column — sorted by count descending by default. A second aggregation column means groupby(...).agg(...) instead.">
+    <p class="stem">When is <code>value_counts()</code> the right reach, instead of <code>groupby(...).agg(...)</code>?</p>
+    <button class="opt" data-ok>Counting one column, nothing else</button>
+    <button class="opt">Summing amounts across two columns</button>
+    <button class="opt">Joining two separate DataFrames together</button>
+  </div>
+  <div class="q" data-why="A DataFrame column of strings is a Series, not a plain Python string — string methods like .contains() or .upper() must be reached through the .str namespace, which runs them vectorized across every row.">
+    <p class="stem">Why does <code>customers["region"].contains("th")</code> raise an <code>AttributeError</code>?</p>
+    <button class="opt" data-ok>String methods need the .str accessor first</button>
+    <button class="opt">contains() only exists in SQL, not pandas</button>
+    <button class="opt">region is not a valid column name</button>
+  </div>
+  <div class="q" data-why="nlargest() finds the biggest N rows across the WHOLE table with no grouping — the moment a question says 'for each customer' or 'per group,' that's groupby(...).rank() or groupby(...).head(n) instead, not nlargest.">
+    <p class="stem"><code>nlargest(2, "amount")</code> on the full orders table answers which question?</p>
+    <button class="opt" data-ok>The two biggest orders overall</button>
+    <button class="opt">Each customer's two biggest orders</button>
+    <button class="opt">The two most active customers</button>
+  </div>
+  <div class="q" data-why="case=False mirrors SQL's ILIKE vs LIKE — pandas string comparisons are case-sensitive by default, so a case-insensitive match must be requested explicitly with case=False.">
+    <p class="stem">What does <code>case=False</code> do inside <code>.str.contains("th", case=False)</code>?</p>
+    <button class="opt" data-ok>Makes the string match case-insensitive</button>
+    <button class="opt">Makes the match check names</button>
+    <button class="opt">Makes pandas ignore missing values</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the <a href="https://leetcode.com/studyplan/introduction-to-pandas/">LeetCode "Introduction to Pandas" study plan</a> (~10 problems, auto-graded) — this course's standing practice resource, same as Lesson 9. A handful of its early problems lean directly on <code>value_counts</code> and string filtering. <a href="https://pandas.pydata.org/docs/user_guide/text.html">pandas docs — Working with text data</a> is the authoritative reference for everything under <code>.str</code>.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a>.<br>
+<strong>Next lesson:</strong> still open — whichever of today's or Lesson 9's drills comes back reported as shakiest gets the next focused round; otherwise, one more fresh-pattern round (duplicated/drop_duplicates, pct_change) keeps the library growing.<br><br>
+💬 Anything unclear — value_counts vs groupby, the .str accessor, or nlargest vs rank? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

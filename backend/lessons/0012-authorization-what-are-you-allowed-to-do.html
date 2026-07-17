@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 12 · Authorization</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 12 · ~20 min</p>
+<h1>Authorization: what are you allowed to do?</h1>
+<p class="byline">Lesson 4 answered "who are you?" — sessions and JWTs both end with middleware attaching an identity to the request. That was never the whole story, and the glossary said so at the time: authentication is "distinct from authorization, which decides what they're allowed to do once known." Today is that second half — the one most handlers quietly skip.</p>
+
+<h2>1 · Knowing who ≠ knowing what they can do</h2>
+<p>Once Lesson 4's middleware runs, every handler downstream knows <em>who</em> is asking. It's tempting to stop there — the request has a user attached, so it must be fine. It isn't. <dfn data-en="deciding what an already-identified user is allowed to do — a separate question from authentication, which only established who they are" data-vn="authorization (giữ nguyên) — quyết định user được làm gì">Authorization</dfn> is a second, independent check: <em>this specific user</em>, doing <em>this specific action</em>, on <em>this specific piece of data</em> — allowed, or not? A logged-in user is a fact about identity. Whether they may delete order #4821 is a fact about permissions, and nothing about being logged in answers it.</p>
+
+<h2>2 · Two granularities: role-based, and record-level</h2>
+<p>Most systems need both, and they answer different questions:</p>
+<ul>
+  <li><dfn data-en="role-based access control: permissions are attached to named roles (admin, editor, viewer) rather than to individual users, and each user is assigned one or more roles" data-vn="RBAC (giữ nguyên) — gán quyền theo vai trò">RBAC</dfn> answers "does this <em>kind</em> of user get to do this <em>kind</em> of thing?" — can any <code>admin</code> delete any order? Cheap to check (one field on the user, or one join to a roles table) and coarse by design.</li>
+  <li><strong>Record-level (ownership) checks</strong> answer a narrower question RBAC can't: "does <em>this</em> user own <em>this</em> row?" A regular user isn't <code>admin</code>, but they still need to edit their <em>own</em> profile, their <em>own</em> orders — a permission that has nothing to do with roles at all.</li>
+</ul>
+<p>Real systems layer both: <em>"an admin, OR the record's owner, may proceed."</em> Skipping the second one is where most real bugs live.</p>
+
+<h2>3 · The bug that skipping record-level checks creates</h2>
+<p>Here's a handler that looks completely reasonable — it's authenticated, it queries the database, it returns JSON:</p>
+<pre><code><span class="kw">func</span> getOrderHandler(w http.ResponseWriter, r *http.Request) {
+    orderID := r.PathValue(<span class="kw">"id"</span>)
+    order, err := store.GetOrder(r.Context(), orderID)
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        http.Error(w, <span class="kw">"not found"</span>, http.StatusNotFound)
+        <span class="kw">return</span>
+    }
+    json.NewEncoder(w).Encode(order) <span class="cm">// BUG: returns ANY order to ANY logged-in user</span>
+}</code></pre>
+<p>Authentication middleware ran; the request definitely came from a real, logged-in user. Nobody ever asked whether <em>this</em> user is allowed to see <em>this</em> order — so any authenticated user can read anyone else's data just by changing the id in the URL. This exact pattern is common enough to have its own name: <dfn data-en="Insecure Direct Object Reference: an endpoint checks that a user is authenticated but never checks that the specific record requested actually belongs to them, letting any logged-in user read or modify another user's data by changing an id in the URL" data-vn="IDOR (giữ nguyên) — sửa ID trên URL để đọc/sửa dữ liệu người khác">IDOR</dfn>, and it's been the OWASP Top 10's "Broken Access Control" entry for years running — not an exotic attack, just a missing <code>if</code>.</p>
+<pre><code><span class="kw">func</span> getOrderHandler(w http.ResponseWriter, r *http.Request) {
+    user := UserFromContext(r.Context()) <span class="cm">// attached by Lesson 4's auth middleware</span>
+    orderID := r.PathValue(<span class="kw">"id"</span>)
+    order, err := store.GetOrder(r.Context(), orderID)
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        http.Error(w, <span class="kw">"not found"</span>, http.StatusNotFound)
+        <span class="kw">return</span>
+    }
+    <span class="kw">if</span> order.UserID != user.ID &amp;&amp; !user.HasRole(<span class="kw">"admin"</span>) {
+        http.Error(w, <span class="kw">"forbidden"</span>, http.StatusForbidden) <span class="cm">// 403, not 401</span>
+        <span class="kw">return</span>
+    }
+    json.NewEncoder(w).Encode(order)
+}</code></pre>
+<p>One line, both granularities at once: <code>admin</code> role OR ownership. That <code>if</code> is the entire fix — and it has to be repeated, deliberately, in every handler that touches a record someone might not own. There's no middleware that can do this one for you the way authentication's middleware could, because only the handler knows which record is actually being asked for.</p>
+
+<h2>4 · 401 vs 403: a status code that's also a security signal</h2>
+<p>The two failure codes say genuinely different things, and interviewers ask this specifically because backend devs mix them up constantly:</p>
+<table class="gloss">
+  <tr><th>Code</th><th>Means</th><th>Fix from the client's side</th></tr>
+  <tr><td><code>401 Unauthorized</code></td><td>Authentication itself failed or is missing — the server doesn't know who you are.</td><td>Log in / attach a valid token.</td></tr>
+  <tr><td><code>403 Forbidden</code></td><td>Authentication succeeded — the server knows exactly who you are — and that identity isn't allowed to do this.</td><td>Nothing to retry; a different user or role is required.</td></tr>
+</table>
+<p>Getting this backwards is a small tell in an interview: <code>401</code> means "prove who you are"; <code>403</code> means "I know, and the answer is still no."</p>
+<div class="callout"><strong>Frontend-habit trap:</strong> hiding a delete button when <code>user.role !== "admin"</code> is a UX nicety, not a security control. Anyone can open devtools, or just call the API directly with curl — the button was never what stopped them. Every authorization decision the UI reflects must <em>also</em> be enforced server-side in the handler; the frontend check is a convenience for well-behaved users, never the actual gate.</div>
+
+<div class="interview">
+<p><strong>Q: "Walk me through how you'd add a 'delete order' feature safely."</strong> A strong answer, out loud: <em>"First, the route sits behind Lesson 4's auth middleware, so I know who's asking. But that's not enough — inside the handler I load the order and check that either the caller owns it or has an admin role, and return 403 if neither is true, before touching anything else. I wouldn't rely on the frontend hiding the delete button — that's just UX, not a security boundary, since anyone can call the endpoint directly. And I'd make sure the check happens on every mutating route that touches a specific record, not just this one, because it's per-handler, not something middleware gives you for free."</em> The signal: naming that authentication and authorization are two separate checks, and that the second one is the handler's job, record by record.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Authentication proves identity (who is this?); authorization is the separate decision of what that identified user is allowed to do. A request can pass authentication and still fail authorization.">
+    <p class="stem">What question does authorization answer, once a user is already authenticated?</p>
+    <button class="opt" data-ok>Whether this user may do this</button>
+    <button class="opt">Whether this user's password is right</button>
+    <button class="opt">Whether the server is reachable now</button>
+  </div>
+  <div class="q" data-why="RBAC checks a coarse category (is this user an admin?) but has no idea which specific record is involved — that's exactly what a record-level ownership check adds, and RBAC alone can't answer.">
+    <p class="stem">What can a record-level ownership check catch that RBAC alone cannot?</p>
+    <button class="opt" data-ok>A non-admin editing someone else's row</button>
+    <button class="opt">A user typing their password wrong</button>
+    <button class="opt">A server running out of memory</button>
+  </div>
+  <div class="q" data-why="IDOR is exactly this: authentication passes, but the handler never checks that the requested record belongs to the caller, so changing the id in the URL exposes someone else's data.">
+    <p class="stem">An endpoint checks login but never checks record ownership — what's this bug called?</p>
+    <button class="opt" data-ok>IDOR</button>
+    <button class="opt">CSRF</button>
+    <button class="opt">SQLi</button>
+  </div>
+  <div class="q" data-why="403 means the server knows exactly who you are and has decided that identity isn't allowed to do this — distinct from 401, which means authentication itself failed or is missing.">
+    <p class="stem">A logged-in, correctly-identified user requests something they're not allowed to do. Correct status?</p>
+    <button class="opt" data-ok>403 Forbidden status</button>
+    <button class="opt">401 Unauthorized status</button>
+    <button class="opt">404 Not Found</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> OWASP's <a href="https://cheatsheetseries.owasp.org/cheatsheets/Authorization_Cheat_Sheet.html">Authorization Cheat Sheet</a> (~10 min) — this course's standing security reference — covers RBAC, record-level (object) checks, and "deny by default" as a design posture, beyond what today's lesson had room for.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> production logging &amp; monitoring — what to log, what never to log, and how a request id ties it all together across instances.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

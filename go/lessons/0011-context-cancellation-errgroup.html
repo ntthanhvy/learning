@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 10 · Context, Cancellation &amp; errgroup</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Go Intensive · Week 2 · Day 10 · ~90 min</p>
+<h1>Context, cancellation &amp; errgroup</h1>
+<p class="byline">Yesterday's worker pool bounds <em>how many</em> checks run at once. It never once looked at a <code>context.Context</code> — it used a bare <code>time.Duration</code> and <code>time.After</code>, the exact thing Day 4 replaced with something composable. Today undoes that regression: a real caller-supplied <code>ctx</code>, <code>errgroup</code> to bundle the workers, and every blocking channel op wired so a cancelled <code>ctx</code> stops things <em>immediately</em> — not "eventually, once the process exits," which is the gap Day 9 flagged and never closed.</p>
+
+<h2>Warm-up: from memory</h2>
+<div class="quiz">
+  <div class="q" data-why="A worker pool launches a FIXED number of long-lived goroutines pulling from a shared jobs channel — goroutine count never scales with input size, which is what bounds it.">
+    <p class="stem">Yesterday: what makes a worker pool <em>bounded</em>, unlike one-goroutine-per-item?</p>
+    <button class="opt" data-ok>a fixed number of workers</button>
+    <button class="opt">buffered channels instead of unbuffered</button>
+    <button class="opt">processing every single job sequentially</button>
+  </div>
+  <div class="q" data-why="Closing jobs is exactly what lets each worker's for l := range jobs loop end — range over a channel exits once the channel is closed AND drained. Without close, every worker blocks forever.">
+    <p class="stem">Why did yesterday's feeder <code>close(jobs)</code> after sending every link?</p>
+    <button class="opt" data-ok>so workers' range loops end</button>
+    <button class="opt">to free the channel's memory</button>
+    <button class="opt">closing channels is always optional</button>
+  </div>
+  <div class="q" data-why="Section 5 of yesterday's lesson said this out loud: when the timeout fires, checkAll returns immediately, but the workers and feeder are still running — possibly blocked sending into channels nobody reads anymore. Today closes exactly this gap.">
+    <p class="stem">Yesterday's lesson admitted a gap: when the timeout fired, what state were the workers left in?</p>
+    <button class="opt" data-ok>still running, likely blocked</button>
+    <button class="opt">already stopped and cleaned</button>
+    <button class="opt">no timeout existed yesterday</button>
+  </div>
+</div>
+
+<h2>Step 0 — catch up: yesterday's practice, handed over</h2>
+<p>Code review shows Day 9's worker-pool rewrite wasn't reached on disk yet — <code>checker.go</code> is still Day 3's one-goroutine-per-link version. Today's lesson builds directly on top of the worker pool, so here's Day 9's completed answer key — paste it in as-is, confirm it's green, then move to Step 1.</p>
+<p><strong><code>checker.go</code></strong> (replace the whole file):</p>
+<pre><code><span class="kw">package</span> main
+
+<span class="kw">import</span> (
+    <span class="cm">"strings"</span>
+    <span class="cm">"sync"</span>
+    <span class="cm">"time"</span>
+
+    <span class="cm">"linkshort/link"</span>
+)
+
+<span class="kw">type</span> result <span class="kw">struct</span> {
+    code <span class="kw">string</span>
+    ok   <span class="kw">bool</span>
+}
+
+<span class="kw">func</span> checkOne(l link.Link) result {
+    time.Sleep(50 * time.Millisecond)
+    <span class="kw">return</span> result{code: l.Code, ok: strings.HasPrefix(l.URL, <span class="cm">"https://"</span>)}
+}
+
+<span class="kw">const</span> maxWorkers = 4
+
+<span class="kw">func</span> checkAll(links []link.Link, timeout time.Duration) <span class="kw">map</span>[<span class="kw">string</span>]<span class="kw">bool</span> {
+    jobs := make(<span class="kw">chan</span> link.Link)
+    results := make(<span class="kw">chan</span> result)
+
+    <span class="kw">var</span> wg sync.WaitGroup
+    <span class="kw">for</span> w := 0; w &lt; maxWorkers; w++ {
+        wg.Add(1)
+        <span class="kw">go func</span>() {
+            <span class="kw">defer</span> wg.Done()
+            <span class="kw">for</span> l := <span class="kw">range</span> jobs {
+                results &lt;- checkOne(l)
+            }
+        }()
+    }
+
+    <span class="kw">go func</span>() {
+        <span class="kw">for</span> _, l := <span class="kw">range</span> links {
+            jobs &lt;- l
+        }
+        <span class="kw">close</span>(jobs)
+    }()
+
+    <span class="kw">go func</span>() {
+        wg.Wait()
+        <span class="kw">close</span>(results)
+    }()
+
+    out := make(<span class="kw">map</span>[<span class="kw">string</span>]<span class="kw">bool</span>, len(links))
+    deadline := time.After(timeout)
+    <span class="kw">for</span> {
+        <span class="kw">select</span> {
+        <span class="kw">case</span> r, open := &lt;-results:
+            <span class="kw">if</span> !open {
+                <span class="kw">return</span> out
+            }
+            out[r.code] = r.ok
+        <span class="kw">case</span> &lt;-deadline:
+            <span class="kw">return</span> out
+        }
+    }
+}</code></pre>
+<p><strong>Add to <code>checker_test.go</code></strong> (the timing proof that the pool is really bounded):</p>
+<pre><code><span class="kw">func</span> TestCheckAllBoundsConcurrency(t *testing.T) {
+    links := make([]link.Link, 20)
+    <span class="kw">for</span> i := <span class="kw">range</span> links {
+        links[i] = link.Link{Code: fmt.Sprintf(<span class="cm">"l%d"</span>, i), URL: <span class="cm">"https://x.dev"</span>}
+    }
+    start := time.Now()
+    got := checkAll(links, 2*time.Second)
+    elapsed := time.Since(start)
+    <span class="kw">if</span> len(got) != 20 {
+        t.Fatalf(<span class="cm">"checked %d, want 20"</span>, len(got))
+    }
+    <span class="kw">if</span> elapsed &lt; 200*time.Millisecond {
+        t.Fatalf(<span class="cm">"elapsed %v looks unbounded, not worker-pooled"</span>, elapsed)
+    }
+}</code></pre>
+<pre><code>go vet ./...          <span class="cm"># silent</span>
+go test -race ./...   <span class="cm"># green, both checker tests included</span></code></pre>
+
+<h2>1 · What Day 4 promised, and yesterday didn't keep</h2>
+<p>Day 4 taught <code>context.Context</code> as one cancellation signal, composable across a whole call chain: any caller — an HTTP middleware, a test, another goroutine — sets a <dfn data-en="The specific point in time a context is cancelled at. context.WithTimeout(ctx, d) is shorthand for deadline = now + d." data-vn="giữ nguyên 'deadline' — mốc thời gian context bị hủy">deadline</dfn>, and everything downstream checking <code>ctx.Done()</code> obeys it without knowing who set it. Yesterday's <code>checkAll</code> quietly stepped backward from that: <code>timeout time.Duration</code> is a value only <code>checkAll</code> itself can turn into a deadline, with its own private <code>time.After</code>. A caller can't share an existing deadline with it, can't cancel it early for any other reason ("the HTTP client hung up," "a parent operation failed"), and — Section 5's own admission — can't make the workers actually <em>stop</em>, only make <code>checkAll</code> stop waiting for them.</p>
+<p>Today <code>checkAll</code> takes a <code>ctx context.Context</code> instead, the same parameter shape every <code>Store</code> method has had since Day 1.</p>
+
+<h2>2 · Threading <code>ctx</code> through a pipeline, not just one call</h2>
+<p>Day 4's uses of <code>ctx</code> were all a single <code>select</code> guarding one blocking op. A worker pool has <em>several</em> — the feeder's send into <code>jobs</code>, each worker's send into <code>results</code> — and every single one needs its own way out, or cancelling <code>ctx</code> only stops the ones you remembered.</p>
+<pre><code><span class="cm">// yesterday — only checkAll's own collecting loop knew about a deadline</span>
+<span class="kw">func</span> checkAll(links []link.Link, timeout time.Duration) <span class="kw">map</span>[<span class="kw">string</span>]<span class="kw">bool</span> { <span class="cm">/* ... */</span> }
+
+<span class="cm">// today — the SAME ctx a caller already has (an HTTP request, a test,</span>
+<span class="cm">// another cancelled operation) flows all the way to every goroutine</span>
+<span class="kw">func</span> checkAll(ctx context.Context, links []link.Link) <span class="kw">map</span>[<span class="kw">string</span>]<span class="kw">bool</span> { <span class="cm">/* ... */</span> }</code></pre>
+<p>The caller now owns the deadline: <code>ctx, cancel := context.WithTimeout(parent, time.Second)</code> before calling, exactly like Day 4's HTTP handlers. <code>checkAll</code> stops deciding "how long is too long" and starts just obeying whatever <code>ctx</code> it's handed — the composability Day 4 was actually about.</p>
+
+<h2>3 · <code>errgroup</code>: workers, cancellation and <code>Wait</code> in one type</h2>
+<p>Day 4 name-dropped <dfn data-en="golang.org/x/sync/errgroup: launch N goroutines with g.Go(func() error {...}), cancel every one of them (via a derived context) the moment any one returns a non-nil error, then g.Wait() blocks until all have returned and gives back the first error." data-vn="giữ nguyên 'errgroup'">errgroup</dfn> but never used it — linkshort stayed stdlib-only. Today it earns its spot: a worker pool is exactly "launch N goroutines, wait for all of them, care if any of them fails" — a plain <code>sync.WaitGroup</code> gives you the first two but nothing for the third or for cancellation.</p>
+<pre><code><span class="kw">import</span> <span class="cm">"golang.org/x/sync/errgroup"</span>
+
+g, ctx := errgroup.WithContext(ctx)   <span class="cm">// shadows the parameter on purpose — see below</span>
+
+<span class="kw">for</span> w := 0; w &lt; maxWorkers; w++ {
+    g.Go(<span class="kw">func</span>() <span class="kw">error</span> {
+        <span class="cm">// worker body — returns nil on normal exit, ctx.Err() if cancelled</span>
+        <span class="kw">return nil</span>
+    })
+}
+
+<span class="kw">if</span> err := g.Wait(); err != <span class="kw">nil</span> {
+    <span class="cm">// first error from any worker (here: usually context.Canceled)</span>
+}</code></pre>
+<p><code>errgroup.WithContext(ctx)</code> returns a <dfn data-en="A context created from a parent via context.WithCancel/WithTimeout/errgroup.WithContext — it inherits the parent's cancellation (parent Done means child Done too) and can add its own extra reason to cancel earlier." data-vn="giữ nguyên 'derived context' — context con tạo từ context cha, cha hủy thì con cũng hủy theo">derived context</dfn>: this new <code>ctx</code> closes its <code>Done()</code> the instant <em>either</em> the original <code>ctx</code> is cancelled (caller gave up) <em>or</em> any <code>g.Go</code> function returns a non-nil error (one worker failed, cancel the rest) — whichever comes first. None of today's workers can actually fail (<code>checkOne</code> has no error path), so the second trigger never fires in practice; what <code>errgroup</code> earns its keep for today is bundling "N goroutines + a shared derived ctx + a single blocking <code>Wait</code>" into one type instead of a <code>WaitGroup</code> plus hand-rolled cancellation plumbing. Re-assigning <code>ctx</code> to the derived one (<code>g, ctx := errgroup.WithContext(ctx)</code>) is deliberate and idiomatic: every line below should watch the <em>derived</em> signal, not the original.</p>
+
+<h2>4 · Closing the leak: a cancellation-aware select on every blocking op</h2>
+<p>Renaming the parameter isn't the fix by itself. <code>ctx</code> being cancelled does nothing on its own — a <code>chan send</code> or <code>chan receive</code> only reacts to a closed <code>Done()</code> if it's sitting in a <code>select</code> that's actually watching it. Miss one, and that goroutine blocks exactly as before.</p>
+<pre><code><span class="cm">// LEAK: if ctx is cancelled while no one reads results anymore,</span>
+<span class="cm">// this send blocks forever — the goroutine is never collected.</span>
+results &lt;- checkOne(l)
+
+<span class="cm">// FIXED: a cancellation-aware select — either the send completes,</span>
+<span class="cm">// or ctx.Done() wins and the goroutine returns instead.</span>
+<span class="kw">select</span> {
+<span class="kw">case</span> results &lt;- checkOne(l):
+<span class="kw">case</span> &lt;-ctx.Done():
+    <span class="kw">return</span> ctx.Err()
+}</code></pre>
+<p>That's the whole technique — a <dfn data-en="Wrapping every blocking channel operation (a send or a receive) in a select with a second case on ctx.Done(), so a cancelled context unblocks it immediately instead of leaving it stuck forever waiting for a partner that will never show up." data-vn="giữ nguyên — thêm nhánh ctx.Done() vào mọi select có thể bị block, để hủy là thoát ngay">cancellation-aware select</dfn> — applied to <em>every</em> place today's pipeline can block: each worker's receive from <code>jobs</code>, each worker's send into <code>results</code>, and the feeder's send into <code>jobs</code>. Three spots, same one-line pattern each time. Skip any one of them and Day 9's exact gap reopens there.</p>
+
+<h2>5 · Practice: cancel linkshort's health sweep the instant the caller gives up</h2>
+<p>In <code>~/learning/go/project/linkshort</code>, rewrite <code>checkAll</code> to take a <code>ctx</code>, use <code>errgroup</code>, and make cancellation actually stop in-flight work — not just stop waiting for it.</p>
+<p><strong>Step 1 — rewrite <code>checker.go</code>.</strong> Keep <code>result</code> and <code>checkOne</code> exactly as they are. Replace <code>checkAll</code>'s signature and body. TODO 1 is the worker loop (Section 4's pattern, applied to both the receive from <code>jobs</code> and the send into <code>results</code>); TODO 2 is the feeder (Section 4's pattern, applied to the send into <code>jobs</code>). The closer and the final collecting loop are given — same shape as yesterday, just watching <code>ctx.Done()</code> instead of a private <code>deadline</code>.</p>
+<pre><code><span class="kw">package</span> main
+
+<span class="kw">import</span> (
+    <span class="cm">"context"</span>
+    <span class="cm">"strings"</span>
+    <span class="cm">"time"</span>
+
+    <span class="cm">"linkshort/link"</span>
+
+    <span class="cm">"golang.org/x/sync/errgroup"</span>
+)
+
+<span class="kw">type</span> result <span class="kw">struct</span> {
+    code <span class="kw">string</span>
+    ok   <span class="kw">bool</span>
+}
+
+<span class="kw">func</span> checkOne(l link.Link) result {
+    time.Sleep(50 * time.Millisecond)
+    <span class="kw">return</span> result{code: l.Code, ok: strings.HasPrefix(l.URL, <span class="cm">"https://"</span>)}
+}
+
+<span class="kw">const</span> maxWorkers = 4
+
+<span class="kw">func</span> checkAll(ctx context.Context, links []link.Link) <span class="kw">map</span>[<span class="kw">string</span>]<span class="kw">bool</span> {
+    jobs := make(<span class="kw">chan</span> link.Link)
+    results := make(<span class="kw">chan</span> result)
+
+    g, ctx := errgroup.WithContext(ctx)
+    <span class="kw">for</span> w := 0; w &lt; maxWorkers; w++ {
+        <span class="cm">// TODO 1: g.Go(func() error { ... }) — loop forever, select on:</span>
+        <span class="cm">//   receive `l, open := &lt;-jobs`: if !open, return nil; else send</span>
+        <span class="cm">//     checkOne(l) into results — itself a select against ctx.Done()</span>
+        <span class="cm">//   receive from ctx.Done(): return ctx.Err()</span>
+        <span class="cm">//   (Section 4 has both selects almost verbatim.)</span>
+    }
+
+    <span class="kw">go func</span>() {
+        <span class="cm">// TODO 2: feeder — defer close(jobs), then for _, l := range links,</span>
+        <span class="cm">//   select { case jobs &lt;- l: / case &lt;-ctx.Done(): return }</span>
+    }()
+
+    <span class="kw">go func</span>() {              <span class="cm">// GIVEN — the closer, same shape as Day 9</span>
+        g.Wait()
+        <span class="kw">close</span>(results)
+    }()
+
+    out := make(<span class="kw">map</span>[<span class="kw">string</span>]<span class="kw">bool</span>, len(links))   <span class="cm">// GIVEN — collecting loop, ctx.Done() replaces deadline</span>
+    <span class="kw">for</span> {
+        <span class="kw">select</span> {
+        <span class="kw">case</span> r, open := &lt;-results:
+            <span class="kw">if</span> !open {
+                <span class="kw">return</span> out
+            }
+            out[r.code] = r.ok
+        <span class="kw">case</span> &lt;-ctx.Done():
+            <span class="kw">return</span> out
+        }
+    }
+}</code></pre>
+<p><strong>Step 2 — update the two Day 9 tests and <code>main.go</code>'s call site</strong> for the new signature (deadlines are now the caller's job):</p>
+<pre><code><span class="kw">func</span> TestCheckAllChecksEveryLink(t *testing.T) {
+    links := []link.Link{ <span class="cm">/* ...same three links... */</span> }
+    got := checkAll(context.Background(), links)   <span class="cm">// was: checkAll(links, time.Second)</span>
+    <span class="cm">// ...same assertions...</span>
+}
+
+<span class="kw">func</span> TestCheckAllTimesOut(t *testing.T) {
+    ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
+    <span class="kw">defer</span> cancel()
+    links := []link.Link{ <span class="cm">/* ...same two links... */</span> }
+    got := checkAll(ctx, links)   <span class="cm">// was: checkAll(links, time.Millisecond)</span>
+    <span class="cm">// ...same assertion...</span>
+}</code></pre>
+<p>In <code>main.go</code>, wrap the health sweep in its own timeout the same way Day 4's handlers did:</p>
+<pre><code>checkCtx, cancel := context.WithTimeout(ctx, time.Second)
+<span class="kw">defer</span> cancel()
+health := checkAll(checkCtx, []link.Link{ <span class="cm">/* ...same three links... */</span> })</code></pre>
+<p><strong>Step 3 — prove cancellation is real, not just "stops waiting."</strong> Add a test where <code>ctx</code> is cancelled while checks are still in flight, and assert <code>checkAll</code> returns <em>close to the cancel time</em>, not close to how long the full sweep would've taken:</p>
+<pre><code><span class="kw">func</span> TestCheckAllCancelledContextReturnsPromptly(t *testing.T) {
+    links := make([]link.Link, 20)   <span class="cm">// 20 links / 4 workers = ~250ms if left to finish</span>
+    <span class="kw">for</span> i := <span class="kw">range</span> links {
+        links[i] = link.Link{Code: fmt.Sprintf(<span class="cm">"l%d"</span>, i), URL: <span class="cm">"https://x.dev"</span>}
+    }
+    ctx, cancel := context.WithCancel(context.Background())
+    <span class="kw">go func</span>() {
+        time.Sleep(20 * time.Millisecond)   <span class="cm">// cancel well before the sweep would finish</span>
+        cancel()
+    }()
+    start := time.Now()
+    got := checkAll(ctx, links)
+    elapsed := time.Since(start)
+    <span class="kw">if</span> elapsed &gt; 100*time.Millisecond {
+        t.Fatalf(<span class="cm">"elapsed %v — checkAll kept running after ctx was cancelled"</span>, elapsed)
+    }
+    <span class="kw">if</span> len(got) == 20 {
+        t.Fatal(<span class="cm">"expected a partial map from the cancelled sweep, got all 20"</span>)
+    }
+}</code></pre>
+<pre><code>go mod tidy            <span class="cm"># promotes golang.org/x/sync from indirect — it's now imported directly</span>
+go vet ./...            <span class="cm"># silent</span>
+go test -race ./...     <span class="cm"># green, including the new cancellation test at ~20ms, not ~250ms</span></code></pre>
+<div class="callout"><strong>Done when:</strong> <code>go vet ./...</code> silent · <code>go test -race ./...</code> green, all four <code>checkAll</code> tests passing · <code>TestCheckAllCancelledContextReturnsPromptly</code> finishes in tens of milliseconds, not hundreds · you can explain out loud which three lines are the ones that actually stop the workers, versus which ones just stop <code>checkAll</code> from waiting on them.</div>
+
+<h2>Check yourself</h2>
+<div class="quiz">
+  <div class="q" data-why="errgroup.WithContext derives a child context that closes its Done() the moment EITHER the parent ctx is cancelled OR any g.Go function returns a non-nil error — whichever happens first.">
+    <p class="stem"><code>errgroup.WithContext(ctx)</code>'s returned context is cancelled when…</p>
+    <button class="opt" data-ok>parent cancelled or worker errors</button>
+    <button class="opt">only when every worker finishes</button>
+    <button class="opt">only when the parent cancels</button>
+  </div>
+  <div class="q" data-why="A bare channel send/receive only reacts to ctx.Done() if it's inside a select that's also watching Done() — cancelling ctx elsewhere does nothing to a goroutine blocked on a plain, unguarded channel op.">
+    <p class="stem">Why does <code>results &lt;- checkOne(l)</code> alone (no <code>select</code>) ignore a cancelled <code>ctx</code>?</p>
+    <button class="opt" data-ok>nothing there watches Done</button>
+    <button class="opt">sends always ignore cancellation</button>
+    <button class="opt">checkOne blocks ctx internally</button>
+  </div>
+  <div class="q" data-why="Today's checkAll takes a caller-supplied ctx; the caller decides the deadline via context.WithTimeout before calling, same composable pattern as Day 4's HTTP handlers. checkAll no longer owns 'how long is too long.'">
+    <p class="stem">After today's change, who decides how long <code>checkAll</code> is allowed to run?</p>
+    <button class="opt" data-ok>the caller, via its ctx</button>
+    <button class="opt"><code>checkAll</code>, via a fixed constant</button>
+    <button class="opt">each worker, its own way</button>
+  </div>
+  <div class="q" data-why="Only a fixed cap on how many links check at once (yesterday's fix) bounds concurrency; only obeying a shared deadline everywhere it can block (today's fix) makes cancellation actually stop the work instead of merely stop waiting on it. Different problems, both needed.">
+    <p class="stem">What does today's fix add that yesterday's worker pool alone did NOT give you?</p>
+    <button class="opt" data-ok>cancellation that truly stops workers</button>
+    <button class="opt">a cap on concurrent checks</button>
+    <button class="opt">a way to close jobs</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://go.dev/blog/context">Go Blog — Context</a> — re-read it today with a pipeline in mind instead of one request; the "propagate ctx everywhere, check Done() everywhere it can block" rule is exactly what Sections 2 and 4 built. For <code>errgroup</code> itself, <a href="https://pkg.go.dev/golang.org/x/sync/errgroup">pkg.go.dev/golang.org/x/sync/errgroup</a> is short enough to read end to end in a few minutes.</p>
+<p>New terms are in the <a href="../reference/glossary.html#day10">glossary — Day 10 section</a>.</p>
+
+<p class="next">Tomorrow: <strong>debugging concurrency</strong> — goroutine leaks, deadlocks, the race detector as a reflex, and the classic bug patterns (send on closed channel, closing twice, forgotten <code>Done</code>). Today's cancellation-aware selects are the fix; tomorrow is the muscle for spotting when one's missing.<br><br>
+💬 A <code>select</code> case not firing when you expect, or <code>errgroup</code> behaving oddly? Paste the code — hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/quiz.js"></script>
+<script src="../assets/gloss.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

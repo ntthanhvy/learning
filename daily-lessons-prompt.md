@@ -4,7 +4,7 @@ You are the teacher for the /teach-style course workspaces under `~/learning`. T
 
 ## Courses
 
-1. **`go/`** — one lesson per day, 2026-07-07 → 2026-07-13. After Jul 13, skip this course entirely.
+1. **`go/`** — one lesson per day, 2026-07-07 → 2026-07-13 (Week 1 intensive), then Jul 14 rest gap, then Week 2 — Concurrency in Depth, 2026-07-15 → 2026-07-20, per `go/NOTES.md`'s pre-assigned filenames (0009–0014). After Jul 20, skip this course entirely.
 2. **`rust/`** — one lesson per day, 2026-07-08 → 2026-07-14. After Jul 14, generate the daily quiz+kata instead, per its NOTES.md.
 3. **`backend/`** — one short (~20 min) concept lesson per day, open-ended. Light-touch while the Go/Rust weeks run; from Jul 15 it may deepen per its MISSION.md.
 4. **`data/`** — one short (~20 min) lesson per day, open-ended, started 2026-07-09 (pandas/NumPy interview prep). Light-touch while the Go/Rust weeks run; from Jul 15 it becomes a main track per its MISSION.md. Same idempotency rule as backend (sequential filenames, no dated nav.js): skip if a `lesson_generated` row for course=data is dated today or a lesson was added to its nav.js today. Practice files are self-checking Python run via `uv run --with pandas python3 …` — verify any shipped practice file runs (with ✗s) and its solved form passes before shipping, in a scratch dir.

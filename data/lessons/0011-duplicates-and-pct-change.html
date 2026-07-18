@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 11 · Duplicates &amp; pct_change</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 11 · ~20 min · 19 Jul 2026</p>
+<h1>Timed drills, round three: duplicates &amp; pct_change</h1>
+<p class="byline">Lesson 10 closed with the next fresh-pattern round already named: <code>duplicated</code>/<code>drop_duplicates</code>, and <code>pct_change</code>. No drill-outcome signal has come back to redirect this, so today ships exactly that — two patterns that haven't had their own moment yet, on a realistic "double-submitted export" scenario plus the familiar order fixtures. Budget ~5 minutes each.</p>
+
+<h2>1 · Finding exact repeats: <code>duplicated()</code></h2>
+<p>SQL answers "are there repeat rows" with <code>GROUP BY ... HAVING COUNT(*) &gt; 1</code>, or a window trick with <code>ROW_NUMBER()</code>. pandas has a direct, row-level equivalent: <dfn data-en="a Series method returning a True/False flag per row, True where that row's full set of column values (or a chosen subset) has already appeared earlier in the DataFrame" data-vn="giữ nguyên 'duplicated()' — đánh dấu True cho các hàng lặp lại">duplicated()</dfn>, which flags each row True the moment an identical row has already appeared above it:</p>
+<pre><code>is_dupe = raw_export.duplicated()
+<span class="cm"># False, False, True, False, True — the 1st occurrence of each row stays False,</span>
+<span class="cm"># repeats after it flip True. Same idea as a running "have I seen this before?" check.</span></code></pre>
+<p>The default keeps the <em>first</em> occurrence unflagged (<code>keep="first"</code>). <code>keep=False</code> flips <em>every</em> copy to True, including the first — useful when the question is "show me every row involved in a duplicate," not just "which ones are extras." Passing a column list, e.g. <code>duplicated(subset=["customer"])</code>, narrows what "identical" means, exactly like grouping by a subset of columns instead of the whole row.</p>
+
+<h2>2 · Removing them: <code>drop_duplicates()</code></h2>
+<p>Once rows are flagged, dropping them is one call — the twin of <code>duplicated()</code>, same <code>keep</code>/<code>subset</code> keywords, but returning the cleaned DataFrame directly instead of a boolean mask:</p>
+<pre><code>deduped = raw_export.drop_duplicates()
+<span class="cm"># equivalent to raw_export[~raw_export.duplicated()] — drop_duplicates() is just</span>
+<span class="cm"># the named shortcut for "keep everything duplicated() marked False"</span></code></pre>
+<p>SQL's nearest cousin is <code>SELECT DISTINCT</code> (whole-row) or a dedupe-by-key pattern using <code>ROW_NUMBER() OVER (PARTITION BY key ORDER BY ...) = 1</code>. That <code>ORDER BY</code> matters in both worlds: if "duplicate" really means "same customer, keep the most recent," sort first, then <code>drop_duplicates(subset=["customer"], keep="last")</code> — reaching for the plain default silently keeps whichever copy happened to load first, which is rarely the intent.</p>
+
+<h2>3 · Change from the previous row: <code>pct_change()</code></h2>
+<p>Lesson 7's <code>cumsum()</code> answered "running total so far." A different, equally common interview question is "how much did this grow compared to last time" — order-over-order, month-over-month. <dfn data-en="a Series method computing the fractional change between each row and the row immediately before it (in current order), NaN on the first row of each group since there is no prior value to compare against" data-vn="giữ nguyên 'pct_change()' — % thay đổi so với dòng ngay trước">pct_change()</dfn> is built exactly for that, and — like <code>rank()</code> and <code>cumsum()</code> — becomes per-group the instant it's chained after <code>groupby()</code>:</p>
+<pre><code>ordered = clean.sort_values([<span class="kw">"customer"</span>, <span class="kw">"order_date"</span>])
+ordered[<span class="kw">"amount_pct_change"</span>] = ordered.groupby(<span class="kw">"customer"</span>)[<span class="kw">"amount"</span>].pct_change()
+<span class="cm"># An: 120.0 -> 42.0  is -0.65   (a 65% drop)</span>
+<span class="cm"># Binh: 35.5 -> 180.0 is  4.07  (a 407% increase, i.e. ~5.07x)</span>
+<span class="cm"># first order per customer has nothing before it -> NaN, same reasoning as</span>
+<span class="cm"># Lesson 3's NaN-not-zero for "value genuinely doesn't exist yet"</span></code></pre>
+<p>Two things trip people up under time pressure. First, <code>pct_change()</code> trusts row order the same way <code>cumsum()</code> does — no <code>ORDER BY</code> argument of its own, so <code>sort_values()</code> first or the numbers are meaningless. Second, it returns a <em>fraction</em>, not a percentage — multiply by 100 (or format as a percent) before showing it to anyone; SQL has no single built-in for this at all, it's normally hand-written as <code>(curr - LAG(curr) OVER (...)) / LAG(curr) OVER (...)</code>, which is exactly what <code>pct_change()</code> is doing under the hood.</p>
+
+<div class="interview">
+<p><strong>Q: "This CSV export has some duplicate rows from a retry — walk me through cleaning it, and separately, how would you flag which customers grew fastest order-over-order?"</strong> A strong answer, out loud: <em>"Two different tools. For the duplicates, I'd check <code>duplicated()</code> first to see how many and which ones before blindly dropping — if 'duplicate' means the whole row, plain <code>drop_duplicates()</code> is fine, but if it really means 'same customer, same day, keep the latest,' I'd sort by timestamp first and pass <code>subset</code> and <code>keep='last'</code> so I'm not keeping an arbitrary copy. For order-over-order growth, that's <code>sort_values</code> by date within customer, then <code>groupby('customer')['amount'].pct_change()</code> — same per-group idea as rank() and cumsum() from earlier, just answering 'change since last' instead of 'position' or 'running total.' Each customer's very first order comes back NaN, which is correct — there's nothing before it to compare to, not a zero-percent change."</em> The subtext: naming <em>why</em> a default (<code>keep="first"</code>, no sort) might be wrong for the specific question is what separates "knows the method" from "knows when to trust the default."</p>
+</div>
+
+<h2>Try it — self-checking practice (~15 min, 3 drills)</h2>
+<p>Open <code>practice/11_duplicates_and_pct_change.py</code>, replace each <code>...</code>, and re-run until all checks print ✓. Try each drill cold before reading its section above again:</p>
+<pre><code>cd ~/learning/data
+uv run --with pandas python3 practice/11_duplicates_and_pct_change.py</code></pre>
+<p>Drills 1–2 use a small inline "double-submitted export" DataFrame (built in the practice file, not a new CSV); Drill 3 returns to the familiar <code>orders_raw.csv</code> fixture from Lesson 5 onward.</p>
+
+<h2>Check yourself</h2>
+<div class="quiz">
+  <div class="q" data-why="duplicated() defaults to keep='first' — the first occurrence of a repeated row stays False, and only the later copies of it flip to True.">
+    <p class="stem">By default, which occurrence of a repeated row does <code>duplicated()</code> mark False?</p>
+    <button class="opt" data-ok>The first occurrence encountered</button>
+    <button class="opt">The last occurrence encountered</button>
+    <button class="opt">Every occurrence is marked False</button>
+  </div>
+  <div class="q" data-why="keep=False flips ALL copies of a duplicated row to True, including the first one — useful when you want to see every row involved in a duplicate, not just the extras.">
+    <p class="stem">What does <code>duplicated(keep=False)</code> change, versus the default?</p>
+    <button class="opt" data-ok>It flags every copy, including the first, as True</button>
+    <button class="opt">It stops checking for duplicates entirely</button>
+    <button class="opt">It only checks the first column</button>
+  </div>
+  <div class="q" data-why="pct_change() has no ORDER BY argument of its own — like cumsum(), it computes strictly against whatever order the rows are currently in, so sort_values() must come first or the result is meaningless.">
+    <p class="stem">Why must you <code>sort_values()</code> before calling <code>groupby(...).pct_change()</code>?</p>
+    <button class="opt" data-ok>pct_change trusts current row order, with no sort of its own</button>
+    <button class="opt">sort_values is required to avoid an error being raised</button>
+    <button class="opt">pct_change only works on already-sorted columns</button>
+  </div>
+  <div class="q" data-why="Each group's first row has no prior row to compare against, so pct_change() correctly returns NaN there — the same 'genuinely does not exist yet' reasoning as Lesson 3's NaN-not-zero rule, not a coding bug.">
+    <p class="stem">Why is a customer's first order's <code>pct_change</code> value <code>NaN</code>, not <code>0</code>?</p>
+    <button class="opt" data-ok>There is no earlier order to compare it against</button>
+    <button class="opt">pandas cannot compute percentages for the number zero</button>
+    <button class="opt">The first row of any DataFrame is always NaN</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the <a href="https://leetcode.com/studyplan/introduction-to-pandas/">LeetCode "Introduction to Pandas" study plan</a> (~10 problems, auto-graded) — this course's standing practice resource, same as Lessons 9–10. <a href="https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.drop_duplicates.html">pandas docs — drop_duplicates</a> and <a href="https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.pct_change.html">pandas docs — pct_change</a> are the authoritative references for the keyword arguments today only skimmed.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a>.<br>
+<strong>Next lesson:</strong> still open — whichever pattern from Lessons 9–11 comes back reported as shakiest gets a focused review round; otherwise, one more fresh pattern (e.g. <code>apply()</code> with a custom function, or <code>cut()</code>/binning) keeps the drill library growing.<br><br>
+💬 Anything unclear — duplicated vs drop_duplicates, the keep= keyword, or pct_change vs cumsum? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -30,6 +30,8 @@
       file: "lessons/0011-rate-limiting-and-backpressure.html" },
     { n: 12, date: "2026-07-18", title: "Authorization: what are you allowed to do?",
       file: "lessons/0012-authorization-what-are-you-allowed-to-do.html" },
+    { n: 13, date: "2026-07-19", title: "Logging & monitoring: how you find out something's wrong",
+      file: "lessons/0013-logging-and-monitoring.html" },
   ];
 
   const REFS = [

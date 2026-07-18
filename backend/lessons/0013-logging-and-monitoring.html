@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 13 · Logging &amp; Monitoring</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 13 · ~20 min</p>
+<h1>Logging &amp; monitoring: how you find out something's wrong</h1>
+<p class="byline">Lesson 12 closed on this teaser. Lesson 7 already introduced two pieces — the correlation ID and structured logs — but only as the escape hatch for a single 500 response. Today zooms out: what a backend logs continuously, in production, all day, and how anyone (not just the request that just failed) notices trouble before a user reports it.</p>
+
+<h2>1 · console.log doesn't survive the frontend/backend jump</h2>
+<p>The frontend habit is <code>console.log</code> and a browser tab you're already looking at. That instinct breaks completely on a server: nobody is watching the terminal of a production process at 3am, the process might be one of many instances (Lesson 8), and by the time a user complains the moment you'd want to inspect is long gone. A backend's logs are not a debugging convenience you glance at — they're the only record of what happened, so they have to be written continuously, to somewhere durable, whether or not anyone is looking that second.</p>
+
+<h2>2 · Log levels: not every line deserves the same attention</h2>
+<p>Lesson 7's <code>request_id</code>-keyed logs answered "what happened during this one failed request." A running server produces log lines constantly, most of them boring, so every line is tagged with a <dfn data-en="a label on each log line (debug, info, warn, error) ranking how urgent or noteworthy it is, so tooling and humans can filter millions of lines down to the ones that matter right now" data-vn="log level (giữ nguyên) — nhãn độ khẩn cấp trên mỗi dòng log">log level</dfn> so the ones that matter don't drown in the ones that don't:</p>
+<ul>
+<li><strong>DEBUG</strong> — fine-grained detail, off by default in production, turned on only while actively chasing a specific bug.</li>
+<li><strong>INFO</strong> — routine, expected events: a request came in, a job finished, a user signed up. Normal operation, worth keeping, never urgent.</li>
+<li><strong>WARN</strong> — something unexpected but recovered from automatically: a retry succeeded on the third attempt, a cache miss fell back to the DB.</li>
+<li><strong>ERROR</strong> — something failed and did <em>not</em> recover: the exact class of thing Lesson 7's 500 handler logs. Someone should be able to see this without reading everything else.</li>
+</ul>
+<p>The level is what lets a dashboard show "only ERROR, last hour" instead of an undifferentiated firehose — the same reason a JS framework separates <code>console.log</code> from <code>console.error</code>, just load-bearing here instead of cosmetic.</p>
+
+<h2>3 · Structured logs, machine-readable by design</h2>
+<p>Lesson 7 introduced <dfn data-en="logging as structured key-value data (often JSON) instead of free-text sentences, so fields like request_id, user_id, or error can be filtered and searched precisely across millions of log lines" data-vn="giữ nguyên 'structured logging' — log dạng key-value/JSON, lọc/tìm chính xác theo field">structured logging</dfn> for one failure; it's the default for every line, not a special case:</p>
+<pre><code>logger.Info(<span class="kw">"charge attempt started"</span>,
+    <span class="kw">"request_id"</span>, requestID,
+    <span class="kw">"user_id"</span>, userID,
+    <span class="kw">"amount_cents"</span>, 4200,
+)
+<span class="cm">// → {"level":"INFO","msg":"charge attempt started","request_id":"req_8f3a","user_id":"user_123","amount_cents":4200}</span></code></pre>
+<p>A free-text sentence like <code>"charging user_123 $42.00"</code> is fine for a human eyeballing a terminal and useless for a query. The JSON version answers "show me every ERROR for user_123 in the last hour" as a precise field filter — a real query — instead of a hopeful regex over sentences that might quietly change wording next release. Go's standard library has shipped exactly this since 1.21, under <code>log/slog</code>:</p>
+<pre><code><span class="kw">var</span> logger = slog.New(slog.NewJSONHandler(os.Stdout, <span class="kw">nil</span>))
+
+<span class="kw">func</span> chargeCardHandler(w http.ResponseWriter, r *http.Request) {
+    requestID := r.Header.Get(<span class="kw">"X-Request-ID"</span>)
+    userID := <span class="kw">"user_123"</span> <span class="cm">// pulled from auth middleware (Lesson 4)</span>
+
+    logger.Info(<span class="kw">"charge attempt started"</span>,
+        <span class="kw">"request_id"</span>, requestID, <span class="kw">"user_id"</span>, userID, <span class="kw">"amount_cents"</span>, 4200)
+
+    <span class="kw">if</span> err := chargeCard(r.Context(), userID, 4200); err != <span class="kw">nil</span> {
+        logger.Error(<span class="kw">"charge failed"</span>,
+            <span class="kw">"request_id"</span>, requestID, <span class="kw">"user_id"</span>, userID, <span class="kw">"error"</span>, err.Error())
+        http.Error(w, <span class="kw">"payment failed"</span>, http.StatusPaymentRequired)
+        <span class="kw">return</span>
+    }
+    w.WriteHeader(http.StatusOK)
+}</code></pre>
+<p>Every line still carries the same <code>request_id</code> Lesson 7 keyed a single error by — that's not a coincidence. Structured logging and correlation IDs are the same idea applied everywhere at once: put a stable, filterable field on every line, all the time, not just the one line written when something already broke.</p>
+
+<div class="callout"><strong>What never goes in, even structured:</strong> Lesson 7's information-disclosure rule about response bodies applies just as hard to logs — passwords, full card numbers, session tokens, and raw auth headers should never be logged at all, structured or not. A log line is a durable, searchable, often widely-readable record; putting a secret in one doesn't leak it to an attacker on the wire, but it does leak it to everyone with log access, forever, including anyone who breaches the logging system itself later.</div>
+
+<h2>4 · Logs answer "what happened"; monitoring answers "is it happening now"</h2>
+<p>Logs are a record you search <em>after</em> you already suspect something's wrong — reactive, one event at a time. <dfn data-en="continuously watching a small set of numeric measurements about a running system — request rate, error rate, latency, queue depth — so trouble is visible from a trend or threshold before anyone reads a single log line" data-vn="monitoring (giữ nguyên) — theo dõi liên tục các chỉ số hệ thống">Monitoring</dfn> is the proactive half: a small set of numbers, tracked continuously, that make a trend visible before a customer files a ticket. The engineering term for one such number is a <dfn data-en="a single numeric time series a system emits continuously — request count, error rate, p99 latency, queue depth — designed to be graphed and alerted on, unlike a log line which describes one discrete event" data-vn="metric (giữ nguyên) — một con số được đo liên tục theo thời gian">metric</dfn>: not a discrete event like a log line, but a number sampled repeatedly and graphed — request rate, error rate, p99 latency, how many jobs are sitting in Lesson 10's queue right now.</p>
+<p>The two are complementary, not competing: a metric graph shows error rate spiking at 14:02 — that's the signal something's wrong and roughly when. The logs, filtered to ERROR around 14:02, show <em>which</em> requests and why. Monitoring finds the needle's haystack; logs are what you search once you know which haystack to search.</p>
+
+<h2>5 · Health checks: a metric an orchestrator asks for directly</h2>
+<p>One specific, very common check deserves its own shape: an HTTP endpoint whose only job is answering "are you okay?" — polled automatically, often every few seconds, by whatever manages your instances (Lesson 8's load balancer, or a container orchestrator). It's worth splitting into two genuinely different questions:</p>
+<pre><code><span class="cm">// liveness: is this PROCESS alive at all? No dependency checks —</span>
+<span class="cm">// if this ever fails to respond, the orchestrator kills and restarts it.</span>
+<span class="kw">func</span> (h *Health) livenessHandler(w http.ResponseWriter, r *http.Request) {
+    w.WriteHeader(http.StatusOK)
+}
+
+<span class="cm">// readiness: can this INSTANCE actually serve a real request right now?</span>
+<span class="kw">func</span> (h *Health) readinessHandler(w http.ResponseWriter, r *http.Request) {
+    ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+    <span class="kw">defer</span> cancel()
+    <span class="kw">if</span> err := h.db.Ping(ctx); err != <span class="kw">nil</span> {
+        w.WriteHeader(http.StatusServiceUnavailable) <span class="cm">// tell the LB: skip me for now</span>
+        <span class="kw">return</span>
+    }
+    w.WriteHeader(http.StatusOK)
+}</code></pre>
+<p>Conflating them is a common mistake: if liveness checked the database too, one slow Postgres connection would make the orchestrator kill and restart a perfectly healthy process, over and over, solving nothing. <dfn data-en="an endpoint answering only whether the process itself is alive and should keep running — no dependency checks, since a dependency being down is not a reason to kill and restart the process" data-vn="liveness check — process còn sống không, không check dependency">Liveness</dfn> is about the process; <dfn data-en="an endpoint answering whether this specific instance can currently serve real traffic, by checking the dependencies a real request would need — used by a load balancer to temporarily stop routing to an unready instance without restarting it" data-vn="readiness check — instance này serve request được chưa">readiness</dfn> is about this instance's dependencies right now, and it's the load balancer's job to route around a not-ready instance temporarily, not restart it.</p>
+
+<div class="interview">
+<p><strong>Q: "How would you know a production service is unhealthy before a customer tells you?"</strong> A strong answer, out loud: <em>"Two separate layers. Metrics — request rate, error rate, p99 latency — get graphed continuously and alert on thresholds, so a spike shows up as a trend within seconds, not when someone files a ticket. Every request also writes structured logs with a request ID and a level, so once an alert fires I can filter straight to ERROR-level lines around that timestamp instead of reading everything. And the service exposes separate liveness and readiness endpoints, so the orchestrator only restarts a process that's actually dead, and only stops routing to one that's temporarily not ready — like its DB connection being down — rather than treating those as the same failure."</em> The signal: distinguishing "detect a trend" (monitoring/metrics) from "explain one event" (logs), and not conflating liveness with readiness.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Log levels rank urgency so tooling and humans can filter — ERROR surfaces real failures without drowning in routine INFO lines describing normal operation.">
+    <p class="stem">Why do log lines carry a level like INFO, WARN, or ERROR?</p>
+    <button class="opt" data-ok>To filter urgent lines from routine ones</button>
+    <button class="opt">To make each log line take less space</button>
+    <button class="opt">To make the Go compiler accept it</button>
+  </div>
+  <div class="q" data-why="Structured (key-value/JSON) logs turn a search into a precise field filter, e.g. user_id=123 AND level=ERROR, instead of a fragile text match against sentences that can change wording between releases.">
+    <p class="stem">What does structured (JSON) logging give you over free-text log lines?</p>
+    <button class="opt" data-ok>Precise, filterable fields instead of fuzzy text</button>
+    <button class="opt">Automatically faster database queries, every single time</button>
+    <button class="opt">Log files that never need storage space</button>
+  </div>
+  <div class="q" data-why="A metric is a continuously sampled number designed to be graphed and alerted on, making a trend visible proactively; a log line records one discrete event, read reactively after trouble is already suspected.">
+    <p class="stem">How does a metric differ from a log line?</p>
+    <button class="opt" data-ok>A metric is a graphed number, not one event</button>
+    <button class="opt">A metric is only ever written during an error</button>
+    <button class="opt">A metric and a log line are the same thing</button>
+  </div>
+  <div class="q" data-why="Liveness asks only whether the process itself is alive, with no dependency checks, since a dependency outage is never a reason to kill and restart an otherwise-healthy process; readiness checks dependencies and only pauses routing.">
+    <p class="stem">Why should a liveness check avoid pinging the database?</p>
+    <button class="opt" data-ok>A DB outage would wrongly restart a process</button>
+    <button class="opt">Databases cannot ever be reached from health checks</button>
+    <button class="opt">Liveness checks are not allowed to use HTTP</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the Twelve-Factor App's <a href="https://12factor.net/logs">Logs</a> factor (~5 min) — treat logs as an event stream, never manage log files yourself. For the level/metric split in more depth, Google's <a href="https://sre.google/sre-book/monitoring-distributed-systems/">SRE Book — Monitoring Distributed Systems</a> (skim the "Four Golden Signals" section, ~10 min) is the standing reference this lesson compresses.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> putting the runtime and security tracks together — what actually goes in a PR review for backend code, and what a substantive review comment looks like versus a style nit.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

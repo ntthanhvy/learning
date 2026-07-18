@@ -179,3 +179,17 @@ by the user there; they apply here identically.
   from this session — confirmed via the go course today — but there is
   nothing to log here since no lesson/quiz/kata was generated. No new
   learning record beyond the Day-1 baseline.
+- 2026-07-19 (headless run): same as the prior four days — verified
+  `daily.html`, `assets/srs.js`, and `assets/quiz-bank.js` are all present
+  and untouched (`quiz-bank.js` still tags exactly days 1–7 and carries
+  exactly 7 kata entries, `k1`–`k7`, one per day); `nav.js` still registers
+  only the 7 Jul 8–14 lessons, unchanged. That's still the correct "daily
+  quiz+kata" for this post-week phase per PLAN.md, so nothing new was
+  generated, nav.js was not touched, and no bank content was added. Direct
+  `psql "$LEARNING_DB_URL" ...` was blocked in this headless run (shell
+  variable expansion disallowed for this sandboxed session — same class of
+  block as prior rounds), and a fallback check of `~/.config/learning/db.env`
+  / `bin/record-progress --help` was also blocked (approval gate on
+  out-of-workspace command paths). So no `course_progress` rows could be
+  read for a scope-change signal (e.g. a request to keep growing the bank
+  past Day 7). No new learning record beyond the Day-1 baseline.

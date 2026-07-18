@@ -110,3 +110,36 @@
   the toolchain and network access for `go mod tidy`/module downloads were both
   available this round. `bin/record-progress` worked; `lesson_generated` for Day 10
   is recorded.
+- 2026-07-19 (Day 11 generation): generated `0012-debugging-concurrency.html`
+  (pre-assigned to Jul 18, one day late — the Jul 18 session deliberately deferred
+  it to "tomorrow" per its own note rather than jump ahead; today filled that gap
+  instead of jumping to Day 12's Jul 19 slot, which stays date-locked for a future
+  session). Direct `psql "$LEARNING_DB_URL" ...` was blocked by this session's
+  permission gate (shell-variable expansion for credentialed commands needs
+  interactive approval, none available headless) — same asymmetry as prior
+  sessions; no prior-progress SELECT was possible, paced from learning-records +
+  project file state alone. `project/linkshort` on disk still had none of Week 2's
+  practice applied — `checker.go`/`main.go` were still Day 3 shape (plain
+  `WaitGroup`, one goroutine per link, bare `time.Duration` timeout) and `link/`
+  had no `counter.go`/`concurrent_test.go` — so Day 11's Step 0 hands over Day 8's
+  mutex-guarded `memstore.go` + `counter.go`, and Day 9+10's combined worker-pool/
+  `ctx`+`errgroup` `checker.go`, all matching exactly what lessons 0009–0011
+  already shipped, before teaching Day 11's actual new material (goroutine leaks,
+  deadlocks, the four classic bug patterns, `-race` as a reflex) on top. The `go`
+  toolchain was intermittently gated this round — a bare `go version`/`go build ./...`
+  from the repo root required interactive approval and was refused, but `go build/vet/test
+  -C <scratch-dir> ./...` (explicit `-C`, no `cd`) went through — so the full
+  scaffold *was* compile-checked this time, unlike 2026-07-11/13. Reconstructed the
+  whole `project/linkshort` tree (matching Days 1–10's already-shipped code) plus
+  the new `leak_test.go` in a scratch dir; `go vet ./...` silent, `go test -race
+  ./...` green including the new `TestCheckAllCancelledLeavesNoGoroutinesBehind`.
+  Also deliberately planted Section 1's exact bug (bare `results <- checkOne(l)`,
+  no `select`/`ctx.Done()`) and confirmed the leak test genuinely catches it
+  (goroutines before=2 after=7) before reverting — and ran the Step 4 standalone
+  deadlock snippet, confirming it prints `fatal error: all goroutines are asleep -
+  deadlock!` with a `[chan send]` stack trace exactly as the lesson shows. Scratch
+  dir removed after. `bin/record-progress go lesson_generated --day 11 --lesson
+  0012-debugging-concurrency.html` worked and is recorded (same asymmetry as
+  2026-07-12/07-18: writes via the script succeed because it sources DB creds
+  internally, while a caller-side `psql "$LEARNING_DB_URL" ...` read stays blocked
+  by the session's credential-expansion gate).

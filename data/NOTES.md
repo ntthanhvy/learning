@@ -130,3 +130,29 @@
   ("th")`, West doesn't; nlargest(2) is Binh/180.0 then An/120.0, no ties).
   `bin/record-progress` also worked when invoked directly — `lesson_generated`
   was recorded for day 10.
+- 2026-07-19 generation (Lesson 11): direct `psql "$LEARNING_DB_URL" ...`
+  reads were blocked in this headless run (shell-variable expansion of that
+  exact command is disallowed for this sandboxed session) — still no
+  `course_progress` rows readable, no learning record beyond the Lesson 1
+  baseline. Lesson 10's own teaser already named the next fresh pattern —
+  `duplicated`/`drop_duplicates` and `pct_change` — so Lesson 11 ships exactly
+  that (checked the glossary first, confirmed neither term existed yet)
+  rather than guessing which drill came back shakiest with no signal to go
+  on. Since `orders_raw.csv`/`customers.csv` have no real duplicate rows and
+  editing the shared fixtures would risk earlier lessons' hand-traced values,
+  Drills 1-2 use a small inline "double-submitted export" DataFrame built
+  directly in the practice file instead of a new CSV; Drill 3 returns to the
+  real `orders_raw.csv` clean slice for `pct_change()`. `uv run --with
+  pandas` worked directly this round: the shipped (unsolved)
+  `practice/11_duplicates_and_pct_change.py` was executed in a scratch dir
+  (`.scratch/data-lesson11/`, deleted after) and printed all ✗ (had to wrap
+  the Drill 3 two-line placeholder in try/except first — an unassigned
+  `ordered = ...` followed by `ordered["col"] = ...` raised a TypeError on
+  the Ellipsis before any checks could run, unlike the single-line
+  placeholders elsewhere), then a solved version printed all ✓ against the
+  real fixtures (An 120.0→42.0 = -0.65 pct_change, Binh 35.5→180.0 = 4.07,
+  each customer's first order NaN; duplicated() flags rows 2 & 4 as repeats
+  of row 0, drop_duplicates() leaves 3 rows keeping each first occurrence)
+  before the unsolved file was copied into `practice/`. `bin/record-progress`
+  also worked when invoked directly this round — `lesson_generated` was
+  recorded for day 11.

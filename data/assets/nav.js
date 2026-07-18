@@ -26,6 +26,8 @@
       file: "lessons/0009-timed-drills.html" },
     { n: 10, date: "2026-07-18", title: "Timed drills, round 2: value_counts, .str & nlargest",
       file: "lessons/0010-value-counts-str-and-nlargest.html" },
+    { n: 11, date: "2026-07-19", title: "Timed drills, round 3: duplicates & pct_change",
+      file: "lessons/0011-duplicates-and-pct-change.html" },
   ];
 
   const REFS = [

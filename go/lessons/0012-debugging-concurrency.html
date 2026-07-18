@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 11 · Debugging Concurrency</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Go Intensive · Week 2 · Day 11 · ~90 min</p>
+<h1>Debugging concurrency</h1>
+<p class="byline">Three days you've been <em>writing</em> concurrent code: a mutex-guarded counter, a bounded worker pool, a cancellation-aware pipeline. Today flips to <em>reading</em> it — spotting the five bug shapes that show up in almost every broken Go service, on sight, before <code>-race</code> or a hung terminal has to tell you. Interviewers ask "what's wrong with this code" far more than "write this from scratch"; today is the drill for that question.</p>
+
+<h2>Warm-up: from memory</h2>
+<div class="quiz">
+  <div class="q" data-why="errgroup.WithContext's derived context closes its Done() the instant EITHER the parent ctx cancels OR any g.Go function returns a non-nil error. That's what made yesterday's checkAll stop workers, not just stop waiting on them.">
+    <p class="stem">Yesterday: what two things cancel an <code>errgroup.WithContext</code> derived context?</p>
+    <button class="opt" data-ok>parent cancels, or a worker errors</button>
+    <button class="opt">only a manual call to cancel</button>
+    <button class="opt">only the parent context timing out</button>
+  </div>
+  <div class="q" data-why="A bare channel send or receive only reacts to a cancelled ctx if it sits inside a select that also has a case on ctx.Done(). Miss that select anywhere a goroutine can block, and cancelling ctx does nothing to it.">
+    <p class="stem">Why did yesterday wrap every blocking channel op in a <code>select</code> with a <code>ctx.Done()</code> case?</p>
+    <button class="opt" data-ok>a bare op ignores a cancelled ctx</button>
+    <button class="opt">select always runs faster than one op</button>
+    <button class="opt">Go requires select for every channel op</button>
+  </div>
+  <div class="q" data-why="Day 9's worker pool bounds HOW MANY checks run at once (a fixed crew of workers). Day 10's ctx/errgroup rewrite bounds HOW LONG work is allowed to keep running and makes cancellation actually stop workers, not just stop checkAll from waiting on them.">
+    <p class="stem">Worker pool (Day 9) vs <code>ctx</code>+<code>errgroup</code> (Day 10) — which bounds what?</p>
+    <button class="opt" data-ok>how many run vs how long</button>
+    <button class="opt">both bound the exact same thing</button>
+    <button class="opt">neither one bounds anything at all</button>
+  </div>
+</div>
+
+<h2>Step 0 — catch up: three days of practice, handed over</h2>
+<p>Code review shows none of Week 2's practice has landed on disk yet — <code>project/linkshort/checker.go</code> and <code>main.go</code> are still at Day 3 level (a plain <code>sync.WaitGroup</code>, one goroutine per link, a bare <code>time.Duration</code> timeout), and <code>link/</code> has no <code>counter.go</code> or <code>concurrent_test.go</code>. Today's lesson is about reading bugs in <em>correct</em> concurrent code, which means it needs Days 8–10's actual output as a starting point, not Day 3's. Paste in all four files below as-is, confirm green, then move to Section 1.</p>
+
+<p><strong><code>link/memstore.go</code></strong> (replace the whole file — Day 8's mutex-guarded store):</p>
+<pre><code><span class="kw">package</span> link
+
+<span class="kw">import</span> (
+    <span class="cm">"context"</span>
+    <span class="cm">"sync"</span>
+)
+
+<span class="kw">var</span> _ Store = (*MemStore)(<span class="kw">nil</span>)
+
+<span class="kw">type</span> MemStore <span class="kw">struct</span> {
+    mu    sync.RWMutex
+    links <span class="kw">map</span>[string]Link
+}
+
+<span class="kw">func</span> NewMemStore() *MemStore {
+    <span class="kw">return</span> &amp;MemStore{links: make(<span class="kw">map</span>[string]Link)}
+}
+
+<span class="kw">func</span> (s *MemStore) Save(ctx context.Context, l Link) error {
+    s.mu.Lock()
+    <span class="kw">defer</span> s.mu.Unlock()
+    s.links[l.Code] = l
+    <span class="kw">return nil</span>
+}
+
+<span class="kw">func</span> (s *MemStore) Get(ctx context.Context, code string) (Link, error) {
+    s.mu.RLock()
+    <span class="kw">defer</span> s.mu.RUnlock()
+    l, ok := s.links[code]
+    <span class="kw">if</span> !ok {
+        <span class="kw">return</span> Link{}, ErrNotFound
+    }
+    <span class="kw">return</span> l, <span class="kw">nil</span>
+}</code></pre>
+
+<p><strong>New file <code>link/counter.go</code></strong> (Day 8's click counter):</p>
+<pre><code><span class="kw">package</span> link
+
+<span class="kw">import</span> <span class="cm">"sync"</span>
+
+<span class="cm">// ClickCounter is a concurrency-safe tally of redirects per code.</span>
+<span class="kw">type</span> ClickCounter <span class="kw">struct</span> {
+    mu     sync.Mutex
+    counts <span class="kw">map</span>[string]<span class="kw">int</span>
+}
+
+<span class="kw">func</span> NewClickCounter() *ClickCounter {
+    <span class="kw">return</span> &amp;ClickCounter{counts: make(<span class="kw">map</span>[string]<span class="kw">int</span>)}
+}
+
+<span class="kw">func</span> (c *ClickCounter) Inc(code string) {
+    c.mu.Lock()
+    <span class="kw">defer</span> c.mu.Unlock()
+    c.counts[code]++
+}
+
+<span class="kw">func</span> (c *ClickCounter) Count(code string) <span class="kw">int</span> {
+    c.mu.Lock()
+    <span class="kw">defer</span> c.mu.Unlock()
+    <span class="kw">return</span> c.counts[code]
+}
+
+<span class="kw">func</span> (c *ClickCounter) Snapshot() <span class="kw">map</span>[string]<span class="kw">int</span> {
+    c.mu.Lock()
+    <span class="kw">defer</span> c.mu.Unlock()
+    out := make(<span class="kw">map</span>[string]<span class="kw">int</span>, len(c.counts))
+    <span class="kw">for</span> k, v := <span class="kw">range</span> c.counts {
+        out[k] = v
+    }
+    <span class="kw">return</span> out
+}</code></pre>
+
+<p><strong><code>checker.go</code></strong> (replace the whole file — Day 9's worker pool + Day 10's <code>ctx</code>/<code>errgroup</code> rewrite):</p>
+<pre><code><span class="kw">package</span> main
+
+<span class="kw">import</span> (
+    <span class="cm">"context"</span>
+    <span class="cm">"strings"</span>
+    <span class="cm">"time"</span>
+
+    <span class="cm">"linkshort/link"</span>
+
+    <span class="cm">"golang.org/x/sync/errgroup"</span>
+)
+
+<span class="kw">type</span> result <span class="kw">struct</span> {
+    code <span class="kw">string</span>
+    ok   <span class="kw">bool</span>
+}
+
+<span class="kw">func</span> checkOne(l link.Link) result {
+    time.Sleep(50 * time.Millisecond)
+    <span class="kw">return</span> result{code: l.Code, ok: strings.HasPrefix(l.URL, <span class="cm">"https://"</span>)}
+}
+
+<span class="kw">const</span> maxWorkers = 4
+
+<span class="kw">func</span> checkAll(ctx context.Context, links []link.Link) <span class="kw">map</span>[<span class="kw">string</span>]<span class="kw">bool</span> {
+    jobs := make(<span class="kw">chan</span> link.Link)
+    results := make(<span class="kw">chan</span> result)
+
+    g, ctx := errgroup.WithContext(ctx)
+    <span class="kw">for</span> w := 0; w &lt; maxWorkers; w++ {
+        g.Go(<span class="kw">func</span>() <span class="kw">error</span> {
+            <span class="kw">for</span> {
+                <span class="kw">select</span> {
+                <span class="kw">case</span> l, open := &lt;-jobs:
+                    <span class="kw">if</span> !open {
+                        <span class="kw">return nil</span>
+                    }
+                    <span class="kw">select</span> {
+                    <span class="kw">case</span> results &lt;- checkOne(l):
+                    <span class="kw">case</span> &lt;-ctx.Done():
+                        <span class="kw">return</span> ctx.Err()
+                    }
+                <span class="kw">case</span> &lt;-ctx.Done():
+                    <span class="kw">return</span> ctx.Err()
+                }
+            }
+        })
+    }
+
+    <span class="kw">go func</span>() {
+        <span class="kw">defer close</span>(jobs)
+        <span class="kw">for</span> _, l := <span class="kw">range</span> links {
+            <span class="kw">select</span> {
+            <span class="kw">case</span> jobs &lt;- l:
+            <span class="kw">case</span> &lt;-ctx.Done():
+                <span class="kw">return</span>
+            }
+        }
+    }()
+
+    <span class="kw">go func</span>() {
+        g.Wait()
+        <span class="kw">close</span>(results)
+    }()
+
+    out := make(<span class="kw">map</span>[<span class="kw">string</span>]<span class="kw">bool</span>, len(links))
+    <span class="kw">for</span> {
+        <span class="kw">select</span> {
+        <span class="kw">case</span> r, open := &lt;-results:
+            <span class="kw">if</span> !open {
+                <span class="kw">return</span> out
+            }
+            out[r.code] = r.ok
+        <span class="kw">case</span> &lt;-ctx.Done():
+            <span class="kw">return</span> out
+        }
+    }
+}</code></pre>
+
+<p><strong>Update <code>checker_test.go</code></strong> and <strong><code>main.go</code>'s call site</strong> for the <code>ctx</code>-based signature exactly as Day 10 shipped them — same four tests (<code>TestCheckAllChecksEveryLink</code>, <code>TestCheckAllTimesOut</code>, <code>TestCheckAllBoundsConcurrency</code>, <code>TestCheckAllCancelledContextReturnsPromptly</code>), same <code>checkCtx, cancel := context.WithTimeout(ctx, time.Second)</code> wiring in <code>main</code>. If you don't have your own copy handy, Day 10's lesson (<a href="0011-context-cancellation-errgroup.html">0011</a>) has all of it verbatim.</p>
+<pre><code>go mod tidy
+go vet ./...          <span class="cm"># silent</span>
+go test -race ./...   <span class="cm"># green, all checker + link tests</span></code></pre>
+
+<h2>1 · Goroutine leaks: the bug that doesn't crash</h2>
+<p>A <dfn data-en="A goroutine blocked forever on a channel operation (or a lock) that will never complete, because its partner is gone. The goroutine is never garbage collected — it sits in memory, doing nothing, until the process exits." data-vn="giữ nguyên 'goroutine leak' — goroutine kẹt mãi mãi, không bao giờ được dọn">goroutine leak</dfn> is the most Go-specific bug there is, and the most dangerous, because nothing crashes. A leaked goroutine just sits there — a few KB of stack, a blocked channel op — invisible in a quick test run, and fatal at scale: ten thousand requests, ten thousand leaked goroutines, memory climbing until the process is killed.</p>
+<pre><code><span class="cm">// LEAK: nobody ever reads from ch. This goroutine blocks on the send</span>
+<span class="cm">// forever — it is never collected, even though its result is never used.</span>
+<span class="kw">func</span> fetchWithTimeout(ctx context.Context) <span class="kw">int</span> {
+    ch := make(<span class="kw">chan int</span>)
+    <span class="kw">go func</span>() {
+        result := slowCompute()
+        ch &lt;- result   <span class="cm">// blocks forever if the caller already gave up below</span>
+    }()
+
+    <span class="kw">select</span> {
+    <span class="kw">case</span> v := &lt;-ch:
+        <span class="kw">return</span> v
+    <span class="kw">case</span> &lt;-ctx.Done():
+        <span class="kw">return</span> -1   <span class="cm">// caller moves on — but the goroutine above is still stuck</span>
+    }
+}</code></pre>
+<p>The tell: an unbuffered channel with exactly one sender and exactly one receiver, where the receiver has a second way out (<code>ctx.Done()</code>) that the sender doesn't share. The fix is Day 10's whole lesson applied one level deeper — give the sender the same escape hatch:</p>
+<pre><code><span class="kw">go func</span>() {
+    result := slowCompute()
+    <span class="kw">select</span> {
+    <span class="kw">case</span> ch &lt;- result:
+    <span class="kw">case</span> &lt;-ctx.Done():   <span class="cm">// FIXED — sender can also give up</span>
+    }
+}()</code></pre>
+<p>How to actually catch this in review or in CI, not just in theory: <code>runtime.NumGoroutine()</code> before and after a suspect operation (a rising baseline across repeated calls is a leak), or the standard library's own <code>go.uber.org/goleak</code> in tests — call <code>defer goleak.VerifyNone(t)</code> at the top of a test and it fails if any goroutine outlives it. linkshort stays stdlib-only, so today's practice below uses the <code>NumGoroutine</code> technique instead of adding a new dependency.</p>
+
+<h2>2 · Deadlock: when Go tells you outright</h2>
+<p>A <dfn data-en="Every goroutine in the program is blocked waiting on something that will never happen — no partial progress is possible. Unlike a leak (silent), the Go runtime detects a FULL deadlock and crashes immediately with a stack dump." data-vn="giữ nguyên 'deadlock' — tất cả goroutine cùng kẹt, không ai chạy tiếp được">deadlock</dfn> is a leak's loud cousin: instead of one goroutine stuck while the rest of the program carries on, <em>every</em> goroutine is stuck. Go's runtime actually notices this specific case — nothing left that could ever become runnable — and kills the process outright:</p>
+<pre><code><span class="kw">func</span> main() {
+    ch := make(<span class="kw">chan int</span>)
+    ch &lt;- 1   <span class="cm">// unbuffered send, no receiver anywhere — nothing else is running</span>
+}
+<span class="cm">// fatal error: all goroutines are asleep - deadlock!</span></code></pre>
+<p>That crash is the friendly case — loud, immediate, a stack trace pointing at the exact blocked line. The dangerous version is a <em>partial</em> deadlock: two goroutines stuck waiting on each other, while a third goroutine (an HTTP server's accept loop, say) is still very much alive and serving other requests. The runtime sees forward progress happening somewhere, so it does <strong>not</strong> detect this — the process looks healthy while two goroutines are silently wedged forever.</p>
+<pre><code><span class="cm">// classic two-lock deadlock: goroutine A locks mu1 then wants mu2;</span>
+<span class="cm">// goroutine B locks mu2 then wants mu1. Whichever order runs first,</span>
+<span class="cm">// the second goroutine to start now waits on a lock the first will</span>
+<span class="cm">// never release, because the first is waiting right back on it.</span>
+<span class="kw">go func</span>() { mu1.Lock(); <span class="kw">defer</span> mu1.Unlock(); mu2.Lock(); <span class="kw">defer</span> mu2.Unlock() /* ... */ }()
+<span class="kw">go func</span>() { mu2.Lock(); <span class="kw">defer</span> mu2.Unlock(); mu1.Lock(); <span class="kw">defer</span> mu1.Unlock() /* ... */ }()</code></pre>
+<p>The fix is a rule, not a clever trick: <strong>always acquire multiple locks in the same, fixed order</strong>, everywhere in the codebase — e.g. always <code>mu1</code> before <code>mu2</code>, never the reverse. Neither goroutine can then be the one holding the second lock the other wants first. It's boring and it's the actual answer interviewers want, not "use a bigger lock."</p>
+
+<h2>3 · The classic bug patterns</h2>
+<p>Four shapes come up over and over — in code review, in interviews, in production incidents. Recognize them on sight.</p>
+
+<p><strong>Send on a closed channel — panics, always.</strong></p>
+<pre><code>ch := make(<span class="kw">chan int</span>)
+<span class="kw">close</span>(ch)
+ch &lt;- 1   <span class="cm">// panic: send on closed channel</span></code></pre>
+<p>The rule from Day 3 was "the sender closes" — today's sharper version: <strong>only the sole sender may close, and only after every send is done.</strong> The moment more than one goroutine can send on the same channel, none of them can safely be the one to call <code>close</code> — any other sender might still be mid-send. This is exactly why Day 9's worker pool has the <em>feeder</em> close <code>jobs</code> (it's the only sender) and the <em>closer</em> goroutine — not any individual worker — close <code>results</code> (workers are the senders, multiple of them; only after <code>g.Wait()</code> confirms all of them are done does closing become safe).</p>
+
+<p><strong>Closing twice — also panics, always.</strong></p>
+<pre><code><span class="kw">close</span>(ch)
+<span class="kw">close</span>(ch)   <span class="cm">// panic: close of closed channel</span></code></pre>
+<p>Comes up most often when a channel gets closed on more than one exit path — an error branch and a success branch both closing "just in case." The fix is the same discipline as above: exactly one place in the code owns closing any given channel, full stop, and every other path either doesn't close it or communicates through a different mechanism (a <code>done chan struct{}</code> that itself only gets closed once, or a <code>sync.Once</code> — Day 12's topic — wrapping the close).</p>
+
+<p><strong>Pre-1.22 loop-variable capture — a correctness bug, not a panic.</strong></p>
+<pre><code><span class="cm">// Go &lt; 1.22: ALL goroutines below could print the SAME final value of l,</span>
+<span class="cm">// because pre-1.22 every iteration reused ONE shared `l` variable.</span>
+<span class="kw">for</span> _, l := <span class="kw">range</span> links {
+    <span class="kw">go func</span>() {
+        fmt.Println(l.Code)   <span class="cm">// pre-1.22: probably prints the LAST code, several times over</span>
+    }()
+}</code></pre>
+<p>Go 1.22 (Feb 2024) fixed this at the language level — every loop iteration now gets its own fresh <code>l</code>, and this exact code is correct as written on any Go you're running this week. It's still worth recognizing on sight for two reasons: reading pre-1.22 code (plenty still in production) and interviews, where "what does this print, and why did Go change it in 1.22" is a favorite question. The old-style defensive fix, <code>l := l</code> or passing <code>l</code> as a parameter (exactly what Day 3's <code>go func(l link.Link) { ... }(l)</code> did), still works today — it's just no longer required.</p>
+
+<p><strong>Forgotten <code>wg.Done()</code> — the WaitGroup version of a deadlock.</strong></p>
+<pre><code><span class="kw">var</span> wg sync.WaitGroup
+<span class="kw">for</span> i := 0; i &lt; n; i++ {
+    wg.Add(1)
+    <span class="kw">go func</span>() {
+        <span class="cm">// forgot: defer wg.Done()</span>
+        doWork()
+    }()
+}
+wg.Wait()   <span class="cm">// blocks forever — the counter never reaches zero</span></code></pre>
+<p>Every early <code>return</code> or <code>panic</code> inside the goroutine skips a bare <code>wg.Done()</code> written at the bottom of the function — exactly the same "forgot one exit path" failure <code>defer mu.Unlock()</code> prevents for locks. The rule is identical: <strong><code>defer wg.Done()</code> on the line right after the goroutine starts, never a bare call at the end.</strong> Day 8 through 10's <code>checker.go</code> has done this correctly every single time — that's not an accident, it's the reflex today names explicitly.</p>
+
+<h2>4 · <code>-race</code> as a reflex, not a last resort</h2>
+<p>Every prior lesson this week ended with <code>go test -race ./...</code> as a final check. Today reframes it: <strong>run it constantly while writing concurrent code, not once at the end</strong> — the race detector doesn't just confirm a hunch, it finds bugs you weren't even looking for, with the exact two stack traces of the colliding accesses. It costs real overhead (5–10x slower, more memory) so it's not for production traffic, but for local dev and CI on anything touching goroutines, it should run by default, every time, the same reflex as <code>go vet</code>. One more thing worth knowing for interviews: <code>-race</code> only flags races it actually <em>observes</em> during that run — it proves a race happened, never that one can't. A clean <code>-race</code> run is evidence, not a guarantee.</p>
+
+<h2>5 · Practice: plant a leak, watch <code>-race</code> and <code>NumGoroutine</code> catch it, then fix it</h2>
+<p>In <code>~/learning/go/project/linkshort</code>. You'll deliberately introduce Section 1's exact bug into <code>checker.go</code>, prove it's real with two different tools, then apply the one-line fix — the full loop a debugging session actually takes.</p>
+
+<p><strong>Step 1 — plant the leak.</strong> In <code>checker.go</code>, inside the worker's <code>g.Go</code> function, temporarily replace the inner <code>select</code> around the send to <code>results</code> with a bare send — deleting exactly the cancellation-aware pattern Day 10 built:</p>
+<pre><code><span class="cm">// TEMPORARY BUG — paste this in to reproduce the leak, Step 3 removes it.</span>
+<span class="kw">case</span> l, open := &lt;-jobs:
+    <span class="kw">if</span> !open {
+        <span class="kw">return nil</span>
+    }
+    results &lt;- checkOne(l)   <span class="cm">// BUG: no select, no ctx.Done() escape — Section 1's leak, planted</span></code></pre>
+
+<p><strong>Step 2 — write a test that catches it two ways.</strong> New file <code>leak_test.go</code>. TODO 1 is the goroutine-count assertion (Section 1's <code>runtime.NumGoroutine()</code> technique); TODO 2 is given as a comment only — you'll run it by hand in Step 4, not as part of <code>go test</code>, because a true positive here is a wedged test process, not a clean failure.</p>
+<pre><code><span class="kw">package</span> main
+
+<span class="kw">import</span> (
+    <span class="cm">"context"</span>
+    <span class="cm">"fmt"</span>
+    <span class="cm">"runtime"</span>
+    <span class="cm">"testing"</span>
+    <span class="cm">"time"</span>
+
+    <span class="cm">"linkshort/link"</span>
+)
+
+<span class="cm">// TestCheckAllCancelledLeavesNoGoroutinesBehind cancels ctx mid-sweep, waits</span>
+<span class="cm">// briefly for things to settle, then checks the goroutine count returned to</span>
+<span class="cm">// baseline. With Step 1's bug in place, a worker can be stuck forever on</span>
+<span class="cm">// `results &lt;- checkOne(l)` after every reader has walked away — the count</span>
+<span class="cm">// stays elevated instead of returning to baseline.</span>
+<span class="kw">func</span> TestCheckAllCancelledLeavesNoGoroutinesBehind(t *testing.T) {
+    <span class="kw">links</span> := make([]link.Link, 20)
+    <span class="kw">for</span> i := <span class="kw">range</span> links {
+        links[i] = link.Link{Code: fmt.Sprintf(<span class="cm">"l%d"</span>, i), URL: <span class="cm">"https://x.dev"</span>}
+    }
+
+    before := runtime.NumGoroutine()
+
+    ctx, cancel := context.WithCancel(context.Background())
+    <span class="kw">go func</span>() {
+        time.Sleep(5 * time.Millisecond)
+        cancel()
+    }()
+    checkAll(ctx, links)
+
+    <span class="cm">// TODO 1: give leaked goroutines a moment to either finish or reveal</span>
+    <span class="cm">//   themselves, then compare runtime.NumGoroutine() to `before`.</span>
+    <span class="cm">//   time.Sleep(100 * time.Millisecond)</span>
+    <span class="cm">//   after := runtime.NumGoroutine()</span>
+    <span class="cm">//   if after &gt; before {</span>
+    <span class="cm">//       t.Fatalf("goroutines before=%d after=%d — leak suspected", before, after)</span>
+    <span class="cm">//   }
+}
+
+<span class="cm">// TODO 2 (run by hand, not part of `go test ./...`): go test -race -run</span>
+<span class="cm">//   TestCheckAllCancelledContextReturnsPromptly ./... — with Step 1's bug</span>
+<span class="cm">//   in place, this Day 10 test itself starts flaking or hanging near its</span>
+<span class="cm">//   100ms budget, because a leaked worker can still be holding a reference</span>
+<span class="cm">//   the race detector's instrumentation tracks. Watch for WARNING: DATA</span>
+<span class="cm">//   RACE or a hung terminal (Ctrl-C, then look at the goroutine dump).</span></code></pre>
+
+<p><strong>Step 3 — confirm the failure, then fix it.</strong> Run the new test with the bug in place (TODO 1 filled in):</p>
+<pre><code>go test -run TestCheckAllCancelledLeavesNoGoroutinesBehind ./...
+<span class="cm">#  --- FAIL: goroutines before=N after=N+k — leak suspected</span></code></pre>
+<p>Now remove Step 1's bug — put back the inner <code>select</code> exactly as Day 10 shipped it (Section 5 above has it verbatim: <code>case results &lt;- checkOne(l): / case &lt;-ctx.Done(): return ctx.Err()</code>) — and rerun. Green.</p>
+
+<p><strong>Step 4 — see a real deadlock once.</strong> In a disposable scratch file (not committed — this is a "watch it happen" exercise, then delete it), reproduce Section 2's unbuffered-send-with-no-receiver:</p>
+<pre><code><span class="kw">package</span> main
+
+<span class="kw">func</span> main() {
+    ch := make(<span class="kw">chan int</span>)
+    ch &lt;- 1
+}</code></pre>
+<pre><code>go run scratch_deadlock.go
+<span class="cm"># fatal error: all goroutines are asleep - deadlock!</span>
+<span class="cm"># goroutine 1 [chan send]:</span>
+<span class="cm"># main.main() ...</span></code></pre>
+<p>Read the stack trace once, on purpose — it names the exact blocked line. That's the signature to recognize instantly the next time a terminal just... stops.</p>
+
+<pre><code>go vet ./...          <span class="cm"># silent</span>
+go test -race ./...   <span class="cm"># green — every Day 8-10 test plus today's leak test</span></code></pre>
+<div class="callout"><strong>Done when:</strong> <code>go vet ./...</code> silent · <code>go test -race ./...</code> green, including <code>TestCheckAllCancelledLeavesNoGoroutinesBehind</code> · you've watched the planted leak fail the goroutine-count assertion, watched the fix turn it green, and watched a real <code>fatal error: all goroutines are asleep - deadlock!</code> at least once · you can name, from memory, which of today's four "classic patterns" a given broken snippet is.</div>
+
+<h2>Check yourself</h2>
+<div class="quiz">
+  <div class="q" data-why="A leak is one goroutine stuck forever while the rest of the program keeps running — invisible until memory climbs. A full deadlock is every goroutine stuck at once, which Go's runtime actually detects and crashes on immediately.">
+    <p class="stem">What's the key difference between a goroutine leak and a full deadlock?</p>
+    <button class="opt" data-ok>leak is partial and silent, deadlock is total and loud</button>
+    <button class="opt">leak is loud and total, deadlock is silent and partial</button>
+    <button class="opt">they are simply two names for one identical bug shape</button>
+  </div>
+  <div class="q" data-why="Only the sole sender on a channel may safely close it, and only once every send has happened — otherwise another goroutine might still be mid-send when close runs, causing a send-on-closed-channel panic.">
+    <p class="stem">Why must closing a channel be owned by exactly one sender, not several?</p>
+    <button class="opt" data-ok>another sender might still be mid-send now</button>
+    <button class="opt">Go only allows one goroutine per channel</button>
+    <button class="opt">closing costs nothing so ownership never matters</button>
+  </div>
+  <div class="q" data-why="Always acquiring multiple locks in the same fixed order everywhere in the codebase prevents the classic two-goroutine deadlock, where each holds the lock the other wants next.">
+    <p class="stem">The reliable fix for a two-goroutine, two-mutex deadlock is…</p>
+    <button class="opt" data-ok>always lock both mutexes in one fixed order</button>
+    <button class="opt">always use one single giant mutex instead</button>
+    <button class="opt">always retry the lock a few times first</button>
+  </div>
+  <div class="q" data-why="The race detector only flags races it actually observes during that specific run — a clean -race pass is evidence the run had no races, not a mathematical guarantee no race can ever occur under different timing or inputs.">
+    <p class="stem">A clean <code>go test -race</code> run proves…</p>
+    <button class="opt" data-ok>no race occurred during that observed run</button>
+    <button class="opt">no race can ever occur here again</button>
+    <button class="opt">every goroutine leak has now been eliminated</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://go.dev/blog/race-detector">Go Blog — Introducing the Race Detector</a> — the tool's own writeup, including what it can and can't catch. For the loop-variable history, the <a href="https://go.dev/blog/loopvar-preview">Go 1.22 loop variable semantics</a> post explains exactly what changed and why it was safe to change.</p>
+<p>New terms are in the <a href="../reference/glossary.html#day11">glossary — Day 11 section</a>.</p>
+
+<p class="next">Tomorrow: <strong>the rest of <code>sync</code></strong> — <code>sync.Once</code>, <code>sync.Pool</code>, <code>sync/atomic</code>, <code>sync.Map</code>, and when each beats a plain mutex or channel. Today's "close exactly once" rule from Section 3 gets a proper tool: <code>sync.Once</code>.<br><br>
+💬 A deadlock you can't untangle, or a <code>-race</code> report that doesn't make sense? Paste the code — hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/quiz.js"></script>
+<script src="../assets/gloss.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -28,6 +28,8 @@
       file: "lessons/0010-worker-pools-and-pipelines.html" },
     { day: 10, date: "2026-07-17", title: "Context, cancellation & errgroup",
       file: "lessons/0011-context-cancellation-errgroup.html" },
+    { day: 11, date: "2026-07-19", title: "Debugging concurrency",
+      file: "lessons/0012-debugging-concurrency.html" },
   ];
 
   const REFS = [

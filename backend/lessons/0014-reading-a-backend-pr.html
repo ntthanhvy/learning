@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 14 · Reading a Backend PR</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 14 · ~20 min</p>
+<h1>Reading a backend PR: substance over style</h1>
+<p class="byline">Lesson 13 closed on this teaser: putting the runtime and security tracks together into what a PR review actually looks like. Every lesson so far taught one concept at a time; today's job is different — given a diff, which of those thirteen lenses actually applies, and what does a comment that catches a real bug look like versus one that just moves commas around?</p>
+
+<h2>1 · A <dfn data-en="a review comment about formatting, naming, or personal style preference — non-blocking, the author can take it or leave it, and it says nothing about whether the code is correct" data-vn="nit (giữ nguyên) — góp ý về hình thức, không bắt buộc sửa">nit</dfn> is free; it's also not the job</h2>
+<p>The frontend review habit that transfers cleanest is exactly the one that matters least here: catching a missing semicolon, a variable named <code>x</code>, an inconsistent quote style. Those are real, worth flagging, and conventionally prefixed <code>nit:</code> so the author knows they're optional. But a PR can pass every nit and still corrupt data, leak another user's records, or take the whole service down under load — and a review that only caught the nits missed the actual job. The instinct to build today: read a diff and ask "what does this code let happen at runtime" before "does this look tidy."</p>
+
+<h2>2 · Five questions, one per track already taught</h2>
+<p>Every lesson so far maps to one question worth asking of almost any backend diff. Not a checklist to run mechanically top to bottom — a set of lenses to hold up against whatever the diff actually touches:</p>
+<ul>
+<li><strong>Data model (Lessons 2, 5):</strong> does this touch the schema? Is the migration safe to run against a live table, and can it be rolled back?</li>
+<li><strong>API contract (Lesson 3):</strong> does this change a response shape, a status code, or a URL that some client already depends on? Is it actually backward compatible, or just untested against one?</li>
+<li><strong>Auth (Lessons 4, 12):</strong> does every new endpoint check <em>both</em> that the caller is logged in <em>and</em> that this specific record belongs to them? A missing ownership check is Lesson 12's IDOR, and it's the single most common bug this lens catches.</li>
+<li><strong>Correctness under concurrency (Lesson 6):</strong> if this handler writes to more than one table, or reads-then-writes the same row, is it inside a transaction? Two instances of this handler running at once — does anything race?</li>
+<li><strong>Operations (Lessons 7–11, 13):</strong> what does a failure look like to the caller (information disclosure), to another instance (shared state), to the cache (invalidation), to a retry (idempotency), and to whoever's on call (logs, metrics)?</li>
+</ul>
+
+<h2>3 · Reading a real diff</h2>
+<p>A small PR: "add PATCH /orders/{id} to let a customer update their shipping address." The diff, as submitted:</p>
+<pre><code><span class="kw">func</span> (s *Server) patchOrderHandler(w http.ResponseWriter, r *http.Request) {
+    orderID := r.PathValue(<span class="kw">"id"</span>)
+    userID := auth.UserIDFromContext(r.Context()) <span class="cm">// Lesson 4: who is calling</span>
+    <span class="kw">if</span> userID == <span class="kw">""</span> {
+        http.Error(w, <span class="kw">"unauthorized"</span>, http.StatusUnauthorized)
+        <span class="kw">return</span>
+    }
+
+    <span class="kw">var</span> body <span class="kw">struct</span>{ ShippingAddress <span class="kw">string</span> `json:"shipping_address"` }
+    json.NewDecoder(r.Body).Decode(&amp;body)
+
+    s.db.Exec(r.Context(),
+        <span class="cm">"UPDATE orders SET shipping_address = $1 WHERE id = $2"</span>, body.ShippingAddress, orderID)
+    s.db.Exec(r.Context(),
+        <span class="cm">"INSERT INTO order_events (order_id, event) VALUES ($1, 'address_updated')"</span>, orderID)
+
+    w.WriteHeader(http.StatusOK)
+}</code></pre>
+<p>Running the five lenses: data model — no schema change, skip. API contract — a new endpoint, shape looks reasonable, skip. <strong>Auth — stop here.</strong> The handler checks that <em>someone</em> is logged in, never that <code>orderID</code> belongs to <code>userID</code>. Any authenticated user can PATCH any order by guessing or incrementing an id in the URL — Lesson 12's IDOR, verbatim, in production code that "works" in every manual test a developer runs against their own account. <strong>Correctness under concurrency — also stop here.</strong> The address update and the event-log insert are two separate statements with no transaction around them; if the process crashes or the second call errors between them, the order's address changes with no audit trail of it — Lesson 6's exact failure shape.</p>
+<p>Neither bug shows up in a quick manual test, neither is a style issue, and neither would be caught by only reading for naming and formatting. Both show up the moment the five lenses are actually applied.</p>
+
+<h2>4 · What the comment itself should say</h2>
+<p>"This is wrong" or "fix this" tells the author a location, not a reason — they still have to reconstruct the failure themselves, and might reconstruct a different, easier-to-dismiss one. A substantive comment names the concrete scenario a reviewer would need to explain out loud in an interview:</p>
+<pre><code><span class="cm">// Weak: "this needs an ownership check"</span>
+
+<span class="cm">// Substantive:</span>
+<span class="cm">// blocking: this handler never verifies orderID belongs to userID — any</span>
+<span class="cm">// logged-in user can PATCH another user's order by changing the id in the</span>
+<span class="cm">// URL (IDOR, Lesson 12). Add `WHERE id = $2 AND user_id = $3` to the UPDATE,</span>
+<span class="cm">// or a separate SELECT ... FOR UPDATE ownership check before it, and return</span>
+<span class="cm">// 404 (not 403 — don't confirm the order exists to a non-owner) if it fails.</span></code></pre>
+<p>The shape worth copying: name the failure scenario concretely (who, doing what, causing what), point at which lesson/pattern it violates, and propose a specific fix — not just a direction to think harder in. The optional <dfn data-en="a review comment prefix marking an issue the author must resolve before the PR can merge, as opposed to a nit the author may take or leave" data-vn="blocking (giữ nguyên) — comment bắt buộc phải sửa trước khi merge">blocking:</dfn> prefix (mirroring <code>nit:</code>) tells the author this one has to be resolved before merge, not just considered.</p>
+
+<div class="interview">
+<p><strong>Q: "Walk me through how you'd review a backend PR."</strong> A strong answer, out loud: <em>"First pass for the nits — naming, formatting — and I'll mark those non-blocking. The real review is running the diff through a handful of questions: does it touch the data model, and is any migration safe and reversible? Does it change the API contract in a way some client already depends on? Does every new endpoint check not just that the caller is authenticated, but that they own the specific record — that's the most common bug I catch. If it writes to more than one place, is it in a transaction, and what happens if two instances run it at once? And operationally — what does a failure look like to the caller, to the cache, to whoever's on call reading the logs. A comment that just says 'this is wrong' isn't useful; I try to name the actual scenario that breaks and propose a concrete fix."</em> The signal: a repeatable set of lenses, not "I read it carefully," and comments that name failure scenarios instead of vague objections.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A nit is a non-blocking style/formatting preference the author can take or leave; it says nothing about whether the code is correct at runtime, which is what a substantive review comment addresses.">
+    <p class="stem">What's the key difference between a "nit" and a substantive review comment?</p>
+    <button class="opt" data-ok>nits are style; substance is runtime correctness</button>
+    <button class="opt">nits are longer; substance comments are shorter</button>
+    <button class="opt">there is no difference between the two</button>
+  </div>
+  <div class="q" data-why="The PATCH handler in Section 3 checked that SOME user was authenticated, but never checked that the specific orderID in the URL belonged to that userID — the exact missing-ownership-check shape Lesson 12 named as IDOR.">
+    <p class="stem">In Section 3's diff, what did the auth lens actually catch?</p>
+    <button class="opt" data-ok>a missing check that the order belongs to caller</button>
+    <button class="opt">a missing check that the caller is logged in</button>
+    <button class="opt">a password stored in plain text in the database</button>
+  </div>
+  <div class="q" data-why="Two separate Exec calls with no transaction around them mean a crash or error between them leaves the address changed but the audit-log event missing — exactly the multi-statement correctness risk Lesson 6 covered.">
+    <p class="stem">Why did the concurrency lens flag the two separate <code>db.Exec</code> calls?</p>
+    <button class="opt" data-ok>no transaction, so a crash mid-way leaves a partial write</button>
+    <button class="opt">two separate Exec calls always run much slower than one</button>
+    <button class="opt">Go does not allow two Exec calls in one handler</button>
+  </div>
+  <div class="q" data-why="A weak comment just points at a location without explaining why it's wrong. A substantive comment names the concrete failure scenario (who, doing what, causing what), ties it to the relevant pattern, and proposes a specific fix — the author doesn't have to reconstruct the reasoning themselves.">
+    <p class="stem">What makes a review comment substantive rather than weak?</p>
+    <button class="opt" data-ok>it names the exact scenario and proposes a fix</button>
+    <button class="opt">it says "wrong" as many times as it can</button>
+    <button class="opt">it is written in the most formal tone available</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> Google's <a href="https://google.github.io/eng-practices/review/reviewer/">Engineering Practices — How to Do a Code Review</a> (~15 min) — the "what to look for" section covers exactly this substance-over-style distinction, from a team that reviews at enormous scale. For the specific bug shape in Section 3, Lesson 12's <a href="../reference/glossary.html">glossary entry on IDOR</a> is the fast refresher.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next:</em> this lesson closes out all five success criteria in MISSION.md — data modeling, API design, runtime concepts, auth/security/ops, and now PR review. Tell your teacher which one deserves a deeper pass next, or say the word to keep the light ~20 min/day cadence going with new scenarios.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

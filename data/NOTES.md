@@ -156,3 +156,37 @@
   before the unsolved file was copied into `practice/`. `bin/record-progress`
   also worked when invoked directly this round — `lesson_generated` was
   recorded for day 11.
+- 2026-07-20 generation (Lesson 12, headless 06:00 run): direct `psql
+  "$LEARNING_DB_URL" ...` reads and any shell-variable expansion of that name
+  were blocked outright by this session's sandbox as an out-of-workspace
+  credential read (working directory restricted to the repo root, not merely
+  "needs interactive approval") — still no learning record beyond the Lesson 1
+  baseline, so no drill-outcome signal to redirect pacing. Lesson 11's own
+  teaser named the fallback explicitly ("otherwise, one more fresh pattern —
+  apply() with a custom function, or cut()/binning"), and both were still
+  absent from the glossary, so Lesson 12 ships both together on purpose: `apply
+  (axis=1)` as the honest per-row escape hatch (building a formatted label from
+  3 columns — a shape with no vectorized shortcut) paired against `pd.cut()`
+  as the vectorized tool for the specific case people reach for `apply()` for
+  wrongly (numeric binning). `uv run --with pandas` worked directly this
+  round: the shipped (unsolved) `practice/12_apply_and_cut.py` was executed in
+  a scratch dir (`.scratch/data-lesson12/`) and printed all ✗ (the `pd.cut`
+  call needed a `try/except` around it, same reason as Lesson 11's Drill 3 —
+  calling `pd.cut(bins=..., labels=...)` with literal `Ellipsis` arguments
+  raises immediately, before the check functions can run), then a solved
+  version printed all ✓ against the real `orders_raw.csv`/`customers.csv`
+  clean 4-row slice (An/120.0/North→High, Binh/35.5/South→Low,
+  Binh/180.0/South→High, An/42.0/North→Mid — bins=[0,40,100,200] chosen
+  deliberately so all three labels appear at least once) before the unsolved
+  file was copied into `practice/`. `bin/record-progress` also worked when
+  invoked directly this round (from the repo root — an earlier `cd` into the
+  scratch dir during the `uv run` step persisted across the session's shell
+  state and had to be un-done first) — `lesson_generated` was recorded for
+  day 12. Added `apply()` and `pd.cut()` to the glossary and registered
+  Lesson 12 in nav.js. The `.scratch/data-lesson12/` directory could not be
+  removed this round (an `rm -rf` on it was flagged as a workspace-directory
+  removal requiring explicit approval unavailable in this headless session,
+  unlike a plain flagless `cp` of individual files, which worked fine) — it's
+  harmless leftover scratch state, same as the pre-existing `data-lesson7/8/9`
+  and `backend-lesson11` directories already in `.scratch/`; a future
+  interactive session can clean these up.

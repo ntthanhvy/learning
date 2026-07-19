@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 12 · apply() &amp; Binning with cut()</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 12 · ~20 min · 20 Jul 2026</p>
+<h1>Timed drills, round four: <code>apply()</code> and binning with <code>cut()</code></h1>
+<p class="byline">Lesson 11 left the next round open — a review pass if a drill came back reported as shakiest, otherwise one more fresh pattern. No outcome signal has come back, so today ships the "otherwise": two patterns that haven't had their own moment yet, and they're worth pairing on purpose — one is the honest reason <code>apply()</code> exists, the other is the vectorized tool people reach for <code>apply()</code> too often instead of.</p>
+
+<h2>1 · <code>apply(axis=1)</code>: pandas' escape hatch back to per-row Python</h2>
+<p>Lesson 1 opened this whole course on "think in tables, not loops" — every operation so far (groupby, merge, rank, pct_change) has been a vectorized, column-wise call with no explicit Python loop anywhere. <dfn data-en="a DataFrame method that calls a Python function once per row (axis=1) or once per column (axis=0), the opposite of a vectorized column-wise operation — under the hood it IS a loop, just spelled as a method call" data-vn="giữ nguyên 'apply()' — gọi hàm Python cho từng dòng/cột, bản chất vẫn là loop">apply()</dfn> is the deliberate exception: it hands each row (or column) to an ordinary Python function, one at a time. It exists for real cases where the per-row logic genuinely can't be expressed as a column-wise operation — combining several columns into one formatted string is a clean example, since there's no single vectorized "format these three columns together" call:</p>
+<pre><code><span class="kw">def</span> make_label(row):
+    <span class="kw">return</span> <span class="kw">f</span><span class="cm">"{row['customer']} ({row['region']}): ${row['amount']:.2f}"</span>
+
+merged[<span class="cm">"label"</span>] = merged.apply(make_label, axis=<span class="kw">1</span>)
+<span class="cm"># "An (North): $120.00", "Binh (South): $35.50", ...</span></code></pre>
+<p><code>axis=1</code> is the part worth burning in: it means "one call per row," with each row handed in as a little Series you index by column name (<code>row["customer"]</code>). <code>axis=0</code> (the default) instead calls the function once per <em>column</em>, handing in a whole column as a Series — a different, less common shape. SQL has no real equivalent for row-wise `apply()`; the nearest cousin is a scalar user-defined function called once per row, which most engines flag as a performance smell for exactly the same reason pandas does.</p>
+<div class="callout"><strong>The catch, and why it matters in an interview:</strong> <code>apply()</code> is still a Python-level loop under the hood — one Python function call per row, no NumPy vectorization underneath. On a small DataFrame the difference is invisible; on a few million rows it can be 10-100x slower than an equivalent vectorized call. The rule worth saying out loud: reach for <code>apply()</code> only after confirming no vectorized operation covers the logic — and Section 2's tool is exactly the vectorized alternative for the specific case people reach for <code>apply()</code> for most often: turning a number into a category.</div>
+
+<h2>2 · <code>pd.cut()</code>: binning a number into labeled ranges, vectorized</h2>
+<p>"Turn this amount into Low/Mid/High" looks at first like an <code>apply()</code> job — a small if/elif/else per row — but it's actually one call, no Python loop, no per-row function at all: <dfn data-en="a pandas function that sorts numeric values into labeled bins/ranges you define with edges, entirely vectorized — no Python-level function call per row" data-vn="giữ nguyên 'pd.cut()' — chia số thành các khoảng (bin) có nhãn, chạy vectorized">pd.cut()</dfn>.</p>
+<pre><code>merged[<span class="cm">"tier"</span>] = pd.cut(merged[<span class="cm">"amount"</span>], bins=[<span class="kw">0</span>, <span class="kw">40</span>, <span class="kw">100</span>, <span class="kw">200</span>], labels=[<span class="cm">"Low"</span>, <span class="cm">"Mid"</span>, <span class="cm">"High"</span>])
+<span class="cm"># 35.5  -> "Low"   (0, 40]</span>
+<span class="cm"># 42.0  -> "Mid"   (40, 100]</span>
+<span class="cm"># 120.0 -> "High"  (100, 200]</span>
+<span class="cm"># 180.0 -> "High"  (100, 200]</span></code></pre>
+<p><code>bins</code> gives the edges (here: 4 edges make 3 ranges), each interval is <code>(previous_edge, this_edge]</code> — left-exclusive, right-inclusive by default, so a value exactly on an edge falls into the <em>lower</em> bucket, not the upper one. <code>labels</code> names each range in order; leave it off and pandas shows the raw interval instead (e.g. <code>(100, 200]</code>), which is honest but not what you'd ship to a report. SQL's nearest cousin is a <code>CASE WHEN amount &lt;= 40 THEN 'Low' WHEN amount &lt;= 100 THEN 'Mid' ELSE 'High' END</code> — same idea, and also the exact per-row logic <code>apply()</code> would have needed if <code>cut()</code> didn't exist. The two-tool pairing today is the point: know both, and know which one a given "categorize this column" question actually calls for.</p>
+
+<div class="interview">
+<p><strong>Q: "You need to bucket a numeric column into a few labeled ranges — walk me through it, and would you use apply()?"</strong> A strong answer, out loud: <em>"For pure numeric binning, <code>pd.cut()</code> — one vectorized call, you give it bin edges and labels, no Python loop involved. I'd reach for <code>apply(axis=1)</code> only if the logic genuinely needs more than one column combined in a way that isn't just numeric ranges — building a formatted string from a few fields, say. And even then I'd double-check there isn't a vectorized way to do it first, because apply() is still a per-row Python function call under the hood — fine on a small table, a real cost on a few million rows."</em> The signal: knowing cut() exists at all, and reflexively checking for a vectorized option before defaulting to apply() — the same "why, not just how" instinct Lesson 1 opened the whole course on.</p>
+</div>
+
+<h2>Try it — self-checking practice (~15 min, 2 drills)</h2>
+<p>Open <code>practice/12_apply_and_cut.py</code>, replace each <code>...</code>, and re-run until all checks print ✓:</p>
+<pre><code>cd ~/learning/data
+uv run --with pandas python3 practice/12_apply_and_cut.py</code></pre>
+<p>Both drills run on the familiar <code>orders_raw.csv</code> merged with <code>customers.csv</code> — the same clean 4-row slice used since Lesson 6.</p>
+
+<h2>Check yourself</h2>
+<div class="quiz">
+  <div class="q" data-why="apply(axis=1) calls the given function once per ROW, handing in that row as a Series you index by column name — the opposite of axis=0, which calls the function once per column instead.">
+    <p class="stem">What does <code>axis=1</code> mean in <code>df.apply(fn, axis=1)</code>?</p>
+    <button class="opt" data-ok>fn runs once per row of the DataFrame</button>
+    <button class="opt">fn runs exactly once for the whole DataFrame</button>
+    <button class="opt">fn runs once per row but skips columns</button>
+  </div>
+  <div class="q" data-why="apply() still calls an ordinary Python function once per row under the hood — no NumPy vectorization — so it can be 10-100x slower than an equivalent vectorized column-wise operation on a large DataFrame.">
+    <p class="stem">Why should <code>apply()</code> be a fallback, not a default?</p>
+    <button class="opt" data-ok>it is still a per-row Python loop underneath</button>
+    <button class="opt">pandas actually forbids using it on big tables</button>
+    <button class="opt">it only ever works correctly on numeric columns</button>
+  </div>
+  <div class="q" data-why="pd.cut()'s default intervals are left-exclusive, right-inclusive — (previous_edge, this_edge] — so a value sitting exactly on an edge falls into the LOWER bucket, not the upper one.">
+    <p class="stem">With <code>bins=[0, 40, 100]</code>, which bucket does a value of exactly <code>40</code> fall into?</p>
+    <button class="opt" data-ok>the lower bucket — cut() includes the edge</button>
+    <button class="opt">the upper bucket — cut() excludes the edge</button>
+    <button class="opt">neither bucket — cut() raises an error here</button>
+  </div>
+  <div class="q" data-why="Turning a single numeric column into labeled ranges is exactly what pd.cut() is built for, in one vectorized call — no per-row Python function needed, which is why reaching for apply() here would be the wrong-tool instinct Section 2 warns against.">
+    <p class="stem">Bucketing one numeric column into labeled ranges is the textbook job for…</p>
+    <button class="opt" data-ok><code>pd.cut()</code>, definitely not <code>apply()</code> here</button>
+    <button class="opt"><code>apply()</code>, definitely not <code>pd.cut()</code> here</button>
+    <button class="opt">pandas simply cannot bucket numbers</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the <a href="https://leetcode.com/studyplan/introduction-to-pandas/">LeetCode "Introduction to Pandas" study plan</a> — this course's standing practice resource, same as Lessons 9–11. <a href="https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.apply.html">pandas docs — DataFrame.apply</a> and <a href="https://pandas.pydata.org/docs/reference/api/pandas.cut.html">pandas docs — pd.cut</a> are the authoritative references for the keyword arguments today only skimmed.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a>.<br>
+<strong>Next lesson:</strong> still open — a focused review round if a drill from Lessons 9–12 comes back reported as shakiest, otherwise one more fresh pattern (e.g. <code>melt</code> revisited with real multi-metric data, or a window-function-style rolling calculation) keeps the drill library growing.<br><br>
+💬 Anything unclear — when apply() is actually warranted, or the bin edges in cut()? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

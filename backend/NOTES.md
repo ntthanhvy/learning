@@ -145,3 +145,28 @@
   handler, liveness/readiness handlers) were compile-checked clean with
   `go build`/`go vet` in a scratch module (`.scratch/backend-lesson13/`,
   deleted after) before shipping.
+- 2026-07-20 generation (Lesson 14, headless 06:00 run): direct `psql
+  "$LEARNING_DB_URL" ...` reads and any shell-variable expansion of that name
+  were blocked outright by this session's sandbox as an out-of-workspace
+  credential read (working directory restricted to the repo root, not merely
+  "needs interactive approval") — still no `lesson_completed` record for any
+  of Lessons 1–13, so Lesson 14 continues the conservative pattern, picking up
+  Lesson 13's own teaser: tying the runtime and security tracks together into
+  what a backend PR review actually looks like — MISSION success-criterion #5,
+  the last of the five still uncovered. Covered: nits vs substantive comments,
+  a five-question checklist mapping each prior lesson to one review lens (data
+  model, API contract, auth/ownership, transactional correctness, operations),
+  a worked diff (a PATCH /orders/{id} handler) with two deliberately planted
+  bugs — a Lesson 12-shape IDOR (checks authentication, never checks the order
+  belongs to the caller) and a Lesson 6-shape missing-transaction bug (two
+  unguarded Exec calls) — and what a substantive comment names versus a vague
+  one. Noted in the lesson's closing teaser that this completes all five
+  MISSION.md success criteria; left the next step open for the user to choose
+  (deepen one track vs. keep the light daily cadence) rather than assuming.
+  The handler snippet was compile-checked clean (`go vet`, `go build`) in a
+  scratch module (`.scratch/backend-lesson14/`, deleted after) with minimal
+  stand-in `auth`/`db` types so the exact code in the lesson is real,
+  compiling Go. `bin/record-progress backend lesson_generated --day 14
+  --lesson 0014-reading-a-backend-pr.html` succeeded (same asymmetry as every
+  prior round — it sources DB creds internally). Added `nit` and `blocking
+  (comment)` to the glossary and registered Lesson 14 in nav.js.

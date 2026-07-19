@@ -193,3 +193,16 @@ by the user there; they apply here identically.
   out-of-workspace command paths). So no `course_progress` rows could be
   read for a scope-change signal (e.g. a request to keep growing the bank
   past Day 7). No new learning record beyond the Day-1 baseline.
+- 2026-07-20 (headless 06:00 run): same as the prior five days — verified
+  `daily.html`, `assets/srs.js`, and `assets/quiz-bank.js` are all present and
+  untouched (`quiz-bank.js` still tags exactly days 1–7, with exactly 7 kata
+  entries `k1`–`k7`; `nav.js` still registers only the 7 Jul 8–14 lessons).
+  That's still the correct "daily quiz+kata" for this post-week phase per
+  PLAN.md, so nothing new was generated, nav.js was untouched, and no bank
+  content was added. This session's sandbox blocked `~/.config/learning/db.env`
+  and any shell-variable expansion of `LEARNING_DB_URL` outright as an
+  out-of-workspace file read (working directory restricted to the repo root),
+  not just "needs interactive approval" — same net effect as every prior
+  round: no `course_progress` rows could be read for a scope-change signal
+  (e.g. a request to keep growing the bank past Day 7). No new learning
+  record beyond the Day-1 baseline.

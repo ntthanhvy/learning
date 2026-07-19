@@ -143,3 +143,36 @@
   2026-07-12/07-18: writes via the script succeed because it sources DB creds
   internally, while a caller-side `psql "$LEARNING_DB_URL" ...` read stays blocked
   by the session's credential-expansion gate).
+- 2026-07-20 (Day 12 generation, headless 06:00 run): generated
+  `0013-the-rest-of-sync.html` (pre-assigned to Jul 19, one day late — same
+  backfill pattern as every prior Week 2 session: fill the oldest still-missing
+  day rather than jump ahead to today's Jul 20/Day 13 capstone slot, which stays
+  date-locked for a future session). This run's sandbox additionally blocked
+  `~/.config/learning/db.env` and any shell-variable expansion of
+  `LEARNING_DB_URL` as an out-of-workspace file read (not just "needs interactive
+  approval" — outright denied, working directory is restricted to the repo root
+  in this environment), so no prior-progress SELECT was possible; paced from
+  learning-records + project file state alone, same as every prior session.
+  `bin/record-progress`, however, worked fine (same asymmetry as always — it
+  sources DB creds internally). `project/linkshort` on disk was still Day 3
+  shape (unguarded `MemStore`, plain-`WaitGroup`-plus-timeout `checker.go`, no
+  `link/counter.go`) — Day 12's Step 0 hands over Day 8's mutex-guarded
+  `memstore.go`/`counter.go` and Day 9+10's worker-pool/`ctx`+`errgroup`
+  `checker.go` again, before teaching `sync.Once`, `sync/atomic`, `sync.Map`,
+  `sync.Pool`, and `singleflight` on top. New practice: `config.go` (lazy
+  singleton via `sync.Once`) and `link/counter.go` gained `AtomicTotal`/
+  `MutexTotal`, benchmarked head-to-head in `link/counter_bench_test.go`. The
+  full scaffold (all of Week 2's catch-up plus today's new files, with TODOs
+  filled in) was reconstructed and compile-checked in a scratch dir —
+  `go vet ./...` silent, `go build ./...` clean, `go test -race ./...` green
+  (both packages), and the benchmark actually run: `BenchmarkAtomicTotal`
+  ~19 ns/op vs `BenchmarkMutexTotal` ~26 ns/op, confirming the lesson's claim
+  with real numbers rather than an invented placeholder. `go`/network access
+  was available this round (module downloads succeeded). Registered in
+  `assets/nav.js` (day 12, unlocks 2026-07-20 — the actual generation date, same
+  convention as every prior backfilled day) and added the Day 12 glossary
+  section. `bin/record-progress go lesson_generated --day 12 --lesson
+  0013-the-rest-of-sync.html` succeeded. Day 13 (`0014-concurrency-capstone.html`,
+  assigned Jul 20) remains not yet generated — a future session should generate
+  it next, and per this file's course window, Go should be skipped entirely in
+  any session running after 2026-07-20.

@@ -1,0 +1,397 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 12 · The Rest of sync</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Go Intensive · Week 2 · Day 12 · ~90 min</p>
+<h1>The rest of <code>sync</code></h1>
+<p class="byline">Four days now you've reached for <code>sync.Mutex</code> or a channel every time something needed protecting. Today is the toolbox tour: <code>sync.Once</code>, <code>sync/atomic</code>, <code>sync.Map</code>, <code>sync.Pool</code>, and <code>singleflight</code> — five narrower tools that each beat a plain mutex in one specific shape, and are worse than a plain mutex in every other shape. Knowing which is which, on sight, is the interview question behind "when would you NOT use a mutex."</p>
+
+<h2>Warm-up: from memory</h2>
+<div class="quiz">
+  <div class="q" data-why="A goroutine leak is one goroutine stuck forever while the rest of the program keeps running — invisible until memory climbs. A full deadlock is every goroutine stuck at once, and Go's runtime actually detects that specific case and crashes immediately.">
+    <p class="stem">Yesterday: leak vs full deadlock — what's the key difference?</p>
+    <button class="opt" data-ok>a leak is silent; a deadlock crashes loudly</button>
+    <button class="opt">a deadlock is silent; a leak crashes loudly</button>
+    <button class="opt">leaks and deadlocks are the same exact bug</button>
+  </div>
+  <div class="q" data-why="Go 1.22 gave every loop iteration its own fresh variable, so goroutines closing over a range variable now correctly see one value each. Before 1.22, all iterations shared one variable and goroutines could all print the same, final value.">
+    <p class="stem">Yesterday: what did Go 1.22 change about <code>for _, l := range links { go func() {...} }</code>?</p>
+    <button class="opt" data-ok>each loop iteration now gets its own variable</button>
+    <button class="opt">goroutines inside a loop are now banned outright</button>
+    <button class="opt">closures inside a loop can no longer capture</button>
+  </div>
+  <div class="q" data-why="Only the sole sender on a channel can safely close it, and only once every send has already happened — otherwise a still-mid-send goroutine hits a send-on-closed-channel panic. Multiple senders need a different owner for the close, which is exactly the gap sync.Once fills today.">
+    <p class="stem">Yesterday: why must exactly one sender own closing a channel?</p>
+    <button class="opt" data-ok>another sender might still be mid-send right then</button>
+    <button class="opt">Go physically prevents having more than one sender</button>
+    <button class="opt">closing a channel has no real effect anyway</button>
+  </div>
+</div>
+
+<h2>Step 0 — catch up: Week 2's practice, handed over again</h2>
+<p>Same situation as every day this week: <code>project/linkshort</code> on disk is still Day 3 shape — an unguarded <code>MemStore</code>, a plain-<code>WaitGroup</code>-plus-timeout <code>checker.go</code>, no <code>link/counter.go</code>. Today's practice needs Day 8's mutex-guarded store and counter, and Day 9–10's worker-pool-plus-<code>errgroup</code> checker as its starting point. Paste in the three files below as-is, confirm green, then move to Section 1.</p>
+
+<p><strong><code>link/memstore.go</code></strong> (replace the whole file — Day 8's mutex-guarded store):</p>
+<pre><code><span class="kw">package</span> link
+
+<span class="kw">import</span> (
+    <span class="cm">"context"</span>
+    <span class="cm">"sync"</span>
+)
+
+<span class="kw">var</span> _ Store = (*MemStore)(<span class="kw">nil</span>)
+
+<span class="kw">type</span> MemStore <span class="kw">struct</span> {
+    mu    sync.RWMutex
+    links <span class="kw">map</span>[string]Link
+}
+
+<span class="kw">func</span> NewMemStore() *MemStore {
+    <span class="kw">return</span> &amp;MemStore{links: make(<span class="kw">map</span>[string]Link)}
+}
+
+<span class="kw">func</span> (s *MemStore) Save(ctx context.Context, l Link) error {
+    s.mu.Lock()
+    <span class="kw">defer</span> s.mu.Unlock()
+    s.links[l.Code] = l
+    <span class="kw">return nil</span>
+}
+
+<span class="kw">func</span> (s *MemStore) Get(ctx context.Context, code string) (Link, error) {
+    s.mu.RLock()
+    <span class="kw">defer</span> s.mu.RUnlock()
+    l, ok := s.links[code]
+    <span class="kw">if</span> !ok {
+        <span class="kw">return</span> Link{}, ErrNotFound
+    }
+    <span class="kw">return</span> l, <span class="kw">nil</span>
+}</code></pre>
+
+<p><strong><code>link/counter.go</code></strong> (Day 8's click counter — today's Section 6 adds an atomic sibling next to it):</p>
+<pre><code><span class="kw">package</span> link
+
+<span class="kw">import</span> <span class="cm">"sync"</span>
+
+<span class="cm">// ClickCounter is a concurrency-safe tally of redirects per code.</span>
+<span class="kw">type</span> ClickCounter <span class="kw">struct</span> {
+    mu     sync.Mutex
+    counts <span class="kw">map</span>[string]<span class="kw">int</span>
+}
+
+<span class="kw">func</span> NewClickCounter() *ClickCounter {
+    <span class="kw">return</span> &amp;ClickCounter{counts: make(<span class="kw">map</span>[string]<span class="kw">int</span>)}
+}
+
+<span class="kw">func</span> (c *ClickCounter) Inc(code string) {
+    c.mu.Lock()
+    <span class="kw">defer</span> c.mu.Unlock()
+    c.counts[code]++
+}
+
+<span class="kw">func</span> (c *ClickCounter) Count(code string) <span class="kw">int</span> {
+    c.mu.Lock()
+    <span class="kw">defer</span> c.mu.Unlock()
+    <span class="kw">return</span> c.counts[code]
+}
+
+<span class="kw">func</span> (c *ClickCounter) Snapshot() <span class="kw">map</span>[string]<span class="kw">int</span> {
+    c.mu.Lock()
+    <span class="kw">defer</span> c.mu.Unlock()
+    out := make(<span class="kw">map</span>[string]<span class="kw">int</span>, len(c.counts))
+    <span class="kw">for</span> k, v := <span class="kw">range</span> c.counts {
+        out[k] = v
+    }
+    <span class="kw">return</span> out
+}</code></pre>
+
+<p><strong><code>checker.go</code></strong> (replace the whole file — Day 9's worker pool + Day 10's <code>ctx</code>/<code>errgroup</code> rewrite, exactly as Day 11 used it):</p>
+<pre><code><span class="kw">package</span> main
+
+<span class="kw">import</span> (
+    <span class="cm">"context"</span>
+    <span class="cm">"strings"</span>
+    <span class="cm">"time"</span>
+
+    <span class="cm">"linkshort/link"</span>
+
+    <span class="cm">"golang.org/x/sync/errgroup"</span>
+)
+
+<span class="kw">type</span> result <span class="kw">struct</span> {
+    code <span class="kw">string</span>
+    ok   <span class="kw">bool</span>
+}
+
+<span class="kw">func</span> checkOne(l link.Link) result {
+    time.Sleep(50 * time.Millisecond)
+    <span class="kw">return</span> result{code: l.Code, ok: strings.HasPrefix(l.URL, <span class="cm">"https://"</span>)}
+}
+
+<span class="kw">const</span> maxWorkers = 4
+
+<span class="kw">func</span> checkAll(ctx context.Context, links []link.Link) <span class="kw">map</span>[<span class="kw">string</span>]<span class="kw">bool</span> {
+    jobs := make(<span class="kw">chan</span> link.Link)
+    results := make(<span class="kw">chan</span> result)
+
+    g, ctx := errgroup.WithContext(ctx)
+    <span class="kw">for</span> w := 0; w &lt; maxWorkers; w++ {
+        g.Go(<span class="kw">func</span>() <span class="kw">error</span> {
+            <span class="kw">for</span> {
+                <span class="kw">select</span> {
+                <span class="kw">case</span> l, open := &lt;-jobs:
+                    <span class="kw">if</span> !open {
+                        <span class="kw">return nil</span>
+                    }
+                    <span class="kw">select</span> {
+                    <span class="kw">case</span> results &lt;- checkOne(l):
+                    <span class="kw">case</span> &lt;-ctx.Done():
+                        <span class="kw">return</span> ctx.Err()
+                    }
+                <span class="kw">case</span> &lt;-ctx.Done():
+                    <span class="kw">return</span> ctx.Err()
+                }
+            }
+        })
+    }
+
+    <span class="kw">go func</span>() {
+        <span class="kw">defer close</span>(jobs)
+        <span class="kw">for</span> _, l := <span class="kw">range</span> links {
+            <span class="kw">select</span> {
+            <span class="kw">case</span> jobs &lt;- l:
+            <span class="kw">case</span> &lt;-ctx.Done():
+                <span class="kw">return</span>
+            }
+        }
+    }()
+
+    <span class="kw">go func</span>() {
+        g.Wait()
+        <span class="kw">close</span>(results)
+    }()
+
+    out := make(<span class="kw">map</span>[<span class="kw">string</span>]<span class="kw">bool</span>, len(links))
+    <span class="kw">for</span> {
+        <span class="kw">select</span> {
+        <span class="kw">case</span> r, open := &lt;-results:
+            <span class="kw">if</span> !open {
+                <span class="kw">return</span> out
+            }
+            out[r.code] = r.ok
+        <span class="kw">case</span> &lt;-ctx.Done():
+            <span class="kw">return</span> out
+        }
+    }
+}</code></pre>
+<p>Update <code>checker_test.go</code> and <code>main.go</code>'s call site for the <code>ctx</code>-based signature exactly as Day 10 shipped them — <a href="0011-context-cancellation-errgroup.html">0011</a> has all of it verbatim if you don't have your own copy handy.</p>
+<pre><code>go mod tidy
+go vet ./...          <span class="cm"># silent</span>
+go test -race ./...   <span class="cm"># green</span></code></pre>
+
+<h2>1 · <code>sync.Once</code> — exactly once, thread-safe, no matter who asks first</h2>
+<p>A <dfn data-en="A sync primitive whose Do(f) runs f exactly one time total, no matter how many goroutines call Do concurrently — every caller, including the first, blocks until that single run finishes, then all return." data-vn="giữ nguyên 'sync.Once' — đảm bảo một đoạn code chỉ chạy đúng 1 lần, dù nhiều goroutine cùng gọi">sync.Once</dfn> answers one narrow question: "run this exactly once, and make every concurrent caller wait for that one run instead of racing to do it themselves." The naive version — a plain <code>if cfg == nil { cfg = load() }</code> — is a textbook data race: two goroutines can both see <code>nil</code>, both call <code>load()</code>, and one of them can even observe the other's half-written struct.</p>
+<pre><code><span class="kw">var</span> (
+    cfg     *Config
+    cfgOnce sync.Once
+)
+
+<span class="kw">func</span> GetConfig() *Config {
+    cfgOnce.Do(<span class="kw">func</span>() {
+        cfg = loadConfig() <span class="cm">// runs exactly once, ever, across all goroutines</span>
+    })
+    <span class="kw">return</span> cfg
+}</code></pre>
+<p>Every goroutine calls <code>Do</code> with the same closure; <code>Once</code> guarantees exactly one of those closures actually executes, and — this is the part a hand-rolled flag-plus-mutex gets wrong if you're not careful — every other caller's <code>Do</code> doesn't return until that one execution has <em>completed</em>, so nobody ever observes a half-initialized <code>cfg</code>. This is Go's answer to the "lazy singleton" pattern, and it's also exactly the tool yesterday's "close exactly once" rule was missing: wrap a channel close in a <code>sync.Once</code> and a second, third, hundredth call to close it is simply a no-op instead of a panic.</p>
+<pre><code><span class="kw">type</span> SafeCloser <span class="kw">struct</span> {
+    ch   <span class="kw">chan</span> <span class="kw">struct</span>{}
+    once sync.Once
+}
+
+<span class="kw">func</span> (c *SafeCloser) Close() {
+    c.once.Do(<span class="kw">func</span>() { <span class="kw">close</span>(c.ch) }) <span class="cm">// safe from any number of callers, any number of times</span>
+}</code></pre>
+
+<h2>2 · <code>sync/atomic</code> — lock-free updates to a single value</h2>
+<p>An <dfn data-en="A hardware-backed CPU instruction that reads, modifies, and writes a value as one indivisible step, so no lock is needed to make the update race-free — but it only ever protects ONE value at a time, never a relationship between several." data-vn="giữ nguyên 'atomic' — thao tác đọc-sửa-ghi làm trong một bước không thể chen ngang, không cần lock, nhưng chỉ bảo vệ được MỘT giá trị">atomic</dfn> operation updates one machine word — an int, a pointer, a bool — without a lock at all, using a CPU instruction that can't be interrupted mid-update. Go 1.19+ wraps this in typed values so you stop juggling raw <code>int64</code>s and offsets:</p>
+<pre><code><span class="kw">var</span> total atomic.Int64
+
+<span class="kw">func</span> (c *AtomicTotal) Inc() { total.Add(1) }
+<span class="kw">func</span> (c *AtomicTotal) Load() <span class="kw">int64</span> { <span class="kw">return</span> total.Load() }</code></pre>
+<p>No <code>Lock</code>/<code>Unlock</code>, no struct to define beyond the atomic type itself — and for exactly this shape (one counter, one flag, one pointer swap) it's both simpler and measurably cheaper than a mutex, because there's no OS-level contention path to fall into under load. The catch is the scope: an atomic protects exactly the one value it wraps, nothing else. The moment you need to update <em>two related fields together</em> — say, a total count AND a last-updated timestamp, and they must never be observed out of sync — one atomic per field does NOT give you that guarantee; two goroutines can interleave between the two independent atomic writes. That's still a mutex's job. Rule of thumb: reach for <code>atomic</code> for one bare counter or flag, reach for a mutex the instant more than one field needs to change together.</p>
+
+<h2>3 · <code>sync.Map</code> — not a faster map, a differently-shaped one</h2>
+<p>The obvious-looking upgrade from "map + mutex" is <dfn data-en="A concurrent-safe map type built into sync, internally optimized for two specific access patterns: keys written once and read many times, or many goroutines operating on entirely disjoint sets of keys. For general read/write-mixed access it is usually SLOWER than a plain map guarded by a Mutex or RWMutex." data-vn="giữ nguyên 'sync.Map' — map an toàn khi nhiều goroutine dùng chung, nhưng chỉ nhanh trong vài tình huống đặc biệt">sync.Map</dfn> — and it's the most misapplied tool in this package. Its own doc comment is blunt about it: use a plain map plus a separate <code>Mutex</code>/<code>RWMutex</code> "for most use cases," and reach for <code>sync.Map</code> only in two specific shapes — (1) a key is written once and read many times afterward (a cache that only grows), or (2) many goroutines each touch a disjoint set of keys with little overlap. <code>ClickCounter</code>'s map fails both tests — every code's count is written repeatedly, by any goroutine, forever — so it correctly stays a plain <code>map[string]int</code> behind a <code>Mutex</code>, not a <code>sync.Map</code>.</p>
+<pre><code><span class="kw">var</span> m sync.Map
+m.Store(<span class="cm">"go"</span>, 42)
+v, ok := m.Load(<span class="cm">"go"</span>)          <span class="cm">// v is `any` — a type assertion is on you</span>
+m.Range(<span class="kw">func</span>(k, v <span class="kw">any</span>) <span class="kw">bool</span> { <span class="kw">return true</span> }) <span class="cm">// keep iterating</span></code></pre>
+<p>Two more costs worth knowing for an interview: values come back as <code>any</code>, so every read needs a type assertion the compiler can't check for you — a plain typed map doesn't have that problem. And it has no <code>Len()</code> method at all; counting entries means a full <code>Range</code>.</p>
+
+<h2>4 · <code>sync.Pool</code> — reusing garbage instead of making more</h2>
+<p>A <dfn data-en="A pool of temporary objects that can be individually saved and retrieved to reduce garbage-collector pressure, e.g. reusing a []byte buffer across requests instead of allocating a fresh one each time. The pool may silently drop items at any time, especially during GC — it is a cache for reuse, never a place to store anything that must persist." data-vn="giữ nguyên 'sync.Pool' — nơi tái sử dụng object tạm để đỡ tốn GC; có thể tự động bị xóa bất cứ lúc nào">sync.Pool</dfn> holds reusable scratch objects — the classic example is a <code>[]byte</code> or <code>bytes.Buffer</code> reused across many requests instead of allocated fresh (and garbage-collected) every time:</p>
+<pre><code><span class="kw">var</span> bufPool = sync.Pool{
+    New: <span class="kw">func</span>() <span class="kw">any</span> { <span class="kw">return</span> <span class="kw">new</span>(bytes.Buffer) },
+}
+
+<span class="kw">func</span> encode(v <span class="kw">any</span>) []<span class="kw">byte</span> {
+    buf := bufPool.Get().(*bytes.Buffer)
+    <span class="kw">defer func</span>() { buf.Reset(); bufPool.Put(buf) }() <span class="cm">// reset BEFORE returning it — the pool doesn't clear for you</span>
+    json.NewEncoder(buf).Encode(v)
+    <span class="kw">return</span> <span class="kw">append</span>([]<span class="kw">byte</span>{}, buf.Bytes()...)
+}</code></pre>
+<p>The one rule that trips people up: <strong>the pool may evict anything, at any time, for any reason</strong> — most aggressively, it drops every pooled item across a GC cycle. That makes it correct only for pure allocation-reduction, never for anything with state you need to survive (a connection, a cache entry, a counter). linkshort's stdlib-only HTTP handlers would reach for exactly this pattern to reuse response buffers under load; today's practice stays with <code>Once</code> and <code>atomic</code>, since <code>Pool</code>'s payoff only shows up under real allocation pressure a course exercise can't easily simulate.</p>
+
+<h2>5 · <code>singleflight</code> — one flight in the air, everyone else waits for the same seat</h2>
+<p><dfn data-en="A package (golang.org/x/sync/singleflight) that deduplicates concurrent identical calls: if N goroutines call Do with the same key while one is already in flight, only one actual call happens and all N get its result — the classic fix for a cache-miss stampede." data-vn="giữ nguyên 'singleflight' — nếu nhiều goroutine gọi cùng một việc cùng lúc, chỉ chạy 1 lần thật, còn lại dùng chung kết quả">singleflight</dfn> solves a shape that shows up constantly in real backends and that neither <code>Once</code> (only ever runs once, period) nor a mutex (serializes, but every caller still re-does the work in turn) actually fixes: a <em>cache stampede</em>. Say linkshort's redirect handler has a cold cache and a hundred requests for the same code land in the same instant — without protection, all hundred hit Postgres at once for identical data.</p>
+<pre><code><span class="kw">var</span> g singleflight.Group
+
+<span class="kw">func</span> resolveWithDedup(ctx context.Context, code <span class="kw">string</span>) (link.Link, error) {
+    v, err, _ := g.Do(code, <span class="kw">func</span>() (<span class="kw">any</span>, error) {
+        <span class="kw">return</span> store.Get(ctx, code) <span class="cm">// only ONE of the hundred concurrent callers actually runs this</span>
+    })
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        <span class="kw">return</span> link.Link{}, err
+    }
+    <span class="kw">return</span> v.(link.Link), <span class="kw">nil</span>
+}</code></pre>
+<p>Unlike <code>Once</code>, this runs again for the <em>next</em> stampede on the same key — it dedupes calls that overlap in time, not calls forever. That's the whole difference in one sentence: <code>Once</code> is "never again," <code>singleflight</code> is "not right now, while one's already in flight."</p>
+
+<h2>6 · Practice: lazy config via <code>sync.Once</code>, atomic vs mutex counter, benchmarked</h2>
+<p>In <code>~/learning/go/project/linkshort</code>, two small additions.</p>
+
+<p><strong>Step 1 — new file <code>config.go</code></strong>: a lazily-loaded, process-wide config, safe under concurrent first access. TODO is the <code>Once</code>-guarded getter from Section 1.</p>
+<pre><code><span class="kw">package</span> main
+
+<span class="kw">import</span> (
+    <span class="cm">"os"</span>
+    <span class="cm">"sync"</span>
+)
+
+<span class="kw">type</span> Config <span class="kw">struct</span> {
+    DBURL      <span class="kw">string</span>
+    MaxWorkers <span class="kw">int</span>
+}
+
+<span class="kw">func</span> loadConfig() *Config {
+    <span class="kw">return</span> &amp;Config{
+        DBURL:      os.Getenv(<span class="cm">"LINKSHORT_DB_URL"</span>),
+        MaxWorkers: maxWorkers,
+    }
+}
+
+<span class="kw">var</span> (
+    cfg     *Config
+    cfgOnce sync.Once
+)
+
+<span class="cm">// TODO: GetConfig should call cfgOnce.Do to lazily set cfg via loadConfig,</span>
+<span class="cm">//   then return cfg. (Section 1 has this exact shape.)</span>
+<span class="kw">func</span> GetConfig() *Config {
+    <span class="kw">panic</span>(<span class="cm">"not implemented"</span>)
+}</code></pre>
+
+<p><strong>Step 2 — extend <code>link/counter.go</code></strong>: add an atomic sibling next to the existing mutex-guarded <code>ClickCounter</code>, tracking one grand total (not per-code — that stays on <code>ClickCounter</code>, per Section 3's rule about <code>sync.Map</code> not fitting a repeatedly-written key set).</p>
+<pre><code><span class="kw">import</span> <span class="cm">"sync/atomic"</span>
+
+<span class="cm">// AtomicTotal is a lock-free running total — one value, no map.</span>
+<span class="kw">type</span> AtomicTotal <span class="kw">struct</span> {
+    n atomic.Int64
+}
+
+<span class="kw">func</span> (a *AtomicTotal) Inc()        { a.n.Add(1) }
+<span class="kw">func</span> (a *AtomicTotal) Load() <span class="kw">int64</span> { <span class="kw">return</span> a.n.Load() }
+
+<span class="cm">// MutexTotal is the same running total, guarded by a plain Mutex — the</span>
+<span class="cm">// benchmark below measures the cost this indirection adds over AtomicTotal.</span>
+<span class="kw">type</span> MutexTotal <span class="kw">struct</span> {
+    mu <span class="kw">sync.Mutex</span>
+    n  <span class="kw">int64</span>
+}
+
+<span class="kw">func</span> (m *MutexTotal) Inc() {
+    m.mu.Lock()
+    <span class="kw">defer</span> m.mu.Unlock()
+    m.n++
+}
+
+<span class="kw">func</span> (m *MutexTotal) Load() <span class="kw">int64</span> {
+    m.mu.Lock()
+    <span class="kw">defer</span> m.mu.Unlock()
+    <span class="kw">return</span> m.n
+}</code></pre>
+
+<p><strong>Step 3 — new file <code>link/counter_bench_test.go</code></strong>: benchmark both under concurrent load with <code>RunParallel</code>, which spins up <code>GOMAXPROCS</code> goroutines all hammering <code>Inc</code> at once — the exact shape that makes lock contention visible.</p>
+<pre><code><span class="kw">package</span> link
+
+<span class="kw">import</span> <span class="cm">"testing"</span>
+
+<span class="kw">func</span> BenchmarkAtomicTotal(b *testing.B) {
+    a := &amp;AtomicTotal{}
+    b.RunParallel(<span class="kw">func</span>(pb *testing.PB) {
+        <span class="kw">for</span> pb.Next() {
+            a.Inc()
+        }
+    })
+}
+
+<span class="kw">func</span> BenchmarkMutexTotal(b *testing.B) {
+    m := &amp;MutexTotal{}
+    b.RunParallel(<span class="kw">func</span>(pb *testing.PB) {
+        <span class="kw">for</span> pb.Next() {
+            m.Inc()
+        }
+    })
+}</code></pre>
+<pre><code>go vet ./...
+go test -race ./...
+go test -bench=Total -benchmem ./link/
+<span class="cm"># BenchmarkAtomicTotal-4   ~19 ns/op, 0 B/op — no lock, no contention path
+# BenchmarkMutexTotal-4    ~26 ns/op, 0 B/op — same 0 allocs, but Lock/Unlock costs real time</span></code></pre>
+<div class="callout"><strong>Done when:</strong> <code>go vet ./...</code> silent · <code>go test -race ./...</code> green · <code>GetConfig()</code> returns the same <code>*Config</code> pointer across repeated calls (add a quick <code>t.Log(GetConfig() == GetConfig())</code> to check) · the benchmark runs and you can say, from the numbers, which is faster and why · you can name which of today's five tools fits a given "what would you use here" prompt without hesitating.</div>
+
+<h2>Check yourself</h2>
+<div class="quiz">
+  <div class="q" data-why="sync.Once guarantees the wrapped function runs exactly one time, ever, and every caller — including the first — blocks until that single run completes, so no caller ever observes a half-initialized result.">
+    <p class="stem"><code>sync.Once.Do(f)</code> guarantees…</p>
+    <button class="opt" data-ok>f runs exactly once; every caller waits for it</button>
+    <button class="opt">f runs once for every goroutine that calls it</button>
+    <button class="opt">f only runs once every time the process restarts</button>
+  </div>
+  <div class="q" data-why="An atomic operation only ever protects the one value it directly wraps. The instant two or more related fields must change together and stay consistent with each other, a single atomic per field can't provide that — a mutex around all of them together is what's needed.">
+    <p class="stem">Why can't <code>sync/atomic</code> replace a mutex once two related fields must update together?</p>
+    <button class="opt" data-ok>each atomic only ever guards its own one value</button>
+    <button class="opt">atomic operations are always significantly slower than a mutex</button>
+    <button class="opt">Go does not allow more than one atomic field</button>
+  </div>
+  <div class="q" data-why="sync.Map's own documentation recommends a plain map guarded by a Mutex/RWMutex for most cases, and reserves sync.Map for two narrow shapes: keys written once and read many times, or goroutines each touching disjoint key sets. A map like ClickCounter's, written repeatedly on every key, fits neither.">
+    <p class="stem"><code>sync.Map</code> is the right fit when…</p>
+    <button class="opt" data-ok>keys are written once, or goroutines touch disjoint keys</button>
+    <button class="opt">any map is shared across two or more goroutines</button>
+    <button class="opt">you want faster reads and writes than a map</button>
+  </div>
+  <div class="q" data-why="singleflight deduplicates only the calls that overlap in time for a given key — once the in-flight call finishes, the NEXT call for that same key runs for real again. sync.Once, by contrast, never runs its function again after the first time, for the life of the program.">
+    <p class="stem"><code>singleflight</code> vs <code>sync.Once</code> — what's the real difference?</p>
+    <button class="opt" data-ok>singleflight dedupes overlapping calls; Once never runs again</button>
+    <button class="opt">singleflight is just a faster alias for Once</button>
+    <button class="opt">there is no real difference between the two</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://pkg.go.dev/sync">pkg.go.dev — sync</a> — read <code>Once</code>, <code>Map</code>, and <code>Pool</code>'s own doc comments once, in full; each is explicit about exactly when it beats a plain mutex and when it doesn't. For <code>sync/atomic</code>'s typed API, <a href="https://pkg.go.dev/sync/atomic">pkg.go.dev — sync/atomic</a>; for the stampede pattern, <a href="https://pkg.go.dev/golang.org/x/sync/singleflight">pkg.go.dev — singleflight</a>.</p>
+<p>New terms are in the <a href="../reference/glossary.html#day12">glossary — Day 12 section</a>.</p>
+
+<p class="next">Tomorrow: the <strong>concurrency capstone</strong> — one production-shaped concurrent component built end to end, whiteboard-explained under pressure, opening with the Jul 20 spaced review. Today's five tools (<code>Once</code>, <code>atomic</code>, <code>Map</code>, <code>Pool</code>, <code>singleflight</code>) join Week 2's mutex, worker pool, and <code>ctx</code>/<code>errgroup</code> as the full toolbox the capstone draws from.<br><br>
+💬 Not sure whether a spot in your own code wants a mutex, an atomic, or <code>sync.Once</code>? Paste it — hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/quiz.js"></script>
+<script src="../assets/gloss.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

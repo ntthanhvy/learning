@@ -151,6 +151,16 @@
 <tr><td>deadlock</td><td>Every goroutine in the program is blocked waiting on something that will never happen — no partial progress is possible anywhere. Unlike a leak (silent, partial), a FULL deadlock is detected by the Go runtime and crashes the process immediately with a stack dump.</td><td>giữ nguyên "deadlock" — tất cả goroutine cùng kẹt, không ai chạy tiếp được</td></tr>
 </table>
 
+<h2 id="day12">Day 12 — The rest of sync (Week 2)</h2>
+<table class="gloss">
+<tr><th>Term</th><th>In software</th><th>Tiếng Việt (dev-style)</th></tr>
+<tr><td>sync.Once</td><td>A sync primitive whose <code>Do(f)</code> runs f exactly one time total, no matter how many goroutines call <code>Do</code> concurrently — every caller, including the first, blocks until that single run finishes.</td><td>giữ nguyên "sync.Once" — đảm bảo một đoạn code chỉ chạy đúng 1 lần, dù nhiều goroutine cùng gọi</td></tr>
+<tr><td>atomic</td><td>A hardware-backed CPU instruction that reads, modifies, and writes a value as one indivisible step, so no lock is needed — but it only ever protects ONE value at a time, never a relationship between several.</td><td>giữ nguyên "atomic" — thao tác đọc-sửa-ghi trong một bước không thể chen ngang, chỉ bảo vệ được MỘT giá trị</td></tr>
+<tr><td>sync.Map</td><td>A concurrent-safe map internally optimized for two specific patterns: keys written once and read many times, or goroutines each touching disjoint keys. For general read/write-mixed access it is usually SLOWER than a plain map guarded by a Mutex.</td><td>giữ nguyên "sync.Map" — map an toàn khi dùng chung, nhưng chỉ nhanh trong vài tình huống đặc biệt</td></tr>
+<tr><td>sync.Pool</td><td>A pool of temporary objects that can be saved and retrieved to reduce garbage-collector pressure. The pool may silently drop items at any time, especially during GC — a cache for reuse, never a place to store anything that must persist.</td><td>giữ nguyên "sync.Pool" — nơi tái sử dụng object tạm để đỡ tốn GC; có thể tự động bị xóa bất cứ lúc nào</td></tr>
+<tr><td>singleflight</td><td>A package that deduplicates concurrent identical calls: if N goroutines call <code>Do</code> with the same key while one is already in flight, only one actual call happens and all N get its result — the classic fix for a cache-miss stampede.</td><td>giữ nguyên "singleflight" — nhiều goroutine gọi cùng một việc cùng lúc, chỉ chạy 1 lần thật, còn lại dùng chung kết quả</td></tr>
+</table>
+
 <h2 id="day7">Day 7 — Testing, tooling &amp; capstone</h2>
 <table class="gloss">
 <tr><th>Term</th><th>In software</th><th>Tiếng Việt (dev-style)</th></tr>

@@ -28,6 +28,8 @@
       file: "lessons/0010-value-counts-str-and-nlargest.html" },
     { n: 11, date: "2026-07-19", title: "Timed drills, round 3: duplicates & pct_change",
       file: "lessons/0011-duplicates-and-pct-change.html" },
+    { n: 12, date: "2026-07-20", title: "Timed drills, round 4: apply() & binning with cut()",
+      file: "lessons/0012-apply-and-binning.html" },
   ];
 
   const REFS = [

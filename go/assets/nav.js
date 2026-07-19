@@ -30,6 +30,8 @@
       file: "lessons/0011-context-cancellation-errgroup.html" },
     { day: 11, date: "2026-07-19", title: "Debugging concurrency",
       file: "lessons/0012-debugging-concurrency.html" },
+    { day: 12, date: "2026-07-20", title: "The rest of sync",
+      file: "lessons/0013-the-rest-of-sync.html" },
   ];
 
   const REFS = [

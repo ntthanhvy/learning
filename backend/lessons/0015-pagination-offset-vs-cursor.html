@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 15 · Pagination</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 15 · ~20 min</p>
+<h1>Pagination: offset vs. cursor</h1>
+<p class="byline">MISSION.md's API-design criterion lists resource naming, verbs, status codes, pagination, error contract, idempotency — Lesson 3 covered the first two, Lesson 7 the error contract, Lessons 3 and 10 idempotency. Pagination is the one word in that list this course never actually taught. A list endpoint that returns every row works fine in a demo with 50 rows and quietly becomes the slowest, most fragile part of the API once a table has 5 million.</p>
+
+<h2>1 · "Just return all of them" doesn't survive scale</h2>
+<p><code>GET /orders</code> returning every row is the natural first version — no pagination logic, no edge cases, ships fast. It stays fine right up until the table stops being small: one response serializing millions of rows, one query holding a read lock or scanning the whole table, one client trying to parse a multi-gigabyte JSON body it never asked for. The fix isn't a bigger server; it's never sending all the rows in the first place. <dfn data-en="splitting a large result set into smaller pages the client requests one at a time, instead of returning every row in a single response" data-vn="pagination (giữ nguyên) — chia kết quả thành từng trang nhỏ">Pagination</dfn> is the API-design answer to the same problem Lesson 5's indexes solved on the query side: don't do more work than the caller actually needs right now.</p>
+
+<h2>2 · Offset/limit: simple, and simple to break</h2>
+<p>The obvious approach mirrors SQL directly. The client asks for a page number; the handler translates it into <code>LIMIT</code>/<code>OFFSET</code>:</p>
+<pre><code><span class="cm">-- GET /orders?page=2&amp;per_page=20</span>
+<span class="kw">SELECT</span> * <span class="kw">FROM</span> orders <span class="kw">ORDER BY</span> created_at <span class="kw">LIMIT</span> 20 <span class="kw">OFFSET</span> 20;</code></pre>
+<p>This is <dfn data-en="pagination by row count: the client asks for page N, and the query skips (OFFSET) N pages worth of rows before returning the next LIMIT rows" data-vn="offset pagination (giữ nguyên) — phân trang kiểu bỏ qua N dòng đầu">offset pagination</dfn>, and it reads exactly like the frontend mental model of "page 2" — easy to reason about, easy to build page-number links for. It has two real problems, and both get worse as the table grows, not better.</p>
+<p><strong>Problem one: OFFSET doesn't skip work, it does the work and throws it away.</strong> <code>OFFSET 100000</code> doesn't jump to row 100,000 the way an array index would — Postgres still has to walk through and discard the first 100,000 matching rows on every single request, even with an index on <code>created_at</code>. Page 2 is fast. Page 5,000 is scanning and discarding 100,000 rows just to return the next 20 — the deeper into the list a client pages, the slower every request gets.</p>
+<p><strong>Problem two: page 2 breaks under concurrent writes.</strong> Offset pagination silently assumes the list holds still between requests. It never does. Say a client fetches page 1 (rows 1–20, ordered by <code>created_at</code>), then before it fetches page 2, a new row is inserted at the front of that order. Every row shifts down by one — what was row 20 is now row 21, sitting in the range page 2 is about to fetch as row 21–40 collapses to a different actual set. The client ends up seeing row 20 twice (once on each page) or, if a row is deleted instead of inserted, skipping a row entirely — with no error, no warning, just quietly wrong data stitched across two "correct" responses.</p>
+
+<h2>3 · Cursor pagination: ask "after what?" instead of "skip how many?"</h2>
+<p><dfn data-en="pagination by position: the client sends back the sort key of the last row it saw, and the query asks the database for rows strictly after that key, instead of skipping a row count" data-vn="cursor pagination / keyset pagination (giữ nguyên) — phân trang theo vị trí dòng cuối đã thấy">Cursor pagination</dfn> (also called keyset pagination) replaces "skip N rows" with "give me rows after this specific point." The client doesn't send a page number — it sends back an <dfn data-en="a value the client treats as a black box and simply echoes back on the next request; the server decides what it encodes and how" data-vn="opaque cursor (giữ nguyên) — client không cần hiểu, chỉ gửi lại nguyên si">opaque cursor</dfn>, typically the sort key of the last row it received:</p>
+<pre><code><span class="cm">-- GET /orders?after=2026-07-20T09:00:00Z_42  (created_at, id of the last row seen)</span>
+<span class="kw">SELECT</span> * <span class="kw">FROM</span> orders
+<span class="kw">WHERE</span> (created_at, id) &gt; (:cursor_created_at, :cursor_id)
+<span class="kw">ORDER BY</span> created_at, id
+<span class="kw">LIMIT</span> 20;</code></pre>
+<p>The pair <code>(created_at, id)</code> rather than <code>created_at</code> alone matters: <code>created_at</code> isn't guaranteed unique (two orders can share a timestamp), so tie-breaking on <code>id</code> guarantees a strict, total order — no row is ever skipped or repeated because two rows landed on the same instant. This directly fixes both of offset pagination's problems. It's stable under writes: a new row inserted anywhere doesn't change what "after this cursor" means, because the cursor names an actual row, not a position that shifts when the list does. And it's fast at any depth: with an index on <code>(created_at, id)</code>, that <code>WHERE</code> clause is an index seek straight to the right spot — page 5,000 costs the same as page 2, because there's no OFFSET to walk through and discard.</p>
+
+<h2>4 · The trade-off, named honestly</h2>
+<p>Cursor pagination isn't strictly better — it gives up something offset pagination has: random access. There's no way to ask a cursor-paginated endpoint for "page 7" directly; a cursor only ever means "after wherever I last stopped," so reaching page 7 means walking through pages 1–6 first. That's a non-issue for infinite-scroll UIs and API-to-API consumers, which only ever ask for "the next batch" anyway — exactly the shape most list endpoints actually have. It's a real problem for a UI that renders clickable numbered page links (1 2 3 ... 9), where a user expects to jump straight to page 7. That's the case where offset/limit still earns its place — just not as the default for a large or fast-growing table.</p>
+<table class="gloss">
+  <tr><th>&nbsp;</th><th>Offset/limit</th><th>Cursor/keyset</th></tr>
+  <tr><td>Jump to arbitrary page</td><td>yes</td><td>no — sequential only</td></tr>
+  <tr><td>Speed on a deep page</td><td>degrades — scans and discards</td><td>constant — index seek</td></tr>
+  <tr><td>Stable under concurrent writes</td><td>no — rows shift between pages</td><td>yes — cursor names a row, not a position</td></tr>
+  <tr><td>Best fit</td><td>small tables, numbered-page UIs</td><td>large/growing tables, infinite scroll, APIs</td></tr>
+</table>
+
+<h2>5 · A cursor-paginated handler</h2>
+<pre><code><span class="kw">type</span> Order <span class="kw">struct</span> {
+    ID        <span class="ty">int64</span>     `json:"id"`
+    CreatedAt time.Time `json:"created_at"`
+}
+
+<span class="cm">// ListOrdersAfter returns up to limit orders strictly after the given cursor,</span>
+<span class="cm">// ordered oldest-first. A zero-value cursor (createdAt IsZero) returns the first page.</span>
+<span class="kw">func</span> (s *Store) ListOrdersAfter(ctx context.Context, createdAt time.Time, id <span class="ty">int64</span>, limit <span class="ty">int</span>) ([]Order, <span class="ty">error</span>) {
+    <span class="kw">rows</span>, err := s.db.Query(ctx,
+        <span class="kw">"SELECT id, created_at FROM orders "</span>+
+        <span class="kw">"WHERE (created_at, id) > ($1, $2) "</span>+
+        <span class="kw">"ORDER BY created_at, id LIMIT $3"</span>,
+        createdAt, id, limit)
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        <span class="kw">return</span> <span class="kw">nil</span>, err
+    }
+    <span class="kw">defer</span> rows.Close()
+
+    <span class="kw">var</span> out []Order
+    <span class="kw">for</span> rows.Next() {
+        <span class="kw">var</span> o Order
+        <span class="kw">if</span> err := rows.Scan(&amp;o.ID, &amp;o.CreatedAt); err != <span class="kw">nil</span> {
+            <span class="kw">return</span> <span class="kw">nil</span>, err
+        }
+        out = <span class="kw">append</span>(out, o)
+    }
+    <span class="kw">return</span> out, rows.Err()
+}
+
+<span class="kw">func</span> listOrdersHandler(w http.ResponseWriter, r *http.Request) {
+    createdAt, id := decodeCursor(r.URL.Query().Get(<span class="kw">"after"</span>)) <span class="cm">// zero value if absent</span>
+    orders, err := store.ListOrdersAfter(r.Context(), createdAt, id, 20)
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        http.Error(w, <span class="kw">"internal error"</span>, http.StatusInternalServerError)
+        <span class="kw">return</span>
+    }
+    <span class="kw">var</span> next <span class="ty">string</span>
+    <span class="kw">if</span> <span class="kw">len</span>(orders) == 20 { <span class="cm">// full page: there may be more, hand back a cursor for it</span>
+        last := orders[<span class="kw">len</span>(orders)-1]
+        next = encodeCursor(last.CreatedAt, last.ID)
+    }
+    json.NewEncoder(w).Encode(<span class="kw">struct</span> {
+        Orders []Order `json:"orders"`
+        Next   <span class="ty">string</span>  `json:"next_cursor,omitempty"`
+    }{orders, next})
+}</code></pre>
+<p>The client's job on each call is small: send back whatever <code>next_cursor</code> it was last given, or nothing for the first page. It never has to know what's inside the cursor or do arithmetic on a page number — that opacity is what makes it safe to change the encoding later without breaking clients.</p>
+
+<div class="interview">
+<p><strong>Q: "How would you paginate a list endpoint backed by a table with millions of rows?"</strong> A strong answer, out loud: <em>"I'd reach for cursor pagination, not offset/limit. Offset/limit looks simpler — LIMIT and OFFSET map directly to a page number — but it has two real problems at scale: OFFSET doesn't skip the earlier rows, it still scans and discards them, so a deep page gets slower the further in you go. And it's not stable under writes — if a row is inserted or deleted between two page requests, the rows after it shift, and the client can see a duplicate or silently miss a row. Cursor pagination fixes both: the client sends back the sort key of the last row it saw, typically (created_at, id) to break ties, and the query becomes a WHERE-greater-than with an index seek instead of a scan-and-discard — so page 5,000 costs the same as page 2, and a mid-list insert or delete never shifts what 'after this cursor' means. The trade-off I'd flag up front is that cursor pagination can't jump to an arbitrary page — no direct 'page 7' — which is fine for infinite scroll or an API consumer that only ever asks for the next batch, but wrong for a UI that needs numbered page links, where I'd keep offset/limit instead."</em> The signal: naming the OFFSET-cost and write-stability problems specifically, not just "cursor pagination is more efficient," and volunteering the random-access trade-off unprompted.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="OFFSET does not let Postgres jump straight to the Nth row — it still has to scan through and discard every row before the offset on each request, so a deep page costs more work than an early one even with an index on the sort column.">
+    <p class="stem">Why does a large OFFSET make an offset-paginated query slower on deeper pages?</p>
+    <button class="opt" data-ok>the DB scans and discards every skipped row</button>
+    <button class="opt">the DB caches only the very first page</button>
+    <button class="opt">LIMIT itself silently stops working past page ten</button>
+  </div>
+  <div class="q" data-why="Offset pagination assumes the list holds still between page requests. If a row is inserted before page 2 is fetched, every later row shifts down by one position, so the client's page-2 request returns a row it already saw on page 1 (or, on a delete, skips one entirely).">
+    <p class="stem">A row is inserted into the list between a client fetching page 1 and page 2 with offset pagination. What can happen?</p>
+    <button class="opt" data-ok>client sees a duplicate or skipped row</button>
+    <button class="opt">the database rejects the second page outright</button>
+    <button class="opt">page one's earlier results silently change again</button>
+  </div>
+  <div class="q" data-why="Cursor pagination's WHERE (created_at, id) > (:cursor) clause is answered by an index seek straight to the right spot, the same cost at any depth, because there is no OFFSET counting and discarding rows along the way — unlike offset pagination, which gets slower the deeper the page.">
+    <p class="stem">Why is cursor pagination roughly the same speed on a deep page as on page one?</p>
+    <button class="opt" data-ok>it uses an index seek, not growing OFFSET</button>
+    <button class="opt">it caches every previous page on the server</button>
+    <button class="opt">it silently drops results past the first pages</button>
+  </div>
+  <div class="q" data-why="A cursor only means 'give me rows after this specific row,' which is inherently sequential — there is no way to compute 'the row that starts page 7' without walking through pages 1 through 6 first, unlike OFFSET which can jump to any page directly.">
+    <p class="stem">What can offset/limit do that cursor pagination structurally cannot?</p>
+    <button class="opt" data-ok>jump straight to an arbitrary numbered page</button>
+    <button class="opt">return more than a dozen rows total</button>
+    <button class="opt">run against a table lacking any index</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> Markus Winand's <a href="https://use-the-index-luke.com/no-offset">"We Have a Problem With Widgets" / no-offset</a> chapter of <em>Use The Index, Luke</em> (~15 min) — the standard reference on this exact trade-off, with the query-plan detail today's lesson didn't have room for.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> API versioning — what changes safely under an existing contract, and what forces a new one.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

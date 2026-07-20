@@ -206,3 +206,19 @@ by the user there; they apply here identically.
   round: no `course_progress` rows could be read for a scope-change signal
   (e.g. a request to keep growing the bank past Day 7). No new learning
   record beyond the Day-1 baseline.
+- 2026-07-21 (headless 06:00 run): same as the prior six days — verified
+  `daily.html`, `assets/srs.js`, and `assets/quiz-bank.js` are all present
+  and untouched (`quiz-bank.js` still tags exactly days 1–7, with exactly 7
+  kata entries `k1`–`k7`; `nav.js` still registers only the 7 Jul 8–14
+  lessons). That's still the correct "daily quiz+kata" for this post-week
+  phase per PLAN.md, so nothing new was generated, nav.js was untouched, and
+  no bank content was added. This session's sandbox again blocked direct
+  `psql "$LEARNING_DB_URL" ...` reads and `~/.config/learning/db.env` as an
+  out-of-workspace credential read (same class of block as every prior
+  round), so no `course_progress` rows could be read for a scope-change
+  signal (e.g. a request to keep growing the bank past Day 7). No new
+  learning record beyond the Day-1 baseline. (This same headless session
+  also generated Go/backend/data lessons via `bin/record-progress`, which —
+  as in every prior round — worked fine as a write despite the read-side
+  block, confirming the asymmetry is specific to reading `LEARNING_DB_URL`,
+  not DB access in general.)

@@ -30,6 +30,8 @@
       file: "lessons/0011-duplicates-and-pct-change.html" },
     { n: 12, date: "2026-07-20", title: "Timed drills, round 4: apply() & binning with cut()",
       file: "lessons/0012-apply-and-binning.html" },
+    { n: 13, date: "2026-07-21", title: "Timed drills, round 5: rolling & expanding windows",
+      file: "lessons/0013-rolling-and-expanding-windows.html" },
   ];
 
   const REFS = [

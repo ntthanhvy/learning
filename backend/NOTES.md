@@ -170,3 +170,38 @@
   --lesson 0014-reading-a-backend-pr.html` succeeded (same asymmetry as every
   prior round — it sources DB creds internally). Added `nit` and `blocking
   (comment)` to the glossary and registered Lesson 14 in nav.js.
+- 2026-07-21 generation (Lesson 15): Lesson 14 left the next step open for an
+  interactive session to choose (deepen a track vs. keep the light cadence),
+  but this is a headless run with no user present to answer that, so rather
+  than guess a preference, generation fell back to MISSION.md itself: success
+  criterion #2 lists "resource naming, verbs, status codes, pagination, error
+  contract, idempotency" and a grep of all 14 prior lessons for "pagination"
+  came back empty, while every other item in that list is already covered
+  (Lesson 3 resource naming/verbs/status codes, Lessons 3+7 error contract,
+  Lessons 3+10 idempotency) - a genuine, mission-sourced gap rather than an
+  invented topic. Still no `lesson_completed` record for any of Lessons 1-14
+  to target instead. Covered: why "return all rows" doesn't scale, offset/
+  limit pagination and its two real problems (OFFSET scans-and-discards
+  skipped rows instead of jumping past them, and instability under
+  concurrent writes - a mid-list insert/delete shifts rows so page 2 can
+  duplicate or skip one), cursor/keyset pagination as the fix (opaque
+  cursor on `(created_at, id)`, index-seek query, stable under writes), and
+  the honest trade-off named explicitly: cursor pagination can't jump to an
+  arbitrary page, so numbered-page UIs still want offset/limit. Primary
+  source: Markus Winand's Use The Index, Luke (RESOURCES.md already flagged
+  it for "pagination done right"). `bin/record-progress backend
+  lesson_generated --day 15 --lesson 0015-pagination-offset-vs-cursor.html
+  --detail '{"by":"launchd"}'` was run directly and succeeded on the first
+  try, no approval blocker this round. The lesson's Go snippet (a cursor-
+  paginated `Store.ListOrdersAfter` method plus the `listOrdersHandler` that
+  calls it) was compile-checked clean with `go vet` and `go build` in a
+  scratch module (`.scratch/backend-lesson15/`, deleted after) using minimal
+  stand-in `DB`/`Rows` interfaces, same pattern as Lessons 11-14. Added
+  `pagination`, `offset pagination`, and `cursor pagination / keyset
+  pagination` to the glossary and registered Lesson 15 in nav.js. Set the
+  teaser going forward to API versioning (still uncovered, a natural
+  companion to Lesson 3's API-contract lesson). Note: found
+  `.scratch/backend-lesson11/` still present on disk from a prior session
+  (should have been deleted per that round's own notes) - left untouched
+  since cleaning up another day's scratch state isn't this round's job, but
+  worth a manual `rm -rf` next time someone's in an interactive session.

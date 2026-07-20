@@ -34,6 +34,8 @@
       file: "lessons/0013-logging-and-monitoring.html" },
     { n: 14, date: "2026-07-20", title: "Reading a backend PR: substance over style",
       file: "lessons/0014-reading-a-backend-pr.html" },
+    { n: 15, date: "2026-07-21", title: "Pagination: offset vs. cursor",
+      file: "lessons/0015-pagination-offset-vs-cursor.html" },
   ];
 
   const REFS = [

@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 13 · Rolling &amp; Expanding Windows</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 13 · ~20 min · 21 Jul 2026</p>
+<h1>Timed drills, round five: rolling &amp; expanding windows</h1>
+<p class="byline">Lesson 12 left the next round open — a review pass if a drill came back reported as shakiest, otherwise a fresh pattern, naming "a window-function-style rolling calculation" directly as the fallback. No outcome signal has come back, so today takes that branch: the moving-window half of the window-function family Lesson 7 only linked out to, never taught.</p>
+
+<h2>1 · Back to Lesson 7's window family: two tools, not yet covered</h2>
+<p>Lesson 7 taught two "window" tools: <code>cumsum()</code> (running total over the whole history so far) and <code>rank()</code> (position within a group). Both are members of a wider family pandas calls <em>window operations</em> — pandas' docs page for it was already linked as a "go deeper" resource back then, but only <code>cumsum</code> and <code>rank</code> themselves got taught. Today fills in the two most interview-common members left: <dfn data-en="a pandas method computing an aggregation over a fixed-size sliding window of the last N rows, sliding forward one row at a time" data-vn="giữ nguyên 'rolling window' — cửa sổ trượt kích thước cố định N dòng gần nhất">rolling window</dfn> (a fixed-size sliding window — "the last N rows") and <dfn data-en="a pandas method computing an aggregation over every row from the start up to and including the current row, growing by one row each time — the general form cumsum() is a special case of" data-vn="giữ nguyên 'expanding window' — cửa sổ lớn dần từ đầu tới dòng hiện tại">expanding window</dfn> (a growing window — "everything so far," which is exactly what <code>cumsum()</code> already does, generalized to any aggregation, not just sum).</p>
+
+<h2>2 · <code>.rolling(window=N).mean()</code>: a fixed-size moving window</h2>
+<p><code>rolling(window=N)</code> looks back at only the last <code>N</code> rows (including the current one) and slides that window forward one row at a time. A "3-order moving average" or "2-order moving average" is exactly this. On the clean order fixture, sorted by date within customer — <code>rolling()</code> trusts row order with no <code>ORDER BY</code> of its own, the same caveat Lesson 11's <code>pct_change()</code> carried:</p>
+<pre><code>ordered = clean.sort_values([<span class="kw">"customer"</span>, <span class="kw">"order_date"</span>])
+ordered[<span class="kw">"amount_roll2_mean"</span>] = ordered.groupby(<span class="kw">"customer"</span>)[<span class="kw">"amount"</span>].rolling(window=<span class="kw">2</span>).mean().values
+<span class="cm"># An:   120.0 -> NaN,  42.0 -> 81.0    ((120.0 + 42.0) / 2)</span>
+<span class="cm"># Binh:  35.5 -> NaN, 180.0 -> 107.75  ((35.5 + 180.0) / 2)</span></code></pre>
+<p>The first <code>window - 1</code> rows of each group come back <code>NaN</code> — with <code>window=2</code>, that's just the very first order per customer, since there's only 1 row available and the window needs 2. That's the same "genuinely doesn't exist yet" reasoning as Lessons 3 and 11's NaN rules, not a bug: a 2-order moving average has nothing to average until a second order shows up.</p>
+
+<h2>3 · <code>.expanding().mean()</code>: a window that only grows</h2>
+<p><code>expanding()</code> takes the same idea and drops the fixed size — instead of "the last N rows," it's "every row from the start of the group through the current one," growing by one row each step. Swap <code>rolling(window=2)</code> for <code>expanding()</code> and nothing else changes:</p>
+<pre><code>ordered[<span class="kw">"amount_expand_mean"</span>] = ordered.groupby(<span class="kw">"customer"</span>)[<span class="kw">"amount"</span>].expanding().mean().values
+<span class="cm"># An:   120.0 -> 120.0,  42.0 -> 81.0     (mean of just row 1, then mean of rows 1-2)</span>
+<span class="cm"># Binh:  35.5 -> 35.5,  180.0 -> 107.75   (mean of just row 1, then mean of rows 1-2)</span></code></pre>
+<p>No leading <code>NaN</code> here — the first row's expanding window is just itself, a valid 1-row mean. Swap <code>.mean()</code> for <code>.sum()</code> and <code>expanding().sum()</code> becomes identical to <code>cumsum()</code>: both accumulate everything seen so far. <code>cumsum()</code> is really just <code>expanding().sum()</code> with a shorter name — <code>expanding()</code> is the general form that works with <em>any</em> aggregation (<code>mean</code>, <code>max</code>, <code>std</code>, …), not only sum. <code>rolling()</code>, by contrast, forgets anything older than <code>N</code> rows — that's the whole difference: fixed-size sliding window vs. ever-growing window.</p>
+
+<h2>4 · The SQL bridge</h2>
+<p>Both map directly onto SQL window frames, same as Lesson 7's <code>RANK()</code>/<code>SUM() OVER</code> mapping:</p>
+<pre><code><span class="cm">-- rolling(window=2).mean() ==</span>
+AVG(amount) OVER (
+  PARTITION BY customer ORDER BY order_date
+  ROWS BETWEEN 1 PRECEDING AND CURRENT ROW
+)
+
+<span class="cm">-- expanding().mean() ==</span>
+AVG(amount) OVER (
+  PARTITION BY customer ORDER BY order_date
+  ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+)</code></pre>
+<p>The frame clause is the whole story: <code>ROWS BETWEEN 1 PRECEDING AND CURRENT ROW</code> is a 2-row fixed frame — <code>rolling(window=2)</code>. <code>ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW</code> is "everything before, no limit" — <code>expanding()</code>. <code>PARTITION BY</code> is <code>groupby()</code>; <code>ORDER BY</code> is the <code>sort_values()</code> that must come first in pandas since neither method takes an ordering argument of its own.</p>
+
+<div class="interview">
+<p><strong>Q: "Compute a 3-day moving average of daily sales per store, then separately a running average since the store opened — how do these differ in pandas?"</strong> A strong answer, out loud: <em>"Same shape both times — sort by date within store first, since neither method has its own ORDER BY, then groupby('store')['sales']. For the moving average it's <code>.rolling(window=3).mean()</code> — a fixed 3-row frame that slides forward, forgetting anything older. For the running average it's <code>.expanding().mean()</code> — the frame never forgets, it just keeps growing from day one. The first two rows of the rolling version come back NaN, since there aren't 3 days yet to average; the expanding version has no such gap, a 1-row mean is still a valid mean. In SQL both are just different ROWS BETWEEN frames on the same AVG() OVER (PARTITION BY store ORDER BY date) — rolling is '1 PRECEDING AND CURRENT ROW' with N-1 preceding, expanding is 'UNBOUNDED PRECEDING AND CURRENT ROW'."</em> The signal: connecting <code>expanding().sum()</code> back to <code>cumsum()</code> unprompted shows the window-function family is understood as one idea with several frame shapes, not four unrelated method names to memorize.</p>
+</div>
+
+<h2>Try it — self-checking practice (~15 min, 2 drills)</h2>
+<p>Open <code>practice/13_rolling_and_expanding.py</code>, replace each <code>...</code>, and re-run until all checks print ✓:</p>
+<pre><code>cd ~/learning/data
+uv run --with pandas python3 practice/13_rolling_and_expanding.py</code></pre>
+<p>Both drills use the familiar <code>orders_raw.csv</code> clean 4-row slice, sorted by date within customer — the same fixture rows used since Lesson 6.</p>
+
+<h2>Check yourself</h2>
+<div class="quiz">
+  <div class="q" data-why="rolling(window=N) only has N-1 prior rows to work with, or fewer, for the first N-1 rows of each group — with window=2 that's just the first row, so its 2-row mean genuinely doesn't exist yet and pandas correctly returns NaN, the same NaN-not-zero reasoning as Lessons 3 and 11.">
+    <p class="stem">With <code>rolling(window=2).mean()</code>, why is a customer's first order NaN?</p>
+    <button class="opt" data-ok>Only one prior row exists, not the two needed</button>
+    <button class="opt">rolling() always skips the very first row on purpose</button>
+    <button class="opt">NaN there means the amount column had a typo</button>
+  </div>
+  <div class="q" data-why="expanding() has no fixed size — its window always starts at the first row of the group and grows to include the current row, so even the very first row has a valid (1-row) window and returns a real value, not NaN.">
+    <p class="stem">Why does <code>expanding().mean()</code> have no leading NaN, unlike <code>rolling(window=2).mean()</code>?</p>
+    <button class="opt" data-ok>Its first window is one row, already valid</button>
+    <button class="opt">expanding() silently fills gaps with the column mean</button>
+    <button class="opt">expanding() requires the data to be pre-sorted first</button>
+  </div>
+  <div class="q" data-why="expanding().sum() and cumsum() both accumulate every row seen so far in the current order — cumsum() is really just expanding().sum() under a shorter, sum-only name; expanding() generalizes the same growing-window idea to mean, max, std, and more.">
+    <p class="stem"><code>expanding().sum()</code> is equivalent to which method already taught in Lesson 7?</p>
+    <button class="opt" data-ok><code>cumsum()</code>, its sum-only special case</button>
+    <button class="opt"><code>rank()</code>, its tie-breaking special case</button>
+    <button class="opt">nothing, not a real thing</button>
+  </div>
+  <div class="q" data-why="A fixed-size N-row sliding frame is exactly ROWS BETWEEN N-1 PRECEDING AND CURRENT ROW in SQL — the direct equivalent of rolling(window=N) — while UNBOUNDED PRECEDING is the ever-growing frame that maps to expanding() instead.">
+    <p class="stem">Which SQL window frame matches <code>.rolling(window=2)</code>?</p>
+    <button class="opt" data-ok><code>ROWS BETWEEN 1 PRECEDING AND CURRENT ROW</code></button>
+    <button class="opt"><code>ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW</code></button>
+    <button class="opt"><code>ROWS BETWEEN 1 FOLLOWING AND CURRENT ROW</code></button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official pandas <a href="https://pandas.pydata.org/docs/user_guide/window.html">Window Operations</a> user guide — already linked from Lesson 7 as a "go deeper" resource for the wider expanding/rolling family it only mentioned in passing; today's lesson is the part of that page actually taught. The <a href="https://leetcode.com/studyplan/introduction-to-pandas/">LeetCode "Introduction to Pandas" study plan</a> remains this course's standing practice resource, same as Lessons 9–12.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a>.<br>
+<strong>Next lesson:</strong> still open — a focused review round if a drill from Lessons 9–13 comes back reported as shakiest, otherwise a multi-metric <code>melt</code> revisit keeps the drill library growing.<br><br>
+💬 Anything unclear — rolling vs expanding, the NaN gap at the start of a rolling window, or the SQL frame mapping? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

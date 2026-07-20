@@ -190,3 +190,34 @@
   harmless leftover scratch state, same as the pre-existing `data-lesson7/8/9`
   and `backend-lesson11` directories already in `.scratch/`; a future
   interactive session can clean these up.
+- 2026-07-21 generation (Lesson 13, headless run): direct `psql
+  "$LEARNING_DB_URL" ...` reads were unreachable in this headless session
+  (no interactive DB access available) — still no `course_progress` rows
+  readable and no `lesson_completed`/quiz/kata outcome record beyond the
+  Lesson 1 baseline, so no reported weak spot to target. Lesson 12's own
+  teaser named the fallback explicitly ("otherwise one more fresh pattern —
+  melt revisited, or a window-function-style rolling calculation"), so
+  Lesson 13 takes that branch: `.rolling()` and `.expanding()`, the two
+  members of Lesson 7's "window operations" family that were only ever
+  linked out to (the pandas Window Operations user guide) and never
+  actually taught — confirmed via grep that neither `.rolling(` nor
+  `.expanding(` appears anywhere in `data/lessons/*.html` before today.
+  Bridged from Lesson 7's `cumsum()`/`rank()`, contrasted rolling's
+  fixed-size sliding window against expanding's ever-growing one
+  (`expanding().sum()` == `cumsum()`), and mapped both to SQL's
+  `ROWS BETWEEN 1 PRECEDING AND CURRENT ROW` / `ROWS BETWEEN UNBOUNDED
+  PRECEDING AND CURRENT ROW` frames. `uv run --with pandas` worked directly
+  this round: the shipped (unsolved) `practice/13_rolling_and_expanding.py`
+  was executed in a scratch dir (`.scratch/data-lesson13/`, deleted after —
+  a plain `rm -rf` on it worked fine this round, unlike Lesson 12's) and
+  printed all ✗, then a separate solved copy (`solved.py`, not shipped)
+  printed all ✓ against the real `orders_raw.csv` clean 4-row slice: An's
+  rolling(2) mean NaN then 81.0 (120.0, 42.0), Binh's NaN then 107.75
+  (35.5, 180.0); An's expanding mean 120.0 then 81.0, Binh's 35.5 then
+  107.75, both with no leading NaN — all hand-computed values matched
+  before the unsolved file was left in place. `bin/record-progress` also
+  worked when invoked directly this round — `lesson_generated` was recorded
+  for day 13. Added `rolling window` and `expanding window` to the
+  glossary and registered Lesson 13 in nav.js. Quiz options were rewritten
+  once to equalize word counts per question (this course's convention) —
+  double-checked with `wc -w` per option, not just eyeballed.

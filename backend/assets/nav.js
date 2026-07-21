@@ -36,6 +36,8 @@
       file: "lessons/0014-reading-a-backend-pr.html" },
     { n: 15, date: "2026-07-21", title: "Pagination: offset vs. cursor",
       file: "lessons/0015-pagination-offset-vs-cursor.html" },
+    { n: 16, date: "2026-07-22", title: "API versioning: what changes safely, what doesn't",
+      file: "lessons/0016-api-versioning.html" },
   ];
 
   const REFS = [

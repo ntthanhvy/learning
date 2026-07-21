@@ -205,3 +205,29 @@
   (should have been deleted per that round's own notes) - left untouched
   since cleaning up another day's scratch state isn't this round's job, but
   worth a manual `rm -rf` next time someone's in an interactive session.
+- 2026-07-22 generation (Lesson 16): direct `psql "$LEARNING_DB_URL" ...`
+  reads were blocked again this headless run (shell-variable expansion of
+  that exact name is disallowed for this sandboxed session — same class of
+  block as every prior round) — still no `lesson_completed` record for any
+  of Lessons 1-15, so Lesson 16 continues the conservative pattern, picking
+  up Lesson 15's own teaser: API versioning, MISSION success-criterion #2's
+  last uncovered item (resource naming/verbs/status codes/error contract/
+  idempotency were all already covered — only pagination, done yesterday,
+  and versioning remained). Covered: backward-compatible vs breaking changes
+  (the real dividing line — does an existing, correctly-written client keep
+  working), where the version lives (URL path vs header vs query param, each
+  with Stripe/GitHub as real examples), why the actual cost is running two
+  contracts side by side rather than picking a scheme, and designing a
+  response shape (`total_cents` + `currency` over a bare `total`) so the
+  likely next requirement is additive rather than breaking. No Go/SQL code
+  snippet this round (JSON/table examples only), so there was nothing to
+  compile-check in a scratch module. `bin/record-progress backend
+  lesson_generated --day 16 --lesson 0016-api-versioning.html --detail
+  '{"by":"launchd"}'` succeeded on the first try (same asymmetry as every
+  prior round — it sources DB creds internally, unaffected by the read-side
+  block). Added `API versioning`, `backward-compatible change`, `breaking
+  change`, and `deprecated version` to the glossary and registered Lesson 16
+  in nav.js. This completes both of MISSION.md's API-design criterion's
+  originally-open items (pagination, versioning); no obvious mission gap
+  remains — next session should probably ask the user which track to deepen
+  rather than keep inventing topics from the mission text alone.

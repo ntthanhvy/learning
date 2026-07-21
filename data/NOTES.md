@@ -221,3 +221,51 @@
   glossary and registered Lesson 13 in nav.js. Quiz options were rewritten
   once to equalize word counts per question (this course's convention) —
   double-checked with `wc -w` per option, not just eyeballed.
+- 2026-07-22 generation (Lesson 14, headless 06:00 run): direct `psql
+  "$LEARNING_DB_URL" ...` reads were blocked in this headless run (shell-
+  variable expansion of that exact name is disallowed for this sandboxed
+  session — confirmed again, same class of block as every prior round) —
+  still no `course_progress` rows readable and no `lesson_completed`/quiz/
+  kata outcome record beyond the Lesson 1 baseline, so no reported weak spot
+  to target. Lesson 13's own teaser named the fallback explicitly ("otherwise
+  a multi-metric melt revisit keeps the drill library growing"), so Lesson 14
+  takes that branch: melting a wide table built from TWO aggfuncs at once
+  (`aggfunc=["sum","count"]`), which produces MultiIndex columns — a shape
+  Lesson 6 never had to handle since it only ever pivoted one metric.
+  Confirmed via grep that neither `MultiIndex` nor `stack(`/`unstack(` appears
+  anywhere in `data/lessons/*.html` before today; Lesson 6 had explicitly
+  flagged stack/unstack as "out of scope for today" back on 2026-07-14 — this
+  picks that up. Taught: flattening a MultiIndex column with
+  `set_axis([...to_flat_index...], axis=1)` before melt (melt only
+  understands flat column names), then `str.split(n=1, expand=True)` to
+  un-merge the metric name back out of the melted `variable` column, and
+  named `stack()` as the MultiIndex-native alternative (verified on the
+  actually-installed pandas 3.0.3 that `stack(level=0)` needs no
+  `future_stack` kwarg — that parameter still exists but already defaults to
+  True and isn't necessary to mention, corrected in the lesson text before
+  shipping rather than repeating an outdated pandas-2.x habit). `uv run
+  --with pandas` worked directly this round: the shipped (unsolved)
+  `practice/14_multi_metric_melt.py` was executed in place and printed all
+  ✗ with no crash (each of the three chained exercises after Exercise 1 is
+  wrapped in its own try/except with a safe empty-DataFrame fallback, so an
+  unsolved upstream step never crashes a downstream one — same pattern
+  Lessons 11/12 used for a bare Ellipsis reaching a real function call), then
+  a solved copy was executed in `.scratch/data-lesson14/solved.py` (deleted
+  after) against the real `orders_raw.csv` clean 4-row slice and printed all
+  ✓, matching hand-computed values exactly (An: sum/01-05=120.0, sum/01-10=
+  42.0, count=1 each; Binh: sum/01-06=35.5, sum/01-09=180.0, count=1 each;
+  16 total melted rows = 2 customers x 4 dates x 2 metrics). `bin/record-
+  progress data lesson_generated --day 14 --lesson
+  0014-multi-metric-melt.html --detail '{"by":"launchd"}'` succeeded on the
+  first try (same asymmetry as every prior round — sources DB creds
+  internally). Added `MultiIndex` and `stack() / unstack()` to the glossary
+  and registered Lesson 14 in nav.js. Quiz options rewritten to equalize word
+  counts per question (this course's convention), verified by manual word
+  count per option after drafting. Set the teaser going forward to
+  `unstack()` (stack's inverse) if no drill-outcome signal surfaces by next
+  generation, same "otherwise" fallback pattern as prior rounds. Left the
+  now-empty `.scratch/data-lesson14/` directory in place — an `rmdir` on it
+  was flagged as a workspace-directory removal requiring explicit approval
+  unavailable in this headless session (same restriction Lesson 12's round
+  hit on `.scratch/data-lesson12/`); harmless, same as the other pre-existing
+  `.scratch/*` leftovers noted in earlier entries.

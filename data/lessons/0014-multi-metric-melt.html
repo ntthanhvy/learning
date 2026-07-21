@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 14 · Multi-metric melt</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 14 · ~20 min · 22 Jul 2026</p>
+<h1>Melt revisited: multiple metrics at once</h1>
+<p class="byline">Lesson 6 melted a wide table with exactly one value per cell (amount). Real reports rarely stop at one metric — a monthly report wants total <em>and</em> count per customer per month, side by side. Today builds that wider table, and shows why melting it back needs one extra step Lesson 6 didn't.</p>
+
+<h2>Recap, in one line</h2>
+<p>Lesson 6: <code>pivot_table</code> spreads one value column across new columns; <code>melt</code> un-spreads it back. Today: what happens when <code>pivot_table</code> spreads <em>two</em> value columns at once.</p>
+
+<h2>1 · Two aggfuncs, one pivot_table call</h2>
+<p><code>pivot_table</code> accepts a <em>list</em> of aggregate functions in <code>aggfunc=</code>, not just one. Passing <code>aggfunc=["sum", "count"]</code> over the same <code>values="amount"</code> computes both at once — the SQL equivalent is running <code>SUM(amount)</code> and <code>COUNT(amount)</code> in the same <code>GROUP BY</code> query, which you'd normally just do as two columns in one <code>SELECT</code>. pandas does the same thing, but the result isn't flat:</p>
+<pre><code>wide = clean.pivot_table(
+    index=<span class="kw">"customer"</span>, columns=<span class="kw">"order_date"</span>,
+    values=<span class="kw">"amount"</span>, aggfunc=[<span class="kw">"sum"</span>, <span class="kw">"count"</span>], fill_value=<span class="kw">0</span>,
+)</code></pre>
+<p>The output's columns are now a <dfn data-en="a pandas column (or row) index with more than one level, so a single column is identified by a tuple like ('sum', '2026-01-05') rather than one plain name" data-vn="giữ nguyên 'MultiIndex' — cột có nhiều tầng, 1 cột = 1 tuple">MultiIndex</dfn>: level 0 is which aggfunc produced the value (<code>"sum"</code> or <code>"count"</code>), level 1 is the date, same as Lesson 6. A single column is no longer just <code>"2026-01-05"</code> — it's the tuple <code>("sum", "2026-01-05")</code>, and <code>wide.loc["An", ("sum", "2026-01-05")]</code> is how you'd address one cell directly.</p>
+
+<h2>2 · Why <code>melt</code> can't touch this directly</h2>
+<p><code>melt</code> was built for the one-level column case Lesson 6 used — its <code>var_name</code> expects to record one plain column name per melted row, not a two-part tuple. Calling <code>.melt()</code> straight on a MultiIndex-column DataFrame either errors or produces a confusing multi-column <code>variable_0</code>/<code>variable_1</code> split you didn't ask for. The fix is to flatten the column MultiIndex into ordinary strings first, joining the levels with a separator:</p>
+<pre><code>flat = wide.set_axis(
+    [<span class="kw">"_"</span>.join(<span class="kw">map</span>(<span class="kw">str</span>, c)) <span class="kw">for</span> c <span class="kw">in</span> wide.columns.to_flat_index()],
+    axis=<span class="kw">1</span>,
+)
+<span class="cm">-- ("sum", "2026-01-05") becomes the single string "sum_2026-01-05"</span></code></pre>
+<p><code>to_flat_index()</code> turns the MultiIndex into a plain sequence of tuples; the list comprehension joins each tuple's parts into one string. Once every column is a flat string, melt works exactly like Lesson 6 — <code>reset_index()</code> (customer is still sitting in the index from the pivot), then <code>.melt(id_vars="customer", var_name="metric_date", value_name="value")</code>.</p>
+
+<h2>3 · Un-merging the metric from the date</h2>
+<p>The melt gets every cell into one long column, but <code>metric_date</code> is still a merged string like <code>"sum_2026-01-05"</code> — one melt turned a 2D grid into rows, but the two things that used to be separate column levels are now squashed into one text value. <code>str.split</code> with <code>expand=True</code> un-squashes it back into real columns:</p>
+<pre><code>long[[<span class="kw">"metric"</span>, <span class="kw">"order_date"</span>]] = long[<span class="kw">"metric_date"</span>].str.split(<span class="kw">"_"</span>, n=<span class="kw">1</span>, expand=<span class="kw">True</span>)</code></pre>
+<p><code>n=1</code> caps it at the first underscore — a safety habit, not a requirement here (today's dates have no underscores either way), but it matters the moment a metric name itself contains one (<code>"avg_price_2026-01-05"</code> should split into <code>"avg_price"</code> and <code>"2026-01-05"</code>, not three pieces). <code>expand=True</code> is what turns a <code>Series</code> of two-item lists into an actual two-column DataFrame that can be assigned straight into <code>long[["metric", "order_date"]]</code>.</p>
+<div class="callout"><strong>The result is a middle ground</strong> between Lesson 6's fully-long and fully-wide shapes: one row per (customer, date, metric) instead of one row per (customer, date) with metrics as separate columns. This "long with a metric column" shape is usually what a downstream groupby or a charting library actually wants — <code>df.groupby(["order_date", "metric"])["value"].sum()</code> reads naturally; a wide table with hand-picked column names per metric doesn't.</div>
+
+<h2>4 · The other tool for this: <code>stack()</code></h2>
+<p>Lesson 6 flagged <dfn data-en="a DataFrame method that moves one level of a MultiIndex column header down into the row index, the MultiIndex-native alternative to melt for this exact reshape" data-vn="giữ nguyên 'stack()' — kéo 1 tầng cột xuống thành hàng, dành cho MultiIndex">stack()</dfn> as "out of scope for today" — it's the MultiIndex-native alternative to the flatten-then-melt path above. <code>wide.stack(level=0)</code> pulls the <code>aggfunc</code> level directly down into the row index, no string-flattening step needed, because stack already understands MultiIndex columns the way melt doesn't. The trade-off: stack's output keeps <code>metric</code> as an index level, not a plain column like melt's <code>var_name</code> gives you — so it's usually followed by its own <code>reset_index()</code> to get the same tidy shape. Both tools reach the same destination; melt-after-flattening is the more portable habit (works no matter how the wide table was built), stack is the shorter path specifically when you already have MultiIndex columns in hand.</p>
+
+<div class="interview">
+<p><strong>Q: "You pivoted a table to get both a total and a count per group per month, and now need it back in long format for a groupby. Walk me through it."</strong> A strong answer, out loud: <em>"Pivoting with two aggfuncs gives MultiIndex columns — one level for the metric, one for the date — and melt only understands flat, single-level columns, so I can't call melt directly on that. I'd flatten the columns first, joining the metric and date into one string per column, then melt normally with var_name capturing that joined string. The one thing melt doesn't do for me is separate the metric back out from the date — that merged string is still one value, so I'd follow it with a str.split on the separator, expand=True, to land the metric and date in their own columns. The alternative is stack(), which handles the MultiIndex natively without the flatten step, but it leaves the metric as an index level rather than a column, so I still need a reset_index() afterward either way."</em> The signal: naming <em>why</em> melt can't run directly on MultiIndex columns (not just reciting the fix), and knowing stack() exists as the native alternative even if melt-after-flatten is the one actually used.</p>
+</div>
+
+<h2>Try it — self-checking practice (~10 min)</h2>
+<p>Open <code>practice/14_multi_metric_melt.py</code>, replace each <code>...</code>, and re-run until all four checks print ✓:</p>
+<pre><code>cd ~/learning/data
+uv run --with pandas python3 practice/14_multi_metric_melt.py</code></pre>
+<p>Same <code>orders_raw.csv</code> clean 4-row slice as Lessons 6–13 (An x2, Binh x2). Exercise 1 builds the two-aggfunc pivot; Exercise 2 flattens its MultiIndex columns; Exercise 3 melts the flattened table; Exercise 4 splits the merged column back into <code>metric</code> and <code>order_date</code>.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Passing a list of aggregate functions to aggfunc computes all of them at once over the same values column, but the result's columns become a two-level MultiIndex (aggfunc name, then the columns= value) instead of one flat level per date.">
+    <p class="stem">What does <code>pivot_table(..., aggfunc=["sum", "count"])</code> produce that a single-aggfunc pivot doesn't?</p>
+    <button class="opt" data-ok>a two-level MultiIndex on the result's columns</button>
+    <button class="opt">an error, since only one function works</button>
+    <button class="opt">a completely separate DataFrame for each function</button>
+  </div>
+  <div class="q" data-why="melt's var_name is built to record one flat column name per melted row. A MultiIndex column is a tuple, not a single name, so melt needs the columns flattened into plain strings first before it can operate normally.">
+    <p class="stem">Why does <code>melt</code> need the MultiIndex columns flattened before it runs?</p>
+    <button class="opt" data-ok>melt expects flat column names, not a tuple</button>
+    <button class="opt">melt cannot ever process more than one row</button>
+    <button class="opt">flattening silently deletes rows melt would later duplicate</button>
+  </div>
+  <div class="q" data-why="Melting a flattened MultiIndex column still leaves the metric and date squashed together in one string value (e.g. 'sum_2026-01-05'), because flattening joined them before melt ran — str.split with expand=True is what pulls them back apart into their own columns.">
+    <p class="stem">After melting the flattened table, why is a separate <code>str.split(expand=True)</code> step still needed?</p>
+    <button class="opt" data-ok>metric and date are still one merged string value</button>
+    <button class="opt">melt refuses to run on any column containing dates</button>
+    <button class="opt">split is required before melt can even be run</button>
+  </div>
+  <div class="q" data-why="stack() understands MultiIndex columns directly and pulls a level down into the row index without a separate flattening step — but that level lands as part of the index, not as a plain column the way melt's var_name does, so a reset_index() is still needed to reach the same tidy shape.">
+    <p class="stem">What's the trade-off of using <code>stack()</code> instead of flatten-then-melt on MultiIndex columns?</p>
+    <button class="opt" data-ok>the pulled-down level becomes an index, not a column</button>
+    <button class="opt">stack cannot be used on any DataFrame with dates</button>
+    <button class="opt">stack silently drops the count metric from every row</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official <a href="https://pandas.pydata.org/docs/user_guide/reshaping.html#reshaping-by-melt">Reshaping — melt</a> section and its neighboring <a href="https://pandas.pydata.org/docs/user_guide/reshaping.html#reshaping-by-stacking-and-unstacking">stack/unstack</a> section of the same user guide (~15 min) — the two tools sit right next to each other there for exactly this comparison.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a>.<br>
+<strong>Next lesson:</strong> still open — a focused review round if a drill from Lessons 9–14 comes back reported as shakiest, otherwise <code>unstack()</code> (stack's inverse, pulling a row-index level back out into columns) keeps the drill library growing.<br><br>
+💬 Anything unclear — MultiIndex columns, why melt needs flattening first, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

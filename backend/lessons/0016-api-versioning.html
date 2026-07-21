@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 16 · API versioning</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 16 · ~20 min</p>
+<h1>API versioning: what changes safely, what doesn't</h1>
+<p class="byline">Lesson 3 designed the contract; Lesson 15 made it scale. This is the last thing that contract needs: a rule for changing it later without breaking every client who already trusts it.</p>
+
+<h2>1 · The contract is a promise, not a snapshot</h2>
+<p>Lesson 3 called the API contract a promise — the shape of every request and response, agreed on before the frontend and backend teams stop talking to each other. A promise made once still has to survive change: a new field, a renamed field, a field that needs to disappear. The frontend code calling <code>GET /orders/42</code> today was written against the contract as it exists today — it has no way to know the contract changed unless something in this scheme tells it. <dfn data-en="a rule for evolving an API's contract over time without silently breaking clients who already depend on the current shape" data-vn="API versioning (giữ nguyên) — quy tắc đổi API mà không làm hỏng client cũ">API versioning</dfn> is that scheme.</p>
+
+<h2>2 · Two kinds of change, and only one is free</h2>
+<p>Not every change needs a version bump. The dividing line is whether existing client code — code that only reads the fields it already knows about — keeps working unmodified.</p>
+<table class="gloss">
+  <tr><th>Change</th><th>Breaks existing clients?</th></tr>
+  <tr><td>Adding a new optional field to a response</td><td>no</td></tr>
+  <tr><td>Adding a new optional request parameter with a default</td><td>no</td></tr>
+  <tr><td>Adding a new endpoint</td><td>no</td></tr>
+  <tr><td>Renaming or removing a field</td><td>yes</td></tr>
+  <tr><td>Changing a field's type or meaning (string id → int id)</td><td>yes</td></tr>
+  <tr><td>Changing a status code an endpoint returns for the same condition</td><td>yes</td></tr>
+  <tr><td>Making a previously-optional request field required</td><td>yes</td></tr>
+</table>
+<p>The first group is a <dfn data-en="a change to an API contract that every existing client keeps working through unmodified, because it only adds — never removes or repurposes — something" data-vn="backward-compatible change (giữ nguyên) — thêm mới, client cũ vẫn chạy được">backward-compatible change</dfn> — ship it any day, no version bump, no announcement. A client that ignores fields it doesn't recognize (the normal, correct way to write a client) never notices. The second group is a <dfn data-en="a change to an API contract that at least one existing, correctly-written client would break against — the trigger for a new version rather than an in-place edit" data-vn="breaking change (giữ nguyên) — client cũ sẽ hỏng nếu áp dụng thẳng">breaking change</dfn> — this is what versioning exists to manage, because "just deploy it" means every client depending on the old shape breaks at the same moment, with no warning.</p>
+
+<h2>3 · Where the version lives</h2>
+<p>Three common places to put it, each with a real trade-off:</p>
+<table class="gloss">
+  <tr><th>Scheme</th><th>Looks like</th><th>Trade-off</th></tr>
+  <tr><td>URL path</td><td><code>/v1/orders</code>, <code>/v2/orders</code></td><td>Most visible and cacheable; but the resource's identity now includes a version number, which feels wrong for something that's still "the same order"</td></tr>
+  <tr><td>Header</td><td><code>Accept: application/vnd.api+json;version=2</code></td><td>Keeps URLs clean and stable; but versions are invisible in logs, browser address bars, and copy-pasted curl commands</td></tr>
+  <tr><td>Query parameter</td><td><code>/orders?version=2</code></td><td>Easy to add later without a routing change; easy to omit by accident, silently falling back to a default</td></tr>
+</table>
+<p>Stripe and GitHub's public APIs both use a variant of the header approach (a single header or a date-based version string) precisely because it decouples "which resource" from "which shape of that resource" — the URL <code>/orders/42</code> keeps meaning the same thing forever. The URL-path scheme is more common in practice anyway, mostly because it's obvious from a browser bar or a log line which version a request hit, and that legibility tends to win for internal and mid-size APIs even though it's the theoretically messier option.</p>
+
+<h2>4 · The real cost isn't picking a scheme — it's supporting two versions at once</h2>
+<p>The hard part of versioning was never where to put the number. It's that shipping <code>v2</code> doesn't retire <code>v1</code> — every existing client on <code>v1</code> keeps calling it, so the service now runs two contracts simultaneously: two sets of validation rules, maybe two response-serialization paths, and every bug fix has to be decided against both ("does this fix apply to v1 too, or is v1 frozen as-is?"). This is why the honest advice from every team that has actually done this at scale is the same: avoid the breaking change if there is any way to. A few reframes that dodge a version bump entirely:</p>
+<ul>
+  <li>Renaming a field → add the new name alongside the old one, deprecate the old one in docs, remove it only after telemetry shows nothing calls it anymore.</li>
+  <li>Changing what a field means → add a new field with the new meaning instead of repurposing the old one.</li>
+  <li>A required field that wasn't required before → give it a server-side default instead of forcing every client to send it.</li>
+</ul>
+<p>When a breaking change is genuinely unavoidable — a field that returns wrong data, not just old-shaped data, for instance — that's when a new version earns its cost, and even then, a <dfn data-en="a version the service still serves but no longer recommends, usually announced with a fixed retirement date so clients have a deadline to migrate by" data-vn="deprecated version (giữ nguyên) — vẫn chạy nhưng có ngày dừng hỗ trợ">deprecated version</dfn> with a stated sunset date (not an indefinite "eventually") is what turns "supporting two versions forever" into "supporting two versions for six months."</p>
+
+<h2>5 · A response shape that survives a breaking change without a version bump</h2>
+<p>Some breaking changes really are just additive if you design the response with room to grow. Compare two ways of returning a total:</p>
+<pre><code><span class="cm">// Fragile: if "total" ever needs to become an object (say, {amount, currency}),</span>
+<span class="cm">// this is a breaking change — every client reading total as a number now gets an object.</span>
+{ <span class="kw">"total"</span>: 4200 }
+
+<span class="cm">// Sturdier: the number can grow a sibling field without displacing anything</span>
+<span class="cm">// a client already reads.</span>
+{ <span class="kw">"total_cents"</span>: 4200, <span class="kw">"currency"</span>: <span class="kw">"USD"</span> }</code></pre>
+<p>Naming the unit in the field itself (<code>total_cents</code>, not <code>total</code>) and giving currency its own field up front means "we now support multiple currencies" never becomes a breaking change — it was always going to need a <code>currency</code> field, so ship it on day one even with a single hardcoded value. This is the same instinct as Lesson 15's opaque cursor: design the contract so the obvious next requirement is additive, not a rename.</p>
+
+<div class="interview">
+<p><strong>Q: "Your team wants to change a field's type on a widely-used endpoint. How do you ship that?"</strong> A strong answer, out loud: <em>"First I'd check whether it's actually a breaking change — if I can add a new field alongside the old one instead of repurposing it, that's backward-compatible and needs no version bump at all, so that's always my first move. If it's genuinely unavoidable — the old field is actively wrong, not just old-shaped — then I'd stand up a new version rather than change v1 in place, because existing clients are depending on the current shape right now and a silent change breaks them with no warning. I'd pick whichever versioning scheme the rest of the API already uses for consistency, and I'd explicitly deprecate the old version with a stated sunset date rather than leave it open-ended — the real cost here isn't the version number, it's that the service now has to maintain two contracts at once, and an open-ended deprecation means maintaining them forever instead of for a fixed window."</em> The signal: leading with "avoid the breaking change if possible," and naming the ongoing-maintenance cost as the actual reason versioning is expensive — not the mechanics of picking v1 vs v2.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A client that correctly ignores fields it doesn't recognize never notices a new optional field appearing in a response — nothing it already reads changes. Renaming or removing a field it does read, or changing that field's type, is exactly what breaks it.">
+    <p class="stem">Which of these is a backward-compatible change that needs no version bump?</p>
+    <button class="opt" data-ok>adding a new optional field to a response</button>
+    <button class="opt">renaming a field a client already reads</button>
+    <button class="opt">changing a field's type from string to int</button>
+  </div>
+  <div class="q" data-why="The real ongoing cost of versioning is running two contracts side by side indefinitely — every bug fix and validation rule has to be decided against both. A stated sunset date turns that into a fixed window instead of a permanent burden.">
+    <p class="stem">What makes supporting two API versions expensive long-term?</p>
+    <button class="opt" data-ok>maintaining two contracts side by side indefinitely</button>
+    <button class="opt">clients cannot read two different port numbers</button>
+    <button class="opt">most databases refuse to store two schema versions</button>
+  </div>
+  <div class="q" data-why="Naming the unit and shipping a currency field on day one, even hardcoded to one value, means adding real multi-currency support later is purely additive — no client reading total_cents or currency has to change. The fragile version repurposes a bare number, which becomes a breaking change the moment it needs to become an object.">
+    <p class="stem">Why does <code>{"total_cents": 4200, "currency": "USD"}</code> survive multi-currency support better than <code>{"total": 4200}</code>?</p>
+    <button class="opt" data-ok>the likely next field is additive, not a rename</button>
+    <button class="opt">JSON numbers cannot represent cents accurately</button>
+    <button class="opt">currency fields are required by the HTTP spec</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://stripe.com/blog/api-versioning">Stripe — "Versioning APIs"</a> (~15 min) — the field-tested account of why Stripe versions by date-string header instead of URL path, and how they roll a client forward across versions automatically. Stripe's public API is repeatedly cited (RESOURCES.md) as an exemplar for this exact track.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> open — all five MISSION.md success criteria are now covered at least once; a good next step is revisiting one track (data modeling, API design, runtime, auth/security, ops) in more depth, or reviewing a real PR together.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

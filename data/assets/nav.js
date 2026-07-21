@@ -32,6 +32,8 @@
       file: "lessons/0012-apply-and-binning.html" },
     { n: 13, date: "2026-07-21", title: "Timed drills, round 5: rolling & expanding windows",
       file: "lessons/0013-rolling-and-expanding-windows.html" },
+    { n: 14, date: "2026-07-22", title: "Melt revisited: multiple metrics at once",
+      file: "lessons/0014-multi-metric-melt.html" },
   ];
 
   const REFS = [

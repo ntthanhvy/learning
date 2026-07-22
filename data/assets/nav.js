@@ -34,6 +34,8 @@
       file: "lessons/0013-rolling-and-expanding-windows.html" },
     { n: 14, date: "2026-07-22", title: "Melt revisited: multiple metrics at once",
       file: "lessons/0014-multi-metric-melt.html" },
+    { n: 15, date: "2026-07-23", title: "Unstack: pulling a row-index level back into columns",
+      file: "lessons/0015-unstack.html" },
   ];
 
   const REFS = [

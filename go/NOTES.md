@@ -176,3 +176,8 @@
   assigned Jul 20) remains not yet generated — a future session should generate
   it next, and per this file's course window, Go should be skipped entirely in
   any session running after 2026-07-20.
+- 2026-07-23 (headless 06:00 run): skipped per the rule directly above — the
+  course window closed 2026-07-20 and today is three days past it. Day 13
+  (`0014-concurrency-capstone.html`) remains ungenerated; left untouched
+  (date-locked, not this course's call to unlock outside an interactive
+  session). No files changed for this course today.

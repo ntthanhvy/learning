@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 15 · Unstack</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 15 · ~20 min · 23 Jul 2026</p>
+<h1>Unstack: pulling a row-index level back into columns</h1>
+<p class="byline">Lesson 14 named <code>stack()</code> as the MultiIndex-native alternative to melt, and left its inverse, <code>unstack()</code>, as a teaser. Today builds it from the other direction: start from a plain <code>groupby</code>, not a pivot, and watch <code>unstack</code> turn its long result wide.</p>
+
+<h2>Recap, in one line</h2>
+<p>Lesson 14: a MultiIndex can sit on the <em>columns</em> (what two-aggfunc <code>pivot_table</code> produces). Today: a MultiIndex sitting on the <em>rows</em> instead — what a multi-column <code>groupby</code> produces — and <code>unstack</code> as the tool that moves a row level onto the columns.</p>
+
+<h2>1 · A groupby on two columns is already a MultiIndex</h2>
+<p>Group by more than one column and pandas doesn't flatten the result — it stacks the group keys into a MultiIndex row index, one level per column grouped on:</p>
+<pre><code>by_customer_date = clean.groupby([<span class="kw">"customer"</span>, <span class="kw">"order_date"</span>])[<span class="kw">"amount"</span>].sum()
+<span class="cm">-- customer  order_date
+-- An        2026-01-05    120.0
+--           2026-01-10     42.0
+-- Binh      2026-01-06     35.5
+--           2026-01-09    180.0</span></code></pre>
+<p>This is the exact SQL equivalent of <code>GROUP BY customer, order_date</code> — one row per (customer, date) pair, just like SQL returns. The pandas difference is only presentation: SQL always hands back a flat table, but pandas keeps the two group keys as index <em>levels</em> rather than ordinary columns, which is what makes this a MultiIndex — the same concept Lesson 14 taught, just on the row axis instead of the column axis.</p>
+
+<h2>2 · <code>unstack</code> moves one of those levels onto the columns</h2>
+<p>The long shape above is correct but awkward to eyeball — comparing An and Binh side by side means scanning down a tall column. <code>unstack</code> takes one named index level and spreads its values across new columns, the same "long → wide" move Lesson 6's <code>pivot_table</code> made, arrived at from a groupby instead:</p>
+<pre><code>wide_by_date = by_customer_date.unstack(<span class="kw">"order_date"</span>, fill_value=<span class="kw">0</span>)
+<span class="cm">--           2026-01-05  2026-01-06  2026-01-09  2026-01-10
+-- customer
+-- An             120.0         0.0         0.0        42.0
+-- Binh             0.0        35.5       180.0         0.0</span></code></pre>
+<p><code>fill_value=0</code> matters here the same way it did in Lesson 6's <code>pivot_table</code> call: An never ordered on <code>2026-01-06</code>, so without <code>fill_value</code> that cell would be <code>NaN</code> — correct in the sense that the combination genuinely doesn't exist, but usually not what a report wants for a currency total. <code>unstack</code> is, in fact, exactly what <code>pivot_table</code> does under the hood for the single-aggfunc case: <dfn data-en="a shorthand method that internally performs a groupby followed by an unstack — useful when the target shape is already known, but unstack is more flexible when you need to inspect or reuse the long groupby result first" data-vn="giữ nguyên 'pivot_table' — về bản chất là groupby rồi unstack, viết gọn lại">pivot_table</dfn> is a shorthand for "groupby, then unstack." Reaching for <code>groupby().unstack()</code> directly instead of <code>pivot_table</code> is worth it whenever the long, grouped result is useful on its own — for a running total, a rank, or a join — before it also gets reshaped wide.</p>
+
+<h2>3 · Which level moves is a choice, not a default</h2>
+<p><code>unstack</code> takes a level name (or position — <code>0</code> for the outermost, <code>1</code> for the next) precisely because a 2-level MultiIndex can be unstacked either way, and each choice answers a different question from the exact same grouped result:</p>
+<pre><code>wide_by_customer = by_customer_date.unstack(<span class="kw">"customer"</span>, fill_value=<span class="kw">0</span>)
+<span class="cm">-- customer      An     Binh
+-- order_date
+-- 2026-01-05  120.0     0.0
+-- 2026-01-06    0.0    35.5
+-- 2026-01-09    0.0   180.0
+-- 2026-01-10   42.0     0.0</span></code></pre>
+<p>Same <code>by_customer_date</code> Series, same two calls apart — but unstacking <code>"customer"</code> instead of <code>"order_date"</code> leaves dates in the row index and spreads customers across columns instead, "one row per date, one column per customer" rather than the reverse. Whichever level stays in the row index is the one still easy to filter and sort on afterward (<code>wide_by_customer.loc["2026-01-09"]</code> reads naturally; reaching a single date out of <code>wide_by_date</code>'s columns does not) — that's the real deciding factor for which level to unstack, not just which shape looks nicer printed.</p>
+
+<div class="callout"><strong>fill_value never changes a real total.</strong> It only fills gaps that were never there to begin with — the grand total of every cell in <code>wide_by_date</code> (zeros included) is still <code>377.5</code>, identical to summing the original four <code>amount</code> values before any grouping or reshaping happened. If a total changes after <code>unstack</code>, the bug is upstream, not in <code>fill_value</code>.</div>
+
+<div class="interview">
+<p><strong>Q: "You've got a Series with a 2-level MultiIndex from a groupby. How do you get it into a wide table, and how is that different from just calling pivot_table?"</strong> A strong answer, out loud: <em>"unstack() takes a named level of the row index and spreads its values across new columns — so a groupby on customer and order_date, followed by unstack('order_date'), turns the long result into customer-by-date. pivot_table does the same underlying thing in one call, but it hides the intermediate long Series, and I lose the chance to reuse that long form for something else — a rank, a join, a running total — before reshaping it. The other thing unstack makes explicit that pivot_table doesn't: which level moves is my choice, not a default. The same Series unstacked on customer instead of order_date gives me date-by-customer instead, and I pick whichever one leaves the level I still need to filter or sort on inside the row index."</em> The signal: naming unstack and pivot_table as the same underlying operation at different levels of abstraction, not two unrelated tools.</p>
+</div>
+
+<h2>Try it — self-checking practice (~10 min)</h2>
+<p>Open <code>practice/15_unstack.py</code>, replace each <code>...</code>, and re-run until all four checks print ✓:</p>
+<pre><code>cd ~/learning/data
+uv run --with pandas python3 practice/15_unstack.py</code></pre>
+<p>Same <code>orders_raw.csv</code> clean 4-row slice as Lessons 6–14 (An x2, Binh x2). Exercise 1 builds the long groupby MultiIndex; Exercise 2 unstacks the date level; Exercise 3 unstacks the customer level from the same Series instead; Exercise 4 checks that <code>fill_value=0</code> left the grand total untouched.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Grouping by more than one column doesn't flatten the result into ordinary columns — pandas stacks the group keys into a MultiIndex row index, one level per grouped column, mirroring what a multi-aggfunc pivot_table does on the column side instead.">
+    <p class="stem">What does <code>groupby(["customer", "order_date"])["amount"].sum()</code> produce?</p>
+    <button class="opt" data-ok>a Series with a two-level MultiIndex</button>
+    <button class="opt">a plain flat DataFrame with columns</button>
+    <button class="opt">a single scalar total across columns</button>
+  </div>
+  <div class="q" data-why="unstack pulls a named row-index level out and spreads its distinct values across new columns, turning a long Series into a wide DataFrame — the same long-to-wide move pivot_table makes, arrived at from a groupby result instead of built in one call.">
+    <p class="stem">What does calling <code>.unstack("order_date")</code> do to a groupby result?</p>
+    <button class="opt" data-ok>spreads the order_date level into columns</button>
+    <button class="opt">deletes every row containing that date</button>
+    <button class="opt">sorts the Series by order_date ascending</button>
+  </div>
+  <div class="q" data-why="fill_value only fills combinations that never occurred in the data — a customer with no order on some date — with a chosen value instead of NaN. It never touches or changes any real, already-computed total in the data.">
+    <p class="stem">What does <code>fill_value=0</code> change about a real, already-computed total?</p>
+    <button class="opt" data-ok>it changes nothing beyond genuinely missing combos</button>
+    <button class="opt">it rounds down every existing real total</button>
+    <button class="opt">it doubles totals for customers ordering twice</button>
+  </div>
+  <div class="q" data-why="pivot_table performs a groupby followed by an unstack internally in one call. Reaching for groupby().unstack() directly instead is worth it specifically when the long, grouped-but-not-yet-reshaped result is useful on its own first — for a rank, a running total, or a join.">
+    <p class="stem">Why reach for <code>groupby().unstack()</code> directly instead of <code>pivot_table</code>?</p>
+    <button class="opt" data-ok>the long result stays reusable before reshaping</button>
+    <button class="opt">pivot_table simply cannot accept a fill_value argument</button>
+    <button class="opt">unstack runs measurably faster on any dataset</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the same official <a href="https://pandas.pydata.org/docs/user_guide/reshaping.html#reshaping-by-stacking-and-unstacking">Reshaping — stack and unstack</a> section of the pandas user guide Lesson 14 linked to stack from (~15 min) — read it from the unstack side this time; the "Reshaping by pivoting DataFrame objects" section right above it makes the pivot_table-is-groupby-plus-unstack connection explicit.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>stack() / unstack()</code> was already added there in Lesson 14.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9–15 comes back reported as shakiest, otherwise the next fresh pattern from LeetCode-pandas/StrataScratch-style timed drills (e.g. <code>transform()</code> for a per-row group-relative value, not yet covered) keeps the drill library growing.<br><br>
+💬 Anything unclear — MultiIndex row vs column levels, which level to unstack, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

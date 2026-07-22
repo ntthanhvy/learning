@@ -38,6 +38,8 @@
       file: "lessons/0015-pagination-offset-vs-cursor.html" },
     { n: 16, date: "2026-07-22", title: "API versioning: what changes safely, what doesn't",
       file: "lessons/0016-api-versioning.html" },
+    { n: 17, date: "2026-07-23", title: "SQL injection & input validation",
+      file: "lessons/0017-sql-injection-and-input-validation.html" },
   ];
 
   const REFS = [

@@ -231,3 +231,33 @@
   originally-open items (pagination, versioning); no obvious mission gap
   remains — next session should probably ask the user which track to deepen
   rather than keep inventing topics from the mission text alone.
+- 2026-07-23 generation (Lesson 17): direct `psql "$LEARNING_DB_URL" ...`
+  reads were blocked again this headless run (raw psql invocation requires
+  interactive approval with no user present) — no `course_progress` rows
+  could be read, still no `lesson_completed` record for any of Lessons
+  1-16. With Lesson 16 explicitly noting no obvious mission gap remained,
+  this round re-scanned MISSION.md's 5 success criteria against all 16
+  shipped lessons rather than inventing a topic: criterion 4 lists
+  "security basics (OWASP top risks)" and a grep for "SQL injection" across
+  every lesson came back empty — auth (L4), authorization/IDOR (L12), rate
+  limiting (L11), and information disclosure (L7) were all covered, but
+  injection/input validation, the other half of "OWASP top risks," never
+  was. Lesson 17 covers it: why `fmt.Sprintf`-built SQL lets untrusted
+  input change query logic, parameterized queries ($1 placeholders) as the
+  actual fix (not escaping/blocklisting), and input validation named
+  explicitly as a separate, complementary layer (allowlist over blocklist).
+  The two Go snippets (vulnerable Sprintf-built query vs. parameterized
+  query) were compile-checked clean with `go build`/`go vet` in a scratch
+  module (`.scratch/backend-lesson17/`, deleted after including its build
+  binary). `bin/record-progress backend lesson_generated --day 17 --lesson
+  0017-sql-injection-and-input-validation.html --detail '{"by":"launchd"}'`
+  ran directly and succeeded, no approval blocker this round (bin/
+  record-progress continues to work as a write even when raw psql reads
+  are blocked, per every prior round's finding). Added `SQL injection`,
+  `parameterized query / prepared statement`, `input validation`, and
+  `allowlist validation` to the glossary and registered Lesson 17 in
+  nav.js. Quiz options rewritten to equalize word counts per question
+  (verified with a grep + manual per-option count, not just eyeballed).
+  Set the teaser going forward to connection pool sizing/exhaustion (only
+  ever named in passing in Lesson 1) if no user-chosen deepening track
+  surfaces by next generation.

@@ -269,3 +269,40 @@
   unavailable in this headless session (same restriction Lesson 12's round
   hit on `.scratch/data-lesson12/`); harmless, same as the other pre-existing
   `.scratch/*` leftovers noted in earlier entries.
+- 2026-07-23 generation (Lesson 15): direct `psql "$LEARNING_DB_URL" ...`
+  reads were blocked in this headless run (raw psql invocation requires
+  interactive approval with no user present) — still no `course_progress`
+  rows readable and no `lesson_completed`/quiz/kata outcome record beyond
+  the Lesson 1 baseline, so no reported weak spot to target. Lesson 14's
+  own teaser named the fallback explicitly ("otherwise unstack() ... keeps
+  the drill library growing"), confirmed via grep that `unstack(` never
+  appeared in any lesson body before today (only in link text and the
+  teaser itself) — so Lesson 15 takes that branch: unstack() built from a
+  plain two-column `groupby` (a row-side MultiIndex) rather than from
+  `stack()`'s column-side one, unstacking the SAME grouped Series on both
+  levels to show the level choice is deliberate, and naming pivot_table as
+  literally "groupby then unstack" under the hood — ties directly back to
+  Lesson 6. `uv run --with pandas` WORKED directly this round (unlike most
+  prior rounds) — the shipped (unsolved) `practice/15_unstack.py` was
+  executed in place and printed all ✗, then a solved copy
+  (`.scratch/data-lesson15/solved.py`, deleted after — a plain `rm` + `rmdir`
+  on the now-empty dir both worked fine this round) printed all checks
+  passing against the real `orders_raw.csv` clean 4-row slice (An
+  01-05=120.0, 01-10=42.0; Binh 01-06=35.5, 01-09=180.0; grand total 377.5
+  unchanged by fill_value=0). `bin/record-progress data lesson_generated
+  --day 15 --lesson 0015-unstack.html --detail '{"by":"launchd"}'` also
+  worked directly — `lesson_generated` was recorded for day 15. No new
+  glossary term needed — `stack() / unstack()` was already added as a
+  combined entry back in Lesson 14, ahead of unstack actually being taught;
+  today's lesson is what makes that entry earned. Registered Lesson 15 in
+  nav.js. Quiz options rewritten to equalize word counts per question,
+  verified with a grep + manual per-option count (this course's established
+  convention). Also cleaned up the leftover `.scratch/backend-lesson17/`
+  build binary from today's backend-course round while `.scratch/` was
+  already open — confirmed the older `data-lesson12`/`data-lesson14`
+  leftovers noted in prior entries are already gone (someone/something
+  cleaned them since); `backend-lesson11`, `data-lesson7`, `data-lesson8`,
+  and `data-lesson9` are still present and were left untouched (not today's
+  course/lesson, not today's task). Set the teaser going forward to
+  `transform()` (per-row group-relative values, not yet covered) if no
+  drill-outcome signal surfaces by next generation.

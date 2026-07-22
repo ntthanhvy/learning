@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 17 · SQL injection & input validation</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 17 · ~20 min</p>
+<h1>SQL injection & input validation</h1>
+<p class="byline">Lesson 12 covered authorization (is this user allowed to touch this row) and Lesson 7 covered information disclosure (what a response is allowed to reveal). This lesson covers the piece that sits before both: can untrusted input change what your code even does. It's MISSION.md's last uncovered security item — the OWASP-flavored one.</p>
+
+<h2>1 · A query that trusts its input</h2>
+<p>Every lesson so far has built queries assuming the values plugged into them are just data. Here's a login lookup written the way string formatting makes tempting:</p>
+<pre><code><span class="kw">func</span> findUserVulnerable(ctx context.Context, db DB, username <span class="kw">string</span>) Row {
+    query := fmt.Sprintf(<span class="kw">"SELECT id, email FROM users WHERE username = '%s'"</span>, username)
+    <span class="kw">return</span> db.QueryRow(ctx, query)
+}</code></pre>
+<p>This works for every normal username. It also works, disastrously, for a username of <code>' OR '1'='1</code> — the resulting query text becomes <code>WHERE username = '' OR '1'='1'</code>, a condition that's true for every row, returning the first user in the table (often an admin) with no matching credentials at all. A username of <code>x'; DROP TABLE users; --</code> is worse: it closes the string early, appends a second statement, and comments out whatever the original query intended to say next. Neither payload is exotic — both are the literal top two examples in every <dfn data-en="a vulnerability where untrusted input is inserted directly into a SQL query's text, letting an attacker change what the query does instead of only what data it fetches" data-vn="giữ nguyên 'SQL injection' — input độc hại được ghép thẳng vào câu SQL, đổi cả ý nghĩa câu lệnh">SQL injection</dfn> tutorial that exists, and the code above is vulnerable to both.</p>
+
+<h2>2 · Why "no real user would type that" is not a defense</h2>
+<p>The input never comes from a real user typing carefully in a browser form. It comes from whatever can reach the handler: a scripted HTTP request, a malformed field in a JSON body, a query parameter edited by hand. <code>fmt.Sprintf</code> has no idea it's building SQL — it just interpolates a string, exactly as asked, and the database has no way to tell "text the developer wrote" apart from "text a user's input happened to produce" once they're concatenated into one string. That's the entire bug, in one sentence: <strong>the query's code and the query's data end up in the same channel</strong>, so anything that looks like SQL syntax inside the data is read as SQL syntax.</p>
+<div class="callout"><strong>Frontend-habit trap:</strong> validating input in the browser (a form field that rejects quotes) stops nothing — an attacker who skips the browser entirely and calls the API directly never runs that JavaScript. Client-side validation is a UX nicety; it is not a security boundary. The only place this bug can actually be fixed is server-side, at the query itself.</div>
+
+<h2>3 · The fix: keep code and data in separate channels</h2>
+<p>The fix already showed up quietly in every query snippet since Lesson 1 — this lesson just names why it's non-negotiable. A <dfn data-en="a query where placeholders ($1, $2, ...) stand in for values, and the database driver sends the SQL text and the values as two separate messages — the database parses the query shape once and substitutes values afterward, so a value can never be interpreted as syntax" data-vn="giữ nguyên 'parameterized query' / 'prepared statement' — SQL và giá trị gửi tách riêng, giá trị không thể bị hiểu thành cú pháp">parameterized query</dfn> sends the SQL text and the values as two separate messages instead of one merged string:</p>
+<pre><code><span class="kw">func</span> findUser(ctx context.Context, db DB, username <span class="kw">string</span>) Row {
+    <span class="kw">return</span> db.QueryRow(ctx, <span class="kw">"SELECT id, email FROM users WHERE username = $1"</span>, username)
+}</code></pre>
+<p>Here <code>$1</code> is a placeholder, not a format slot — pgx sends the literal text <code>SELECT id, email FROM users WHERE username = $1</code> to Postgres first, and <code>username</code> separately as a value to bind into it. Postgres parses the query's shape before it ever sees the value, so <code>' OR '1'='1</code> arrives as a single string being compared for equality — not as SQL syntax — and simply matches no username, which is exactly the correct behavior for a bogus login attempt. This isn't "sanitizing" or "escaping" the input; it's never letting the value enter the code channel in the first place. Every <code>$1</code>/<code>$2</code> placeholder used in Lessons 6, 11, and 15's snippets was already doing this — the rule made explicit here is: <strong>never <code>fmt.Sprintf</code> (or <code>+</code>) a value into a SQL string, ever, even for values that "can't" contain quotes</strong>, because the cost of being wrong once is total.</p>
+
+<h2>4 · Input validation is a different, complementary layer</h2>
+<p>Parameterized queries close the injection hole completely — but a query can still do something wrong with input that's syntactically safe. <dfn data-en="checking that input matches the shape, type, and bounds a handler actually expects before acting on it — separate from injection defense, which is about how a value reaches a query, not what the value is allowed to be" data-vn="input validation (giữ nguyên) — kiểm tra dữ liệu đầu vào đúng dạng/kiểu/giới hạn trước khi xử lý">input validation</dfn> is a separate question asked before the query even runs: is this string actually an email, is this page size a positive integer under some cap, is this enum value one of the three the handler understands. The two defenses solve different problems and neither substitutes for the other:</p>
+<table class="gloss">
+  <tr><th></th><th>SQL injection defense</th><th>Input validation</th></tr>
+  <tr><td>Question it answers</td><td>Can this value change what the query does?</td><td>Is this value the shape the handler expects?</td></tr>
+  <tr><td>Where it lives</td><td>Inside the query — parameterized placeholders</td><td>Before the query — handler-level checks</td></tr>
+  <tr><td>What it stops</td><td><code>' OR '1'='1</code> changing query logic</td><td>A negative page size, a 10MB "name" field, an unknown enum string</td></tr>
+  <tr><td>Skipping it means</td><td>Attacker rewrites your SQL</td><td>Garbage or oversized data reaches business logic / storage</td></tr>
+</table>
+<p>The most reliable validation strategy is an <dfn data-en="rejecting everything except a known-good, explicitly enumerated set of values — as opposed to a blocklist, which tries to enumerate known-bad values and always misses one" data-vn="allowlist validation — chỉ chấp nhận giá trị nằm trong danh sách biết trước là hợp lệ">allowlist</dfn>: define exactly what's acceptable (an enum of three status strings, an integer range 1–100) and reject everything outside it — rather than a blocklist that tries to guess every bad value in advance (block quotes, block semicolons, block <code>DROP</code>...) and reliably misses one, the same losing game as trying to string-match your way out of injection instead of parameterizing.</p>
+
+<div class="interview">
+<p><strong>Q: "How would you explain SQL injection to a junior who just wrote <code>fmt.Sprintf</code> into a query?"</strong> A strong answer, out loud: <em>"I'd show them that the database can't tell the difference between SQL the developer wrote and SQL that showed up inside a user's input, once both are concatenated into one string — a username like <code>' OR '1'='1</code> turns a WHERE clause that's supposed to match one row into one that matches every row. The fix isn't escaping quotes or blocking suspicious characters — it's parameterized queries, placeholders like <code>$1</code> that make the driver send the query text and the values as two separate messages, so a value physically cannot be interpreted as syntax no matter what it contains. I'd also point out this is a different problem from input validation — checking that a page size is a positive number is about correctness, not injection, and you need both."</em> The signal: naming parameterization specifically, not "sanitize the input" — sanitizing is the blocklist approach that keeps losing.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Parameterized queries send the SQL text and the values as two separate messages, so the database parses the query's shape before seeing any value — a value can never be read as syntax. Escaping/blocking specific characters is a blocklist that reliably misses a case; browser-side checks don't run when the API is called directly.">
+    <p class="stem">What actually stops SQL injection?</p>
+    <button class="opt" data-ok>sending SQL text and values separately</button>
+    <button class="opt">escaping quote characters in the input</button>
+    <button class="opt">validating the field inside the browser</button>
+  </div>
+  <div class="q" data-why="fmt.Sprintf merges the value into the query's text before the database ever sees it, so a value containing SQL syntax (quotes, OR, a second statement) is read as part of the query itself. That is the entire vulnerability in one sentence.">
+    <p class="stem">Why is <code>fmt.Sprintf("...WHERE username = '%s'", username)</code> dangerous?</p>
+    <button class="opt" data-ok>it merges query code and data</button>
+    <button class="opt">Sprintf runs slower than concatenation does</button>
+    <button class="opt">Go's fmt package rejects single quotes</button>
+  </div>
+  <div class="q" data-why="A parameterized $1 placeholder makes '1'='1 impossible to inject as new query logic, so that specific attack is closed — but the query can still misbehave on syntactically-safe input the handler never expected, like a negative page size or an unknown enum string. That's what handler-level validation catches.">
+    <p class="stem">A query already uses <code>$1</code> placeholders. What can still go wrong without input validation?</p>
+    <button class="opt" data-ok>a page size of negative one</button>
+    <button class="opt">placeholder syntax randomly stops working right</button>
+    <button class="opt">pgx quietly reverts to string concatenation</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html">OWASP — SQL Injection Prevention Cheat Sheet</a> (~15 min) — the canonical, maintained checklist this lesson draws its core rule from (parameterization as primary defense, allowlisting as the pattern for the rare cases parameters can't cover, like dynamic column names). RESOURCES.md already flags the OWASP Cheat Sheet Series as the high-trust source for this track.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> open — every MISSION.md success criterion has now been touched at least once; a good next step is going deeper on one track (e.g. connection pool sizing/exhaustion, only briefly named in Lesson 1) or reviewing a real PR together. Tell your teacher which you'd like.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

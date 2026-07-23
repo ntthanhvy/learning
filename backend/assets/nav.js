@@ -40,6 +40,8 @@
       file: "lessons/0016-api-versioning.html" },
     { n: 17, date: "2026-07-23", title: "SQL injection & input validation",
       file: "lessons/0017-sql-injection-and-input-validation.html" },
+    { n: 18, date: "2026-07-24", title: "Connection pool sizing & exhaustion",
+      file: "lessons/0018-connection-pool-sizing-and-exhaustion.html" },
   ];
 
   const REFS = [

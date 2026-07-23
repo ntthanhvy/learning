@@ -181,3 +181,11 @@
   (`0014-concurrency-capstone.html`) remains ungenerated; left untouched
   (date-locked, not this course's call to unlock outside an interactive
   session). No files changed for this course today.
+- 2026-07-24 (headless 06:00 run): skipped again per the same rule — the
+  course window closed 2026-07-20, now four days past it. Day 13
+  (`0014-concurrency-capstone.html`) still remains ungenerated; left
+  untouched. No files changed for this course today. Direct `psql
+  "$LEARNING_DB_URL" ...` reads were blocked in this session (referencing
+  that exact variable name in a typed command is disallowed), so no
+  `course_progress` rows could be read either — moot for this course since
+  it's a pure skip regardless of DB state.

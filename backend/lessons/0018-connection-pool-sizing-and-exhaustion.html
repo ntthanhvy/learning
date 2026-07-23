@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 18 · Connection pool sizing & exhaustion</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 18 · ~20 min</p>
+<h1>Connection pool sizing & exhaustion</h1>
+<p class="byline">Lesson 1's request-lifecycle diagram named the <code>connection pool</code> in passing, and Lesson 17 left "going deeper on one track" open once every MISSION.md criterion had been touched — connection pool sizing was the specific example it named. This lesson is that: what the pool is actually saving you from, what happens when it runs out, and why "just make it bigger" isn't the fix it sounds like.</p>
+
+<h2>1 · What the pool is saving you from</h2>
+<p>Opening a database connection isn't free. Postgres runs one backend <em>process</em> per connection — not a thread, a whole OS process, using a few megabytes of memory and CPU time just to exist, before it ever runs a query. Getting there costs a TCP handshake plus an authentication round trip, tens of milliseconds that dwarf many queries' own execution time. Opening one fresh per request, then throwing it away, pays that cost on every single request. The <code>connection pool</code> exists to pay it once: open a small set of connections up front, keep them alive, and have every handler borrow one, use it, and return it.</p>
+<p>That reframes the sizing question. A pool isn't "how many connections can I afford" — Postgres's default <code>max_connections</code> is 100 total, shared across every client that talks to that database, and each one costs real server memory whether it's doing anything or not. A pool is "how many connections does this instance actually need in flight at once," and for most services that number is much smaller than intuition suggests — see section 3.</p>
+
+<h2>2 · Configuring the pool</h2>
+<p>In Go, <code>pgxpool</code> (the pool wrapper around <code>pgx</code>, the driver this course has used since Lesson 5) exposes the knobs that decide the trade-off:</p>
+<pre><code><span class="kw">func</span> newPool(ctx context.Context, dsn <span class="kw">string</span>) (*pgxpool.Pool, <span class="kw">error</span>) {
+    cfg, err := pgxpool.ParseConfig(dsn)
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        <span class="kw">return</span> <span class="kw">nil</span>, err
+    }
+    cfg.MaxConns = <span class="kw">20</span>
+    cfg.MinConns = <span class="kw">2</span>
+    cfg.MaxConnLifetime = <span class="kw">30</span> * time.Minute
+    cfg.MaxConnIdleTime = <span class="kw">5</span> * time.Minute
+    <span class="kw">return</span> pgxpool.NewWithConfig(ctx, cfg)
+}</code></pre>
+<p><code>MaxConns</code> caps how many connections this one instance will ever hold at once — if left unset, <code>pgxpool</code> defaults to the greater of 4 or the machine's CPU count, a number picked for a generic workload, not yours. <code>MinConns</code> keeps a small floor open even when idle, trading a little standing memory for skipping the connect handshake on the next burst of traffic. <code>MaxConnLifetime</code> and <code>MaxConnIdleTime</code> force periodically-recycled connections — useful when a load balancer or the database itself expects connections to rotate, and a cheap safety net against a connection that's quietly gone stale.</p>
+
+<h2>3 · Pool exhaustion: what running out actually looks like</h2>
+<p>Every connection in the pool is either idle (available to borrow) or acquired (currently in use). <code>pool.Acquire(ctx)</code> hands one out; the caller is responsible for giving it back:</p>
+<pre><code><span class="kw">func</span> leaky(ctx context.Context, pool *pgxpool.Pool) <span class="kw">error</span> {
+    conn, err := pool.Acquire(ctx)
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        <span class="kw">return</span> err
+    }
+    <span class="kw">var</span> id <span class="kw">int</span>
+    <span class="kw">return</span> conn.QueryRow(ctx, <span class="kw">"SELECT 1"</span>).Scan(&id)
+    <span class="cm">// conn.Release() never runs — this slot is gone for good</span>
+}
+
+<span class="kw">func</span> fixed(ctx context.Context, pool *pgxpool.Pool) <span class="kw">error</span> {
+    conn, err := pool.Acquire(ctx)
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        <span class="kw">return</span> err
+    }
+    <span class="kw">defer</span> conn.Release()
+    <span class="kw">var</span> id <span class="kw">int</span>
+    <span class="kw">return</span> conn.QueryRow(ctx, <span class="kw">"SELECT 1"</span>).Scan(&id)
+}</code></pre>
+<p><code>leaky</code> never calls <code>Release()</code>, on either the success or the error path — that connection is permanently removed from the pool's available set until the process restarts. One leaked call is invisible. A thousand, from a handler that runs on every request, quietly drains <code>MaxConns</code> down to zero. The fix is the same discipline as Go's other acquire-then-release resources (a mutex's <code>Unlock</code>, a file's <code>Close</code>): <code>defer conn.Release()</code> immediately after a successful <code>Acquire</code>, unconditionally.</p>
+<div class="callout"><strong>This is <dfn data-en="the state where every connection in a pool is currently in use (or leaked) and a new caller must wait for one to free up — indistinguishable from a slow network or downed database from the outside, since requests simply stop completing" data-vn="pool exhaustion (giữ nguyên) — hết connection rảnh trong pool, request phải chờ">pool exhaustion</dfn>, and it doesn't look like a pool problem from the outside.</strong> When every connection is acquired (leaked or genuinely busy), the next <code>Acquire(ctx)</code> call just blocks until one frees up or <code>ctx</code>'s deadline fires — requests pile up and start timing out, which looks identical to a slow network or a downed database. CPU and memory graphs can look completely calm while this happens; the actual signal is <code>pool.Stat()</code>, which reports <code>AcquiredConns()</code>, <code>IdleConns()</code>, and <code>MaxConns()</code> — acquired sitting at max with idle at zero, under load that used to be fine, is the fingerprint of exhaustion.</div>
+
+<h2>4 · The multiplication problem: pool size × instance count</h2>
+<p>Lesson 8 established that a "stateless" server still runs as more than one instance in production. Each instance owns its <em>own</em> pool — a pool is never shared across processes. So the number that actually matters against Postgres's <code>max_connections</code> isn't one instance's <code>MaxConns</code>, it's <code>MaxConns × instance count</code>. Twenty connections per instance feels modest; twenty connections across fifteen instances is 300, well past a default <code>max_connections</code> of 100 (itself reduced further by connections Postgres reserves for superusers and replication) — the database starts rejecting new connections outright, and every instance sees it at once, right as traffic (and instance count, if autoscaling is involved) is highest.</p>
+<p>Two real levers close that gap: size pools smaller than instinct suggests — most services need far fewer concurrent connections than requests-per-second, since each connection is only held for a query's duration, not a whole request — and, once instance count grows enough that per-instance pools alone can't fit under <code>max_connections</code>, put an external pooler like <a href="https://www.pgbouncer.org/">PgBouncer</a> in front of Postgres, so every instance's pool talks to PgBouncer instead of the database directly, and PgBouncer multiplexes a much larger number of app-side connections onto a small, fixed number of real Postgres ones.</p>
+
+<div class="interview">
+<p><strong>Q: "Your API starts timing out under load, but CPU and memory both look fine. What would you check?"</strong> A strong answer, out loud: <em>"I'd suspect connection pool exhaustion before anything else, since it produces exactly this signature — requests hang waiting for a resource, but the machine itself looks idle. I'd check the pool's stats: acquired connections sitting at the max with idle at zero means every connection is either genuinely busy or leaked. If it's a leak, I'd look for an Acquire without a matching deferred Release on every code path, including errors. If it's not a leak, I'd check whether instance count times per-instance pool size has grown past the database's max_connections — that's easy to miss when autoscaling adds instances without anyone revisiting the pool size math."</em> The signal: naming pool exhaustion specifically and the acquired-vs-idle diagnostic, not just "check the database."</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A connection pool exists so handlers can reuse a small set of already-open connections instead of paying the TCP handshake and authentication cost, plus a full Postgres backend process, on every single request.">
+    <p class="stem">What is a connection pool primarily saving handlers from paying repeatedly?</p>
+    <button class="opt" data-ok>the cost of opening a new connection</button>
+    <button class="opt">the cost of writing SQL query text</button>
+    <button class="opt">the cost of parsing JSON response body</button>
+  </div>
+  <div class="q" data-why="Forgetting Release() on every code path (success and error both) permanently removes that connection from the pool's available set until the process restarts — one leak is invisible, but a handler that leaks on every request drains the pool down to zero under load.">
+    <p class="stem">What happens to a connection acquired via <code>pool.Acquire()</code> that never calls <code>Release()</code>?</p>
+    <button class="opt" data-ok>it stays removed from the pool until restart</button>
+    <button class="opt">pgxpool automatically reclaims it within a few seconds</button>
+    <button class="opt">Postgres itself closes it after the query returns</button>
+  </div>
+  <div class="q" data-why="Pool exhaustion doesn't show up as an obvious pool error — Acquire() simply blocks until a connection frees up or the context deadline fires, so requests pile up and time out while CPU and memory graphs stay calm, looking exactly like a slow network or downed database from the outside.">
+    <p class="stem">Why does pool exhaustion often get misdiagnosed as a network or database outage?</p>
+    <button class="opt" data-ok>CPU and memory look normal while requests hang</button>
+    <button class="opt">Postgres always logs an explicit pool-exhausted error message</button>
+    <button class="opt">pgxpool crashes the whole process immediately every time</button>
+  </div>
+  <div class="q" data-why="A pool is per-process, never shared across instances, so the number that matters against Postgres's max_connections is each instance's MaxConns multiplied by how many instances are running — a modest per-instance size can still add up to far more than the database allows once instance count grows.">
+    <p class="stem">Why can a "safe" per-instance pool size still exhaust the database's <code>max_connections</code>?</p>
+    <button class="opt" data-ok>pool size multiplies by the running instance count</button>
+    <button class="opt">Postgres shares one global pool across all instances</button>
+    <button class="opt">max_connections silently resets to zero on each deploy</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://www.postgresql.org/docs/current/runtime-config-connection.html">PostgreSQL Manual — Connections and Authentication</a> (~15 min, focus on <code>max_connections</code>) — RESOURCES.md already flags the official PostgreSQL Manual as the primary source for anything schema/runtime-config-related, ahead of blog posts; this is the page that defines the ceiling every pool's sizing math has to respect.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> open — every MISSION.md success criterion plus this deepened pooling topic are now covered; a good next step is reviewing a real PR together, or naming another track to go deeper on. Tell your teacher which you'd like.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -306,3 +306,43 @@
   course/lesson, not today's task). Set the teaser going forward to
   `transform()` (per-row group-relative values, not yet covered) if no
   drill-outcome signal surfaces by next generation.
+- 2026-07-24 generation (Lesson 16, headless 06:00 run): direct `psql
+  "$LEARNING_DB_URL" ...` reads were blocked in this headless run
+  (referencing that exact variable name in a typed command is disallowed
+  for this sandboxed session) — still no `course_progress` rows readable
+  and no `lesson_completed`/quiz/kata outcome record beyond the Lesson 1
+  baseline, so no reported weak spot to target. Lesson 15's own teaser
+  named the fallback explicitly ("transform() for a per-row group-relative
+  value, not yet covered"), confirmed via grep that `transform(` never
+  appeared in any lesson body before today — so Lesson 16 takes that
+  branch: `groupby().transform("mean")` for a deviation-from-group-mean
+  column with no merge step needed (contrasted against the
+  `agg()`-then-merge approach the reader would otherwise reach for), then
+  `transform("sum")` for a group-total-share variant to show the
+  aggregation name is swappable, and named as pandas' general-purpose
+  member of the window-function family Lesson 7 (`rank`/`cumsum`) and
+  Lesson 13 (`rolling`/`expanding`) already opened, tied explicitly to
+  SQL's `AVG(amount) OVER (PARTITION BY customer)`. `uv run --with pandas`
+  worked directly this round: the shipped (unsolved) `practice/16_transform.py`
+  was executed in place and printed all ✗ with no crash (Exercise 1's
+  `.transform(...)` call needed its own try/except, same reason as prior
+  rounds — a literal Ellipsis reaching a real method call raises
+  immediately), then a solved copy (`.scratch/data-lesson16/solved.py`,
+  deleted after) printed all ✓ against the real `orders_raw.csv` clean
+  4-row slice — hand-computed values matched exactly: An's group mean 81.0
+  (dev +39.0/-39.0), Binh's group mean 107.75 (dev -72.25/+72.25), and the
+  group-total-share fractions (0.7407/0.1647/0.8353/0.2593) each
+  customer's pair summing to exactly 1.0. `bin/record-progress data
+  lesson_generated --day 16 --lesson
+  0016-transform-group-relative-values.html --detail '{"by":"launchd"}'`
+  ran directly and succeeded, no approval blocker this round (same
+  asymmetry as every prior round — it sources DB creds internally,
+  unaffected by the read-side block). Added `transform()` to the glossary and registered Lesson 16
+  in nav.js. Quiz options were rewritten to equalize word counts per
+  question (this course's established convention) — the first drafted
+  Q2/Q3 options came out mismatched (6/7/8 and 6/10/8 words), caught and
+  fixed with a `grep` extraction of every option string plus a manual
+  per-option word count before shipping, not just eyeballed. Set the
+  teaser going forward to `crosstab()` (a frequency-table shortcut related
+  to but distinct from `pivot_table`, not yet covered) if no drill-outcome
+  signal surfaces by next generation.

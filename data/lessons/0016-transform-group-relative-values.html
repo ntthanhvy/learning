@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 16 · Transform: group-relative values</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 16 · ~20 min · 24 Jul 2026</p>
+<h1>Transform: broadcasting a group value back to every row</h1>
+<p class="byline">Lesson 15's teaser named <code>transform()</code> — a per-row group-relative value — as the next fresh pattern once a drill-outcome signal didn't surface. Every reshape and aggregation so far has either collapsed rows (<code>groupby().sum()</code>) or kept every row's own value untouched. Today's tool does neither: it keeps every row, but replaces each one with something computed from its <em>group</em>.</p>
+
+<h2>Recap, in one line</h2>
+<p>Lesson 4's <code>groupby().agg()</code> answers "one number per group" — the output is shorter than the input. Today's <code>transform()</code> answers "one number per group, but written back onto every row of that group" — the output is exactly as long as the input.</p>
+
+<h2>1 · The problem plain <code>agg()</code> can't solve directly</h2>
+<p>Say the task is: for every order, how far above or below its customer's own average is this order's amount? <code>groupby("customer")["amount"].mean()</code> gives the group averages — but that Series has one row per customer, not one row per order, so subtracting it straight from <code>clean["amount"]</code> doesn't line up. The textbook fix is a merge: compute the group means, then <code>merge</code> them back onto the original rows on <code>customer</code>, the same join mechanics as Lesson 5. That works, but it's two steps and a join key to get exactly back to where you started — every original row, no fewer, no more.</p>
+
+<h2>2 · <code>transform()</code> skips the merge entirely</h2>
+<p><dfn data-en="a groupby method that computes an aggregation per group but returns the result broadcast back to the original row count and row order — every row in a group receives that group's aggregate value, unlike agg()/sum() which collapses to one row per group" data-vn="giữ nguyên 'transform()' — tính theo nhóm nhưng KHÔNG gộp hàng, trả về đúng số dòng gốc">transform()</dfn> computes the exact same aggregation as <code>agg()</code>, but hands back a result already aligned row-for-row with the input it was called on:</p>
+<pre><code>group_mean = clean.groupby(<span class="kw">"customer"</span>)[<span class="kw">"amount"</span>].transform(<span class="kw">"mean"</span>)
+<span class="cm">-- 0    81.00   (An's rows both get An's mean)
+-- 1   107.75   (Binh's rows both get Binh's mean)
+-- 2   107.75
+-- 3    81.00</span>
+
+clean[<span class="kw">"amount"</span>] - group_mean
+<span class="cm">-- 0    39.00   (120.0 is 39 above An's average)
+-- 1   -72.25   (35.5 is 72.25 below Binh's average)
+-- 2    72.25
+-- 3   -39.00</span></code></pre>
+<p>No merge, no join key, no risk of a many-to-many blow-up if a merge key isn't unique — <code>group_mean</code> already has the same index as <code>clean</code>, so plain Series subtraction lines every row up correctly. This is the SQL equivalent of <code>AVG(amount) OVER (PARTITION BY customer)</code>: a <a href="../lessons/0007-rank-and-cumulative-operations.html">window function</a> (Lesson 7's term) computed per partition without collapsing the rows — <code>transform()</code> is pandas' general-purpose member of that same family, alongside <code>rank()</code>, <code>cumsum()</code>, and Lesson 13's <code>rolling()</code>/<code>expanding()</code>.</p>
+
+<h2>3 · <code>transform()</code> isn't limited to <code>"mean"</code></h2>
+<p>Any aggregation name that works with <code>agg()</code> works with <code>transform()</code> — the only difference is the shape it hands back. Swap in <code>"sum"</code> to get each row's share of its customer's total instead of its distance from the average:</p>
+<pre><code>group_total = clean.groupby(<span class="kw">"customer"</span>)[<span class="kw">"amount"</span>].transform(<span class="kw">"sum"</span>)
+pct_of_group_total = clean[<span class="kw">"amount"</span>] / group_total
+<span class="cm">-- 0    0.7407   (An's 120.0 is 74% of An's 162.0 total)
+-- 1    0.1647   (Binh's 35.5 is 16% of Binh's 215.5 total)
+-- 2    0.8353
+-- 3    0.2593</span></code></pre>
+<p>Each customer's own percentages sum to exactly <code>1.0</code> — every row still carries its customer's full total, just divided differently per row. That's the whole pattern: pick the aggregation, call <code>transform()</code>, use the result exactly like any other same-length column.</p>
+
+<div class="callout"><strong>transform() vs agg(), the one-sentence version:</strong> <code>agg()</code>/<code>sum()</code>/<code>mean()</code> collapse — fewer rows out than in. <code>transform()</code> broadcasts — exactly as many rows out as in, every row replaced by its group's value. Same aggregation vocabulary, opposite output shape.</p></div>
+
+<div class="interview">
+<p><strong>Q: "How would you add a column showing each row's deviation from its group's average, without a separate merge step?"</strong> A strong answer, out loud: <em>"I'd use groupby().transform('mean') instead of groupby().mean() — transform computes the same per-group average, but returns it already broadcast back to every original row, aligned by index, instead of collapsing to one row per group. That means I can subtract it directly from the original column with no merge and no join key. It's the same idea as a SQL window function like AVG(amount) OVER (PARTITION BY customer) — the aggregate is computed per partition, but every row keeps its place."</em> The signal: naming the row-count-preserving property specifically, not just "it computes an average per group" — that part alone doesn't distinguish it from agg().</p>
+</div>
+
+<h2>Try it — self-checking practice (~10 min)</h2>
+<p>Open <code>practice/16_transform.py</code>, replace each <code>...</code>, and re-run until all four checks print ✓:</p>
+<pre><code>cd ~/learning/data
+uv run --with pandas python3 practice/16_transform.py</code></pre>
+<p>Same <code>orders_raw.csv</code> clean 4-row slice as Lessons 6–15 (An x2, Binh x2). Exercise 1 builds the group-mean transform; Exercise 2 subtracts it to get each row's deviation; Exercise 3 swaps in <code>"sum"</code> for a group-total-share version; Exercise 4 checks the property that makes <code>transform()</code> what it is — output length never changes.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="transform() returns a result the same length as the group it was called on — every row in a group gets that group's aggregate value written back onto it. agg()/mean() collapses to one row per group instead; that row-count difference is the entire distinction between the two.">
+    <p class="stem">How many rows does <code>groupby("customer")["amount"].transform("mean")</code> return, for a 4-row input?</p>
+    <button class="opt" data-ok>exactly 4, one per original row</button>
+    <button class="opt">exactly 2, one per customer group</button>
+    <button class="opt">exactly 1, the overall grand mean</button>
+  </div>
+  <div class="q" data-why="Because transform's output is already aligned index-for-index with the original data, no merge or join key is needed to combine it back with the source column — that's the specific advantage over the agg()-then-merge approach.">
+    <p class="stem">Why can <code>clean["amount"] - group_mean</code> be computed directly with no merge step?</p>
+    <button class="opt" data-ok>transform() output already aligns to every row</button>
+    <button class="opt">subtraction in pandas never needs matching indexes</button>
+    <button class="opt">amount and group_mean never share an index</button>
+  </div>
+  <div class="q" data-why="transform() takes the same aggregation names agg() does — mean, sum, max, and more — the vocabulary is identical. The only thing that changes between them is the output shape: collapsed for agg(), broadcast back to every row for transform().">
+    <p class="stem">What changes when swapping <code>transform("mean")</code> for <code>transform("sum")</code>?</p>
+    <button class="opt" data-ok>only which single aggregate gets broadcast back</button>
+    <button class="opt">the number of rows returned drops sharply</button>
+    <button class="opt">whether the transformed result aligns back correctly</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official pandas <a href="https://pandas.pydata.org/docs/user_guide/groupby.html#transformation">Group by — Transformation</a> section of the "Group by: split-apply-combine" user guide page (~15 min) — RESOURCES.md already flags this page as lesson-grade on its own; today's lesson picks up the "Transformation" section specifically, one level past what Lesson 4 covered.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>transform()</code> is new today.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9–16 comes back reported as shakiest, otherwise <code>crosstab()</code> (a frequency-table shortcut related to but distinct from <code>pivot_table</code>, not yet covered) keeps the drill library growing.<br><br>
+💬 Anything unclear — transform vs agg, when to reach for it over a merge, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

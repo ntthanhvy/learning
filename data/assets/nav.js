@@ -36,6 +36,8 @@
       file: "lessons/0014-multi-metric-melt.html" },
     { n: 15, date: "2026-07-23", title: "Unstack: pulling a row-index level back into columns",
       file: "lessons/0015-unstack.html" },
+    { n: 16, date: "2026-07-24", title: "Transform: broadcasting a group value back to every row",
+      file: "lessons/0016-transform-group-relative-values.html" },
   ];
 
   const REFS = [

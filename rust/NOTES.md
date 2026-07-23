@@ -250,3 +250,16 @@ by the user there; they apply here identically.
   (Go was skipped this round per its own Jul-20 window close, now three
   days in the past; backend Lesson 17 and data Lesson 15 were generated via
   `bin/record-progress`, which — as always — worked fine as a write.)
+- 2026-07-24 (headless 06:00 run): same as every prior post-week day —
+  verified `daily.html`, `assets/srs.js`, and `assets/quiz-bank.js` are all
+  present and untouched (`quiz-bank.js` still tags exactly days 1-7, with
+  exactly 7 kata entries `k1`-`k7`; `nav.js` still registers only the 7 Jul
+  8-14 lessons). Still the correct "daily quiz+kata" for this post-week
+  phase per PLAN.md, so nothing new was generated. Direct `psql
+  "$LEARNING_DB_URL" ...` reads were blocked again this session (referencing
+  that exact variable name in a typed command is disallowed for this
+  sandboxed session), so no `course_progress` rows could be read for a
+  scope-change signal. No new learning record beyond the Day-1 baseline.
+  (Go was skipped again per its own Jul-20 window close, now four days in
+  the past; backend Lesson 18 and data Lesson 16 were generated — both
+  compile/run-verified in a scratch dir before shipping.)

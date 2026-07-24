@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 19 · Schema migrations</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 19 · ~20 min</p>
+<h1>Schema migrations: evolving a table without breaking anything</h1>
+<p class="byline">MISSION.md's first success criterion promises designing a data model "entities, relationships, constraints, <strong>and a migration plan</strong> — and explain the trade-offs." Lesson 2 covered entities and relationships, Lesson 5 covered indexes as part of that model — but the migration plan itself has never been its own lesson. This is that lesson: how a schema changes after it's already live, without breaking the code currently running against it.</p>
+
+<h2>1 · What a migration actually is</h2>
+<p>A <dfn data-en="a versioned, ordered SQL script (or paired up/down script) checked into version control alongside the code that depends on it, applied by a migration tool that tracks which ones have already run" data-vn="migration (giữ nguyên) — script SQL có thứ tự, đi kèm code trong git, chạy qua tool để đổi schema từng bước">migration</dfn> is a small, ordered SQL script that changes the schema — add a column, add an index, add a constraint — checked into the same git repository as the code that depends on it. A migration tool (in the Go ecosystem, <code>golang-migrate</code> is the standard) keeps a table in the database itself recording which migrations have already run, so it can apply exactly the ones a given environment is missing, in order, once each.</p>
+<p>Think of it as the schema's equivalent of git commit history. You wouldn't hand-edit a colleague's checked-out working tree to match yours; you'd give them a commit to apply. A migration is the same idea for the shape of the database: instead of one person running <code>ALTER TABLE</code> by hand against production, the change is a file, reviewed in a PR (Lesson 14), and applied the same way in every environment — a teammate's laptop, staging, production — by running the same tool against the same script.</p>
+
+<h2>2 · The hazard: old code and new code, same database, at once</h2>
+<p>Lesson 8 established that a "stateless" server actually runs as many instances behind a load balancer, and a rolling deploy replaces them one at a time rather than all at once. For the length of that rollout — seconds to minutes — old code and new code are both handling live requests against the exact same database. A migration doesn't get that same grace period: it either hasn't run yet, or it has, for every instance, all at once.</p>
+<p>That gap is where migrations break things. Add a required column — <code>NOT NULL</code>, no default — and every row written by an old-code instance that doesn't know the column exists will fail that constraint outright. Drop a column the old code still reads, and every one of its queries breaks the moment the column disappears, not when the old code is eventually retired. The migration ships instantly; the code doesn't.</p>
+
+<h2>3 · The safe recipe: expand/contract</h2>
+<p>Lesson 16 drew a line between backward-compatible changes (existing, correctly-written clients keep working) and breaking changes (they don't) for API contracts. Schema changes split the exact same way, and the fix is the same shape too: never take a single breaking step — take several backward-compatible ones in sequence, known as the <dfn data-en="the pattern of splitting one breaking schema change into several individually backward-compatible steps: first expand the schema to tolerate both old and new code, then contract it once every instance has moved to the new code" data-vn="expand/contract pattern (giữ nguyên) — tách 1 thay đổi breaking thành nhiều bước nhỏ, bước nào cũng backward-compatible">expand/contract pattern</dfn>.</p>
+<p>To add a required column with zero downtime:</p>
+<ol>
+<li><strong>Expand:</strong> a migration adds the column nullable, or with a <code>DEFAULT</code>. On its own this step is fully backward-compatible — old code doesn't know the column exists and keeps working exactly as before.</li>
+<li><strong>Deploy new code</strong> that writes the column on every new row, but still tolerates it being <code>NULL</code> when reading an existing row (see the Go snippet below). This can roll out instance by instance same as any deploy.</li>
+<li><strong><dfn data-en="a script or job that fills in a value for rows that existed before a new column was added, so old rows end up with the same data new rows get going forward" data-vn="backfill (giữ nguyên) — chạy job điền dữ liệu cho các dòng cũ sau khi thêm cột mới">Backfill</dfn></strong> the existing rows — a script or background job (Lesson 10) that computes and writes a value for every row that predates the column.</li>
+<li><strong>Contract:</strong> only once every instance is confirmed running the new code and the backfill is complete, a second migration adds the <code>NOT NULL</code> constraint.</li>
+</ol>
+<p>Each step alone is backward-compatible. It's only the full sequence — expand, deploy, backfill, contract — that gets you to "required," and that's the trade-off worth naming out loud in review: a same-day "just add a required column" migration is fast to write and unsafe to run; the four-step version is slower but never breaks a request mid-rollout.</p>
+
+<h2>4 · Dropping a column: the same pattern, reversed</h2>
+<p>Removing a column safely runs the identical logic backwards. Drop the column first and every instance still reading it — old or new, doesn't matter which — breaks immediately. Instead: deploy code that stops <em>reading</em> the column, deploy code that stops <em>writing</em> it, confirm every instance is on that code, and only then run the migration that drops it. Write before read, when adding; read before write, when removing — in both directions, the migration that actually changes structure comes last, after the code no longer depends on the old shape.</p>
+
+<div class="callout"><strong>The rule underneath both recipes:</strong> a migration is safe exactly when every currently-running version of the code — old and new alike — still works after it applies. If that's not true, split the change into more steps until it is.</div>
+
+<h2>5 · Building an index without blocking writes</h2>
+<p>Lesson 5 covered when an index is worth adding; it didn't cover how to add one to a table that's already taking live traffic. A plain <code>CREATE INDEX</code> takes a lock on the table for the entire build — every write to that table queues up and waits until the index finishes, which on a large table can be minutes of stalled writes in production. <code>CREATE INDEX CONCURRENTLY</code> builds the same index without holding that lock, so writes keep flowing the whole time.</p>
+<p>The trade-off is real, not free: a <dfn data-en="an index build (CREATE INDEX CONCURRENTLY) that avoids locking the table against writes by scanning it more than once, at the cost of taking noticeably longer and needing a manual retry if it fails partway" data-vn="concurrent index build (giữ nguyên) — build index không khóa bảng, nhưng chậm hơn và fail giữa chừng phải tự retry">concurrent index build</dfn> takes noticeably longer than a locking one (it scans the table more than once to avoid holding the lock), and if it fails partway — a conflicting statement, a crash — it can leave behind an invalid index that Postgres won't use and won't clean up automatically; you have to notice, drop it, and retry by hand. For any table serving live traffic, that trade is almost always worth it anyway: a slower build beats a frozen table.</p>
+
+<h2>6 · Rollback vs. fix-forward</h2>
+<p>Migration tools like <code>golang-migrate</code> support paired files — a <code>.up.sql</code> that applies the change and a <code>.down.sql</code> that's meant to reverse it, so a bad migration can theoretically be rolled back. In practice, many production teams run a <dfn data-en="a policy of never reversing a bad migration; instead a new migration is written that fixes the problem going forward, leaving the history append-only" data-vn="fix-forward (giữ nguyên) — không rollback migration lỗi, viết migration mới để sửa tiếp">fix-forward</dfn> policy instead: a bad migration is never rolled back — a new migration is written that corrects it, and history only ever moves forward.</p>
+<p>The honest reason: a down migration only really works for changes that never destroyed anything. Reversing "add a nullable column" is trivial — drop it, no data lost. Reversing "drop a column" is not: the values that column held are already gone by the time anyone decides to roll back, and no <code>.down.sql</code> can conjure deleted data back into existence. Once a migration has destroyed or overwritten data, "rollback" is a script that looks reassuring but can't actually restore the pre-migration state — which is exactly why the expand/contract sequence in section 3 defers every destructive step (the final <code>NOT NULL</code>, the actual column drop) until it's provably safe, rather than leaning on rollback as the safety net.</p>
+
+<h2>7 · Reading a column that might still be NULL</h2>
+<p>Concretely, step 2 of the expand recipe means a store method has to handle the column not being populated yet. <code>database/sql</code>'s <code>sql.NullString</code> makes that an explicit, compile-time-checked case instead of a runtime surprise:</p>
+<pre><code><span class="kw">func</span> (s *Store) ShippingRegion(ctx context.Context, orderID <span class="kw">int64</span>) (<span class="kw">string</span>, <span class="kw">error</span>) {
+    <span class="kw">var</span> region sql.NullString
+    err := s.db.QueryRowContext(ctx,
+        <span class="kw">`SELECT</span> shipping_region <span class="kw">FROM</span> orders <span class="kw">WHERE</span> id = $1<span class="kw">`</span>, orderID,
+    ).Scan(&region)
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        <span class="kw">return</span> <span class="str">""</span>, err
+    }
+    <span class="kw">if</span> !region.Valid {
+        <span class="kw">return</span> <span class="str">"unknown"</span>, <span class="kw">nil</span> <span class="cm">// old row, not backfilled yet — don't crash</span>
+    }
+    <span class="kw">return</span> region.String, <span class="kw">nil</span>
+}</code></pre>
+<p><code>region.Valid</code> is <code>false</code> exactly for rows the backfill hasn't reached yet — an old row written before the column existed. Handling that case explicitly (falling back to a sentinel value here) is what makes the code in step 2 safe to deploy before the backfill in step 3 has even started.</p>
+
+<div class="interview">
+<p><strong>Q: "Walk me through adding a required column to a table with live traffic, zero downtime."</strong> A strong answer, out loud: <em>"I'd use the expand/contract pattern rather than one migration. First, expand: a migration adds the column nullable, or with a default — that alone is backward-compatible, since old code just ignores a column it doesn't know about. Then I'd deploy new code that writes the column on every new row but still tolerates NULL on read, so it's safe to roll out instance by instance during a normal deploy. Next, backfill the existing rows with a script or background job. Only once every instance is confirmed on the new code and the backfill's done would I ship a second migration adding the NOT NULL constraint — that's the contract step. Each individual step is backward-compatible on its own; it's the sequence that gets me to 'required' safely."</em> The signal: naming expand/contract by name and explaining why the sequence matters, not just "add the column."</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A migration is a versioned SQL script checked into the same repo as the code, applied by a tool that tracks which ones already ran — the schema's equivalent of a git commit history, not a one-off manual edit against production.">
+    <p class="stem">What is a schema migration, in this course's terms?</p>
+    <button class="opt" data-ok>a versioned SQL script tracked in git</button>
+    <button class="opt">a manual edit typed directly into production</button>
+    <button class="opt">a comment describing planned future schema work</button>
+  </div>
+  <div class="q" data-why="During a rolling deploy across multiple instances (Lesson 8), old code and new code both run against the same database at once — a required column with no default breaks any write from an old-code instance that doesn't populate it, since the migration applies to every instance instantly while the code rollout doesn't.">
+    <p class="stem">Why can adding a required column break a rolling deploy across instances?</p>
+    <button class="opt" data-ok>old and new code share one database mid-rollout</button>
+    <button class="opt">Postgres rejects all schema changes during any deploy</button>
+    <button class="opt">rolling deploys always restart the whole database itself</button>
+  </div>
+  <div class="q" data-why="Expand/contract splits one breaking change into several backward-compatible steps: add the column nullable, deploy code that writes it but tolerates NULL reads, backfill old rows, then only add NOT NULL once every instance has moved — each step alone never breaks a currently-running version of the code.">
+    <p class="stem">What problem does the expand/contract pattern solve?</p>
+    <button class="opt" data-ok>splitting one breaking change into safe small steps</button>
+    <button class="opt">making a single migration run much faster overall</button>
+    <button class="opt">letting one instance skip running any migration ever</button>
+  </div>
+  <div class="q" data-why="A plain CREATE INDEX holds a lock for the whole build, blocking writes until it finishes; CREATE INDEX CONCURRENTLY avoids that lock so writes keep flowing, at the cost of a slower build and a manual retry if it fails partway and leaves an invalid index behind.">
+    <p class="stem">What does <code>CREATE INDEX CONCURRENTLY</code> trade away for not blocking writes?</p>
+    <button class="opt" data-ok>build speed, plus a manual retry risk if it fails</button>
+    <button class="opt">the ability to use the index once it finishes building</button>
+    <button class="opt">support for having more than one column in the index</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://www.postgresql.org/docs/current/sql-altertable.html">PostgreSQL Manual — ALTER TABLE</a> and <a href="https://www.postgresql.org/docs/current/sql-createindex.html">PostgreSQL Manual — CREATE INDEX</a> (~15 min combined, focus on the <code>NOT NULL</code>/default behavior and the <code>CONCURRENTLY</code> option) — RESOURCES.md flags the PostgreSQL Manual's Data Definition docs as the primary source for schema topics, ahead of blog posts. Secondary, practical reference: <a href="https://github.com/golang-migrate/migrate">golang-migrate's GitHub README</a>, the Go-ecosystem standard migration tool named in section 1.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> open — this closes the last named-but-untaught phrase in MISSION.md's success criteria. A good next step is reviewing a real migration or PR together, or naming a track to go deeper on. Tell your teacher which you'd like.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

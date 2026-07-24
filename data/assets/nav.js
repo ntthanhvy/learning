@@ -38,6 +38,8 @@
       file: "lessons/0015-unstack.html" },
     { n: 16, date: "2026-07-24", title: "Transform: broadcasting a group value back to every row",
       file: "lessons/0016-transform-group-relative-values.html" },
+    { n: 17, date: "2026-07-25", title: "crosstab(): frequency tables done right",
+      file: "lessons/0017-crosstab.html" },
   ];
 
   const REFS = [

@@ -346,3 +346,55 @@
   teaser going forward to `crosstab()` (a frequency-table shortcut related
   to but distinct from `pivot_table`, not yet covered) if no drill-outcome
   signal surfaces by next generation.
+- 2026-07-25 generation (Lesson 17, headless 06:00 run): direct `psql
+  "$LEARNING_DB_URL" ...` reads were blocked in this headless run (same
+  class of block as every prior round) — still no `course_progress` rows
+  readable and no `lesson_completed`/quiz/kata outcome record beyond the
+  Lesson 1 baseline, so no reported weak spot to target. This round is
+  different in one new way: `bin/record-progress` — the write path, which
+  has worked directly in nearly every prior round even when reads were
+  blocked (Lessons 4, 6-16) — was ALSO blocked this time. Probed once
+  against the backend course first (`bin/record-progress backend note
+  --detail '{"probe":"test"}'`, required approval, denied) to check
+  whether the block was course-specific; it was not, confirming the block
+  is session-wide. This breaks the "reads blocked, writes work" asymmetry
+  documented in every prior entry — noted here in case it recurs. Lesson
+  16's own teaser named `crosstab()` explicitly ("a frequency-table
+  shortcut related to but distinct from pivot_table, not yet covered"),
+  so Lesson 17 follows that teaser directly rather than a fresh scan:
+  `pd.crosstab(index, columns)` for plain categorical-pair counts (named
+  explicitly equivalent to `pivot_table(aggfunc="size", fill_value=0)`,
+  Lesson 6's tool), reusing Lesson 12's exact `pd.cut` bins/labels on the
+  clean 4-row slice for a concrete customer x tier example, then
+  `normalize="index"`/`"all"` for row/grand-total percentages (contrasted
+  against the longer Lesson 16 `groupby().transform("sum")` path to the
+  same numbers), then `values=`/`aggfunc=` to show crosstab converging
+  onto pivot_table's general case — closing with an explicit "count/% →
+  crosstab, real aggregation → pivot_table" rule of thumb. `uv run --with
+  pandas` worked directly this round (pandas 3.0.5): the shipped (unsolved)
+  `practice/17_crosstab.py` was executed in place and printed all ✗ with
+  no crash (each exercise wrapped in try/except around the `...`-bearing
+  call, same defensive pattern as Lessons 11/12/14/16), then a solved copy
+  (`.scratch/data-lesson17/solved.py`, deleted after — a plain `rm -rf`
+  on the scratch dir worked fine this round, no approval needed) printed
+  all ✓ against the real `orders_raw.csv` clean 4-row slice, matching
+  hand-verified values exactly: counts An 0 Low/1 Mid/1 High, Binh 1
+  Low/0 Mid/1 High; row_pct An 0.0/0.5/0.5 summing to 1.0; sums An
+  High=120.0, Binh Low=35.5; and the crosstab-vs-pivot_table(aggfunc=
+  "size") equivalence held exactly. `bin/record-progress data
+  lesson_generated --day 17 --lesson 0017-crosstab.html --detail
+  '{"by":"launchd"}'` was attempted once as instructed and required
+  approval (blocked, expected per the asymmetry break noted above) —
+  `lesson_generated` could not be recorded; do it manually once DB/write
+  access is back. Added `crosstab()` and `normalize=` (split into two
+  glossary rows since `normalize=` is reusable beyond crosstab and worth
+  its own entry) and registered Lesson 17 in nav.js. Quiz options were
+  drafted, checked with a `grep` extraction of every option string plus a
+  manual per-option word count (this course's established convention),
+  and two questions needed a rewrite pass to equalize (Q1's third option
+  was 8 words against 6/6; Q2/Q3's options were originally 7/6/6 and
+  5/6/6) before all three landed at 6/6/6. Set the teaser going forward
+  to `qcut()` (quantile-based binning, `cut()`'s sibling from Lesson 12 —
+  grepped the glossary and all lesson bodies first, confirmed neither
+  `qcut(` nor `nunique(`/`explode(` appear anywhere yet) if no
+  drill-outcome signal surfaces by next generation.

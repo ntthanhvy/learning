@@ -42,6 +42,8 @@
       file: "lessons/0017-sql-injection-and-input-validation.html" },
     { n: 18, date: "2026-07-24", title: "Connection pool sizing & exhaustion",
       file: "lessons/0018-connection-pool-sizing-and-exhaustion.html" },
+    { n: 19, date: "2026-07-25", title: "Schema migrations: evolving a table without breaking anything",
+      file: "lessons/0019-schema-migrations.html" },
   ];
 
   const REFS = [

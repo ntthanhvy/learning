@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 17 · crosstab(): frequency tables done right</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 17 · ~20 min · 25 Jul 2026</p>
+<h1>crosstab(): frequency tables done right</h1>
+<p class="byline">Lesson 16's closing teaser named <code>crosstab()</code> directly — "a frequency-table shortcut related to but distinct from pivot_table, not yet covered." Lesson 6 built <code>pivot_table</code> for general reshape-and-aggregate work; today's tool is the one-call shortcut for the specific, very common case of "just count how two categorical columns co-occur."</p>
+
+<h2>1 · The one-call shortcut <code>pivot_table</code> doesn't have</h2>
+<p><dfn data-en="a pandas function computing a frequency count cross-tab of two (or more) categorical columns by default — no values/aggfunc required for the plain-count case, unlike pivot_table which always needs both" data-vn="giữ nguyên 'crosstab()' — đếm tần suất kết hợp giữa 2 cột phân loại, không cần values/aggfunc như pivot_table">pd.crosstab(index, columns)</dfn> counts how often each combination of two categorical columns occurs together — a frequency cross-tab — with no <code>values</code> and no <code>aggfunc</code> needed for the plain-count case. That's the difference from Lesson 6's <code>pivot_table</code>, which always requires both: <code>pivot_table</code> is built around "aggregate a values column," so even a pure count needs <code>aggfunc="size"</code> spelled out explicitly. In fact the two calls are exactly equivalent for that case:</p>
+<pre><code>pd.crosstab(a, b)
+<span class="cm">-- is the same table as --</span>
+df.pivot_table(index=a, columns=b, aggfunc=<span class="kw">"size"</span>, fill_value=<span class="kw">0</span>)</code></pre>
+<p><code>crosstab()</code> is just that one common shape given its own name and a shorter call — one tool for quick categorical counts, the other for everything else.</p>
+
+<h2>2 · Building one: reusing Lesson 12's bins</h2>
+<p>Lesson 12 sorted <code>amount</code> into tiers with <code>pd.cut(amount, bins=[0, 40, 100, 200], labels=["Low", "Mid", "High"])</code>. Run that on the same clean 4-row slice Lessons 6-16 have used (An/120.0, Binh/35.5, Binh/180.0, An/42.0) and cross-tab the result against <code>customer</code>:</p>
+<pre><code>tier = pd.cut(clean[<span class="kw">"amount"</span>], bins=[<span class="kw">0</span>, <span class="kw">40</span>, <span class="kw">100</span>, <span class="kw">200</span>], labels=[<span class="kw">"Low"</span>, <span class="kw">"Mid"</span>, <span class="kw">"High"</span>])
+pd.crosstab(clean[<span class="kw">"customer"</span>], tier)
+<span class="cm">--           Low  Mid  High
+-- An          0    1     1
+-- Binh        1    0     1</span></code></pre>
+<p>An's two orders land one in Mid (42.0) and one in High (120.0); Binh's land one in Low (35.5) and one in High (180.0). Every cell not mentioned is a real, counted zero — same <code>fill_value=0</code> behavior Lesson 6's <code>pivot_table</code> needed to ask for explicitly, except <code>crosstab()</code> does it by default since it's always counting, never risking a genuine missing aggregate.</p>
+
+<h2>3 · <code>normalize=</code>: percentages without a <code>transform()</code> detour</h2>
+<p>Pass <dfn data-en="a crosstab()/pivot_table() keyword turning raw counts into proportions — 'index' normalizes each row to sum to 1, 'columns' normalizes each column to sum to 1, 'all' divides every cell by the grand total" data-vn="giữ nguyên 'normalize=' — đổi số đếm thành tỉ lệ %, chọn theo hàng/cột/toàn bảng">normalize="index"</dfn> to turn every row into proportions of that row's own total, summing to <code>1.0</code> across each customer:</p>
+<pre><code>pd.crosstab(clean[<span class="kw">"customer"</span>], tier, normalize=<span class="kw">"index"</span>)
+<span class="cm">--           Low  Mid  High
+-- An        0.0  0.5   0.5
+-- Binh      0.5  0.0   0.5</span></code></pre>
+<p><code>normalize="all"</code> divides by the grand total instead, so every cell is a share of every order across every customer, not just that customer's own orders — the four cells above become <code>0.0, 0.25, 0.25</code> for An and <code>0.25, 0.0, 0.25</code> for Binh, all six real cells summing to <code>1.0</code>. This is <code>crosstab()</code>'s strongest advantage over building the same percentages by hand: Lesson 16's <code>groupby().transform("sum")</code> path (per-row divide by a broadcast group total) gets there for one row-normalization case, but takes a <code>groupby</code>, a <code>transform</code>, and a division — versus one keyword argument here.</p>
+
+<div class="callout"><strong>normalize= options:</strong> <code>"index"</code> — each row sums to 1 (row-wise %). <code>"columns"</code> — each column sums to 1 (column-wise %). <code>"all"</code> — every cell is a share of the grand total. Pick the one matching the question actually being asked: "of An's orders, what % were High?" is <code>"index"</code>; "of all High orders, what % were An's?" is <code>"columns"</code>.</div>
+
+<h2>4 · When crosstab grows into pivot_table</h2>
+<p>Add <code>values=</code> and <code>aggfunc=</code> and <code>crosstab()</code> stops being count-only and becomes functionally identical to <code>pivot_table</code>:</p>
+<pre><code>pd.crosstab(clean[<span class="kw">"customer"</span>], tier, values=clean[<span class="kw">"amount"</span>], aggfunc=<span class="kw">"sum"</span>)
+<span class="cm">--           Low   Mid   High
+-- An        NaN  42.0  120.0
+-- Binh     35.5   NaN  180.0</span></code></pre>
+<p>That's the exact same result Lesson 6's <code>pivot_table(index="customer", columns=tier, values="amount", aggfunc="sum")</code> would produce — no <code>fill_value</code> this time, so the genuinely-empty cells show <code>NaN</code>, same default as <code>pivot_table</code>. The rule of thumb: reach for <code>crosstab()</code> when the question is "how do these two categorical columns break down against each other" (counts or percentages, no <code>values</code> needed) — reach for <code>pivot_table</code> the moment there's a real <code>values</code> column and the full <code>aggfunc</code>/<code>fill_value</code>/multi-metric control Lesson 6 covered is wanted. Both call the same reshape machinery under the hood; <code>crosstab()</code> just defaults toward the counting case.</p>
+
+<div class="interview">
+<p><strong>Q: "You need a quick frequency breakdown of two categorical columns with row-wise percentages — what's the one-liner?"</strong> A strong answer, out loud: <em>"pd.crosstab(col_a, col_b, normalize='index') — crosstab defaults to counting how often each combination occurs, and normalize='index' turns each row into proportions of that row's own total in one call. The alternative — groupby(col_a)[col_b].value_counts() then transform to divide by the row total — gets the same numbers but takes several more steps. I'd reach for pivot_table instead only if I actually need to aggregate a real values column, not just count categories."</em> The signal: naming <code>normalize=</code> specifically, not just "crosstab counts things" — the percentage shortcut is the part that actually saves work over a plain <code>value_counts()</code>.</p>
+</div>
+
+<h2>Try it — self-checking practice (~10 min)</h2>
+<p>Open <code>practice/17_crosstab.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/17_crosstab.py</code></pre>
+<p>Same <code>orders_raw.csv</code> clean 4-row slice as Lessons 6-16, tiered with Lesson 12's exact bins. Exercise 1 builds the plain count crosstab; Exercise 2 adds <code>normalize="index"</code> for row percentages; Exercise 3 swaps in <code>values=</code>/<code>aggfunc="sum"</code>; Exercise 4 checks the equivalence to <code>pivot_table(aggfunc="size")</code> directly.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="pd.crosstab(a, b) with no values/aggfunc counts how often each combination of a and b occurs together — exactly the same result as pivot_table(index=a, columns=b, aggfunc='size', fill_value=0), just without needing to spell aggfunc/fill_value out.">
+    <p class="stem">What does <code>pd.crosstab(customer, tier)</code> compute with no <code>values</code>/<code>aggfunc</code> given?</p>
+    <button class="opt" data-ok>a count of each customer/tier combination</button>
+    <button class="opt">the average amount per customer/tier pair</button>
+    <button class="opt">a single grand total for everything</button>
+  </div>
+  <div class="q" data-why="normalize='index' divides every cell by its own row's total, so each row sums to 1.0 — a direct row-wise percentage breakdown. normalize='all' divides by the grand total across every cell instead, and normalize='columns' divides by each column's total.">
+    <p class="stem">What does <code>normalize="index"</code> do to a crosstab's rows?</p>
+    <button class="opt" data-ok>turns each row into row-summing proportions</button>
+    <button class="opt">sorts each row by descending count</button>
+    <button class="opt">drops every row summing to zero</button>
+  </div>
+  <div class="q" data-why="Adding values= plus aggfunc= makes crosstab aggregate a real numeric column per cell instead of counting rows, at which point it produces the identical result pivot_table would — the two tools converge on that general case. Below that, crosstab's whole advantage is not needing either argument for the pure-count case.">
+    <p class="stem">What happens once <code>values=</code> and <code>aggfunc=</code> are both passed to <code>crosstab()</code>?</p>
+    <button class="opt" data-ok>it becomes functionally identical to pivot_table</button>
+    <button class="opt">normalize stops working on the result</button>
+    <button class="opt">it silently ignores both new arguments</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official pandas <a href="https://pandas.pydata.org/docs/reference/api/pandas.crosstab.html">pandas.crosstab</a> API reference page (~10 min) — covers <code>normalize</code>'s full set of options (<code>"index"</code>, <code>"columns"</code>, <code>"all"</code>/<code>True</code>) and the <code>margins=</code> keyword for adding row/column subtotals, not covered in today's lesson.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>crosstab()</code> is new today.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-17 comes back reported as shakiest, otherwise <code>qcut()</code> (quantile-based binning — Lesson 12's <code>cut()</code> sibling, splitting by rank instead of fixed edges, not yet covered) keeps the drill library growing.<br><br>
+💬 Anything unclear — crosstab vs pivot_table, normalize=, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

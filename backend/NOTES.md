@@ -304,3 +304,52 @@
   session should ask the user which track to deepen, or default to a real
   PR review together, rather than inventing another topic from MISSION.md
   text alone a third time running.
+- 2026-07-25 generation (Lesson 19, headless 06:00 run): Lesson 18 left the
+  next topic open, explicitly warning against a third round of mining
+  MISSION.md blind — but this round re-checked that warning against the
+  actual mission text rather than treating it as a blanket ban, and found
+  one genuine, still-untaught phrase: success criterion 1 promises "a
+  migration plan — and explain the trade-offs," and a grep for "migration"
+  across all 18 prior lessons turns up exactly one hit (Lesson 14, only in
+  passing, PR-review context) — schema migrations as their own topic had
+  never been taught. That's a real mission-sourced gap, not an invented one,
+  so Lesson 19 covers it: what a migration is (versioned SQL script in
+  version control, `golang-migrate` named as the Go-ecosystem standard
+  tool), the rolling-deploy hazard (Lesson 8's old-code/new-code-same-
+  database window breaking a required-column-with-no-default add, or an
+  outright break from dropping a column old code still reads), the
+  expand/contract pattern as the fix (explicitly drawn as the same two-
+  bucket backward-compatible/breaking split as Lesson 16's API-versioning
+  framing) with all four steps for adding a required column and the
+  reversed sequence for dropping one, `CREATE INDEX CONCURRENTLY` tied back
+  to Lesson 5's indexing lesson, and rollback vs. fix-forward with the
+  honest reason forward-only is common (a down migration can't un-delete
+  data a drop already destroyed). This round surfaced something new: DB
+  access was blocked on BOTH sides for the first time — not just the usual
+  `psql "$LEARNING_DB_URL" ...` read block, but `bin/record-progress`
+  itself required approval and was denied when tested
+  (`bin/record-progress backend note --detail '{"probe":"test"}'`), breaking
+  the "reads blocked, writes work" asymmetry every single prior round from
+  Lesson 9 onward had documented — worth watching whether this is a one-off
+  session quirk or a real change in what's permitted headless. Still no
+  `lesson_completed` record exists for any of Lessons 1-18 either way. The
+  Go snippet (a `Store.ShippingRegion` method reading a possibly-NULL column
+  via `database/sql`'s `sql.NullString`, the "tolerate NULL on read" step of
+  the expand phase) was compile-checked clean with `go build -C` / `go vet
+  -C` in a scratch module (`.scratch/backend-lesson19/`, contents deleted
+  after including the built binary the module name produced, directory left
+  in place). Added `migration`, `expand/contract pattern`, `backfill`,
+  `CREATE INDEX CONCURRENTLY`, and `fix-forward` to the glossary and
+  registered Lesson 19 in nav.js. Quiz options were drafted, then manually
+  recounted word-by-word per option and adjusted twice (all four questions
+  had at least one mismatched option on the first pass) until every option
+  within each question had an equal word count. `bin/record-progress backend
+  lesson_generated --day 19 --lesson 0019-schema-migrations.html --detail
+  '{"by":"launchd"}'` was attempted once as instructed and required approval
+  with none available — recorded here as blocked, not retried. Open question
+  for the next session: still no `lesson_completed` record for anything
+  after 19 lessons — a future interactive session should ask the user for a
+  completion signal, or a specific track to deepen, rather than keep
+  advancing to a 20th topic blind; if the record-progress write-path block
+  persists next round too, it may be worth flagging to the user directly
+  rather than treating it as another transient sandbox quirk.

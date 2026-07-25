@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 20 · Synthesis: reviewing one small feature end-to-end</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 20 · ~20 min</p>
+<h1>Synthesis: reviewing one small feature end-to-end</h1>
+<p class="byline">Lesson 19 closed out the last named-but-untaught phrase in MISSION.md — all five success criteria now have at least one lesson behind them. Nothing new to bolt on today. Instead, this lesson does what Lesson 14 taught but hasn't been exercised on a feature built <em>from scratch</em> yet: take one small, concrete feature request, design it, then review the design the same way Lesson 14's five lenses would review a PR — data model, API contract, auth, concurrency, operations. One feature, all five tracks, tied together instead of taught apart.</p>
+
+<h2>1 · The feature request</h2>
+<p>"Let a customer mark their own order as urgent, so support can triage it faster." One sentence, one new capability. Small enough to hold in your head end-to-end — which is the point: most real backend work looks like this, not like a green-field service.</p>
+
+<h2>2 · Data model: one boolean column, added safely</h2>
+<p>Lesson 2 established that a table isn't a JSON blob — a new fact about an order needs a column, not a free-floating field. This fact is boolean, always applies to every order, and belongs on the row it describes: <code>is_urgent boolean</code> on the existing <code>orders</code> table, no new entity or join table (Lesson 2's join-table pattern is for many-to-many relationships; this is a single flag on a single row, so it doesn't apply here).</p>
+<p>The migration itself is where Lesson 19 comes back directly. <code>orders</code> is a live table — adding <code>is_urgent boolean NOT NULL</code> in one step is exactly the hazard Lesson 19 named: an old-code instance mid-rollout doesn't know the column exists, and any <code>INSERT</code> it runs skips it, tripping the <code>NOT NULL</code> constraint instantly. The safe version is the expand step alone: <code>ADD COLUMN is_urgent boolean NOT NULL DEFAULT false</code>. A default makes this genuinely one-step-safe — old code's inserts get <code>false</code> automatically, no backfill or contract phase needed, because unlike Lesson 19's example this column has an honest default for every existing row (an order that already exists was, by definition, not marked urgent by this feature before it existed). No index either: Lesson 5's rule was index columns you filter or sort by at meaningful scale, and nothing in this feature queries "all urgent orders" yet.</p>
+
+<h2>3 · API: whose verb is this?</h2>
+<p>Lesson 3 named the temptation to reach for <code>POST /markOrderUrgent</code> — a verb dressed as a URL. The resource is still <code>/orders/{id}</code>; marking it urgent is a partial update to that resource, which is <code>PATCH</code>, the same verb Lesson 14's worked example used for shipping address. Reusing the existing endpoint rather than inventing a new one is itself an API-contract call: fewer surfaces for clients to learn, and it's already documented.</p>
+<p><code>PATCH /orders/{id}</code> with body <code>{"is_urgent": true}</code>, response <code>{"is_urgent": true}</code> and <code>200 OK</code> on success. Two contract details worth naming out loud in review, both from earlier lessons: this call is idempotent — sending it twice leaves the same end state, satisfying Lesson 3's PUT/PATCH promise — and on failure it uses Lesson 3's error contract (a stable <code>error.code</code>, not a raw string) rather than inventing a one-off shape for this one field.</p>
+
+<h2>4 · Auth: two checks, not one</h2>
+<p>This is where Lesson 12 does the real work. "Let a customer mark <em>their own</em> order" has two separate requirements hiding in it, and Lesson 14's five-lens review named exactly why both matter: authentication (is anyone logged in) and authorization (does this specific order belong to this specific caller) are different checks, and a handler that only does the first is Lesson 12's IDOR — any logged-in customer could mark <em>any</em> order urgent by changing the id in the URL.</p>
+<p>The fix isn't a second query "first fetch, then compare owner" — that's two round trips and a race between them. Fold the ownership check straight into the <code>WHERE</code> clause of the same statement, and check <code>RowsAffected</code> to tell "no such order" apart from "order isn't yours" — Lesson 14's own worked example named the same shape:</p>
+<pre><code><span class="kw">func</span> (s *Server) markOrderUrgentHandler(w http.ResponseWriter, r *http.Request) {
+    orderID := r.PathValue(<span class="kw">"id"</span>)
+    userID := auth.UserIDFromContext(r.Context()) <span class="cm">// Lesson 4: who is calling</span>
+    <span class="kw">if</span> userID == <span class="kw">""</span> {
+        http.Error(w, <span class="kw">"unauthorized"</span>, http.StatusUnauthorized)
+        <span class="kw">return</span>
+    }
+
+    <span class="cm">// Lesson 12: ownership, not just authentication — the WHERE clause</span>
+    <span class="cm">// only flips the row if this order actually belongs to this caller.</span>
+    tag, err := s.db.Exec(r.Context(),
+        <span class="kw">`UPDATE</span> orders <span class="kw">SET</span> is_urgent = <span class="kw">true</span> <span class="kw">WHERE</span> id = $1 <span class="kw">AND</span> user_id = $2<span class="kw">`</span>,
+        orderID, userID)
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        http.Error(w, <span class="str">`{"error":{"code":"internal"}}`</span>, http.StatusInternalServerError)
+        <span class="kw">return</span>
+    }
+    rows, _ := tag.RowsAffected()
+    <span class="kw">if</span> rows == 0 {
+        <span class="cm">// Lesson 14 §4: 404, not 403 — don't confirm the order exists</span>
+        <span class="cm">// to a caller who doesn't own it.</span>
+        http.Error(w, <span class="str">`{"error":{"code":"not_found"}}`</span>, http.StatusNotFound)
+        <span class="kw">return</span>
+    }
+
+    w.Header().Set(<span class="str">"Content-Type"</span>, <span class="str">"application/json"</span>)
+    json.NewEncoder(w).Encode(<span class="kw">map</span>[<span class="kw">string</span>]<span class="kw">bool</span>{<span class="str">"is_urgent"</span>: <span class="kw">true</span>})
+}</code></pre>
+<p><code>rows == 0</code> covers both "no such id" and "exists but isn't yours" with the same response — a real 404, not a 403 that would confirm the order exists to someone who shouldn't know that.</p>
+
+<h2>5 · Runtime: does this need a transaction, and does anything cache it?</h2>
+<p>Lesson 6's question — does this handler write to more than one place, or read-then-write the same row — applies here almost trivially: one <code>UPDATE</code>, one statement, nothing else changes alongside it. No transaction needed, and reaching for one anyway would be the wrong instinct to build; Lesson 14's PATCH example needed a transaction because it wrote to two tables (the order and an event log), this one doesn't. Running the concurrency lens is still worth doing explicitly rather than skipping it, because "no transaction needed" is a conclusion, not an assumption — the two are easy to mix up under time pressure.</p>
+<p>The lens that <em>does</em> catch something: Lesson 9's caching rule. If order details are cached anywhere — a per-order cache entry, a list of "my orders" on a customer dashboard — this <code>UPDATE</code> has to invalidate it, or a customer who just flagged their order urgent reloads the page and sees the old, non-urgent version. Nothing in this feature request mentions caching, which is exactly why it's easy to ship a correct database write and a stale response — the review question is "what currently caches order data," not "does this handler cache anything," since the bug lives in a different piece of code than the one being changed.</p>
+
+<div class="callout"><strong>The pattern underneath sections 2–5:</strong> none of these are new ideas — every one is a named lesson, applied to one concrete diff instead of taught in isolation. That's what makes this a review, not a fifth new topic.</div>
+
+<h2>6 · What "Go deeper" looks like for a feature this small</h2>
+<p>A one-column, one-endpoint feature doesn't need a design doc — but it's worth writing the two-sentence version anyway, because that's what turns into the PR description: <em>what changes (schema + one endpoint), and what was deliberately left out (no index, no separate "urgent orders" list endpoint — not worth building until a real query needs one)</em>. Naming what you didn't build, and why, is itself a review-readiness habit Lesson 14 didn't cover explicitly: it pre-answers the reviewer's "why didn't you also do X" before they ask.</p>
+
+<div class="interview">
+<p><strong>Q: "Design a small feature for me — anything, your choice — and walk me through it like you're about to open the PR."</strong> A strong answer, out loud: <em>"I'd start with the smallest schema change that fits — here, one boolean column with a default, so the migration is safe in a single step with no backfill. Then the API: reuse an existing resource and verb if one already fits, rather than inventing a new endpoint — this is a PATCH on the order that already exists. For auth, I separate authentication from authorization explicitly and fold the ownership check into the query itself rather than a separate lookup, so there's no race between checking and acting. Then I ask whether this needs a transaction — usually no, for a single-statement change — and separately whether anything caches this data, because that's the bug that doesn't show up in the diff itself. Last, I write down what I deliberately didn't build, so the reviewer isn't left guessing whether I missed it or chose it."</em> The signal: walking the same five lenses on a feature <em>you</em> designed, not just one someone handed you already broken.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A DEFAULT gives every existing row a valid value the instant the column appears, so an old-code instance's INSERT (which doesn't know the column exists) still satisfies NOT NULL — no separate backfill or contract step is needed the way Lesson 19's no-default example required.">
+    <p class="stem">Why is <code>ADD COLUMN is_urgent boolean NOT NULL DEFAULT false</code> safe in one migration step?</p>
+    <button class="opt" data-ok>the default backfills every existing row for free</button>
+    <button class="opt">boolean columns never need a separate migration step</button>
+    <button class="opt">Postgres always skips NOT NULL checks on columns</button>
+  </div>
+  <div class="q" data-why="Marking urgency is a partial update to the order resource that already exists at /orders/{id} — reusing PATCH there keeps one documented surface, rather than inventing a verb-shaped URL like /markOrderUrgent, which Lesson 3 named as an anti-pattern.">
+    <p class="stem">Why does this feature reuse <code>PATCH /orders/{id}</code> instead of a new endpoint?</p>
+    <button class="opt" data-ok>it's a partial update to an existing resource</button>
+    <button class="opt">PATCH is required for every single new feature</button>
+    <button class="opt">new endpoints are always rejected during code review</button>
+  </div>
+  <div class="q" data-why="Checking that someone is logged in only proves authentication; it never proves this specific order belongs to this specific caller. Without the WHERE user_id = $2 clause, any authenticated customer could mark any order urgent by changing the id — Lesson 12's IDOR.">
+    <p class="stem">What would break if the handler only checked <code>userID != ""</code> and skipped the <code>WHERE user_id = $2</code> clause?</p>
+    <button class="opt" data-ok>any logged-in caller could flag someone else's order</button>
+    <button class="opt">the query would fail to compile against Postgres</button>
+    <button class="opt">the endpoint would stop returning any JSON responses</button>
+  </div>
+  <div class="q" data-why="The write itself is one statement to one row, so no transaction is needed — but if order data is cached anywhere (a detail page, a dashboard list), that cache entry goes stale the moment the row changes underneath it, exactly the invalidation problem Lesson 9 named.">
+    <p class="stem">Section 5 says this handler needs no transaction — what runtime concern does it still flag?</p>
+    <button class="opt" data-ok>stale cached order data right after the write</button>
+    <button class="opt">the handler must retry every failed request itself</button>
+    <button class="opt">two instances can never run this code together</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> Google's <a href="https://google.github.io/eng-practices/review/reviewer/">Engineering Practices — How to Do a Code Review</a> (revisit from Lesson 14, ~10 min if skimming for the "design" and "complexity" sections this time) — its guidance on judging a change's overall design, not just its diff, is exactly the lens this lesson ran on a feature built from scratch instead of handed over already written. For the schema step specifically, RESOURCES.md's <a href="https://www.postgresql.org/docs/current/ddl.html">PostgreSQL Manual — Data Definition</a> covers <code>DEFAULT</code> behavior on <code>ALTER TABLE ADD COLUMN</code> precisely.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> open, same as Lesson 19 left it. This was a synthesis pass across all five tracks on one small feature — a good next step is doing this same walk-through on a real feature or PR from work, or naming one track (data modeling, API design, runtime, auth/security/ops, or review) to go deeper on than the ~20 min/day format allows. Tell your teacher which you'd like.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

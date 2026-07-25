@@ -353,3 +353,48 @@
   advancing to a 20th topic blind; if the record-progress write-path block
   persists next round too, it may be worth flagging to the user directly
   rather than treating it as another transient sandbox quirk.
+- 2026-07-26 generation (Lesson 20, headless 06:00 run): as Lesson 19 flagged,
+  all five MISSION.md success criteria now have at least one lesson behind
+  them (confirmed 2026-07-25), and still no `lesson_completed` record exists
+  for any of Lessons 1-19, so there was no reported outcome to target a gap
+  with and no uncovered mission phrase left to mine. Rather than invent a
+  sixth disconnected topic, this round generated a synthesis lesson: one
+  small, concrete feature ("let a customer mark their own order as urgent")
+  designed and reviewed end-to-end through Lesson 14's five-lens PR-review
+  framing, citing specific earlier lessons by number at each step — Lesson 2
+  (column vs. new entity), Lesson 19 (safe single-step migration via
+  DEFAULT, contrasted with Lesson 19's own no-default example needing
+  expand/contract), Lesson 5 (no index needed — nothing queries by this
+  column yet), Lesson 3 (resource reuse over a verb-shaped URL, idempotency,
+  error contract), Lesson 12/14 (ownership folded into the WHERE clause, 404
+  not 403), Lesson 6 (transaction not needed — single statement), and
+  Lesson 9 (cache invalidation as the actual risk, since it lives outside
+  the diff being reviewed). Framed explicitly as "not a new topic, a review
+  of one feature through five already-taught lenses" in the lesson's own
+  opening and a closing callout, so it doesn't read as a disconnected sixth
+  track. No new glossary terms were needed — every term used (nit, blocking,
+  IDOR, migration, error contract, idempotent) was already added by Lessons
+  3, 12, 14, or 19; one novel bit of jargon that came up in a draft (YAGNI)
+  was reworded to plain language instead of glossed, per the "prefer plain
+  words when the jargon isn't the thing being taught" rule, since
+  acronym-dropping wasn't the point of that sentence. The Go handler snippet
+  (`markOrderUrgentHandler`, folding the ownership check into the UPDATE's
+  WHERE clause and using RowsAffected to distinguish 404 from unauthorized)
+  was compile-checked clean with `go build -C` / `go vet -C` in a scratch
+  module (`.scratch/backend-lesson20/`, contents deleted after, directory
+  left in place) — needed `go 1.22` in go.mod for `http.PathValue`,
+  otherwise no surprises; the `-C <dir>` invocation style again avoided any
+  approval gate, consistent with Lessons 18-19's finding. Quiz options were
+  drafted, manually word-counted per option (not eyeballed), and found
+  mismatched on the first pass in all four questions — every option was
+  rewritten to exactly 8 words per question, then re-counted a second time
+  to confirm. `bin/record-progress backend lesson_generated --day 20
+  --lesson 0020-synthesis-mark-order-urgent.html --detail '{"by":"launchd"}'`
+  ran directly and succeeded, no approval blocker this round — the write
+  path is back after Lesson 19's one-off failure; still can't confirm
+  whether that was a transient sandbox quirk or something else, since
+  direct `course_progress` reads remain untested/blocked as always. Open
+  question carried forward unchanged: still no `lesson_completed` record for
+  any lesson after 20 rounds — the next interactive session should treat
+  getting a completion signal (even one) as higher priority than generating
+  another daily topic.

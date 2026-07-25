@@ -44,6 +44,8 @@
       file: "lessons/0018-connection-pool-sizing-and-exhaustion.html" },
     { n: 19, date: "2026-07-25", title: "Schema migrations: evolving a table without breaking anything",
       file: "lessons/0019-schema-migrations.html" },
+    { n: 20, date: "2026-07-26", title: "Synthesis: reviewing one small feature end-to-end",
+      file: "lessons/0020-synthesis-mark-order-urgent.html" },
   ];
 
   const REFS = [

@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 18 · qcut(): binning by rank, not by value</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 18 · ~20 min · 26 Jul 2026</p>
+<h1>qcut(): binning by rank, not by value</h1>
+<p class="byline">Lesson 17's closing teaser named this directly — "<code>qcut()</code>, quantile-based binning, Lesson 12's <code>cut()</code> sibling, splitting by rank instead of fixed edges." Same "turn a number into a category" job Lesson 12 opened, one different, very interview-relevant assumption about what "even" means.</p>
+
+<h2>1 · Same question, different definition of "fair"</h2>
+<p>Lesson 12's <code>pd.cut()</code> splits a numeric column at fixed VALUE edges you choose (<code>bins=[0, 40, 100, 200]</code>) — every row lands wherever its value falls between those edges, no matter how many rows that turns out to be per bucket. <dfn data-en="a pandas function that sorts numeric values into a chosen number of bins by RANK/PERCENTILE so each bin gets (as close as possible to) an equal COUNT of rows, instead of fixed value edges — the opposite trade-off from pd.cut()" data-vn="giữ nguyên 'pd.qcut()' — chia theo thứ hạng/phân vị, mỗi bin có SỐ LƯỢNG dòng gần bằng nhau, khác pd.cut() chia theo giá trị cố định">pd.qcut()</dfn> flips that: you choose how many bins, and pandas picks the value edges FOR you so that each bin ends up with (as close as possible to) an equal COUNT of rows. <code>cut()</code> answers "which fixed range is this value in?" — <code>qcut()</code> answers "which quarter (or third, or tenth) of the sorted data is this value in?"</p>
+<p>Run both on the same clean 4-row <code>amount</code> slice Lessons 6-17 have used (An/120.0, Binh/35.5, Binh/180.0, An/42.0), reusing Lesson 12's exact bins for <code>cut()</code>:</p>
+<pre><code><span class="cm"># cut() — Lesson 12's fixed edges: 0-40 Low, 40-100 Mid, 100-200 High</span>
+pd.cut(clean[<span class="kw">"amount"</span>], bins=[<span class="kw">0</span>, <span class="kw">40</span>, <span class="kw">100</span>, <span class="kw">200</span>], labels=[<span class="kw">"Low"</span>, <span class="kw">"Mid"</span>, <span class="kw">"High"</span>]).value_counts()
+<span class="cm"># High    2    (120.0 and 180.0 both land here)
+# Low     1    (35.5)
+# Mid     1    (42.0)</span>
+
+<span class="cm"># qcut() — 4 quantile bins, one per row on this small slice</span>
+pd.qcut(clean[<span class="kw">"amount"</span>], q=<span class="kw">4</span>, labels=[<span class="kw">"Q1"</span>, <span class="kw">"Q2"</span>, <span class="kw">"Q3"</span>, <span class="kw">"Q4"</span>]).value_counts()
+<span class="cm"># Q1    1    (35.5)
+# Q2    1    (42.0)
+# Q3    1    (120.0)
+# Q4    1    (180.0)</span></code></pre>
+<p><code>cut()</code>'s fixed edges put both An's 120.0 and Binh's 180.0 into the same "High" bucket — a real, unequal 2/1/1 split, exactly what fixed edges produce whenever the underlying data isn't evenly spread across the range. <code>qcut()</code> instead sorts all four values and cuts at the boundaries that give each bucket exactly one row: <code>Q1</code>=35.5, <code>Q2</code>=42.0, <code>Q3</code>=120.0, <code>Q4</code>=180.0 — a guaranteed-even 1/1/1/1 split, because it never asks "where does 100 fall" — it asks "who's in the top quarter by rank."</p>
+
+<div class="callout"><strong>Why this matters, concretely:</strong> if <code>amount</code> were heavily skewed — a handful of huge outlier orders and a long tail of small ones — <code>cut()</code>'s fixed-width bins would dump almost every row into one bucket and leave the others nearly empty. <code>qcut()</code> is immune to that by construction: it always finds edges that balance the COUNT, wherever the values actually sit. That's also its cost — the edges it picks are data-dependent and can look ugly/arbitrary (<code>81.0</code>, not a round number), whereas <code>cut()</code>'s edges are whatever meaningful business ranges you asked for (a real pricing tier, a real age bracket).</div>
+
+<h2>2 · <code>q=</code>: how many groups, not where they start</h2>
+<p><code>q=</code> is the one argument that matters most: an integer number of equal-count bins (<code>q=4</code> is quartiles, <code>q=10</code> is deciles), or your own list of quantile cutpoints (<code>q=[0, .5, 1]</code> is an explicit median split). Try <code>q=2</code> on the same slice — the plain median split:</p>
+<pre><code>pd.qcut(clean[<span class="kw">"amount"</span>], q=<span class="kw">2</span>, labels=[<span class="kw">"Low"</span>, <span class="kw">"High"</span>])
+<span class="cm">-- An/120.0   -> High
+-- Binh/35.5  -> Low
+-- Binh/180.0 -> High
+-- An/42.0    -> Low</span></code></pre>
+<p>The two smallest values (35.5, 42.0) become "Low," the two largest (120.0, 180.0) become "High" — a clean 2/2 split, because <code>q=2</code> means "cut at the median," and the median of these four sorted values sits at 81.0. Under the hood <code>qcut()</code> is built on the same <dfn data-en="a Series method assigning each value its position as a fraction between 0 and 1 when the column is sorted — pct=True on rank() — the percentile each row occupies" data-vn="giữ nguyên 'rank(pct=True)' — thứ hạng dạng phần trăm (0 đến 1)">rank(pct=True)</dfn> idea Lesson 7 introduced for plain ranking: it ranks every value as a percentile (0 to 1), then slices that 0-1 range into <code>q</code> equal-width percentile bands — equal-width in RANK space, not in value space, which is exactly the trade-off flip from <code>cut()</code>.</p>
+
+<h2>3 · The SQL bridge: <code>NTILE(n)</code></h2>
+<p><code>qcut()</code>'s SQL cousin is a specific, well-known window function: <code>NTILE(n) OVER (ORDER BY col)</code> divides the ordered rows into <code>n</code> groups of as-equal-as-possible size, numbering each row 1 through <code>n</code> by which group it landed in — the exact same "equal COUNT, not equal value-range" contract as <code>qcut(q=n)</code>.</p>
+<pre><code><span class="cm">-- SQL: quartile number per row, ordered by amount</span>
+<span class="kw">SELECT</span> customer, amount,
+       <span class="kw">NTILE</span>(<span class="kw">4</span>) <span class="kw">OVER</span> (<span class="kw">ORDER BY</span> amount) <span class="kw">AS</span> quartile
+<span class="kw">FROM</span> orders;
+
+<span class="cm">-- pandas equivalent</span>
+clean[<span class="kw">"quartile"</span>] = pd.qcut(clean[<span class="kw">"amount"</span>], q=<span class="kw">4</span>, labels=<span class="kw">False</span>) + <span class="kw">1</span></code></pre>
+<p><code>labels=False</code> returns the bin number itself (0-indexed integers) instead of a category label, matching <code>NTILE</code>'s plain integer output once you add 1 for 1-indexing. This is the pairing worth saying out loud in an interview: <code>cut()</code> ~ a <code>CASE WHEN</code> chain of fixed ranges, <code>qcut()</code> ~ <code>NTILE(n) OVER (ORDER BY ...)</code> — both already-familiar SQL shapes, just spelled differently.</p>
+
+<div class="interview">
+<p><strong>Q: "What's the difference between cut() and qcut(), and when would you reach for each?"</strong> A strong answer, out loud: <em>"cut() bins by fixed value edges you choose — good when the ranges themselves are meaningful, like real pricing tiers or age brackets, but the bucket sizes can end up wildly unequal if the data's skewed. qcut() bins by rank instead — you say how many buckets, and it finds edges that give each one roughly the same count of rows, like SQL's NTILE(n) OVER (ORDER BY col). I'd reach for qcut() when I specifically need balanced groups — quartile analysis, splitting a dataset into equal-sized cohorts for a report — and cut() when the boundaries themselves carry business meaning that shouldn't shift as the data changes."</em> The signal: naming NTILE unprompted — it's the fastest proof this maps cleanly onto SQL knowledge already there.</p>
+</div>
+
+<h2>Try it — self-checking practice (~15 min)</h2>
+<p>Open <code>practice/18_qcut.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/18_qcut.py</code></pre>
+<p>Same <code>orders_raw.csv</code> clean 4-row slice as Lessons 6-17. Exercise 1 reruns Lesson 12's exact <code>cut()</code> bins and checks the resulting (unequal) value_counts; Exercise 2 builds <code>qcut(q=4)</code> and checks the (equal) value_counts; Exercise 3 builds <code>qcut(q=2)</code> for the median split; Exercise 4 checks the <code>labels=False</code> + <code>NTILE</code>-style 1-indexed integer output.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="cut() splits at fixed VALUE edges you choose, so bin counts can be very unequal depending on how the data is distributed. qcut() instead splits by RANK/percentile so each bin gets as close to an equal COUNT of rows as possible, regardless of the actual values.">
+    <p class="stem">What is the core difference between <code>pd.cut()</code> and <code>pd.qcut()</code>?</p>
+    <button class="opt" data-ok>cut() uses fixed edges, qcut() uses equal counts</button>
+    <button class="opt">cut() uses equal counts, qcut() uses fixed edges</button>
+    <button class="opt">both always split the data into equal ranges</button>
+  </div>
+  <div class="q" data-why="qcut(q=4) on the clean 4-row slice puts each of the four distinct amounts into its own quartile bin, since sorting four values into four equal-count groups gives exactly one row per group.">
+    <p class="stem">On the 4-row clean slice, what does <code>pd.qcut(amount, q=4)</code> produce?</p>
+    <button class="opt" data-ok>four bins, exactly one row landing in each</button>
+    <button class="opt">four bins, all four rows crammed into one</button>
+    <button class="opt">an error, since q can't exceed row count</button>
+  </div>
+  <div class="q" data-why="NTILE(n) OVER (ORDER BY col) is SQL's window function for splitting ordered rows into n groups of as-equal-as-possible size — the exact same equal-count contract qcut(q=n) implements in pandas.">
+    <p class="stem">Which SQL window function is <code>qcut(q=n)</code>'s closest equivalent?</p>
+    <button class="opt" data-ok><code>NTILE(n) OVER (ORDER BY col)</code></button>
+    <button class="opt"><code>RANK() OVER (ORDER BY col)</code></button>
+    <button class="opt"><code>SUM(col) OVER (ORDER BY col)</code></button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official pandas <a href="https://pandas.pydata.org/docs/reference/api/pandas.qcut.html">pandas.qcut</a> API reference page (~10 min) — covers passing a custom list of quantile cutpoints to <code>q=</code> (e.g. <code>q=[0, .1, .5, .9, 1]</code>) and the <code>duplicates="drop"</code> keyword for handling repeated quantile edges on data with many ties, neither covered in today's lesson.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>pd.qcut()</code> and <code>rank(pct=True)</code> are new today.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-18 comes back reported as shakiest, otherwise <code>nunique()</code> or <code>explode()</code> (both still genuinely uncovered — grepped the glossary and every lesson body to confirm) keeps the drill library growing.<br><br>
+💬 Anything unclear — cut() vs qcut(), the NTILE bridge, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

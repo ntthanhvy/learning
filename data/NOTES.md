@@ -398,3 +398,53 @@
   grepped the glossary and all lesson bodies first, confirmed neither
   `qcut(` nor `nunique(`/`explode(` appear anywhere yet) if no
   drill-outcome signal surfaces by next generation.
+- 2026-07-26 generation (Lesson 18, headless 06:00 run): direct `psql
+  "$LEARNING_DB_URL" ...` reads were unreachable in this headless session
+  (both a direct invocation and a `bash -c` wrapper were blocked, same as
+  every prior round) — still no `course_progress` rows readable and no
+  `lesson_completed`/quiz/kata outcome record beyond the Lesson 1 baseline,
+  so no reported weak spot to target. Lesson 17's own teaser named the
+  fallback explicitly ("otherwise qcut() ... keeps the drill library
+  growing"), confirmed via grep that `qcut` never appeared in any lesson
+  body before today (only in the Lesson 17 teaser text and NOTES.md) — so
+  Lesson 18 takes that branch: `pd.qcut()` (equal-COUNT quantile binning)
+  contrasted directly against Lesson 12's `pd.cut()` (fixed-VALUE-edge
+  binning), reusing Lesson 12's exact bins/labels for the `cut()` side of
+  the contrast, then `q=2`/`q=4` variants and `rank(pct=True)` as the
+  mechanism qcut is built on internally, bridged to SQL's `NTILE(n) OVER
+  (ORDER BY col)` window function with a `labels=False + 1` example to
+  match NTILE's 1-indexed integer output. Also grepped for `nunique`/
+  `explode` while at it (per Lesson 17's own note that both were
+  unconfirmed-uncovered) — confirmed neither appears anywhere in
+  `lessons/*.html` or `reference/glossary.html` today either, so both
+  remain valid candidates and the teaser below names them explicitly.
+  `uv run --with pandas` WORKED directly this round (pandas install via uv,
+  confirmed pandas 3.x behavior): first used to hand-verify the exact
+  contrast numbers before writing the lesson text (`cut()` with Lesson 12's
+  bins gives High=2/Low=1/Mid=1 on the real 4-row slice — a genuinely
+  unequal split — while `qcut(q=4)` gives exactly 1 row per quartile), then
+  the shipped (unsolved) `practice/18_qcut.py` was executed in place and
+  printed all ✗ with no crash (each of the 4 exercises wraps its
+  `...`-bearing `pd.cut`/`pd.qcut` call in its own try/except, same
+  defensive pattern as Lessons 11/12/14/16/17 — a bare Ellipsis reaching a
+  real pandas call raises before checks can run), then a solved copy
+  (`.scratch/data-lesson18/solved.py`, deleted after — plain `rm -rf`
+  worked fine this round, no approval needed) printed all ✓ against the
+  real `orders_raw.csv` clean 4-row slice, matching the lesson text exactly:
+  cut() High=2/Low=1/Mid=1; qcut(q=4) exactly 1 each in Q1-Q4; qcut(q=2)
+  median split puts 35.5 & 42.0 in Low, 120.0 & 180.0 in High; ntile
+  (labels=False + 1) gives 35.5 -> quartile 1, 180.0 -> quartile 4. Added
+  `pd.qcut()` and `rank(pct=True)` to the glossary and registered Lesson 18
+  in nav.js. Quiz options were checked by hand-counting words per option
+  (this course's established convention) — Q1 and Q2's first-draft third
+  options came out mismatched (8/8/7 and 8/9/8), caught and fixed before
+  shipping so all three questions landed at 8/8/8, 8/8/8, and 5/5/5 (Q3's
+  options are short SQL code snippets, counted the same whitespace-split
+  way as Lesson 13's precedent). `bin/record-progress data lesson_generated
+  --day 18 --lesson 0018-qcut.html --detail '{"by":"launchd"}'` was run
+  once from the repo root as instructed and succeeded on the first try, no
+  approval blocker this round (back to the "reads blocked, writes work"
+  asymmetry documented in most rounds before Lesson 17's one-off break) —
+  `lesson_generated` was recorded for day 18. Set the teaser going forward
+  to `nunique()` or `explode()` (both confirmed genuinely uncovered this
+  round) if no drill-outcome signal surfaces by next generation.

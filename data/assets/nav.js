@@ -40,6 +40,8 @@
       file: "lessons/0016-transform-group-relative-values.html" },
     { n: 17, date: "2026-07-25", title: "crosstab(): frequency tables done right",
       file: "lessons/0017-crosstab.html" },
+    { n: 18, date: "2026-07-26", title: "qcut(): binning by rank, not by value",
+      file: "lessons/0018-qcut.html" },
   ];
 
   const REFS = [

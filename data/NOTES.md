@@ -448,3 +448,70 @@
   `lesson_generated` was recorded for day 18. Set the teaser going forward
   to `nunique()` or `explode()` (both confirmed genuinely uncovered this
   round) if no drill-outcome signal surfaces by next generation.
+- 2026-07-27 generation (Lesson 19, headless run): direct `psql
+  "$LEARNING_DB_URL" ...` reads were unreachable in this headless session
+  (same class of block as every prior round — no interactive DB access
+  available) — still no `course_progress` rows readable and no
+  `lesson_completed`/quiz/kata outcome record beyond the Lesson 1 baseline,
+  so no reported weak spot to target. Lesson 18's own teaser named the
+  fallback explicitly ("nunique() or explode(), both still genuinely
+  uncovered"), re-confirmed via grep that neither `nunique(` nor `explode(`
+  appeared anywhere in `lessons/*.html` or `reference/glossary.html` before
+  today (each only showed up in Lesson 18's own teaser sentence) — so Lesson
+  19 ships both together: `nunique()` contrasted three ways against Lesson
+  10's `value_counts()` (count per value) and plain `.count()` (count of
+  non-null rows) on the raw 6-row `orders_raw.csv` fixture, then
+  `groupby("customer")["order_date"].nunique()` tying back to Lesson 4's
+  groupby foundation, then `explode()` introduced on a small NEW inline
+  "tagged orders" DataFrame (order_id 1/2 with a list-of-tags column, same
+  precedent as Lesson 11's inline table — didn't touch the shared CSV
+  fixtures), closing with an explicit opposite-direction framing:
+  `nunique()` collapses (many rows -> one count, like `groupby()`),
+  `explode()` expands (one row with a list -> many rows, a different kind
+  of expansion than Lesson 6's `melt()`, which reshapes columns into rows
+  rather than list elements within a cell). SQL bridges: `COUNT(DISTINCT
+  col)` for `nunique()`, `UNNEST()`/`CROSS JOIN LATERAL unnest()` for
+  `explode()`. `uv run --with pandas` worked directly this round: the
+  shipped (unsolved) `practice/19_nunique_and_explode.py` was first executed
+  in place and caught a real bug before shipping — `nunique(...)` and
+  `count(...)` with a literal Ellipsis as a positional argument do NOT
+  raise (Ellipsis is truthy, so it behaves like the default `dropna=True`
+  positional arg), silently passing Exercises 1/2 while still unsolved, a
+  new failure mode not hit by Lessons 11-18's placeholder style. Fixed by
+  moving the `...` into the column-selection position (`df[...].nunique()`
+  instead of `df["customer"].nunique(...)`), which raises `KeyError:
+  Ellipsis` as intended; re-ran and confirmed all 4 exercises print ✗ with
+  no crash. A solved copy (`.scratch/data-lesson19/solved.py`, deleted after
+  — plain `rm -rf` worked fine this round, no approval needed) then printed
+  all ✓ against the real fixtures, hand-verified myself against the raw CSV
+  and clean slice rather than just trusting the script: raw `customer`
+  column nunique=3 (An/Binh/Chi) vs count=6 (non-null rows, An x3/Binh
+  x2/Chi x1); clean 4-row slice grouped nunique gives An=2 distinct dates
+  (01-05, 01-10) and Binh=2 distinct dates (01-06, 01-09); the inline
+  tagged-orders explode gives 3 rows total (order_id 1 duplicated across
+  its 2 tags "urgent"/"gift", order_id 2 with its 1 tag "bulk"). `bin/record-
+  progress data lesson_generated --day 19 --lesson
+  0019-nunique-and-explode.html --detail '{"by":"launchd"}'` was attempted
+  once as instructed from the repo root and required approval (blocked, no
+  user present in this headless session, same class of block hit in most
+  rounds before Lesson 18's one-off success) — `lesson_generated` could not
+  be recorded; do it manually once DB/write access is back. Not retried in
+  a loop. Added `nunique()` and `explode()` to the glossary and
+  registered Lesson 19 in nav.js. Quiz options were drafted and checked with
+  a `grep` extraction of every option string plus manual per-option word
+  counts (this course's established convention) — all three questions
+  needed at least one rewrite pass before landing at matching counts (Q1
+  6/6/6, Q2 7/7/7, same whitespace-split convention as Lessons 13/18). Q3's
+  code-snippet options were actually mismatched at 4/5/5 words despite being
+  reported as 4/4/4 in this entry's first draft — caught in a post-hoc
+  verification pass (a second pair of eyes re-running `wc -w` on each option)
+  and fixed by adjusting the correct option and the second distractor so all
+  three landed at 5/5/5; worth noting since it means this course's
+  "checked with grep + manual count" claim isn't infallible — a follow-up
+  recount is cheap insurance. Set the teaser going forward to
+  `idxmax()`/`idxmin()` (finding which row holds a max/min value, not just
+  the value itself) if no drill-outcome signal surfaces by next generation
+  — confirmed via grep that neither appears anywhere in `lessons/*.html` or
+  `reference/glossary.html` yet; also confirmed `agg()` with multiple named
+  aggregations is NOT a valid fallback candidate, since Lesson 4 already
+  fully covers that exact pattern.

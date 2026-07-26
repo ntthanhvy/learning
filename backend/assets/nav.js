@@ -46,6 +46,8 @@
       file: "lessons/0019-schema-migrations.html" },
     { n: 20, date: "2026-07-26", title: "Synthesis: reviewing one small feature end-to-end",
       file: "lessons/0020-synthesis-mark-order-urgent.html" },
+    { n: 21, date: "2026-07-27", title: "Configuration: what belongs in code, what belongs in the environment",
+      file: "lessons/0021-configuration-env-vs-code.html" },
   ];
 
   const REFS = [

@@ -398,3 +398,50 @@
   any lesson after 20 rounds — the next interactive session should treat
   getting a completion signal (even one) as higher priority than generating
   another daily topic.
+- 2026-07-27 generation (Lesson 21, headless 06:00 run): Lesson 20 closed out
+  all five MISSION.md success criteria with explicit guidance that the next
+  session should ask the user which track to deepen rather than invent a
+  sixth topic — but this is a headless run with no user present to ask, and
+  still no `lesson_completed` record exists for any of Lessons 1-20. Rather
+  than mine MISSION.md a fourth time, this round found a genuine gap sourced
+  from RESOURCES.md instead: its own "Gaps" section plus its 12factor.net
+  citation ("Use for: config, logs, statelessness, deployment vocabulary")
+  both point at configuration, which Lessons 8 (statelessness), 13 (logging),
+  and 18 (pgxpool's MaxConns etc.) had each touched only in passing — a grep
+  across all 20 prior lessons for "twelve-factor"/"12factor"/a dedicated
+  config lesson came back empty, confirming it had never been taught as its
+  own subject. Lesson 21 covers it: the frontend-.env-file bridge (low stakes
+  in a Vite/Next app vs. real credentials on a backend), the Twelve-Factor
+  rule that config (anything varying between deploys) must be separated from
+  code, the checked-in per-environment-config-file anti-pattern named
+  directly (nobody's sure which block is live, and a file already holding
+  real values invites committing a secret out of habit), secrets-vs-config
+  (every secret is config, not every config value is a secret) illustrated
+  with this exact repo's own working `~/.config/learning/db.env` /
+  `bin/record-progress`'s `source` fallback as a real, not hypothetical,
+  instance of the pattern, a `loadConfig` Go snippet failing fast on a
+  missing `DATABASE_URL` while defaulting `PORT`, and an explicit tie-back to
+  Lesson 6/8 (the DB connection string as the original per-environment
+  example) and Lesson 18 (pgxpool's knobs are config too, not values to
+  hardcode). The Go snippet was compile-checked clean with `go build -C` /
+  `go vet -C` in a scratch module (`.scratch/backend-lesson21/`, built binary
+  deleted after, directory left in place, same pattern as every prior
+  round) — no approval blocker this round for either command, though a bare
+  `go version` invocation (tested once, not needed for the lesson itself)
+  still required approval, consistent with Lessons 13/18's finding that
+  `-C <dir>`-style invocations sidestep the gate while bare ones don't. Quiz
+  options were drafted per-option into individual scratch files and verified
+  with `wc -w` (not eyeballed) — all four questions needed at least one
+  rewrite to equalize word count before landing at 9/9/9, 9/9/9, 10/10/10,
+  and 9/9/9. Added `Twelve-Factor App`, `config`, and `fail fast` to the
+  glossary (checked first that none of the three, nor any dedicated config
+  lesson, already existed) and registered Lesson 21 in nav.js.
+  `bin/record-progress backend lesson_generated --day 21 --lesson
+  0021-configuration-env-vs-code.html --detail '{"by":"launchd"}'` ran
+  directly and succeeded, no approval blocker this round. Direct `psql
+  "$LEARNING_DB_URL" ...` reads were not attempted this round per the
+  standing instruction that they're expected to be blocked and not worth
+  spending time on. Open question carried forward unchanged from Lesson 20:
+  still no `lesson_completed` record for any lesson after 21 rounds — the
+  next interactive session should prioritize getting a completion signal, or
+  naming a track to deepen, over generating a 22nd daily topic blind.

@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 21 · Configuration: what belongs in code, what belongs in the environment</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 21 · ~20 min</p>
+<h1>Configuration: what belongs in code, what belongs in the environment</h1>
+<p class="byline">Lesson 20 closed out all five of MISSION.md's success criteria with no obvious next gap to mine, and still no <code>lesson_completed</code> record exists for any lesson to signal what to deepen — so, same as Lesson 20 itself, there's no user-chosen track to follow yet. Rather than invent a sixth disconnected topic, this lesson picks up a thread that's been real the whole time but only ever mentioned in passing: RESOURCES.md cites <a href="https://12factor.net">The Twelve-Factor App</a> for "config, logs, statelessness, deployment vocabulary," and Lessons 8, 13, and 18 each touched a piece of configuration without ever teaching it as its own subject. Today it gets one.</p>
+
+<h2>1 · The frontend habit that doesn't survive</h2>
+<p>You already have a <code>.env</code> file. A Vite or Next.js project usually has one sitting at the project root with something like <code>VITE_API_BASE_URL=https://api.example.com</code> — and if it leaked into a public repo tomorrow, the damage would be someone learning your API's hostname. Low stakes, because anything in a frontend <code>.env</code> ships to the browser anyway; there's no real secret to keep, just build-time convenience.</p>
+<p>The habit that doesn't survive the jump: on a backend, the file with the same name and the same shape routinely holds a database password, a signing key for session tokens, or a third-party API credential. Same filename, same instinct to "just put the value somewhere and read it" — completely different stakes if it ends up in <code>git log</code> instead of on the machine running the process. The question "did this get committed?" goes from a shrug to an incident.</p>
+
+<h2>2 · The Twelve-Factor rule: config is not code</h2>
+<p>The <dfn data-en="a widely cited set of conventions for building services that deploy and scale cleanly — config, statelessness, logs, and process management among its recurring themes" data-vn="Twelve-Factor App (giữ nguyên) — bộ quy ước phổ biến cho việc build service dễ deploy/scale">Twelve-Factor App</dfn> states this as a strict rule, not a style preference: <strong><dfn data-en="anything that varies between deploys of the same code — credentials, hostnames, per-environment toggles — kept out of the codebase and supplied at runtime" data-vn="config (giữ nguyên) — giá trị thay đổi theo môi trường (dev/staging/prod), tách khỏi code">config</dfn> must be separated from code.</strong> Its definition of config is specific — anything that varies between deploys. A database connection string that points at one host in dev and a different host in production is config. A per-environment feature toggle is config. Credentials are config. The application's logic — what a <code>PATCH /orders/{id}</code> handler actually does — is not config, because that code should behave identically whether it's running against the dev database or the production one; only where it points changes.</p>
+<p>Environment variables are the standard mechanism for supplying config, precisely because they're outside the codebase by construction — nothing about setting <code>DATABASE_URL</code> in a deploy's process environment requires touching a file that's tracked in version control. The named anti-pattern is a checked-in configuration file with a block per environment — a <code>config.yaml</code> with a <code>[dev]</code> section, a <code>[staging]</code> section, a <code>[production]</code> section, all committed side by side. It looks organized, but two things go wrong with it in practice: someone deploying a change always has to remember which block is "live" right now, and a file that already holds real production values invites pasting a real secret into it out of habit, the exact moment a value that should never be committed gets committed. Env vars sidestep both — there is no "which block" to get wrong, because only one value exists per running process, supplied by whoever launched it.</p>
+
+<h2>3 · Secrets vs. non-secrets — and this exact course's own example</h2>
+<p>Not every config value is a secret. A port number, a log level (Lesson 13's <code>DEBUG</code>/<code>INFO</code>/<code>WARN</code>/<code>ERROR</code>), a feature flag that's on in staging and off in production — these vary between deploys, so they're config by the Twelve-Factor definition, but leaking one isn't a security incident. The other direction always holds, though: every <em>secret</em> — a database password, a JWT signing key, a third-party API token — is config, because it too varies (or should be rotatable) per environment, and it must never be hardcoded or committed regardless of how harmless it looks in a diff.</p>
+<p>This isn't hypothetical — this exact course's own progress-tracking setup, described in NOTES.md, is a real, working instance of the pattern being taught, not a textbook example. The connection string that lets <code>bin/record-progress</code> write to this course's Neon database lives in <code>~/.config/learning/db.env</code>, <code>chmod 600</code> so only its owner can even read it, holding one line: <code>LEARNING_DB_URL=postgres://...</code>. It is never committed to this repository. <code>bin/record-progress</code> reads it with exactly the fallback this section describes:</p>
+<pre><code><span class="kw">if</span> [ -z <span class="str">"${LEARNING_DB_URL:-}"</span> ]; <span class="kw">then</span>
+  source ~/.config/learning/db.env
+<span class="kw">fi</span></code></pre>
+<p>If the environment already has <code>LEARNING_DB_URL</code> set (true in CI), the script uses that; otherwise it falls back to sourcing the untracked, permission-locked file on disk. One script, two environments, zero copies of the credential inside version control — separation of config from code, running in this course's own toolchain every time a lesson gets recorded.</p>
+
+<h2>4 · Fail fast at startup, not deep inside a request handler</h2>
+<p>Reading config with <code>os.Getenv</code> is easy; deciding what to do when a required value is missing is where the design choice actually lives. The wrong version reads a blank string, doesn't check it, and lets it flow forward — the process starts up looking healthy, and minutes (or hours) later some unrelated line panics on a nil database handle, at a moment that has nothing to do with the actual cause. The right version checks at startup, before the process ever accepts a request, and refuses to boot if something required is missing:</p>
+<pre><code><span class="kw">type</span> Config <span class="kw">struct</span> {
+    DatabaseURL <span class="kw">string</span>
+    Port        <span class="kw">string</span>
+}
+
+<span class="kw">func</span> loadConfig() (Config, <span class="kw">error</span>) {
+    dbURL := os.Getenv(<span class="str">"DATABASE_URL"</span>)
+    <span class="kw">if</span> dbURL == <span class="str">""</span> {
+        <span class="kw">return</span> Config{}, errors.New(<span class="str">"DATABASE_URL is required but not set"</span>)
+    }
+
+    port := os.Getenv(<span class="str">"PORT"</span>)
+    <span class="kw">if</span> port == <span class="str">""</span> {
+        port = <span class="str">"8080"</span> <span class="cm">// sane default, not a secret</span>
+    }
+
+    <span class="kw">return</span> Config{DatabaseURL: dbURL, Port: port}, <span class="kw">nil</span>
+}
+
+<span class="kw">func</span> main() {
+    cfg, err := loadConfig()
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        fmt.Fprintln(os.Stderr, <span class="str">"startup failed:"</span>, err)
+        os.Exit(<span class="kw">1</span>)
+    }
+    <span class="cm">// ... use cfg.DatabaseURL, cfg.Port to start the server</span>
+}</code></pre>
+<p><code>PORT</code> gets a default because a missing port number has an obviously reasonable fallback — 8080 is a fine guess, and guessing wrong just means a config value someone can override later. <code>DATABASE_URL</code> gets no default, because there is no reasonable guess for "which database" — an empty value there is always a misconfiguration, and <code>loadConfig</code> returns an error immediately so <code>main</code> can refuse to start rather than hand a broken <code>Config</code> to code that assumes it's valid. <strong><dfn data-en="detecting a fatal problem at the earliest possible point (e.g. startup) and stopping immediately with a clear error, instead of letting it surface later as a confusing symptom far from the actual cause" data-vn="fail fast (giữ nguyên) — phát hiện lỗi sớm nhất có thể (vd lúc khởi động) rồi dừng ngay, thay vì để lỗi âm thầm lan xuống dưới">Fail fast</dfn>:</strong> the failure happens at the earliest possible moment, with a message that names exactly what's missing, instead of surfacing later as a confusing symptom several layers away from the actual cause.</p>
+
+<h2>5 · Config values you've already met</h2>
+<p>This isn't the first config this course has touched — it's the first time naming it as one subject. Lesson 6/8's database connection string was this course's very first example of "a value that varies per environment": the same handler code runs against a different Postgres instance in dev, staging, and production, and only the connection string changes between them. Lesson 18's <code>pgxpool</code> knobs — <code>MaxConns</code>, <code>MinConns</code>, <code>MaxConnLifetime</code>, <code>MaxConnIdleTime</code> — were shown hardcoded directly in a <code>newPool</code> function for clarity, but by this lesson's rule they're config too: a pool sized for a low-traffic staging environment is very likely wrong for production, so those four numbers belong in the environment (or a config layer read from it) rather than baked into the binary, exactly like <code>DATABASE_URL</code> and <code>PORT</code> above.</p>
+
+<div class="callout"><strong>The one-line version:</strong> if a value has to change when you deploy the same code somewhere else, it's config — it goes in the environment, never in a checked-in file with per-environment blocks, and a missing required one should stop the process at startup, loudly, not fail silently three requests later.</div>
+
+<div class="interview">
+<p><strong>Q: "How do you handle configuration across environments?"</strong> A strong answer, out loud: <em>"I keep config strictly separate from code — anything that varies between dev, staging, and production, like connection strings, credentials, or pool sizes, comes from the environment rather than being hardcoded or checked into a per-environment config file. Checked-in per-environment blocks are the pattern I avoid specifically, because it's easy to lose track of which block is actually live, and having real values sitting in a tracked file invites someone pasting a secret into it out of habit. At startup I validate that every required value is present and fail immediately with a clear error if something's missing, rather than letting a blank value propagate until it causes a confusing crash deep in a request handler. And secrets specifically never go in version control — they live in the environment or a secrets manager, read at runtime."</em> The signal: naming the checked-in-file anti-pattern specifically, and fail-fast validation, not just "I use environment variables."</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Twelve-Factor defines config as anything that changes between one deploy and another — dev, staging, production each need a different value for the same setting, which is exactly why it must live outside the code that stays identical across all three.">
+    <p class="stem">By the Twelve-Factor definition, what makes a value "config" rather than code?</p>
+    <button class="opt" data-ok>it varies between deploys for example dev staging prod</button>
+    <button class="opt">it stays fixed no matter which environment it runs</button>
+    <button class="opt">it always holds a database password or signing key</button>
+  </div>
+  <div class="q" data-why="A checked-in config file with a block per environment looks organized but invites exactly this mistake in practice: nobody can be fully sure which block is currently deployed, and a file already holding real production values makes it easy to paste a genuine secret into it out of habit.">
+    <p class="stem">What's the named risk of a checked-in config file with per-environment blocks?</p>
+    <button class="opt" data-ok>someone forgets which block is actually live in production</button>
+    <button class="opt">Postgres refuses to start whenever such a file exists</button>
+    <button class="opt">Go refuses to compile any program using that pattern</button>
+  </div>
+  <div class="q" data-why="This course's own db.env file demonstrates the pattern directly: chmod 600 restricts it to its owner, and it is never added to the repository, so the credential inside it never appears in git history no matter how many times the script that reads it is committed.">
+    <p class="stem">What does this course's own <code>~/.config/learning/db.env</code> convention demonstrate?</p>
+    <button class="opt" data-ok>it never gets committed and only readable by its owner</button>
+    <button class="opt">it lives inside the repository right next to the code</button>
+    <button class="opt">it gets emailed to every teammate whenever the value changes</button>
+  </div>
+  <div class="q" data-why="loadConfig checks DATABASE_URL immediately and returns an error before main ever starts the server, so a missing value produces one clear message at boot — the alternative is a blank value silently flowing forward until some unrelated line panics on it much later, far from the actual cause.">
+    <p class="stem">What does failing fast on a missing <code>DATABASE_URL</code> give you, compared to letting it propagate?</p>
+    <button class="opt" data-ok>a clear startup error instead of a runtime crash</button>
+    <button class="opt">a slower response time added to every single request</button>
+    <button class="opt">a permanent increase to the connection pool's maximum size</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://12factor.net/config">The Twelve-Factor App — III. Config</a> (~5 min) — already cited in RESOURCES.md; this is the exact short chapter this lesson expands on, worth reading directly once for its own wording, including the litmus test it gives for whether an app has correctly factored out its config: could you open-source the codebase right now without exposing any credential.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> open, same as Lesson 20 left it. There's still no completion signal and no user-chosen track to deepen, so a good next step is a real PR review together, or naming one track — data modeling, API design, runtime, auth/security/ops, or review — to go deeper on than the ~20 min/day format allows. Tell your teacher which you'd like.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

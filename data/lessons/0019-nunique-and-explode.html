@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 19 · nunique() and explode(): counting distinct, and un-nesting lists</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 19 · ~20 min · 27 Jul 2026</p>
+<h1>nunique() and explode(): counting distinct, and un-nesting lists</h1>
+<p class="byline">Lesson 18's closing teaser named this pair directly — "<code>nunique()</code> or <code>explode()</code>, both still genuinely uncovered." Today ships both together: one collapses multiplicity down to a count, the other expands it out into rows — a deliberate contrast, not a coincidence of pairing.</p>
+
+<h2>1 · nunique(): how many DISTINCT values, not how many rows</h2>
+<p>Three pandas methods sound similar and answer three genuinely different questions. Lesson 10's <code>value_counts()</code> answers "how many rows have EACH value" — one count per distinct value. Plain <code>.count()</code> answers "how many non-null rows are there" — one number, ignoring whether values repeat. <dfn data-en="a Series/DataFrame method returning the number of DISTINCT (unique) values in a column, ignoring how many times each one repeats and ignoring NaN by default — a different question from both value_counts() (count per value) and count() (count of non-null rows)" data-vn="giữ nguyên 'nunique()' — đếm số giá trị PHÂN BIỆT (distinct) trong 1 cột, khác value_counts() (đếm theo từng giá trị) và count() (đếm số dòng không rỗng)">nunique()</dfn> answers a third question: "how many DISTINCT values are there, total" — one single count, collapsing all the repeats away.</p>
+<p>Run it on the raw 6-row <code>orders_raw.csv</code> fixture Lessons 6-18 have loaded from — three customers placed those 6 orders (An x3, Binh x2, Chi x1):</p>
+<pre><code>df = pd.read_csv(<span class="kw">"practice/data/orders_raw.csv"</span>)
+
+df[<span class="kw">"customer"</span>].count()      <span class="cm"># 6  -- six non-null rows in the column</span>
+df[<span class="kw">"customer"</span>].nunique()   <span class="cm"># 3  -- only three DISTINCT names among those 6 rows</span>
+df[<span class="kw">"customer"</span>].value_counts()
+<span class="cm"># An      3
+# Binh    2
+# Chi     1</span></code></pre>
+<p><code>value_counts()</code> breaks the 6 rows down per name; <code>count()</code> just counts the 6 non-null rows and throws away which name each one belongs to; <code>nunique()</code> throws away both the row count AND the per-name breakdown, keeping only "how many different names appeared." The SQL bridge is exact and immediate: <code>nunique()</code> is <code>COUNT(DISTINCT col)</code>, full stop — the one pandas method whose SQL translation needs no hedging.</p>
+
+<h2>2 · nunique() per group</h2>
+<p>Chained after <code>groupby()</code>, <code>nunique()</code> answers "how many distinct X does each group have" — a per-group cardinality check, same split-apply-combine shape Lesson 4 introduced. On the clean 4-row slice (dropping the unparseable amount and the missing date, same slice every lesson since Lesson 6 has used), how many distinct order dates does each customer have:</p>
+<pre><code>clean.groupby(<span class="kw">"customer"</span>)[<span class="kw">"order_date"</span>].nunique()
+<span class="cm"># An      2   (2026-01-05, 2026-01-10)
+# Binh    2   (2026-01-06, 2026-01-09)</span></code></pre>
+<p>Both customers show 2 — each of their two clean orders happened on a different day, so "distinct dates" equals "row count" here. That's not always true: if An had placed two orders on the same date, <code>nunique()</code> would say 1 while a plain row count would still say 2 — exactly the gap this method exists to catch (e.g. "did this customer order on multiple distinct days, or just submit the same day's order twice?"). SQL bridge:</p>
+<pre><code><span class="kw">SELECT</span> customer, <span class="kw">COUNT</span>(<span class="kw">DISTINCT</span> order_date)
+<span class="kw">FROM</span> orders
+<span class="kw">GROUP BY</span> customer;</code></pre>
+
+<h2>3 · explode(): one row per list element</h2>
+<p>Sometimes a column doesn't hold a scalar — it holds a Python list (or, loaded from JSON, an array) of several values packed into one cell. <dfn data-en="a DataFrame method that takes a column containing list-like values and produces one row per element of each list, duplicating every other column's value alongside it — the opposite of collapsing rows, it multiplies them out" data-vn="giữ nguyên 'explode()' — tách 1 cột chứa list thành nhiều hàng, mỗi hàng 1 phần tử, các cột khác lặp lại theo">explode()</dfn> un-nests that: one row goes in, one row comes out per list element, with every other column's value copied alongside each one. A small inline table — orders that each carry a list of tags (not touching the shared CSV fixtures, same as Lesson 11's inline "double-submitted export" table):</p>
+<pre><code>tagged = pd.DataFrame({
+    <span class="kw">"order_id"</span>: [<span class="kw">1</span>, <span class="kw">2</span>],
+    <span class="kw">"tags"</span>: [[<span class="kw">"urgent"</span>, <span class="kw">"gift"</span>], [<span class="kw">"bulk"</span>]],
+})
+tagged.explode(<span class="kw">"tags"</span>)
+<span class="cm">#    order_id    tags
+# 0         1  urgent
+# 0         2    gift
+# 1         2    bulk</span></code></pre>
+<p>Order 1 had two tags, so it becomes two rows — <code>order_id</code> 1 duplicated on both, one tag per row. Order 2 had one tag, so it stays one row. Notice the row INDEX duplicates too (<code>0</code> appears twice) — <code>explode()</code> doesn't renumber, so a follow-up <code>.reset_index(drop=True)</code> is standard practice once the shape is what you want. SQL's cousin is array-unnesting: Postgres' <code>UNNEST(tags)</code>, typically written as <code>CROSS JOIN LATERAL unnest(tags)</code> to pair each unnested element back with its row, or the equivalent for exploding a JSON array column (<code>jsonb_array_elements</code>). Same job, different spelling: "one row per list element, other columns copied alongside."</p>
+
+<h2>4 · Round trip: nunique() collapses, explode() expands</h2>
+<p><code>nunique()</code> and <code>explode()</code> point in opposite directions, and both are fundamentally about handling multiplicity — many values mapping to (or packed into) one thing:</p>
+<ul>
+<li><strong>nunique()</strong> — many rows in, one number out. Collapsing, same direction as Lesson 4's <code>groupby()</code> (which collapses by aggregating values, not just counting distinct ones).</li>
+<li><strong>explode()</strong> — one row (with a list) in, many rows out. Expanding, but a different kind of expansion than Lesson 6's <code>melt()</code>: melt reshapes COLUMNS into rows (wide → long, no lists involved); explode reshapes LIST ELEMENTS WITHIN a single cell into rows (no columns disappear, one column's values multiply out).</li>
+</ul>
+<p>In a real cleaning pipeline they can even chain: explode a tags column out to one-tag-per-row, then <code>nunique()</code> that exploded tags column to answer "how many distinct tags exist across all orders" — expand first to make each value analyzable on its own row, then collapse to count what's distinct.</p>
+
+<div class="interview">
+<p><strong>Q: "How would you count distinct values in a column, and how would you handle a column that holds a list per cell?"</strong> A strong answer, out loud: <em>"For distinct counts I'd reach for nunique() — it's exactly COUNT(DISTINCT col) from SQL, and I'd use it as a quick cardinality or sanity check: how many unique customers, how many unique SKUs, does this ID column actually behave like a key. For a list-valued cell — tags, categories, a JSON array column — I'd explode() it: one row per list element, every other column copied alongside, the same job as UNNEST() or CROSS JOIN LATERAL unnest() in Postgres. I'd reach for explode() specifically when I need to denormalize a packed array/JSON column into rows I can groupby or filter on individually — you can't groupby a list value, so exploding first is usually the unblocking step."</em> The signal: naming COUNT(DISTINCT) and UNNEST unprompted, and being able to say WHEN each pandas method actually gets reached for, not just what it does.</p>
+</div>
+
+<h2>Try it — self-checking practice (~15 min)</h2>
+<p>Open <code>practice/19_nunique_and_explode.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/19_nunique_and_explode.py</code></pre>
+<p>Exercise 1 uses <code>nunique()</code> on the raw <code>orders_raw.csv</code> to count distinct customers (3, not 6 rows); Exercise 2 contrasts it against <code>count()</code> on the same column (6 non-null rows); Exercise 3 uses grouped <code>nunique()</code> on the clean 4-row slice to count each customer's distinct order dates; Exercise 4 builds a small inline tagged-orders DataFrame and uses <code>explode()</code> to un-nest it.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="nunique() counts DISTINCT values only, collapsing all repeats into one number. value_counts() keeps the per-value breakdown (a count for each distinct value), and count() counts non-null rows without caring whether values repeat.">
+    <p class="stem">What does <code>nunique()</code> return that <code>value_counts()</code> and <code>count()</code> do not?</p>
+    <button class="opt" data-ok>a single count of distinct values</button>
+    <button class="opt">a count of rows per value</button>
+    <button class="opt">a count of non-null rows total</button>
+  </div>
+  <div class="q" data-why="explode() takes a column of list-like values and produces one row per list element, copying every other column's value alongside each exploded element — the row count grows, it does not stay the same or shrink.">
+    <p class="stem">What does <code>DataFrame.explode("tags")</code> do to a column holding lists?</p>
+    <button class="opt" data-ok>one row per list element, columns copied</button>
+    <button class="opt">merges every list into one combined row</button>
+    <button class="opt">drops the column, keeps row count fixed</button>
+  </div>
+  <div class="q" data-why="UNNEST(tags), often written as CROSS JOIN LATERAL unnest(tags) in Postgres, expands an array column into one row per element — the exact SQL equivalent of pandas' explode(). COUNT(DISTINCT col) is nunique()'s equivalent instead.">
+    <p class="stem">Which SQL construct is <code>explode()</code>'s closest equivalent?</p>
+    <button class="opt" data-ok><code>CROSS JOIN LATERAL unnest(tags) t</code></button>
+    <button class="opt"><code>SELECT COUNT(DISTINCT tags) FROM t</code></button>
+    <button class="opt"><code>SELECT tags, order_id FROM t</code></button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official pandas <a href="https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.explode.html">DataFrame.explode</a> API reference page (~10 min) — covers exploding multiple list columns at once (<code>column=[...]</code>, requiring equal-length lists per row) and how <code>explode()</code> handles empty lists and scalar (non-list) cells, neither covered in today's lesson.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>nunique()</code> and <code>explode()</code> are new today.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-19 comes back reported as shakiest, otherwise <code>idxmax()</code>/<code>idxmin()</code> (finding WHICH row holds the max/min, not just the value — grepped the glossary and every lesson body to confirm neither appears yet) keeps the drill library growing.<br><br>
+💬 Anything unclear — nunique() vs value_counts(), the UNNEST bridge, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

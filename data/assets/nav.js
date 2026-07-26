@@ -42,6 +42,8 @@
       file: "lessons/0017-crosstab.html" },
     { n: 18, date: "2026-07-26", title: "qcut(): binning by rank, not by value",
       file: "lessons/0018-qcut.html" },
+    { n: 19, date: "2026-07-27", title: "nunique() and explode(): counting distinct, and un-nesting lists",
+      file: "lessons/0019-nunique-and-explode.html" },
   ];
 
   const REFS = [

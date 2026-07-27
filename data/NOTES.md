@@ -515,3 +515,77 @@
   `reference/glossary.html` yet; also confirmed `agg()` with multiple named
   aggregations is NOT a valid fallback candidate, since Lesson 4 already
   fully covers that exact pattern.
+- 2026-07-28 generation (Lesson 20, headless 06:00 run): direct `psql
+  "$LEARNING_DB_URL" ...` reads were blocked in this headless run (shell-
+  variable expansion of that exact name is disallowed for this sandboxed
+  session — same class of block as every prior round) — still no
+  `course_progress` rows readable and no `lesson_completed`/quiz/kata outcome
+  record beyond the Lesson 1 baseline, so no reported weak spot to target.
+  Lesson 19's own teaser named the fallback explicitly ("idxmax()/idxmin(),
+  finding WHICH row holds the max/min, not just the value itself"),
+  re-confirmed via grep that neither appeared anywhere in `lessons/*.html` or
+  `reference/glossary.html` before today (only in the Lesson 19 teaser
+  sentence), and re-confirmed NOTES.md's own note that `agg()` with multiple
+  named aggregations is NOT a valid fallback since Lesson 4 already fully
+  covers that pattern — so Lesson 20 ships idxmax()/idxmin() as planned:
+  `.max()`/`.min()` (a VALUE) contrasted directly against `.idxmax()`/
+  `.idxmin()` (the INDEX LABEL of that row), then `.loc[idx]` as the
+  necessary follow-up to get the FULL row back (every column, not just the
+  one maxed on), then `groupby(...)["col"].idxmax()` for the "top row per
+  group" interview pattern ("find the top order per customer"), closing with
+  an explicit SQL-bridge callout that there is no single SQL equivalent —
+  either a correlated/LATERAL `ORDER BY ... LIMIT 1` per group, or
+  `ROW_NUMBER() OVER (PARTITION BY ... ORDER BY col DESC) = 1`, both named
+  as more ceremony than pandas' one-liner. `uv run --with pandas` worked
+  directly this round (pandas 3.0.5): first used to hand-verify the actual
+  index labels and values on the real `orders_raw.csv` clean 4-row slice
+  before writing the lesson text — `clean["amount"].idxmax()` is label `4`
+  (Binh, 180.0, order_id 5, 2026-01-09), `.idxmin()` is label `1` (Binh,
+  35.5, order_id 2, 2026-01-06), and grouped `idxmax()` gives An -> label 0
+  (120.0) / Binh -> label 4 (180.0) — confirming the index labels are the
+  ORIGINAL `orders_raw.csv` row positions, not the clean slice's own 0..3
+  positions, which the lesson text calls out explicitly since it's the
+  clearest way to show idxmax() returns a LABEL, not a position. Also hit and
+  designed around a new variant of Lesson 19's Ellipsis gotcha while building
+  the practice file: `df.loc[some_var]` where `some_var` is literally the bare
+  `...` object (or a bare `.loc[...]` call) does NOT raise — pandas treats
+  Ellipsis as a valid "select everything" indexer for `.loc[]`, silently
+  returning the whole DataFrame instead of erroring, a NEW failure shape
+  distinct from Lesson 19's `nunique(...)`/`count(...)` truthy-positional-arg
+  case. Verified this directly with a throwaway script before writing the
+  practice file, then designed around it: every `...` placeholder sits in a
+  column-selection spot (`clean[...]`, `clean.groupby("customer")[...]`) that
+  DOES raise `KeyError`/`TypeError` when left unsolved, and Exercise 2's
+  `.loc[max_idx]` uses the (then-`None`-valued) VARIABLE from the unsolved
+  Exercise 1 rather than a literal `...`, which correctly raises `KeyError:
+  None`. First draft of the shipped file actually shipped a bug caught before
+  finalizing — Exercise 1 only had `...` on the `.max()` line but not the
+  `.idxmax()` line, so `max_idx` was fully solved even unsolved, which made
+  Exercise 2 print a false ✓ on the very first run; fixed by adding `...` to
+  the `.idxmax()` line too and re-ran to confirm all 4 exercises now print ✗
+  with no crash. A solved copy (`.scratch/data-lesson20/solved.py`, deleted
+  after — plain `rm -rf` worked fine this round, no approval needed) then
+  printed all ✓ against the real fixture, matching the hand-verified values
+  above exactly. `bin/record-progress data lesson_generated --day 20 --lesson
+  0020-idxmax-and-idxmin.html --detail '{"by":"launchd"}'` was run once from
+  the repo root as instructed and succeeded on the first try, no approval
+  blocker this round (back to the "reads blocked, writes work" asymmetry
+  documented in most rounds) — `lesson_generated` was recorded for day 20.
+  Added `idxmax() / idxmin()` to the glossary (one combined entry, same
+  precedent as `stack()/unstack()`) and registered Lesson 20 in nav.js. Quiz
+  options were drafted and checked with a `wc -w` count per option (this
+  course's established convention, following Lesson 19's note that a single
+  "checked with grep + count" pass isn't infallible) — Q1's first draft came
+  out 7/7/8 (fixed by shortening the third option to "a count of rows tied
+  for max"), and Q3's first draft (long compound SQL/window-function phrases)
+  came out badly mismatched at 11/6/7, needing three successive rewrite
+  passes before landing at 7/7/7; Q2's three short code-snippet options were
+  counted as 1 whitespace-split token each, same precedent as Lessons
+  13/18's short-snippet questions. Set the teaser going forward to
+  `pd.concat()` (stacking/combining DataFrames, Lesson 5's `merge()` sibling
+  for the "just append rows" case) if no drill-outcome signal surfaces by
+  next generation — grepped every lesson body and the glossary to confirm
+  it's genuinely uncovered (no mention anywhere yet, not even inside a code
+  example, unlike `query()` which appears as an uncredited call inside
+  Lesson 8 but was never taught as its own concept — a candidate worth
+  flagging for a future round too).

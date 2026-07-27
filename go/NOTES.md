@@ -206,3 +206,15 @@
   variable name) and a script-file wrapper around the same query hit a
   generic "requires approval" gate with no user present — moot for this
   course since it's a pure skip regardless of DB state.
+- 2026-07-28 (headless 06:00 run): skipped again per the same rule — the
+  course window closed 2026-07-20, now eight days past it. Day 13
+  (`0014-concurrency-capstone.html`) still remains ungenerated; left
+  untouched, not this session's call to unlock. This session's sandbox
+  again blocked `~/.config/learning/db.env` and any shell-variable
+  expansion of `LEARNING_DB_URL` as an out-of-workspace credential read
+  (working directory restricted to the repo root), and a generic script-
+  file/`psql` invocation also required approval with no user present — moot
+  for this course since it's a pure skip regardless of DB state. Backend
+  lesson 22 and data lesson 20 were generated this round via delegated
+  agents (see their own NOTES.md entries); rust's post-week daily
+  quiz+kata infra was verified unchanged, nothing new to generate.

@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 20 · idxmax() and idxmin(): WHICH row, not just the value</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 20 · ~20 min · 28 Jul 2026</p>
+<h1>idxmax() and idxmin(): WHICH row, not just the value</h1>
+<p class="byline">Lesson 19's closing teaser named this pair directly — "<code>idxmax()</code>/<code>idxmin()</code>, finding WHICH row holds the max/min, not just the value." A distinction interview candidates fumble constantly: <code>.max()</code> hands you a number with no way back to the row it came from.</p>
+
+<h2>1 · .max() gives the VALUE, idxmax() gives the LABEL</h2>
+<p>Every lesson so far that touched a max/min used <code>.max()</code>/<code>.min()</code> — they return the value itself, with no memory of which row produced it. <dfn data-en="a Series method returning the INDEX LABEL of the row holding the maximum value in that column, not the value itself" data-vn="giữ nguyên 'idxmax()' — trả về NHÃN INDEX của dòng có giá trị lớn nhất, không phải giá trị đó">idxmax()</dfn> and <dfn data-en="a Series method returning the INDEX LABEL of the row holding the minimum value in that column, not the value itself" data-vn="giữ nguyên 'idxmin()' — trả về NHÃN INDEX của dòng có giá trị nhỏ nhất, không phải giá trị đó">idxmin()</dfn> answer a different question: "which ROW is that?" On the clean 4-row <code>amount</code> slice Lessons 6-19 have used (An/120.0/01-05, Binh/35.5/01-06, Binh/180.0/01-09, An/42.0/01-10):</p>
+<pre><code>clean[<span class="kw">"amount"</span>].max()      <span class="cm"># 180.0  -- just the number</span>
+clean[<span class="kw">"amount"</span>].idxmax()   <span class="cm"># 4      -- the INDEX LABEL of the row holding 180.0</span>
+
+clean[<span class="kw">"amount"</span>].min()      <span class="cm"># 35.5</span>
+clean[<span class="kw">"amount"</span>].idxmin()   <span class="cm"># 1      -- the row holding 35.5</span></code></pre>
+<p><code>.max()</code> says "the biggest order was 180.0" — useful, but it can't tell you whose order that was or when it happened. <code>.idxmax()</code> says "row label 4 is the one" — the row's ADDRESS, not its content. Notice <code>4</code>, not <code>2</code>: this DataFrame's index still carries the original row positions from <code>orders_raw.csv</code> before the unparseable/missing rows were dropped, so the index label and the row's position in <code>clean</code> aren't the same number. That gap is exactly why <code>idxmax()</code> returns the LABEL — it always finds the row correctly by name, regardless of how the DataFrame got filtered or reordered beforehand.</p>
+
+<h2>2 · .loc[idx]: turning the label into the full row</h2>
+<p>An index label alone isn't very useful in an interview answer — the real move is feeding it straight into <code>.loc[]</code> to pull back the entire row, every column, not just the one you maxed on:</p>
+<pre><code>clean.loc[clean[<span class="kw">"amount"</span>].idxmax()]
+<span class="cm"># order_id               5
+# customer            Binh
+# amount              180.0
+# order_date    2026-01-09
+# Name: 4, dtype: object</span></code></pre>
+<p>That's the whole point of returning a label instead of a value: <code>.max()</code> alone can never get you back to <code>customer</code> or <code>order_date</code> for the winning row — you'd need a separate filter (<code>clean[clean["amount"] == clean["amount"].max()]</code>) that's slower to write, and silently wrong if two rows happen to tie on the max value (it would return both). <code>idxmax()</code> + <code>.loc[]</code> is the direct, unambiguous path from "biggest value" to "everything about that row."</p>
+
+<h2>3 · groupby(...)["col"].idxmax(): the top row PER GROUP</h2>
+<p>Chained after <code>groupby()</code>, <code>idxmax()</code> answers one of the most common interview patterns there is: "find the top order per customer." Not the top amount — the whole top ROW, per customer:</p>
+<pre><code>top_idx = clean.groupby(<span class="kw">"customer"</span>)[<span class="kw">"amount"</span>].idxmax()
+<span class="cm"># customer
+# An      0
+# Binh    4
+# Name: amount, dtype: int64</span>
+
+clean.loc[top_idx]
+<span class="cm">#    order_id customer  amount  order_date
+# 0         1       An   120.0  2026-01-05
+# 4         5     Binh   180.0  2026-01-09</span></code></pre>
+<p>Each customer's <code>idxmax()</code> gives back the label of THEIR biggest order — An's is row 0 (120.0, their only other order was 42.0), Binh's is row 4 (180.0, beating their 35.5). Feeding that Series of labels straight into <code>.loc[]</code> pulls back one full row per customer in a single step: no separate merge, no manual sort-then-<code>groupby().head(1)</code> dance. This is the pattern to reach for anytime an interview question says "find the &lt;top/latest/biggest&gt; X per Y" and you need more than just the winning number.</p>
+
+<h2>4 · The SQL bridge: no single equivalent</h2>
+<p>This is worth naming explicitly, because it's where pandas is genuinely more concise than SQL, not just differently spelled. SQL has no single function that means "the row holding the max, per group" — you reach for one of two heavier constructs:</p>
+<pre><code><span class="cm">-- Option A: ORDER BY ... LIMIT 1 per group (subquery or LATERAL join)</span>
+<span class="kw">SELECT</span> c.customer, o.*
+<span class="kw">FROM</span> (<span class="kw">SELECT DISTINCT</span> customer <span class="kw">FROM</span> orders) c
+<span class="kw">CROSS JOIN LATERAL</span> (
+  <span class="kw">SELECT</span> * <span class="kw">FROM</span> orders o
+  <span class="kw">WHERE</span> o.customer = c.customer
+  <span class="kw">ORDER BY</span> amount <span class="kw">DESC</span> <span class="kw">LIMIT</span> <span class="kw">1</span>
+) o;
+
+<span class="cm">-- Option B: window function, then filter to rank 1</span>
+<span class="kw">SELECT</span> * <span class="kw">FROM</span> (
+  <span class="kw">SELECT</span> *, <span class="kw">ROW_NUMBER() OVER</span> (<span class="kw">PARTITION BY</span> customer <span class="kw">ORDER BY</span> amount <span class="kw">DESC</span>) <span class="kw">AS</span> rn
+  <span class="kw">FROM</span> orders
+) ranked
+<span class="kw">WHERE</span> rn = <span class="kw">1</span>;
+
+<span class="cm">-- pandas: one line</span>
+clean.loc[clean.groupby(<span class="kw">"customer"</span>)[<span class="kw">"amount"</span>].idxmax()]</code></pre>
+<p>Both SQL options need real ceremony — a correlated subquery/LATERAL join, or a window function wrapped in an outer <code>WHERE rn = 1</code> filter. <code>groupby(...)["col"].idxmax()</code> collapses that entire shape into one call precisely because <code>groupby()</code> in pandas is already an object you can chain further operations onto, unlike a SQL <code>GROUP BY</code> clause, which only exists inside one aggregation query.</p>
+
+<div class="callout"><strong>Ties, and NaN:</strong> if two rows in a group tie exactly on the max value, <code>idxmax()</code> returns only the FIRST one it encounters (by row order) — same "returns one winner" behavior as <code>ROW_NUMBER()</code> would need <code>method="first"</code>-style tie-breaking (Lesson 7) to guarantee reproducibly. And <code>idxmax()</code>/<code>idxmin()</code> raise a <code>ValueError</code> on an all-NaN Series or empty group — there's no "which row" answer when there's no data, so unlike <code>.max()</code> (which returns NaN quietly), <code>idxmax()</code> refuses to guess.</div>
+
+<div class="interview">
+<p><strong>Q: "How would you find, for each customer, their single largest order — the full row, not just the amount?"</strong> A strong answer, out loud: <em>"I'd use groupby('customer')['amount'].idxmax() — that gives me the index label of the max-amount row within each group, as a Series keyed by customer. Then I feed that straight into .loc[] on the original DataFrame to pull back the full row — every column, not just amount. I reach for idxmax() specifically over plain max() whenever I need to get BACK to the row, not just the number; max() alone throws away which row it came from. In SQL I'd need either a LATERAL join with ORDER BY ... LIMIT 1, or a ROW_NUMBER() OVER (PARTITION BY customer ORDER BY amount DESC) window function filtered to rank 1 — pandas collapses both of those into one line because groupby() there is a live object I can keep chaining, not just a clause."</em> The signal: naming that SQL has no single equivalent, and being explicit that idxmax() returns a LABEL, not a value.</p>
+</div>
+
+<h2>Try it — self-checking practice (~15 min)</h2>
+<p>Open <code>practice/20_idxmax_and_idxmin.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/20_idxmax_and_idxmin.py</code></pre>
+<p>Same <code>orders_raw.csv</code> clean 4-row slice as Lessons 6-19. Exercise 1 contrasts <code>.max()</code> (a value) against <code>.idxmax()</code> (a label) on the whole <code>amount</code> column; Exercise 2 uses that label with <code>.loc[]</code> to pull back the full winning row; Exercise 3 uses <code>groupby("customer")["amount"].idxmax()</code> to find each customer's top order's label; Exercise 4 feeds that grouped result into <code>.loc[]</code> to get each customer's full top-order row in one step.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="max() returns the maximum VALUE itself, with no way to trace it back to a row. idxmax() returns the INDEX LABEL of the row holding that maximum value, which you can then feed into .loc[] to get the full row.">
+    <p class="stem">What does <code>Series.idxmax()</code> return that <code>Series.max()</code> does not?</p>
+    <button class="opt" data-ok>the index label of the max row</button>
+    <button class="opt">the max value rounded to an int</button>
+    <button class="opt">a count of rows tied for max</button>
+  </div>
+  <div class="q" data-why="idxmax() gives back a label, not a row on its own. .loc[label] is the follow-up step that turns that label into the full row, every column, not just the one idxmax() was called on.">
+    <p class="stem">After <code>idx = df["amount"].idxmax()</code>, how do you get the FULL row it points to?</p>
+    <button class="opt" data-ok><code>df.loc[idx]</code></button>
+    <button class="opt"><code>df["amount"][idx]</code></button>
+    <button class="opt"><code>df.iloc[df["amount"]]</code></button>
+  </div>
+  <div class="q" data-why="SQL has no single built-in function for 'the row holding the max, per group' the way pandas has idxmax(). It takes either a correlated/LATERAL subquery with ORDER BY ... LIMIT 1, or a window function like ROW_NUMBER() filtered down to rank 1 in an outer query.">
+    <p class="stem">What is SQL's closest equivalent to <code>groupby(...)["col"].idxmax()</code>?</p>
+    <button class="opt" data-ok><code>ROW_NUMBER() OVER (PARTITION BY x) = 1</code></button>
+    <button class="opt">a single built-in <code>IDXMAX()</code> function, no window</button>
+    <button class="opt">plain <code>MAX(col)</code> alone, no <code>GROUP BY</code> needed</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official pandas <a href="https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.idxmax.html">DataFrame.idxmax</a> API reference page (~10 min) — covers <code>axis=1</code> (finding which COLUMN holds the max per row, instead of which row), and how ties and all-NaN rows/columns are handled in that direction, neither covered in today's lesson.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>idxmax()</code> and <code>idxmin()</code> are new today.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-20 comes back reported as shakiest, otherwise <code>pd.concat()</code> (stacking/combining DataFrames, Lesson 5's <code>merge()</code> sibling for the "just append rows" case — grepped every lesson body and the glossary to confirm it's genuinely uncovered, no mention anywhere yet) keeps the drill library growing.<br><br>
+💬 Anything unclear — idxmax() vs max(), the per-group pattern, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

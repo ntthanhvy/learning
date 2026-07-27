@@ -48,6 +48,8 @@
       file: "lessons/0020-synthesis-mark-order-urgent.html" },
     { n: 21, date: "2026-07-27", title: "Configuration: what belongs in code, what belongs in the environment",
       file: "lessons/0021-configuration-env-vs-code.html" },
+    { n: 22, date: "2026-07-28", title: "CSRF: the other half of cookie auth",
+      file: "lessons/0022-csrf-the-other-half-of-cookie-auth.html" },
   ];
 
   const REFS = [

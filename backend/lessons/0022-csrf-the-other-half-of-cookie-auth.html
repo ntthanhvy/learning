@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 22 · CSRF: the other half of cookie auth</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 22 · ~20 min</p>
+<h1>CSRF: the other half of cookie auth</h1>
+<p class="byline">Lesson 4 named CSRF as the trade-off of storing a session in an <code>HttpOnly</code> cookie instead of <code>localStorage</code> — then said it was "handled separately" and moved on. It never actually was. Today it gets the lesson Lesson 4 deferred, the same way Lesson 12 later delivered the authorization half of "auth" that Lesson 4 had also put off.</p>
+
+<h2>1 · What CSRF actually is</h2>
+<p>Go back to Lesson 4's own quiz: it already made you tell <dfn data-en="Cross-Site Scripting: an attacker gets their own JavaScript to run on your page (e.g. via unescaped user input), able to read anything JS can read, including localStorage" data-vn="giữ nguyên 'XSS' — chèn JS độc hại chạy trên trang của bạn">XSS</dfn> and <dfn data-en="Cross-Site Request Forgery: a malicious page makes the victim's browser fire an authenticated request, since cookies attach automatically" data-vn="giữ nguyên 'CSRF' — trang độc hại giả mạo request bằng cookie có sẵn">CSRF</dfn> apart, but only as "these are different, XSS is the one HttpOnly defends against." Here's the CSRF half spelled out. XSS is about <em>which code runs</em> — an attacker gets their own JavaScript executing inside your page's own origin, so it can read anything your page can read. CSRF has nothing to do with running code on your site at all. It's a request forged from a completely different site:</p>
+
+<pre>
+1. You log in to bank.example — browser gets Set-Cookie: session_id=abc123; HttpOnly
+2. You open evil.example in another tab (a phishing link, an ad, whatever)
+3. evil.example's HTML contains: &lt;form action="https://bank.example/transfer" method="POST"&gt;
+                                    &lt;input name="to" value="attacker-account"&gt;
+                                    &lt;input name="amount" value="9999"&gt;
+                                  &lt;/form&gt;
+   &lt;script&gt;document.forms[0].submit()&lt;/script&gt;
+4. Your browser POSTs to bank.example ──▶  auto-attaches session_id=abc123, same as any request to bank.example
+5. bank.example's server sees a valid, authenticated session ──▶  processes the transfer
+</pre>
+
+<p>Nothing was stolen. The attacker never read your cookie, never ran code on <code>bank.example</code>, and an <code>HttpOnly</code> flag does nothing here — it only stops JavaScript from <em>reading</em> the cookie, and this attack never tries to read it. It relies on the one property every cookie has by design: the browser attaches it to <em>any</em> request to that domain, regardless of which page's HTML triggered the request. Your own browser is the one making the forged request, using your own valid session, and the server has no way to tell "the user clicked a button on my site" apart from "a form on some other site auto-submitted itself" — both arrive as an identical, validly-authenticated POST.</p>
+
+<h2>2 · Why this is specifically a cookie problem</h2>
+<p>This is the piece Lesson 4 asserted without justifying: <em>"put the JWT in an <code>Authorization</code> header instead of a cookie"</em> isn't just a storage preference, it's a structural CSRF fix. Walk through why. A cross-site <code>&lt;form&gt;</code> submission, or an <code>&lt;img src="evil-url"&gt;</code>, or a background <code>fetch</code> from another origin — the browser will happily fire all of these at your domain and auto-attach any cookie that matches it. What the browser will <em>not</em> do is reach into <code>evil.example</code>'s JavaScript and hand it the <code>Authorization</code> header value your app set on <code>bank.example</code>'s own page. A custom header only gets attached by JavaScript that explicitly sets it, and that JavaScript would have to be running on your own origin to have the token available in the first place — which is exactly the XSS scenario, a different attack with a different defense.</p>
+<p>So the two designs Lesson 4 compared land on opposite sides of this specific risk: a bearer token in a header is naturally immune to CSRF, because forging a cross-origin request doesn't forge the header. A session cookie is naturally exposed to CSRF, because forging a cross-origin request gets the cookie for free — that's what cookies are <em>for</em>. Neither is "more secure" overall (Lesson 4's XSS-vs-CSRF trade-off table still holds), but this is the concrete mechanism behind that one throwaway line.</p>
+
+<div class="callout"><strong>The one-line version:</strong> CSRF exists because cookies attach themselves; it only threatens auth that lives in a cookie. Auth that lives in a header you set yourself was never exposed to it in the first place.</div>
+
+<h2>3 · Defense 1: the <code>SameSite</code> cookie attribute</h2>
+<p>If the entire attack depends on the browser attaching a cookie to a cross-site request, the simplest fix is telling the browser not to do that. That's what <dfn data-en="a cookie attribute controlling whether the browser sends that cookie on requests originating from a different site — Strict never sends it cross-site, Lax sends it on top-level cross-site navigations only, None sends it always (and requires the Secure flag)" data-vn="SameSite (giữ nguyên) — thuộc tính cookie quyết định cookie có được gửi kèm request từ site khác hay không">SameSite</dfn> does — a third cookie attribute alongside the <code>HttpOnly</code> and <code>Secure</code> flags Lesson 4 already used:</p>
+<table class="gloss">
+  <tr><th>Value</th><th>Sent on cross-site request?</th><th>When you'd use it</th></tr>
+  <tr><td><code>Strict</code></td><td>Never — not even clicking a link in from another site</td><td>Highly sensitive actions; costs you: clicking an email link to your own site arrives logged out</td></tr>
+  <tr><td><code>Lax</code></td><td>Only top-level navigations (clicking a link), never a cross-site form POST or fetch</td><td>The sane default for session cookies — most browsers already default new cookies to this</td></tr>
+  <tr><td><code>None</code></td><td>Always, on every cross-site request — must be paired with <code>Secure</code></td><td>A cookie genuinely meant to be shared across sites, e.g. a third-party embed</td></tr>
+</table>
+<p><code>Lax</code> is the default worth reaching for because it draws the line exactly where the risk lives: clicking a link to your site is a normal, harmless user action that should arrive logged in, but a hidden cross-site <code>&lt;form&gt;</code> auto-submitting a POST — the actual forgery from section 1 — is blocked before it ever reaches your server, cookie and all. Note the honest limit though: <code>SameSite=Lax</code> is a browser-enforced default, not a contract every browser is guaranteed to honor identically forever, and it says nothing about a same-site attack (e.g. an XSS bug on your own domain triggering the same request) — which is why it's a strong first layer, not the only layer.</p>
+
+<h2>4 · Defense 2: a token the attacker can't produce</h2>
+<p>For state-changing requests specifically, the more explicit defense stops relying on the cookie alone and requires a second, unguessable value the request must carry — one a cross-site form has no way to obtain. Two common shapes of this:</p>
+<ul>
+<li><strong><dfn data-en="a CSRF defense where the server sets a random token as a readable cookie, and the client must also send that same token back in a request header or body field on every state-changing request; a cross-site attacker can trigger the cookie to be sent but cannot read its value to copy it into the header" data-vn="double-submit cookie (giữ nguyên) — cookie CSRF token phải khớp với token gửi kèm header/body">Double-submit cookie</dfn>:</strong> the server sets a random token as a cookie, and the client's own JavaScript (which <em>can</em> read a non-HttpOnly cookie) copies that value into a custom header on every state-changing request. The server checks the header value against the cookie value. A cross-site attacker's forged form can make the browser attach the cookie, but has no way to read its value to also put it in the header — it can only guess.</li>
+<li><strong><dfn data-en="a CSRF defense where the server embeds a unique, unpredictable token in each rendered form (tied to the user's session server-side), and rejects the submission if that token is missing or doesn't match" data-vn="synchronizer token (giữ nguyên) — token CSRF nhúng trong form, server so khớp với giá trị lưu ở session">Synchronizer token pattern</dfn>:</strong> the server embeds a random token as a hidden form field when rendering the page, and stores the same value server-side against that session. A forged cross-site form has no way to know or embed that token, so a submission without a matching one is rejected. This is the older, more traditional pattern (used by classic server-rendered apps); double-submit is the more common shape for an API + SPA split.</li>
+</ul>
+<p>Both patterns share the same idea: forging the request is easy (any page can make the browser fire a POST), but forging <em>the token</em> is not, because the attacker's page can never read a value scoped to your origin. Here's the double-submit check as a Go middleware — the shape most REST APIs actually reach for:</p>
+<pre><code><span class="kw">func</span> requireCSRFToken(next http.Handler) http.Handler {
+    <span class="kw">return</span> http.HandlerFunc(<span class="kw">func</span>(w http.ResponseWriter, r *http.Request) {
+        <span class="kw">if</span> r.Method == http.MethodGet || r.Method == http.MethodHead {
+            next.ServeHTTP(w, r) <span class="cm">// safe methods don't change state, nothing to check</span>
+            <span class="kw">return</span>
+        }
+
+        cookie, err := r.Cookie(<span class="str">"csrf_token"</span>)
+        <span class="kw">if</span> err != <span class="kw">nil</span> {
+            http.Error(w, <span class="str">"missing csrf cookie"</span>, http.StatusForbidden)
+            <span class="kw">return</span>
+        }
+
+        header := r.Header.Get(<span class="str">"X-CSRF-Token"</span>)
+        <span class="kw">if</span> header == <span class="str">""</span> || subtle.ConstantTimeCompare([]<span class="kw">byte</span>(header), []<span class="kw">byte</span>(cookie.Value)) != <span class="kw">1</span> {
+            http.Error(w, <span class="str">"csrf token mismatch"</span>, http.StatusForbidden)
+            <span class="kw">return</span>
+        }
+
+        next.ServeHTTP(w, r)
+    })
+}</code></pre>
+<p>Two details worth naming: only unsafe methods (POST/PUT/PATCH/DELETE) are checked — a GET is expected to be side-effect-free, so there's nothing for a forged GET to change (this is also why GET handlers must never mutate state, a rule worth holding regardless of CSRF). And the comparison uses <code>subtle.ConstantTimeCompare</code> rather than <code>==</code>, the same timing-attack-resistant comparison used for password hashes — not because the token is secret from the legitimate client, but because a byte-by-byte <code>==</code> comparison leaks how many leading bytes matched through response timing, handing an attacker a way to guess the token one byte at a time.</p>
+
+<h2>5 · Layered, not either/or</h2>
+<p><code>SameSite=Lax</code> and a double-submit token aren't competing options — production systems commonly run both. <code>SameSite</code> is a cheap, broad first layer enforced by the browser itself with zero server-side state to manage. A token check is the explicit, server-verified backstop for the specific requests that matter (state-changing ones), and it keeps working even against an older browser or a misconfigured cookie that skipped the <code>SameSite</code> attribute entirely. Defense in depth, not a choice between them.</p>
+
+<div class="interview">
+<p><strong>Q: "Does your API need CSRF protection?"</strong> A strong answer, out loud: <em>"It depends entirely on how auth travels. If the client sends a bearer token in an Authorization header, no — a cross-site page can't make the browser attach a header it never set, so CSRF isn't a risk there. If auth travels in a cookie, then yes: I'd set SameSite=Lax as the baseline, since it blocks the classic forged-form-POST case for free with no server-side state, and add a double-submit or synchronizer token check on top for state-changing endpoints specifically, since SameSite alone depends on browser behavior I don't fully control. I wouldn't bother protecting GET requests — those should never mutate state in the first place, CSRF or not."</em> The signal: tying the defense to <em>which</em> auth mechanism is in play, not reciting "add CSRF tokens" as a rule that applies everywhere uniformly.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="CSRF never reads anything — it relies purely on the browser auto-attaching a valid cookie to a request forged from another site. That's what makes it a different attack from XSS, which is about an attacker's code running inside your own origin.">
+    <p class="stem">What is CSRF, precisely?</p>
+    <button class="opt" data-ok>a forged cross-site request riding the browser's auto-attached cookies</button>
+    <button class="opt">malicious script running directly inside your own page's origin</button>
+    <button class="opt">a database credential leaked through a verbose error message</button>
+    <button class="opt">a session token expiring before the user finishes checkout</button>
+  </div>
+  <div class="q" data-why="A forged cross-site request can make the browser fire the request and attach any matching cookie automatically, but the attacker's page has no way to read a header value scoped to your origin and set it on the forged request — there's simply nothing to auto-attach.">
+    <p class="stem">Why does putting a token in an <code>Authorization</code> header sidestep CSRF, when a cookie doesn't?</p>
+    <button class="opt" data-ok>cookies attach automatically a header value must be added manually</button>
+    <button class="opt">bearer tokens are always encrypted while session cookies never are</button>
+    <button class="opt">JWTs cannot ever be forged while session cookies always can</button>
+    <button class="opt">browsers always block every cross-site request carrying a bearer token</button>
+  </div>
+  <div class="q" data-why="Lax is the sane default because it draws the line exactly where the risk lives: a normal link click still arrives logged in, but a hidden cross-site form auto-submitting a POST — the actual forgery — never gets the cookie attached at all.">
+    <p class="stem">What does <code>SameSite=Lax</code> actually do?</p>
+    <button class="opt" data-ok>blocks the cookie on cross-site navigations and cross-site form posts</button>
+    <button class="opt">allows the cookie only on top-level cross-site navigations like links</button>
+    <button class="opt">sends the cookie on every cross-site request regardless of method</button>
+    <button class="opt">requires HTTPS but otherwise behaves the same as no attribute</button>
+  </div>
+  <div class="q" data-why="Both the double-submit-cookie and synchronizer-token patterns rely on the same idea: a cross-site attacker can trigger a request and get a cookie auto-attached, but has no way to read a value scoped to your origin, so it can never supply the matching second value the server checks for.">
+    <p class="stem">What does a double-submit CSRF check compare?</p>
+    <button class="opt" data-ok>compares a cookie value against a value the client sent back</button>
+    <button class="opt">encrypts every state-changing request body before it reaches the real handler</button>
+    <button class="opt">stores the entire session inside the URL instead of a cookie</button>
+    <button class="opt">rate limits repeated POST requests coming from the same IP address</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://thecopenhagenbook.com/csrf">The Copenhagen Book — CSRF</a> (~10 min), already cited in RESOURCES.md for "the auth & security track"; it covers the same <code>SameSite</code> and token defenses with implementation-level detail this lesson deliberately kept brief.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> open, same as recent rounds have left it. All five MISSION.md success criteria are covered and this closes the CSRF gap Lesson 4 deferred — a good next step is a real PR review together, or naming one track to go deeper on. Tell your teacher which you'd like.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

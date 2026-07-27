@@ -445,3 +445,53 @@
   still no `lesson_completed` record for any lesson after 21 rounds — the
   next interactive session should prioritize getting a completion signal, or
   naming a track to deepen, over generating a 22nd daily topic blind.
+- 2026-07-28 generation (Lesson 22, headless 06:00 run): rather than mine
+  MISSION.md a fourth time or invent another synthesis lesson, this round
+  went back to a genuine, previously-identified gap instead of a new one:
+  Lesson 4 (2026-07-10) named CSRF explicitly in its own text and quiz
+  ("handled separately") but never actually taught it as its own topic — the
+  same deferred-topic pattern Lesson 12 resolved for authorization after
+  Lesson 4 had deferred that too. A grep for a dedicated CSRF lesson across
+  all 21 prior lessons confirmed it only ever appeared in Lesson 4's callout
+  table, one Lesson 4 quiz question, and one Lesson 12 quiz distractor —
+  never its own subject. Lesson 22 covers it: what CSRF actually is
+  contrasted explicitly against Lesson 4's own XSS/CSRF quiz distinction (a
+  forged cross-site request riding auto-attached cookies vs. attacker code
+  running in-origin), a worked forged-form walkthrough, why it's structurally
+  a cookie-only problem (justifying, for the first time, Lesson 4's
+  unjustified "put the JWT in a header" CSRF-sidestep claim), the SameSite
+  attribute (Strict/Lax/None table, Lax as the sane default and why), and the
+  double-submit-cookie / synchronizer-token patterns as the explicit
+  per-request defense, framed as layered with SameSite rather than
+  either/or. `XSS` and `CSRF` dfn tags were reused (both already in the
+  glossary from Lesson 4); added `SameSite`, `double-submit cookie`, and
+  `synchronizer token` as the three genuinely new terms after confirming
+  none of the three already existed in glossary.html. The double-submit
+  CSRF-check Go middleware (`requireCSRFToken`, using
+  `subtle.ConstantTimeCompare` against a cookie/header pair) was
+  compile-checked clean with `go build -C` / `go vet -C` in a scratch module
+  (`.scratch/backend-lesson22/`, built binary deleted after, directory left
+  in place, same pattern as Lessons 17-21) — no approval blocker for either
+  `-C`-style invocation this round, consistent with every round since
+  Lesson 13's finding. Quiz options were drafted into individual per-option
+  scratch files and verified with `wc -w` per file (not eyeballed) — all
+  four questions needed at least one rewrite before landing at equal counts:
+  Q1 9/9/9/9, Q2 10/10/10/10, Q3 10/10/10/10, Q4 11/11/11/11; the scratch
+  quiz-drafting directory was deleted afterward (only the Go compile-check
+  scratch dir is kept, per convention). Direct `psql "$LEARNING_DB_URL" ...`
+  reads were attempted once as instructed and were blocked again
+  (shell-variable expansion of that exact name disallowed for this
+  sandboxed session — same class of block as every prior round), not
+  retried. `bin/record-progress backend lesson_generated --day 22 --lesson
+  0022-csrf-the-other-half-of-cookie-auth.html --detail '{"by":"launchd"}'`
+  ran directly and succeeded, no approval blocker this round (write path
+  continues to work even when the read path is blocked, per every round
+  since Lesson 9 except Lesson 19's one-off failure). Registered Lesson 22
+  in nav.js. Still no `lesson_completed` record exists for any lesson after
+  22 rounds — open question carried forward unchanged: the next interactive
+  session should prioritize getting a completion signal, or naming a track
+  to deepen, over generating a 23rd daily topic blind. No obvious next gap
+  was identified this round (MISSION.md's five criteria all covered since
+  Lesson 20, RESOURCES.md's config gap closed by Lesson 21, and Lesson 4's
+  other deferred half — CSRF — now closed by this lesson), so the teaser was
+  left open rather than naming an invented topic.

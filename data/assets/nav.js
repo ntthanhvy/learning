@@ -44,6 +44,8 @@
       file: "lessons/0018-qcut.html" },
     { n: 19, date: "2026-07-27", title: "nunique() and explode(): counting distinct, and un-nesting lists",
       file: "lessons/0019-nunique-and-explode.html" },
+    { n: 20, date: "2026-07-28", title: "idxmax() and idxmin(): WHICH row, not just the value",
+      file: "lessons/0020-idxmax-and-idxmin.html" },
   ];
 
   const REFS = [

@@ -218,3 +218,14 @@
   lesson 22 and data lesson 20 were generated this round via delegated
   agents (see their own NOTES.md entries); rust's post-week daily
   quiz+kata infra was verified unchanged, nothing new to generate.
+- 2026-07-29 (headless 06:00 run): skipped again per the same rule — the
+  course window closed 2026-07-20, now nine days past it. Day 13
+  (`0014-concurrency-capstone.html`) still remains ungenerated; left
+  untouched, not this session's call to unlock. Direct `psql
+  "$LEARNING_DB_URL" ...` reads were blocked again this session (content-
+  level block on the variable name — same class as every prior round), but
+  `bin/record-progress` worked fine as a write (used for backend/data
+  below) — moot for this course since it's a pure skip regardless of DB
+  state. Backend lesson 23 (mass assignment & overexposure) and data
+  lesson 21 (`pd.concat()`) were generated this round; rust's post-week
+  daily quiz+kata infra was verified unchanged, nothing new to generate.

@@ -589,3 +589,50 @@
   example, unlike `query()` which appears as an uncredited call inside
   Lesson 8 but was never taught as its own concept — a candidate worth
   flagging for a future round too).
+- 2026-07-29 generation (Lesson 21, headless 06:00 run): direct `psql
+  "$LEARNING_DB_URL" ...` reads were blocked again this session (content-
+  level block on the variable name, same class as every prior round) — no
+  `course_progress` rows readable and no `lesson_completed`/quiz/kata
+  outcome record beyond the Lesson 1 baseline, so no reported weak spot to
+  target. Lesson 20's own teaser named the fallback explicitly (`pd.concat()`,
+  confirmed genuinely uncovered by a fresh grep before writing), so Lesson
+  21 ships exactly that: `merge()` (match by key value, Lesson 5) contrasted
+  against `concat()` (no matching, pure stacking), `axis=0` row-stacking with
+  `ignore_index=True`, `keys=` for a MultiIndex tracking each row's source
+  batch (reusing Lesson 14's MultiIndex structure for a new purpose), the
+  NaN-fill behavior on mismatched columns (tied back to Lesson 3's missing-
+  data reflex), a brief `axis=1` index-aligned column stack (tied to Lesson
+  20's `.loc[]` alignment mechanism), and the SQL bridge (`UNION ALL` for
+  `axis=0`, no clean equivalent for `axis=1`). New inline fixtures
+  (`batch_a`/`batch_b`/`batch_c`), no shared CSV touched, same precedent as
+  Lessons 11/19. `uv run --with pandas` worked directly this round: first
+  used to hand-verify every number in the lesson text against real pandas
+  output (`.scratch/data-lesson21/explore.py`, deleted after) before writing
+  a word of the lesson, then the shipped (unsolved) `practice/21_concat.py`
+  was executed and initially caught a new variant of the by-now-familiar
+  Ellipsis-is-truthy gotcha (Lessons 19/20): `ignore_index=...` doesn't
+  raise, since Ellipsis is truthy and behaves exactly like `True` — Exercise
+  1 silently passed on the very first unsolved run. Fixed by moving the
+  placeholder into the DataFrame list itself (`pd.concat([...], ...)`
+  instead of `pd.concat([batch_a, batch_b], ignore_index=...)`), which does
+  raise `TypeError` on an unsolved Ellipsis inside the list; re-ran and
+  confirmed all 4 exercises print ✗ with no crash. A solved copy
+  (`.scratch/data-lesson21/solved.py`, deleted after — plain `rm -rf` worked
+  fine this round, no approval needed) then printed all ✓ against the exact
+  hand-verified values (stacked 4-row 0..3 index; `.loc["feb"]` gives
+  Chi/Danh; An/Binh get NaN `region`, Danh gets "West"; row 2's amount 180.0
+  pairs with rank 1). `bin/record-progress data lesson_generated --day 21
+  --lesson 0021-concat-stacking-dataframes.html --detail '{"by":"launchd"}'`
+  ran directly and succeeded, no approval blocker this round (write path
+  works even though the read path stays blocked, per most rounds' finding).
+  Added `pd.concat()` to the glossary (one entry covering `axis=`,
+  `ignore_index=`, and `keys=` together, same precedent as the combined
+  `stack()/unstack()` and `idxmax()/idxmin()` entries) and registered
+  Lesson 21 in nav.js. Quiz options were drafted into per-option scratch
+  files and verified with `wc -w` (this course's established convention,
+  following Lesson 19's note that one pass isn't infallible) — all four
+  questions landed at 8/8/8 on the first count, no rewrite pass needed. Set
+  the teaser going forward to `query()` (used without explanation inside
+  Lesson 8, never taught as its own topic — flagged as a candidate in
+  Lesson 20's entry above) if no drill-outcome signal surfaces by next
+  generation.

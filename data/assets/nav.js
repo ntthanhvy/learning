@@ -46,6 +46,8 @@
       file: "lessons/0019-nunique-and-explode.html" },
     { n: 20, date: "2026-07-28", title: "idxmax() and idxmin(): WHICH row, not just the value",
       file: "lessons/0020-idxmax-and-idxmin.html" },
+    { n: 21, date: "2026-07-29", title: "pd.concat(): stacking DataFrames",
+      file: "lessons/0021-concat-stacking-dataframes.html" },
   ];
 
   const REFS = [

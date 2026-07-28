@@ -307,3 +307,17 @@ by the user there; they apply here identically.
   per its own window close; backend lesson 22 — CSRF, the gap Lesson 4
   deferred — and data lesson 20 — idxmax()/idxmin() — were generated this
   round via delegated agents; see their own NOTES.md entries for detail.)
+- 2026-07-29 (headless 06:00 run): same as every prior post-week day —
+  verified `daily.html`, `assets/srs.js`, and `assets/quiz-bank.js` are all
+  present and untouched (`quiz-bank.js` still tags exactly days 1-7, with
+  exactly 7 kata entries `k1`-`k7`; `nav.js` still registers only the 7
+  Jul 8-14 lessons). Still the correct "daily quiz+kata" for this
+  post-week phase per PLAN.md, so nothing new was generated. Direct `psql
+  "$LEARNING_DB_URL" ...` reads were blocked again this session (content-
+  level block on the variable name), so no `course_progress` rows could be
+  read for a scope-change signal (e.g. a request to keep growing the bank
+  past Day 7); `bin/record-progress` worked fine as a write this round
+  (used for backend/data, see below). No new learning record beyond the
+  Day-1 baseline. (Go skipped again per its own window close, now nine
+  days past it; backend lesson 23 — mass assignment & overexposure — and
+  data lesson 21 — `pd.concat()` — were generated this round.)

@@ -50,6 +50,8 @@
       file: "lessons/0021-configuration-env-vs-code.html" },
     { n: 22, date: "2026-07-28", title: "CSRF: the other half of cookie auth",
       file: "lessons/0022-csrf-the-other-half-of-cookie-auth.html" },
+    { n: 23, date: "2026-07-29", title: "Mass assignment & overexposure",
+      file: "lessons/0023-mass-assignment-and-overexposure.html" },
   ];
 
   const REFS = [

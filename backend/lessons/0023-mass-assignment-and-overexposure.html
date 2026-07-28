@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 23 · Mass assignment & overexposure</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 23 · ~20 min</p>
+<h1>Mass assignment: what your API accidentally lets clients set</h1>
+<p class="byline">Lesson 12 taught the record-level check: <em>does this user own this row?</em> Today's bug passes that check completely — the caller really does own the row — and still lets them write a field nobody meant to expose. It's the OWASP risk that gets skipped precisely because authorization already looks handled.</p>
+
+<h2>1 · The convenient trap: one struct, two jobs</h2>
+<p>A Go struct that mirrors a database row is genuinely convenient — <code>pgx</code> can scan a row straight into it, and <code>encoding/json</code> can decode a request body straight into the same one. Reusing it for both is the default move, and it's exactly the bug:</p>
+<pre><code><span class="kw">type</span> User <span class="kw">struct</span> {
+    ID          <span class="kw">int</span>    <span class="str">`json:"id"`</span>
+    Email       <span class="kw">string</span> <span class="str">`json:"email"`</span>
+    Name        <span class="kw">string</span> <span class="str">`json:"name"`</span>
+    IsAdmin     <span class="kw">bool</span>   <span class="str">`json:"is_admin"`</span>
+    BalanceCent <span class="kw">int</span>    <span class="str">`json:"balance_cents"`</span>
+}
+
+<span class="kw">func</span> updateProfileHandler(w http.ResponseWriter, r *http.Request) {
+    userID := UserFromContext(r.Context()).ID
+    <span class="kw">var</span> update User
+    <span class="kw">if</span> err := json.NewDecoder(r.Body).Decode(&amp;update); err != <span class="kw">nil</span> {
+        http.Error(w, <span class="str">"bad request"</span>, http.StatusBadRequest)
+        <span class="kw">return</span>
+    }
+    update.ID = userID <span class="cm">// "safety": force the id... but every other field is still client-controlled</span>
+    store.UpdateUser(r.Context(), update)
+}</code></pre>
+<p>This is <dfn data-en="a vulnerability where decoding untrusted input directly onto a model binds every field the model happens to have, not just the ones the client was meant to set" data-vn="mass assignment (giữ nguyên) — bind thẳng JSON client gửi vào toàn bộ field của model, kể cả field không nên cho client sửa">mass assignment</dfn>: the handler is authenticated (Lesson 4), it's checking the right record (Lesson 12's ownership check would pass — this <em>is</em> the caller's own row), and it still lets the request body decide <code>IsAdmin</code> and <code>BalanceCent</code>, because those fields exist on the struct <code>json.Decode</code> was pointed at. Forcing <code>update.ID = userID</code> only guards the one field someone remembered to think about.</p>
+
+<h2>2 · The attack, spelled out</h2>
+<p>A client sends exactly the request the UI would send for a normal profile edit — plus two extra keys the UI never sends but the API never rejects:</p>
+<pre><code>PATCH /me
+{"name": "Kim", "email": "kim@example.com", "is_admin": true, "balance_cents": 999999}</code></pre>
+<p>Nothing here trips authentication or the record-level check from Lesson 12 — this really is Kim, editing Kim's own row, exactly as allowed. The bug is one level down: <em>which fields</em> an already-authorized write is allowed to touch was never decided. That's the distinction worth holding onto — Lesson 12 answered "can this user write to this row at all," and mass assignment is "which columns of that row," a separate question with no shared middleware to answer it either.</p>
+
+<h2>3 · The fix: an explicit allowlist struct</h2>
+<p>Lesson 17 named the general principle already, for values: allowlist over blocklist — accept only what you've explicitly decided is fine, rather than trying to enumerate everything bad. The same principle applies to <em>fields</em>, not just values. The fix isn't a filter that strips <code>is_admin</code> out after decoding — it's a struct that never had a slot for it to land in:</p>
+<pre><code><span class="kw">type</span> ProfileUpdate <span class="kw">struct</span> {
+    Name  <span class="kw">string</span> <span class="str">`json:"name"`</span>
+    Email <span class="kw">string</span> <span class="str">`json:"email"`</span>
+}
+
+<span class="kw">func</span> updateProfileHandler(w http.ResponseWriter, r *http.Request) {
+    userID := UserFromContext(r.Context()).ID
+    <span class="kw">var</span> in ProfileUpdate
+    <span class="kw">if</span> err := json.NewDecoder(r.Body).Decode(&amp;in); err != <span class="kw">nil</span> {
+        http.Error(w, <span class="str">"bad request"</span>, http.StatusBadRequest)
+        <span class="kw">return</span>
+    }
+    store.UpdateProfile(r.Context(), userID, in.Name, in.Email) <span class="cm">// only these two columns, ever — nothing else CAN bind</span>
+}</code></pre>
+<p>Send the exact same attacker payload from section 2 at this version: <code>is_admin</code> and <code>balance_cents</code> are simply dropped by <code>json.Decode</code>, silently, because <code>ProfileUpdate</code> has no field for them. There's no list of dangerous fields to remember and keep in sync — the struct's shape <em>is</em> the allowlist. The one-time cost is a second struct per write endpoint instead of reusing the DB model; the payoff is that adding a new sensitive column to <code>User</code> later can never accidentally become client-writable, because nothing wires it up until someone deliberately does.</p>
+
+<div class="callout"><strong>Not just Go:</strong> this bug has hit production systems built in every language — a well-known 2012 GitHub incident let a user set <code>public_key</code> on someone else's account this exact way, back when Rails' ActiveRecord bound request params onto models by default. The language changes; the shape of the mistake — model convenience reused as the request boundary — doesn't.</div>
+
+<h2>4 · The read-side twin: excessive data exposure</h2>
+<p>The same convenience cuts the other way too. A handler that does <code>json.NewEncoder(w).Encode(user)</code> straight off the <code>User</code> struct sends <em>every</em> field back to the client — including ones like a password hash or an internal risk score that were only ever meant to live in the database:</p>
+<table class="gloss">
+  <tr><th>Direction</th><th>Bug</th><th>Fix</th></tr>
+  <tr><td>Write (request → model)</td><td>Mass assignment — client sets fields it shouldn't</td><td>A request struct with only the settable fields</td></tr>
+  <tr><td>Read (model → response)</td><td><dfn data-en="the read-side mirror of mass assignment: encoding an internal model straight into an API response leaks fields — password hashes, internal flags, other users' data — that were never meant to leave the server" data-vn="excessive data exposure (giữ nguyên) — trả nguyên model nội bộ ra response, lộ field không nên public">Excessive data exposure</dfn> — response leaks internal fields</td><td>A response struct with only the public fields</td></tr>
+</table>
+<p>Same root cause, mirrored: one struct, reused past the boundary it was safe inside. The fix is the same shape too — a dedicated struct for what crosses the wire, separate from the one that mirrors the table.</p>
+
+<div class="interview">
+<p><strong>Q: "You've added authentication and an ownership check to a PATCH endpoint. What else would you check before calling it safe?"</strong> A strong answer, out loud: <em>"Which specific fields the request body is allowed to set. If the handler decodes JSON straight into the same struct the database row uses, any field on that struct becomes client-writable the moment it exists — even ones nobody intended, like a role flag or a balance. I'd use a separate request struct with only the fields this endpoint should ever change, so it's not a filter I have to remember, it's a type that structurally can't hold anything else. I'd apply the same idea to the response side — encoding the internal model back out can leak fields like a password hash the same way."</em> The signal: authentication and ownership are necessary but not sufficient — field-level access is a third, separate check.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Mass assignment is specifically about binding: decoding client-controlled JSON directly onto a model gives the client control of every field that model happens to have, not just the ones a handler meant to expose for editing.">
+    <p class="stem">What is mass assignment, precisely?</p>
+    <button class="opt" data-ok>binding client JSON directly onto a model's every field</button>
+    <button class="opt">a forged cross-site request riding automatically attached session cookies</button>
+    <button class="opt">untrusted input changing a SQL query's actual meaning entirely</button>
+    <button class="opt">capping how many requests a single client may send</button>
+  </div>
+  <div class="q" data-why="The struct's fields are exactly what json.Decode can fill from the request body — reusing the DB-row struct for decoding means every one of its fields, sensitive or not, becomes something the client's request can set.">
+    <p class="stem">Why does reusing one struct for both JSON binding and the database row create risk?</p>
+    <button class="opt" data-ok>any field present on the struct becomes settable</button>
+    <button class="opt">database columns are automatically encrypted before every write</button>
+    <button class="opt">JSON decoding ignores fields it does not expect</button>
+    <button class="opt">HTTP requests cannot include fields beyond what's declared</button>
+  </div>
+  <div class="q" data-why="update.ID = userID only forces the one field the handler author thought to guard — every other field on the struct, like IsAdmin or BalanceCent, is still whatever the client's JSON body set it to.">
+    <p class="stem">In the vulnerable handler, forcing <code>update.ID = userID</code> after decoding fixes what?</p>
+    <button class="opt" data-ok>fixes only the id field every other stays open</button>
+    <button class="opt">fixes every possible field including the admin flag too</button>
+    <button class="opt">fixes nothing the decode step already rejected the request</button>
+    <button class="opt">fixes the balance field but leaves the id open</button>
+  </div>
+  <div class="q" data-why="Excessive data exposure is the read-side mirror of mass assignment: encoding the full internal model into a response leaks whatever fields it holds, sensitive or not — the fix is the same shape, a dedicated struct holding only what should cross the wire.">
+    <p class="stem">What's the read-side twin of mass assignment, and its fix?</p>
+    <button class="opt" data-ok>excessive data exposure fixed by a response struct</button>
+    <button class="opt">SQL injection fixed by using parameterized query placeholders</button>
+    <button class="opt">rate limiting fixed by adding token bucket checks</button>
+    <button class="opt">CSRF fixed by setting the SameSite cookie attribute</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> OWASP's <a href="https://cheatsheetseries.owasp.org/cheatsheets/Mass_Assignment_Cheat_Sheet.html">Mass Assignment Cheat Sheet</a> (~5 min) — this course's standing security reference (RESOURCES.md) — names the same allowlist-of-fields fix and covers framework-specific defaults (Rails, Django, Spring) where this bug has historically been the framework's fault, not just a missed check.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> open — MISSION.md's five criteria and every previously-identified gap (config, CSRF, and now mass assignment) are covered; a good next step is naming one track to deepen, or a real PR review together. Tell your teacher which you'd like.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

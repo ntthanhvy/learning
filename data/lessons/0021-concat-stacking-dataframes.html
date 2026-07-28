@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 21 · pd.concat(): stacking DataFrames</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 21 · ~20 min · 29 Jul 2026</p>
+<h1>pd.concat(): stacking DataFrames, merge()'s sibling for "just append rows"</h1>
+<p class="byline">Lesson 20's closing teaser named this directly — <code>pd.concat()</code>, <code>merge()</code>'s sibling from Lesson 5 for the "just append rows" case. Every join so far has matched rows by a shared key value. Today's tool doesn't match anything at all — it just stacks.</p>
+
+<h2>1 · concat() doesn't match anything — merge() does</h2>
+<p>Lesson 5's <code>merge()</code> answers "which row in table A corresponds to which row in table B?" by comparing key VALUES — <code>customer_id</code> in one table against <code>customer_id</code> in the other. <dfn data-en="a pandas function that stacks two or more DataFrames together — by row (axis=0, the default) or by column (axis=1) — with no matching or comparing of values at all, unlike merge()" data-vn="giữ nguyên 'pd.concat()' — ghép nhiều DataFrame lại (theo hàng hoặc cột), không so khớp giá trị như merge()">pd.concat()</dfn> asks a completely different question: "put these DataFrames together, one after another." No key, no matching, no lookup — just stacking. The two tools solve opposite halves of "combine two tables": <code>merge()</code> when rows need to be matched by what they mean; <code>concat()</code> when they just need to sit next to each other.</p>
+
+<h2>2 · axis=0 (the default): stacking rows</h2>
+<p>The most common case: two exports with the same columns that just need to become one table. Say a January batch and a February batch of orders, pulled separately:</p>
+<pre><code>batch_a = pd.DataFrame({<span class="str">"customer"</span>: [<span class="str">"An"</span>, <span class="str">"Binh"</span>], <span class="str">"amount"</span>: [<span class="kw">120.0</span>, <span class="kw">35.5</span>]})
+batch_b = pd.DataFrame({<span class="str">"customer"</span>: [<span class="str">"Chi"</span>, <span class="str">"Danh"</span>], <span class="str">"amount"</span>: [<span class="kw">99.9</span>, <span class="kw">200.0</span>]})
+
+pd.concat([batch_a, batch_b])
+<span class="cm">#   customer  amount
+#0       An   120.0
+#1     Binh    35.5
+#0      Chi    99.9   &lt;- index restarted at 0, collided with batch_a's row 0
+#1     Danh   200.0</span></code></pre>
+<p>Notice the index: <code>0, 1, 0, 1</code> — each DataFrame kept its own original row labels, so two unrelated rows now share the label <code>0</code>. That's rarely what you want once the batches are meant to become one logical table, and it's the first thing to fix:</p>
+<pre><code>pd.concat([batch_a, batch_b], ignore_index=<span class="kw">True</span>)
+<span class="cm">#   customer  amount
+#0       An   120.0
+#1     Binh    35.5
+#2      Chi    99.9
+#3     Danh   200.0</span></code></pre>
+<p><code>ignore_index=True</code> throws away both original indexes and renumbers the result <code>0..N-1</code> — the right default whenever the old row labels carried no meaning worth keeping.</p>
+
+<h2>3 · keys=: keeping track of which batch a row came from</h2>
+<p>Sometimes the old labels — or at least which source they came from — <em>is</em> worth keeping, for debugging or for reporting "how many rows came from each batch." <code>keys=</code> builds exactly that, as a MultiIndex (Lesson 14's structure, reused here for a new purpose):</p>
+<pre><code>combined = pd.concat([batch_a, batch_b], keys=[<span class="str">"jan"</span>, <span class="str">"feb"</span>])
+<span class="cm">#         customer  amount
+#jan 0          An   120.0
+#    1        Binh    35.5
+#feb 0         Chi    99.9
+#    1        Danh   200.0</span>
+
+combined.loc[<span class="str">"feb"</span>]
+<span class="cm">#   customer  amount
+#0       Chi    99.9
+#1     Danh   200.0</span></code></pre>
+<p>The outer index level is the batch name, the inner level is each batch's own original row position — and <code>.loc["feb"]</code> slices straight back to just that batch, unchanged. This is the version to reach for when "which source did this row come from" is itself a question worth answering later, not just a one-time stack-and-forget.</p>
+
+<h2>4 · Mismatched columns: concat fills, it doesn't reject</h2>
+<p>Real batches don't always have identical columns. Say a later export adds a <code>region</code> column the earlier ones never had:</p>
+<pre><code>batch_c = pd.DataFrame({<span class="str">"customer"</span>: [<span class="str">"Danh"</span>], <span class="str">"amount"</span>: [<span class="kw">200.0</span>], <span class="str">"region"</span>: [<span class="str">"West"</span>]})
+
+pd.concat([batch_a, batch_c], ignore_index=<span class="kw">True</span>)
+<span class="cm">#   customer  amount region
+#0       An   120.0    NaN   &lt;- batch_a never had a region column
+#1     Binh    35.5    NaN
+#2     Danh   200.0   West</span></code></pre>
+<p><code>concat()</code> doesn't error and doesn't drop the extra column — it takes the union of every column seen across all inputs and fills whatever a given row's source DataFrame didn't have with <code>NaN</code>. That's Lesson 3's missing-data problem showing up in a new place: a successful concat can silently manufacture NaNs anywhere the input shapes didn't quite match, worth checking for with <code>.isna().sum()</code> right after, the same reflex Lesson 3 taught for any freshly loaded table.</p>
+
+<h2>5 · axis=1: stacking columns, aligned by index — not by key</h2>
+<p>Less common, but worth recognizing: <code>axis=1</code> puts DataFrames side by side instead of one after another, lining rows up by INDEX LABEL rather than by any key column:</p>
+<pre><code>amount = pd.Series([<span class="kw">120.0</span>, <span class="kw">35.5</span>, <span class="kw">180.0</span>, <span class="kw">42.0</span>], name=<span class="str">"amount"</span>)
+ranks = amount.rank(ascending=<span class="kw">False</span>).astype(<span class="kw">int</span>).rename(<span class="str">"rank"</span>)  <span class="cm"># Lesson 7</span>
+
+pd.concat([amount, ranks], axis=<span class="kw">1</span>)
+<span class="cm">#   amount  rank
+#0   120.0     2
+#1    35.5     4
+#2   180.0     1
+#3    42.0     3</span></code></pre>
+<p>This works because both Series already share the same index (<code>0..3</code>) — <code>concat(axis=1)</code> just glues columns together by matching those labels, the same alignment mechanism that made Lesson 20's <code>.loc[idxmax()]</code> work. It is <em>not</em> a substitute for <code>merge()</code>: if the two inputs' indexes don't already line up, this produces misaligned garbage or NaN-filled rows instead of an error — <code>merge()</code> is still the right tool anytime rows need to be matched by a key's VALUE rather than by already sharing the same index.</p>
+
+<div class="callout"><strong>Rule of thumb:</strong> rows that mean the same thing across sources (another batch of the same kind of data) → <code>concat(axis=0)</code>. Columns describing the SAME rows, already aligned by index → <code>concat(axis=1)</code>. Rows that need to be matched by a key's value before they can be combined → <code>merge()</code>, not concat, regardless of axis.</div>
+
+<h2>6 · The SQL bridge</h2>
+<p><code>concat(axis=0)</code> is <code>UNION ALL</code> — stack every row from both queries, keep duplicates, no matching required, exactly concat's behavior. Plain SQL <code>UNION</code> (which also de-duplicates) needs an explicit <code>.drop_duplicates()</code> call afterward in pandas, since <code>concat()</code> alone never removes anything. <code>concat(axis=1)</code> has no clean SQL equivalent, for the same reason Lesson 20 found none for grouped <code>idxmax()</code>: a SQL table has no inherent row order or position for a second table to align against the way a pandas index does — a SQL join always needs an explicit key to match on.</p>
+
+<div class="interview">
+<p><strong>Q: "You have twelve monthly CSV exports with identical columns that need to become one DataFrame. What do you reach for?"</strong> A strong answer, out loud: <em>"pd.concat() with a list of the twelve DataFrames, axis=0 since it's the default — this is a pure row-stacking problem, not a matching problem, so merge() would be the wrong tool entirely. I'd pass ignore_index=True unless keeping track of which month each row came from actually matters, in which case I'd use keys= instead to get a MultiIndex I can still slice by month later. And right after, I'd check columns and run isna().sum(), because if even one month's file has a differently-named or missing column, concat won't error — it'll silently NaN-fill instead."</em> The signal: naming concat vs merge as a first branch — stacking rows needs no key, matching rows always does — before reaching for either.</p>
+</div>
+
+<h2>Try it — self-checking practice (~15 min)</h2>
+<p>Open <code>practice/21_concat.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/21_concat.py</code></pre>
+<p>New inline fixtures (no shared CSV touched): <code>batch_a</code> (An/120.0, Binh/35.5), <code>batch_b</code> (Chi/99.9, Danh/200.0), <code>batch_c</code> (Danh/200.0, plus an extra <code>region</code> column). Exercise 1 stacks <code>batch_a</code>/<code>batch_b</code> with <code>ignore_index=True</code>; Exercise 2 uses <code>keys=</code> and slices back out with <code>.loc[]</code>; Exercise 3 concats the mismatched-column <code>batch_a</code>/<code>batch_c</code> and checks the NaN fill; Exercise 4 does an <code>axis=1</code> concat of two same-length, same-index Series.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="merge() matches rows across two tables by comparing a shared key's values (Lesson 5); concat() does no matching at all, it just stacks DataFrames together by row or by column.">
+    <p class="stem">What's the core difference between <code>concat()</code> and <code>merge()</code>?</p>
+    <button class="opt" data-ok>concat stacks together merge matches by key values</button>
+    <button class="opt">concat matches by key merge only stacks rows</button>
+    <button class="opt">concat and merge do exactly the same thing</button>
+  </div>
+  <div class="q" data-why="Without it, each input DataFrame keeps its own original row labels, so stacking two 0-indexed DataFrames produces a repeated 0,1,0,1 index. ignore_index=True discards both and renumbers the result 0..N-1.">
+    <p class="stem">After <code>pd.concat([batch_a, batch_b])</code>, how do you get a clean 0..N index instead of repeated labels?</p>
+    <button class="opt" data-ok>pass ignore_index equals True to renumber every row</button>
+    <button class="opt">pass axis equals one to renumber every row</button>
+    <button class="opt">pass keys equals a list to renumber rows</button>
+  </div>
+  <div class="q" data-why="concat() takes the union of every column seen across its inputs and never errors on a mismatch — any row whose source DataFrame lacked a given column gets NaN there instead, the same missing-data shape Lesson 3 taught to check for.">
+    <p class="stem"><code>pd.concat()</code> on two DataFrames with different columns produces what for the missing cells?</p>
+    <button class="opt" data-ok>missing cells are filled in with NaN values</button>
+    <button class="opt">missing cells raise an error immediately every time</button>
+    <button class="opt">missing cells are silently dropped from the result</button>
+  </div>
+  <div class="q" data-why="UNION ALL stacks every row from two queries with no matching and keeps duplicates — exactly concat(axis=0)'s behavior. A plain SQL JOIN, by contrast, is what merge() maps to, since it matches rows by a key's value.">
+    <p class="stem">What is <code>pd.concat(axis=0)</code>'s closest SQL equivalent?</p>
+    <button class="opt" data-ok>UNION ALL stacking rows from both tables directly</button>
+    <button class="opt">INNER JOIN matching rows that share a key</button>
+    <button class="opt">GROUP BY collapsing every row into one aggregate</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the pandas User Guide's <a href="https://pandas.pydata.org/docs/user_guide/merging.html">"Merge, join, concatenate and compare"</a> page (~15 min, already cited in RESOURCES.md as "lesson-grade on their own") — covers <code>join=</code> ("outer" vs "inner", for choosing NaN-fill vs intersection-only on mismatched columns) and <code>compare()</code>, both beyond today's scope.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>pd.concat()</code> is new today.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-21 comes back reported as shakiest, otherwise <code>query()</code> (used without explanation inside Lesson 8, never taught as its own topic) keeps the drill library growing.<br><br>
+💬 Anything unclear — concat vs merge, keys=, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

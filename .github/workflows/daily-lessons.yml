@@ -15,7 +15,11 @@ concurrency:
 jobs:
   generate:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Sized for the active-course count, not the average run. Typical runs are
+    # 10-13 min, but the worst observed was 24 min back when only backend/ and
+    # data/ were active; python/ (2026-07-29) adds a third active course whose
+    # practice files must actually be executed to verify. 30 min left no room.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 

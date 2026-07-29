@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 1 · Names, objects &amp; mutability</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 1 · ~20 min · 29 Jul 2026</p>
+<h1>Names, objects &amp; mutability: what <code>=</code> actually does</h1>
+<p class="byline">Day 1 of the intensive week. Before comprehensions, before generators, before any of it: what happens when you write <code>x = something</code>. Get this wrong and Python behaves like it has a poltergeist — a list changes when you never touched it, a function remembers data from a call an hour ago. Get it right and every one of those mysteries collapses into one rule.</p>
+
+<div class="callout"><strong>Why this is Day 1:</strong> nearly every "Python is weird" bug traces back to this single idea. It is also the thing that makes the rest of the week make sense — why a comprehension builds a <em>new</em> list (Day 2), why dict keys must be immutable (Day 3), why a generator can't be replayed (Day 5). One rule, spent seven times.</div>
+
+<h2>1 · A name is a label, not a box</h2>
+<p>Most languages teach you to picture a variable as a box with a value inside. Python does not work that way, and carrying the box picture is the root of nearly every surprise ahead.</p>
+<p>In Python, the data lives in an <dfn data-en="the actual piece of data living in memory, with a type and a value — in Python everything is one: numbers, strings, lists, functions, even classes" data-vn="giữ nguyên &quot;object&quot; — vùng dữ liệu thật nằm trong bộ nhớ">object</dfn>. A <dfn data-en="a label bound to an object; Python names are not boxes holding values, they are tags stuck onto objects" data-vn="&quot;biến&quot; / &quot;name&quot; — cái nhãn dán lên object, không phải cái hộp chứa">name</dfn> is just a label stuck onto that object. So <code>=</code> does not "put a value into a variable" — it attaches a label to an object that already exists. That attachment is called <dfn data-en="assignment attaches a name to an object; assigning again moves that name to a different object and never changes the original" data-vn="&quot;gán&quot; — dán nhãn lên object; gán lại là chuyển nhãn sang object khác">binding</dfn>.</p>
+<pre><code>x = <span class="kw">5</span>
+y = x        <span class="cm"># y now labels the SAME object as x</span>
+x = <span class="kw">6</span>        <span class="cm"># the label x is MOVED to a different object</span>
+<span class="kw">print</span>(y)     <span class="cm"># 5 — y never moved, and the object 5 never changed</span></code></pre>
+<p>Read line 3 carefully. It did not "change x from 5 to 6." The object <code>5</code> is still there, unchanged, still labelled by <code>y</code>. All that happened is the label <code>x</code> was peeled off <code>5</code> and stuck onto <code>6</code>. That is <dfn data-en="moving an existing name to point at a different object; contrast with mutation, which changes the object itself" data-vn="&quot;gán lại&quot; — chuyển nhãn sang object khác, object cũ không đổi">rebinding</dfn>, and it is all that plain assignment ever does.</p>
+
+<h2>2 · Two labels, one object</h2>
+<p>So far so harmless — because integers can't be changed anyway. The picture starts to matter the moment two names label the same <em>changeable</em> object. That's called an <dfn data-en="two or more names bound to the same object; assignment aliases rather than copies, so mutating through one name is visible through the other" data-vn="giữ nguyên &quot;alias&quot; — hai tên cùng trỏ một object">alias</dfn>:</p>
+<pre><code>a = [<span class="kw">1</span>, <span class="kw">2</span>, <span class="kw">3</span>]
+b = a            <span class="cm"># NOT a copy — b is a second label on the same list</span>
+b.append(<span class="kw">4</span>)
+
+<span class="kw">print</span>(a)         <span class="cm"># [1, 2, 3, 4]  &lt;- a changed, and you never mentioned a</span>
+<span class="kw">print</span>(b)         <span class="cm"># [1, 2, 3, 4]</span></code></pre>
+<p>There is only ever <em>one</em> list here. <code>b = a</code> copied nothing — it added a second label. <code>append</code> then changed the single shared object, and both labels see it because both point at the same thing.</p>
+<p>You can prove there is only one object with <code>is</code>, which tests <dfn data-en="whether two names refer to the very same object, tested with `is` and shown by id(); distinct from ==, which compares values" data-vn="&quot;is&quot; — hỏi có phải CÙNG MỘT object không, khác &quot;==&quot;">identity</dfn>:</p>
+<pre><code>a = [<span class="kw">1</span>, <span class="kw">2</span>]
+b = a
+c = [<span class="kw">1</span>, <span class="kw">2</span>]      <span class="cm"># a separate list that happens to look the same</span>
+
+<span class="kw">print</span>(a <span class="kw">is</span> b)   <span class="cm"># True  — one object, two labels</span>
+<span class="kw">print</span>(a <span class="kw">is</span> c)   <span class="cm"># False — two different objects</span>
+<span class="kw">print</span>(a == c)   <span class="cm"># True  — different objects, equal contents</span></code></pre>
+<div class="callout"><strong><code>is</code> vs <code>==</code>:</strong> <code>is</code> asks "same object?", <code>==</code> asks "same value?". You almost always want <code>==</code>. The one everyday use of <code>is</code> is comparing against <code>None</code> — write <code>if x is None:</code>, never <code>if x == None:</code>.</div>
+
+<h2>3 · The dividing line: mutable vs immutable</h2>
+<p>Whether aliasing can bite you depends entirely on one property of the object.</p>
+<table class="gloss">
+  <tr><th>Kind</th><th>Types</th><th>Can it be changed in place?</th></tr>
+  <tr><td><dfn data-en="an object whose contents can be changed in place without creating a new object" data-vn="&quot;mutable&quot; — sửa được tại chỗ (list, dict, set)">mutable</dfn></td><td><code>list</code>, <code>dict</code>, <code>set</code></td><td>Yes — <code>.append()</code>, <code>d[k] = v</code>, <code>.add()</code></td></tr>
+  <tr><td><dfn data-en="an object that cannot be changed after creation; changing one always builds a new object and rebinds the name" data-vn="&quot;immutable&quot; — không sửa được, muốn đổi phải tạo object mới">immutable</dfn></td><td><code>int</code>, <code>float</code>, <code>str</code>, <code>bool</code>, <code>tuple</code></td><td>No — every "change" builds a new object</td></tr>
+</table>
+<p>This is why strings feel different from lists:</p>
+<pre><code>s = <span class="str">"hello"</span>
+t = s
+s = s.upper()      <span class="cm"># builds a NEW string, rebinds s to it</span>
+<span class="kw">print</span>(t)           <span class="cm"># "hello" — untouched, because strings can't be mutated</span>
+
+nums = [<span class="kw">1</span>, <span class="kw">2</span>]
+other = nums
+nums.append(<span class="kw">3</span>)   <span class="cm"># MUTATES the one shared list</span>
+<span class="kw">print</span>(other)       <span class="cm"># [1, 2, 3] — it changed underneath you</span></code></pre>
+<p>Same aliasing in both cases. Different outcome, and the only difference is whether the object could be <dfn data-en="to change an object's contents directly, as opposed to rebinding a name to a different object" data-vn="&quot;sửa in-place&quot; — đổi ruột object, không tạo cái mới">mutated</dfn>. Notice the tell: <code>s.upper()</code> <em>returns</em> a new string and you must assign it, while <code>nums.append(3)</code> returns <code>None</code> and changes the object. In Python, a method that returns <code>None</code> has almost always just mutated something.</p>
+
+<h2>4 · When you actually want a copy</h2>
+<p>If aliasing isn't what you want, ask for a copy explicitly:</p>
+<pre><code>original = [<span class="kw">1</span>, <span class="kw">2</span>, <span class="kw">3</span>]
+copy1 = <span class="kw">list</span>(original)   <span class="cm"># a new list</span>
+copy2 = original[:]      <span class="cm"># same thing, older spelling</span>
+
+copy1.append(<span class="kw">99</span>)
+<span class="kw">print</span>(original)         <span class="cm"># [1, 2, 3] — safe</span></code></pre>
+<p>That is a <dfn data-en="a new outer object whose elements are still references to the same inner objects — safe against changes to the outer container, not against mutating something nested inside it" data-vn="&quot;shallow copy&quot; — copy lớp ngoài, ruột bên trong vẫn dùng chung">shallow copy</dfn>: the outer list is new, but the items inside are still the same objects. With flat data that is all you need. With nesting, the sharing is still there one level down:</p>
+<pre><code>rows = [[<span class="str">"An"</span>, <span class="kw">120</span>], [<span class="str">"Binh"</span>, <span class="kw">35</span>]]
+shallow = <span class="kw">list</span>(rows)
+shallow[<span class="kw">0</span>].append(<span class="str">"VN"</span>)     <span class="cm"># mutating an INNER list</span>
+<span class="kw">print</span>(rows[<span class="kw">0</span>])              <span class="cm"># ['An', 120, 'VN'] — still shared</span>
+
+<span class="kw">import</span> copy
+deep = copy.deepcopy(rows)   <span class="cm"># nothing shared at any depth</span></code></pre>
+<p>A <dfn data-en="a recursive copy of an object and everything nested inside it, sharing nothing with the original — correct but slower, and rarely needed" data-vn="&quot;deep copy&quot; — copy toàn bộ, không dùng chung gì cả">deep copy</dfn> is the sledgehammer: correct, slower, and usually a sign the data should have been rebuilt rather than copied. Reach for it only when you genuinely need an independent nested structure.</p>
+
+<h2>5 · The trap this all exists to explain</h2>
+<p>Here is the bug this lesson buys you immunity from. It catches every Python programmer exactly once:</p>
+<pre><code><span class="cm"># BROKEN — do not write this</span>
+<span class="kw">def</span> add_item(item, basket=[]):
+    basket.append(item)
+    <span class="kw">return</span> basket
+
+<span class="kw">print</span>(add_item(<span class="str">"apple"</span>))    <span class="cm"># ['apple']</span>
+<span class="kw">print</span>(add_item(<span class="str">"banana"</span>))   <span class="cm"># ['apple', 'banana']  &lt;- ???</span></code></pre>
+<p>The second call was supposed to start from an empty basket. It didn't, and now you know exactly why: Python evaluates default values <strong>once, when the <code>def</code> line runs</strong> — not on every call. That single list object is created at definition time and reused by every call forever, accumulating. This is the <dfn data-en="Python evaluates a function's default values once at definition time, so a default [] or {} is one object shared by every call, accumulating across calls; the fix is None plus a fresh object inside the body" data-vn="&quot;bẫy default mutable&quot; — đừng để =[] hay ={} làm giá trị mặc định">mutable default argument</dfn> trap.</p>
+<p>The fix is always the same shape:</p>
+<pre><code><span class="cm"># CORRECT</span>
+<span class="kw">def</span> add_item(item, basket=<span class="kw">None</span>):
+    <span class="kw">if</span> basket <span class="kw">is</span> <span class="kw">None</span>:
+        basket = []          <span class="cm"># a fresh list per call</span>
+    basket.append(item)
+    <span class="kw">return</span> basket</code></pre>
+<p><code>None</code> is immutable, so sharing it is harmless, and the real list is built inside the body — once per call. Note the <code>is None</code> from section 2 doing real work here.</p>
+
+<div class="callout"><strong>Rule of thumb:</strong> never put <code>[]</code>, <code>{}</code>, or <code>set()</code> in a function's default arguments. Default to <code>None</code> and build the real thing in the body. Numbers, strings, and <code>None</code> as defaults are always safe, because they can't be mutated.</div>
+
+<h2>6 · Why the data track cares</h2>
+<p>This isn't trivia — it is the difference between a pipeline that's correct and one that's quietly wrong. A cleaning function that takes a list of records and mutates it has changed the caller's data too, so the "raw" records are no longer raw and the step can't be re-run or debugged. The safe habit, which the whole rest of this course builds on:</p>
+<pre><code><span class="cm"># mutates the caller's data — the original is now gone</span>
+<span class="kw">def</span> clean(records):
+    <span class="kw">for</span> r <span class="kw">in</span> records:
+        r[<span class="str">"name"</span>] = r[<span class="str">"name"</span>].strip()
+    <span class="kw">return</span> records
+
+<span class="cm"># builds and returns something new — the original survives</span>
+<span class="kw">def</span> clean(records):
+    out = []
+    <span class="kw">for</span> r <span class="kw">in</span> records:
+        out.append({**r, <span class="str">"name"</span>: r[<span class="str">"name"</span>].strip()})
+    <span class="kw">return</span> out</code></pre>
+<p>The second shape — take input, return new output, never mutate — is what makes pipeline steps composable and testable. Day 2 rewrites that second version as a single readable line, and it will be obvious then why it produces a new list rather than editing the old one.</p>
+
+<div class="interview">
+<p><strong>Q: "What does <code>b = a</code> do in Python?"</strong> A strong answer, out loud: <em>"It binds a second name to the same object — it doesn't copy anything. If that object is mutable, like a list or dict, mutating it through either name is visible through both, because there's only one object. If it's immutable, like an int or a string, the question never comes up, since any 'change' rebinds the name to a new object and leaves the original alone. When I actually need independence I copy explicitly — list(a) for flat data, copy.deepcopy for nested."</em> The signal: separating <em>rebinding a name</em> from <em>mutating an object</em>. That distinction is the whole answer, and it's what the mutable-default-argument question is really testing too.</p>
+</div>
+
+<h2>Try it — self-checking practice (~15 min)</h2>
+<p>Open <code>practice/01_names_objects_mutability.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/01_names_objects_mutability.py</code></pre>
+<p>No dependencies — standard library only, so no <code>--with</code> flag is needed. Six exercises: predicting aliasing outcomes, using <code>is</code> vs <code>==</code>, making a safe copy, spotting the shallow-copy limit, fixing a mutable default argument, and rewriting a mutating function into a non-mutating one.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Assignment binds a second name to the same object; it never copies. Both names then see any mutation made through either one, because there is only one object.">
+    <p class="stem">What does <code>b = a</code> do when <code>a</code> is a list?</p>
+    <button class="opt" data-ok>binds another name to the same list</button>
+    <button class="opt">creates a brand new list object entirely</button>
+    <button class="opt">copies every element into a new list</button>
+  </div>
+  <div class="q" data-why="Strings are immutable, so upper() cannot change the original — it returns a new string, and the name s is rebound to that new object. The name t still labels the untouched original.">
+    <p class="stem">After <code>s = "hi"; t = s; s = s.upper()</code>, what is <code>t</code>?</p>
+    <button class="opt" data-ok>hi because strings can never be mutated</button>
+    <button class="opt">HI because both names were changed together</button>
+    <button class="opt">HI because upper mutates the original string</button>
+  </div>
+  <div class="q" data-why="`is` compares identity — whether two names point at the very same object. `==` compares values, so two separate lists with equal contents are == but not is.">
+    <p class="stem">What does <code>is</code> compare, unlike <code>==</code>?</p>
+    <button class="opt" data-ok>whether both names label one same object</button>
+    <button class="opt">whether both objects hold the same value</button>
+    <button class="opt">whether both objects share a single type</button>
+  </div>
+  <div class="q" data-why="Default values are evaluated once, when the def statement executes — so a default [] is a single object reused by every call, accumulating items across calls. Default to None and build the list inside the body instead.">
+    <p class="stem">Why is <code>def f(x, acc=[])</code> dangerous?</p>
+    <button class="opt" data-ok>the default list is shared across every call</button>
+    <button class="opt">the default list is rebuilt on every call</button>
+    <button class="opt">the default list is deleted after every call</button>
+  </div>
+  <div class="q" data-why="list(rows) builds a new outer list, but its elements are still references to the same inner objects — so mutating a nested list is visible through both. copy.deepcopy() is what breaks the sharing at every level.">
+    <p class="stem"><code>list(rows)</code> protects you against what, when <code>rows</code> holds nested lists?</p>
+    <button class="opt" data-ok>changes to the outer list only, not inner</button>
+    <button class="opt">changes to the inner lists only, not outer</button>
+    <button class="opt">changes to both the outer and inner lists</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> Ned Batchelder's <a href="https://nedbatchelder.com/text/names.html">"Facts and Myths about Python names and values"</a> (~15 min, cited in RESOURCES.md) — the clearest treatment of this topic anywhere, with diagrams that make the label-not-box picture stick. If you read one thing this week, read this. For the authoritative version, the <a href="https://docs.python.org/3/reference/datamodel.html">Data model</a> reference covers objects and identity formally.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — every term on this page is new today, since this is Lesson 1.<br>
+<strong>Next lesson (30 Jul):</strong> comprehensions and slicing — retiring the <code>for</code> loop for the "build a new list from an old one" case, including the exact <code>clean()</code> function from section 6.<br><br>
+💬 Anything unclear — aliasing, <code>is</code> vs <code>==</code>, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

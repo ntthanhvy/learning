@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Python Intensive Glossary</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Python Intensive · Reference</p>
+<h1>Glossary</h1>
+<p class="byline">Every jargon term used in the lessons, in one place. Tiếng Việt column is dev-style — how Vietnamese devs actually say it, not textbook translation.</p>
+
+<h2 id="day1">Day 1 — Names, objects &amp; mutability</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>object</td><td>giữ nguyên "object" — vùng dữ liệu thật nằm trong bộ nhớ</td><td>The actual piece of data living in memory, with a type and a value. In Python everything is one — numbers, strings, lists, functions, even classes. Names are attached to objects; the object is the thing that exists.</td></tr>
+  <tr><td>name (variable)</td><td>"biến" / "name" — cái nhãn dán lên object, không phải cái hộp chứa</td><td>A label bound to an object. Python names are <em>not</em> boxes holding values — they are tags stuck onto objects. <code>x = 5</code> makes the name <code>x</code> point at the object <code>5</code>; it does not put 5 inside a container called x.</td></tr>
+  <tr><td>binding / rebinding</td><td>"gán" — dán nhãn lên object; gán lại là chuyển nhãn sang object khác</td><td>Assignment attaches a name to an object (binding). Assigning again moves that name to a different object (rebinding) — it never changes the object the name used to point at.</td></tr>
+  <tr><td>reference</td><td>giữ nguyên "reference" — đường trỏ từ tên tới object</td><td>The link from a name to an object. Two names can hold references to the same object, which is why changing it through one name is visible through the other.</td></tr>
+  <tr><td>alias / aliasing</td><td>giữ nguyên "alias" — hai tên cùng trỏ một object</td><td>Two or more names bound to the same object. <code>b = a</code> aliases; it does not copy. The classic Python surprise: mutating through <code>b</code> changes what <code>a</code> shows.</td></tr>
+  <tr><td>mutable</td><td>"mutable" — sửa được tại chỗ (list, dict, set)</td><td>An object whose contents can be changed in place without creating a new object: <code>list</code>, <code>dict</code>, <code>set</code>. Mutation is visible through every name referencing it.</td></tr>
+  <tr><td>immutable</td><td>"immutable" — không sửa được, muốn đổi phải tạo object mới</td><td>An object that cannot be changed after creation: <code>int</code>, <code>float</code>, <code>str</code>, <code>tuple</code>, <code>bool</code>. "Changing" one always builds a new object and rebinds the name.</td></tr>
+  <tr><td>mutate / mutated (in place)</td><td>"sửa in-place" — đổi ruột object, không tạo cái mới</td><td>To change an object's contents directly — <code>lst.append(x)</code>, <code>d["k"] = v</code>. Contrast with rebinding, which swaps which object a name points to and leaves the original untouched.</td></tr>
+  <tr><td>identity (<code>is</code>)</td><td><code>is</code> — hỏi "có phải CÙNG MỘT object không", khác <code>==</code></td><td>Whether two names refer to the very same object, tested with <code>is</code> and shown by <code>id()</code>. Distinct from <code>==</code>, which asks whether two objects have equal <em>values</em>. Two equal lists can be separate objects.</td></tr>
+  <tr><td>shallow copy</td><td>"shallow copy" — copy lớp ngoài, ruột bên trong vẫn dùng chung</td><td>A new outer object whose elements are still references to the same inner objects. <code>list(a)</code> or <code>a[:]</code> gives one — safe against appends to the outer list, not against mutating a nested list inside it.</td></tr>
+  <tr><td>deep copy</td><td>"deep copy" — copy toàn bộ, không dùng chung gì cả</td><td>A recursive copy of an object and everything nested inside it, via <code>copy.deepcopy()</code>. Nothing is shared with the original — correct but slower, and rarely what you need.</td></tr>
+  <tr><td>mutable default argument</td><td>"bẫy default mutable" — đừng để <code>=[]</code> hay <code>={}</code> làm giá trị mặc định</td><td>Python evaluates a function's default values <em>once</em>, when the function is defined — so a default <code>[]</code> or <code>{}</code> is one object shared by every call, accumulating across calls. The fix is <code>None</code> as the default plus a fresh object inside the body.</td></tr>
+  <tr><td>garbage collection</td><td>giữ nguyên "GC" — object hết tên trỏ tới thì bị thu hồi</td><td>Automatic reclamation of objects nothing refers to any more. Rebinding the last name pointing at an object makes it unreachable, and Python frees it — which is why you never free memory by hand.</td></tr>
+</table>
+
+<p class="next">💬 A term here still unclear? Ask your teacher — hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/nav.js"></script>
+</body>
+</html>

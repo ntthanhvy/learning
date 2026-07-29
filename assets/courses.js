@@ -57,6 +57,20 @@ window.COURSES = [
     ],
   },
   {
+    id: "python",
+    accent: "#2d6a9f",
+    title: "Python Intensive",
+    desc: "The language itself, which every other course assumes: objects and mutability, comprehensions, dicts, generators, files, dataclasses — taught through data pipelines with no pandas, then extended into FastAPI + pydantic.",
+    start: "2026-07-29",
+    end: "2026-08-04",
+    days: 7,
+    after: { label: "Open-ended main track continues", href: "python/index.html" },
+    links: [
+      { label: "Open course", href: "python/index.html" },
+      { label: "Glossary", href: "python/reference/glossary.html" },
+    ],
+  },
+  {
     id: "data",
     accent: "#5a3d99",
     title: "Data Wrangling",

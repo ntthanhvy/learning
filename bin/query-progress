@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Read-only helper: dump recent learning-progress rows from the Neon DB.
+# Works locally (creds from ~/.config/learning/db.env) and in CI (LEARNING_DB_URL env).
+set -euo pipefail
+if [ -z "${LEARNING_DB_URL:-}" ]; then
+  source ~/.config/learning/db.env
+fi
+
+psql "$LEARNING_DB_URL" -c "SELECT course, kind, day, lesson, detail, recorded_at FROM course_progress ORDER BY id DESC LIMIT 20;"

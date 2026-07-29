@@ -161,6 +161,15 @@
 <tr><td>singleflight</td><td>A package that deduplicates concurrent identical calls: if N goroutines call <code>Do</code> with the same key while one is already in flight, only one actual call happens and all N get its result — the classic fix for a cache-miss stampede.</td><td>giữ nguyên "singleflight" — nhiều goroutine gọi cùng một việc cùng lúc, chỉ chạy 1 lần thật, còn lại dùng chung kết quả</td></tr>
 </table>
 
+<h2 id="day13">Day 13 — Concurrency capstone (Week 2)</h2>
+<table class="gloss">
+<tr><th>Term</th><th>In software</th><th>Tiếng Việt (dev-style)</th></tr>
+<tr><td>write-behind (batching)</td><td>Accumulating incoming writes in memory and applying them to the slower backing store later, in grouped batches — trading a small window of potential loss for far fewer, far cheaper writes.</td><td>giữ nguyên "write-behind" / ghi dồn theo batch — gom nhiều lượt ghi trong RAM rồi ghi xuống DB một thể</td></tr>
+<tr><td>sink</td><td>The destination a component hands its output to, usually behind a small interface so the component doesn't know or care what is actually consuming the data.</td><td>giữ nguyên "sink" — đầu nhận dữ liệu; component chỉ biết interface, không biết ai nhận thật</td></tr>
+<tr><td>drop policy (load shedding)</td><td>What a system does with new work when it is already at capacity: block the producer (lossless but slower), or drop the work and count it (lossy but never stalls). The right answer depends on what the data is worth.</td><td>giữ nguyên "drop policy" / load shedding — đầy thì bỏ bớt và đếm số lượng bỏ, đổi mất mát lấy tốc độ</td></tr>
+<tr><td>context.WithoutCancel</td><td><code>context.WithoutCancel(ctx)</code> returns a context that keeps the parent's values but never gets cancelled and has no deadline — for cleanup work that must complete even though the operation that spawned it was cancelled. Go 1.21+.</td><td>giữ nguyên "context.WithoutCancel" — context giữ values của cha nhưng không bị hủy theo; dùng cho việc dọn dẹp bắt buộc phải chạy xong</td></tr>
+</table>
+
 <h2 id="day7">Day 7 — Testing, tooling &amp; capstone</h2>
 <table class="gloss">
 <tr><th>Term</th><th>In software</th><th>Tiếng Việt (dev-style)</th></tr>

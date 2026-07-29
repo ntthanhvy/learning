@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 13 · Concurrency Capstone</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Go Intensive · Week 2 · Day 13 (final day) · ~2 h</p>
+<h1>Concurrency capstone — the click aggregator</h1>
+<p class="byline">Last day. Two weeks ago you wrote working Go; today you build one production-shaped concurrent component end to end — a batching click aggregator — using the whole toolbox at once: channels as ownership, <code>select</code> with three live cases, <code>context</code> for shutdown, <code>atomic</code> for the one loose counter, and a mutex exactly where a mutex belongs. Then you practice saying it all out loud, because explaining this under pressure is a <a href="../MISSION.md">MISSION</a> success criterion, and the explaining is a separate skill from the building.</p>
+
+<h2>Spaced review #1 — two weeks, from memory</h2>
+<p>This is the Jul 20 review the Week 1 plan scheduled. Six questions, both weeks, no peeking at the reference sheets until after.</p>
+<div class="quiz">
+  <div class="q" data-why="Go interfaces are satisfied structurally: if a type has the right method set, it satisfies the interface — checked entirely at compile time, with no implements declaration anywhere. The var _ Store = (*MemStore)(nil) line exists purely to make that compile-time check happen in a visible place.">
+    <p class="stem">Day 1: how does Go decide that <code>*MemStore</code> satisfies <code>Store</code>?</p>
+    <button class="opt" data-ok>the compiler checks method sets match automatically</button>
+    <button class="opt">you declare implements Store on the struct</button>
+    <button class="opt">the runtime checks it on first use</button>
+  </div>
+  <div class="q" data-why="&amp;T{...} allocates a new struct value, initializes the named fields, and hands back a pointer to it — one expression. It is not a copy of anything existing, and no make is involved (make is only for slices, maps, and channels).">
+    <p class="stem">Refresher week 1: <code>&amp;MemStore{links: make(map[string]Link)}</code> gives you…</p>
+    <button class="opt" data-ok>a pointer to a brand-new struct value</button>
+    <button class="opt">a copy of an existing struct value</button>
+    <button class="opt">a nil pointer until you call make</button>
+  </div>
+  <div class="q" data-why="Indexing a map with a missing key never panics and never returns nil-unless-the-value-type-is-nilable — it returns the value type's zero value, which looks exactly like a stored zero value. Only the comma-ok form (l, ok := m[k]) can tell the two apart. This was the Day 1 Get bug.">
+    <p class="stem">The Day 1 bug: <code>s.links[code]</code> with a missing key returns…</p>
+    <button class="opt" data-ok>the value type's zero value, silently returned</button>
+    <button class="opt">a nil that you can check directly</button>
+    <button class="opt">a runtime panic for the missing key</button>
+  </div>
+  <div class="q" data-why="%w wraps: the new error keeps the original inside it, so errors.Is(err, link.ErrNotFound) still matches through any number of layers. %v only formats the text — the original error's identity is gone, and errors.Is can no longer find it.">
+    <p class="stem">Day 2: why wrap with <code>%w</code> rather than <code>%v</code>?</p>
+    <button class="opt" data-ok>errors.Is can still find the original error</button>
+    <button class="opt">the message formats more nicely for logs</button>
+    <button class="opt">wrapping with %v is a compile error</button>
+  </div>
+  <div class="q" data-why="The UNIQUE constraint on links.code creates a B-tree index, and that index turns the redirect lookup from a sequential scan of the whole table into a direct tree descent — the difference EXPLAIN showed on Day 6. Postgres does not cache query results between calls, and small tables only stay fast until they aren't small.">
+    <p class="stem">Day 5–6: the redirect's <code>WHERE code = $1</code> stays fast under load because…</p>
+    <button class="opt" data-ok>a unique index turns the scan into a lookup</button>
+    <button class="opt">Postgres caches every single query after its first run</button>
+    <button class="opt">small tables always stay fast whatever you may do</button>
+  </div>
+  <div class="q" data-why="The real criterion from Day 8: if the data can live inside ONE goroutine and everyone else can talk to it through a channel, channels are clean (today's batch map). If the data must be touched from many goroutines in place, guard it with a mutex (Day 8's ClickCounter). Neither construct is 'always more idiomatic' — ownership decides.">
+    <p class="stem">Week 2: channel or mutex — what actually decides?</p>
+    <button class="opt" data-ok>whether one goroutine can own the data alone</button>
+    <button class="opt">channels are always the more idiomatic Go choice</button>
+    <button class="opt">mutexes are faster so they always win here</button>
+  </div>
+</div>
+
+<h2>Step 0 — a real bug in your own <code>checker.go</code></h2>
+<p>Before the build: open <code>checker.go</code> and look at your <code>checkOne</code>. You wrote:</p>
+<pre><code>time.Sleep(50 + time.Millisecond)   <span class="cm">// ← this is not 50ms</span></code></pre>
+<p><code>50 + time.Millisecond</code> is arithmetic on a <code>time.Duration</code>: 50 <em>nanoseconds</em> plus one millisecond ≈ <strong>1ms</strong>, not the 50ms the Day 3 lesson intended (<code>50 * time.Millisecond</code>). One character, 50× off. And it's not harmless — it makes <code>TestCheckAllTimesOut</code> a coin flip, because the checks now finish in about the same 1ms the test's timeout allows. Yesterday's lesson said flaky concurrency tests are telling you something true; here's one in your own repo. Prove it, then fix it:</p>
+<pre><code>go test -run CheckAll -count=20 .   <span class="cm"># fails some runs with the typo…</span>
+<span class="cm"># --- FAIL: TestCheckAllTimesOut — "expected partial results under a 1ms timeout, got all of them"</span></code></pre>
+<p>Change <code>+</code> to <code>*</code>, run it again with <code>-count=20</code>, and it's solid. (Also worth knowing: today's new component is <strong>standalone</strong> — it only needs the <code>link</code> package as it already stands. If you still want Week 2's catch-up files — the mutex-guarded <code>MemStore</code>, <code>ClickCounter</code>, and the worker-pool <code>checkAll</code> — <a href="0013-the-rest-of-sync.html">Day 12's Step 0</a> has all of them ready to paste, and everything below coexists with either state of your repo.)</p>
+
+<h2>1 · The component: clicks come in a firehose, the database wants batches</h2>
+<p>Every redirect linkshort serves is a click event. Writing one <code>INSERT</code> per click melts the database under load — the standard production shape is <dfn data-en="Accumulating incoming writes in memory and applying them to the slower backing store later, in grouped batches — trading a small window of potential loss for far fewer, far cheaper writes." data-vn="giữ nguyên 'write-behind' / ghi dồn theo batch — gom nhiều lượt ghi trong RAM rồi ghi xuống DB một thể">write-behind</dfn> batching: accumulate counts in memory, flush them as one grouped write. A correct batcher needs <strong>three flush triggers</strong>, and each one maps to a <code>select</code> case you already know:</p>
+<ul>
+  <li><strong>Size</strong> — the batch hit <code>maxBatch</code> events: flush now, don't let memory grow unbounded.</li>
+  <li><strong>Time</strong> — a <code>time.Ticker</code> fired: flush whatever's there, so a quiet trickle still reaches the database promptly.</li>
+  <li><strong>Shutdown</strong> — <code>ctx.Done()</code>: drain what's buffered, flush one last time, exit clean. Losing accepted clicks at shutdown is the bug.</li>
+</ul>
+<p>Where do the counts live? In a plain <code>map[string]int</code> — <em>with no mutex</em>. This is the Day 8 judgment call, resolved the other way this time: exactly one goroutine (<code>Run</code>) ever touches the batch map, and every other goroutine talks to it only by sending on a channel. Share memory by communicating. Compare: Day 8's <code>ClickCounter</code> needed a mutex precisely because <em>many</em> goroutines read and write it in place. Same data shape, opposite ownership, opposite tool — that contrast is an interview answer in itself.</p>
+
+<h2>2 · The seam: a one-method <code>Sink</code></h2>
+<p>Where do batches go? The aggregator doesn't know, on purpose — it declares a <dfn data-en="The destination a component hands its output to, usually behind a small interface so the component doesn't know or care what is actually consuming the data." data-vn="giữ nguyên 'sink' — đầu nhận dữ liệu; component chỉ biết interface, không biết ai nhận thật">sink</dfn> interface with one method, consumer-defined, Day 1's rule verbatim:</p>
+<pre><code><span class="kw">type</span> Sink <span class="kw">interface</span> {
+    Flush(ctx context.Context, batch <span class="kw">map</span>[<span class="kw">string</span>]<span class="kw">int</span>) <span class="kw">error</span>
+}</code></pre>
+<p>Tests hand it a <code>fakeSink</code> that just records batches in a slice; production would hand it a <code>PostgresSink</code> whose <code>Flush</code> is one multi-row <code>INSERT INTO clicks</code> inside a transaction (Day 6's material — a good post-course exercise). The aggregator never changes. Note the fake needs a mutex where the aggregator doesn't: the test goroutine <em>reads</em> the recorded flushes while <code>Run</code>'s goroutine <em>appends</em> to them — two goroutines, shared slice, Day 8's exact criterion.</p>
+
+<h2>3 · Two production decisions worth saying out loud</h2>
+<p><strong>Backpressure: this one drops.</strong> <code>Add</code> is called from the redirect hot path — the handler serving a user. Should a full buffer make the user's redirect <em>wait</em>? For click analytics, no: a lost count beats a slow redirect. So <code>Add</code> uses <code>select</code>-with-<code>default</code> — the non-blocking send from Day 9 — and applies a <dfn data-en="What a system does with new work when it is already at capacity: block the producer (lossless but slower), or drop the work and count it (lossy but never stalls) — also called load shedding. The right answer depends on what the data is worth." data-vn="giữ nguyên 'drop policy' / load shedding — đầy thì bỏ bớt và đếm số lượng bỏ, đổi mất mát lấy tốc độ">drop policy</dfn>: reject the event, count it in an <code>atomic.Int64</code> (Day 12: one loose counter touched from many goroutines and related to nothing else — the atomic shape, not the mutex shape). Contrast deliberately with Day 9's checker, where the unbuffered <code>jobs</code> channel <em>blocking</em> the feeder was the backpressure we wanted. Same primitive, opposite policy, chosen per component — that's the judgment interviewers probe.</p>
+<p><strong>Shutdown: drain, then flush with a context that ignores the cancel.</strong> When <code>ctx.Done()</code> fires, events that <code>Add</code> already accepted are still sitting in the channel — abandoning them breaks the component's promise, so the exit path drains the buffer (Day 9's word) into the batch and flushes once more. But there's a trap: that final <code>Flush</code> takes a context, and the only one in hand <em>is already cancelled</em> — a real <code>PostgresSink</code> would see the dead context and refuse the write. Go 1.21 added the tool for exactly this: <dfn data-en="context.WithoutCancel(ctx) returns a context that keeps the parent's values but never gets cancelled and has no deadline — for cleanup work that must complete even though the operation that spawned it was cancelled." data-vn="giữ nguyên 'context.WithoutCancel' — context giữ values của cha nhưng không bị hủy theo; dùng cho việc dọn dẹp bắt buộc phải chạy xong">context.WithoutCancel</dfn>, a context that survives its parent's cancellation for cleanup that must complete. And one contract, same spirit as "the sender owns the close": <strong>producers stop calling <code>Add</code> before the owner is cancelled</strong> — events added after cancel may never be flushed. The shutdown-order habit from Day 11 applies to components, not just channels.</p>
+
+<h2>4 · Practice: build it, race it, benchmark it</h2>
+<p>In <code>~/learning/go/project/linkshort</code>, two new files. The struct, constructor, <code>Add</code>, and the <code>flush</code> helper are given — the two TODOs are the owner loop itself, which is the whole lesson.</p>
+
+<p><strong>Step 1 — new file <code>link/aggregator.go</code>:</strong></p>
+<pre><code><span class="kw">package</span> link
+
+<span class="kw">import</span> (
+    <span class="cm">"context"</span>
+    <span class="cm">"sync/atomic"</span>
+    <span class="cm">"time"</span>
+)
+
+<span class="cm">// Sink is where finished batches go. Consumer-defined, one method —</span>
+<span class="cm">// Day 1's rule: the aggregator declares what it needs, not who provides it.</span>
+<span class="kw">type</span> Sink <span class="kw">interface</span> {
+    Flush(ctx context.Context, batch <span class="kw">map</span>[<span class="kw">string</span>]<span class="kw">int</span>) <span class="kw">error</span>
+}
+
+<span class="cm">// Aggregator turns a firehose of single click events into periodic batched</span>
+<span class="cm">// writes. One goroutine (Run) owns the batch map outright — no mutex, because</span>
+<span class="cm">// no sharing: every other goroutine talks to it only through the channel.</span>
+<span class="kw">type</span> Aggregator <span class="kw">struct</span> {
+    sink     Sink
+    interval time.Duration
+    maxBatch <span class="kw">int</span>
+
+    events  <span class="kw">chan string</span>
+    dropped atomic.Int64
+}
+
+<span class="kw">func</span> NewAggregator(sink Sink, interval time.Duration, maxBatch, buffer <span class="kw">int</span>) *Aggregator {
+    <span class="kw">return</span> &amp;Aggregator{
+        sink:     sink,
+        interval: interval,
+        maxBatch: maxBatch,
+        events:   make(<span class="kw">chan string</span>, buffer),
+    }
+}
+
+<span class="cm">// Add records one click. It never blocks the caller: if the buffer is full,</span>
+<span class="cm">// the event is dropped and counted instead. Reports whether it was accepted.</span>
+<span class="kw">func</span> (a *Aggregator) Add(code <span class="kw">string</span>) <span class="kw">bool</span> {
+    <span class="kw">select</span> {
+    <span class="kw">case</span> a.events &lt;- code:
+        <span class="kw">return true</span>
+    <span class="kw">default</span>:
+        a.dropped.Add(1)
+        <span class="kw">return false</span>
+    }
+}
+
+<span class="cm">// Dropped reports how many events a full buffer has rejected so far.</span>
+<span class="kw">func</span> (a *Aggregator) Dropped() <span class="kw">int64</span> { <span class="kw">return</span> a.dropped.Load() }
+
+<span class="cm">// Run is the owner goroutine: it loops until ctx is cancelled, then drains</span>
+<span class="cm">// what Add already accepted, flushes one last time, and returns. Callers must</span>
+<span class="cm">// stop calling Add before cancelling ctx — same rule as "senders own the</span>
+<span class="cm">// close": the producer side goes quiet first, then the owner shuts down.</span>
+<span class="kw">func</span> (a *Aggregator) Run(ctx context.Context) <span class="kw">error</span> {
+    ticker := time.NewTicker(a.interval)
+    <span class="kw">defer</span> ticker.Stop()
+
+    batch := make(<span class="kw">map</span>[<span class="kw">string</span>]<span class="kw">int</span>)
+    total := 0
+
+    flush := <span class="kw">func</span>(fctx context.Context) <span class="kw">error</span> {   <span class="cm">// GIVEN — flushes batch to the sink, resets it</span>
+        <span class="kw">if</span> total == 0 {
+            <span class="kw">return nil</span>
+        }
+        <span class="kw">if</span> err := a.sink.Flush(fctx, batch); err != <span class="kw">nil</span> {
+            <span class="kw">return</span> err
+        }
+        batch = make(<span class="kw">map</span>[<span class="kw">string</span>]<span class="kw">int</span>)
+        total = 0
+        <span class="kw">return nil</span>
+    }
+
+    <span class="kw">for</span> {
+        <span class="kw">select</span> {
+        <span class="cm">// TODO 1: the two missing live cases —</span>
+        <span class="cm">//   case code := &lt;-a.events: count it into batch (batch[code]++,</span>
+        <span class="cm">//     total++); if total has reached a.maxBatch, flush(ctx) and</span>
+        <span class="cm">//     return any non-nil error it gives back.</span>
+        <span class="cm">//   case &lt;-ticker.C: flush(ctx), same error handling.</span>
+
+        <span class="kw">case</span> &lt;-ctx.Done():
+            <span class="cm">// TODO 2: BEFORE the final flush below, drain the buffer —</span>
+            <span class="cm">//   loop a nested select: case code := &lt;-a.events counts it</span>
+            <span class="cm">//   into batch (total++); default means the buffer is empty,</span>
+            <span class="cm">//   stop looping. (Sections 1 and 3 explain the drain and why</span>
+            <span class="cm">//   the final flush gets a WithoutCancel context.)</span>
+            <span class="kw">return</span> flush(context.WithoutCancel(ctx))
+        }
+    }
+}</code></pre>
+<p>The file compiles as-is (an owner loop that only knows how to shut down), and the tests tell you what's missing: without TODO 1 nothing ever flushes mid-run, and without TODO 2 <code>TestAggregatorShutdownLosesNothing</code> reports exactly the clicks the drain would have saved.</p>
+
+<p><strong>Step 2 — new file <code>link/aggregator_test.go</code></strong> (given in full — each test pins one of the design decisions from Sections 1–3):</p>
+<pre><code><span class="kw">package</span> link
+
+<span class="kw">import</span> (
+    <span class="cm">"context"</span>
+    <span class="cm">"errors"</span>
+    <span class="cm">"maps"</span>
+    <span class="cm">"sync"</span>
+    <span class="cm">"testing"</span>
+    <span class="cm">"time"</span>
+)
+
+<span class="cm">// fakeSink records every flush it receives — mutex-guarded, because the test</span>
+<span class="cm">// goroutine reads it while Run's goroutine writes it (Day 8's exact shape).</span>
+<span class="kw">type</span> fakeSink <span class="kw">struct</span> {
+    mu      sync.Mutex
+    flushes []<span class="kw">map</span>[<span class="kw">string</span>]<span class="kw">int</span>
+}
+
+<span class="kw">func</span> (f *fakeSink) Flush(ctx context.Context, batch <span class="kw">map</span>[<span class="kw">string</span>]<span class="kw">int</span>) <span class="kw">error</span> {
+    f.mu.Lock()
+    <span class="kw">defer</span> f.mu.Unlock()
+    f.flushes = append(f.flushes, maps.Clone(batch))
+    <span class="kw">return nil</span>
+}
+
+<span class="kw">func</span> (f *fakeSink) totalFor(code <span class="kw">string</span>) <span class="kw">int</span> {
+    f.mu.Lock()
+    <span class="kw">defer</span> f.mu.Unlock()
+    n := 0
+    <span class="kw">for</span> _, b := <span class="kw">range</span> f.flushes {
+        n += b[code]
+    }
+    <span class="kw">return</span> n
+}
+
+<span class="kw">func</span> waitFor(t *testing.T, cond <span class="kw">func</span>() <span class="kw">bool</span>) {
+    t.Helper()
+    deadline := time.Now().Add(2 * time.Second)
+    <span class="kw">for</span> time.Now().Before(deadline) {
+        <span class="kw">if</span> cond() {
+            <span class="kw">return</span>
+        }
+        time.Sleep(5 * time.Millisecond)
+    }
+    t.Fatal(<span class="cm">"condition never became true within 2s"</span>)
+}
+
+<span class="kw">func</span> TestAggregatorFlushesWhenBatchFills(t *testing.T) {
+    sink := &amp;fakeSink{}
+    a := NewAggregator(sink, time.Hour, 5, 64) <span class="cm">// interval never fires — only size can flush</span>
+    ctx, cancel := context.WithCancel(context.Background())
+    done := make(<span class="kw">chan error</span>, 1)
+    <span class="kw">go func</span>() { done &lt;- a.Run(ctx) }()
+
+    <span class="kw">for range</span> 5 {
+        <span class="kw">if</span> !a.Add(<span class="cm">"go"</span>) {
+            t.Fatal(<span class="cm">"Add rejected an event with buffer room to spare"</span>)
+        }
+    }
+    waitFor(t, <span class="kw">func</span>() <span class="kw">bool</span> { <span class="kw">return</span> sink.totalFor(<span class="cm">"go"</span>) == 5 })
+    cancel()
+    <span class="kw">if</span> err := &lt;-done; err != <span class="kw">nil</span> {
+        t.Fatalf(<span class="cm">"Run returned %v"</span>, err)
+    }
+}
+
+<span class="kw">func</span> TestAggregatorFlushesOnInterval(t *testing.T) {
+    sink := &amp;fakeSink{}
+    a := NewAggregator(sink, 20*time.Millisecond, 1000, 64) <span class="cm">// batch never fills — only time can flush</span>
+    ctx, cancel := context.WithCancel(context.Background())
+    <span class="kw">defer</span> cancel()
+    done := make(<span class="kw">chan error</span>, 1)
+    <span class="kw">go func</span>() { done &lt;- a.Run(ctx) }()
+
+    a.Add(<span class="cm">"go"</span>)
+    a.Add(<span class="cm">"go"</span>)
+    a.Add(<span class="cm">"rust"</span>)
+    waitFor(t, <span class="kw">func</span>() <span class="kw">bool</span> { <span class="kw">return</span> sink.totalFor(<span class="cm">"go"</span>) == 2 &amp;&amp; sink.totalFor(<span class="cm">"rust"</span>) == 1 })
+}
+
+<span class="kw">func</span> TestAggregatorShutdownLosesNothing(t *testing.T) {
+    sink := &amp;fakeSink{}
+    a := NewAggregator(sink, time.Hour, 1000, 256) <span class="cm">// neither trigger fires — only shutdown can flush</span>
+    ctx, cancel := context.WithCancel(context.Background())
+    done := make(<span class="kw">chan error</span>, 1)
+    <span class="kw">go func</span>() { done &lt;- a.Run(ctx) }()
+
+    <span class="kw">const</span> n = 100
+    <span class="kw">var</span> wg sync.WaitGroup
+    <span class="kw">for range</span> 4 {
+        wg.Add(1)
+        <span class="kw">go func</span>() {
+            <span class="kw">defer</span> wg.Done()
+            <span class="kw">for range</span> n / 4 {
+                a.Add(<span class="cm">"go"</span>)
+            }
+        }()
+    }
+    wg.Wait() <span class="cm">// producers go quiet FIRST…</span>
+    cancel()  <span class="cm">// …then the owner is told to shut down</span>
+    <span class="kw">if</span> err := &lt;-done; err != <span class="kw">nil</span> {
+        t.Fatalf(<span class="cm">"Run returned %v"</span>, err)
+    }
+    <span class="kw">if</span> got := sink.totalFor(<span class="cm">"go"</span>); got != n {
+        t.Fatalf(<span class="cm">"lost clicks at shutdown: flushed %d, want %d"</span>, got, n)
+    }
+    <span class="kw">if</span> a.Dropped() != 0 {
+        t.Fatalf(<span class="cm">"dropped %d events with a roomy buffer"</span>, a.Dropped())
+    }
+}
+
+<span class="kw">func</span> TestAggregatorAddNeverBlocks(t *testing.T) {
+    a := NewAggregator(&amp;fakeSink{}, time.Hour, 1000, 2) <span class="cm">// tiny buffer, Run deliberately NOT started</span>
+    <span class="kw">if</span> !a.Add(<span class="cm">"a"</span>) || !a.Add(<span class="cm">"b"</span>) {
+        t.Fatal(<span class="cm">"buffer should hold the first two events"</span>)
+    }
+    <span class="kw">if</span> a.Add(<span class="cm">"c"</span>) {
+        t.Fatal(<span class="cm">"third Add should be rejected immediately, not block"</span>)
+    }
+    <span class="kw">if</span> a.Dropped() != 1 {
+        t.Fatalf(<span class="cm">"Dropped() = %d, want 1"</span>, a.Dropped())
+    }
+}
+
+<span class="kw">var</span> errSinkDown = errors.New(<span class="cm">"sink down"</span>)
+
+<span class="kw">type</span> failingSink <span class="kw">struct</span>{}
+
+<span class="kw">func</span> (failingSink) Flush(context.Context, <span class="kw">map</span>[<span class="kw">string</span>]<span class="kw">int</span>) <span class="kw">error</span> { <span class="kw">return</span> errSinkDown }
+
+<span class="kw">func</span> TestAggregatorSurfacesFlushErrors(t *testing.T) {
+    a := NewAggregator(failingSink{}, time.Hour, 1, 8)
+    ctx, cancel := context.WithCancel(context.Background())
+    <span class="kw">defer</span> cancel()
+    done := make(<span class="kw">chan error</span>, 1)
+    <span class="kw">go func</span>() { done &lt;- a.Run(ctx) }()
+
+    a.Add(<span class="cm">"go"</span>) <span class="cm">// maxBatch=1: the first event forces a flush, which fails</span>
+    <span class="kw">select</span> {
+    <span class="kw">case</span> err := &lt;-done:
+        <span class="kw">if</span> !errors.Is(err, errSinkDown) {
+            t.Fatalf(<span class="cm">"Run returned %v, want errSinkDown"</span>, err)
+        }
+    <span class="kw">case</span> &lt;-time.After(2 * time.Second):
+        t.Fatal(<span class="cm">"Run never returned — the failing flush was never attempted"</span>)
+    }
+}
+
+<span class="kw">func</span> BenchmarkAggregatorAdd(b *testing.B) {
+    a := NewAggregator(&amp;fakeSink{}, time.Millisecond, 1024, 4096)
+    ctx, cancel := context.WithCancel(context.Background())
+    <span class="kw">defer</span> cancel()
+    <span class="kw">go func</span>() { _ = a.Run(ctx) }()
+    b.RunParallel(<span class="kw">func</span>(pb *testing.PB) {
+        <span class="kw">for</span> pb.Next() {
+            a.Add(<span class="cm">"go"</span>)
+        }
+    })
+}</code></pre>
+
+<p><strong>Step 3 — run everything:</strong></p>
+<pre><code>go vet ./...
+go test -race ./...
+go test -bench=AggregatorAdd -benchmem -run=<span class="cm">'^$'</span> ./link/
+<span class="cm"># BenchmarkAggregatorAdd-8   ~48 ns/op   0 B/op   0 allocs/op
+# — the redirect hot path pays ~48ns and zero allocations per click, whatever the sink is doing</span></code></pre>
+<div class="callout"><strong>Done when:</strong> <code>go vet ./...</code> silent · <code>go test -race ./...</code> green, all five aggregator tests passing · <code>TestCheckAllTimesOut</code> survives <code>-count=20</code> after your Step 0 fix · the benchmark runs with 0 allocs/op · and — this being the capstone — you can answer every drill in Section 5 out loud without opening the code.</div>
+
+<h2>5 · Interview drills: say it out loud, under pressure</h2>
+<p>Set a timer: 60–90 seconds per answer, spoken aloud, no notes. Then open the model answer and compare — not for wording, for whether you hit the load-bearing points. Doing each drill a second time in Vietnamese is worth it: explaining Go bằng tiếng Việt cho đồng nghiệp is a real workplace skill, not a lesser version of the English one.</p>
+<details><summary><strong>Drill 1 — "When would you use a channel, and when a mutex?"</strong></summary>
+<p>Load-bearing points: it's about <em>ownership</em>, not fashion. If one goroutine can own the data and others interact through messages, use a channel (today's batch map — no lock anywhere). If many goroutines must touch shared data in place, guard the invariant with a mutex (Day 8's <code>ClickCounter</code>, the fake sink's slice). Bonus: name the third option — <code>atomic</code> for a single independent value like today's dropped counter.</p></details>
+<details><summary><strong>Drill 2 — "Explain how cancellation actually stops your goroutines."</strong></summary>
+<p>Load-bearing points: cancelling a context does nothing by itself — it closes a channel (<code>ctx.Done()</code>). Goroutines stop only where they <em>watch</em> that channel, so every blocking send/receive needs a <code>select</code> with a <code>ctx.Done()</code> case (Day 10's cancellation-aware select). Miss one and that goroutine leaks. Mention <code>errgroup.WithContext</code> for "one fails, cancel the rest", and today's twist: cleanup that must outlive the cancel gets <code>context.WithoutCancel</code>.</p></details>
+<details><summary><strong>Drill 3 — "Your service leaks goroutines in production. Walk me through finding it."</strong></summary>
+<p>Load-bearing points: leaks are silent — the runtime only crashes on a <em>full</em> deadlock. Watch <code>runtime.NumGoroutine()</code> before/after an operation in a test (Day 11's leak test), or grab the goroutine profile via <code>pprof</code> in production and look for hundreds of stacks parked on the same line — that line is the unguarded send/receive. <code>-race</code> won't find leaks (it finds races); the fix is almost always a missing <code>ctx.Done()</code> case or an unclosed channel.</p></details>
+<details><summary><strong>Drill 4 — "Design a component that batches writes to a database."</strong></summary>
+<p>Load-bearing points: today's whole build — one owner goroutine holding the batch (no lock), a channel in front of it, three flush triggers (size, ticker, shutdown), and two named policies: backpressure (drop-and-count on the hot path — the caller must never stall for analytics) and shutdown (producers quiet first, drain the channel, final flush on a non-cancellable context so accepted data isn't lost). If you can also say what the tests pin — nothing lost at shutdown, Add never blocks — you've answered at a senior level.</p></details>
+<details><summary><strong>Drill 5 — "What does <code>select</code> do when multiple cases are ready? When none are?"</strong></summary>
+<p>Load-bearing points: multiple ready → one is chosen uniformly at random (no priority — that randomness is why the ticker still gets its turn under load). None ready → <code>select</code> blocks until one is, <em>unless</em> there's a <code>default</code>, which runs immediately — the non-blocking send powering today's <code>Add</code> and the drain loop's "buffer is empty" exit.</p></details>
+
+<h2>Check yourself</h2>
+<div class="quiz">
+  <div class="q" data-why="The batch map is confined to Run's goroutine: nothing else can reach it, so there is no concurrent access to protect against. Go maps are NOT safe for concurrent use by themselves, and an atomic counter protects only its own value — the safety here comes purely from single-goroutine ownership.">
+    <p class="stem">Why does the batch map need no mutex?</p>
+    <button class="opt" data-ok>only Run's single goroutine ever touches it</button>
+    <button class="opt">maps in Go are always safe concurrently</button>
+    <button class="opt">the atomic counter protects the map too</button>
+  </div>
+  <div class="q" data-why="select with a default case makes the send non-blocking: if the buffer has room the send happens, and if it's full the default branch runs instead — dropping and counting the event. The channel can absolutely still fill; the point is that a full channel costs the caller nothing.">
+    <p class="stem"><code>Add</code>'s <code>select</code>-with-<code>default</code> buys exactly what?</p>
+    <button class="opt" data-ok>a full buffer drops instead of blocking callers</button>
+    <button class="opt">the events channel can never fill up fully</button>
+    <button class="opt">sends become much faster than a buffered channel</button>
+  </div>
+  <div class="q" data-why="At shutdown the only context in hand is the cancelled one — a real sink would see it and refuse the write, losing the drained events. context.WithoutCancel keeps the parent's values but strips its cancellation, exactly for cleanup that must complete. It changes nothing about speed, and it creates a NEW context rather than altering ctx itself.">
+    <p class="stem">Why flush with <code>context.WithoutCancel(ctx)</code> at shutdown?</p>
+    <button class="opt" data-ok>the parent is already cancelled; the flush must still run</button>
+    <button class="opt">it makes the final flush run faster than normal ones</button>
+    <button class="opt">it permanently disables cancellation for every later use of ctx</button>
+  </div>
+  <div class="q" data-why="The drain loop only empties what is in the channel at shutdown; an Add racing with the drain can slip an event in after the default branch has already concluded the buffer is empty. Nothing panics and nothing is forbidden — the event is simply accepted into a channel no one will ever read again. Hence the contract: producers go quiet first.">
+    <p class="stem">Why must producers stop <code>Add</code>ing before <code>ctx</code> is cancelled?</p>
+    <button class="opt" data-ok>events added after cancel may never get flushed</button>
+    <button class="opt">Add would panic once the context is cancelled</button>
+    <button class="opt">the runtime forbids sends after any context cancellation</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://quii.gitbook.io/learn-go-with-tests">Learn Go with Tests</a> — the <em>Sync</em>, <em>Select</em>, and <em>Context</em> chapters walk the exact primitives you assembled today, test-first; reading them after building is fast and consolidating. For the pipeline/shutdown patterns in their original form, re-skim <a href="https://go.dev/blog/pipelines">Go Blog — Pipelines and cancellation</a>; for <code>context.WithoutCancel</code>'s rationale, its entry in <a href="https://pkg.go.dev/context">pkg.go.dev — context</a>.</p>
+<p>New terms are in the <a href="../reference/glossary.html#day13">glossary — Day 13 section</a>.</p>
+
+<p class="next">That's the course — both weeks of it. You came in writing working Go; you leave with a Postgres-backed service, a concurrency toolbox you've benchmarked rather than memorized, and answers you can say out loud. <strong>Spaced review #2 is Aug 3</strong>: re-run today's Section 5 drills cold, skim the reference sheets, and re-read your own linkshort code as if reviewing a stranger's PR.<br><br>
+💬 Follow-up questions stay open after the course ends — về aggregator hôm nay, về câu trả lời phỏng vấn, hay bất cứ gì trong hai tuần qua. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/quiz.js"></script>
+<script src="../assets/gloss.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

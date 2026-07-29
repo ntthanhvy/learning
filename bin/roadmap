@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# View / check off the Staff-backend roadmap checklist in Neon.
+# Usage:
+#   roadmap                 # show the whole checklist grouped by phase/track
+#   roadmap done <id> [note]  # mark item <id> done (optionally attach a note)
+#   roadmap undo <id>       # mark item <id> not done
+set -euo pipefail
+if [ -z "${LEARNING_DB_URL:-}" ]; then source ~/.config/learning/db.env; fi
+export PATH="/opt/homebrew/opt/libpq/bin:$PATH"
+
+cmd="${1:-show}"
+case "$cmd" in
+  show)
+    psql "$LEARNING_DB_URL" -q -c "
+      SELECT id, phase AS p, track,
+             CASE WHEN done THEN '[x]' ELSE '[ ]' END AS s, item
+      FROM roadmap_checklist ORDER BY sort;"
+    psql "$LEARNING_DB_URL" -qtA -c "
+      SELECT 'progress: '||count(*) FILTER (WHERE done)||'/'||count(*)||' done'
+      FROM roadmap_checklist;" ;;
+  done)
+    id="${2:?item id required}"; note="${3:-}"
+    psql "$LEARNING_DB_URL" -q -v ON_ERROR_STOP=1 -v id="$id" -v n="$note" -c "
+      UPDATE roadmap_checklist
+         SET done=true, done_at=now(), note=NULLIF(:'n','')
+       WHERE id=:'id'::bigint;"
+    echo "done: #$id" ;;
+  undo)
+    id="${2:?item id required}"
+    psql "$LEARNING_DB_URL" -q -v ON_ERROR_STOP=1 -v id="$id" -c "
+      UPDATE roadmap_checklist SET done=false, done_at=NULL WHERE id=:'id'::bigint;"
+    echo "undone: #$id" ;;
+  *) echo "usage: roadmap [show | done <id> [note] | undo <id>]" >&2; exit 1 ;;
+esac

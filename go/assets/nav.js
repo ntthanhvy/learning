@@ -32,6 +32,8 @@
       file: "lessons/0012-debugging-concurrency.html" },
     { day: 12, date: "2026-07-20", title: "The rest of sync",
       file: "lessons/0013-the-rest-of-sync.html" },
+    { day: 13, date: "2026-07-20", title: "Concurrency capstone + interview drills",
+      file: "lessons/0014-concurrency-capstone.html" },
   ];
 
   const REFS = [

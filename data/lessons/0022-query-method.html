@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 22 · query(): WHERE, spelled as a string</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 22 · ~20 min · 30 Jul 2026</p>
+<h1>query(): filtering with a WHERE-shaped string instead of a boolean mask</h1>
+<p class="byline">Lesson 21's closing teaser named this directly — <code>query()</code>, used without explanation back in Lesson 8's method chain (<code>.query("amount_rank == 1")</code>) but never taught on its own. Today gives that call a name and a mental model: a second way to spell filtering, sitting right next to the boolean mask from Lesson 1.</p>
+
+<h2>1 · Same filter, two spellings</h2>
+<p>Lesson 1 taught filtering with a <dfn data-en="a True/False Series aligned to the rows; indexing a DataFrame with it keeps only the True rows — pandas' WHERE clause" data-vn="mask (hay nói tắt) — mảng True/False để lọc hàng">boolean mask</dfn>: <code>df[df["amount"] &gt; 100]</code>. That's still the right default — it's explicit and it's everywhere in real pandas code. But repeat the column name enough times in a chain and it gets noisy fast, especially with several conditions. <dfn data-en="a DataFrame method that filters rows using a string expression parsed like a WHERE clause, instead of a boolean mask built from repeated df[...] comparisons" data-vn="giữ nguyên 'query()' — lọc hàng bằng chuỗi biểu thức, đọc gần giống WHERE trong SQL, thay cho boolean mask">query()</dfn> does the exact same filtering, spelled as a string:</p>
+<pre><code><span class="cm"># boolean mask (Lesson 1)</span>
+clean[clean[<span class="str">"amount"</span>] &gt; <span class="kw">100</span>]
+
+<span class="cm"># query() — same result</span>
+clean.query(<span class="str">"amount &gt; 100"</span>)
+<span class="cm">#   order_id customer  amount  order_date
+#0         1       An   120.0  2026-01-05
+#2         5     Binh   180.0  2026-01-09</span></code></pre>
+<p>Both return identical DataFrames. The difference is entirely about how the condition is written: repeated <code>df[...]</code>/<code>clean[...]</code> noise versus one plain-looking expression. That expression is exactly what makes it feel familiar: a <code>query()</code> string reads like a SQL <code>WHERE</code> clause, because that's precisely the gap it closes.</p>
+
+<h2>2 · The SQL bridge</h2>
+<p>This is the whole pitch: <code>clean.query("amount &gt; 100")</code> is <code>WHERE amount &gt; 100</code>, spelled as a pandas method call. String equality, multiple conditions, the works — all read close to their SQL originals:</p>
+<pre><code>clean.query(<span class="str">"customer == 'An'"</span>)          <span class="cm"># WHERE customer = 'An'</span>
+clean.query(<span class="str">"amount &gt; 50 and customer != 'An'"</span>)  <span class="cm"># WHERE amount &gt; 50 AND customer != 'An'</span>
+<span class="cm">#   order_id customer  amount  order_date
+#2         5     Binh   180.0  2026-01-09</span></code></pre>
+<p>Note the keywords: <code>and</code>/<code>or</code>/<code>not</code>, not <code>&amp;</code>/<code>|</code>/<code>~</code> — inside a query string you write them like Python's own boolean keywords (which happen to match SQL's), not like the bitwise operators a boolean mask forces you into. That operator swap is the one real syntax difference worth remembering.</p>
+
+<h2>3 · @variable: pulling a Python value into the expression</h2>
+<p>A hardcoded number in the string works, but real filters usually depend on a variable computed earlier in the script. Prefix it with <code>@</code> inside the query string to reach into the surrounding Python scope:</p>
+<pre><code>threshold = <span class="kw">100</span>
+clean.query(<span class="str">"amount &gt; @threshold"</span>)
+<span class="cm">#   order_id customer  amount  order_date
+#0         1       An   120.0  2026-01-05
+#2         5     Binh   180.0  2026-01-09</span></code></pre>
+<p>Without <code>@</code>, <code>query()</code> looks for a column literally named <code>threshold</code> and raises <code>UndefinedVariableError</code> since no such column exists. <code>@</code> is what tells it "this is a Python name from outside the DataFrame, not a column."</p>
+
+<h2>4 · Why it exists: readable chains</h2>
+<p>The real payoff shows up inside a method chain (Lesson 8) — a boolean mask can't be written mid-chain at all, since there's no DataFrame name yet to index into:</p>
+<pre><code><span class="cm"># can't do this mid-chain — `merged` doesn't exist until the chain finishes</span>
+merged = clean.merge(customers, on=<span class="str">"customer"</span>, how=<span class="str">"left"</span>)
+merged[merged[<span class="str">"region"</span>] == <span class="str">"South"</span>]
+
+<span class="cm"># query() reads naturally as one more link in the chain</span>
+(
+    clean
+    .merge(customers, on=<span class="str">"customer"</span>, how=<span class="str">"left"</span>)
+    .query(<span class="str">"region == 'South'"</span>)
+)
+<span class="cm">#   order_id customer  amount  order_date region
+#1         2     Binh    35.5  2026-01-06  South
+#2         5     Binh   180.0  2026-01-09  South</span></code></pre>
+<p>That's exactly the shape Lesson 8's own example used <code>.query("amount_rank == 1")</code> for — filtering to one row per group right after a <code>rank()</code> step, with no intermediate variable needed to hold the mask.</p>
+
+<div class="callout"><strong>Rule of thumb:</strong> boolean mask is still the right default for a single simple condition, and it's the form you'll see most in other people's code. Reach for <code>query()</code> when a chain needs a filter step with no natural variable name to mask against, or when several conditions in one boolean mask are getting hard to read.</div>
+
+<h2>5 · One sharp edge: column names that aren't valid identifiers</h2>
+<p>A query string is parsed as an expression, so a column name with a space or a symbol needs backticks to be recognized inside it: <code>df.query("`order date` &gt; '2026-01-01'")</code>. It's rare in practice — most real column names are already valid identifiers — but worth recognizing the error if it comes up, rather than assuming <code>query()</code> is broken.</p>
+
+<div class="interview">
+<p><strong>Q: "When would you use query() instead of a boolean mask?"</strong> A strong answer, out loud: <em>"They filter identically — query() is just a string-expression spelling of the same WHERE-clause idea as a boolean mask. I reach for it inside a method chain, where there's no intermediate DataFrame name yet to build a mask against, or when a mask has enough conditions that repeating df[...] on each one hurts readability. For a single simple filter I'd still default to the boolean mask, since it's more common in the codebases I've seen and doesn't need the @ prefix to pull in outside variables."</em> The signal: naming the real trade-off — chain-friendliness versus the ubiquity and directness of a plain mask — instead of claiming one is simply better.</p>
+</div>
+
+<h2>Try it — self-checking practice (~15 min)</h2>
+<p>Open <code>practice/22_query.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/22_query.py</code></pre>
+<p>Uses the same cleaned 4-row slice of <code>orders_raw.csv</code> as Lessons 6-21 (An 120.0/01-05, Binh 35.5/01-06, Binh 180.0/01-09, An 42.0/01-10), plus a merge against <code>customers.csv</code> for Exercise 4. Exercise 1 filters with <code>query("amount &gt; 100")</code>; Exercise 2 uses an <code>and</code> with a string equality condition; Exercise 3 pulls a Python variable in with <code>@threshold</code>; Exercise 4 chains <code>.merge().query("region == 'South'")</code> with no intermediate variable.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="query() and a boolean mask filter to the exact same rows — query() is a string-expression spelling of the same WHERE-clause idea, not a different operation.">
+    <p class="stem">What's the relationship between <code>df.query("amount &gt; 100")</code> and <code>df[df["amount"] &gt; 100]</code>?</p>
+    <button class="opt" data-ok>they filter down to the same rows</button>
+    <button class="opt">query always returns a boolean mask only</button>
+    <button class="opt">query only works after a groupby step</button>
+  </div>
+  <div class="q" data-why="Query strings use Python's own boolean keywords and, or, not — matching how SQL reads WHERE a AND b — rather than the bitwise &, |, ~ a boolean mask requires.">
+    <p class="stem">Inside a <code>query()</code> string, how do you combine two conditions?</p>
+    <button class="opt" data-ok>the keywords and, or, not</button>
+    <button class="opt">the symbols ampersand, pipe, tilde</button>
+    <button class="opt">two separate chained query calls</button>
+  </div>
+  <div class="q" data-why="The @ prefix tells query() that a name refers to a Python variable from the surrounding scope, not a column — without it, query() looks for a column with that literal name and raises an error.">
+    <p class="stem">How do you use a Python variable's value inside a <code>query()</code> string?</p>
+    <button class="opt" data-ok>prefix the name with an @ sign</button>
+    <button class="opt">wrap the name in curly braces always</button>
+    <button class="opt">pass it as an extra keyword arg</button>
+  </div>
+  <div class="q" data-why="A boolean mask needs an existing DataFrame variable to index into (df[df[...] ...]), which doesn't exist mid-chain. query() reads as one more method call, so it fits directly after .merge() with no intermediate variable required.">
+    <p class="stem">Why does <code>query()</code> fit naturally inside a method chain where a boolean mask does not?</p>
+    <button class="opt" data-ok>a mask needs a DataFrame name chains lack</button>
+    <button class="opt">masks are not allowed after a merge call</button>
+    <button class="opt">query is simply faster than any mask ever</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the pandas docs' <a href="https://pandas.pydata.org/docs/getting_started/comparison/comparison_with_sql.html">"Comparison with SQL"</a> page (~10 min, already cited in RESOURCES.md as this course's backbone) — its WHERE section shows <code>query()</code> and the boolean mask side by side against real SQL, and covers <code>engine="python"</code>/<code>"numexpr"</code>, beyond today's scope.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>query()</code> is new today.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-22 comes back reported as shakiest, otherwise a fresh scan of the curriculum spine and glossary for the next genuinely-uncovered drill pattern.<br><br>
+💬 Anything unclear — query() vs mask, the @ prefix, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

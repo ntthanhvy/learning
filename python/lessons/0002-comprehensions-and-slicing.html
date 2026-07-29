@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 2 · Comprehensions &amp; slicing</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 2 · ~20 min · 30 Jul 2026</p>
+<h1>Comprehensions &amp; slicing: retiring the loop</h1>
+<p class="byline">Day 1 was the object model — what <code>=</code> really does. Today spends that rule: the reason a comprehension always builds a <em>new</em> list, never touching the old one, is exactly the rebinding-vs-mutation split from yesterday. This lesson has one job: read and write a <dfn data-en="a single expression that builds a new list (or dict/set) directly from an iterable, replacing a `for` loop that only appends" data-vn="giữ nguyên &quot;comprehension&quot; — viết loop thành 1 dòng, tạo list/dict/set mới">list comprehension</dfn> without hesitation, plus enough <a href="#slicing">slicing</a> to stop writing manual index loops.</p>
+
+<div class="callout"><strong>Bridge from SQL:</strong> a list comprehension is a <code>SELECT ... FROM ... WHERE ...</code> squeezed onto one line. <code>[x for x in rows if x > 0]</code> reads exactly like <em>select x from rows where x &gt; 0</em> — same three parts, same order, same meaning. If SQL is comfortable, this is not new logic, only new punctuation.</p></div>
+
+<h2>1 · The loop shape this replaces</h2>
+<p>Section 6 of Day 1 ended with this <code>clean()</code> function, deliberately written with a plain <code>for</code> loop because comprehensions hadn't been taught yet:</p>
+<pre><code><span class="kw">def</span> clean(records):
+    out = []
+    <span class="kw">for</span> r <span class="kw">in</span> records:
+        out.append({**r, <span class="str">"name"</span>: r[<span class="str">"name"</span>].strip()})
+    <span class="kw">return</span> out</code></pre>
+<p>Look at its shape, ignoring the details: make an empty list, loop over something, <code>append</code> one transformed item per iteration, return the list. That shape — <em>empty list, loop, append, done</em> — is so common that Python gives it its own syntax. Whenever a loop's only job is building a new list by appending one item per iteration, a comprehension says the same thing in one line, and says it more clearly because there's no empty list to initialize and no <code>append</code> to misspell.</p>
+
+<h2>2 · List comprehensions, piece by piece</h2>
+<p>Start with the plainest case — a loop that transforms every element:</p>
+<pre><code><span class="cm"># loop form</span>
+prices = [<span class="kw">120.0</span>, <span class="kw">35.5</span>, <span class="kw">99.9</span>]
+taxed = []
+<span class="kw">for</span> p <span class="kw">in</span> prices:
+    taxed.append(p * <span class="kw">1.1</span>)
+
+<span class="cm"># comprehension form — same result</span>
+taxed = [p * <span class="kw">1.1</span> <span class="kw">for</span> p <span class="kw">in</span> prices]</code></pre>
+<p>Read the comprehension left to right as: <em>"build a list of <code>p * 1.1</code>, for each <code>p</code> in <code>prices</code>."</em> The part before <code>for</code> is the expression that becomes each output element; the part after <code>for</code> is exactly the loop header you'd write by hand — same <code>for</code>, same <code>in</code>, same variable name rules.</p>
+<p>Add a filter with <code>if</code>, and the SQL parallel becomes exact:</p>
+<pre><code><span class="cm"># SQL: SELECT amount FROM sales WHERE amount > 50</span>
+sales = [<span class="kw">120.0</span>, <span class="kw">35.5</span>, <span class="kw">99.9</span>, <span class="kw">10.0</span>]
+big = [amount <span class="kw">for</span> amount <span class="kw">in</span> sales <span class="kw">if</span> amount > <span class="kw">50</span>]
+<span class="kw">print</span>(big)   <span class="cm"># [120.0, 99.9]</span></code></pre>
+<p>Three slots, always in this order: <strong>expression</strong> (what goes in the output — the <code>SELECT</code> part), <strong>for</strong>-clause (what you're iterating — the <code>FROM</code> part), <strong>if</strong>-clause, optional (the <code>WHERE</code> part). Now the <code>clean()</code> function from section 1 in one line:</p>
+<pre><code><span class="kw">def</span> clean(records):
+    <span class="kw">return</span> [{**r, <span class="str">"name"</span>: r[<span class="str">"name"</span>].strip()} <span class="kw">for</span> r <span class="kw">in</span> records]</code></pre>
+<p>No empty list, no <code>append</code>, no <code>return out</code> on a separate line — and it's still building a brand-new list of new dicts, same as Day 1's non-mutating version. That's not a coincidence: a comprehension can only build a new container, never mutate an existing one, so it structurally can't fall into yesterday's mutation trap.</p>
+
+<div class="callout"><strong>When not to reach for one:</strong> if the loop body needs more than one line of real logic, or does something other than build a list (printing, writing to a file, raising an error), keep the <code>for</code> loop. A comprehension that needs a line break to stay readable has stopped being a readability win. This course would rather you write ten years' worth of maintainable loops than one clever unreadable comprehension.</div>
+
+<h2>3 · Dict and set comprehensions — same shape, different brackets</h2>
+<p>The exact same three-slot idea builds a <dfn data-en="a comprehension that builds a dict, written {key_expr: value_expr for item in iterable}, using curly braces and a colon instead of a list's square brackets" data-vn="giữ nguyên &quot;dict comprehension&quot; — comprehension tạo dict, dùng {} và dấu :">dict comprehension</dfn> or a <dfn data-en="a comprehension that builds a set, written {expr for item in iterable} — curly braces like a dict but with no colon, so there's one expression per element and duplicates collapse" data-vn="giữ nguyên &quot;set comprehension&quot; — comprehension tạo set, dùng {} nhưng không có dấu :">set comprehension</dfn>. Only the brackets and, for dicts, a colon change:</p>
+<pre><code>names = [<span class="str">"An"</span>, <span class="str">"Binh"</span>, <span class="str">"Chi"</span>]
+
+<span class="cm"># list: [ expr for ... ]           — square brackets</span>
+lengths = [<span class="kw">len</span>(n) <span class="kw">for</span> n <span class="kw">in</span> names]              <span class="cm"># [2, 4, 3]</span>
+
+<span class="cm"># dict: { key: value for ... }     — curly braces + colon</span>
+name_len = {n: <span class="kw">len</span>(n) <span class="kw">for</span> n <span class="kw">in</span> names}          <span class="cm"># {'An': 2, 'Binh': 4, 'Chi': 3}</span>
+
+<span class="cm"># set: { expr for ... }            — curly braces, no colon</span>
+unique_lengths = {<span class="kw">len</span>(n) <span class="kw">for</span> n <span class="kw">in</span> names}       <span class="cm"># {2, 3, 4} — duplicates collapse</span></code></pre>
+<p>You don't need mastery of these two yet — that's genuinely Day 3's job, once <code>dict</code> and <code>set</code> as lookup structures have been taught properly. The goal today is just to <strong>recognize the shape</strong>: curly braces plus a colon is a dict, curly braces with no colon is a set, square brackets is a list. All three read the same way once you know which bracket you're looking at.</p>
+
+<h2 id="slicing">4 · Slicing: <code>seq[start:stop:step]</code></h2>
+<p>Indexing a single item — <code>names[0]</code> — should already be familiar from reading Python. <dfn data-en="the seq[start:stop:step] syntax for extracting part of a sequence at once — stop is exclusive, and any of the three can be omitted" data-vn="giữ nguyên &quot;slicing&quot; — cắt một đoạn của list/string cùng lúc bằng seq[start:stop:step]">Slicing</dfn> is the same square-bracket syntax extended to grab a <em>range</em> at once, with up to three parts separated by colons:</p>
+<pre><code>letters = [<span class="str">"a"</span>, <span class="str">"b"</span>, <span class="str">"c"</span>, <span class="str">"d"</span>, <span class="str">"e"</span>]
+<span class="cm">#            0    1    2    3    4     (and -5  -4  -3  -2  -1 from the right)</span>
+
+letters[<span class="kw">1</span>:<span class="kw">3</span>]     <span class="cm"># ['b', 'c']        — start at 1, stop BEFORE 3</span>
+letters[:<span class="kw">2</span>]      <span class="cm"># ['a', 'b']        — start omitted = from the beginning</span>
+letters[<span class="kw">3</span>:]      <span class="cm"># ['d', 'e']        — stop omitted = to the end</span>
+letters[:]      <span class="cm"># ['a', 'b', 'c', 'd', 'e']   — a full copy (Day 1, section 4)</span>
+letters[::<span class="kw">2</span>]     <span class="cm"># ['a', 'c', 'e']   — step 2: every second item</span>
+letters[::-<span class="kw">1</span>]    <span class="cm"># ['e', 'd', 'c', 'b', 'a']  — step -1: reversed</span>
+letters[-<span class="kw">2</span>:]     <span class="cm"># ['d', 'e']        — negative index: from the right</span></code></pre>
+<p>The one rule that trips everyone up once, exactly once: <strong><code>stop</code> is never included.</strong> <code>letters[1:3]</code> stops <em>before</em> index 3, giving indices 1 and 2 only — two items, not three. That's the same convention as <code>range(1, 3)</code>, if that's already familiar from reading loops. Slicing also never raises an error for an out-of-range index — <code>letters[2:100]</code> just returns however much exists, which makes it forgiving for messy, variable-length data.</p>
+<p>Slicing works on any <dfn data-en="an ordered collection indexable by position — list, tuple, and str are the three you'll use constantly; slicing and positional indexing both rely on this ordering" data-vn="giữ nguyên &quot;sequence&quot; — dữ liệu có thứ tự, đánh index được (list, tuple, str)">sequence</dfn> — lists, tuples, and strings all support it identically:</p>
+<pre><code>header, *rows = [<span class="str">"id,name"</span>, <span class="str">"1,An"</span>, <span class="str">"2,Binh"</span>]  <span class="cm"># preview only — unpacking is Day 4</span>
+sku = <span class="str">"SKU-2024-00042"</span>
+year = sku[<span class="kw">4</span>:<span class="kw">8</span>]        <span class="cm"># "2024" — slicing a string returns a string</span>
+first_three_rows = rows[:<span class="kw">3</span>]  <span class="cm"># however many of the first 3 rows exist, no crash if fewer</span></code></pre>
+<p>Slicing and comprehensions solve different problems and it's worth keeping them apart: slicing takes a <em>contiguous range by position</em> from one sequence; a comprehension builds a <em>new sequence by transforming or filtering</em>, and can skip around, not just take a run. "First 10 rows" is a slice. "Rows where amount &gt; 50" is a comprehension.</p>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> once <code>data/</code> introduces DataFrames, the same two ideas reappear as <code>df.iloc[1:3]</code> for slicing and a boolean mask or <code>.query()</code> for filtering. Same concepts, different spelling for a different container — not covered here, that's <code>data/</code>'s job.</div>
+
+<h2>5 · Nested access: comprehension and slice together</h2>
+<p>These compose the way you'd expect — a comprehension's expression can itself contain a slice:</p>
+<pre><code>codes = [<span class="str">"VN-Hanoi"</span>, <span class="str">"VN-HCMC"</span>, <span class="str">"US-NYC"</span>]
+country = [c[:<span class="kw">2</span>] <span class="kw">for</span> c <span class="kw">in</span> codes]           <span class="cm"># ['VN', 'VN', 'US']</span>
+vn_only = [c <span class="kw">for</span> c <span class="kw">in</span> codes <span class="kw">if</span> c[:<span class="kw">2</span>] == <span class="str">"VN"</span>]   <span class="cm"># ['VN-Hanoi', 'VN-HCMC']</span></code></pre>
+<p>Same three slots as always — expression, <code>for</code>, optional <code>if</code> — just with a slice living inside the expression or the condition. Nothing new is happening here syntactically; this is exactly why the shape is worth owning solidly before moving on.</p>
+
+<div class="interview">
+<p><strong>Q: "When would you use a list comprehension instead of a loop, and when not?"</strong> A strong answer, out loud: <em>"When the loop's only job is building a new list by transforming or filtering an existing iterable — one line, one append per iteration. It's the same logic as a SQL SELECT/FROM/WHERE, just Python syntax. I'd keep a plain for loop when the body does more than one thing, needs multiple statements, or isn't building a list at all — readability loses to cleverness at that point."</em> The signal: knowing the shape it replaces, not just the syntax.</p>
+</div>
+
+<h2>Try it — self-checking practice (~15 min)</h2>
+<p>Open <code>practice/02_comprehensions_and_slicing.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/02_comprehensions_and_slicing.py</code></pre>
+<p>No dependencies — standard library only. Exercises: converting a loop to a list comprehension, adding a filter condition, recognizing dict/set comprehension shape, slicing with start/stop, slicing with a step and a negative index, and rewriting Day 1's <code>clean()</code> as a one-liner.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A list comprehension is the one-line form of: make an empty list, loop, append one transformed item per iteration, return the list. It replaces exactly that shape and nothing more general.">
+    <p class="stem">A list comprehension replaces which loop shape?</p>
+    <button class="opt" data-ok>empty list, loop, append once, return it</button>
+    <button class="opt">empty list, loop, print twice, return it</button>
+    <button class="opt">empty list, loop, append twice, discard it</button>
+  </div>
+  <div class="q" data-why="The three slots always appear in this order: the output expression first (the SELECT), then the for-clause (the FROM), then the optional if-clause (the WHERE). Matching SQL's logic, not its word order.">
+    <p class="stem">In <code>[x for x in rows if x > 0]</code>, which SQL clause does <code>if x &gt; 0</code> match?</p>
+    <button class="opt" data-ok>WHERE, the row filter condition</button>
+    <button class="opt">FROM, the source table reference</button>
+    <button class="opt">SELECT, the output column list</button>
+  </div>
+  <div class="q" data-why="Slicing's stop index is always exclusive — letters[1:3] takes indices 1 and 2 only, stopping before index 3. This mirrors range(1, 3), which also excludes its endpoint.">
+    <p class="stem">For <code>letters = ["a","b","c","d"]</code>, what is <code>letters[1:3]</code>?</p>
+    <button class="opt" data-ok>two items: index 1 up to, not including, 3</button>
+    <button class="opt">three items: index 1 up to, and including, 3</button>
+    <button class="opt">two items: index 3 down to, not including, 1</button>
+  </div>
+  <div class="q" data-why="Curly braces with a colon between two expressions build a dict comprehension — key before the colon, value after. No colon in curly braces would be a set instead.">
+    <p class="stem">What kind of comprehension is <code>{n: len(n) for n in names}</code>?</p>
+    <button class="opt" data-ok>a dict comprehension, from the colon</button>
+    <button class="opt">a set comprehension, from the braces</button>
+    <button class="opt">a list comprehension, from the loop</button>
+  </div>
+  <div class="q" data-why="Slicing takes a contiguous range by position from one sequence, forgiving of out-of-range bounds. A comprehension builds a new sequence by transforming or filtering, and can select non-contiguous items a slice never could.">
+    <p class="stem">What can a comprehension select that a slice cannot?</p>
+    <button class="opt" data-ok>non-contiguous items chosen by a condition</button>
+    <button class="opt">contiguous items chosen by position only</button>
+    <button class="opt">every single item, with no exceptions</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> Trey Hunner's <a href="https://treyhunner.com/blog/archives/">blog</a> (cited in RESOURCES.md) is the sharpest beginner-aware writing on comprehensions and when <em>not</em> to reach for one — search his archive for "comprehension" for several short, focused posts. For the canonical syntax reference, the <a href="https://docs.python.org/3/tutorial/datastructures.html#list-comprehensions">Python Tutorial's list comprehensions section</a> covers the same three-slot grammar formally, and the same chapter documents slicing.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day2">glossary</a> under Day 2.<br>
+<strong>Next lesson (31 Jul):</strong> <code>dict</code> and <code>set</code> as real lookup structures — grouping records without pandas, the SQL <code>GROUP BY</code> done by hand.<br><br>
+💬 Anything unclear — the three-slot shape, slicing bounds, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

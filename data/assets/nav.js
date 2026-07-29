@@ -48,6 +48,8 @@
       file: "lessons/0020-idxmax-and-idxmin.html" },
     { n: 21, date: "2026-07-29", title: "pd.concat(): stacking DataFrames",
       file: "lessons/0021-concat-stacking-dataframes.html" },
+    { n: 22, date: "2026-07-30", title: "query(): WHERE, spelled as a string",
+      file: "lessons/0022-query-method.html" },
   ];
 
   const REFS = [

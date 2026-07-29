@@ -82,3 +82,41 @@ fail *gracefully* so the learner sees which task failed.
   is the only record of the change. Any future course needs the same widening,
   plus the `QUIZ_COURSE` regex in that course's `assets/quiz.js`, or its
   progress and quiz results vanish silently.
+- 2026-07-30 — **Day 2 generated** (`lessons/0002-comprehensions-and-slicing.html`),
+  the first lesson this headless run actually produced end-to-end. Taught list
+  comprehensions ground-up as the one-line form of "empty list, loop, append,
+  return" (Day 1's `clean()` from section 6 rewritten as the running example),
+  enough dict/set comprehension to recognize the `{}`-with-colon /
+  `{}`-without-colon shapes (explicitly not mastery — that's Day 3), and
+  slicing (`seq[start:stop:step]`, stop-exclusive, negative index, step).
+  Bridged from SQL per the baseline record (`SELECT/FROM/WHERE` mapped
+  directly onto the three comprehension slots), not from vague
+  "Python-adjacent" analogies. Kept to one core idea (list comprehension) done
+  solidly, with dict/set kept to shape-recognition only, per the baseline
+  record's flag that Day 2 is the likely first difficulty spike — no attempt
+  to also land generator expressions or nested comprehensions today.
+  No-pandas rule: zero pandas/NumPy API anywhere in lesson or practice file;
+  one contrast sentence only (`.iloc`/boolean-mask/`.query()` mentioned by
+  name, never demonstrated), matching the one-line-contrast allowance in this
+  file's hard rule section above.
+  Practice file `practice/02_comprehensions_and_slicing.py` (6 exercises:
+  loop→comprehension, filtered comprehension, dict-comprehension shape,
+  start:stop slice, step/negative-index slice, and `clean()` as a one-liner)
+  was verified in a scratch dir via a subagent: the shipped (unsolved) copy
+  ran with `uv run python3` and printed six clean ✗ lines with no traceback;
+  a separately solved copy printed six ✓ and the "All green" tally. One bug
+  was caught and fixed during that verification — an early draft's Ex 1 check
+  hardcoded a float literal for `35.5 * 1.1` that didn't match Python's actual
+  floating-point output, so even the solved version failed; fixed by comparing
+  the comprehension's output against the loop's output instead of a literal.
+  Glossary: added a Day 2 section to `reference/glossary.html` (list
+  comprehension, dict comprehension, set comprehension, slicing, sequence).
+  Quiz: 5 questions, options hand-verified to equal word count per option
+  (one first-draft mismatch caught and fixed — a slicing question's options
+  originally read 6/7/7 words because of an uneven bracket-literal length;
+  rewritten in prose form so all three land on 9 words). Registered in
+  `assets/nav.js` with `date: "2026-07-30"`.
+  `record-progress python lesson_generated --day 2 …` was attempted once per
+  convention; it required interactive approval in this sandbox and was not
+  retried — outcome is "not recorded to DB this run," not a constraint
+  rejection, so the 2026-07-29 CHECK-constraint widening is not implicated.

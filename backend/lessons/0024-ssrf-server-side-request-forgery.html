@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 24 · SSRF: server-side request forgery</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 24 · ~20 min</p>
+<h1>SSRF: when your server is the attacker's proxy</h1>
+<p class="byline">Every security lesson so far (Lessons 12, 17, 22, 23) has been about a request <em>arriving</em> at your server. This one flips the direction: a feature that makes your server send a request <em>out</em>, to a URL a client got to influence. That single design shape is its own OWASP Top 10 risk, never covered here yet.</p>
+
+<h2>1 · The feature that quietly opens a hole</h2>
+<p>Plenty of ordinary features need the server to fetch a URL on the caller's behalf: a webhook target, an "import from URL" button, a link-preview thumbnail, an avatar pulled from a profile link. The natural implementation just fetches whatever URL the client sent:</p>
+<pre><code><span class="kw">func</span> fetchAvatarVulnerable(w http.ResponseWriter, r *http.Request) {
+    imageURL := r.URL.Query().Get(<span class="str">"url"</span>)
+    resp, err := http.Get(imageURL) <span class="cm">// fetches whatever the client asked for</span>
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        http.Error(w, <span class="str">"fetch failed"</span>, http.StatusBadGateway)
+        <span class="kw">return</span>
+    }
+    <span class="kw">defer</span> resp.Body.Close()
+    io.Copy(w, resp.Body)
+}</code></pre>
+<p>This works perfectly for its intended use — a client passes a public image URL, the server fetches it, everyone's happy. The bug is what else it accepts. Nothing here checks <em>where</em> the URL points, only that it's a URL.</p>
+
+<h2>2 · The attack: your server as a proxy into your own network</h2>
+<p>This is <dfn data-en="a vulnerability where an attacker gets a server to make an outbound HTTP request to a destination the attacker chose, instead of one the application intended — abusing the server's own network position and credentials rather than the client's" data-vn="giữ nguyên 'SSRF' (Server-Side Request Forgery) — dụ server tự gửi request tới địa chỉ attacker chọn, lợi dụng vị trí mạng và quyền của server">SSRF</dfn>: instead of a normal image URL, the attacker sends a URL pointing at somewhere the public internet can't normally reach, but the server can:</p>
+<pre><code>GET /fetch-avatar?url=http://169.254.169.254/latest/meta-data/iam/security-credentials/
+GET /fetch-avatar?url=http://localhost:6379/
+GET /fetch-avatar?url=http://10.0.4.12:5432/</code></pre>
+<p>Three real targets, three real outcomes: <code>169.254.169.254</code> is the cloud metadata endpoint (AWS/GCP/Azure all use it) — reachable only from inside the instance, and it can hand back live cloud credentials. <code>localhost:6379</code> is a Redis instance that was never exposed publicly because "only the server talks to it." <code>10.0.4.12:5432</code> is a Postgres instance sitting on a private subnet, unreachable from outside — except the app server sits inside that same network and has a route to it. None of these addresses were ever meant to be public. The attacker never touches them directly; they get <em>your server</em> to touch them, and the response gets copied straight back into the HTTP response the attacker receives. The server's network position — and often its credentials — become the attacker's.</p>
+<div class="callout"><strong>Why this isn't just "another IDOR":</strong> Lesson 12's IDOR is about a request that arrives and reads the wrong row. SSRF is about a request your own server <em>sends</em>, to a destination it never meant to reach — the trust boundary being crossed is the network perimeter around internal services, not a database row's ownership.</div>
+
+<h2>3 · Why "just block private IP ranges from the URL string" isn't enough</h2>
+<p>The obvious first fix is to reject any URL whose hostname parses to a private-looking address before fetching it. That's necessary, but checking the URL string alone misses the actual attack surface: a hostname is resolved by DNS, and DNS is attacker-controlled the moment the attacker controls the domain. <code>http://evil-but-looks-fine.example.com/</code> can have a DNS record pointing straight at <code>169.254.169.254</code> — the string in the URL never mentions a private IP at all, so a check that only inspects the URL text passes it through. Worse, an attacker with a slightly more patient setup can even make the DNS answer differ between the moment it's checked and the moment it's actually connected to (a DNS rebinding attack) — checking the URL, or even resolving it once ahead of time, and then fetching separately leaves that gap open.</p>
+<p>The fix has to sit at the actual network connection, not the URL string: resolve the hostname, inspect the IP that connection is about to use, and refuse to dial it if it's private/loopback/link-local — every single time a connection is made, not once earlier in the request.</p>
+
+<h2>4 · The fix: validate the connection, not the string</h2>
+<p>In Go, <code>http.Client</code> takes a custom <code>Transport</code>, and the transport's <code>DialContext</code> is the one place that sees the literal IP a connection is about to use — the right place to enforce this:</p>
+<pre><code><span class="kw">func</span> safeDialContext(ctx context.Context, network, addr <span class="kw">string</span>) (net.Conn, error) {
+    host, port, err := net.SplitHostPort(addr)
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        <span class="kw">return</span> <span class="kw">nil</span>, err
+    }
+    ips, err := net.DefaultResolver.LookupIP(ctx, <span class="str">"ip"</span>, host)
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        <span class="kw">return</span> <span class="kw">nil</span>, err
+    }
+    <span class="kw">for</span> _, ip := <span class="kw">range</span> ips {
+        <span class="kw">if</span> ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() {
+            <span class="kw">return</span> <span class="kw">nil</span>, errBlockedHost <span class="cm">// refuse to dial it, no exceptions</span>
+        }
+    }
+    dialer := net.Dialer{Timeout: 5 * time.Second}
+    <span class="kw">return</span> dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].String(), port))
+}
+
+<span class="kw">var</span> safeClient = &amp;http.Client{
+    Timeout:   5 * time.Second,
+    Transport: &amp;http.Transport{DialContext: safeDialContext},
+}</code></pre>
+<p>Because <code>DialContext</code> runs at the moment of the actual TCP connection — after DNS resolution, right before the socket opens — this closes both problems at once: a hostname that resolves to a private IP is caught regardless of what the URL string looked like, and there's no earlier "check now, connect later" gap for DNS rebinding to slip through, because the check and the connection are the same step. <code>safeClient.Get(url)</code> replaces the bare <code>http.Get(url)</code> from section 1, and every outbound fetch in the feature now goes through it.</p>
+
+<div class="interview">
+<p><strong>Q: "A code review shows a handler doing <code>http.Get(userSuppliedURL)</code> for a webhook feature. What do you flag?"</strong> A strong answer, out loud: <em>"That's SSRF — the server will fetch whatever URL the request contains, including internal addresses like the cloud metadata endpoint or an internal Postgres instance that were never meant to be reachable from outside. I'd flag it as blocking, not a nit. The fix isn't a regex check on the URL string, since DNS can point an innocent-looking hostname at a private IP — it needs to validate the actual IP at connection time, in the HTTP client's dial step, so a hostname that resolves to a private or loopback address gets refused right when the connection is made, not earlier when it's easier to spoof."</em> The signal: naming that the check has to happen at dial time against the resolved IP, not as a one-time string check on the URL.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="SSRF is specifically about the server itself making an outbound request to a destination the attacker chose, abusing the server's own network position and credentials — distinct from IDOR (Lesson 12), which is about an inbound request reading a row it shouldn't.">
+    <p class="stem">What is SSRF, precisely?</p>
+    <button class="opt" data-ok>server sends a request to attacker's chosen target</button>
+    <button class="opt">a client sets fields a handler never exposed</button>
+    <button class="opt">untrusted input changes a SQL query's actual meaning</button>
+    <button class="opt">a forged request rides the victim's session cookies</button>
+  </div>
+  <div class="q" data-why="Cloud metadata endpoints, internal caches like Redis, and private-subnet databases were never exposed to the public internet, but the application server itself sits inside that network and has a route to them — SSRF abuses exactly that position.">
+    <p class="stem">Why can an SSRF payload reach a metadata endpoint or internal database?</p>
+    <button class="opt" data-ok>the server itself already sits inside that network</button>
+    <button class="opt">the attacker already holds valid cloud account credentials</button>
+    <button class="opt">metadata endpoints are reachable from the public internet</button>
+    <button class="opt">the database was misconfigured to accept public traffic</button>
+  </div>
+  <div class="q" data-why="A hostname's DNS record is attacker-controlled the moment the attacker controls that domain, so a URL string can look entirely public while resolving straight to a private IP — checking the string alone never sees that.">
+    <p class="stem">Why doesn't checking the URL string for private IPs fully stop SSRF?</p>
+    <button class="opt" data-ok>DNS can resolve an innocent hostname to private</button>
+    <button class="opt">private IP addresses are impossible to write down</button>
+    <button class="opt">Go's URL parser silently rewrites private addresses always</button>
+    <button class="opt">HTTP requests cannot legally include an IP literal</button>
+  </div>
+  <div class="q" data-why="DialContext runs at the moment of the actual TCP connection, right after DNS resolution and right before the socket opens, so it sees the real IP a connection is about to use and closes the string-check gap and the earlier-check-then-later-connect gap in one place.">
+    <p class="stem">Why enforce the SSRF check inside <code>DialContext</code> specifically?</p>
+    <button class="opt" data-ok>it sees the real IP as connection opens</button>
+    <button class="opt">it runs once at server startup before requests</button>
+    <button class="opt">it is the only function allowed to dial</button>
+    <button class="opt">it automatically retries any request that gets blocked</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> OWASP's <a href="https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html">Server-Side Request Forgery Prevention Cheat Sheet</a> (~10 min) — this course's standing security reference (RESOURCES.md) — covers the same dial-time IP validation as the primary defense, plus network-level defense in depth (egress firewall rules) for when application code alone isn't enough.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> open — MISSION.md's five criteria and every previously-identified gap (config, CSRF, mass assignment, and now SSRF) are covered; a good next step is naming one track to deepen, or a real PR review together. Tell your teacher which you'd like.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

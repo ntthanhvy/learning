@@ -8,6 +8,8 @@
   const LESSONS = [
     { n: 1, date: "2026-07-29", title: "Names, objects & mutability",
       file: "lessons/0001-names-objects-and-mutability.html" },
+    { n: 2, date: "2026-07-30", title: "Comprehensions & slicing: retiring the loop",
+      file: "lessons/0002-comprehensions-and-slicing.html" },
   ];
 
   const REFS = [

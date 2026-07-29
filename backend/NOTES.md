@@ -533,3 +533,58 @@
   finding). This closes the gap found by grepping OWASP-adjacent terms;
   teaser left open again for the next session to pick a track to deepen
   or find another genuine gap, same as Lesson 22's closing note.
+- 2026-07-30 generation (Lesson 24, headless 06:00 run): direct `psql
+  "$LEARNING_DB_URL" ...` was attempted once as instructed and was blocked
+  again (shell-variable expansion of that exact name disallowed for this
+  sandboxed session — same class of block as every prior round), not
+  retried — still no `course_progress` rows could be read, and still no
+  `lesson_completed` record for any of Lessons 1-23. Lesson 23 left the
+  teaser open with no obvious next gap after MISSION.md's five criteria,
+  RESOURCES.md's config gap, and Lesson 4's CSRF/mass-assignment deferrals
+  were all closed by Lessons 20-23 — so this round grepped every lesson
+  body for other OWASP Top 10 items instead of mining MISSION.md a fifth
+  time: SQL injection (L17), IDOR/authorization (L12), mass assignment
+  (L23), and CSRF (L22) were all covered, but a grep for "SSRF" and
+  "server-side request forgery" across all 23 prior lessons and the
+  glossary came back completely empty — confirmed genuinely untaught.
+  Lesson 24 covers it: the feature shape that opens the hole (a handler
+  fetching a client-supplied URL — webhook target, avatar-from-URL,
+  link preview), the attack (pointing that fetch at the cloud metadata
+  endpoint 169.254.169.254, an internal Redis, or a private-subnet
+  Postgres the server can reach but the public internet can't), why
+  checking the URL string for private IPs is insufficient (DNS is
+  attacker-controlled the moment the attacker controls the domain, and a
+  check-then-connect gap invites DNS rebinding), and the fix — validating
+  the resolved IP inside the HTTP client's `DialContext`, the one point
+  that sees the literal IP right as the TCP connection opens, closing
+  both the string-check gap and the rebinding gap in the same step. Framed
+  explicitly against Lesson 12's IDOR in an early callout (inbound request
+  reading the wrong row vs. outbound request the server itself sends) so
+  it reads as a new, distinct risk rather than a rehash. Both Go snippets
+  (`fetchAvatarVulnerable`'s bare `http.Get`, and the fixed version's
+  `safeDialContext` + `safeClient`) were compile-checked clean with
+  `go build -C` / `go vet -C` in a scratch module
+  (`.scratch/backend-lesson24/`, built binary deleted after, directory
+  left in place with only `go.mod`/`main.go`, same pattern as every prior
+  round) — no approval blocker for either `-C`-style invocation this
+  round. Added `SSRF` to the glossary (checked first it didn't already
+  exist) and registered Lesson 24 in nav.js. Quiz options were drafted
+  into per-option scratch files under `.scratch/backend-lesson24/` and
+  verified with `wc -w` per file (this course's established convention,
+  not eyeballed) — three of four questions needed a rewrite pass to
+  equalize word count (Q1 was 8/9/8/8, Q3 was 10/9/7/8, Q4 was 10/9/9/8;
+  only Q2 was correct on the first draft at 8/8/8/8), all four landed at
+  8/8/8/8 after rewriting the mismatched options and re-verifying with
+  `wc -w` again; the quiz-drafting scratch files were deleted afterward,
+  keeping only `go.mod`/`main.go` in the scratch directory per convention.
+  `~/learning/bin/record-progress backend lesson_generated --day 24
+  --lesson 0024-ssrf-server-side-request-forgery.html --detail
+  '{"by":"launchd"}'` was attempted once as instructed and required
+  approval with none available in this headless run — recorded here as
+  blocked, not retried (same outcome as Lesson 19's one-off failure;
+  every other round since Lesson 9 succeeded, so this remains a
+  transient-looking sandbox variance rather than a confirmed pattern).
+  This closes the SSRF gap found by grepping OWASP-adjacent terms a
+  second time (same method Lesson 23 used successfully); teaser left open
+  again for the next session to pick a track to deepen or find another
+  genuine gap.

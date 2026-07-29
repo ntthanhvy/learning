@@ -229,3 +229,14 @@
   state. Backend lesson 23 (mass assignment & overexposure) and data
   lesson 21 (`pd.concat()`) were generated this round; rust's post-week
   daily quiz+kata infra was verified unchanged, nothing new to generate.
+- 2026-07-30 (headless 06:00 run): skipped again per the same rule — the
+  course window closed 2026-07-20, now ten days past it. Note: despite
+  the 2026-07-29 entry above saying Day 13 "still remains ungenerated,"
+  `0014-concurrency-capstone.html` is in fact present on disk (a full
+  402-line lesson) and already registered in `assets/nav.js` — so that
+  earlier note was stale/incorrect. Moot for this session's decision
+  either way (past the window means skip regardless of whether Day 13
+  exists), but flagged so a future session doesn't waste time chasing a
+  phantom gap. Direct `psql "$LEARNING_DB_URL" ...` was blocked again
+  this session (generic "requires approval" gate, no user present) —
+  moot for this course since it's a pure skip regardless of DB state.

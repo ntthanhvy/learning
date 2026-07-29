@@ -52,6 +52,8 @@
       file: "lessons/0022-csrf-the-other-half-of-cookie-auth.html" },
     { n: 23, date: "2026-07-29", title: "Mass assignment & overexposure",
       file: "lessons/0023-mass-assignment-and-overexposure.html" },
+    { n: 24, date: "2026-07-30", title: "SSRF: server-side request forgery",
+      file: "lessons/0024-ssrf-server-side-request-forgery.html" },
   ];
 
   const REFS = [

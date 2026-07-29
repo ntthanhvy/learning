@@ -321,3 +321,14 @@ by the user there; they apply here identically.
   Day-1 baseline. (Go skipped again per its own window close, now nine
   days past it; backend lesson 23 — mass assignment & overexposure — and
   data lesson 21 — `pd.concat()` — were generated this round.)
+- 2026-07-30 (headless 06:00 run): same as every prior post-week day —
+  verified `daily.html`, `assets/srs.js`, and `assets/quiz-bank.js` are all
+  present and untouched (`quiz-bank.js` still tags exactly days 1-7, with
+  exactly 7 kata entries `k1`-`k7`; `nav.js` still registers only the 7
+  Jul 8-14 lessons). Still the correct "daily quiz+kata" for this
+  post-week phase per PLAN.md, so nothing new was generated. Direct `psql
+  "$LEARNING_DB_URL" ...` reads were blocked again this session (generic
+  "requires approval" gate, no user present), so no `course_progress` rows
+  could be read for a scope-change signal. No new learning record beyond
+  the Day-1 baseline. (Go skipped again per its own window close, now ten
+  days past it.)

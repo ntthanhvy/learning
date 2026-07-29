@@ -636,3 +636,71 @@
   Lesson 8, never taught as its own topic — flagged as a candidate in
   Lesson 20's entry above) if no drill-outcome signal surfaces by next
   generation.
+- 2026-07-30 generation (Lesson 22, headless 06:00 run): direct `psql
+  "$LEARNING_DB_URL" ...` reads were blocked again this session (same
+  content-level block on the variable name as every prior round) — still
+  no `course_progress` rows readable and no `lesson_completed`/quiz/kata
+  outcome record beyond the Lesson 1 baseline, so no reported weak spot to
+  target. Lesson 21's own teaser named `query()` explicitly (used
+  uncredited inside Lesson 8's method chain, `.query("amount_rank == 1")`,
+  never taught as its own topic) — re-confirmed via grep across
+  `lessons/*.html` and `reference/glossary.html` before committing that it
+  still only appears inside Lesson 8's code (twice) and Lesson 21's teaser
+  sentence, nowhere as a taught concept, so the teaser was not stale (unlike
+  the Lesson 12/2026-07-22 backend precedent) — Lesson 22 ships it as
+  planned: `query()` as a second spelling of the same filter a boolean mask
+  already does, the `and`/`or`/`not` keyword swap versus `&`/`|`/`~`, the
+  `@variable` prefix for pulling in a Python value, and why it fits inside a
+  method chain (Lesson 8) where a boolean mask can't be written at all since
+  there's no DataFrame variable yet to index into — closed with a one-line
+  note on backtick-quoting non-identifier column names. SQL bridge: a query
+  string reads directly as `WHERE ...`. `uv run --with pandas` worked
+  directly this round: first used to hand-verify every number against the
+  real `orders_raw.csv`/`customers.csv` fixtures before writing the lesson
+  text (`.scratch/data-lesson22/explore.py`, deleted after) — reused the
+  same cleaned 4-row slice as Lessons 6-21 (An 120.0/01-05, Binh 35.5/01-06,
+  Binh 180.0/01-09, An 42.0/01-10): `query("amount > 100")` gives An/120.0 +
+  Binh/180.0 (2 rows), `query("customer == 'An'")` gives both An rows,
+  `query("amount > @threshold")` with `threshold=100` matches the plain
+  boolean-mask equivalent exactly, and merging in `customers.csv` then
+  `query("region == 'South'")` gives Binh's 2 orders (South). The shipped
+  (unsolved) `practice/22_query.py` was executed in place and initially
+  needed care around the by-now-familiar Ellipsis-is-truthy/doesn't-raise
+  family of gotchas (Lessons 19-21): Exercise 3's first draft used an
+  f-string (`clean.query(f"amount > {...}")`), which does raise on an
+  unsolved Ellipsis (formats to the string `"Ellipsis"`, an undefined name
+  the query parser rejects) but doesn't actually exercise the `@threshold`
+  syntax the lesson teaches, so it was rewritten to
+  `clean.query(... + " > @threshold")` instead — `str + Ellipsis` raises
+  `TypeError` immediately when unsolved, and solving it means filling in the
+  literal string `"amount"`, producing the real taught `"amount > @threshold"`
+  expression. Exercise 2 embeds its `...` placeholder inside an existing
+  Python string literal (`"amount > 50 and customer == ..."`), so it's three
+  literal dot characters becoming part of the query expression itself, not a
+  Python Ellipsis object — this reliably fails to parse as a query
+  expression and raises, caught by the surrounding try/except. Re-ran after
+  the Exercise 3 fix and confirmed all 4 exercises print ✗ with no crash,
+  then a solved copy (`.scratch/data-lesson22/solved.py`, deleted after —
+  plain `rm -rf` worked fine this round, no approval needed) printed all ✓,
+  matching the hand-verified numbers above exactly. `bin/record-progress
+  data lesson_generated --day 22 --lesson 0022-query-method.html --detail
+  '{"by":"launchd"}'` was attempted once as instructed (both via a `cd &&`
+  chain and via a direct absolute-path invocation) and required approval
+  both times, no user present in this headless session — `lesson_generated`
+  could not be recorded; do it manually once DB/write access is back. Not
+  retried in a loop. Added `query()` to the glossary and registered Lesson
+  22 in nav.js. Quiz options were drafted and checked with a `Grep -o`
+  extraction of every option string plus manual per-option word counts
+  (this course's established convention, following Lesson 19's note that a
+  single pass isn't infallible) — this round needed THREE successive
+  verification passes before all four questions actually matched: the first
+  draft looked right by eye but a `Grep`-based recount caught Q1 at 7/6/7,
+  Q2 at 6/7/6, Q3 at 8/8/9, and Q4 at 9/8/7 all mismatched; a second editing
+  pass fixed Q2 and Q4 but a third recount caught Q1 still at 7/6/7 and Q3
+  still at 7/6/7; a final fourth recount confirmed all four questions
+  genuinely level at 7/7/7, 5/5/5, 7/7/7, and 8/8/8 — concrete evidence for
+  why this course's NOTES.md keeps insisting a single "checked" pass isn't
+  enough. Set the teaser going forward to a fresh scan of the curriculum
+  spine/glossary for the next genuinely-uncovered drill pattern (no obvious
+  named candidate left dangling from this lesson's own content, unlike most
+  prior rounds) if no drill-outcome signal surfaces by next generation.

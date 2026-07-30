@@ -10,6 +10,8 @@
       file: "lessons/0001-names-objects-and-mutability.html" },
     { n: 2, date: "2026-07-30", title: "Comprehensions & slicing: retiring the loop",
       file: "lessons/0002-comprehensions-and-slicing.html" },
+    { n: 3, date: "2026-07-31", title: "dict & set: grouping without pandas",
+      file: "lessons/0003-dict-set-and-grouping.html" },
   ];
 
   const REFS = [

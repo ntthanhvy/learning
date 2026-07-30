@@ -616,3 +616,70 @@
   stylesheet, so the lesson itself could stay ~20 min. Registered in nav.js REFS.
   13 new glossary terms added. Six-question retrieval quiz, no practice section
   (concept lesson, per this course's light-touch shape).
+- 2026-07-31 generation (Lesson 26, headless 06:00 run): learning-records/0002
+  flagged that Lesson 25's retrieval quiz outcome is NOT YET confirmed (the
+  progress DB is approval-gated and unreachable this session, no user present
+  to approve) — so this round deliberately avoided a deep continuation of
+  Lesson 25's concurrency material and picked a fresh, mostly-independent
+  topic instead, per the task's own guidance. Idempotency check first:
+  confirmed `lessons/0026-*.html` did not exist and lesson 26 was not yet in
+  nav.js before writing anything. With no open teaser (Lesson 25 consumed
+  Lesson 24's), this round used the course's established gap-finding method —
+  grepping the workspace against MISSION.md's own criteria — rather than
+  inventing a topic: criterion 2 lists "idempotency" explicitly, and while
+  Lesson 3 (2026-07-09) already taught the *concept* (GET/PUT/DELETE promise
+  it, POST doesn't) and Lesson 10 named *at-least-once delivery* for job
+  queues, a grep for "Idempotency-Key" / "idempotency key" across every prior
+  lesson and the glossary came back completely empty — the concrete
+  client-retry-safety mechanism for POST that Lesson 3's own text gestured at
+  ("special protection (dedup tokens, disabled buttons)") but never built was
+  genuinely untaught. Also checked and ruled out circuit breaker, graceful
+  shutdown, and the outbox pattern as candidates (none taught either, but
+  idempotency keys tie more directly to a named, still-open MISSION phrase
+  and Lesson 3's own text, so that one was chosen over inventing among the
+  others). Lesson 26 covers it: why a dropped connection after a successful
+  POST is indistinguishable from "never arrived" to the client, forcing a
+  retry that can double-create; the idempotency key as a client-generated,
+  once-per-action header value; a minimal `withIdempotency` Go middleware
+  that checks a key/response store before running the real handler and
+  replays the stored response on a repeat, so the handler's own logic
+  (including any real side effects like a second charge) never runs twice;
+  why replaying the stored bytes is safer than re-running deduplicated
+  business logic; and the three easy-to-miss correctness details (per-client
+  scoping, same-body validation, key expiry), each tied to Stripe's own
+  documented behavior rather than invented. Framed explicitly as closing a
+  gap Lesson 3 itself left open, and echoed Lesson 10's at-least-once framing
+  ("the handler must tolerate running more than once") as the same shape
+  applied at the API layer. The `IdempotencyStore`/`withIdempotency`/
+  `recordingWriter`/`createOrderHandler` Go snippets were compile-checked
+  clean with `go build -C` / `go vet -C` in a scratch module
+  (`.scratch/backend-lesson26/`, built binary written to `/tmp` and not
+  copied into the scratch dir so only `go.mod`/`main.go` remain there, same
+  end-state as every prior round) — no approval blocker for either `-C`-style
+  invocation this round; a bare `go version` (tested once, not needed for the
+  lesson) did require approval, consistent with every round since Lesson
+  13's finding. Added `idempotency key` to the glossary (confirmed via grep
+  it didn't already exist) and registered Lesson 26 in nav.js. Quiz options
+  were drafted into per-option scratch files under a
+  `.scratch/backend-lesson26-quiz/` directory and verified with `wc -w`
+  per file, then cross-checked with a second, independent method (Grep `-o`
+  word extraction, counting matches per file) rather than a single eyeball
+  pass, per this course's established practice that one pass has repeatedly
+  proven insufficient — Q1 and Q4 each needed one rewrite to fix a
+  mismatched option (Q1 was 8/8/8/7, Q4 was 9/8/9/9; a hyphenated
+  "server-side," collapsing to one word under `wc -w` was the specific cause
+  of Q4's miscount), Q2 and Q3 landed correct on the first draft; final
+  tallies Q1 8/8/8/8, Q2 8/8/8/8, Q3 8/8/8/8, Q4 9/9/9/9, all confirmed by
+  both methods agreeing. The quiz-drafting scratch directory was deleted
+  afterward, keeping only the Go compile-check scratch dir per convention.
+  `/home/runner/work/learning/learning/bin/record-progress backend
+  lesson_generated --day 26 --lesson 0026-idempotency-keys-safe-retries.html
+  --detail '{"by":"launchd"}'` was attempted once as instructed via its
+  absolute path and required approval with none available in this headless
+  run — recorded here as blocked, not retried (same outcome as Lessons 19
+  and 24's one-off failures; every other round since Lesson 9 succeeded, so
+  this remains inconsistent rather than a confirmed permanent block). Teaser
+  left open again, same as Lessons 22-24 — no obvious next mission gap
+  identified this round beyond the one just closed; the next session should
+  either confirm Lesson 25's quiz outcome (still the standing open question
+  from learning-records/0002) or pick a track to deepen.

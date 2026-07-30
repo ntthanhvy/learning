@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 23 · shift(): LAG/LEAD, spelled in pandas</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 23 · ~20 min · 31 Jul 2026</p>
+<h1>shift(): pulling the previous (or next) row's value alongside</h1>
+<p class="byline">Lesson 22 closed with no single named next candidate, so today's topic comes from a fresh scan: Lesson 11's <code>pct_change()</code> was described as "hand-written as <code>(curr - LAG(curr) OVER (...)) / LAG(curr) OVER (...)</code>, which is exactly what pct_change() is doing under the hood" — but the tool that actually IS that <code>LAG()</code>/<code>LEAD()</code>, <code>shift()</code>, was never taught on its own. It's a genuine gap: grepped every lesson body and the glossary, <code>shift()</code> appears nowhere as a taught concept.</p>
+
+<h2>1 · The SQL bridge: LAG() and LEAD()</h2>
+<p>SQL answers "what was this row's previous value" with a window function: <code>LAG(amount) OVER (PARTITION BY customer ORDER BY order_date)</code>. pandas' direct equivalent is <dfn data-en="a Series method that shifts every value down (or up) by a chosen number of rows, in the CURRENT row order, filling the rows that now have nothing to shift into with NaN" data-vn="giữ nguyên 'shift()' — dịch cả cột lên/xuống N dòng theo thứ tự hiện tại, tương đương LAG()/LEAD() trong SQL">shift()</dfn>: it moves every value down (or up) by N rows, in whatever order the DataFrame is currently in.</p>
+<pre><code>ordered = clean.sort_values([<span class="str">"customer"</span>, <span class="str">"order_date"</span>])
+ordered[<span class="str">"prev_amount"</span>] = ordered.groupby(<span class="str">"customer"</span>)[<span class="str">"amount"</span>].shift(<span class="kw">1</span>)
+<span class="cm">#   customer  amount  order_date  prev_amount
+#0        An   120.0  2026-01-05          NaN
+#1        An    42.0  2026-01-10        120.0
+#2      Binh    35.5  2026-01-06          NaN
+#3      Binh   180.0  2026-01-09         35.5</span></code></pre>
+<p><code>shift(1)</code> is <code>LAG(amount) OVER (PARTITION BY customer ORDER BY order_date)</code> — each row now carries the value from one row before it, per customer. The first order of each customer has nothing before it, so it comes back <code>NaN</code> — the same "genuinely doesn't exist yet" reasoning as Lesson 3's NaN-not-zero rule.</p>
+
+<h2>2 · The other direction: shift(-1) for LEAD()</h2>
+<p>A negative argument shifts values <em>up</em> instead of down — each row sees what comes <em>next</em>, not what came before:</p>
+<pre><code>ordered[<span class="str">"next_amount"</span>] = ordered.groupby(<span class="str">"customer"</span>)[<span class="str">"amount"</span>].shift(-<span class="kw">1</span>)
+<span class="cm">#   customer  amount  order_date  next_amount
+#0        An   120.0  2026-01-05         42.0
+#1        An    42.0  2026-01-10          NaN
+#2      Binh    35.5  2026-01-06        180.0
+#3      Binh   180.0  2026-01-09          NaN</span></code></pre>
+<p><code>shift(-1)</code> is <code>LEAD(amount) OVER (PARTITION BY customer ORDER BY order_date)</code>. Same mechanism, opposite direction — now the <em>last</em> order of each customer is the one with nothing after it, so that row is <code>NaN</code> instead of the first.</p>
+
+<h2>3 · The sharp edge: shift() trusts row order only, same as everything in this family</h2>
+<p><code>shift()</code> has no <code>ORDER BY</code> argument of its own — exactly the same warning Lessons 7, 11, and 13 already gave for <code>cumsum()</code>, <code>pct_change()</code>, and <code>rolling()</code>. It shifts whatever physical row order the DataFrame is currently in. Skip the grouping too, and it gets worse than "wrong order" — it bleeds values <em>across customers</em>, since <code>shift()</code> only looks at row position, not who the row belongs to:</p>
+<pre><code><span class="cm">## WRONG — no groupby(), just a plain shift on the sorted table</span>
+ordered[<span class="str">"wrong_prev"</span>] = ordered[<span class="str">"amount"</span>].shift(<span class="kw">1</span>)
+<span class="cm">#   customer  amount  order_date  wrong_prev
+#0        An   120.0  2026-01-05         NaN
+#1        An    42.0  2026-01-10        120.0
+#2      Binh    35.5  2026-01-06         42.0   <-- An's amount, not Binh's!
+#3      Binh   180.0  2026-01-09         35.5</span></code></pre>
+<p>Binh's first order silently inherits An's last amount (42.0) as its "previous" value — there's no error, no warning, just a quietly wrong number that looks perfectly plausible in a report. This is the single most common way <code>shift()</code> goes wrong in practice: always <code>groupby(key)</code> first when "previous" means "previous <em>for this group</em>," not "previous physical row."</p>
+
+<h2>4 · diff() is just shift(), pre-subtracted</h2>
+<p><code>ordered["amount"] - ordered["prev_amount"]</code> and <code>ordered.groupby("customer")["amount"].diff()</code> compute the exact same numbers — <code>diff()</code> is a named shortcut for "current minus <code>shift(1)</code>," the same relationship Lesson 11 already showed between <code>pct_change()</code> and a hand-written <code>(curr - LAG(curr)) / LAG(curr)</code>:</p>
+<pre><code>ordered.groupby(<span class="str">"customer"</span>)[<span class="str">"amount"</span>].diff()
+<span class="cm"># An:  NaN, -78.0    (42.0 - 120.0)
+# Binh: NaN, 144.5   (180.0 - 35.5)</span></code></pre>
+<p>Three related tools now sit side by side: <code>shift()</code> hands you the raw previous/next <em>value</em>, <code>diff()</code> hands you the <em>difference</em>, and Lesson 11's <code>pct_change()</code> hands you the <em>fractional change</em> — all three are the same "look one row over" idea, just returning a different shape of answer.</p>
+
+<div class="callout"><strong>Rule of thumb:</strong> need the raw prior/next value itself (to compare against, to build a custom formula) → <code>shift()</code>. Just need the absolute difference → <code>diff()</code>. Need the percentage change → Lesson 11's <code>pct_change()</code>. All three: sort first, group by key first, or the answer is wrong in a way that won't raise an error.</div>
+
+<div class="interview">
+<p><strong>Q: "How would you find each customer's order-over-order change in pandas, and how does that map to SQL?"</strong> A strong answer, out loud: <em>"Sort by customer and date, then groupby(customer) chained with shift(1) for the raw previous value, diff() for the absolute change, or pct_change() for the percentage — they're all the same 'look at the previous row' idea, just returning a different shape of answer. In SQL that's LAG(amount) OVER (PARTITION BY customer ORDER BY order_date) — shift(1) is that window function directly, and shift(-1) is LEAD(). The pitfall I'd watch for is forgetting the groupby: shift() only knows physical row position, not which customer a row belongs to, so skipping the groupby silently pulls in another customer's value instead of raising an error."</em> The signal: naming LAG/LEAD unprompted, and naming the silent-bleed failure mode instead of just the happy path.</p>
+</div>
+
+<h2>Try it — self-checking practice (~15 min)</h2>
+<p>Open <code>practice/23_shift.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/23_shift.py</code></pre>
+<p>Uses the same cleaned rows as Lessons 6-22 (An 120.0/01-05, An 42.0/01-10, Binh 35.5/01-06, Binh 180.0/01-09), sorted by customer then date. Exercise 1 is <code>shift(1)</code> after <code>groupby()</code>; Exercise 2 is <code>shift(-1)</code>; Exercise 3 deliberately reproduces the ungrouped cross-customer bleed from section 3 so you can see the wrong number with your own eyes; Exercise 4 rebuilds <code>diff()</code> by hand from <code>shift()</code> and checks it against the real <code>groupby(...).diff()</code>.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="shift(1) moves every value down one row in the current order — LAG(col) OVER (...) is exactly this, reading the previous row's value into the current row.">
+    <p class="stem">Which SQL window function does <code>groupby("customer")["amount"].shift(1)</code> match?</p>
+    <button class="opt" data-ok>LAG(amount) OVER (PARTITION BY customer ORDER BY ...)</button>
+    <button class="opt">RANK(amount) OVER (PARTITION BY customer ORDER BY ...)</button>
+    <button class="opt">SUM(amount) OVER (PARTITION BY customer ORDER BY ...)</button>
+  </div>
+  <div class="q" data-why="A negative argument shifts values up instead of down, so each row sees what comes next rather than what came before — the LEAD() side of the same window-function pair as LAG().">
+    <p class="stem">What does <code>shift(-1)</code> do differently from <code>shift(1)</code>?</p>
+    <button class="opt" data-ok>it pulls in the next row's value</button>
+    <button class="opt">it reverses the whole DataFrame's row order</button>
+    <button class="opt">it shifts by one column, not rows</button>
+  </div>
+  <div class="q" data-why="shift() only looks at physical row position, with no awareness of which group a row belongs to — skip groupby() and a row silently inherits the previous row's value even if that row is a different customer, with no error raised.">
+    <p class="stem">Why must you <code>groupby(key)</code> before <code>shift()</code> when "previous" means "previous for this group"?</p>
+    <button class="opt" data-ok>an ungrouped shift bleeds values across groups</button>
+    <button class="opt">shift() raises an error without a groupby</button>
+    <button class="opt">groupby is only needed to sort rows</button>
+  </div>
+  <div class="q" data-why="diff() is a named shortcut for current-row-value minus shift(1) — the same relationship pct_change() has to a hand-written (curr - LAG(curr)) / LAG(curr) formula from Lesson 11.">
+    <p class="stem">How does <code>groupby(...).diff()</code> relate to <code>shift()</code>?</p>
+    <button class="opt" data-ok>diff() equals the current value minus shift(1)</button>
+    <button class="opt">diff() is shift() renamed, no behavior change</button>
+    <button class="opt">diff() requires shift() to run first always</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the pandas docs' <a href="https://pandas.pydata.org/docs/getting_started/comparison/comparison_with_sql.html">"Comparison with SQL"</a> page (~10 min, this course's backbone, already cited in Lesson 22) — its window-function section lines <code>shift()</code>/<code>diff()</code> up directly against <code>LAG()</code>/<code>LEAD()</code>.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>shift()</code> is new today.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-23 comes back reported as shakiest, otherwise another fresh scan of the curriculum spine and glossary for the next genuinely-uncovered drill pattern.<br><br>
+💬 Anything unclear — shift() vs diff(), the groupby pitfall, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

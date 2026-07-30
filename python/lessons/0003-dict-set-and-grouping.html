@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 3 · dict &amp; set: grouping without pandas</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 3 · ~20 min · 31 Jul 2026</p>
+<h1>dict &amp; set: grouping without pandas</h1>
+<p class="byline">Day 2 taught the dict/set comprehension <em>shape</em> on purpose without asking you to use it — curly braces, colon or no colon, and stop. Today spends that recognition: <code>dict</code> and <code>set</code> as real lookup and grouping structures, comprehensions used with full confidence, and the pattern every data job needs before pandas ever enters the picture — <code>GROUP BY</code>, done by hand.</p>
+
+<div class="callout"><strong>Bridge from SQL:</strong> <code>SELECT city, COUNT(*) FROM people GROUP BY city</code> builds one bucket per distinct <code>city</code> and counts what lands in each. That's exactly what today's core pattern does — one dict, one key per bucket, one list (or count) growing inside each bucket as you loop the rows once.</div>
+
+<h2>1 · <code>dict</code>: a lookup, not a list you search</h2>
+<p>A list finds things by <em>position</em> — <code>rows[3]</code>. A <dfn data-en="a mutable mapping from keys to values, written {key: value, ...}; keys must be hashable (immutable), lookup by key is O(1) average, not a scan" data-vn="giữ nguyên &quot;dict&quot; — mapping key → value, tra cứu theo key">dict</dfn> finds things by <em>key</em> — <code>prices["apple"]</code> — and it does that lookup directly, without scanning every entry to find a match. That's the whole reason to reach for one: whenever you'd otherwise write "loop through this list looking for the row where the id matches," a dict already knows.</p>
+<pre><code>prices = {<span class="str">"apple"</span>: <span class="kw">3.5</span>, <span class="str">"banana"</span>: <span class="kw">1.2</span>, <span class="str">"pear"</span>: <span class="kw">2.0</span>}
+
+prices[<span class="str">"banana"</span>]        <span class="cm"># 1.2 — direct lookup, no scanning</span>
+prices[<span class="str">"kiwi"</span>]           <span class="cm"># KeyError — no such key</span>
+prices.get(<span class="str">"kiwi"</span>)        <span class="cm"># None — .get() returns None instead of raising</span>
+prices.get(<span class="str">"kiwi"</span>, <span class="kw">0.0</span>)   <span class="cm"># 0.0 — .get() with a fallback default</span>
+
+<span class="str">"banana"</span> <span class="kw">in</span> prices      <span class="cm"># True — membership test checks keys</span>
+prices[<span class="str">"kiwi"</span>] = <span class="kw">4.0</span>     <span class="cm"># adds a new key, or overwrites an existing one</span></code></pre>
+<p>Two everyday methods pull double duty: <code>.keys()</code> gives every key, <code>.values()</code> gives every value, <code>.items()</code> gives <code>(key, value)</code> pairs — the form you'll loop over constantly:</p>
+<pre><code><span class="kw">for</span> name, price <span class="kw">in</span> prices.items():
+    <span class="kw">print</span>(name, price)   <span class="cm"># unpacks each (key, value) pair — unpacking gets a full lesson Day 4</span></code></pre>
+<p>One rule worth knowing before it bites: dict <dfn data-en="the values used to look things up in a dict, or the elements of a set; must be immutable (hashable) — str, int, tuple, bool, frozenset all qualify, list and dict do not" data-vn="giữ nguyên &quot;key&quot; — giá trị dùng để tra cứu, phải là immutable">keys</dfn> must be immutable — <code>str</code>, <code>int</code>, <code>tuple</code>, <code>bool</code> all work; a <code>list</code> as a key raises <code>TypeError</code>. That's Day 1's mutable/immutable split showing up again: a key has to stay put to be findable, so Python refuses anything that could change underneath it.</p>
+
+<h2>2 · <code>set</code>: uniqueness and membership, fast</h2>
+<p>A <dfn data-en="an unordered collection of unique, immutable elements — {a, b, c} with no duplicates and no positional index; membership testing (`in`) is direct, not a scan" data-vn="giữ nguyên &quot;set&quot; — tập hợp phần tử duy nhất, không trùng, không thứ tự">set</dfn> is a dict with only keys, no values — same immutable-elements rule, same direct membership test, but its whole job is "does this exist" and "what's unique here," not lookup-by-key:</p>
+<pre><code>seen = {<span class="str">"An"</span>, <span class="str">"Binh"</span>, <span class="str">"An"</span>}   <span class="cm"># {'An', 'Binh'} — duplicate collapses automatically</span>
+
+<span class="str">"An"</span> <span class="kw">in</span> seen           <span class="cm"># True — direct membership test, not a scan</span>
+seen.add(<span class="str">"Chi"</span>)         <span class="cm"># {'An', 'Binh', 'Chi'}</span>
+
+ids_a = {<span class="kw">1</span>, <span class="kw">2</span>, <span class="kw">3</span>}
+ids_b = {<span class="kw">2</span>, <span class="kw">3</span>, <span class="kw">4</span>}
+ids_a & ids_b     <span class="cm"># {2, 3}       — intersection: in both</span>
+ids_a | ids_b     <span class="cm"># {1, 2, 3, 4} — union: in either</span>
+ids_a - ids_b     <span class="cm"># {1}          — difference: in a, not in b</span></code></pre>
+<p>The two most common everyday uses: de-duplicating a list (<code>set(names)</code>), and fast "have I seen this already?" checks in a loop — checking <code>x in a_set</code> is direct, the same way a dict key lookup is, where checking <code>x in a_list</code> means scanning every item.</p>
+
+<h2>3 · Grouping: <code>setdefault</code>, then <code>defaultdict</code></h2>
+<p>Here is the pattern this whole lesson is building toward — <code>GROUP BY</code>, by hand. The task: given flat sales rows, group amounts by city. In SQL: <code>SELECT city, amount FROM sales</code> with the bucketing done by <code>GROUP BY city</code>. In plain Python, one bucket per distinct key means one dict, and the first entry for each key needs special handling — you can't <code>.append()</code> into a list that doesn't exist yet:</p>
+<pre><code>sales = [
+    {<span class="str">"city"</span>: <span class="str">"Hanoi"</span>, <span class="str">"amount"</span>: <span class="kw">120</span>},
+    {<span class="str">"city"</span>: <span class="str">"HCMC"</span>,  <span class="str">"amount"</span>: <span class="kw">80</span>},
+    {<span class="str">"city"</span>: <span class="str">"Hanoi"</span>, <span class="str">"amount"</span>: <span class="kw">45</span>},
+]
+
+by_city = {}
+<span class="kw">for</span> row <span class="kw">in</span> sales:
+    city = row[<span class="str">"city"</span>]
+    <span class="kw">if</span> city <span class="kw">not</span> <span class="kw">in</span> by_city:
+        by_city[city] = []          <span class="cm"># first time we've seen this city: start a bucket</span>
+    by_city[city].append(row[<span class="str">"amount"</span>])
+<span class="cm"># {'Hanoi': [120, 45], 'HCMC': [80]}</span></code></pre>
+<p>That <code>if ... not in ... : by_city[city] = []</code> guard is so common Python gives it one method — <dfn data-en="dict.setdefault(key, default) returns the value at key if present, otherwise inserts key with that default and returns it — the one-line version of the if-not-in-then-create guard, ideal as the first line of a grouping loop" data-vn="giữ nguyên &quot;setdefault&quot; — lấy value nếu key có sẵn, chưa có thì tạo với default rồi trả về">setdefault</dfn>, which does "get it, or create-and-return a default" in one call:</p>
+<pre><code>by_city = {}
+<span class="kw">for</span> row <span class="kw">in</span> sales:
+    by_city.setdefault(row[<span class="str">"city"</span>], []).append(row[<span class="str">"amount"</span>])
+<span class="cm"># same result: {'Hanoi': [120, 45], 'HCMC': [80]}</span></code></pre>
+<p>Read <code>by_city.setdefault(row["city"], [])</code> as: "give me the list at this city's key — and if there isn't one yet, put an empty list there first, then give me that." The <code>.append()</code> on the end always has a list to land in, first row or not.</p>
+<p>The standard library has a second way to say the same thing, from the <code>collections</code> module: <dfn data-en="collections.defaultdict(factory) is a dict subclass that auto-creates a value via factory() the first time a missing key is accessed, instead of raising KeyError — defaultdict(list) is the common grouping choice" data-vn="giữ nguyên &quot;defaultdict&quot; — dict tự tạo value mặc định khi key chưa có, thay vì báo lỗi">defaultdict</dfn>:</p>
+<pre><code><span class="kw">from</span> collections <span class="kw">import</span> defaultdict
+
+by_city = defaultdict(<span class="kw">list</span>)     <span class="cm"># list is the FACTORY — called with no args to build each new bucket</span>
+<span class="kw">for</span> row <span class="kw">in</span> sales:
+    by_city[row[<span class="str">"city"</span>]].append(row[<span class="str">"amount"</span>])
+<span class="cm"># defaultdict(&lt;class 'list'&gt;, {'Hanoi': [120, 45], 'HCMC': [80]})</span></code></pre>
+<p>No <code>setdefault</code> call needed at all — accessing a missing key runs the factory (<code>list()</code>, giving <code>[]</code>) automatically and stores the result before returning it. Both approaches produce identical dicts; <code>defaultdict</code> reads slightly cleaner when every value in the dict follows the same "start empty, then grow" rule, which grouping always does. Either is fine to write; both are worth being able to read on sight, because you'll meet both in other people's code.</p>
+
+<div class="callout"><strong>Counting is grouping's simplest case:</strong> if all you want is <em>how many</em> rows per city, not the rows themselves, <code>collections.Counter</code> is purpose-built: <code>Counter(row["city"] for row in sales)</code> gives <code>{'Hanoi': 2, 'HCMC': 1}</code> in one call — the same family as <code>defaultdict</code>, specialized for counting. (The <code>for ... in ...</code> without brackets here is a generator expression — a preview, not today's lesson; Day 5 explains it properly.)</div>
+
+<h2>4 · Comprehensions, now with full confidence</h2>
+<p>Day 2 asked you to recognize the shape only. Now that <code>dict</code> and <code>set</code> are real tools, the same three-slot grammar — expression, <code>for</code>, optional <code>if</code> — is worth using on purpose. A dict comprehension is the right tool whenever the loop's only job is building a lookup:</p>
+<pre><code>names = [<span class="str">"An"</span>, <span class="str">"Binh"</span>, <span class="str">"Chi"</span>]
+ages =  [<span class="kw">30</span>, <span class="kw">25</span>, <span class="kw">41</span>]
+
+<span class="cm"># SQL: SELECT name, age FROM people  -- then keyed by name for lookup</span>
+age_of = {n: a <span class="kw">for</span> n, a <span class="kw">in</span> <span class="kw">zip</span>(names, ages)}
+<span class="cm"># {'An': 30, 'Binh': 25, 'Chi': 41}</span>
+
+<span class="cm"># filtered dict comprehension: only the over-30s (SQL WHERE)</span>
+seniors = {n: a <span class="kw">for</span> n, a <span class="kw">in</span> <span class="kw">zip</span>(names, ages) <span class="kw">if</span> a > <span class="kw">30</span>}
+<span class="cm"># {'Chi': 41}</span>
+
+<span class="cm"># set comprehension: distinct first letters</span>
+first_letters = {n[<span class="kw">0</span>] <span class="kw">for</span> n <span class="kw">in</span> names}
+<span class="cm"># {'A', 'B', 'C'}</span></code></pre>
+<p><code>zip(names, ages)</code> pairs the two lists element by element into <code>(name, age)</code> tuples — enough to read today; unpacking it fully is Day 4. The dict comprehension's two slots before <code>for</code> are exactly <code>setdefault</code>'s two arguments in different clothing: <code>key: value</code> instead of <code>key, default</code>.</p>
+<p>One boundary worth being precise about: a comprehension builds the <em>whole</em> result from one pass with no per-key accumulation, so it's the right tool for "one output value per input row" (like <code>age_of</code> above). The grouping pattern from section 3 needs <code>setdefault</code> or <code>defaultdict</code> instead, because multiple rows share a key and their values must <em>accumulate</em> into the same bucket rather than each simply overwriting the last — a comprehension has no way to say "and also append to what's already there."</p>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> the grouping pattern in section 3 is exactly what <code>df.groupby("city")["amount"].sum()</code> does in one call once <code>data/</code> introduces DataFrames. Same idea — bucket by key, aggregate within each bucket — different spelling for a different container. Not covered here; that's <code>data/</code>'s job, and this is the only sentence in this lesson that mentions it.</div>
+
+<h2>Try it — self-checking practice (~15 min)</h2>
+<p>Open <code>practice/03_dict_set_and_grouping.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/03_dict_set_and_grouping.py</code></pre>
+<p>No dependencies — standard library only. Exercises: dict lookup with <code>.get()</code> and a default, de-duplicating with <code>set</code>, grouping rows by key with <code>setdefault</code>, the same grouping with <code>collections.defaultdict</code>, a dict comprehension built from <code>zip</code>, and counting rows per key with <code>collections.Counter</code>.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A dict looks a value up directly by key, without scanning every entry — the same way a set tests membership directly. A list has to be scanned position by position to find a matching value.">
+    <p class="stem">Why reach for a <code>dict</code> instead of scanning a list for a match?</p>
+    <button class="opt" data-ok>dict looks up a key directly, no scanning</button>
+    <button class="opt">dict keeps every value in insertion order only</button>
+    <button class="opt">dict allows duplicate keys, unlike a plain list</button>
+  </div>
+  <div class="q" data-why="dict.setdefault(key, default) returns the existing value if the key is present, or inserts the key with that default and returns it if not — the one-line form of the if-not-in-then-create guard that grouping needs on every row.">
+    <p class="stem">What does <code>by_city.setdefault(city, [])</code> do?</p>
+    <button class="opt" data-ok>returns the list at city, creating it if missing</button>
+    <button class="opt">always overwrites city with a brand new empty list</button>
+    <button class="opt">raises an error whenever the city key is missing</button>
+  </div>
+  <div class="q" data-why="defaultdict(list) calls list() with no arguments to build a fresh bucket automatically the first time a missing key is accessed, so the loop body can append directly with no setdefault call at all.">
+    <p class="stem">In <code>defaultdict(list)</code>, what job does <code>list</code> do?</p>
+    <button class="opt" data-ok>a factory function called to build each missing bucket value</button>
+    <button class="opt">a type check that rejects any key not a list</button>
+    <button class="opt">a fixed starting list shared by every single dict key</button>
+  </div>
+  <div class="q" data-why="Dict keys, and set elements, must be immutable so they stay stable and hashable for lookup — a list can change after being used as a key, which would break lookups, so Python raises TypeError instead of allowing it.">
+    <p class="stem">Why does <code>d[[1, 2]] = "x"</code> raise <code>TypeError</code>?</p>
+    <button class="opt" data-ok>a mutable list cannot be used as a key</button>
+    <button class="opt">dict keys can only be plain integers or strings</button>
+    <button class="opt">a list literal is not valid Python assignment syntax</button>
+  </div>
+  <div class="q" data-why="A comprehension builds its whole result in one pass with one output value per input item — it has no way to accumulate multiple rows into the same growing bucket, which is exactly what grouping by a repeated key needs.">
+    <p class="stem">Why can't a plain comprehension replace <code>setdefault</code>-based grouping?</p>
+    <button class="opt" data-ok>it cannot accumulate several rows into one shared output bucket</button>
+    <button class="opt">it can only ever build a list, not a dict</button>
+    <button class="opt">it cannot use a variable that came from a loop</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the <a href="https://docs.python.org/3/library/collections.html#collections.defaultdict">docs for <code>collections.defaultdict</code></a> (cited in RESOURCES.md), which also cover <code>Counter</code> in the same module — both are lesson-grade reading on their own. For the plain-dict fundamentals, the Python Tutorial's <a href="https://docs.python.org/3/tutorial/datastructures.html#dictionaries">dictionaries section</a> covers <code>.get()</code>, <code>.items()</code>, and the key-immutability rule formally.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day3">glossary</a> under Day 3.<br>
+<strong>Next lesson (1 Aug):</strong> functions that pull their weight — <code>*args</code>/<code>**kwargs</code>, <code>key=</code> functions, and <code>lambda</code>, which grouping and sorting both lean on.<br><br>
+💬 Anything unclear — <code>setdefault</code> vs <code>defaultdict</code>, set operations, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

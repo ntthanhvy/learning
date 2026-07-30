@@ -704,3 +704,77 @@
   spine/glossary for the next genuinely-uncovered drill pattern (no obvious
   named candidate left dangling from this lesson's own content, unlike most
   prior rounds) if no drill-outcome signal surfaces by next generation.
+- 2026-07-31 generation (Lesson 23, headless 06:00 run): direct `psql
+  "$LEARNING_DB_URL" ...` reads were blocked again this session (same
+  content-level block on the variable name as every prior round) — still no
+  `course_progress` rows readable and no `lesson_completed`/quiz/kata outcome
+  record beyond the Lesson 1 baseline, so no reported weak spot to target.
+  Lesson 22's own teaser named no single dangling candidate this time ("a
+  fresh scan of the curriculum spine/glossary for the next genuinely-
+  uncovered drill pattern"), so this round did exactly that: listed every
+  lesson title (1-22) and grepped `lessons/*.html` and `reference/
+  glossary.html` for a batch of common pandas/NumPy interview terms not yet
+  confirmed taught (`shift`, `diff`, `np.where`, `select_dtypes`, `.map()`,
+  broadcasting, `SettingWithCopy`/`.copy()`). `shift()` came back genuinely
+  uncovered — Lesson 11's own `pct_change()` text literally described the
+  underlying formula as "hand-written as `(curr - LAG(curr) OVER (...)) /
+  LAG(curr) OVER (...))`," naming `LAG()`/`LEAD()` in prose, but `shift()`
+  itself (the pandas method that IS that window function) was never taught
+  on its own — a clean, natural-difficulty-step gap, not general-Python
+  territory. Lesson 23 ships `shift(1)`/`shift(-1)` bridged directly to SQL's
+  `LAG()`/`LEAD() OVER (PARTITION BY ... ORDER BY ...)`, the same "trusts row
+  order only" warning already given for `cumsum()`/`pct_change()`/
+  `rolling()` (Lessons 7/11/13), the classic missing-`groupby()` pitfall
+  (values silently bleed across groups, no error raised — same "no crash,
+  quietly wrong" class of gotcha as this course's own practice-file Ellipsis
+  bugs), and closes by naming `diff()` as literally "current minus
+  shift(1)," tying all three (`shift`/`diff`/`pct_change`) together as one
+  family. `uv run --with pandas` worked directly this round: first used to
+  hand-verify every number in `.scratch/data-lesson23/explore.py` (deleted
+  after) against the real `orders_raw.csv` clean 4-row slice sorted by
+  customer then date (An 120.0/01-05, An 42.0/01-10, Binh 35.5/01-06, Binh
+  180.0/01-09) before writing a word of the lesson — `shift(1)` per customer:
+  An NaN→120.0, Binh NaN→35.5; `shift(-1)`: An 42.0→NaN, Binh 180.0→NaN;
+  `diff() == amount - shift(1)` exactly, matching `-78.0`/`144.5`. The
+  ungrouped-shift pitfall example needed a correction mid-draft: an initial
+  guess that Binh's first row would wrongly inherit An's 120.0 was wrong —
+  hand-tracing the real sorted row order (An/120, An/42, Binh/35.5, Binh/180)
+  shows Binh's first row actually inherits An's SECOND amount, 42.0, since
+  `shift()` only looks at the row immediately above regardless of customer;
+  caught by actually running the numbers rather than assuming, and both the
+  lesson text and `practice/23_shift.py`'s Exercise 3 check were written to
+  the verified 42.0, not the initially-assumed 120.0. The shipped (unsolved)
+  `practice/23_shift.py` was executed in place from `data/` (relative
+  `practice/data/orders_raw.csv` path, same convention as every prior
+  practice file) and printed all 5 ✗ with no crash (each exercise wrapped in
+  its own try/except around the `...`-bearing call, same defensive pattern as
+  Lessons 11/12/14/16/17/19/20/21/22), then a solved copy was built in
+  `.scratch/data-lesson23/solved.py`, temporarily copied into `practice/` to
+  resolve the fixture's relative path (deleted immediately after each run,
+  confirmed gone), and printed all 5 ✓ against the same hand-verified
+  numbers. `.scratch/data-lesson23/` was fully removed (`rm -rf`) after
+  verification, no approval needed this round. Added `shift()` to the
+  glossary and registered Lesson 23 in nav.js. Quiz options were drafted and
+  checked with a `Grep -o` extraction of every option string plus `wc -w` per
+  option (this course's established convention, following Lesson 19's note
+  that a single pass isn't infallible) — the first draft came out mismatched
+  on 2 of 4 questions (Q2 at 10/7/8, Q3 at 7/8/8) and was rewritten; a second
+  full recount caught a leftover mismatch in the rewritten Q2 (7/7/8) that
+  the first fix pass missed, needing one more edit; a third and fourth
+  independent recount pass both confirmed all four questions genuinely level
+  at 8/8/8, 7/7/7, 7/7/7, and 7/7/7 — consistent with this course's repeated
+  finding that a single "checked" pass is not reliable. `bin/record-progress
+  data lesson_generated --day 23 --lesson 0023-shift-lag-lead.html --detail
+  '{"by":"launchd"}'` was attempted once as instructed from the repo root,
+  using the literal absolute path, and required approval with no user
+  present in this headless session (blocked/gated, same class of block hit
+  in most rounds before Lesson 18's and Lesson 21's one-off successes) —
+  `lesson_generated` could not be recorded; do it manually once DB/write
+  access is back. Not retried in a loop. Set the teaser going forward to
+  another fresh curriculum/glossary scan (no single obvious dangling
+  candidate named in this lesson's own content) if no drill-outcome signal
+  surfaces by next generation — candidates spotted but not yet confirmed
+  uncovered during this round's scan worth checking first: `np.where()`/
+  `np.select()` (vectorized if/else, in-scope NumPy per MISSION.md, not yet
+  grepped-confirmed absent) and `select_dtypes()`/category dtype (schema-
+  inspection, adjacent to Lesson 2's load & inspect).

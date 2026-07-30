@@ -120,3 +120,50 @@ fail *gracefully* so the learner sees which task failed.
   convention; it required interactive approval in this sandbox and was not
   retried — outcome is "not recorded to DB this run," not a constraint
   rejection, so the 2026-07-29 CHECK-constraint widening is not implicated.
+- 2026-07-31 — **Day 3 generated** (`lessons/0003-dict-set-and-grouping.html`),
+  the headless run's second end-to-end lesson. Taught `dict` and `set` as real
+  lookup/grouping structures — direct key lookup and `.get()` with a default,
+  set uniqueness/membership and the `&`/`|`/`-` operators, then the core
+  pattern: grouping rows by key with `by_city.setdefault(key, []).append(...)`,
+  followed by the same thing via `collections.defaultdict(list)`, plus a
+  one-call `collections.Counter` mention for the count-only case. Built
+  directly on Day 2 per PLAN.md: section 4 moves dict/set comprehensions from
+  Day 2's explicit shape-recognition-only stance to full use (a keyed dict
+  comprehension over `zip(names, ages)`, plus a filtered version and a set
+  comprehension), and closes with a boundary section explaining *why* a
+  comprehension can't replace `setdefault`-grouping — one output value per
+  input row, no per-key accumulation across rows. Bridged from SQL per the
+  baseline record: `GROUP BY` framed explicitly as "one bucket per distinct
+  key" before any Python, then `by_city.setdefault(...)` introduced as that
+  same idea done by hand — not from a pandas or other "Python-adjacent"
+  analogy.
+  No-pandas rule: zero pandas/NumPy API anywhere in lesson or practice file;
+  exactly one contrast sentence, naming `df.groupby("city")["amount"].sum()`
+  without demonstrating it, placed once in section 3 and called out in prose
+  as the only such sentence in the lesson, matching the hard-rule section
+  above.
+  Practice file `practice/03_dict_set_and_grouping.py` (6 exercises: `.get()`
+  with a fallback default, de-duplicating with `set`, grouping with
+  `setdefault`, the same grouping with `defaultdict(list)`, a dict
+  comprehension built from `zip`, and counting with `Counter`) was verified in
+  a scratch dir (`.scratch_py3_verify/`, created under the repo root and
+  removed after use, since `/tmp` was outside the allowed working directory
+  for this sandboxed run): the shipped (unsolved) copy ran with
+  `uv run python3` and printed six clean ✗ lines with no traceback; a
+  separately solved copy printed six ✓ and the "All green" tally. No bugs
+  found during verification this time — both passes succeeded on the first
+  attempt.
+  Glossary: added a Day 3 section to `reference/glossary.html` (`dict`,
+  `set`, `key`, `setdefault`, `defaultdict`) after confirming none of the five
+  terms already existed in the Day 1 or Day 2 sections.
+  Quiz: 5 questions. Word counts were checked and mismatched on the first
+  draft for four of the five questions (Q1 9/8/8, Q3 9/11/9, Q4 11/9/9, Q5
+  9/11/11) — each was rewritten and recounted word-by-word until every
+  question's three options matched (8/8/8, 9/9/9, 10/10/10, 9/9/9, 10/10/10
+  respectively), then a full final recount pass confirmed all five before
+  shipping, per this file's instruction to recount after any edit. Registered
+  in `assets/nav.js` with `date: "2026-07-31"`.
+  `record-progress python lesson_generated --day 3 …` was attempted once per
+  convention; it required interactive approval in this sandbox and was not
+  retried, consistent with both prior attempts — outcome is "not recorded to
+  DB this run."

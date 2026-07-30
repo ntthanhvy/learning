@@ -50,6 +50,8 @@
       file: "lessons/0021-concat-stacking-dataframes.html" },
     { n: 22, date: "2026-07-30", title: "query(): WHERE, spelled as a string",
       file: "lessons/0022-query-method.html" },
+    { n: 23, date: "2026-07-31", title: "shift(): LAG/LEAD, spelled in pandas",
+      file: "lessons/0023-shift-lag-lead.html" },
   ];
 
   const REFS = [

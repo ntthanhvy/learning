@@ -39,6 +39,16 @@
   <tr><td>sequence</td><td>giữ nguyên "sequence" — dữ liệu có thứ tự, đánh index được (list, tuple, str)</td><td>An ordered collection indexable by position — <code>list</code>, <code>tuple</code>, and <code>str</code> are the three used constantly. Slicing and positional indexing both rely on this ordering, and both work identically across all three types.</td></tr>
 </table>
 
+<h2 id="day3">Day 3 — dict &amp; set: grouping without pandas</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>dict</td><td>giữ nguyên "dict" — mapping key → value, tra cứu theo key</td><td>A mutable mapping from keys to values, written <code>{key: value, ...}</code>. Keys must be hashable (immutable); lookup by key is direct, not a scan of every entry.</td></tr>
+  <tr><td>set</td><td>giữ nguyên "set" — tập hợp phần tử duy nhất, không trùng, không thứ tự</td><td>An unordered collection of unique, immutable elements, written <code>{a, b, c}</code> — no duplicates, no positional index. Membership testing with <code>in</code> is direct, the same way dict key lookup is.</td></tr>
+  <tr><td>key</td><td>giữ nguyên "key" — giá trị dùng để tra cứu, phải là immutable</td><td>The value used to look something up in a <code>dict</code>, or an element of a <code>set</code>. Must be immutable — <code>str</code>, <code>int</code>, <code>tuple</code>, <code>bool</code>, <code>frozenset</code> qualify; <code>list</code> and <code>dict</code> do not, and raise <code>TypeError</code> if used as one.</td></tr>
+  <tr><td>setdefault</td><td>giữ nguyên "setdefault" — lấy value nếu key có sẵn, chưa có thì tạo với default rồi trả về</td><td><code>dict.setdefault(key, default)</code> returns the value at <code>key</code> if present, otherwise inserts <code>key</code> with that default and returns it. The one-line version of the "if not in, create it first" guard — the first line of a hand-written grouping loop.</td></tr>
+  <tr><td>defaultdict</td><td>giữ nguyên "defaultdict" — dict tự tạo value mặc định khi key chưa có, thay vì báo lỗi</td><td><code>collections.defaultdict(factory)</code> is a <code>dict</code> subclass that calls <code>factory()</code> to auto-create a value the first time a missing key is accessed, instead of raising <code>KeyError</code>. <code>defaultdict(list)</code> is the common grouping choice — no <code>setdefault</code> call needed.</td></tr>
+</table>
+
 <p class="next">💬 A term here still unclear? Ask your teacher — hỏi bằng tiếng Việt cũng được.</p>
 
 <script src="../assets/nav.js"></script>

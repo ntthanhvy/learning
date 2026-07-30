@@ -56,6 +56,8 @@
       file: "lessons/0024-ssrf-server-side-request-forgery.html" },
     { n: 25, date: "2026-07-30", title: "Concurrency is not parallelism, and a goroutine is not a thread",
       file: "lessons/0025-concurrency-parallelism-threads-coroutines.html" },
+    { n: 26, date: "2026-07-31", title: "Idempotency keys: making POST safe to retry",
+      file: "lessons/0026-idempotency-keys-safe-retries.html" },
   ];
 
   const REFS = [

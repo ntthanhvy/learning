@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 26 · Idempotency keys: making POST safe to retry</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 26 · ~20 min</p>
+<h1>Idempotency keys: making POST safe to retry</h1>
+<p class="byline">Lesson 3 taught you that POST makes no idempotency promise — "retrying a POST creates something new each time" was the whole point of that table. Today: the concrete mechanism that lets a client retry a POST anyway, without your server creating the thing twice.</p>
+
+<h2>1 · The gap Lesson 3 left open</h2>
+<p>Lesson 3's verb table was honest about POST: no promise, the one verb allowed side effects, so only it needs "special protection (dedup tokens, disabled buttons)" against the double-click-fires-two-orders problem. That line named the problem and gestured at a fix, but never built one. The same gap shows up from the network side, not just double-clicks: a client fires <code>POST /orders</code>, the server creates the order and starts writing the response, and the connection drops before the client ever sees <code>201 Created</code>. From the client's side this is indistinguishable from "the request never arrived" — the only reasonable move is to retry. But the order was already created. Retry naively and the customer gets charged twice.</p>
+<div class="callout"><strong>Same shape as Lesson 10:</strong> background job queues promise <em>at-least-once delivery</em> for exactly this reason — a worker can crash after finishing work but before marking the job done, so the job runs again. That lesson's answer was "the handler must tolerate running more than once." Today's lesson is the concrete tool for tolerating it at the API layer.</div>
+
+<h2>2 · The idea: let the client name the attempt, not the row</h2>
+<p>The fix is a client-generated <dfn data-en="a unique value the client generates once per logical action and sends on every retry of the same POST request, so the server can recognize a retry and return the original result instead of repeating the side effect" data-vn="idempotency key (giữ nguyên) — key client tự tạo cho 1 lần thao tác, gửi kèm mỗi lần retry để server nhận ra đây là lần gửi lại, không phải thao tác mới">idempotency key</dfn>, sent as a request header: <code>Idempotency-Key: 7c9e-...</code>. The client generates this once, when the user clicks "Place order" — not once per HTTP attempt. If the request needs retrying (timeout, dropped connection, 5xx), the client sends the exact same key again. The server's job: the first time it sees a key, do the work and remember the result; every later request with that same key gets the remembered result played back, without doing the work again.</p>
+<p>This inverts where the "have I done this before?" question gets answered. Without a key, the server has no way to distinguish "a new order" from "the same order, asked twice" — both just look like a POST with a body. The key gives the server something stable to check <em>before</em> touching the database.</p>
+
+<h2>3 · A minimal implementation</h2>
+<p>The mechanism: a small store mapping key → the response that was already sent for it, checked before the real handler runs and filled in after:</p>
+<pre><code><span class="kw">type</span> IdempotencyStore <span class="kw">struct</span> {
+    mu      sync.Mutex
+    records <span class="kw">map</span>[<span class="kw">string</span>]idempotencyRecord
+}
+
+<span class="kw">func</span> (s *IdempotencyStore) Get(key <span class="kw">string</span>) (idempotencyRecord, <span class="kw">bool</span>) {
+    s.mu.Lock()
+    <span class="kw">defer</span> s.mu.Unlock()
+    rec, ok := s.records[key]
+    <span class="kw">return</span> rec, ok
+}
+
+<span class="kw">func</span> withIdempotency(store *IdempotencyStore, next http.HandlerFunc) http.HandlerFunc {
+    <span class="kw">return func</span>(w http.ResponseWriter, r *http.Request) {
+        key := r.Header.Get(<span class="str">"Idempotency-Key"</span>)
+        <span class="kw">if</span> key == <span class="str">""</span> {
+            http.Error(w, <span class="str">"Idempotency-Key header required"</span>, http.StatusBadRequest)
+            <span class="kw">return</span>
+        }
+        <span class="kw">if</span> rec, ok := store.Get(key); ok {
+            w.Header().Set(<span class="str">"Content-Type"</span>, <span class="str">"application/json"</span>)
+            w.WriteHeader(rec.statusCode)
+            w.Write(rec.body) <span class="cm">// replay — never calls next()</span>
+            <span class="kw">return</span>
+        }
+        rw := &amp;recordingWriter{ResponseWriter: w, status: http.StatusOK}
+        next(rw, r) <span class="cm">// first time: run the real handler</span>
+        store.Put(key, rw.status, rw.body) <span class="cm">// remember exactly what it sent</span>
+    }
+}</code></pre>
+<p>The middleware wraps <code>createOrderHandler</code> from Lesson 3's shape unchanged — the handler itself never learns about retries. <code>recordingWriter</code> (the full version compiles clean, elided here for space) just captures whatever status and body the real handler wrote, so the exact same bytes can be replayed later. A production version swaps the in-memory map for a database table with a unique constraint on the key, so the "check, then remember" step is itself safe under two near-simultaneous retries — but the shape is identical.</p>
+
+<h2>4 · Why replay the stored response instead of just re-running the handler</h2>
+<p>It's tempting to think the fix is simpler than this — "just check if an order with this key already exists, and skip creating it." That's most of the idea, but replaying the exact stored response matters for a reason beyond convenience: re-running any part of the original logic risks a second real side effect (a second charge to the payment provider inside that handler, a second email queued), even if the order row itself doesn't duplicate. The safe version does zero application logic on a replay — it recognizes the key before the handler runs at all and returns bytes that were already sent once.</p>
+
+<h2>5 · What the key doesn't fix by itself</h2>
+<p>Three details that turn a naive version into a correct one: the key must be <strong>scoped per client</strong> (usually per API credential/customer), never global — otherwise one customer's retry could theoretically collide with another's key and leak their order back. It should be checked against the <strong>same request body</strong> it was first used with — reusing a key with a different payload is a client bug, and a careful implementation flags that with a 422 rather than silently returning the old response for new data. And it needs an <strong>expiry</strong> — Stripe's own docs (below) keep keys for 24 hours, long enough to cover realistic retries without the store growing forever.</p>
+
+<div class="interview">
+<p><strong>Q: "How would you make a payment-creation endpoint safe to retry?"</strong> A strong answer, out loud: <em>"POST doesn't promise idempotency on its own, so I'd require an Idempotency-Key header the client generates once per user action. First time the server sees a key, it runs the real handler and stores exactly what it returned, keyed by that value. Any later request with the same key gets that stored response replayed — the handler never runs again — so a dropped connection and a client-side retry can't double-charge. I'd scope the key per customer, validate the retried body matches the first one, and expire old keys after a day or so."</em> The signal: replaying the stored response instead of re-running logic, and naming the per-client scoping detail unprompted.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="An idempotency key exists specifically so a dropped connection or timeout that forces a client-side retry doesn't create the order a second time — the exact gap Lesson 3 named ('retry and hope' vs POST having no promise) but never solved.">
+    <p class="stem">What problem does an <code>Idempotency-Key</code> header solve?</p>
+    <button class="opt" data-ok>a network retry safely creating the order twice</button>
+    <button class="opt">a stale cache serving an old order response</button>
+    <button class="opt">a missing index slowing down an order lookup</button>
+    <button class="opt">a client forging another customer own session cookie</button>
+  </div>
+  <div class="q" data-why="The key has to name one logical user action across every retry attempt, so it must be generated once by the client at the moment of that action (e.g. the button click) — a server-generated value would be different on every attempt and defeat the purpose.">
+    <p class="stem">Who generates the idempotency key, and when?</p>
+    <button class="opt" data-ok>the client, generated fresh once per user action</button>
+    <button class="opt">the server, derived from the request body hash</button>
+    <button class="opt">the database, assigned when a new row inserts</button>
+    <button class="opt">the load balancer, attached before routing the request</button>
+  </div>
+  <div class="q" data-why="Re-running the handler on a retry risks repeating any real side effect inside it — a second charge, a second email — even if the main row itself is deduplicated. Storing and replaying the exact original response means zero application logic runs a second time.">
+    <p class="stem">Why replay the stored response instead of re-running the handler on a retry?</p>
+    <button class="opt" data-ok>re-running risks a second real side effect happening</button>
+    <button class="opt">re-running is always slower than reading a cache</button>
+    <button class="opt">re-running requires a database transaction every single time</button>
+    <button class="opt">re-running would fail Go's compiler type-checking rules entirely</button>
+  </div>
+  <div class="q" data-why="An idempotency key that isn't scoped per client could theoretically let one customer's retry collide with a different customer's key and return their stored response — the key must be namespaced per client, same as any other identifier shared across tenants.">
+    <p class="stem">What's the correct way to scope an idempotency key across customers?</p>
+    <button class="opt" data-ok>scope it per client, never share across different accounts</button>
+    <button class="opt">generate it on the server, hidden from clients entirely</button>
+    <button class="opt">reuse it forever, across every endpoint the client calls</button>
+    <button class="opt">store it only in memory, never persisted anywhere durable</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://docs.stripe.com/api/idempotent_requests">Stripe's Idempotent Requests docs</a> (~10 min) — the pattern this lesson teaches is drawn directly from how Stripe's own payment API works in production, including the 24-hour key expiry and the same-body-required detail from section 5.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> open — no obvious next mission gap remains after Lessons 20-26; a good next step is naming one track to deepen, or a real PR review together. Tell your teacher which you'd like.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

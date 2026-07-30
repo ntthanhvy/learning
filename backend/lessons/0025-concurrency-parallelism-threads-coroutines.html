@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 25 · Concurrency, parallelism, threads, coroutines</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 25 · ~20 min</p>
+<h1>Concurrency is not parallelism, and a goroutine is not a thread</h1>
+<p class="byline">Four words — concurrent, parallel, thread, coroutine — get used as if they were four names for one thing. They aren't. They're answers to <em>two separate questions</em>, and once you see which question each word answers, the whole vocabulary collapses into something you can hold in your head and defend in a review.</p>
+
+<h2>1 · The reframe: two questions, not one list</h2>
+<p>The confusion is structural. People try to line these four words up on a single scale from "slow" to "fast," and it never works, because two independent questions are being asked at once:</p>
+
+<div class="callout"><strong>Question A — how is the work arranged?</strong> Is your program <em>structured</em> as independent pieces, and do those pieces <em>actually execute at the same instant</em>? → <em>concurrency</em> vs <em>parallelism</em>.<br><br>
+<strong>Question B — who decides when to switch between pieces?</strong> The operating system kernel, or your language's runtime? → <em>thread</em> vs <em>coroutine</em>.</div>
+
+<p>Question A is about your <strong>design</strong>. Question B is about the <strong>mechanism</strong> underneath it. A single program answers both: "structured concurrently (A), using coroutines (B), running in parallel across 8 cores (A again)." That sentence is not redundant — it's three separate facts.</p>
+
+<h2>2 · Question A: concurrency vs parallelism</h2>
+<p>The canonical definitions come from Rob Pike, one of Go's designers, in a 2012 talk that exists more or less to kill this exact confusion:</p>
+
+<p><dfn data-en="structuring a program as independently executing pieces that can make progress in overlapping time periods — a property of your program's design, not of the hardware it runs on" data-vn="concurrency (giữ nguyên) — chia chương trình thành nhiều phần chạy độc lập, xen kẽ nhau; là chuyện thiết kế code, không phải chuyện máy có mấy core">Concurrency</dfn> is <em>"the composition of independently executing processes"</em> — or in the short form, <em>"dealing with lots of things at once."</em> <dfn data-en="two or more computations literally executing at the same instant, which requires more than one physical CPU core — a property of the hardware and runtime, not of your program's structure" data-vn="parallelism (giữ nguyên) — nhiều việc chạy CÙNG một khoảnh khắc thật, bắt buộc phải có nhiều core; là chuyện hardware/runtime">Parallelism</dfn> is <em>"the simultaneous execution of (possibly related) computations"</em> — <em>"doing lots of things at once."</em> <a href="https://go.dev/blog/waza-talk">(go.dev/blog/waza-talk)</a></p>
+
+<p>The test that makes it concrete: <strong>a single-core machine can be concurrent but can never be parallel.</strong> One core executes exactly one instruction stream at any instant. Yet a single-core server happily handles 500 open connections — it interleaves them, switching between them fast enough that all 500 make progress. That's concurrency with zero parallelism.</p>
+
+<p>So the relationship isn't "concurrency is the slow version of parallelism." It's this: <strong>concurrency is a way of writing your program; parallelism is something the machine may or may not then do with it.</strong> You write concurrency. The runtime and the hardware grant parallelism. If you never structured the work concurrently, extra cores can't help you — there's nothing for them to pick up.</p>
+
+<h2>3 · Question B: thread vs coroutine — who does the switching</h2>
+<p>Now the mechanism. Both a thread and a coroutine are "a piece of work that can be paused and resumed." The difference is <em>who</em> pauses it.</p>
+
+<p>An <dfn data-en="an independently schedulable stream of execution managed by the operating system kernel, with its own stack; the kernel can interrupt and reschedule it at any moment" data-vn="OS thread (giữ nguyên) — luồng thực thi do kernel của hệ điều hành quản lý và tự ý ngắt/đổi lúc nào cũng được; mỗi thread có stack riêng, khá tốn">OS thread</dfn> is scheduled by the kernel. The kernel can interrupt it at essentially any instruction and hand the core to something else — that's <dfn data-en="scheduling where the scheduler forcibly interrupts a running task at a time of its own choosing, without the task's cooperation" data-vn="preemptive scheduling (giữ nguyên) — scheduler tự ý ngắt task đang chạy, task không cần (và không thể) xin phép">preemptive scheduling</dfn>. Threads are the only thing an OS will actually place on separate cores, so <strong>threads are the unit of real parallelism.</strong> They're also comparatively expensive: a thread's stack is typically sized in megabytes, and creating one is a system call.</p>
+
+<p>A <dfn data-en="a function that can suspend itself mid-execution and later resume where it left off, scheduled by a language runtime or library rather than the OS kernel — cheap enough to create by the hundred thousand" data-vn="coroutine (giữ nguyên) — hàm có thể tự tạm dừng giữa chừng rồi chạy tiếp từ đúng chỗ đó; do runtime của ngôn ngữ điều phối, không phải kernel; rẻ nên tạo hàng trăm nghìn cái cũng được">coroutine</dfn> is scheduled by the language runtime, in user space. The kernel doesn't know it exists. It suspends at points the runtime can see — an <code>await</code>, a channel operation, a network read — which is <dfn data-en="scheduling where a running task yields control voluntarily at defined points, rather than being interrupted from outside" data-vn="cooperative scheduling (giữ nguyên) — task tự nhường quyền tại những điểm nhất định, chứ không bị ngắt từ bên ngoài">cooperative scheduling</dfn>. Its stack starts at kilobytes, and creating one is a function call, not a syscall.</p>
+
+<div class="cmp-wrap">
+<table class="cmp">
+<thead><tr><th></th><th>OS thread</th><th>Coroutine</th></tr></thead>
+<tbody>
+<tr><th>Scheduled by</th><td>the OS kernel</td><td>the language runtime, in user space</td></tr>
+<tr><th>Switching</th><td>preemptive — interrupted anywhere</td><td>cooperative — yields at defined points</td></tr>
+<tr><th>Stack</th><td>megabytes, fixed at creation</td><td>kilobytes, often grows on demand</td></tr>
+<tr><th>Cost to create</th><td>a system call</td><td>a function call</td></tr>
+<tr><th>Realistic count</th><td>thousands</td><td>hundreds of thousands to millions</td></tr>
+<tr><th>Gives parallelism?</th><td>yes — the OS can place it on its own core</td><td>only via the threads it runs on top of</td></tr>
+<tr><th>Called</th><td>thread, OS thread, kernel thread</td><td>goroutine (Go), task/future (Rust), coroutine (Kotlin, Python <code>async def</code>)</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>That last row of the coroutine column is the answer to "why does everyone use a different word?" They're the same idea with different names and different degrees of power. And notice the second-to-last row: coroutines do not compete with threads — <strong>they run on top of them.</strong> A runtime keeps a small pool of OS threads (roughly one per core) and multiplexes many coroutines onto them. That arrangement is called <dfn data-en="a scheduling model where M runtime-managed tasks are multiplexed onto N operating-system threads, with M vastly larger than N" data-vn="M:N scheduling (giữ nguyên) — M coroutine chạy ghép lên N thread thật, với M lớn hơn N rất nhiều">M:N scheduling</dfn>.</p>
+
+<p>Go's documentation is unusually direct about the naming, and it's worth reading as the resolution of your question rather than a footnote:</p>
+
+<div class="callout"><strong>From Effective Go:</strong> <em>"They're called goroutines because the existing terms — threads, coroutines, processes, and so on — convey inaccurate connotations. A goroutine has a simple model: it is a function executing concurrently with other goroutines in the same address space. It is lightweight, costing little more than the allocation of stack space."</em> And: <em>"Goroutines are multiplexed onto multiple OS threads so if one should block, such as while waiting for I/O, others continue to run."</em> <a href="https://go.dev/doc/effective_go#goroutines">(go.dev/doc/effective_go)</a><br><br>
+So a goroutine <em>is</em> a coroutine in the broad family sense — runtime-scheduled, cheap, multiplexed M:N — but it's preemptible and it can block anywhere, without the <code>async</code>/<code>await</code> ceremony that Python or Rust require. That's why Go picked a new word.</div>
+
+<h2>4 · When to use which: the one question that decides it</h2>
+<p>Here is the rule that turns all of the above into a decision. Ask what your work is <em>waiting on</em>:</p>
+
+<div class="cmp-wrap">
+<table class="cmp">
+<thead><tr><th></th><th>I/O-bound work</th><th>CPU-bound work</th></tr></thead>
+<tbody>
+<tr><th>Spends its time</th><td>waiting — on the network, the database, the disk</td><td>computing — actually burning cycles</td></tr>
+<tr><th>Backend examples</th><td>querying Postgres, calling another service, reading a file, serving an idle connection</td><td>hashing a password, resizing an image, parsing a huge JSON body, compression</td></tr>
+<tr><th>What you need</th><td><strong>concurrency</strong> — a cheap way to hold thousands of waits</td><td><strong>parallelism</strong> — more cores actually doing the work</td></tr>
+<tr><th>Reach for</th><td>coroutines / goroutines — thousands of them, on a handful of threads</td><td>threads or processes, roughly one per core, no more</td></tr>
+<tr><th>Ceiling</th><td>memory and file descriptors, not cores</td><td>your physical core count. Full stop.</td></tr>
+</tbody>
+</table>
+</div>
+
+<p><dfn data-en="work whose completion time is dominated by waiting for input/output — network, disk, or database — rather than by computation" data-vn="I/O-bound (giữ nguyên) — thời gian chủ yếu là NGỒI CHỜ network/disk/database, không phải chờ tính toán">I/O-bound</dfn> work is the overwhelming majority of what a backend service does, and that's why this vocabulary matters at all for backend work. A request handler that queries Postgres spends almost all of its wall-clock time doing nothing but waiting for a reply. During that wait, whatever was running it should be doing something else. If the unit of work is an expensive OS thread, 10,000 waiting requests means 10,000 mostly-idle threads, and you drown in memory and scheduler churn. If it's a cheap coroutine, 10,000 waits cost almost nothing — one thread per core stays busy, hopping between whichever coroutines have data ready.</p>
+
+<p><dfn data-en="work whose completion time is dominated by computation, so it goes faster only when given more CPU cores, never by adding more concurrent tasks" data-vn="CPU-bound (giữ nguyên) — thời gian chủ yếu là TÍNH TOÁN thật; chỉ nhanh hơn khi có thêm core, thêm task không giúp gì">CPU-bound</dfn> work is the opposite, and here's the trap worth internalizing: <strong>concurrency does not speed up CPU-bound work.</strong> Splitting a computation into 100 coroutines on a 4-core machine does not make it faster — the same 4 cores do the same total work, plus scheduling overhead. Only parallelism helps, and parallelism is capped by your cores. Spawning 200 coroutines to hash 200 passwords is not a performance fix; it's the same CPU time with extra bookkeeping. Worse, in a cooperative runtime a long CPU-bound coroutine that never yields <em>starves the others</em> — the classic "why did all my request latencies spike" incident.</p>
+
+<div class="callout"><strong>Where the language you're in changes the answer:</strong> In <strong>Go</strong>, the split is invisible — goroutines are cheap enough for I/O <em>and</em> the runtime spreads them across cores automatically (<code>GOMAXPROCS</code> defaults to the CPUs available), so one primitive covers both cases. In <strong>Python</strong>, the two cases need different tools, because the <dfn data-en="a lock in the default CPython interpreter that permits only one thread to execute Python bytecode at a time, so threads give concurrency but not parallelism for pure-Python computation" data-vn="GIL (giữ nguyên) — cái lock trong CPython mặc định khiến chỉ một thread chạy bytecode Python tại một thời điểm; thread vẫn concurrent nhưng KHÔNG parallel cho code Python thuần">GIL</dfn> means threads don't parallelize pure-Python computation: <code>asyncio</code> for I/O, <code>multiprocessing</code> for CPU. (Python 3.14 ships an officially supported free-threaded build, <code>python3.14t</code>, that removes the GIL — but it's opt-in, and the default build still has it. <a href="https://peps.python.org/pep-0779/">PEP 779</a>.) In <strong>Node</strong>, there is one thread for your JavaScript, so CPU-bound work must leave it entirely — worker threads or a separate process.</div>
+
+<div class="interview">
+<p><strong>Q: "What's the difference between concurrency and parallelism?"</strong> — a near-universal backend interview question. A strong answer, out loud: <em>"Concurrency is a property of how I structure the program — independent pieces that can interleave. Parallelism is a property of the execution — those pieces literally running at the same instant, which needs multiple cores. A single-core box can be fully concurrent and never parallel: it handles a thousand connections by interleaving them. So I write concurrency, and the runtime plus hardware decide how much parallelism I get out of it. The practical consequence is that for I/O-bound work — which is most of a backend service, waiting on Postgres or another service — concurrency is what I need, and cheap runtime-scheduled tasks like goroutines are the right unit. For CPU-bound work, concurrency buys nothing; only parallelism helps, and it's capped by core count."</em> The signal: naming that one is about structure and the other about execution, then connecting it to the I/O-bound vs CPU-bound decision rather than stopping at the definition.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Concurrency is a property of program structure — independently executing pieces that can interleave. Parallelism is a property of execution — those pieces running at the very same instant, which requires more than one core. You write the first; the runtime and hardware grant the second.">
+    <p class="stem">What exactly separates concurrency from parallelism?</p>
+    <button class="opt" data-ok>one is code structure, the other is simultaneous execution</button>
+    <button class="opt">one needs many cores, the other needs just one</button>
+    <button class="opt">one is runtime behaviour, the other compiler optimisation level</button>
+    <button class="opt">one waits on networks, the other waits on disks</button>
+  </div>
+  <div class="q" data-why="A single core executes one instruction stream at any given instant, so nothing can truly run simultaneously — yet it can interleave hundreds of connections and let all of them make progress. That is concurrency with zero parallelism.">
+    <p class="stem">Can a single-core machine be concurrent? Parallel?</p>
+    <button class="opt" data-ok>concurrent yes, parallel no — one instant, one stream</button>
+    <button class="opt">parallel yes, concurrent no — one core still switches</button>
+    <button class="opt">neither one, since both of them require two cores</button>
+    <button class="opt">both of them, because the kernel fakes extra cores</button>
+  </div>
+  <div class="q" data-why="A thread is scheduled preemptively by the OS kernel, which can interrupt it anywhere; a coroutine is scheduled cooperatively by the language runtime in user space, yielding only at points the runtime can see.">
+    <p class="stem">The core difference between a thread and a coroutine?</p>
+    <button class="opt" data-ok>who actually schedules it — the kernel or the runtime</button>
+    <button class="opt">how fast the code runs — compiled or fully interpreted</button>
+    <button class="opt">what it happens to wait on — network or disk</button>
+    <button class="opt">where its memory lives — the heap or the stack</button>
+  </div>
+  <div class="q" data-why="Coroutines are multiplexed onto a small pool of OS threads (M:N scheduling), and only threads can be placed on separate cores by the OS. So coroutines get parallelism only through the threads beneath them — they don't replace threads, they ride on them.">
+    <p class="stem">Do coroutines by themselves give you parallelism?</p>
+    <button class="opt" data-ok>no — only through the OS threads underneath them</button>
+    <button class="opt">yes — each coroutine gets its own dedicated core</button>
+    <button class="opt">yes — the runtime fully bypasses the kernel scheduler</button>
+    <button class="opt">no — they always run strictly one after another</button>
+  </div>
+  <div class="q" data-why="CPU-bound work is limited by core count, so splitting it into more concurrent tasks gives the same cores the same total work plus scheduling overhead. Only parallelism helps, and it's capped by physical cores.">
+    <p class="stem">Why won't 200 coroutines speed up 200 password hashes?</p>
+    <button class="opt" data-ok>CPU-bound work is limited by cores, not concurrency</button>
+    <button class="opt">hashing functions refuse to run inside a coroutine</button>
+    <button class="opt">a coroutine cannot call into cryptographic library code</button>
+    <button class="opt">the runtime silently serializes every hash it sees</button>
+  </div>
+  <div class="q" data-why="A handler waiting on Postgres is I/O-bound — nearly all its wall-clock time is spent waiting for a reply, not computing. That's exactly the case where cheap concurrency wins: thousands of waits held open on a handful of threads.">
+    <p class="stem">A handler that queries Postgres and returns rows is…</p>
+    <button class="opt" data-ok>I/O-bound — it mostly waits, so concurrency helps</button>
+    <button class="opt">CPU-bound — it mostly computes, so cores help</button>
+    <button class="opt">both equally — the distinction cannot guide design</button>
+    <button class="opt">neither one — the database does all waiting</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> Rob Pike, <a href="https://go.dev/blog/waza-talk">"Concurrency is not parallelism"</a> (~30 min video, or read the <a href="https://go.dev/talks/2012/waza.slide">slides</a> in 10). This is <em>the</em> canonical treatment — the definitions in section 2 are his, and the gopher-and-book-cart illustrations make the "structure vs execution" split stick better than any prose can. Now registered as this course's standing reference for the concurrency vocabulary (RESOURCES.md).</p>
+<p><strong>Then:</strong> the compressed version of this whole lesson lives in the new <a href="../reference/concurrency-vocabulary.html">concurrency vocabulary reference sheet</a> — the two tables plus the decision rule, on one printable page. Use that for revision, not this lesson.</p>
+<p><strong>Already covered in your Go course:</strong> this lesson is the conceptual frame underneath work you've already done — <a href="../../go/lessons/0004-goroutines-channels-select.html">Go Lesson 4 (goroutines, channels, select)</a> is the mechanism, and <a href="../../go/lessons/0010-worker-pools-and-pipelines.html">Go Lesson 10 (worker pools)</a> is precisely the "bound the parallelism to core count" idea applied. Backend-side, <a href="0018-connection-pool-sizing-and-exhaustion.html">Lesson 18 (pool sizing)</a> is the same ceiling logic one layer down: your database has a core count too, which is why the pool is small even when the goroutines are many.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> the natural follow-on is <strong>what goes wrong once work is concurrent</strong> — two requests reading and writing the same row, and why the fix is a database concern (locking, isolation levels) rather than a goroutine concern. That connects this lesson to <a href="0006-what-actually-happens-in-a-transaction.html">Lesson 6</a>. Tell your teacher if you'd rather go a different way.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

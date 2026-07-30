@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reference · Concurrency vocabulary & decision rules</title>
+<link rel="stylesheet" href="../assets/course.css">
+<style>
+  /* print-friendly: one page, no nav, no chrome */
+  @media print {
+    .course-nav, .next, .copy-btn { display: none !important; }
+    body { max-width: none; font-size: 10.5pt; }
+    h2 { margin-top: 1.1rem; }
+    .cmp-wrap { overflow: visible; }
+  }
+  .rule { border: 1px solid var(--accent); border-radius: 6px; padding: .9rem 1.1rem; margin: 1.2rem 0; }
+  .rule p { margin: .3rem 0; }
+</style>
+</head>
+<body>
+<p class="kicker">Backend Foundations · Reference</p>
+<h1>Concurrency vocabulary &amp; decision rules</h1>
+<p class="byline">The compressed version of <a href="../lessons/0025-concurrency-parallelism-threads-coroutines.html">Lesson 25</a>. Four words, two questions, one decision rule. Designed to be printed and re-read, not read once.</p>
+
+<h2>The two questions the four words answer</h2>
+<div class="cmp-wrap">
+<table class="cmp">
+<thead><tr><th>Question</th><th>The two answers</th><th>What it's a property of</th></tr></thead>
+<tbody>
+<tr><th>How is the work arranged?</th><td><strong>concurrency</strong> — structured as independent interleaving pieces<br><strong>parallelism</strong> — pieces literally executing at the same instant</td><td>your program's design (concurrency) / the hardware &amp; runtime (parallelism)</td></tr>
+<tr><th>Who switches between pieces?</th><td><strong>thread</strong> — the OS kernel does<br><strong>coroutine</strong> — the language runtime does</td><td>the mechanism your concurrency is built on</td></tr>
+</tbody>
+</table>
+</div>
+
+<p><strong>Rob Pike's definitions</strong> (<a href="https://go.dev/blog/waza-talk">go.dev/blog/waza-talk</a>): concurrency is <em>"the composition of independently executing processes"</em> — <em>"dealing with lots of things at once."</em> Parallelism is <em>"the simultaneous execution of (possibly related) computations"</em> — <em>"doing lots of things at once."</em></p>
+
+<div class="rule">
+<p><strong>The one-line test:</strong> a single-core machine can be concurrent but never parallel.</p>
+<p>You <em>write</em> concurrency. The runtime and hardware <em>grant</em> parallelism. No concurrent structure → extra cores have nothing to pick up.</p>
+</div>
+
+<h2>Thread vs coroutine</h2>
+<div class="cmp-wrap">
+<table class="cmp">
+<thead><tr><th></th><th>OS thread</th><th>Coroutine</th></tr></thead>
+<tbody>
+<tr><th>Scheduled by</th><td>the OS kernel</td><td>the language runtime, in user space</td></tr>
+<tr><th>Switching</th><td>preemptive — interrupted anywhere</td><td>cooperative — yields at defined points</td></tr>
+<tr><th>Stack</th><td>megabytes, fixed at creation</td><td>kilobytes, often grows on demand</td></tr>
+<tr><th>Cost to create</th><td>a system call</td><td>a function call</td></tr>
+<tr><th>Realistic count</th><td>thousands</td><td>hundreds of thousands to millions</td></tr>
+<tr><th>Gives parallelism?</th><td>yes — the OS can place it on its own core</td><td>only via the threads it runs on top of (M:N)</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2>The same idea, per language</h2>
+<div class="cmp-wrap">
+<table class="cmp">
+<thead><tr><th>Language</th><th>Its coroutine</th><th>What to know</th></tr></thead>
+<tbody>
+<tr><th>Go</th><td><code>goroutine</code> — <code>go f()</code></td><td>Deliberately <em>not</em> called a coroutine or thread: it's preemptible and can block anywhere, with no <code>async</code>/<code>await</code>. Runtime spreads them across cores automatically; <code>GOMAXPROCS</code> defaults to available CPUs. One primitive covers I/O <em>and</em> CPU cases.</td></tr>
+<tr><th>Python</th><td><code>async def</code> coroutine, run by <code>asyncio</code></td><td>Default CPython has the <strong>GIL</strong>: threads give concurrency but not parallelism for pure-Python computation. So <code>asyncio</code> for I/O, <code>multiprocessing</code> for CPU. Python 3.14's free-threaded build (<code>python3.14t</code>, <a href="https://peps.python.org/pep-0779/">PEP 779</a>) removes the GIL but is opt-in.</td></tr>
+<tr><th>Rust</th><td><code>async fn</code> → a <code>Future</code>, run as a task by a runtime (tokio)</td><td>Futures are inert until polled — nothing runs without a runtime driving it. Stackless: suspends only at <code>.await</code> points.</td></tr>
+<tr><th>JavaScript / Node</th><td><code>async</code> function, driven by the event loop</td><td>One thread runs your JS. CPU-bound work must leave it entirely — worker threads or a separate process.</td></tr>
+<tr><th>Kotlin / JVM</th><td><code>suspend fun</code>, launched in a coroutine scope</td><td>Where the word "coroutine" is most used as the official name; JVM threads underneath.</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2>The decision rule: what is the work waiting on?</h2>
+<div class="cmp-wrap">
+<table class="cmp">
+<thead><tr><th></th><th>I/O-bound</th><th>CPU-bound</th></tr></thead>
+<tbody>
+<tr><th>Spends its time</th><td>waiting — network, database, disk</td><td>computing — burning cycles</td></tr>
+<tr><th>Backend examples</th><td>querying Postgres, calling a service, reading a file, idle connections</td><td>hashing a password, resizing an image, parsing huge JSON, compression</td></tr>
+<tr><th>What you need</th><td><strong>concurrency</strong></td><td><strong>parallelism</strong></td></tr>
+<tr><th>Reach for</th><td>coroutines / goroutines — thousands, on a handful of threads</td><td>threads or processes — roughly one per core, no more</td></tr>
+<tr><th>Ceiling</th><td>memory and file descriptors</td><td>physical core count. Full stop.</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="rule">
+<p><strong>The trap:</strong> concurrency does <em>not</em> speed up CPU-bound work. 100 coroutines on 4 cores = the same 4 cores, the same total work, plus scheduling overhead.</p>
+<p><strong>The incident:</strong> one long CPU-bound coroutine that never yields starves every other coroutine on its thread → all request latencies spike at once.</p>
+</div>
+
+<h2>Glossary quick list</h2>
+<div class="cmp-wrap">
+<table class="cmp">
+<tbody>
+<tr><th>concurrency</th><td>Structuring a program as independent pieces that interleave. A design property.</td></tr>
+<tr><th>parallelism</th><td>Pieces literally executing at the same instant. Needs &gt;1 core.</td></tr>
+<tr><th>OS thread</th><td>Kernel-scheduled execution stream with its own stack. The unit of real parallelism.</td></tr>
+<tr><th>coroutine</th><td>Function that suspends and resumes, scheduled by a language runtime. Cheap.</td></tr>
+<tr><th>preemptive scheduling</th><td>The scheduler interrupts a task at a time of its own choosing.</td></tr>
+<tr><th>cooperative scheduling</th><td>The task yields control voluntarily, at defined points.</td></tr>
+<tr><th>M:N scheduling</th><td>M runtime tasks multiplexed onto N OS threads, M ≫ N.</td></tr>
+<tr><th>context switch</th><td>Saving one task's state and restoring another's. Cheap in user space, costlier in the kernel.</td></tr>
+<tr><th>blocking call</th><td>A call that doesn't return until its work finishes, holding whatever runs it.</td></tr>
+<tr><th>I/O-bound</th><td>Time dominated by waiting. Fixed by concurrency.</td></tr>
+<tr><th>CPU-bound</th><td>Time dominated by computing. Fixed only by parallelism, capped by cores.</td></tr>
+<tr><th>GIL</th><td>CPython's lock allowing one thread to run Python bytecode at a time.</td></tr>
+</tbody>
+</table>
+</div>
+
+<p class="next">Full bilingual definitions (EN ↔ tiếng Việt) for every term above are in the <a href="glossary.html">glossary</a>. The lesson this compresses: <a href="../lessons/0025-concurrency-parallelism-threads-coroutines.html">Lesson 25</a>. <strong>Anything unclear? Ask your teacher.</strong></p>
+
+<script src="../assets/nav.js"></script>
+</body>
+</html>

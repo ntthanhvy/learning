@@ -18,6 +18,10 @@
   High-trust, maintained security checklists. Use for: input validation, SQL injection, session management, secrets.
 - [Site: The Twelve-Factor App](https://12factor.net)
   Classic operational manifesto for services. Use for: config, logs, statelessness, deployment vocabulary.
+- [Talk: "Concurrency is not parallelism" — Rob Pike (Waza 2012)](https://go.dev/blog/waza-talk)
+  The canonical treatment of the concurrency/parallelism distinction, by one of Go's designers ([slides](https://go.dev/talks/2012/waza.slide) read in ~10 min). Use for: the concurrency vocabulary — this is the arbiter for what those two words mean. Standing reference as of Lesson 25.
+- [Docs: Effective Go — Goroutines](https://go.dev/doc/effective_go#goroutines)
+  Primary source for what a goroutine is and why Go refused the words "thread" and "coroutine". Use for: the thread vs coroutine mechanism question.
 
 ## Wisdom (Communities)
 

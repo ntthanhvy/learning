@@ -588,3 +588,31 @@
   second time (same method Lesson 23 used successfully); teaser left open
   again for the next session to pick a track to deepen or find another
   genuine gap.
+- 2026-07-30 (Lesson 25, interactive session — user-requested topic): the user asked
+  directly to understand "coroutine / parallel / concurrent — the difference, use case,
+  when to use, also thread meaning." This is the first user-chosen topic since Lesson
+  24's teaser left the next lesson open, so it took that slot. Placed here rather than
+  in `go/` for two reasons: this is the terminology-and-mental-models course by design,
+  and the `go/` course window closed 2026-07-20. Verified the gap by grep before
+  writing — "coroutine" appeared in NO course in the workspace, and "parallelism" only
+  in passing in `go/lessons/0004`, `0009` and `rust/lessons/0006` — despite 14 Go
+  concurrency lessons. See learning-records/0002.
+  Lesson shape: the four words are answers to TWO questions (A: structure vs
+  simultaneous execution → concurrency vs parallelism; B: who schedules → kernel vs
+  language runtime → thread vs coroutine), then the I/O-bound vs CPU-bound decision
+  rule as the "when to use" answer. Grounded in Rob Pike's Waza 2012 talk and
+  Effective Go's goroutines section (both now standing references in RESOURCES.md,
+  quoted verbatim rather than paraphrased from memory). Anchored examples in Go per
+  this course's convention, with Python/Rust/Node/Kotlin named as the other points on
+  the map since "coroutine" is not Go's word — that contrast IS the answer to the
+  user's question.
+  New shared component: `table.cmp` + `.cmp-wrap` in assets/course.css (purely
+  additive, no existing lesson touched) — a comparison-table style for side-by-side
+  alternatives, wrapped so wide tables scroll instead of widening the page. Reuse it
+  for any future two- or three-way comparison instead of inlining table CSS.
+  New reference sheet: `reference/concurrency-vocabulary.html` — the first reference in
+  this course besides the glossary. Carries the compression (both tables, the
+  per-language mapping, the decision rule, a 12-term quick list) with a print
+  stylesheet, so the lesson itself could stay ~20 min. Registered in nav.js REFS.
+  13 new glossary terms added. Six-question retrieval quiz, no practice section
+  (concept lesson, per this course's light-touch shape).

@@ -54,11 +54,15 @@
       file: "lessons/0023-mass-assignment-and-overexposure.html" },
     { n: 24, date: "2026-07-30", title: "SSRF: server-side request forgery",
       file: "lessons/0024-ssrf-server-side-request-forgery.html" },
+    { n: 25, date: "2026-07-30", title: "Concurrency is not parallelism, and a goroutine is not a thread",
+      file: "lessons/0025-concurrency-parallelism-threads-coroutines.html" },
   ];
 
   const REFS = [
     { short: "Glossary", title: "Glossary — terms in software context (EN ↔ VN)",
       file: "reference/glossary.html" },
+    { short: "Concurrency", title: "Concurrency vocabulary & decision rules — thread vs coroutine, I/O- vs CPU-bound",
+      file: "reference/concurrency-vocabulary.html" },
   ];
 
   const fmt = (iso) =>

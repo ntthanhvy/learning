@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 24 · np.where() and np.select(): CASE WHEN, vectorized</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 24 · ~20 min · 1 Aug 2026</p>
+<h1>np.where() and np.select(): vectorized if/else</h1>
+<p class="byline">Lesson 23's own teaser named two unconfirmed candidates: <code>np.where()</code>/<code>np.select()</code>, and <code>select_dtypes()</code>/category dtype. A fresh grep confirmed both were still genuinely absent, but <code>np.where()</code> wins today's slot — it's NumPy content MISSION.md explicitly calls in scope ("read NumPy-flavored code... predict its output"), and it directly replaces Lesson 12's <code>apply()</code> for the single most common reason people reach for <code>apply()</code> at all: an if/else per row.</p>
+
+<h2>1 · The SQL bridge: CASE WHEN</h2>
+<p>SQL answers "a new column whose value depends on a condition" with <code>CASE WHEN ... THEN ... ELSE ... END</code>. NumPy's direct equivalent is <dfn data-en="a NumPy function taking a boolean condition array plus two value arrays; returns the first value where the condition is True, the second where it's False — fully vectorized, no per-row Python function call" data-vn="giữ nguyên 'np.where()' — CASE WHEN...THEN...ELSE...END chạy vectorized trên cả cột">np.where()</dfn>: pass it a condition, a value for True, a value for False.</p>
+<pre><code><span class="kw">import</span> numpy <span class="kw">as</span> np
+
+clean[<span class="str">"tier"</span>] = np.where(clean[<span class="str">"amount"</span>] &gt;= <span class="kw">100</span>, <span class="str">"High"</span>, <span class="str">"Low"</span>)
+<span class="cm">#   customer  amount  tier
+#0        An   120.0  High
+#1        An    42.0   Low
+#2      Binh    35.5   Low
+#3      Binh   180.0  High</span></code></pre>
+<p>Read it exactly like SQL: <code>CASE WHEN amount &gt;= 100 THEN 'High' ELSE 'Low' END</code>. <code>clean["amount"] &gt;= 100</code> is a <dfn data-en="a True/False Series aligned to the rows; the same object Lesson 1 introduced for filtering, reused here as np.where()'s condition argument" data-vn="giữ nguyên 'boolean mask' — dùng lại từ Lesson 1, giờ làm điều kiện cho np.where()">boolean mask</dfn> (Lesson 1) — <code>np.where()</code> just gives you a way to turn that mask directly into two different <em>output values</em> instead of only using it to filter rows.</p>
+
+<h2>2 · Why not apply()? Because this is exactly the case it's slow for</h2>
+<p>Lesson 12 taught <code>apply(axis=1)</code> as the honest per-row escape hatch, and warned it's "still a Python-level loop under the hood — one Python function call per row." An if/else on one column is the textbook case that loop is unnecessary for:</p>
+<pre><code><span class="cm"># apply() version — works, but loops in Python</span>
+<span class="kw">def</span> tier(amount):
+    <span class="kw">return</span> <span class="str">"High"</span> <span class="kw">if</span> amount &gt;= <span class="kw">100</span> <span class="kw">else</span> <span class="str">"Low"</span>
+clean[<span class="str">"tier"</span>] = clean[<span class="str">"amount"</span>].apply(tier)
+
+<span class="cm"># np.where() version — same result, no Python-level loop</span>
+clean[<span class="str">"tier"</span>] = np.where(clean[<span class="str">"amount"</span>] &gt;= <span class="kw">100</span>, <span class="str">"High"</span>, <span class="str">"Low"</span>)</code></pre>
+<p>Both produce the identical column. The difference is entirely how the work gets done: <code>apply()</code> re-enters the Python interpreter once per row (Lesson 1's core vectorization argument, again); <code>np.where()</code> evaluates the condition as one array operation and picks values from two arrays in compiled code, no per-row callback at all.</p>
+
+<h2>3 · More than two outcomes: np.select()</h2>
+<p>A plain <code>if/elif/elif/.../else</code> chain — SQL's <code>CASE WHEN ... WHEN ... WHEN ... ELSE END</code> — is <dfn data-en="a NumPy function taking a LIST of boolean condition arrays and a matching list of choice arrays; returns the choice from the first condition that is True for each row, or a default if none match" data-vn="giữ nguyên 'np.select()' — CASE WHEN nhiều nhánh, vectorized, khớp điều kiện đầu tiên đúng">np.select()</dfn>, not nested <code>np.where()</code> calls:</p>
+<pre><code>conditions = [
+    clean[<span class="str">"amount"</span>] &gt;= <span class="kw">150</span>,
+    clean[<span class="str">"amount"</span>] &gt;= <span class="kw">50</span>,
+]
+choices = [<span class="str">"High"</span>, <span class="str">"Mid"</span>]
+clean[<span class="str">"tier3"</span>] = np.select(conditions, choices, default=<span class="str">"Low"</span>)
+<span class="cm">#   customer  amount tier3
+#0        An   120.0   Mid
+#1        An    42.0   Low
+#2      Binh    35.5   Low
+#3      Binh   180.0  High</span></code></pre>
+<p><code>conditions</code> and <code>choices</code> are two parallel <dfn data-en="a Python data structure holding an ordered sequence of items, written with square brackets — a general programming idiom, not pandas-specific" data-vn="giữ nguyên 'list' — cấu trúc dữ liệu dạng danh sách có thứ tự trong Python">lists</dfn> (a general Python idiom, not pandas-specific): row by row, <code>np.select()</code> walks the conditions <em>in order</em> and uses the first one that's <code>True</code>, falling through to <code>default</code> if none match — exactly like SQL's <code>CASE WHEN</code> evaluating branches top to bottom and stopping at the first hit. An's 120.0 fails the first condition (not &gt;= 150) but passes the second (&gt;= 50), landing on <code>"Mid"</code>.</p>
+<div class="callout"><strong>Order matters, same as SQL:</strong> if the conditions overlap, <code>np.select()</code> picks the FIRST match, not the most specific one. Writing <code>amount &gt;= 50</code> before <code>amount &gt;= 150</code> would silently put every high-value row into "Mid" instead — no error, just a wrong bucket. Same discipline as ordering <code>WHEN</code> branches in SQL.</div>
+
+<h2>4 · NaN and dtype: what np.where() doesn't fix</h2>
+<p>Both functions are still built on ordinary comparisons, so Lesson 3's NaN rule still applies: comparing <code>NaN &gt;= 100</code> is <code>False</code>, not an error and not "unknown" — a row with a missing <code>amount</code> would silently land in the ELSE/default branch, the same "no crash, quietly wrong" shape as Lesson 23's ungrouped-<code>shift()</code> pitfall. Check for missing values explicitly first (<code>isna()</code>) if a missing input should mean something other than the default output.</p>
+
+<div class="interview">
+<p><strong>Q: "How would you add a categorical column based on a numeric threshold, without a Python loop?"</strong> A strong answer, out loud: <em>"np.where(condition, value_if_true, value_if_false) for a single yes/no split — it's CASE WHEN...ELSE...END, fully vectorized: the condition is a boolean mask evaluated once over the whole column, then values are picked from two arrays in compiled code, no per-row Python call. For three or more branches I'd reach for np.select() with a list of conditions and a matching list of choices, evaluated in order like SQL's CASE WHEN chain — first match wins. I'd avoid apply() here since a per-row Python function is the exact case np.where()/np.select() exist to replace, and Lesson 12 already showed apply() can be 10-100x slower at scale. One gotcha I'd flag: comparisons against NaN are always False, not an error, so a missing input silently falls into the default branch unless I check isna() first."</em> The signal: naming CASE WHEN unprompted, explaining WHY it's vectorized (not just that it is), and flagging the NaN-into-default trap.</p>
+</div>
+
+<h2>Try it — self-checking practice (~15 min)</h2>
+<p>Open <code>practice/24_np_where_and_select.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/24_np_where_and_select.py</code></pre>
+<p>Uses the same cleaned rows as Lessons 6-23 (An 120.0/01-05, An 42.0/01-10, Binh 35.5/01-06, Binh 180.0/01-09). Exercise 1 is a plain two-way <code>np.where()</code> tier split; Exercise 2 is a three-way <code>np.select()</code> tier split (deliberately reusing different thresholds so the middle bucket is exercised); Exercise 3 proves order matters by deliberately swapping the condition order and showing Binh's 180.0 row flips from High to Mid; Exercise 4 uses <code>np.where()</code> after a left-merge with <code>customers.csv</code> to fill a missing (NaN) region with <code>"Unknown"</code> — An and Binh both have a real match here, so it checks the mechanism leaves real values untouched (Lesson 5's orphan Chi/order_id 4 is exactly when the else-branch would fire for real, but that row is already dropped by this file's cleaning step).</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="np.where(condition, a, b) evaluates the whole boolean condition array at once and picks from two value arrays in compiled code — the direct NumPy equivalent of SQL's CASE WHEN ... THEN ... ELSE ... END, with no per-row Python function call.">
+    <p class="stem">Which SQL construct does <code>np.where(cond, a, b)</code> match most directly?</p>
+    <button class="opt" data-ok>CASE WHEN cond THEN a ELSE b END</button>
+    <button class="opt">GROUP BY cond HAVING sum(a) &gt; sum(b) always</button>
+    <button class="opt">JOIN left_tbl ON cond = right_tbl.key AND x</button>
+  </div>
+  <div class="q" data-why="apply(axis=1) still calls an ordinary Python function once per row under the hood, the exact loop np.where()/np.select() avoid by evaluating the condition as one vectorized array operation over the whole column.">
+    <p class="stem">Why prefer <code>np.where()</code> over <code>apply()</code> for a simple threshold split?</p>
+    <button class="opt" data-ok>apply() loops in Python; np.where() runs vectorized</button>
+    <button class="opt">apply() cannot read numeric columns at all</button>
+    <button class="opt">np.where() supports more than two outcomes only</button>
+  </div>
+  <div class="q" data-why="np.select() walks its list of conditions in the given order and uses the choice tied to the FIRST condition that is True for each row, falling through to default only if none match — identical to how SQL evaluates CASE WHEN branches top to bottom.">
+    <p class="stem">When two conditions in <code>np.select()</code> both match a row, which choice wins?</p>
+    <button class="opt" data-ok>the choice tied to the first matching condition</button>
+    <button class="opt">the choice tied to the last matching condition</button>
+    <button class="opt">the default value, since ties are not allowed</button>
+  </div>
+  <div class="q" data-why="Comparisons against NaN always evaluate to False under IEEE float rules (Lesson 3's NaN rule), so a row with a missing input silently falls into the ELSE/default branch instead of raising an error or being treated as unknown.">
+    <p class="stem">What happens when <code>np.where()</code>'s condition compares against a NaN value?</p>
+    <button class="opt" data-ok>it evaluates False, silently landing in the else</button>
+    <button class="opt">it raises a ValueError before returning any result</button>
+    <button class="opt">it treats NaN as automatically matching every condition</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the <a href="https://numpy.org/doc/stable/user/basics.broadcasting.html">NumPy broadcasting docs</a> (~10 min, already cited in RESOURCES.md) — <code>np.where()</code>/<code>np.select()</code> are broadcasting in action: the condition, and both value arguments, are all broadcast together into one output array before any values are picked.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>np.where()</code> and <code>np.select()</code> are new today.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-24 comes back reported as shakiest, otherwise <code>select_dtypes()</code>/category dtype — the other candidate spotted but not yet confirmed uncovered as of this round's grep.<br><br>
+💬 Anything unclear — np.where() vs np.select(), the NaN-into-default trap, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

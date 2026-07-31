@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 27 · Graceful shutdown: what happens the instant before a process dies</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 27 · ~20 min</p>
+<h1>Graceful shutdown: what happens the instant before a process dies</h1>
+<p class="byline">Lesson 8 taught that instances come and go — horizontal scaling, restarts, deploys all kill and start processes routinely. Every lesson since has quietly assumed a process dies at a clean boundary between requests. Today: it doesn't, unless you write the code that makes it stop cleanly first.</p>
+
+<h2>1 · The moment nobody's mental model covers</h2>
+<p>A deploy, an autoscaler scaling down, a crashed node being replaced — all of these end with the platform sending your running process a <dfn data-en="a signal sent to a process asking it to terminate, which the process can intercept and react to before exiting — as opposed to SIGKILL, which cannot be intercepted at all" data-vn="giữ nguyên 'SIGTERM' — tín hiệu xin dừng process, process có thể bắt được và tự dọn dẹp trước khi thoát">SIGTERM</dfn>, then killing it outright (<dfn data-en="a signal that terminates a process immediately with no chance for it to run any cleanup code at all" data-vn="giữ nguyên 'SIGKILL' — tín hiệu buộc dừng ngay, process không kịp dọn gì cả">SIGKILL</dfn>) a fixed number of seconds later if it hasn't exited by then. A Go binary that never intercepts SIGTERM just dies on the spot the instant it arrives — mid-request, mid-transaction, wherever it happened to be.</p>
+<p>That's not a corner case; it's what a rolling deploy does to every instance, every time. Say instance A is mid-way through handling <code>POST /orders</code> — the row already inserted, the response not yet written — when SIGTERM lands. The client that sent that request gets a dropped connection or a 502 for an order that, in the database, already exists. That's the same "did it actually happen?" ambiguity Lesson 26 built a whole mechanism (idempotency keys) to survive on the client's retry path — but graceful shutdown is the server's half of the same problem: stop creating <em>new</em> half-finished work in the first place, and give the work already in flight a real chance to finish before the process is gone.</p>
+<div class="callout"><strong>Frontend-habit trap:</strong> closing a browser tab mid-fetch is a single user's problem — the request just fails, and nobody else is affected. A server process dying mid-request affects whoever that in-flight request belonged to, but also every <em>future</em> request the load balancer was about to send it in the next few hundred milliseconds, unless the process actively tells the load balancer to stop first.</div>
+
+<h2>2 · The two things shutdown has to do, in order</h2>
+<p>A clean exit is two separate steps, and doing them in the wrong order is the most common mistake:</p>
+<ol>
+<li><strong>Stop accepting new work.</strong> Tell the load balancer this instance is going away — Lesson 13's <dfn data-en="an endpoint answering whether this specific instance can currently serve real traffic, checked by a load balancer to decide whether to keep routing to it" data-vn="readiness check — instance này serve request được chưa">readiness check</dfn> is exactly this lever: flip it to failing the moment SIGTERM arrives, so the load balancer stops routing new requests here within one or two health-check intervals, while existing connections are left alone.</li>
+<li><strong>Let in-flight work finish, up to a deadline.</strong> Requests already being handled — and background work already claimed from Lesson 10's job queue — get a bounded window to complete normally. Only after that window (or once everything genuinely finishes early) does the process actually exit.</li>
+</ol>
+<p>Skip step 1 and step 2 is fighting a losing battle: the load balancer keeps sending fresh requests into a process that's actively trying to leave, so "in-flight work" never shrinks to zero. Skip step 2 and step 1 alone buys nothing — the requests already accepted still die mid-flight exactly as if nothing had changed.</p>
+
+<h2>3 · The shape in Go</h2>
+<p><code>net/http</code>'s <code>Server.Shutdown</code> already implements step 2 for HTTP connections: called once, it stops the listener from accepting new connections and blocks until every already-open connection's handler returns (or the passed-in context's deadline expires, whichever comes first). The wiring that's still your job is catching the signal and calling it:</p>
+<pre><code><span class="kw">ctx</span>, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+<span class="kw">defer</span> stop()
+
+srv := &amp;http.Server{Addr: <span class="str">":8080"</span>, Handler: mux}
+
+<span class="kw">go func</span>() {
+    <span class="kw">if</span> err := srv.ListenAndServe(); err != <span class="kw">nil</span> &amp;&amp; err != http.ErrServerClosed {
+        log.Fatalf(<span class="str">"listen: %v"</span>, err)
+    }
+}()
+
+&lt;-ctx.Done() <span class="cm">// blocks here until SIGTERM/SIGINT arrives</span>
+log.Println(<span class="str">"shutdown signal received, no longer accepting new connections"</span>)
+
+shutdownCtx, cancel := context.WithTimeout(context.Background(), <span class="kw">10</span>*time.Second)
+<span class="kw">defer</span> cancel()
+
+<span class="kw">if</span> err := srv.Shutdown(shutdownCtx); err != <span class="kw">nil</span> {
+    log.Printf(<span class="str">"forced shutdown: %v"</span>, err) <span class="cm">// deadline hit with requests still running</span>
+}
+log.Println(<span class="str">"shutdown complete"</span>)</code></pre>
+<p><code>signal.NotifyContext</code> turns the incoming OS signal into a context that cancels the moment SIGTERM or SIGINT (Ctrl-C locally) arrives, so the main goroutine can simply block on <code>ctx.Done()</code> instead of writing a raw <code>signal.Notify</code> channel by hand. <code>srv.ListenAndServe()</code> runs on its own goroutine because it blocks forever on success — the main goroutine's job is only to wait for the shutdown signal, then drive the shutdown sequence. The 10-second timeout on <code>shutdownCtx</code> is the deadline from step 2: long enough for realistic in-flight requests to finish, short enough that a genuinely stuck request doesn't block the deploy indefinitely — it should always be shorter than however long the deployment platform waits before sending SIGKILL.</p>
+
+<h2>4 · Readiness first, or the shutdown races the load balancer</h2>
+<p>The snippet above handles in-flight requests correctly, but on its own it still has a gap: the instant SIGTERM arrives, the load balancer doesn't know yet — it's still happily routing new requests here based on the last readiness check it saw, which could be several seconds stale. The fix is Lesson 13's readiness check again: the SIGTERM handler should flip a shared flag the readiness handler reads, so it starts returning unhealthy immediately, <em>before</em> calling <code>srv.Shutdown</code>. Most deployment platforms (Kubernetes among them) build in a short pause between "mark unready" and "send SIGTERM" for exactly this reason — the shutdown timeout has to budget for that gap too, not just the requests already running.</p>
+
+<div class="interview">
+<p><strong>Q: "What happens to in-flight requests when you deploy a new version of this service?"</strong> A strong answer, out loud: <em>"Without explicit handling, whatever the deploy platform sends — usually SIGTERM — kills the process immediately, so any request being handled at that instant just drops. I'd catch SIGTERM, immediately flip the readiness check to unhealthy so the load balancer stops sending new traffic, then call the HTTP server's Shutdown method with a bounded timeout — it stops accepting new connections and waits for in-flight ones to finish on their own. If a request is still running when the timeout hits, I'd rather log that and let the platform force-kill it than block the deploy forever."</em> The signal: naming the readiness-first ordering unprompted, not just "call Shutdown."</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Without a SIGTERM handler, the OS default action for a Go process is to terminate immediately, with no chance to finish in-flight requests or tell the load balancer it's leaving — exactly the same behavior as SIGKILL from the process's point of view.">
+    <p class="stem">What happens to a Go server that never intercepts SIGTERM?</p>
+    <button class="opt" data-ok>it terminates immediately mid an open request</button>
+    <button class="opt">it automatically finishes every open request now</button>
+    <button class="opt">it queues the signal until the restart</button>
+    <button class="opt">Go silently converts it to a no-op</button>
+  </div>
+  <div class="q" data-why="Flipping readiness to unhealthy first tells the load balancer to stop sending new requests; only once new work has stopped arriving does waiting for in-flight requests to finish actually make progress toward zero.">
+    <p class="stem">Why must readiness flip to unhealthy before calling Shutdown?</p>
+    <button class="opt" data-ok>new requests keep arriving otherwise forever</button>
+    <button class="opt">Shutdown silently fails without that ordering</button>
+    <button class="opt">Go requires readiness checks before shutdown</button>
+    <button class="opt">load balancers reject unordered shutdown entirely</button>
+  </div>
+  <div class="q" data-why="Server.Shutdown stops the listener from accepting new connections, then blocks until every already-open connection's handler returns or the passed context's deadline expires, whichever happens first.">
+    <p class="stem">What does Go's <code>http.Server.Shutdown</code> actually wait for?</p>
+    <button class="opt" data-ok>in-flight handlers to finish or time out</button>
+    <button class="opt">the operating system to reclaim all memory</button>
+    <button class="opt">every past request log line to flush</button>
+    <button class="opt">a new deploy to finish rolling fully</button>
+  </div>
+  <div class="q" data-why="The shutdown timeout must be shorter than however long the deployment platform waits before escalating to SIGKILL, or the platform kills the process mid-cleanup anyway, defeating the entire point of a bounded, graceful wait.">
+    <p class="stem">Why must the shutdown timeout be shorter than the platform's SIGKILL delay?</p>
+    <button class="opt" data-ok>otherwise SIGKILL will arrive before cleanup finishes</button>
+    <button class="opt">Go refuses to compile that longer number</button>
+    <button class="opt">Postgres closes idle connections after some delay</button>
+    <button class="opt">longer timeouts always cause silent memory leaks</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://12factor.net/disposability">The Twelve-Factor App — Disposability</a> (~5 min) — the section this lesson is built on directly: "processes should strive to minimize startup time" and "shut down gracefully when they receive a SIGTERM," naming the exact fast-startup/graceful-shutdown pair this lesson covers the second half of. RESOURCES.md already cites 12factor.net generally; Lessons 8 and 21 drew on its Processes and Config sections respectively — this is the same source's Disposability section, not yet cited.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> open — no fresh reported outcome exists yet for any lesson; a good next step is naming a track to deepen, confirming a quiz result, or picking another gap (circuit breaker and the outbox pattern remain untaught candidates from this round's search).</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

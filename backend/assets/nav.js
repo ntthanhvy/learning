@@ -58,6 +58,8 @@
       file: "lessons/0025-concurrency-parallelism-threads-coroutines.html" },
     { n: 26, date: "2026-07-31", title: "Idempotency keys: making POST safe to retry",
       file: "lessons/0026-idempotency-keys-safe-retries.html" },
+    { n: 27, date: "2026-08-01", title: "Graceful shutdown: what happens the instant before a process dies",
+      file: "lessons/0027-graceful-shutdown.html" },
   ];
 
   const REFS = [

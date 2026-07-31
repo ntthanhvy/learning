@@ -351,3 +351,19 @@ by the user there; they apply here identically.
   generated this round via delegated agents; python Day 3 —
   `dict`/`set` grouping without pandas — was also generated, its own
   date-locked slot per PLAN.md.)
+- 2026-08-01 (headless 06:00 run): same as every prior post-week day —
+  verified `daily.html`, `assets/srs.js`, and `assets/quiz-bank.js` are all
+  present and untouched (`quiz-bank.js` still tags exactly days 1-7 by an
+  `id: "k1"`..`"k7"` grep, with exactly 7 real kata entries — the one extra
+  textual `type: "kata"` match is the commented-out example at line 12,
+  same as the 2026-07-28 finding; `nav.js` still registers only the 7 Jul
+  8-14 lessons). Still the correct "daily quiz+kata" for this post-week
+  phase per PLAN.md, so nothing new was generated. `bin/query-progress`
+  (read) hit a generic "requires approval" gate with no user present this
+  session, so no `course_progress` rows could be read for a scope-change
+  signal (e.g. a request to keep growing the bank past Day 7). No new
+  learning record beyond the Day-1 baseline. (Go skipped again per its own
+  window close, now twelve days past it; backend and data lessons were
+  generated this round via delegated agents; python Day 4 — functions,
+  args, and `key=` — was also generated, its own date-locked slot per
+  PLAN.md.)

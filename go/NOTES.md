@@ -240,3 +240,11 @@
   phantom gap. Direct `psql "$LEARNING_DB_URL" ...` was blocked again
   this session (generic "requires approval" gate, no user present) —
   moot for this course since it's a pure skip regardless of DB state.
+- 2026-08-01 (headless 06:00 run): skipped again per the same rule — the
+  course window closed 2026-07-20, now twelve days past it. Day 13
+  (`0014-concurrency-capstone.html`) is present on disk and registered in
+  `assets/nav.js` (re-confirmed, consistent with the 2026-07-30 correction
+  of the earlier stale "still ungenerated" claim) — moot for this
+  session's decision either way. `bin/query-progress` (read) hit a generic
+  "requires approval" gate with no user present this session — moot for
+  this course since it's a pure skip regardless of DB state.

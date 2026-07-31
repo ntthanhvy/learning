@@ -683,3 +683,75 @@
   identified this round beyond the one just closed; the next session should
   either confirm Lesson 25's quiz outcome (still the standing open question
   from learning-records/0002) or pick a track to deepen.
+- 2026-08-01 generation (Lesson 27, headless 06:00 run): idempotency check
+  first — confirmed `lessons/0027-*.html` did not exist and lesson 27 was not
+  yet in nav.js before writing anything. `~/learning/bin/query-progress
+  backend` (a read) required approval and was blocked with no user present,
+  exactly as the task briefing warned; not retried. Lesson 26 left the
+  teaser open with two named options (confirm Lesson 25's quiz outcome, or
+  pick a track to deepen) and explicitly flagged three untaught candidates
+  it had considered and set aside: circuit breaker, graceful shutdown, and
+  the outbox pattern. Grepped all 26 lesson bodies plus glossary.html for
+  all three terms (and "SIGTERM"/"graceful.*shutdown"/"outbox" specifically)
+  — all three came back completely empty (the only workspace hits were
+  NOTES.md's own retrospective mentions), confirming all three genuinely
+  remain open. Chose graceful shutdown over the other two: it's a runtime-
+  operations concept squarely under MISSION criterion 3 ("reason about what
+  happens at runtime... spot these problems in existing code"), and it ties
+  directly into three already-taught lessons rather than standing alone —
+  Lesson 8 (instances come and go via horizontal scaling/restarts), Lesson
+  13 (liveness vs readiness checks — readiness is the exact lever shutdown
+  needs to flip first), and Lesson 26 (the same "did it actually happen?"
+  ambiguity from the server's outbound side instead of the client's retry
+  side). Circuit breaker and the outbox pattern remain open candidates,
+  named in this lesson's own closing teaser for a future round. Lesson 27
+  covers it: why an unhandled SIGTERM kills a Go process mid-request with no
+  warning (the default OS action, same practical effect as SIGKILL from the
+  process's viewpoint), the two-step shutdown sequence in strict order (stop
+  accepting new work via readiness, then let in-flight work finish inside a
+  deadline) and why doing them in the wrong order defeats the purpose either
+  way, the `net/http` `Server.Shutdown` mechanism itself (stops the listener,
+  blocks until open handlers return or the passed context's deadline fires),
+  a full `signal.NotifyContext` + `srv.Shutdown(shutdownCtx)` Go snippet, and
+  the readiness-must-flip-first ordering detail (the load balancer is
+  working off a stale readiness check unless the SIGTERM handler updates it
+  immediately, before calling Shutdown) plus the shutdown-timeout-must-be-
+  shorter-than-the-platform's-SIGKILL-delay detail. The Go snippet (signal
+  handling + HTTP server shutdown, plus an unused-in-the-lesson but
+  compile-checked `inFlightTracker` middleware sketch) was compile-checked
+  clean with `go build -C` / `go vet -C` in a scratch module
+  (`.scratch/backend-lesson27/`, built binary written to `/tmp` and not
+  copied into the scratch dir, directory left with only `go.mod`/`main.go`,
+  same end-state as every prior round) — no approval blocker for either
+  `-C`-style invocation this round, consistent with every round since Lesson
+  13's finding; `rm -f /tmp/lesson27bin` was blocked by the sandbox's
+  working-directory restriction (only paths under the repo root are
+  removable this session) and was left in place per established precedent
+  that this is harmless. Added `SIGTERM` and `SIGKILL` to the glossary
+  (confirmed via grep neither already existed) and registered Lesson 27 in
+  nav.js. Quiz options were drafted into a scratch file
+  (`.scratch/backend-lesson27/opts.txt`, deleted after) and verified with
+  `wc -w` per line, run twice independently (once via Grep `-o` extraction
+  plus manual token counting, once via `sed -n '<n>p' | wc -w` per line one
+  at a time since loop-based invocations and `awk` both hit this session's
+  approval gate) — all four questions needed a rewrite pass before landing
+  on equal counts: Q1 was 5/6/7/8 on the first draft, fixed to 7/7/7/7; Q2
+  was already correct at 6/6/6/6 on the first draft; Q3 was 7/7/7/8 (an
+  "in-flight"-as-one-hyphenated-word undercount on the correct option, the
+  same hyphen-miscount class Lesson 26's own notes flagged for
+  "server-side") and was fixed by respelling it "time out" to reach
+  7/7/7/7; Q4 was 6/7/6/6 on the first draft, needed two more rewrite passes
+  to reach 7/7/7/7 cleanly. `~/learning/bin/record-progress backend
+  lesson_generated --day 27 --lesson 0027-graceful-shutdown.html --detail
+  '{"by":"launchd"}'` was attempted once via its absolute path as instructed
+  and required approval with none available in this headless run — recorded
+  here as blocked, not retried (same outcome as Lessons 19, 24, and 26).
+  Primary source: The Twelve-Factor App's Disposability section
+  (12factor.net/disposability) — RESOURCES.md already cites 12factor.net
+  generally, and Lessons 8/21 already drew on its Processes/Config sections
+  respectively, so this extends an already-vetted source into a section not
+  yet cited rather than introducing a new one. Teaser left open: still no
+  `lesson_completed` record for any lesson after 27 rounds (the standing
+  open question since Lesson 19), and circuit breaker / the outbox pattern
+  remain named, confirmed-untaught candidates for whenever this method is
+  used again.

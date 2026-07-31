@@ -167,3 +167,60 @@ fail *gracefully* so the learner sees which task failed.
   convention; it required interactive approval in this sandbox and was not
   retried, consistent with both prior attempts — outcome is "not recorded to
   DB this run."
+- 2026-08-01 — **Day 4 generated** (`lessons/0004-functions-args-and-key.html`),
+  the headless run's third end-to-end lesson, and the first to teach `key=`
+  and `lambda` per the learner-profile scoping (both explicitly off-limits
+  before today). Taught functions as first-class values (a name bound to a
+  function object, passable like any other value — the mechanism `sorted`'s
+  `key=` relies on), positional vs. keyword arguments, default arguments
+  (plus a callback to Day 1's mutable-default-argument trap, already in the
+  glossary, rather than re-explaining it), `*args`/`**kwargs` at a
+  recognition-only level per the scoping instructions, `lambda` as a
+  single-expression anonymous function, and `key=` as accepted by `sorted()`,
+  `min()`, and `max()`. Built directly on Day 3 per PLAN.md's stated ordering
+  ("grouping needs `key=` functions"): section 4's worked example sorts a
+  Day-3-style `Counter` of city counts by count, descending, via
+  `sorted(city_counts.items(), key=lambda pair: pair[1], reverse=True)` —
+  explicitly framed as the reason `Counter.items()` doesn't come out
+  pre-sorted and needs today's tool to be useful. Bridged from SQL per the
+  baseline record: `ORDER BY count DESC` introduced first as "sort by a
+  computed column, not the row itself," then `key=` presented as that same
+  idea in Python.
+  No-pandas rule: zero pandas/NumPy API anywhere in lesson or practice file;
+  exactly one contrast sentence, naming `df.sort_values("amount",
+  ascending=False)` without demonstrating it, placed once after the
+  Counter-sorting example and called out in prose as the only such sentence,
+  matching the hard-rule section above.
+  Practice file `practice/04_functions_args_and_key.py` (6 exercises: a
+  function with a default argument, calling with keyword arguments, writing
+  a `lambda`, sorting a list of dicts with `key=`, `max(..., key=...)`, and
+  sorting a `Counter`'s items by count descending) was verified in a scratch
+  dir (`.scratch_py4_verify/`, created under the repo root and removed after
+  use, per this file's `/tmp`-is-out-of-bounds note from the Day 3 entry):
+  the shipped (unsolved) copy ran via `uv run python3` (both from the scratch
+  copy and from its real `practice/` path with the documented command) and
+  printed six clean ✗ lines with no traceback — the unsolved lines are bare
+  `...` expression statements assigned to names or left as a no-op function
+  body, so every check's lambda condition evaluates to `False` rather than
+  raising, and `check()`'s own `try/except` would catch it either way; a
+  separately solved copy printed six ✓ and the "All green" tally. No bugs
+  found during verification — both passes succeeded on the first attempt.
+  Glossary: added a Day 4 section to `reference/glossary.html` (`function`,
+  `positional argument`, `keyword argument`, `default argument`, `lambda`,
+  `key=`) after confirming none of the six terms already existed in the Day
+  1–3 sections (Day 3 already has `key` as in dict/set key, a distinct term
+  from today's `key=` sorting argument, so the new entry is titled `key=
+  (sorting)` to avoid collision).
+  Quiz: 5 questions. Word counts were checked and mismatched on the first
+  draft for four of the five questions (Q1 10/10/11, Q2 5/9/8, Q3 10/8/8, Q4
+  11/7/8, Q5 10/9/7) — each was rewritten and recounted word-by-word (not by
+  eye) until every question's three options matched (10/10/10, 8/8/8,
+  10/10/10, 9/9/9, 10/10/10 respectively), then a full final recount pass
+  confirmed all five before shipping, per this file's instruction to recount
+  after any edit — Q2 in particular needed three rewrite rounds since the
+  first two attempts each fixed one option while leaving another mismatched.
+  Registered in `assets/nav.js` with `date: "2026-08-01"`.
+  `record-progress python lesson_generated --day 4 …` was attempted once per
+  convention; it required interactive approval in this sandbox and was not
+  retried, consistent with all three prior attempts — outcome is "not
+  recorded to DB this run."

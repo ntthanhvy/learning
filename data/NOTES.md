@@ -778,3 +778,81 @@
   `np.select()` (vectorized if/else, in-scope NumPy per MISSION.md, not yet
   grepped-confirmed absent) and `select_dtypes()`/category dtype (schema-
   inspection, adjacent to Lesson 2's load & inspect).
+- 2026-08-01 generation (Lesson 24, headless 06:00 run): direct `psql
+  "$LEARNING_DB_URL" ...` reads and an ad-hoc `bin/query-progress` read were
+  both unreachable in this headless session (required interactive approval,
+  no user present) — still no `course_progress` rows readable and no
+  `lesson_completed`/quiz/kata outcome record beyond the Lesson 1 baseline,
+  so no reported weak spot to target. Lesson 23's own teaser named two
+  unconfirmed candidates (`np.where()`/`np.select()` and `select_dtypes()`/
+  category dtype) — re-grepped `lessons/*.html` and `reference/glossary.html`
+  for both before picking: `select_dtypes(` and `category dtype` appear
+  nowhere; `np.where(`/`np.select(` also appear nowhere as actual taught
+  calls (only "NumPy"-the-library and "NaN" were previously glossed, never
+  these two functions) — both genuinely uncovered. Picked `np.where()`/
+  `np.select()` over `select_dtypes()` per the pre-supplied judgment call:
+  it's NumPy content MISSION.md explicitly puts in scope ("read NumPy-
+  flavored code... predict its output"), and it gives a concrete, high-
+  frequency interview replacement for Lesson 12's `apply()` in the single
+  most common case people reach for `apply()` at all — a per-row if/else.
+  Lesson 24 ships: `np.where(cond, a, b)` bridged directly to SQL's `CASE
+  WHEN cond THEN a ELSE b END`, contrasted against an `apply()`-based
+  equivalent to make Lesson 12's vectorization argument concrete rather than
+  abstract, `np.select(conditions, choices, default=...)` for 3+ branches
+  (parallel Python lists, glossed since general Python fluency isn't
+  assumed), an explicit "first match wins, order matters" callout mirroring
+  SQL `CASE WHEN` branch order, and a closing NaN caveat (`NaN >= x` is
+  always False, so a missing input silently lands in the else/default
+  branch — the same "no crash, quietly wrong" shape as Lesson 23's
+  ungrouped-`shift()` pitfall). `uv run --with pandas` worked directly this
+  round (pandas 3.0.5): first used to hand-verify every number in
+  `.scratch/data-lesson24/explore.py` (deleted after) against the real
+  `orders_raw.csv`/`customers.csv` clean 4-row slice before writing a word
+  of the lesson — `np.where(amount >= 100, ...)` gives An 120.0->High/
+  42.0->Low, Binh 35.5->Low/180.0->High; `np.select()` with `[>=150, >=50]`
+  gives An 120.0->Mid/42.0->Low, Binh 35.5->Low/180.0->High; a merge with
+  `customers.csv` then `np.where(region.isna(), "Unknown", region)` leaves
+  An/Binh's real regions (North/South) untouched, matching the no-NaN case
+  since both have a real match. Also explicitly hand-verified the "order
+  matters" claim rather than assuming it: swapping `np.select()`'s condition
+  order (`>=50` checked before `>=150`) changes Binh's 180.0 row from
+  "High" to "Mid" since it now matches the first (wider) condition first —
+  confirmed by direct execution before writing that exercise. The shipped
+  (unsolved) `practice/24_np_where_and_select.py` was executed in place and
+  printed all 4 ✗ with no crash; explicitly checked the by-now-expected
+  Ellipsis-gotcha family (Lessons 19-23) before trusting the placeholder
+  positions — verified with a standalone throwaway script that `series >=
+  ...` (a float Series compared against a literal Ellipsis) DOES raise
+  `TypeError: '>=' not supported between instances of 'float' and
+  'ellipsis'` immediately, a clean new failure mode distinct from the
+  previously-hit "Ellipsis is truthy" and "Ellipsis is a valid .loc[]
+  indexer" gotchas — so all four placeholders (inside `>=` comparisons or a
+  `merged[...]` column lookup) were safe to leave as bare `...` without a
+  wrapping trick beyond the existing try/except. A solved copy
+  (`.scratch/data-lesson24/solved.py`, temporarily copied into `practice/`
+  to resolve the relative fixture path then deleted immediately after,
+  confirmed gone) printed all 4 ✓ against the same hand-verified numbers.
+  `.scratch/data-lesson24/` was fully removed (`rm -rf`) after verification,
+  no approval needed this round. Added `np.where() / np.select()` (one
+  combined entry, same precedent as `stack()/unstack()` and
+  `idxmax()/idxmin()`) and `list` (a general Python idiom, glossed since
+  `np.select()`'s parallel-list argument shape needed it) to the glossary,
+  and registered Lesson 24 in nav.js. Quiz options were drafted and checked
+  with a `Grep` extraction of every option string plus a manual per-option
+  whitespace-token count (this course's established convention, following
+  Lesson 19's repeated finding that a single pass isn't infallible) — the
+  first draft came out mismatched on 3 of 4 questions (Q1 at 8/7/8, Q3 at
+  8/8/9, Q4 badly mismatched at 9/5/6) and needed several rewrite + recount
+  cycles per question before a final independent recount confirmed all four
+  genuinely level at 8/8/8, 7/7/7, 8/8/8, and 8/8/8. `bin/record-progress
+  data lesson_generated --day 24 --lesson
+  0024-np-where-and-np-select.html --detail '{"by":"launchd"}'` was
+  attempted once as instructed from the repo root and required approval,
+  blocked with no user present in this headless session (same class of
+  block hit in most rounds before the occasional one-off successes at
+  Lessons 18/20/21) — `lesson_generated` could not be recorded; do it
+  manually once DB/write access is back. Not retried in a loop. Set the
+  teaser going forward to `select_dtypes()`/category dtype (the other
+  candidate named in Lesson 23's teaser, confirmed still genuinely
+  uncovered by this round's grep, not yet picked up) if no drill-outcome
+  signal surfaces by next generation.

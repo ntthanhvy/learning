@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 4 · Functions that pull their weight</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 4 · ~20 min · 1 Aug 2026</p>
+<h1>Functions that pull their weight</h1>
+<p class="byline">Day 3 ended with <code>Counter(row["city"] for row in sales)</code> giving you counts per city — but a raw dict of counts doesn't come out in an order that's useful to read. Today's job is the missing piece: how to tell <code>sorted()</code>, <code>min()</code>, and <code>max()</code> <em>what to sort by</em> when "by the value itself" isn't the right rule — using a small anonymous function called a <code>lambda</code>, plus enough of how Python functions accept arguments to understand why that works.</p>
+
+<div class="callout"><strong>Bridge from SQL:</strong> <code>ORDER BY count DESC</code> tells the database to sort rows by a column, not by whatever the row itself looks like. Python's <code>sorted(..., key=...)</code> is the same idea in code: <code>key</code> names a function that computes the sort column from each item, on the fly.</div>
+
+<h2>1 · A function is a value, not just a name to call</h2>
+<p>You've called functions since Day 1 — <code>len(x)</code>, <code>list(x)</code>, <code>row.setdefault(...)</code>. A <dfn data-en="a named, reusable block of code defined with def, taking zero or more arguments and optionally returning a value with return" data-vn="giữ nguyên &quot;function&quot; — khối code tái sử dụng, nhận đối số, có thể trả về giá trị">function</dfn> is defined with <code>def</code>, a name, parentheses for its inputs, and a body that optionally <code>return</code>s a value:</p>
+<pre><code><span class="kw">def</span> discount(price, rate):
+    <span class="kw">return</span> price * (<span class="kw">1</span> - rate)
+
+discount(<span class="kw">100</span>, <span class="kw">0.2</span>)     <span class="cm"># 80.0</span></code></pre>
+<p>The part that matters today: <code>discount</code> itself is an object, exactly like the ints and lists from Day 1 — it has a name bound to it, and that name can be passed around, stored in a variable, or handed to <em>another</em> function as an argument, without the parentheses that would call it:</p>
+<pre><code>my_func = discount        <span class="cm"># binds a second name to the SAME function object — no call, no ()</span>
+my_func(<span class="kw">100</span>, <span class="kw">0.2</span>)      <span class="cm"># 80.0 — calling through either name works identically</span></code></pre>
+<p>That single fact — a function is a value you can pass to another function — is the whole mechanism behind today's lesson. <code>sorted()</code> doesn't just sort things; it accepts a function as an argument and calls it for you, once per item, to decide the order.</p>
+
+<h2>2 · Arguments: positional, keyword, and default</h2>
+<p><code>discount(100, 0.2)</code> matched <code>100</code> to <code>price</code> and <code>0.2</code> to <code>rate</code> purely by position — a <dfn data-en="an argument matched to a function's parameter by its position in the call, e.g. discount(100, 0.2) matches 100 to the first parameter and 0.2 to the second" data-vn="giữ nguyên &quot;positional argument&quot; — đối số khớp theo vị trí, không nêu tên">positional argument</dfn>. You can instead name which parameter each value goes to, in any order, with a <dfn data-en="an argument passed as name=value in a function call, matched by name rather than position, e.g. discount(rate=0.2, price=100)" data-vn="giữ nguyên &quot;keyword argument&quot; — đối số truyền dạng name=value, khớp theo tên">keyword argument</dfn>:</p>
+<pre><code>discount(price=<span class="kw">100</span>, rate=<span class="kw">0.2</span>)   <span class="cm"># 80.0 — same call, named, order doesn't matter</span>
+discount(rate=<span class="kw">0.2</span>, price=<span class="kw">100</span>)   <span class="cm"># 80.0 — still correct, arguments matched by name</span></code></pre>
+<p>A parameter can also declare a <dfn data-en="a parameter value supplied in the def line, e.g. def discount(price, rate=0.1), used automatically whenever the caller omits that argument" data-vn="giữ nguyên &quot;default argument&quot; — giá trị mặc định khai báo sẵn, dùng khi caller không truyền">default argument</dfn> — a value used automatically when the caller doesn't supply one:</p>
+<pre><code><span class="kw">def</span> discount(price, rate=<span class="kw">0.1</span>):    <span class="cm"># rate defaults to 0.1 if the caller omits it</span>
+    <span class="kw">return</span> price * (<span class="kw">1</span> - rate)
+
+discount(<span class="kw">100</span>)          <span class="cm"># 90.0 — uses the default rate</span>
+discount(<span class="kw">100</span>, <span class="kw">0.5</span>)     <span class="cm"># 50.0 — caller's rate overrides the default</span></code></pre>
+<p>One trap worth flagging now, since Day 1 already built the vocabulary for it: Python evaluates a default value <em>once</em>, when <code>def</code> runs — so <code>def add_item(item, bucket=[])</code> would hand every call <em>the same list object</em>, accumulating across unrelated calls instead of starting fresh. That's why a mutable default like <code>[]</code> or <code>{}</code> is a trap; the fix, when you need one, is a default of <code>None</code> and building the fresh mutable object inside the body.</p>
+<p>Two signatures you'll <em>recognize</em> in other people's code from here on, at a recognition level only — mastering them isn't today's job: <code>def f(*args)</code> collects any number of extra positional arguments into a tuple named <code>args</code>, and <code>def f(**kwargs)</code> collects extra keyword arguments into a dict named <code>kwargs</code>. You'll see both spellings constantly in library code (including <code>sorted</code>'s own documentation); knowing the names is enough for now.</p>
+
+<h2>3 · <code>lambda</code>: a function small enough to write inline</h2>
+<p>Writing a whole <code>def</code> block just to say "square this number" is a lot of ceremony for a one-line idea. A <dfn data-en="lambda params: expr — an anonymous inline function limited to a single expression, whose value is returned automatically with no return keyword; used where a small function is needed as a value, not as a standalone definition" data-vn="giữ nguyên &quot;lambda&quot; — hàm ẩn danh viết trên 1 dòng, chỉ có 1 biểu thức, tự động return">lambda</dfn> is exactly that: an anonymous, throwaway function limited to one expression, whose result is returned automatically:</p>
+<pre><code>square = <span class="kw">lambda</span> n: n * n
+square(<span class="kw">5</span>)              <span class="cm"># 25 — same call syntax as any function</span>
+
+<span class="cm"># equivalent def, spelled the long way:</span>
+<span class="kw">def</span> square(n):
+    <span class="kw">return</span> n * n</code></pre>
+<p>Read <code>lambda n: n * n</code> as "a function of one parameter, <code>n</code>, whose value is <code>n * n</code>" — no <code>def</code>, no name required, no <code>return</code>. A <code>lambda</code> can take several parameters the same way a <code>def</code> can (<code>lambda a, b: a + b</code>), but it can never hold a loop, an <code>if</code> statement, or more than one expression — anything bigger belongs in a real <code>def</code>. In practice a <code>lambda</code> is almost never assigned a name like <code>square</code> above; its whole point is showing up inline, unnamed, exactly where a function is expected as an argument — which is precisely what section 4 needs it for.</p>
+
+<h2>4 · <code>key=</code>: telling <code>sorted()</code>, <code>min()</code>, and <code>max()</code> what to compare</h2>
+<p>Plain <code>sorted()</code> compares items directly — fine for numbers, and fine for strings (alphabetically). It breaks down the moment you need to sort by <em>something about</em> each item rather than the item itself: sorting the Day 3 sales rows by <code>amount</code> doesn't work by comparing whole dicts. This is what the <dfn data-en="a keyword argument accepted by sorted(), min(), max(), and list.sort() — a function called once per item to compute the value actually compared, instead of comparing the items directly" data-vn="giữ nguyên &quot;key=&quot; — đối số nhận 1 hàm, tính giá trị dùng để so sánh thay vì so sánh trực tiếp item">key=</dfn> argument is for — a function, called once per item, whose return value is what actually gets compared:</p>
+<pre><code>sales = [
+    {<span class="str">"city"</span>: <span class="str">"Hanoi"</span>, <span class="str">"amount"</span>: <span class="kw">120</span>},
+    {<span class="str">"city"</span>: <span class="str">"HCMC"</span>,  <span class="str">"amount"</span>: <span class="kw">80</span>},
+    {<span class="str">"city"</span>: <span class="str">"Danang"</span>, <span class="str">"amount"</span>: <span class="kw">200</span>},
+]
+
+<span class="kw">sorted</span>(sales, key=<span class="kw">lambda</span> row: row[<span class="str">"amount"</span>])
+<span class="cm"># [{'city': 'HCMC', 'amount': 80}, {'city': 'Hanoi', 'amount': 120}, {'city': 'Danang', 'amount': 200}]</span>
+
+<span class="kw">sorted</span>(sales, key=<span class="kw">lambda</span> row: row[<span class="str">"amount"</span>], reverse=<span class="kw">True</span>)
+<span class="cm"># biggest amount first — reverse is a keyword argument with default False</span>
+
+<span class="kw">max</span>(sales, key=<span class="kw">lambda</span> row: row[<span class="str">"amount"</span>])   <span class="cm"># {'city': 'Danang', 'amount': 200}</span>
+<span class="kw">min</span>(sales, key=<span class="kw">lambda</span> row: row[<span class="str">"amount"</span>])   <span class="cm"># {'city': 'HCMC', 'amount': 80}</span></code></pre>
+<p>Read <code>key=lambda row: row["amount"]</code> as "for each <code>row</code>, use <code>row["amount"]</code> as its sort value" — <code>sorted</code> calls that function on every item once, then orders items by the results, without you ever writing the comparison logic by hand. <code>reverse=True</code> is a keyword argument in the exact sense section 2 defined: named, with a default (<code>False</code>) used when you leave it out.</p>
+<p>This is where Day 3's grouping and today's sorting meet. A <code>Counter</code> (or any dict) doesn't come out of the box in count order — its <code>.items()</code> gives <code>(key, value)</code> pairs in insertion order, not sorted:</p>
+<pre><code><span class="kw">from</span> collections <span class="kw">import</span> Counter
+
+city_counts = Counter([<span class="str">"Hanoi"</span>, <span class="str">"HCMC"</span>, <span class="str">"Hanoi"</span>, <span class="str">"Hanoi"</span>, <span class="str">"HCMC"</span>])
+<span class="cm"># Counter({'Hanoi': 3, 'HCMC': 2})  — already looks sorted here, but that's not guaranteed</span>
+
+<span class="kw">sorted</span>(city_counts.items(), key=<span class="kw">lambda</span> pair: pair[<span class="kw">1</span>], reverse=<span class="kw">True</span>)
+<span class="cm"># [('Hanoi', 3), ('HCMC', 2)] — a list of (city, count) tuples, most-counted first</span></code></pre>
+<p>Each <code>pair</code> here is a <code>(city, count)</code> tuple from <code>.items()</code>; <code>pair[1]</code> reaches the count, the second slot. <code>sorted()</code> always returns a fresh <em>list</em>, even when sorting a dict's items or a set — worth knowing so the result's type isn't a surprise. This exact shape — sort a grouped or counted result by size — is the single most common reason a data script reaches for <code>key=</code> at all.</p>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> <code>Counter(...).most_common()</code> and today's <code>sorted(..., key=...)</code> both do by hand what <code>df.sort_values("amount", ascending=False)</code> does in one call once <code>data/</code> introduces DataFrames. Same idea — order by a computed value, not the row itself — different spelling for a different container. Not covered here; that's <code>data/</code>'s job, and this is the only sentence in this lesson that mentions it.</div>
+
+<h2>Try it — self-checking practice (~15 min)</h2>
+<p>Open <code>practice/04_functions_args_and_key.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/04_functions_args_and_key.py</code></pre>
+<p>No dependencies — standard library only. Exercises: a function with a default argument, calling with keyword arguments, writing a <code>lambda</code>, sorting a list of dicts with <code>key=</code>, finding the <code>max</code> of a list with <code>key=</code>, and sorting a <code>Counter</code>'s items by count.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A default argument's value is used only when the caller doesn't supply that argument; supplying one, whether positional or keyword, always overrides the default for that call.">
+    <p class="stem">What does a function's default argument value control?</p>
+    <button class="opt" data-ok>the value used only when the caller omits that argument</button>
+    <button class="opt">the value used always, even when the caller passes one</button>
+    <button class="opt">the value used only on the very first call made</button>
+  </div>
+  <div class="q" data-why="A lambda is limited to exactly one expression, whose result is returned automatically with no return keyword — it cannot contain a loop, an if statement, or multiple statements the way a def block can.">
+    <p class="stem">What can a <code>lambda</code> body contain, unlike a full <code>def</code> function?</p>
+    <button class="opt" data-ok>just a single expression, returned back automatically always</button>
+    <button class="opt">any number of statements, exactly like a def</button>
+    <button class="opt">a loop, but never even one arithmetic expression</button>
+  </div>
+  <div class="q" data-why="sorted() calls the key function once per item and orders items by what that function returns, instead of comparing the items directly — which is exactly what's needed when the sort value is a field inside a larger dict or tuple."><p class="stem">In <code>sorted(rows, key=lambda r: r["amount"])</code>, what does <code>key</code> actually do?</p>
+    <button class="opt" data-ok>calls a function per item to compute its sort value</button>
+    <button class="opt">renames the amount field before it fully sorts the rows</button>
+    <button class="opt">filters out every single row that is missing an amount</button>
+  </div>
+  <div class="q" data-why="A keyword argument is matched to a parameter by the name written before the equals sign in the call, so the order of keyword arguments in the call can differ from the order of parameters in the def line.">
+    <p class="stem">How is a keyword argument matched to a function's parameter?</p>
+    <button class="opt" data-ok>by the name written before its equals sign value</button>
+    <button class="opt">by its position, left to right, among all arguments</button>
+    <button class="opt">by the order its own parameters were first declared</button>
+  </div>
+  <div class="q" data-why="Counter, like every plain dict, gives .items() back in insertion order, not sorted by count — sorted(..., key=..., reverse=True) is needed to put the most-counted entries first."><p class="stem">Why does <code>sorted(counts.items(), key=lambda p: p[1])</code> matter for a <code>Counter</code>?</p>
+    <button class="opt" data-ok>.items() comes out in insertion order, not sorted by count</button>
+    <button class="opt">Counter objects cannot ever be looped over without sorting first</button>
+    <button class="opt">.items() only ever works right after first calling sorted() beforehand</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the <a href="https://docs.python.org/3/howto/sorting.html">Sorting HOW TO</a> (cited in RESOURCES.md) — the shortest path to fluency with <code>sorted()</code>, <code>key=</code>, and stability. For function definitions, defaults, and the <code>*args</code>/<code>**kwargs</code> spellings, the Python Tutorial's <a href="https://docs.python.org/3/tutorial/controlflow.html#defining-functions">defining functions</a> section covers the same ground formally.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day4">glossary</a> under Day 4.<br>
+<strong>Next lesson (2 Aug):</strong> iterators &amp; generators — lazy pipelines, and why <code>yield</code> lets huge files stream through constant memory.<br><br>
+💬 Anything unclear — <code>lambda</code> vs <code>def</code>, <code>key=</code>, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

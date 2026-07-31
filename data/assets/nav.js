@@ -52,6 +52,8 @@
       file: "lessons/0022-query-method.html" },
     { n: 23, date: "2026-07-31", title: "shift(): LAG/LEAD, spelled in pandas",
       file: "lessons/0023-shift-lag-lead.html" },
+    { n: 24, date: "2026-08-01", title: "np.where() and np.select(): vectorized if/else",
+      file: "lessons/0024-np-where-and-np-select.html" },
   ];
 
   const REFS = [

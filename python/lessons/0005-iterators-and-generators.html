@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 5 · Iterators &amp; generators: lazy pipelines</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 5 · ~20 min · 2 Aug 2026</p>
+<h1>Iterators &amp; generators: lazy pipelines</h1>
+<p class="byline">Every <code>for</code> loop you've written since Day 1 has been looping over something built <em>all at once</em> — a full list in memory before the loop ever starts. Today's job: the mechanism that makes <code>for</code> work at all, and a way to produce a sequence <em>one item at a time, on demand</em>, so a script can process a file far bigger than memory without ever holding more than one piece of it. Day 3's callout promised this properly — here it is.</p>
+
+<div class="callout"><strong>Bridge from SQL:</strong> a query plan doesn't materialize every intermediate table before the next operator runs — rows stream through <code>WHERE</code>, then the next stage, one at a time. A chain of generators is the same idea in Python: each stage pulls one item, does its bit, and hands it onward, instead of building a full intermediate list at every step.</div>
+
+<h2>1 · What actually makes a <code>for</code> loop work</h2>
+<p>A <code>list</code> is an <dfn data-en="an object you can loop over with for — anything supporting iter(), including list, dict, set, str, range, and a generator; being iterable says nothing about whether the whole sequence exists in memory at once" data-vn="giữ nguyên &quot;iterable&quot; — cái gì for được, gọi iter() được">iterable</dfn> — you can write <code>for x in a_list</code>. So is a <code>dict</code>, a <code>str</code>, a <code>range</code>. What actually happens when Python runs that loop is two steps, normally hidden: first it calls <code>iter()</code> on the iterable to get an <dfn data-en="the object a for loop actually drives, produced by calling iter() on an iterable; repeated calls to next() return successive items and remember position between calls, until StopIteration ends the loop" data-vn="giữ nguyên &quot;iterator&quot; — object nhớ vị trí, next() để lấy item kế tiếp">iterator</dfn>, then it repeatedly calls <code>next()</code> on that iterator until there's nothing left:</p>
+<pre><code>nums = [<span class="kw">10</span>, <span class="kw">20</span>, <span class="kw">30</span>]
+
+it = <span class="kw">iter</span>(nums)      <span class="cm"># the iterator — remembers where it is</span>
+<span class="kw">next</span>(it)              <span class="cm"># 10</span>
+<span class="kw">next</span>(it)              <span class="cm"># 20 — same it, position advanced</span>
+<span class="kw">next</span>(it)              <span class="cm"># 30</span>
+<span class="kw">next</span>(it)              <span class="cm"># raises StopIteration — nothing left</span></code></pre>
+<p>A <code>for</code> loop is exactly that pattern, written for you: <code>for x in nums</code> calls <code>iter(nums)</code> once, then <code>next()</code> in a loop, catching <code>StopIteration</code> to know when to stop. The distinction worth holding onto: <code>nums</code> itself is iterable but has no memory of position — you can start a fresh loop over it any time. The iterator <code>it</code>, once created, is stateful — it remembers exactly where it left off, which is precisely the property today's generators exploit.</p>
+
+<h2>2 · A generator function: <code>yield</code> instead of building a list</h2>
+<p>Every function you've written up to now runs top to bottom and hands back one value with <code>return</code> — done, all at once. A <dfn data-en="a function containing at least one yield statement; calling it doesn't run the body, it returns a generator object that runs the body lazily, one step at a time, up to each yield, on each next() call" data-vn="giữ nguyên &quot;generator function&quot; — function có yield, gọi nó tạo ra generator chạy lười">generator function</dfn> looks almost identical but uses <code>yield</code> instead of, or alongside, <code>return</code>:</p>
+<pre><code><span class="kw">def</span> count_up_to(n):
+    i = <span class="kw">1</span>
+    <span class="kw">while</span> i &lt;= n:
+        <span class="kw">yield</span> i        <span class="cm"># pause here, hand back i, remember this exact spot</span>
+        i += <span class="kw">1</span>
+
+gen = count_up_to(<span class="kw">3</span>)   <span class="cm"># calling it does NOT run the body at all yet</span>
+<span class="kw">next</span>(gen)              <span class="cm"># 1 — body runs until the first yield, then pauses</span>
+<span class="kw">next</span>(gen)              <span class="cm"># 2 — resumes right after that yield, runs to the next one</span>
+<span class="kw">next</span>(gen)              <span class="cm"># 3</span>
+<span class="kw">next</span>(gen)              <span class="cm"># raises StopIteration — loop condition finally false</span></code></pre>
+<p>Calling <code>count_up_to(3)</code> does not run any of the function's code — it immediately returns a <dfn data-en="the object returned by calling a generator function; itself an iterator, so for and next() both work on it directly; running its body is deferred until the next value is actually asked for" data-vn="giữ nguyên &quot;generator&quot; — object trả về khi gọi generator function, tự nó là iterator">generator</dfn>, which is itself an iterator exactly per section 1 — it has a <code>next()</code>. The body only executes when something asks it to, and only up to the next <code>yield</code>, at which point it freezes with every local variable (here, <code>i</code>) intact until asked to resume. In practice you rarely call <code>next()</code> by hand — a plain <code>for i in count_up_to(3):</code> drives it exactly like any other iterable, one <code>next()</code> per loop turn, with <code>StopIteration</code> ending the loop silently the way it always does.</p>
+<p>Compare that to the version that isn't lazy — a function returning a whole list:</p>
+<pre><code><span class="kw">def</span> count_up_to_list(n):
+    result = []
+    i = <span class="kw">1</span>
+    <span class="kw">while</span> i &lt;= n:
+        result.append(i)
+        i += <span class="kw">1</span>
+    <span class="kw">return</span> result      <span class="cm"># the WHOLE list exists in memory before the caller sees any of it</span></code></pre>
+<p>Both loops over <code>3</code> print the same three numbers. The difference is entirely about <em>when</em> the values come into existence and how much memory is ever alive at once — which is exactly section 3's point.</p>
+
+<h2>3 · Why this matters: constant memory, not proportional to input size</h2>
+<p><code>count_up_to_list(10_000_000)</code> builds a ten-million-element list, all of it resident in memory, before the first <code>print</code> ever runs. <code>count_up_to(10_000_000)</code> never holds more than the current <code>i</code> — each value is produced, used, and discarded before the next one is even computed. Scale that up to the real motivating case: a 10 GB log file, read and processed line by line.</p>
+<pre><code><span class="kw">def</span> read_lines(path):
+    <span class="kw">with</span> <span class="kw">open</span>(path) <span class="kw">as</span> f:
+        <span class="kw">for</span> line <span class="kw">in</span> f:      <span class="cm"># a file object is itself an iterator — one line in memory at a time</span>
+            <span class="kw">yield</span> line.strip()
+
+<span class="cm"># processing a 10 GB file: at any instant, exactly one line is alive in memory,</span>
+<span class="cm"># never the whole file — the loop below never knows the file is huge</span>
+<span class="kw">for</span> line <span class="kw">in</span> read_lines(<span class="str">"huge.log"</span>):
+    <span class="kw">if</span> <span class="str">"ERROR"</span> <span class="kw">in</span> line:
+        <span class="kw">print</span>(line)</code></pre>
+<p>An open file object is already a built-in iterator for this exact reason — looping it line by line, as <code>read_lines</code> does above, never reads the whole file at once either. Wrapping it in a generator here doesn't change that; it adds the <code>.strip()</code> step lazily, one line at a time, ready to feed the pipeline sections 4 and 5 build. (<code>with open(...) as f</code> is a context manager, properly Day 6's topic — read it today as "safely open and auto-close the file.")</p>
+
+<h2>4 · Generator expressions: the lazy sibling of a comprehension</h2>
+<p>Day 2's list comprehension, <code>[x for x in nums]</code>, still builds the whole list immediately — same eagerness as <code>count_up_to_list</code>. Swap the square brackets for parentheses and you get a <dfn data-en="(expr for item in iterable if cond) — a generator expression, syntactically a comprehension in parentheses instead of brackets, producing values lazily one at a time instead of building the whole list immediately" data-vn="giữ nguyên &quot;generator expression&quot; — comprehension viết bằng ngoặc tròn, sinh giá trị lười">generator expression</dfn> — the exact same three-slot grammar, but lazy:</p>
+<pre><code>nums = [<span class="kw">1</span>, <span class="kw">2</span>, <span class="kw">3</span>, <span class="kw">4</span>, <span class="kw">5</span>]
+
+squares_list = [n * n <span class="kw">for</span> n <span class="kw">in</span> nums]     <span class="cm"># list comprehension — builds all 5 values NOW</span>
+squares_gen  = (n * n <span class="kw">for</span> n <span class="kw">in</span> nums)     <span class="cm"># generator expression — builds NONE yet</span>
+
+<span class="kw">type</span>(squares_gen)                          <span class="cm"># &lt;class 'generator'&gt; — same kind of object section 2 built</span>
+<span class="kw">next</span>(squares_gen)                          <span class="cm"># 1 — computed only now, on demand</span>
+<span class="kw">next</span>(squares_gen)                          <span class="cm"># 4</span>
+<span class="kw">sum</span>(n * n <span class="kw">for</span> n <span class="kw">in</span> nums)              <span class="cm"># 55 — no brackets at all needed as a lone function argument</span></code></pre>
+<p>That last line is the form Day 3's <code>Counter(row["city"] for row in sales)</code> already used, unexplained at the time — a generator expression passed straight into a function that consumes an iterable, with the parentheses of the function call doing double duty so the extra pair isn't needed. Reach for a generator expression over a list comprehension whenever the result is only ever going to be looped over once and thrown away — <code>sum(...)</code>, <code>max(...)</code>, feeding another loop — since there's no reason to pay for a full list nothing keeps.</p>
+
+<h2>5 · Chaining generators into a pipeline</h2>
+<p>The payoff: generators chain. Each stage takes an iterable and yields a transformed one, lazily — nothing runs until the final stage is actually consumed, and at that point values flow through every stage one at a time, the way section 1's bridge described a query plan streaming rows through operators.</p>
+<pre><code><span class="kw">from</span> collections <span class="kw">import</span> defaultdict
+
+<span class="kw">def</span> parse_rows(lines):
+    <span class="kw">for</span> line <span class="kw">in</span> lines:
+        city, amount = line.split(<span class="str">","</span>)
+        <span class="kw">yield</span> {<span class="str">"city"</span>: city, <span class="str">"amount"</span>: <span class="kw">int</span>(amount)}
+
+<span class="kw">def</span> only_positive(rows):
+    <span class="kw">for</span> row <span class="kw">in</span> rows:
+        <span class="kw">if</span> row[<span class="str">"amount"</span>] > <span class="kw">0</span>:
+            <span class="kw">yield</span> row
+
+raw_lines = [<span class="str">"Hanoi,120"</span>, <span class="str">"HCMC,-10"</span>, <span class="str">"Hanoi,45"</span>, <span class="str">"Danang,200"</span>]
+
+pipeline = only_positive(parse_rows(raw_lines))   <span class="cm"># nothing has run yet — just wired stages together</span>
+
+totals = defaultdict(<span class="kw">int</span>)
+<span class="kw">for</span> row <span class="kw">in</span> pipeline:                          <span class="cm"># NOW values flow: one line parsed, filtered, grouped, per turn</span>
+    totals[row[<span class="str">"city"</span>]] += row[<span class="str">"amount"</span>]
+<span class="cm"># {'Hanoi': 165, 'Danang': 200} — HCMC's -10 row never even entered the dict</span></code></pre>
+<p>Read <code>only_positive(parse_rows(raw_lines))</code> from the inside out: <code>parse_rows</code> yields parsed dicts one at a time, <code>only_positive</code> pulls from that lazily and yields only the ones that pass, and the final <code>for</code> loop's <code>defaultdict</code> grouping — Day 3's exact pattern — is what actually drives the whole chain, one row at a time, start to finish. Nothing is built in full at any stage; at most one row is "in flight" between any two stages at once. Swap <code>raw_lines</code> for <code>read_lines("huge.log")</code> from section 3 and this identical pipeline scales to a file far bigger than memory, unchanged.</p>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> pandas operations are eager and vectorized — <code>df[df["amount"] > 0].groupby("city")["amount"].sum()</code> computes each stage over the whole column at once rather than streaming row by row through lazy generators. Different tradeoff, same shape of question ("filter, then group"). Not covered here; that's <code>data/</code>'s job, and this is the only sentence in this lesson that mentions it.</div>
+
+<h2>Try it — self-checking practice (~15 min)</h2>
+<p>Open <code>practice/05_iterators_and_generators.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/05_iterators_and_generators.py</code></pre>
+<p>No dependencies — standard library only. Exercises: calling <code>iter()</code>/<code>next()</code> by hand, writing a generator function with <code>yield</code>, writing a generator expression, and chaining two generator functions into a filter-then-aggregate pipeline.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A for loop calls iter() once on the iterable to obtain a stateful iterator, then calls next() on that iterator repeatedly, stopping when StopIteration is raised — the iterable itself never tracks position.">
+    <p class="stem">What does a <code>for</code> loop actually call to drive itself?</p>
+    <button class="opt" data-ok>iter() once, then next() repeatedly on the result</button>
+    <button class="opt">next() once, then iter() repeatedly on the result</button>
+    <button class="opt">len() once, then indexing up to that length</button>
+  </div>
+  <div class="q" data-why="Calling a generator function does not execute its body at all — it immediately returns a generator object, and the body only runs, up to the next yield, when a value is actually requested via next() or a for loop.">
+    <p class="stem">What happens when you call a generator function?</p>
+    <button class="opt" data-ok>the body doesn't run yet, a generator object is returned</button>
+    <button class="opt">the whole body runs immediately, values collected in a list</button>
+    <button class="opt">Python raises an error unless yield appears in a loop</button>
+  </div>
+  <div class="q" data-why="A generator processes one item at a time and discards it before producing the next, so at most a small constant amount of data is ever held in memory, regardless of how large the total input is.">
+    <p class="stem">Why can a generator stream a 10 GB file in constant memory?</p>
+    <button class="opt" data-ok>only one item at a time is held in memory</button>
+    <button class="opt">Python silently compresses every line automatically as it is read</button>
+    <button class="opt">the whole file loads once, then gets discarded right away</button>
+  </div>
+  <div class="q" data-why="(expr for item in iterable) is a generator expression: the same three-slot grammar as a list comprehension, but written with parentheses instead of square brackets, and lazy instead of eager.">
+    <p class="stem">How does a generator expression differ from a list comprehension?</p>
+    <button class="opt" data-ok>plain parentheses instead of brackets, values produced lazily</button>
+    <button class="opt">curly braces instead of brackets, values produced lazily</button>
+    <button class="opt">brackets exactly like a list, no if allowed</button>
+  </div>
+  <div class="q" data-why="Wiring generator stages together does no work by itself — parse_rows and only_positive both just return generator objects. Values only start flowing, one at a time through every stage, once something like the final for loop actually calls next() on the outermost generator.">
+    <p class="stem">In <code>only_positive(parse_rows(raw_lines))</code>, when does any row actually get processed?</p>
+    <button class="opt" data-ok>only once the final loop pulls values, one row at once</button>
+    <button class="opt">immediately, since both generator calls each run their entire bodies now</button>
+    <button class="opt">only after raw_lines is fully copied into a brand new list</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> David Beazley's <a href="https://www.dabeaz.com/generators/">Generators: The Final Frontier</a> (cited in RESOURCES.md) — the deepest practical treatment of generators as data-pipeline building blocks, exactly today's framing. The <a href="https://docs.python.org/3/library/itertools.html">itertools docs</a> are the natural next stop once chaining generators by hand feels comfortable — its recipes section is lesson-grade on its own.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day5">glossary</a> under Day 5.<br>
+<strong>Next lesson (3 Aug):</strong> files, formats &amp; context managers — <code>with</code>, reading real CSV/JSON, and why today's lazy pipelines are how a huge file gets processed at all.<br><br>
+💬 Anything unclear — <code>yield</code>, generator expressions, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

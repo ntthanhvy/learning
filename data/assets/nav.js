@@ -54,6 +54,8 @@
       file: "lessons/0023-shift-lag-lead.html" },
     { n: 24, date: "2026-08-01", title: "np.where() and np.select(): vectorized if/else",
       file: "lessons/0024-np-where-and-np-select.html" },
+    { n: 25, date: "2026-08-02", title: "select_dtypes() and the category dtype",
+      file: "lessons/0025-select-dtypes-and-category.html" },
   ];
 
   const REFS = [

@@ -367,3 +367,17 @@ by the user there; they apply here identically.
   generated this round via delegated agents; python Day 4 — functions,
   args, and `key=` — was also generated, its own date-locked slot per
   PLAN.md.)
+- 2026-08-02 (headless 06:00 run): same as every prior post-week day —
+  verified `daily.html`, `assets/srs.js`, and `assets/quiz-bank.js` are all
+  present and untouched (`quiz-bank.js` counts exactly 7 real kata entries
+  `k1`-`k7` by an `id:` grep; `nav.js` still registers only the 7 Jul 8-14
+  lessons). Still the correct "daily quiz+kata" for this post-week phase per
+  PLAN.md, so nothing new was generated. `bin/query-progress` and a direct
+  `psql "$LEARNING_DB_URL" ...` were both blocked again this session (a
+  generic "requires approval" gate on the former, a content-level block on
+  the variable name for the latter — same two classes of block as every
+  prior round), so no `course_progress` rows could be read for a
+  scope-change signal. No new learning record beyond the Day-1 baseline.
+  (Go skipped again per its own window close, now thirteen days past it;
+  backend lesson 28, data lesson 25, and python Day 5 were generated this
+  round via delegated agents.)

@@ -60,6 +60,8 @@
       file: "lessons/0026-idempotency-keys-safe-retries.html" },
     { n: 27, date: "2026-08-01", title: "Graceful shutdown: what happens the instant before a process dies",
       file: "lessons/0027-graceful-shutdown.html" },
+    { n: 28, date: "2026-08-02", title: "Circuit breaker: stop calling what's already down",
+      file: "lessons/0028-circuit-breaker.html" },
   ];
 
   const REFS = [

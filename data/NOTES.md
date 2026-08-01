@@ -856,3 +856,97 @@
   candidate named in Lesson 23's teaser, confirmed still genuinely
   uncovered by this round's grep, not yet picked up) if no drill-outcome
   signal surfaces by next generation.
+- 2026-08-02 generation (Lesson 25, headless 06:00 run): direct `psql
+  "$LEARNING_DB_URL" ...` reads, `bin/query-progress`, and `psql`/`bin/`
+  invocations in general were all unreachable this session (blocked by
+  sandbox restrictions, no interactive approval available) — still no
+  `course_progress` rows readable and no `lesson_completed`/quiz/kata
+  outcome record beyond the Lesson 1 baseline, so no reported weak spot to
+  target. Lesson 24's own teaser named `select_dtypes()`/category dtype
+  explicitly (the other candidate spotted in Lesson 23's scan, picked over
+  for `np.where()`/`np.select()` last round) — re-grepped `lessons/*.html`
+  and `reference/glossary.html` before writing and confirmed both
+  `select_dtypes(` and "category dtype" were still genuinely absent
+  (appeared only inside Lesson 24's own teaser sentence and NOTES.md), so
+  Lesson 25 ships exactly that: `df.dtypes` recapped in one line back to
+  Lesson 2, `select_dtypes(include="number")`/`exclude="number"` for
+  pulling numeric/non-numeric columns by TYPE with no names hardcoded (the
+  real interview use — a transform that needs to run across "every numeric
+  column" on an unknown-width table), then the `category` dtype: what it
+  is (a small lookup table of distinct values plus an integer code per
+  row, framed as SQL's ENUM/normalized-foreign-key model living inside one
+  column), why it exists (memory AND speed — comparisons/groupby run on
+  small codes instead of full strings), `.astype("category")` to convert,
+  and the fixed-category silent-NaN gotcha as the closing "no crash,
+  quietly wrong" entry in this course's running family (Lessons 19-24).
+  `uv run --with pandas` worked directly this round (pandas 3.0.5): first
+  used to hand-verify every number in `.scratch/data-lesson25/explore.py`
+  (deleted after) against the real `orders_raw.csv`/`customers.csv` merged
+  4-row fixture (An 120.0/01-05/North, An 42.0/01-10/North, Binh
+  35.5/01-06/South, Binh 180.0/01-09/South) before writing a word of the
+  lesson — `select_dtypes(include="number")` gives exactly `["order_id",
+  "amount"]`; `region` as `str` costs 216 bytes via
+  `memory_usage(deep=True)`, as `category` costs 112 bytes (confirmed the
+  saving scales with row count by also testing a 250x-repeated 1000-row
+  version: 54,000 bytes as str vs 1,108 as category). Also discovered and
+  corrected a real gap between the classic documented gotcha and actual
+  pandas 3.0.5 behavior before writing section 5: a direct scalar
+  assignment of an out-of-category value via `.loc[i, col] = "unseen"`
+  now RAISES `TypeError: Cannot setitem on a Categorical with a new
+  category` — pandas added a real guard here, it does NOT silently
+  produce NaN the way older docs/pandas 1.x/2.x describe. The silent-NaN
+  behavior only still reproduces via `astype()` onto an EXPLICITLY fixed
+  `CategoricalDtype(categories=[...])` that omits a real value — confirmed
+  this path still silently NaNs (with a new `Pandas4Warning` noting this
+  will become an error in a future pandas version too, so this gotcha has
+  a shelf life) — the lesson text and practice file were written to this
+  verified, still-current path, not the outdated/incorrect one. Also hit a
+  new variant of the by-now-expected Ellipsis-placeholder family while
+  designing the practice file: `series.memory_usage(deep=True)[...]` does
+  NOT raise (Ellipsis is a valid whole-Series indexer, same family as
+  Lesson 20's `.loc[...]` finding) — avoided by keeping every placeholder
+  in a `select_dtypes(include=...)`/`exclude=...)`, `.astype(...)`, or
+  `CategoricalDtype(categories=...)` position instead, each confirmed by a
+  standalone throwaway script to raise `TypeError` immediately when
+  unsolved. Also confirmed `pd.Series(["North", ..., "South"])` (bare
+  Ellipsis as a literal list element, not a keyword argument) does NOT
+  raise either — it becomes a Series containing the Python object
+  `Ellipsis` itself, which then quietly becomes NaN under a fixed
+  CategoricalDtype for the wrong reason (an unrecognized object, not the
+  intended demonstration) — avoided entirely by keeping the gotcha
+  exercise's placeholder in the `categories=...` argument instead of the
+  test data. The shipped (unsolved)
+  `practice/25_select_dtypes_and_category.py` was executed in place and
+  printed all 6 ✗ with no crash, then a solved copy
+  (`.scratch/data-lesson25/solved.py`, temporarily copied into `practice/`
+  to resolve the relative fixture path, then deleted immediately after,
+  confirmed gone) printed all 6 ✓ against the exact hand-verified numbers
+  above (216→112 bytes; West correctly vanishes to NaN under the
+  North/South-only fixed dtype). `.scratch/data-lesson25/` was fully
+  removed (`rm -rf`) after verification, no approval needed this round.
+  `bin/record-progress data lesson_generated --day 25 --lesson
+  0025-select-dtypes-and-category.html --detail '{"by":"launchd"}'` was
+  run once from the repo root as instructed and succeeded on the first
+  try, no approval blocker this round. Added `select_dtypes()` and
+  `category dtype` to the glossary (two separate entries, since both are
+  independently reusable concepts) and registered Lesson 25 in nav.js.
+  Quiz options were drafted and checked with a `Grep` extraction of every
+  option string plus a manual whitespace-token word count done TWICE
+  independently (this course's established convention, following Lesson
+  19's repeated finding that a single pass isn't infallible) — the first
+  draft came out mismatched on all four questions (Q1 at 7/7/6, Q2 at
+  9/8/10, Q3 at 7/6/7, Q4 at 8/7/7) and needed one rewrite pass per
+  question before a second independent recount confirmed all four
+  genuinely level at 7/7/7, 9/9/9, 7/7/7, and 7/7/7. Set the teaser going
+  forward to `SettingWithCopy`/`.copy()` (flagged as a candidate back in
+  Lesson 23's round but never picked up since `np.where()`/`np.select()`
+  and then `select_dtypes()`/category dtype took priority — re-confirmed
+  via grep this round that neither term appears anywhere in
+  `lessons/*.html` or `reference/glossary.html`, only in NOTES.md and
+  RESOURCES.md's Tom Augspurger citation) if no drill-outcome signal
+  surfaces by next generation; `.map()` (Series-level value-to-value
+  mapping, distinct from `apply()`) and `pd.wide_to_long()` were also
+  confirmed genuinely uncovered this round as secondary candidates, but
+  `pivot_table` multi-agg edge cases are NOT a valid candidate — Lessons
+  6/14/15/16/17 already cover `pivot_table` thoroughly, re-confirmed by
+  grep before ruling it out.

@@ -224,3 +224,66 @@ fail *gracefully* so the learner sees which task failed.
   convention; it required interactive approval in this sandbox and was not
   retried, consistent with all three prior attempts — outcome is "not
   recorded to DB this run."
+- 2026-08-02 — **Day 5 generated** (`lessons/0005-iterators-and-generators.html`),
+  the headless run's fourth end-to-end lesson, and the first to teach
+  generators/`yield` per the learner-profile scoping (explicitly off-limits
+  before today, and flagged in the profile note itself). Taught the iterator
+  protocol practically (`iter()`/`next()`, `StopIteration`, what a plain
+  `for` loop actually does under the hood), generator functions (`yield`
+  pausing/resuming a function body instead of building a return value all at
+  once), the concrete memory argument from MISSION.md — a generator over a
+  huge file holds at most one line at a time versus a list-returning version
+  holding everything — a generator expression as the lazy, parenthesized
+  sibling of Day 2's list comprehension (also paying off Day 3's own
+  glossary-adjacent callout, which had explicitly deferred generator
+  expressions to "Day 5 explains it properly"), and chaining two generator
+  functions (`parse` → `positive_only`) into a lazy filter pipeline whose
+  final consuming loop reused Day 3's `defaultdict`-style grouping/aggregation
+  pattern. Bridged from SQL per PLAN.md's ordering note ("`key=` functions
+  lead into generators"): framed a chained generator pipeline as a query plan
+  streaming rows through operators rather than materializing every
+  intermediate result, used once in the top callout and not forced into any
+  other section.
+  No-pandas rule: zero pandas/NumPy API anywhere in lesson or practice file
+  (checked by grep for `pandas|numpy|DataFrame`, case-insensitive); exactly
+  one contrast sentence, naming `df[df["amount"] > 0].groupby("city")["amount"].sum()`
+  as eager/vectorized versus today's lazy generators, without demonstrating
+  it, placed once near the end and called out in prose as the only such
+  sentence, matching the hard-rule section above.
+  Practice file `practice/05_iterators_and_generators.py` (5 exercises:
+  manual `iter()`/`next()`, a `countdown()` generator function, a generator
+  expression squaring a list, chaining `parse`/`positive_only` generator
+  functions into a pipeline, and consuming that pipeline into a per-city
+  totals dict) was verified in a scratch dir (`.scratch_py5_verify/`, created
+  under the repo root and removed after use, per the Day 3/4 precedent that
+  `/tmp` is out of bounds for this sandbox) via a subagent: the shipped
+  (unsolved) copy ran with `uv run python3` and printed five clean ✗ lines
+  with no traceback; a separately solved copy printed five ✓ and the "All
+  green" tally. No bugs found during verification — both passes succeeded on
+  the first attempt. One design point confirmed deliberately, not a bug: the
+  Ex 4 check rebuilds its own fresh `positive_only(parse(raw_lines))` instead
+  of consuming the student's module-level `pipeline`, so Ex 5 exhausting
+  `pipeline` doesn't affect Ex 4's check regardless of execution order —
+  necessary because generators are single-use.
+  Glossary: added a Day 5 section to `reference/glossary.html` (`iterable`,
+  `iterator`, `generator function`, `generator`, `generator expression`,
+  `lazy evaluation`) after confirming none of the six terms collided with any
+  Day 1–4 entry.
+  Quiz: 5 questions. Word counts were checked and mismatched on the first
+  draft for three of the five questions (Q3 13/9/10, Q4 7/8/9, Q5 12/9/11) —
+  Q1 and Q2 were already equal on the first draft (8/8/8 and 10/10/10). Each
+  mismatched question was rewritten and recounted word-by-word with `wc -w`
+  (not by eye) until every option matched (Q3 10/10/10, Q4 8/8/8, Q5
+  11/11/11), needing a couple of iterations on Q3 and Q5 in particular before
+  landing on the target count, then a full final recount pass across all
+  five questions confirmed every option before shipping, per this file's
+  instruction to recount after any edit. Registered in `assets/nav.js` with
+  `date: "2026-08-02"`.
+  `record-progress python lesson_generated --day 5 …` was attempted once per
+  convention and **succeeded this time** — `recorded: python/lesson_generated
+  day=5 lesson=0005-iterators-and-generators.html` — unlike all four prior
+  Day 1–4 attempts, which required interactive approval and were not
+  recorded. No explanation available from this session for why this attempt
+  went through non-interactively when the previous ones didn't; worth
+  watching whether Day 6 also succeeds before assuming the sandbox behavior
+  has changed for good.

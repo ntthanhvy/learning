@@ -60,6 +60,17 @@
   <tr><td>key= (sorting)</td><td>giữ nguyên "key=" — đối số nhận 1 hàm, tính giá trị dùng để so sánh thay vì so sánh trực tiếp item</td><td>A keyword argument accepted by <code>sorted()</code>, <code>min()</code>, <code>max()</code>, and <code>list.sort()</code> — a function called once per item to compute the value actually compared, instead of comparing the items directly. <code>sorted(rows, key=lambda r: r["amount"])</code> sorts by each row's <code>amount</code>.</td></tr>
 </table>
 
+<h2 id="day5">Day 5 — Iterators &amp; generators: lazy pipelines</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>iterable</td><td>giữ nguyên "iterable" — cái gì for được, gọi iter() được</td><td>An object you can loop over with <code>for</code> — anything supporting <code>iter()</code>, including <code>list</code>, <code>dict</code>, <code>set</code>, <code>str</code>, <code>range</code>, and a generator. Being iterable says nothing about whether the whole sequence already exists in memory at once.</td></tr>
+  <tr><td>iterator</td><td>giữ nguyên "iterator" — object nhớ vị trí, next() để lấy item kế tiếp</td><td>The object a <code>for</code> loop actually drives, produced by calling <code>iter()</code> on an iterable. Repeated calls to <code>next()</code> return successive items and remember position between calls, until <code>StopIteration</code> ends the loop.</td></tr>
+  <tr><td>generator function</td><td>giữ nguyên "generator function" — function có yield, gọi nó tạo ra generator chạy lười</td><td>A function containing at least one <code>yield</code> statement. Calling it doesn't run the body — it returns a generator object that runs the body lazily, one step at a time up to each <code>yield</code>, on each <code>next()</code> call.</td></tr>
+  <tr><td>generator</td><td>giữ nguyên "generator" — object trả về khi gọi generator function, tự nó là iterator</td><td>The object returned by calling a generator function. Itself an iterator, so <code>for</code> and <code>next()</code> both work on it directly; running its body is deferred until the next value is actually asked for.</td></tr>
+  <tr><td>generator expression</td><td>giữ nguyên "generator expression" — comprehension viết bằng ngoặc tròn, sinh giá trị lười</td><td><code>(expr for item in iterable if cond)</code> — syntactically a comprehension in parentheses instead of brackets, producing values lazily one at a time instead of building the whole list immediately.</td></tr>
+  <tr><td>lazy evaluation</td><td>giữ nguyên "lazy" — chỉ tính khi thật sự cần, không tính trước</td><td>Computing a value only when it's actually requested, rather than up front. Generators and generator expressions are lazy; a list or a list comprehension is eager — built completely before anything can use it.</td></tr>
+</table>
+
 <p class="next">💬 A term here still unclear? Ask your teacher — hỏi bằng tiếng Việt cũng được.</p>
 
 <script src="../assets/nav.js"></script>

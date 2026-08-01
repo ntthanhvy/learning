@@ -755,3 +755,64 @@
   open question since Lesson 19), and circuit breaker / the outbox pattern
   remain named, confirmed-untaught candidates for whenever this method is
   used again.
+- 2026-08-02 generation (Lesson 28, headless 06:00 run): picked up Lesson
+  27's own closing teaser exactly as named — circuit breaker, one of the two
+  confirmed-untaught candidates it left open (the outbox pattern remains for
+  a future round). Direct DB reads were not attempted this round (established
+  as reliably blocked every round since Lesson 9); still no
+  `lesson_completed` record exists for any lesson 1-27, so there was no
+  reported outcome to target — proceeded conservatively per the teaser.
+  Lesson 28 covers it: why retrying a failing dependency without a breaker
+  turns its outage into the caller's own (every retry still holds a pool
+  connection or goroutine waiting on a timeout — the same resource-pinned
+  shape Lesson 18 taught for pool exhaustion, just triggered by a downstream
+  dependency instead of a leaked `Release()`), the closed/open/half-open
+  state machine and the transitions between them, a minimal `CircuitBreaker`
+  Go struct (mutex-guarded state + consecutive-failure counter + cooldown
+  timer, `Call`/`allow`/`recordResult` methods, no external library), the
+  fallback question a caller still has to answer once the circuit is open,
+  and an explicit contrast table against Lesson 11's rate limiter (protects
+  the callee vs. protects the caller — opposite directions, a common
+  interview mix-up). Reused Lesson 25's `table.cmp`/`.cmp-wrap` comparison
+  component for that contrast rather than inlining new table markup. The
+  `CircuitBreaker` struct and its three methods (`Call`, `allow`,
+  `recordResult`) were compile-checked clean with `go build -C` / `go vet -C`
+  in a scratch module (`.scratch/backend-lesson28/`, built binary removed
+  successfully this round — `rm` was not blocked, unlike some prior rounds —
+  directory left with only `go.mod`/`main.go`) — no approval blocker for
+  either `-C`-style invocation, consistent with every round since Lesson 13's
+  finding. Primary source: Martin Fowler's CircuitBreaker article (the
+  pattern's namesake writeup, credited there to Michael Nygard's *Release
+  It!*), with Kleppmann's DDIA named as a secondary, more general
+  fault-tolerance framing — RESOURCES.md had no existing circuit-breaker
+  citation, so none was added as a permanent entry per the task's own
+  guidance, only cited inline in the lesson. Added `circuit breaker`,
+  `cascading failure`, `half-open state`, and `fallback` to the glossary
+  (confirmed via grep beforehand that none of the four, nor "circuit
+  breaker" generally, already existed anywhere in `lessons/*.html` or
+  `glossary.html`) and registered Lesson 28 in nav.js. Quiz options were
+  drafted into four per-question scratch files under
+  `.scratch/backend-lesson28-quiz/` (deleted after, per convention) and
+  verified with `wc -w` per line — the loop-based `for` form was blocked by
+  this session's sandbox on every attempt (same "Contains simple_expansion"
+  class of block NOTES.md hasn't previously named this specifically, worth
+  watching), so verification fell back to individual `sed -n '<n>p' | wc -w`
+  calls one line at a time, cross-checked with Grep `-o` token extraction as
+  the second independent method. All four questions needed at least one
+  rewrite pass before landing on equal counts (a repeated failure mode this
+  round: hand-counting words while drafting kept being off by one,
+  especially across a comma-attached token like "callers," or "delay," —
+  trust the tool count, not the eyeball, is the reinforced lesson here) —
+  final tallies Q1 9/9/9/9, Q2 8/8/8/8, Q3 8/8/8/8, Q4 9/9/9/9, all confirmed
+  by both methods agreeing on the final pass. `~/learning/bin/record-progress
+  backend lesson_generated --day 28 --lesson 0028-circuit-breaker.html
+  --detail '{"by":"launchd"}'` was attempted once via its absolute path as
+  instructed and required approval with none available in this headless run
+  — recorded here as blocked, not retried (same outcome as Lessons 19, 24,
+  26, and 27; the write-path block looks more like the norm than the
+  exception across the last several rounds, not a one-off quirk anymore).
+  Teaser left open: the outbox pattern remains the last named,
+  confirmed-untaught candidate from Lesson 27's search; still no
+  `lesson_completed` record for any lesson after 28 rounds — the next
+  session should treat getting a completion/quiz-outcome signal, even one,
+  as higher priority than generating a 29th topic blind.

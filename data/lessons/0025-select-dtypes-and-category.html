@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 25 · select_dtypes() and the category dtype</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 25 · ~20 min · 2 Aug 2026</p>
+<h1>select_dtypes() and the category dtype: pulling columns by type, and shrinking repeated text</h1>
+<p class="byline">Lesson 24 closed by naming this exact candidate: <code>select_dtypes()</code>/category dtype, adjacent to Lesson 2's <code>df.dtypes</code> but never revisited as its own topic. Re-grepped every lesson body and the glossary before writing — still genuinely absent.</p>
+
+<h2>1 · Recap: df.dtypes tells you, select_dtypes() acts on it</h2>
+<p>Lesson 2 introduced <code>df.dtypes</code> as the first-look ritual's second line — one <dfn data-en="the data type of an entire column (int64, float64, str, category, datetime64…) — per column, not per cell" data-vn="dtype (giữ nguyên) — kiểu dữ liệu của CẢ một cột">dtype</dfn> per column, printed for you to read. That's fine for eyeballing six columns; it doesn't scale to "give me every numeric column" on a wide table without hand-typing every name. <dfn data-en="a DataFrame method returning a NEW DataFrame containing only the columns whose dtype matches include= (or excluding those matching exclude=) — selects by TYPE, not by name" data-vn="giữ nguyên 'select_dtypes()' — lọc cột theo KIỂU dữ liệu, không phải theo tên">select_dtypes()</dfn> is <code>df.dtypes</code> turned into a filter:</p>
+<pre><code>merged.dtypes
+<span class="cm"># order_id        int64
+# customer          str
+# amount        float64
+# order_date        str
+# region            str</span>
+
+merged.select_dtypes(include=<span class="str">"number"</span>).columns.tolist()
+<span class="cm"># ['order_id', 'amount']</span></code></pre>
+<p>Read it like a SQL <code>information_schema</code> query: "give me every column whose declared type is numeric," without ever typing <code>order_id</code> or <code>amount</code> by name. That's the real interview use — a wrangling function that needs to scale a numeric transform (fill NaN, normalize, sum) across however many numeric columns a table happens to have, unknown until runtime.</p>
+
+<h2>2 · include= and exclude()</h2>
+<p><code>include=</code> takes a dtype name (or a list of them) and keeps only matching columns; <code>exclude=</code> is its mirror — keep everything <em>except</em> matching columns:</p>
+<pre><code>merged.select_dtypes(exclude=<span class="str">"number"</span>).columns.tolist()
+<span class="cm"># ['customer', 'order_date', 'region']  -- everything NOT numeric</span>
+
+merged.select_dtypes(include=[<span class="str">"number"</span>, <span class="str">"datetime"</span>]).columns.tolist()
+<span class="cm"># both numeric AND datetime columns, one call</span></code></pre>
+<p><code>"number"</code> is a NumPy dtype-group alias — it matches <code>int64</code> and <code>float64</code> together without listing both. Both keywords return a brand-new DataFrame with only the matching columns (same "returns a copy" rule as everything else in pandas that isn't an in-place mutation) — chain <code>.columns</code> to get just the names, or keep the whole slice if that's what the next step needs.</p>
+
+<h2>3 · The category dtype: a lookup table hiding inside one column</h2>
+<p>SQL has two ways to store a repeated string: a free-text <code>VARCHAR</code> column, or an <code>ENUM</code>/foreign key into a small lookup table with an integer key underneath. pandas' text columns default to the first shape — Lesson 2's <code>str</code> dtype stores every value as its own separate string, even when only 2 or 3 distinct values actually repeat across thousands of rows (a <code>region</code> column with only "North"/"South", say). <dfn data-en="a pandas dtype that stores a column as a small lookup table of distinct values (categories) plus one small integer code per row pointing into it — instead of repeating the full string in every row. Best for columns with few distinct values repeated many times." data-vn="giữ nguyên 'category dtype' — mã hoá cột thành bảng tra cứu nhỏ (categories) + số nguyên cho mỗi hàng, giống ENUM/foreign key trong SQL">category dtype</dfn> is pandas' second shape: it stores the small set of distinct values once, plus one small integer code per row pointing back into that set — the ENUM/lookup-table model, inside a single column.</p>
+<pre><code>merged[<span class="str">"region"</span>] = merged[<span class="str">"region"</span>].astype(<span class="str">"category"</span>)
+merged[<span class="str">"region"</span>].dtype
+<span class="cm"># category</span>
+merged[<span class="str">"region"</span>].cat.categories.tolist()
+<span class="cm"># ['North', 'South']  -- the lookup table, built automatically from the values seen</span></code></pre>
+
+<h2>4 · Why it exists: memory, hand-verified</h2>
+<p>The pitch isn't theoretical — <code>memory_usage(deep=True)</code> proves it on this course's real 4-row fixture (merged with <code>customers.csv</code>, same as Lesson 5):</p>
+<pre><code>merged.memory_usage(deep=<span class="kw">True</span>)[<span class="str">"region"</span>]              <span class="cm"># 216 bytes, as str</span>
+merged_cat.memory_usage(deep=<span class="kw">True</span>)[<span class="str">"region"</span>]          <span class="cm"># 112 bytes, as category</span></code></pre>
+<p>Roughly half, on just 4 rows with 2 distinct values. The saving isn't fixed — it scales with <em>row count relative to distinct-value count</em>: the lookup table (categories) is paid for once no matter how many rows repeat it, while a plain <code>str</code> column pays the string-storage cost every single row. Repeat this same 4-row shape 250x to 1,000 rows and the gap opens far wider — <code>region</code> as <code>str</code> costs 54,000 bytes; as <code>category</code>, 1,108 bytes, since the lookup table barely grows while a thousand repeated "North"/"South" strings would have. Low-cardinality columns repeated over many rows (region, status, category, country code) are exactly where this pays off; a column that's almost all distinct values (an email address, a free-text comment) gains little or nothing, since there's no repetition for the lookup table to exploit.</p>
+<p>The speed side follows from the same shape: groupby, value_counts, and comparisons on a category column work on small integer codes instead of comparing full strings row by row — the same reason an indexed foreign-key join beats comparing raw text in SQL.</p>
+
+<h2>5 · The gotcha: an out-of-category value doesn't just get added</h2>
+<p>A <code>category</code> column's categories are fixed once set — pandas won't silently grow the lookup table just because a new value shows up. The exact failure shape depends on <em>how</em> you write the new value in, and it's worth knowing both, hand-verified on pandas 3.0.5:</p>
+<pre><code><span class="cm">## Path A — direct scalar assignment into an existing category column: raises, doesn't silently corrupt
+merged["region"].loc[0] = "Mars"</span>
+<span class="cm"># TypeError: Cannot setitem on a Categorical with a new category (Mars), set the categories first</span>
+
+<span class="cm">## Path B — converting a column to an EXPLICIT fixed set of categories that doesn't include a real value:
+## this is the "no crash, quietly wrong" one</span>
+fixed = pd.CategoricalDtype(categories=[<span class="str">"North"</span>, <span class="str">"South"</span>])
+pd.Series([<span class="str">"North"</span>, <span class="str">"Mars"</span>, <span class="str">"South"</span>]).astype(fixed)
+<span class="cm"># 0    North
+# 1      NaN     <-- "Mars" silently became missing, no error, no warning printed
+# 2    South
+# dtype: category</span></code></pre>
+<p>Same family as this course's other "no crash, quietly wrong" gotchas (Lessons 19-24): converting a column to a category dtype with an explicitly fixed category list is a real pattern — for example, forcing test data onto the same categories as training data — and any value outside that fixed list becomes <code>NaN</code> silently rather than raising. Always check <code>.isna().sum()</code> immediately after a fixed-category <code>astype()</code> conversion, the same reflex Lesson 2 taught for <code>pd.to_numeric(..., errors="coerce")</code>.</p>
+
+<div class="callout"><strong>SQL bridge:</strong> <code>dtype</code> overall ~ a column's declared type in a schema. <code>category</code> dtype ~ an <code>ENUM</code>, or a normalized foreign-keyed lookup table for a repeated value — same "store the small set once, reference it by a small code" idea, just living inside one pandas column instead of a separate joined table.</p></div>
+
+<div class="interview">
+<p><strong>Q: "You've loaded a wide table and need to shrink its memory footprint. What do you check first?"</strong> A strong answer, out loud: <em>"df.dtypes or select_dtypes() first, to see what's actually there — select_dtypes(include='number') or exclude='number' lets me grab a whole group of columns by type instead of hardcoding names, useful for any transform that needs to run across all the numeric columns regardless of how many there are. For the text columns, I'd check cardinality with nunique() relative to row count — a low-cardinality column like region or status repeated over many rows is a strong astype('category') candidate: pandas stores the distinct values once as a lookup table plus a small integer code per row, so memory_usage(deep=True) drops noticeably, and operations like groupby get faster since they're comparing small codes instead of full strings. The gotcha I'd flag: converting to an explicitly fixed category list and then feeding it a value outside that list silently produces NaN instead of raising — I'd always check isna().sum() right after that kind of conversion."</em> The signal: naming the memory AND speed reasons, not just one, and flagging the silent-NaN trap unprompted.</p>
+</div>
+
+<h2>Try it — self-checking practice (~15 min)</h2>
+<p>Open <code>practice/25_select_dtypes_and_category.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/25_select_dtypes_and_category.py</code></pre>
+<p>Uses the same cleaned rows as Lessons 6-24 (An 120.0/01-05, An 42.0/01-10, Binh 35.5/01-06, Binh 180.0/01-09) merged with <code>customers.csv</code> (An→North, Binh→South, same as Lesson 5). Exercise 1 is <code>select_dtypes(include="number")</code>; Exercise 2 is <code>select_dtypes(exclude="number")</code>; Exercise 3 converts <code>region</code> to category and checks the real memory drop with <code>memory_usage(deep=True)</code>; Exercise 4 reproduces the fixed-category silent-NaN gotcha from section 5 so you see the wrong (missing) value with your own eyes.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="select_dtypes(include='number') returns a new DataFrame keeping only columns whose dtype is in the numeric group (int64, float64, ...) -- selecting by TYPE, with no column names hardcoded, the same idea as querying information_schema for numeric columns.">
+    <p class="stem">What does <code>df.select_dtypes(include="number")</code> return?</p>
+    <button class="opt" data-ok>a DataFrame with only the numeric-dtype columns</button>
+    <button class="opt">a DataFrame with only columns named "number"</button>
+    <button class="opt">a Series counting rows for each dtype</button>
+  </div>
+  <div class="q" data-why="category dtype stores the small set of distinct values once (the categories) plus a small integer code per row pointing into it, instead of repeating the full string every row -- the same 'store once, reference by small code' idea as a SQL ENUM or a normalized foreign-keyed lookup table.">
+    <p class="stem">What does the <code>category</code> dtype store, under the hood?</p>
+    <button class="opt" data-ok>distinct values once, plus a small code per row</button>
+    <button class="opt">every row's full string value again, unchanged, just relabeled</button>
+    <button class="opt">only the count of each distinct value, discarding rows</button>
+  </div>
+  <div class="q" data-why="Low-cardinality columns (few distinct values) repeated across many rows are exactly where category dtype saves memory and speeds up comparisons -- the lookup table is paid for once, while a plain str column repeats full string storage every row. A near-all-distinct column like an email address gains little.">
+    <p class="stem">Which column is the best <code>category</code> dtype candidate?</p>
+    <button class="opt" data-ok>a status column repeated across many rows</button>
+    <button class="opt">a column of unique, never-repeating email addresses</button>
+    <button class="opt">a column of unique auto-increment row IDs</button>
+  </div>
+  <div class="q" data-why="Converting a Series to an EXPLICITLY fixed CategoricalDtype whose categories list doesn't include some real value turns that value into NaN silently -- no error, no warning printed -- the same 'no crash, quietly wrong' shape as this course's other gotchas. Always check isna().sum() right after.">
+    <p class="stem">Converting a column to a fixed <code>CategoricalDtype</code> that's missing one real value does what to that value?</p>
+    <button class="opt" data-ok>silently turns it into NaN, no error</button>
+    <button class="opt">raises a ValueError immediately, stopping the script</button>
+    <button class="opt">automatically adds it as a new category</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the pandas User Guide's <a href="https://pandas.pydata.org/docs/user_guide/categorical.html">Categorical data</a> page (~10 min, this course's backbone) — covers <code>CategoricalDtype</code>, ordered categories, and the exact memory mechanics touched on today. Wes McKinney's <a href="https://wesmckinney.com/book/data-cleaning.html">Python for Data Analysis, ch. 7</a> also covers <code>category</code> with more benchmarking detail.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>select_dtypes()</code> and <code>category dtype</code> are new today.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-25 comes back reported as shakiest, otherwise another fresh scan of the curriculum spine and glossary for the next genuinely-uncovered drill pattern.<br><br>
+💬 Anything unclear — select_dtypes(), the category dtype, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

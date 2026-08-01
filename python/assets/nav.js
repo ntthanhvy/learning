@@ -14,6 +14,8 @@
       file: "lessons/0003-dict-set-and-grouping.html" },
     { n: 4, date: "2026-08-01", title: "Functions that pull their weight",
       file: "lessons/0004-functions-args-and-key.html" },
+    { n: 5, date: "2026-08-02", title: "Iterators & generators: lazy pipelines",
+      file: "lessons/0005-iterators-and-generators.html" },
   ];
 
   const REFS = [

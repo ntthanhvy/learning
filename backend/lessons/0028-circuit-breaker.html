@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 28 · Circuit breaker: stop calling what's already down</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 28 · ~20 min</p>
+<h1>Circuit breaker: stop calling what's already down</h1>
+<p class="byline">Lesson 27's closing teaser named two untaught candidates: circuit breaker and the outbox pattern. Today, the first one — a guard that notices a downstream dependency is failing and, for a while, simply stops calling it.</p>
+
+<h2>1 · Retrying a dead dependency makes the outage worse</h2>
+<p>Say your order service calls an inventory service on every checkout, and the inventory service starts timing out — overloaded, deploying, or just gone. The naive response feels correct: catch the error, retry. But every one of those calls still has to wait out its own timeout before it fails, and while it waits, it's holding a resource — the exact <dfn data-en="the state where every connection in a pool is currently in use and a new caller must wait for one to free up" data-vn="pool exhaustion (giữ nguyên) — hết connection rảnh trong pool, request phải chờ">pool exhaustion</dfn> shape Lesson 18 taught, except now the thing blocking every connection is a dependency that was never going to answer in time. More load arrives, more calls pile up waiting on the same dead dependency, and the order service — which was healthy — goes down too, just from trying to be polite to a service that already failed.</p>
+<p>This is <dfn data-en="a failure that spreads from one struggling component to the components calling it, because they keep waiting on or retrying the struggling one instead of giving up quickly" data-vn="cascading failure (giữ nguyên) — lỗi lan từ chỗ hỏng sang chỗ đang gọi nó, vì cứ chờ/retry mãi">cascading failure</dfn>: one dependency's outage, amplified by callers who never stop trying, becomes an outage of everything upstream of it too. A <dfn data-en="a stateful guard placed around a call to a flaky or slow dependency, which starts letting calls through, trips to blocking them after enough failures, and later allows a single test call through to check if the dependency has recovered" data-vn="circuit breaker (giữ nguyên) — bộ canh trạng thái đặt quanh 1 lời gọi tới dependency hay lỗi/chậm, hỏng nhiều lần thì tự chặn gọi tiếp">circuit breaker</dfn> exists to break that chain: after enough consecutive failures calling a dependency, it stops attempting the call at all — failing immediately, in microseconds, instead of waiting out a timeout every single time — until the dependency has had a chance to recover.</p>
+<div class="callout"><strong>Frontend-habit trap:</strong> a frontend retry (refetch on a failed request, react-query's default retry-with-backoff) assumes the <em>network</em> is what's unreliable and the server is fine — retrying is usually the right move. A circuit breaker assumes the opposite failure: the server side itself, or one dependency deep inside it, is the thing that's down. Retrying harder doesn't fix that; it adds load to something already struggling.</div>
+
+<h2>2 · Three states, not a binary on/off</h2>
+<p>The mechanism is a small state machine with three states:</p>
+<ul>
+<li><strong>Closed</strong> — the normal state. Calls pass through to the real dependency. Failures are counted; a run of consecutive failures crossing a threshold trips the breaker to open.</li>
+<li><strong>Open</strong> — calls fail immediately without even attempting the dependency, for a fixed cooldown window. This is the state that actually stops the cascade: no thread, goroutine, or pool connection is spent waiting on something known to be down.</li>
+<li><strong><dfn data-en="the circuit breaker's third state, entered after the open cooldown elapses, in which exactly one probe call is allowed through to test whether the dependency has recovered before deciding to close or reopen" data-vn="half-open state (giữ nguyên) — trạng thái thứ 3, hết thời gian cooldown thì cho đúng 1 lời gọi thử qua để test dependency đã hồi chưa">Half-open</dfn></strong> — once the cooldown elapses, the breaker lets exactly one probe call through. Succeed, and it closes again — normal traffic resumes. Fail, and it reopens for another full cooldown, without ever letting a flood of retries hit the still-struggling dependency.</li>
+</ul>
+<p>The names describe an electrical circuit deliberately: closed lets current (calls) flow; open breaks the circuit so nothing gets through; the breaker "trips" the same way a household circuit breaker does when a fault draws too much current, protecting the wiring behind it rather than the appliance that caused the fault.</p>
+
+<h2>3 · A minimal Go implementation</h2>
+<p>The whole mechanism fits in a small struct: a state, a failure counter and threshold, and the timestamp the breaker last tripped open:</p>
+<pre><code><span class="kw">type</span> CircuitBreaker <span class="kw">struct</span> {
+    mu               sync.Mutex
+    st               state <span class="cm">// closed, open, or halfOpen</span>
+    consecutiveFails <span class="kw">int</span>
+    failureThreshold <span class="kw">int</span>
+    openTimeout      time.Duration
+    openedAt         time.Time
+}
+
+<span class="kw">func</span> (cb *CircuitBreaker) Call(fn <span class="kw">func</span>() <span class="kw">error</span>) <span class="kw">error</span> {
+    <span class="kw">if</span> !cb.allow() {
+        <span class="kw">return</span> ErrCircuitOpen <span class="cm">// fails in microseconds — no call attempted</span>
+    }
+    err := fn()
+    cb.recordResult(err)
+    <span class="kw">return</span> err
+}
+
+<span class="kw">func</span> (cb *CircuitBreaker) allow() <span class="ty">bool</span> {
+    cb.mu.Lock()
+    <span class="kw">defer</span> cb.mu.Unlock()
+    <span class="kw">switch</span> cb.st {
+    <span class="kw">case</span> closed:
+        <span class="kw">return</span> <span class="kw">true</span>
+    <span class="kw">case</span> open:
+        <span class="kw">if</span> time.Since(cb.openedAt) &lt; cb.openTimeout {
+            <span class="kw">return</span> <span class="kw">false</span> <span class="cm">// still cooling down</span>
+        }
+        cb.st = halfOpen <span class="cm">// timeout elapsed — allow one probe</span>
+        <span class="kw">return</span> <span class="kw">true</span>
+    <span class="kw">case</span> halfOpen:
+        <span class="kw">return</span> <span class="kw">false</span> <span class="cm">// a probe is already out; block the rest</span>
+    }
+    <span class="kw">return</span> <span class="kw">false</span>
+}
+
+<span class="kw">func</span> (cb *CircuitBreaker) recordResult(err <span class="kw">error</span>) {
+    cb.mu.Lock()
+    <span class="kw">defer</span> cb.mu.Unlock()
+    <span class="kw">if</span> err == <span class="kw">nil</span> {
+        cb.consecutiveFails = <span class="kw">0</span>
+        cb.st = closed <span class="cm">// success (incl. the probe) fully resets</span>
+        <span class="kw">return</span>
+    }
+    cb.consecutiveFails++
+    <span class="kw">if</span> cb.st == halfOpen || cb.consecutiveFails &gt;= cb.failureThreshold {
+        cb.st = open
+        cb.openedAt = time.Now()
+    }
+}</code></pre>
+<p>Every call to the dependency goes through <code>cb.Call(fn)</code> instead of calling <code>fn</code> directly. <code>allow()</code> is the gate: closed always lets the call through; open blocks until <code>openTimeout</code> has elapsed, then flips to half-open and lets exactly one call through as a probe; half-open blocks every other caller until that one probe resolves. <code>recordResult</code> is what actually moves the state — a single failure while half-open reopens immediately (the dependency isn't back yet), while a success from any state fully resets the counter. This compiled clean as real, standalone Go — no framework, no external library, because the whole point is that the state machine is small enough to hold in your head.</p>
+
+<h2>4 · What the caller does when the circuit is open</h2>
+<p>A breaker only solves half the problem: failing fast instead of failing slow. The caller still has to decide what to return to <em>its</em> own caller while the circuit is open — this is the <dfn data-en="a degraded but usable response returned when a circuit breaker is open and the real dependency can't be called, instead of propagating the failure further" data-vn="fallback (giữ nguyên) — phản hồi thay thế (kém hơn) khi breaker đang mở, thay vì báo lỗi tiếp lên trên">fallback</dfn>: a cached inventory count that might be slightly stale, a "check back shortly" response, or, if there's truly nothing sensible to serve, an honest error returned immediately rather than after a timeout. Which fallback makes sense is a product decision, not a mechanical one — but an open circuit is exactly the signal that should trigger asking that question, instead of blindly propagating whatever error the dependency last returned.</p>
+
+<h2>5 · Not the same tool as rate limiting</h2>
+<p>Lesson 11's rate limiter and today's circuit breaker can look similar — both reject calls under certain conditions — but they protect opposite sides of a call, and mixing them up is a common interview stumble:</p>
+<div class="cmp-wrap">
+<table class="cmp">
+<thead><tr><th></th><th>Rate limiter (Lesson 11)</th><th>Circuit breaker (today)</th></tr></thead>
+<tbody>
+<tr><th>Protects</th><td>the callee, from too many callers</td><td>the caller, from a failing callee</td></tr>
+<tr><th>Triggered by</th><td>request volume crossing a cap</td><td>consecutive failures crossing a threshold</td></tr>
+<tr><th>Lives on</th><td>the service receiving traffic</td><td>the service making outbound calls</td></tr>
+<tr><th>Recovery</th><td>token bucket refills on a timer</td><td>half-open probe tests real recovery</td></tr>
+</tbody>
+</table>
+</div>
+<p>A single request can pass through both, in either order: your service might rate-limit its own incoming traffic <em>and</em> wrap its outbound call to inventory in a circuit breaker — one defends your capacity from the outside, the other defends your capacity from a dependency you don't control.</p>
+
+<div class="interview">
+<p><strong>Q: "A downstream service you depend on starts timing out under load. What do you do?"</strong> A strong answer, out loud: <em>"First, I wouldn't just add more retries — that adds load to something already struggling and can turn its outage into mine, since every retry still holds a connection or goroutine waiting. I'd wrap that call in a circuit breaker: after enough consecutive failures it trips open and fails immediately for a cooldown window, no network call attempted, instead of every caller waiting out a full timeout. After the cooldown it lets one probe call through — half-open — and only resumes normal traffic if that succeeds. And I'd decide up front what to return while it's open: a cached fallback if one makes sense, or a fast honest error if it doesn't, rather than letting the failure propagate after the slow way."</em> The signal: naming the three states and the half-open probe specifically, and connecting it back to why blind retries make an outage worse.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A circuit breaker's whole purpose is to stop attempting calls to a dependency that has failed enough times in a row, failing fast instead of waiting out a timeout on every call while the dependency is known to be down.">
+    <p class="stem">What does a circuit breaker actually do?</p>
+    <button class="opt" data-ok>it stops calling a dependency that keeps on failing</button>
+    <button class="opt">it doubles the timeout on every single retry attempt</button>
+    <button class="opt">it caps how many requests one client is allowed</button>
+    <button class="opt">it queues every failed request for a later retry</button>
+  </div>
+  <div class="q" data-why="Closed is the normal operating state: calls pass through to the real dependency, and failures are only counted, not blocked, until enough of them in a row cross the threshold and trip the breaker open.">
+    <p class="stem">In the circuit breaker's closed state, what happens to calls?</p>
+    <button class="opt">open, calls fail immediately with no attempt made</button>
+    <button class="opt" data-ok>closed, calls pass through and reach the dependency</button>
+    <button class="opt">paused, calls wait for the timer to elapse</button>
+    <button class="opt">locked, calls require a manual restart to resume</button>
+  </div>
+  <div class="q" data-why="Every retry attempt against a failing dependency still has to hold whatever resource made the call — a database connection, a goroutine, a thread pool slot — while it waits out its own timeout, so retrying harder amplifies load on a dependency that's already struggling instead of easing it.">
+    <p class="stem">Why does retrying a failing dependency without a circuit breaker make things worse?</p>
+    <button class="opt" data-ok>every retry still holds a pool connection waiting</button>
+    <button class="opt">every retry writes a duplicate row in table</button>
+    <button class="opt">every retry doubles the response payload sent back</button>
+    <button class="opt">every retry skips authentication and exposes private data</button>
+  </div>
+  <div class="q" data-why="Rate limiting caps how much a caller may demand, defending the receiving service's capacity; a circuit breaker instead defends the calling service, by refusing to keep waiting on a callee that has already shown it's failing.">
+    <p class="stem">How does a circuit breaker differ from Lesson 11's rate limiter?</p>
+    <button class="opt" data-ok>rate limiting caps callers, a breaker protects the caller</button>
+    <button class="opt">rate limiting logs errors, a breaker retries them automatically</button>
+    <button class="opt">rate limiting adds delay, a breaker adds a cache</button>
+    <button class="opt">rate limiting checks auth, a breaker checks authorization instead</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://martinfowler.com/bliki/CircuitBreaker.html">Martin Fowler — CircuitBreaker</a> (~10 min) — the article that named and popularized this exact pattern (credited there to Michael Nygard's <em>Release It!</em>), covering the same closed/open/half-open shape and the "fail fast" motivation this lesson builds on. Kleppmann's <em>Designing Data-Intensive Applications</em> (already a standing RESOURCES.md reference) frames the same fault-tolerance instinct more generally in its discussion of partial failure in distributed systems.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> open — the outbox pattern remains the last named-but-untaught candidate from Lesson 27's search; still no reported quiz/lesson-completion outcome exists for any lesson, so the next session might also prioritize getting that signal over picking a 29th topic blind.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

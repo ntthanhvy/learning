@@ -56,6 +56,8 @@
       file: "lessons/0024-np-where-and-np-select.html" },
     { n: 25, date: "2026-08-02", title: "select_dtypes() and the category dtype",
       file: "lessons/0025-select-dtypes-and-category.html" },
+    { n: 26, date: "2026-08-03", title: "SettingWithCopy and .copy(): views vs copies",
+      file: "lessons/0026-settingwithcopy-and-copy.html" },
   ];
 
   const REFS = [

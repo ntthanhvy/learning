@@ -816,3 +816,76 @@
   `lesson_completed` record for any lesson after 28 rounds — the next
   session should treat getting a completion/quiz-outcome signal, even one,
   as higher priority than generating a 29th topic blind.
+- 2026-08-03 generation (Lesson 29, headless 06:00 run): idempotency check
+  first — confirmed `lessons/0029-*.html` did not exist and lesson 29 was
+  not yet in nav.js before writing anything. Picked up Lesson 28's own
+  closing teaser exactly as named: the outbox pattern, the last of the
+  three candidates (circuit breaker, graceful shutdown, outbox) Lesson 27's
+  search had flagged as confirmed-untaught — circuit breaker and graceful
+  shutdown were closed by Lessons 28 and 27 respectively, so this closes the
+  full set. Grepped all 28 lesson bodies plus glossary.html for "outbox",
+  "dual-write", "dual write", "change data capture", and "transactional
+  outbox" before writing — all came back empty except NOTES.md's own
+  retrospective mentions and Lessons 27/28's closing teasers, confirming the
+  topic was genuinely still open. `~/learning/bin/query-progress backend`
+  (a read) was not attempted this round per the standing instruction that
+  DB reads are reliably blocked every round since Lesson 9 and not worth
+  retrying; still no `lesson_completed` record exists for any of Lessons
+  1-28. Lesson 29 covers it: the dual-write problem (updating a DB row and
+  publishing an event are two separate systems with no shared transaction,
+  so a crash between them either loses the event or, if retried, risks
+  duplicating it — Lesson 26's territory from the other side), the
+  transactional-outbox trick of writing the event into an outbox table in
+  the SAME transaction as the business row so Lesson 6's atomicity covers
+  both writes together, and a separate relay/poller process that reads
+  unprocessed outbox rows, publishes them to the real queue, and marks them
+  processed — named explicitly as a Lesson 10 background job (a standalone
+  loop, never called from inside a request), with its publish-then-mark gap
+  tied back to Lesson 10's at-least-once framing and Lesson 26's idempotency
+  angle (the relay can duplicate-publish on a crash between publish and
+  mark-processed, so the subscriber must tolerate re-delivery the same way
+  a job handler or an Idempotency-Key-checked endpoint must). Both Go
+  snippets (`createOrder`'s transactional insert-order-plus-insert-outbox,
+  and `outboxRelay`/`relayOnce`'s polling-and-publishing loop) were
+  compile-checked clean with `go build -C` / `go vet -C` in a scratch module
+  (`.scratch/backend-lesson29/`, built binary removed after each of two
+  build runs, directory left with only `go.mod`/`main.go`) — no approval
+  blocker for either `-C`-style invocation this round, consistent with every
+  round since Lesson 13's finding. Primary source: Martin Kleppmann's
+  *Designing Data-Intensive Applications*, ch. 11 "Change Data Capture" —
+  RESOURCES.md already cites DDIA generally for transactions (ch. 7); this
+  extends the citation into ch. 11, which is where the book frames the
+  dual-write problem and the transactional outbox as a specific case of its
+  broader change-data-capture idea. Added `dual-write problem`, `outbox
+  table`, `transactional outbox`, and `relay / poller` to the glossary
+  (confirmed via grep beforehand that none of the four already existed) and
+  registered Lesson 29 in nav.js. Quiz options were drafted into four
+  per-question scratch files under `.scratch/backend-lesson29-quiz/`
+  (deleted after, per convention) and verified with `wc -w` per line via
+  individual `sed -n '<n>p' | wc -w` calls (this session's sandbox again
+  rejects any bash variable expansion, so no loop form was attempted at
+  all this round — went straight to one literal command per line), then
+  cross-checked with a second, independent method (`grep -o '[^ ]\+' | wc -l`
+  per line). Two of four questions needed a rewrite pass: Q3 was 11/10/10/9
+  on the first draft and needed two successive rewrites before landing
+  evenly (an early rewrite attempt introduced a fresh mismatch before
+  settling), Q4 was 8/10/9/9 on the first draft and needed three small
+  rewrites (one attempt still miscounted a hyphenated contraction,
+  "request's response cycle", the same class of hyphen/contraction
+  miscount Lessons 26-28's notes already flagged) before landing evenly;
+  Q1 and Q2 were correct on the first draft. Final tallies, confirmed by
+  both methods agreeing: Q1 11/11/11/11, Q2 9/9/9/9, Q3 11/11/11/11, Q4
+  10/10/10/10. `/home/runner/work/learning/learning/bin/record-progress
+  backend lesson_generated --day 29 --lesson 0029-outbox-pattern.html
+  --detail '{"by":"launchd"}'` was attempted once via its absolute path as
+  instructed and required approval with none available in this headless
+  run — recorded here as blocked, not retried (consistent with the last
+  several rounds; the write-path block looks like the norm now, not a
+  one-off). This closes out ALL THREE of Lesson 27's originally-named
+  candidates (circuit breaker, graceful shutdown, outbox pattern) — no
+  further named candidate remains from that search. The next session
+  should either run a fresh gap-finding pass (re-scan MISSION.md/
+  RESOURCES.md/OWASP-adjacent terms the way Lessons 22-24 did) or, better,
+  ask the user directly which track to deepen or for a completion signal —
+  still no `lesson_completed` record exists for any lesson after 29
+  rounds, now a 29-round-long standing gap.

@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 6 · Files, formats &amp; context managers</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 6 · ~20 min · 3 Aug 2026</p>
+<h1>Files, formats &amp; context managers</h1>
+<p class="byline">Day 5 ended with a throwaway line: "a file object is already a built-in iterator." Today that claim gets made precise, plus the safety mechanism around it (<code>with</code>) and the two structured formats you'll actually read and write — <code>csv</code> and <code>json</code>. By the end, you'll be able to open a real CSV lazily, line by line, into structured dicts — exactly what tomorrow's ETL capstone builds on.</p>
+
+<div class="callout"><strong>Bridge from SQL:</strong> a CSV file is the closest thing Python sees to a raw, un-typed database export — rows of text, one line per record, comma-separated columns. Today's job is turning that text into the same row-of-values shape SQL already gives you for free, by hand.</div>
+
+<h2>1 · <code>open()</code> and file modes</h2>
+<p><code>open(path, mode)</code> returns a <em>file object</em> connected to a file on disk. The <code>mode</code> string says what you intend to do with it: <code>"r"</code> reads (the file must already exist), <code>"w"</code> writes from scratch (creates the file if missing, <strong>erases</strong> it first if it already has content), and <code>"a"</code> appends (creates if missing, adds to the end if not):</p>
+<pre><code>f = <span class="kw">open</span>(<span class="str">"notes.txt"</span>, <span class="str">"w"</span>)   <span class="cm"># create/overwrite, ready to write</span>
+f.write(<span class="str">"first line\n"</span>)
+f.write(<span class="str">"second line\n"</span>)
+f.close()                        <span class="cm"># flush to disk and release the file handle</span>
+
+f = <span class="kw">open</span>(<span class="str">"notes.txt"</span>, <span class="str">"r"</span>)   <span class="cm"># read what's there</span>
+f.read()                         <span class="cm"># "first line\nsecond line\n" — the whole file as one string</span>
+f.close()</code></pre>
+<p>Forgetting the mode's effect is a common early mistake: opening an existing file with <code>"w"</code> to just "add a line" silently destroys everything already in it. When in doubt about whether a file exists yet, <code>"a"</code> is the safer default for adding to a log-like file.</p>
+
+<h2>2 · Why a file object <em>is</em> an iterator — not a new mechanism</h2>
+<p>Day 5 built the iterator protocol: <code>iter()</code> gets you an iterator, <code>next()</code> pulls one item, <code>StopIteration</code> ends it, and a <code>for</code> loop is exactly that pattern automated. A <dfn data-en="an open file object is itself an iterator in the exact Day 5 sense — next() on it returns successive lines and StopIteration ends it — so for line in f uses the identical iter()/next() protocol as looping a list or a generator, not a separate file-specific mechanism" data-vn="giữ nguyên &quot;file object&quot; — chính nó là iterator, for line in f dùng đúng protocol Day 5">file object</dfn> opened for reading already <em>is</em> such an iterator — each call to <code>next()</code> on it returns the next line, so <code>for line in f</code> is not a special file-reading trick, it's the identical mechanism Day 5 taught, applied to a source that happens to be a file:</p>
+<pre><code>f = <span class="kw">open</span>(<span class="str">"notes.txt"</span>, <span class="str">"r"</span>)
+<span class="kw">for</span> line <span class="kw">in</span> f:              <span class="cm"># same iter()/next()/StopIteration protocol as Day 5's lists and generators</span>
+    <span class="kw">print</span>(line.strip())    <span class="cm"># .strip() drops the trailing "\n" each line keeps</span>
+f.close()</code></pre>
+<p>This is also why a file scales to sizes far bigger than memory the same way a generator does: <code>for line in f</code> never reads the whole file into one string first — it pulls one line at a time, exactly the constant-memory argument Day 5 made for <code>yield</code>. A file object is Python's own built-in generator-like iterator, not a look-alike.</p>
+
+<h2>3 · The problem <code>with</code> solves: a leaked or locked file on exception</h2>
+<p>Every file object opened with <code>open()</code> holds a real operating-system resource — a file handle — until <code>.close()</code> runs. Calling <code>.close()</code> by hand works fine as long as nothing goes wrong in between. The moment an exception is raised between <code>open()</code> and the matching <code>.close()</code>, the close line is skipped, and the handle stays open for the rest of the program — unflushed writes can be lost, and on some platforms the file stays locked to other processes:</p>
+<pre><code><span class="cm"># manual open/close — LEAKS the handle if process_line() raises</span>
+f = <span class="kw">open</span>(<span class="str">"notes.txt"</span>, <span class="str">"r"</span>)
+<span class="kw">for</span> line <span class="kw">in</span> f:
+    process_line(line)          <span class="cm"># if this raises, the line below never runs</span>
+f.close()                        <span class="cm"># SKIPPED on exception — handle stays open, leaked</span></code></pre>
+<p>The <dfn data-en="the with statement runs a context manager's __enter__ before its body and guarantees __exit__ runs after the body, even if the body raises an exception, so cleanup like closing a file always happens" data-vn="giữ nguyên &quot;with&quot; — mở resource, tự động dọn dẹp dù có lỗi hay không">with</dfn> statement fixes exactly this. <code>with open(...) as f:</code> guarantees the file gets closed when the block ends, whether it ends normally or via an exception:</p>
+<pre><code><span class="cm"># with — guaranteed to close even if process_line() raises</span>
+<span class="kw">with</span> <span class="kw">open</span>(<span class="str">"notes.txt"</span>, <span class="str">"r"</span>) <span class="kw">as</span> f:
+    <span class="kw">for</span> line <span class="kw">in</span> f:
+        process_line(line)      <span class="cm"># if this raises, close() STILL runs before the exception propagates</span>
+<span class="cm"># f is already closed here, exception or not — no line of cleanup code to forget</span></code></pre>
+<p>Nothing about reading the file changed between the two versions — only the guarantee around cleanup. That guarantee is why <code>with</code> is the only spelling of <code>open()</code> you should reach for from here on.</p>
+
+<h2>4 · The context manager protocol: <code>__enter__</code> and <code>__exit__</code></h2>
+<p><code>with</code> is not special-cased for files — it's a general protocol any object can support. A <dfn data-en="an object implementing __enter__ and __exit__, usable after the with keyword; __enter__ runs at the start of the with block and __exit__ runs at the end, unconditionally, even on exception" data-vn="giữ nguyên &quot;context manager&quot; — object có __enter__/__exit__, dùng được sau from with">context manager</dfn> is any object with two special methods: <code>__enter__</code>, called when the <code>with</code> block starts, and <code>__exit__</code>, called when it ends — normally or via exception:</p>
+<pre><code><span class="kw">with</span> <span class="kw">open</span>(<span class="str">"notes.txt"</span>) <span class="kw">as</span> f:
+    ...
+<span class="cm"># roughly equivalent to, but exception-safe the way manual code above wasn't:</span>
+f = <span class="kw">open</span>(<span class="str">"notes.txt"</span>).__enter__()
+<span class="kw">try</span>:
+    ...
+<span class="kw">finally</span>:
+    f.__exit__(<span class="kw">None</span>, <span class="kw">None</span>, <span class="kw">None</span>)   <span class="cm"># __exit__ always runs, exception or not — this line is what .close() needs</span></code></pre>
+<p>You won't write <code>__enter__</code>/<code>__exit__</code> yourself yet — that's a later lesson on writing your own classes. What matters today is recognizing the shape: <code>as f</code> binds whatever <code>__enter__</code> returns (the file object itself, for <code>open()</code>), and the <code>finally</code>-like guarantee on <code>__exit__</code> is precisely what made section 3's second version safe. Whenever you see <code>with X() as name:</code> in someone else's code, read it as "acquire a resource, guaranteed to release it no matter what happens inside."</p>
+
+<h2>5 · Reading CSV: <code>csv.reader</code> and <code>csv.DictReader</code></h2>
+<p>A CSV file is just text — comma-separated values, one record per line — but hand-splitting on <code>","</code> breaks the moment a field contains a comma inside quotes. The standard library's <code>csv</code> module handles that correctly. <code>csv.reader</code> gives each row as a plain list of strings:</p>
+<pre><code><span class="kw">import</span> csv
+
+<span class="kw">with</span> <span class="kw">open</span>(<span class="str">"sales.csv"</span>) <span class="kw">as</span> f:
+    reader = csv.reader(f)
+    header = <span class="kw">next</span>(reader)         <span class="cm"># ['city', 'amount'] — first row, pulled like Day 5's next()</span>
+    <span class="kw">for</span> row <span class="kw">in</span> reader:            <span class="cm"># each row: ['Hanoi', '120'] — a list, strings, no header attached</span>
+        <span class="kw">print</span>(row[<span class="kw">0</span>], row[<span class="kw">1</span>])</code></pre>
+<p><code>csv.reader(f)</code> wraps the file's own line-by-line iteration (section 2) with comma-and-quote-aware splitting — it's still lazy, one row per <code>next()</code>, nothing pre-loaded. Indexing by position (<code>row[0]</code>, <code>row[1]</code>) works but reads poorly and breaks silently if a column is ever reordered. <dfn data-en="csv.DictReader wraps csv.reader and uses the file's first row as keys, so each subsequent row comes back as an OrderedDict/dict keyed by column name instead of a plain list indexed by position" data-vn="giữ nguyên &quot;csv.DictReader&quot; — đọc CSV, mỗi row trả về dạng dict theo tên cột thay vì list theo vị trí">csv.DictReader</dfn> fixes that by using the first row as field names automatically, handing back each row as a dict:</p>
+<pre><code><span class="kw">with</span> <span class="kw">open</span>(<span class="str">"sales.csv"</span>) <span class="kw">as</span> f:
+    reader = csv.DictReader(f)      <span class="cm"># first line consumed automatically as the header</span>
+    <span class="kw">for</span> row <span class="kw">in</span> reader:
+        <span class="kw">print</span>(row[<span class="str">"city"</span>], row[<span class="str">"amount"</span>])   <span class="cm"># {'city': 'Hanoi', 'amount': '120'} — keyed by column name</span></code></pre>
+<p>Every value out of either reader is a <code>str</code> — CSV has no number type, so <code>row["amount"]</code> is the string <code>"120"</code>, not the int <code>120</code>; converting it (<code>int(row["amount"])</code>) is the reader's job, same as Day 5's <code>parse_rows</code> already did by hand for its comma-split lines.</p>
+
+<h2>6 · JSON: <code>json.load</code>, <code>json.dump</code>, and why it maps onto dict/list for free</h2>
+<p>CSV is flat — rows and columns, nothing nested. <dfn data-en="JSON (JavaScript Object Notation) is a text format for structured data whose object and array syntax maps directly onto Python's dict and list literals; json.load reads it into Python objects and json.dump writes Python objects back out as JSON text" data-vn="giữ nguyên &quot;JSON&quot; — định dạng dữ liệu dạng text, object/array của nó map thẳng sang dict/list của Python">JSON</dfn> is the standard text format for nested data — objects (<code>{...}</code>) and arrays (<code>[...]</code>) that can hold each other arbitrarily deep. The reason it's easy in Python specifically: JSON's <code>{...}</code> and <code>[...]</code> are, syntactically, the exact shapes Day 1 already called dict and list literals. The <code>json</code> module reads a JSON file straight into real Python <code>dict</code>/<code>list</code> objects, and writes them back out the same way:</p>
+<pre><code><span class="kw">import</span> json
+
+data = {<span class="str">"city"</span>: <span class="str">"Hanoi"</span>, <span class="str">"amount"</span>: <span class="kw">120</span>, <span class="str">"tags"</span>: [<span class="str">"retail"</span>, <span class="str">"q3"</span>]}
+
+<span class="kw">with</span> <span class="kw">open</span>(<span class="str">"record.json"</span>, <span class="str">"w"</span>) <span class="kw">as</span> f:
+    json.dump(data, f)               <span class="cm"># writes {"city": "Hanoi", "amount": 120, "tags": ["retail", "q3"]}</span>
+
+<span class="kw">with</span> <span class="kw">open</span>(<span class="str">"record.json"</span>) <span class="kw">as</span> f:
+    loaded = json.load(f)            <span class="cm"># reads it straight back into a real dict, ints stay ints</span>
+
+loaded == data                       <span class="cm"># True — same shape, same types, no strings-for-everything like CSV</span></code></pre>
+<p>Unlike CSV, JSON keeps types: <code>120</code> loads back as an <code>int</code>, not a string, and <code>["retail", "q3"]</code> loads back as a real <code>list</code> nested inside the dict. That's the whole appeal — no re-parsing numbers by hand the way CSV always requires. Both <code>with</code> blocks above are exactly section 3's pattern; <code>json.load</code>/<code>json.dump</code> always take an already-open file object, never a path string directly.</p>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> <code>pd.read_csv("sales.csv")</code> does the open, read, split, and type-conversion of section 5 in one eager call, loading every row into memory as a DataFrame at once. Not covered here; that's <code>data/</code>'s job, and this is the only sentence in this lesson that mentions it.</div>
+
+<h2>7 · Setting up tomorrow: lazy CSV rows, ready for structure</h2>
+<p>Sections 2 and 5 already combine into exactly what the capstone needs: a file is an iterator (section 2), <code>csv.DictReader</code> turns each line into a dict lazily (section 5), and Day 5's generator functions can wrap that in a further lazy transform — no new mechanism, just today's and Day 5's tools chained:</p>
+<pre><code><span class="kw">import</span> csv
+
+<span class="kw">def</span> read_sales(path):
+    <span class="kw">with</span> <span class="kw">open</span>(path) <span class="kw">as</span> f:
+        reader = csv.DictReader(f)
+        <span class="kw">for</span> row <span class="kw">in</span> reader:
+            <span class="kw">yield</span> {<span class="str">"city"</span>: row[<span class="str">"city"</span>], <span class="str">"amount"</span>: <span class="kw">int</span>(row[<span class="str">"amount"</span>])}   <span class="cm"># str -> int, once per row</span>
+
+<span class="kw">for</span> record <span class="kw">in</span> read_sales(<span class="str">"sales.csv"</span>):   <span class="cm"># one row in memory at a time, all the way from disk</span>
+    <span class="kw">print</span>(record)</code></pre>
+<p><code>read_sales</code> is a generator function exactly like Day 5's <code>parse_rows</code>, except its source is a real CSV file instead of a hardcoded list of strings, and its rows arrive already comma-split and keyed by <code>csv.DictReader</code> instead of hand-split on <code>","</code>. Tomorrow's capstone takes this exact dict-per-row shape and gives each row a proper structure — a <code>dataclass</code> — instead of a loose dict with no guarantee of which keys exist.</p>
+
+<h2>Try it — self-checking practice (~15 min)</h2>
+<p>Open <code>practice/06_files_formats_and_with.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/06_files_formats_and_with.py</code></pre>
+<p>No dependencies — standard library only. Exercises: writing then reading a text file with <code>with</code>, contrasting a manual-close leak against a <code>with</code>-block that always cleans up, reading rows with <code>csv.DictReader</code>, and a <code>json.dump</code>/<code>json.load</code> round trip.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="'w' mode creates the file if missing but truncates (erases) any existing content first, unlike 'a' which appends to existing content and 'r' which requires the file to already exist and never writes.">
+    <p class="stem">What does opening an existing file with mode <code>"w"</code> do to its content?</p>
+    <button class="opt" data-ok>erases it immediately, before any new write ever happens</button>
+    <button class="opt">appends new writes right after the existing content stays</button>
+    <button class="opt">refuses to open unless the file is already empty</button>
+  </div>
+  <div class="q" data-why="A file object opened for reading is itself an iterator in the exact Day 5 sense — next() on it returns successive lines and StopIteration ends it — so for line in f uses the identical protocol as looping a list or a generator, not a separate file-specific mechanism.">
+    <p class="stem">Why does <code>for line in f</code> work on an open file object?</p>
+    <button class="opt" data-ok>a file object is itself an iterator, Day 5's protocol</button>
+    <button class="opt">Python secretly loads the whole file into a fresh list</button>
+    <button class="opt">files get totally special syntax unrelated to any old iterator</button>
+  </div>
+  <div class="q" data-why="If an exception is raised between open() and a manual .close() call, the close line is skipped entirely and the handle leaks. A with block's guarantee is that __exit__ (which closes the file) still runs even when the body raises, so the resource never leaks that way.">
+    <p class="stem">What problem does <code>with open(...) as f:</code> solve over manual <code>open()</code>/<code>.close()</code>?</p>
+    <button class="opt" data-ok>a skipped close on exception, leaving the handle open</button>
+    <button class="opt">files opened manually always silently fail to ever read</button>
+    <button class="opt">manual open calls are simply unable to use loops</button>
+  </div>
+  <div class="q" data-why="csv.reader hands back each row as a plain list indexed by position (row[0], row[1]); csv.DictReader additionally uses the first row as field names, so each row instead comes back as a dict keyed by column name (row['city']).">
+    <p class="stem">How does <code>csv.DictReader</code> differ from plain <code>csv.reader</code>?</p>
+    <button class="opt" data-ok>rows come back as dicts keyed by column name, not lists</button>
+    <button class="opt">it loads the entire CSV file's rows eagerly, all at once</button>
+    <button class="opt">it silently converts every single field value into a real number</button>
+  </div>
+  <div class="q" data-why="JSON's {...} object syntax and [...] array syntax map directly onto Python's own dict and list literal syntax, so json.load/json.dump can convert between the two with no extra translation step — unlike CSV, which is flat text needing manual type conversion for every field.">
+    <p class="stem">Why does JSON map so directly onto Python's own data structures?</p>
+    <button class="opt" data-ok>its object and array syntax mirror dict and list literals</button>
+    <button class="opt">Python silently rewrites the JSON text into CSV before parsing</button>
+    <button class="opt">JSON only ever stores plain strings, same as CSV fields</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the Python Tutorial's <a href="https://docs.python.org/3/tutorial/inputoutput.html#reading-and-writing-files">Reading and Writing Files</a> section (cited in RESOURCES.md) — covers <code>open()</code>, modes, and <code>with</code> at exactly today's depth. For the two format modules, the <a href="https://docs.python.org/3/library/csv.html"><code>csv</code></a> and <a href="https://docs.python.org/3/library/json.html"><code>json</code></a> stdlib docs are the natural next stop once today's basics feel comfortable.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day6">glossary</a> under Day 6.<br>
+<strong>Next lesson (4 Aug):</strong> dataclasses, typing &amp; an ETL capstone — giving today's loose CSV/JSON dicts real structure, and wiring the whole week's tools into one working script.<br><br>
+💬 Anything unclear — <code>with</code>, <code>csv.DictReader</code>, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 26 · SettingWithCopy and .copy(): the one trap SQL habits don't warn you about</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 26 · ~20 min · 3 Aug 2026</p>
+<h1>SettingWithCopy and .copy(): the one trap SQL habits don't warn you about</h1>
+<p class="byline">Lesson 25's own teaser named this exact candidate, flagged since Lesson 23's scan — re-grepped every lesson body and the glossary before writing, still genuinely absent. This closes out the "no crash, quietly wrong" family this course has been building since Lesson 19 with its most pandas-specific member yet: one with no real SQL equivalent at all.</p>
+
+<h2>1 · A slice can be a view OR a copy — and you often can't tell which</h2>
+<p>Every prior lesson has quietly relied on one fact: filtering or slicing a DataFrame gives you back <em>something new</em> that you can work with. What "new" means underneath is more slippery than it looks. <code>clean[clean["customer"] == "An"]</code> might hand you a <dfn data-en="a new DataFrame/Series that shares its underlying memory with the original — mutating it can (unpredictably) mutate the original too" data-vn="giữ nguyên 'view' — DataFrame/Series mới nhưng dùng chung vùng nhớ với bản gốc, sửa 1 bên có thể ảnh hưởng bên kia">view</dfn> (sharing memory with <code>clean</code>) or a full, independent <dfn data-en="a new DataFrame/Series with its own separate memory — mutating it never touches the original" data-vn="giữ nguyên 'copy' — DataFrame/Series mới, vùng nhớ tách biệt hoàn toàn, sửa không ảnh hưởng bản gốc">copy</dfn> (its own separate memory), depending on internal details — the dtypes involved, whether the selection is contiguous, which pandas version you're on. There's no way to tell just by reading the line of code which one you got.</p>
+<p>In SQL this question never comes up. <code>SELECT * FROM orders WHERE customer = 'An'</code> always materializes a brand-new result set — there is no "maybe this result set secretly still points at the original table's storage." pandas' view-or-copy ambiguity is a side effect of pandas optimizing for speed (a view avoids copying data you might only be reading, not writing), and it's exactly the kind of internal-implementation-detail question a strong SQL background gives no instinct for.</p>
+
+<h2>2 · Chained indexing: the classic trap</h2>
+<p><dfn data-en="writing two indexing operations back-to-back in one expression (df[mask][col] = value) instead of one combined operation — pandas evaluates the first bracket as a separate, possibly-temporary object before the second bracket ever runs" data-vn="giữ nguyên 'chained indexing' — viết 2 lượt [] liên tiếp trong 1 dòng, ví dụ df[mask][col] = value, thay vì gộp làm 1 lượt">Chained indexing</dfn> is writing the assignment as two bracket operations back-to-back:</p>
+<pre><code>clean[clean[<span class="str">"customer"</span>] == <span class="str">"An"</span>][<span class="str">"amount"</span>] = <span class="kw">0</span></code></pre>
+<p>Read left to right, this looks like one step: "the rows where customer is An, set amount to 0." It is actually <em>two</em> steps pandas runs one after the other: first <code>clean[clean["customer"] == "An"]</code> produces some intermediate object (view or copy — pandas itself doesn't know until it tries), then <code>[...]["amount"] = 0</code> assigns into <em>that intermediate object</em>, not necessarily into <code>clean</code>. If the intermediate happened to be a view, <code>clean</code> gets mutated. If it was a copy, the assignment lands on a throwaway object nobody kept a reference to, and <code>clean</code> is untouched — <strong>the exact same line of code, and you can't tell which happened just by reading it.</strong></p>
+<p>Hand-verified on this course's real fixture (pandas 3.0.5, current default settings):</p>
+<pre><code>clean[clean[<span class="str">"customer"</span>] == <span class="str">"An"</span>][<span class="str">"amount"</span>] = <span class="kw">0</span>
+<span class="cm"># pandas.errors.ChainedAssignmentError: A value is being set on a copy of a
+# DataFrame or Series through chained assignment. When using Copy-on-Write,
+# chained assignment never works to update the original DataFrame.
+# clean itself is left completely unchanged.</span></code></pre>
+
+<h2>3 · SettingWithCopyWarning: pandas' own uncertainty flag</h2>
+<p>For years — and in most blog posts, Stack Overflow answers, and pandas &lt; 3.0 you'll meet in the wild — this exact line didn't raise at all. It printed a <dfn data-en="a runtime warning pandas prints when it detects an assignment into something that MIGHT be a view of another DataFrame — pandas genuinely doesn't know if the write took effect on the original data or not, so it flags its own uncertainty instead of guessing silently" data-vn="giữ nguyên 'SettingWithCopyWarning' — cảnh báo pandas in ra khi nó tự thấy không chắc bạn đang sửa view hay copy, tức là chính pandas cũng không biết chắc">SettingWithCopyWarning</dfn> and then <em>might</em> have modified <code>clean</code>, or might not — a coin flip you'd only discover by checking. That warning is pandas' way of admitting "I don't know either" — it isn't guessing wrong on purpose, it genuinely can't always tell whether the object it just wrote into shares memory with something else.</p>
+<p>Since pandas 2.0 introduced <dfn data-en="a pandas execution mode, the permanent default starting in pandas 3.0, where every DataFrame/Series behaves AS IF it were copied on every operation — a write into a derived object never surprises you by mutating the original, removing the view-vs-copy ambiguity at the cost of always erring toward safety" data-vn="giữ nguyên 'Copy-on-Write' (CoW) — chế độ mặc định từ pandas 3.0, mọi thao tác coi như luôn copy, ghi vào bảng con không bao giờ làm lộn xộn bảng gốc">Copy-on-Write</dfn> (CoW) and made it the permanent default in 3.0, the picture changed again — hand-verified on the actually-installed pandas 3.0.5 this course runs:</p>
+<ul>
+<li><strong>One-line chained assignment</strong> (<code>clean[mask]["col"] = val</code>) now <strong>raises</strong> <code>ChainedAssignmentError</code> immediately — pandas can see the intermediate object is about to be discarded, so it refuses outright instead of guessing.</li>
+<li><strong>Two-line chained indexing</strong> — the same trap split across two statements, arguably the more realistic way it shows up in real code — is <strong>completely silent</strong>, no warning, no error:</li>
+</ul>
+<pre><code>an_rows = clean[clean[<span class="str">"customer"</span>] == <span class="str">"An"</span>]   <span class="cm"># a separate object, CoW guarantees it</span>
+an_rows[<span class="str">"amount"</span>] = <span class="kw">0</span>                          <span class="cm"># mutates an_rows only</span>
+<span class="cm"># clean is untouched -- but so is anyone who expected an_rows's mutation
+# to matter. No error. No warning. Just a variable holding a result nobody
+# uses again, while the intended edit never happened.</span></code></pre>
+<p>This is the sharper version of the same "no crash, quietly wrong" shape this course has been naming since Lesson 19 (<code>nunique()</code>'s truthy Ellipsis, Lesson 20's <code>.loc[...]</code>, Lesson 24's NaN-into-default, Lesson 25's fixed-category NaN): the two-statement form used to at least print a warning under old pandas; under current pandas it doesn't even do that. The take-home-assignment risk this creates is real — code that "runs clean" (no crash, no warning) can still have silently failed to make the edit you meant to make.</p>
+
+<h2>4 · .copy(): the explicit, unambiguous fix</h2>
+<p>The fix removes the ambiguity by naming your intent directly: take the slice, call <dfn data-en="a DataFrame/Series method returning a genuinely independent copy with its own memory — the explicit way to say 'I know this is a copy, and I mean to mutate it, and I do NOT want it linked to the original'" data-vn="giữ nguyên '.copy()' — tạo bản sao độc lập thật sự, nói rõ ý định 'tôi biết đây là copy, tôi muốn sửa nó, không liên quan gì tới bản gốc'">.copy()</dfn> on it explicitly, assign it to its own variable, then mutate that:</p>
+<pre><code>an_only = clean[clean[<span class="str">"customer"</span>] == <span class="str">"An"</span>].copy()
+an_only[<span class="str">"amount"</span>] = <span class="kw">0</span>
+<span class="cm"># an_only is safely, deliberately independent -- clean is guaranteed untouched.
+# No warning, no ambiguity, no relying on pandas' internals guessing right.</span></code></pre>
+<p>If the goal is actually to edit rows inside the original DataFrame (not spin off an independent copy), the correct tool is a single combined <code>.loc[]</code> call — one step, no intermediate object at all:</p>
+<pre><code>clean.loc[clean[<span class="str">"customer"</span>] == <span class="str">"An"</span>, <span class="str">"amount"</span>] = <span class="kw">0</span>
+<span class="cm"># one indexing operation, unambiguous: this row selector AND this column,
+# assigned directly on clean itself. This is what Lesson 1's boolean-mask
+# reflex should always resolve to when the intent is "mutate in place."</span></code></pre>
+<p>The rule of thumb: <strong>reading</strong> a filtered slice is always safe, however it was produced. The moment you're about to <strong>write</strong> into one, ask "do I want this to affect the original?" — if yes, use one combined <code>.loc[row_selector, col_selector] = value</code>; if no, call <code>.copy()</code> explicitly and mutate the copy. Never write into the bare result of <code>df[mask]</code> without deciding which one you meant.</p>
+
+<div class="callout"><strong>SQL bridge:</strong> there is no real SQL equivalent to this trap, and that's the point. A materialized query result — a CTE, a temp table, a result set fetched into application code — is always a fresh, fully independent copy of the data at that moment; mutating it can never reach back and silently change the source table. SQL gives no instinct at all for "this thing I just selected might secretly still be connected to where it came from." This is a genuinely pandas-shaped trap, not a leftover SQL habit misapplied — worth naming explicitly so it doesn't get waved away as "oh, like a view in Postgres" (a SQL <code>VIEW</code> is a saved query definition, re-run every time — nothing like pandas' view-or-copy memory-sharing ambiguity).</div>
+
+<div class="interview">
+<p><strong>Q: "What is SettingWithCopyWarning, and how do you avoid it?"</strong> A strong answer, out loud: <em>"It's pandas' own uncertainty flag — when I filter or slice a DataFrame, the result might share memory with the original (a view) or might be fully independent (a copy), and pandas can't always tell which internally. Writing into that result through chained indexing, like df[mask]['col'] = value, is ambiguous: it's really two indexing steps, and the assignment lands on whatever the first step produced, which may or may not be the original data. On current pandas with Copy-on-Write, the single-line form actually raises a ChainedAssignmentError outright, but the same trap split across two lines — sub = df[mask]; sub['col'] = value — is completely silent, no warning at all, and simply fails to update the original. My rule: if I mean to mutate the original DataFrame, I use one combined df.loc[row_selector, col_selector] = value call; if I mean to work on an independent copy, I call .copy() explicitly right after the slice, before I mutate anything. I never write into the bare, un-.copy()'d result of a filter." </em> The signal: naming that this is a view/copy ambiguity (not just "a warning to silence"), and knowing .copy() vs .loc[] are two different fixes for two different intentions — not interchangeable.</p>
+</div>
+
+<h2>Try it — self-checking practice (~15 min)</h2>
+<p>Open <code>practice/26_settingwithcopy_and_copy.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/26_settingwithcopy_and_copy.py</code></pre>
+<p>Uses the same cleaned rows as Lessons 6-25 (An 120.0/01-05, An 42.0/01-10, Binh 35.5/01-06, Binh 180.0/01-09). Exercise 1 reproduces the two-line silent-no-op trap and proves <code>clean</code> stays untouched; Exercise 2 fixes it with an explicit <code>.copy()</code> on a filtered slice, mutated independently; Exercise 3 fixes the same intent the other way — a single combined <code>.loc[row_selector, col_selector] = value</code> call that DOES mutate <code>clean</code> itself, on purpose.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A DataFrame slice/filter result might share memory with the original (a view) or be fully independent (a copy) -- pandas' internals decide this, and it isn't always predictable just by reading the line of code that produced the slice.">
+    <p class="stem">Why can't you always tell if <code>df[mask]</code> returns a view or a copy?</p>
+    <button class="opt" data-ok>pandas decides internally; it isn't predictable from the code alone</button>
+    <button class="opt">it always returns a view; copies never happen in pandas</button>
+    <button class="opt">it depends only on the DataFrame's chosen column names, always</button>
+  </div>
+  <div class="q" data-why="Chained indexing writes the assignment as two separate bracket operations -- df[mask] produces some intermediate object first, then [col] = value assigns into THAT object, which may or may not be the same memory as the original DataFrame.">
+    <p class="stem">Why is <code>df[mask]["col"] = value</code> called chained indexing?</p>
+    <button class="opt" data-ok>it is two separate indexing steps run one after another</button>
+    <button class="opt">it always chains together three or more DataFrames at once</button>
+    <button class="opt">it links every column in a DataFrame into one value</button>
+  </div>
+  <div class="q" data-why="On current pandas with Copy-on-Write, the two-line chained indexing trap (sub = df[mask]; sub['col'] = value) raises no warning and no error at all -- it silently mutates only the temporary sub object, leaving the original DataFrame completely untouched.">
+    <p class="stem">On current pandas, what happens with <code>sub = df[mask]; sub["col"] = value</code>?</p>
+    <button class="opt" data-ok>nothing is raised; df is silently left unchanged</button>
+    <button class="opt">a ChainedAssignmentError is always raised right away instantly</button>
+    <button class="opt">df is always correctly updated with the value</button>
+  </div>
+  <div class="q" data-why="A materialized SQL query result -- a CTE, a temp table, a fetched result set -- is always an independent copy of the data at that moment; mutating it can never reach back and change the source table. pandas' view-or-copy ambiguity has no real parallel in ordinary SQL habits.">
+    <p class="stem">What is the real SQL equivalent of pandas' view-vs-copy ambiguity?</p>
+    <button class="opt" data-ok>there is none; a materialized query result is always independent</button>
+    <button class="opt">a SQL VIEW, which behaves identically to a pandas view</button>
+    <button class="opt">a temp table, which silently mutates the source table too</button>
+  </div>
+  <div class="q" data-why=".copy() explicitly creates an independent object with its own memory, safe to mutate with no risk of touching the original -- the deliberate fix when the intent is to work on a separate slice. A single combined .loc[row_selector, col_selector] = value is the other correct fix, used instead when the intent is to mutate the original DataFrame directly in one unambiguous step.">
+    <p class="stem">What does calling <code>.copy()</code> on a filtered slice guarantee before mutating it?</p>
+    <button class="opt" data-ok>the slice is independent; mutating it never touches the original</button>
+    <button class="opt">the original DataFrame always updates automatically right along with it</button>
+    <button class="opt">pandas always prints out a SettingWithCopyWarning once, every single time</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> Tom Augspurger's <a href="https://tomaugspurger.net/posts/modern-1-intro/">"Modern Pandas"</a> series (already cited in RESOURCES.md, ~10-15 min for the relevant post) — written by a pandas core developer, covers avoiding SettingWithCopy traps and writing pipelines that read cleanly, directly relevant after today's lesson. The pandas User Guide's <a href="https://pandas.pydata.org/docs/user_guide/copy_on_write.html">Copy-on-Write</a> page covers the current 3.x default behavior in full.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>SettingWithCopyWarning</code>, <code>view</code>/<code>copy</code>, <code>chained indexing</code>, <code>.copy()</code>, and <code>Copy-on-Write</code> are new today.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-26 comes back reported as shakiest, otherwise <code>.map()</code> (Series-level value-to-value mapping, distinct from <code>apply()</code>) or <code>pd.wide_to_long()</code>, both confirmed genuinely uncovered as of this round's grep.<br><br>
+💬 Anything unclear — views vs copies, chained indexing, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

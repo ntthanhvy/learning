@@ -71,6 +71,16 @@
   <tr><td>lazy evaluation</td><td>giữ nguyên "lazy" — chỉ tính khi thật sự cần, không tính trước</td><td>Computing a value only when it's actually requested, rather than up front. Generators and generator expressions are lazy; a list or a list comprehension is eager — built completely before anything can use it.</td></tr>
 </table>
 
+<h2 id="day6">Day 6 — Files, formats &amp; context managers</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>with statement</td><td>giữ nguyên "with" — mở resource, tự động dọn dẹp dù có lỗi hay không</td><td>The <code>with expr as name:</code> statement runs the context manager's <code>__enter__</code> before its block and guarantees <code>__exit__</code> runs after the block ends, even if an exception was raised inside it. For files this means <code>.close()</code> always happens, unlike a manual <code>open()</code>/<code>.close()</code> pair where an exception in between skips the close entirely.</td></tr>
+  <tr><td>context manager</td><td>giữ nguyên "context manager" — object có __enter__/__exit__, dùng được sau from</td><td>Any object implementing <code>__enter__</code> and <code>__exit__</code>, making it usable after <code>with</code>. <code>__enter__</code> runs at the start of the block and its return value is bound by <code>as name</code>; <code>__exit__</code> runs at the end unconditionally — normal exit or exception — which is what makes <code>with</code> safe for cleanup.</td></tr>
+  <tr><td>file object as iterator</td><td>giữ nguyên "file object" — chính nó là iterator, for line in f dùng đúng protocol Day 5</td><td>An open file object is itself an iterator in the exact Day 5 sense: <code>next()</code> on it returns the next line, and <code>StopIteration</code> ends it once the file is exhausted. <code>for line in f</code> is not special file syntax — it's the same <code>iter()</code>/<code>next()</code> protocol driving any other iterable, applied to a file.</td></tr>
+  <tr><td>csv.DictReader</td><td>giữ nguyên "csv.DictReader" — đọc CSV, mỗi row trả về dạng dict theo tên cột thay vì list theo vị trí</td><td>A wrapper around <code>csv.reader</code> that consumes the file's first row as field names, then hands back every subsequent row as a dict keyed by column name instead of a plain list indexed by position. Every value is still a <code>str</code> — CSV has no number type, so numeric fields need explicit conversion (<code>int(...)</code>, <code>float(...)</code>) after reading.</td></tr>
+  <tr><td>JSON</td><td>giữ nguyên "JSON" — định dạng dữ liệu dạng text, object/array của nó map thẳng sang dict/list của Python</td><td>A text format for structured, nestable data whose <code>{...}</code> object and <code>[...]</code> array syntax map directly onto Python's own <code>dict</code> and <code>list</code> literals. <code>json.load(f)</code> reads a file straight into real Python objects, preserving types (<code>int</code>, <code>list</code>, ...); <code>json.dump(obj, f)</code> writes them back out as JSON text.</td></tr>
+</table>
+
 <p class="next">💬 A term here still unclear? Ask your teacher — hỏi bằng tiếng Việt cũng được.</p>
 
 <script src="../assets/nav.js"></script>

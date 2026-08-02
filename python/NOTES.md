@@ -287,3 +287,80 @@ fail *gracefully* so the learner sees which task failed.
   went through non-interactively when the previous ones didn't; worth
   watching whether Day 6 also succeeds before assuming the sandbox behavior
   has changed for good.
+- 2026-08-03 — **Day 6 generated** (`lessons/0006-files-formats-and-with.html`),
+  the headless run's fifth end-to-end lesson. Taught `open()` and its three
+  core modes (`"r"`/`"w"`/`"a"`, with `"w"`'s silent-truncate trap flagged
+  explicitly), then made precise a claim Day 5 had already made in passing —
+  that a file object opened for reading *is* an iterator in the exact Day 5
+  sense, so `for line in f` is the identical `iter()`/`next()`/`StopIteration`
+  protocol applied to a file, not a new file-specific mechanism. Landed the
+  context manager protocol next: a before/after contrast (manual
+  `open()`/`.close()` that leaks the handle if an exception fires in between,
+  versus the `with` version whose `__exit__` guarantees the close regardless)
+  followed by a short `__enter__`/`__exit__` explanation at a
+  recognition-only level — writing a context manager class is explicitly
+  deferred to a later lesson. Then the two structured-format modules:
+  `csv.reader` (rows as lists) vs `csv.DictReader` (rows as dicts keyed by
+  the header row, values always `str`), and `json.load`/`json.dump`, framed
+  through why JSON's `{...}`/`[...]` syntax maps directly onto Python's own
+  dict/list literals — a direct callback to Day 1's object-literal material.
+  Closed by explicitly wiring Day 5's generator-function idea onto today's
+  `csv.DictReader` into a `read_sales(path)` generator yielding one
+  int-typed record per row, lazily, the exact shape tomorrow's capstone
+  needs before it adds a `dataclass`. Built directly on Day 5 per PLAN.md's
+  stated ordering ("generators make file streaming make sense"), and framed
+  as Day 7's direct prerequisite throughout section 7 and the closing line.
+  Bridged from SQL per the baseline record: a CSV file introduced as SQL's
+  closest un-typed cousin — rows of raw text needing the same row-of-values
+  shape SQL already gives for free — rather than any pandas or other
+  "Python-adjacent" analogy.
+  No-pandas rule: zero pandas/NumPy API anywhere in lesson or practice file
+  (checked by grep for `pandas|numpy|dataframe|read_csv`, case-insensitive,
+  across both new files); exactly one contrast sentence, naming
+  `pd.read_csv("sales.csv")` as eager/one-call versus today's `open()` +
+  `csv.DictReader` + manual type conversion, without demonstrating it, placed
+  once after section 6 and called out in prose as the only such sentence,
+  matching the hard-rule section above. (The grep also turned up two
+  pre-existing, unrelated hits — Day 3's own title/heading, "dict & set:
+  grouping without pandas" — which don't count against today's one-sentence
+  budget since they predate this lesson.)
+  Practice file `practice/06_files_formats_and_with.py` (5 exercises: writing
+  then reading a text file via `with`, a `FakeFile` context-manager stand-in
+  contrasting a manual-close leak against a `with`-guaranteed close on
+  exception — chosen over a real crash-prone file to keep the check
+  deterministic, per this file's own scratch-verification practice — reading
+  a self-written CSV fixture with `csv.DictReader`, a `json.dump`/`json.load`
+  round trip preserving `int`/`list` types, and a `read_sales()` generator
+  function chaining Day 5's generator idea onto `csv.DictReader`) was
+  verified in a scratch dir (`.scratch_py6_verify/`, created under the repo
+  root and removed after use, per the Day 3–5 precedent that `/tmp` is out of
+  bounds for this sandbox): the shipped (unsolved) copy ran with
+  `uv run python3`, both from the scratch copy and from its real `practice/`
+  path with the documented command, and printed five clean ✗ lines with no
+  traceback; a separately solved copy printed five ✓ and the "All green"
+  tally. No bugs found during verification — both passes succeeded on the
+  first attempt. The practice file writes its own CSV/text/JSON fixtures
+  into a `tempfile.mkdtemp()` directory at the top of the script, so it needs
+  no external fixture file to already exist and is safe to run repeatedly.
+  Glossary: added a Day 6 section to `reference/glossary.html` (`with`
+  statement, context manager, file object as iterator, `csv.DictReader`,
+  JSON) after confirming none of the five terms already existed in the Day
+  1–5 sections via grep.
+  Quiz: 5 questions. Word counts were checked and mismatched on the first
+  draft for four of the five questions (Q1 8/8/9, Q2 11/10/9, Q3 9/9/11, Q5
+  10/9/11) — only Q4 was already equal on the first draft (11/11/11). Each
+  mismatched question went through multiple rewrite-and-recount rounds with
+  `wc -w` per option line (not by eye) — Q1 and Q2 in particular needed
+  several iterations, including one false-start edit that swapped a word for
+  a same-length synonym without changing the count — until every option
+  matched (Q1 9/9/9, Q2 10/10/10, Q3 9/9/9, Q5 10/10/10), then a full final
+  recount pass across all five questions' three options each (15 lines total)
+  confirmed every one before shipping, per this file's instruction to
+  recount after any edit. Registered in `assets/nav.js` with
+  `date: "2026-08-03"`.
+  `record-progress python lesson_generated --day 6 …` was attempted once per
+  convention; it required interactive approval in this sandbox and was
+  blocked, not retried — outcome is "not recorded to DB this run," the same
+  result as all Day 1–4 attempts. Day 5 had succeeded non-interactively, so
+  this confirms that success was not a lasting sandbox change — behavior is
+  inconsistent run to run, still unexplained.

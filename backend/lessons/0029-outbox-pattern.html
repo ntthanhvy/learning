@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 29 · The outbox pattern: making a DB write and an event atomic</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 29 · ~20 min</p>
+<h1>The outbox pattern: making a DB write and an event atomic</h1>
+<p class="byline">Lesson 28's closing teaser named the last untaught candidate from Lesson 27's search: the outbox pattern. Circuit breaker (L28) and graceful shutdown (L27) are both done — this closes the set. Today: what happens when "update the row" and "tell everyone else about it" are two separate systems, and the trick that makes them act like one.</p>
+
+<h2>1 · Two systems, one moment, no shared transaction</h2>
+<p>Say <code>createOrder</code> does two things: insert the order row into Postgres, and publish an <code>order.created</code> event so a shipping service, an email service, and an analytics pipeline can react. Each of those two things talks to a different system — Postgres for the row, a message queue or webhook for the event — and nothing ties them together. That's the <dfn data-en="the problem of a handler needing to update a database AND notify another system (a message queue, a webhook, a second service) as if they were one atomic step, when they are actually two independent systems with no shared transaction between them" data-vn="dual-write problem (giữ nguyên) — phải ghi vào 2 hệ thống khác nhau (DB và message queue) như 1 bước, nhưng chúng không nằm trong cùng 1 transaction">dual-write problem</dfn>: whatever order you do the two writes in, a crash between them leaves the two systems disagreeing.</p>
+<p>Insert the row, then crash before publishing: the order exists, but nobody downstream ever hears about it — a silently lost event. Publish first, then crash before the insert commits: a shipping service starts shipping an order that doesn't actually exist in the database yet, or ever will if the insert then fails. Retry your way out of the first case (publish again if you're not sure it went out) and you risk the opposite fault: publishing twice, which is Lesson 26's world — safe only if the subscriber also tolerates a duplicate. There is no ordering of "write to Postgres" and "call the queue" that is safe by itself, because they're two separate systems and only one of them is the one your code can wrap in a transaction.</p>
+<div class="callout"><strong>Frontend-habit trap:</strong> in frontend code, "update the UI state and fire an analytics event" failing halfway is usually harmless — worst case, one dropped analytics ping. Here, the downstream event can be the trigger for shipping a physical order or charging a card again; a lost or duplicated event is a real business event, not a missing dot on a chart.</div>
+
+<h2>2 · The trick: write the event into the SAME database, in the SAME transaction</h2>
+<p>The fix doesn't make the two systems agree directly — it sidesteps the problem by turning "publish an event" into "write one more row," in the one database that already has transactions. Alongside the real <code>orders</code> table, add an <dfn data-en="a database table that holds events waiting to be published, written in the same transaction as the business row that caused them, so the two writes commit or roll back together" data-vn="outbox table (giữ nguyên) — bảng chứa event chờ publish, ghi cùng transaction với dòng nghiệp vụ để cùng commit hoặc cùng rollback">outbox table</dfn> — one row per event, holding a topic, a payload, and a processed timestamp that starts NULL. The handler inserts the order row <em>and</em> the outbox row inside one <code>BEGIN…COMMIT</code>:</p>
+<pre><code><span class="kw">func</span> createOrder(ctx context.Context, db *sql.DB, o Order) <span class="kw">error</span> {
+    tx, err := db.BeginTx(ctx, <span class="kw">nil</span>)
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        <span class="kw">return</span> err
+    }
+    <span class="kw">defer</span> tx.Rollback() <span class="cm">// no-op if Commit already ran</span>
+
+    _, err = tx.ExecContext(ctx,
+        <span class="str">`INSERT INTO orders (id, customer_id, total_cents) VALUES ($1, $2, $3)`</span>,
+        o.ID, o.CustomerID, o.TotalCents,
+    )
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        <span class="kw">return</span> err
+    }
+
+    payload, err := json.Marshal(OrderShippedEvent{OrderID: o.ID, CustomerID: o.CustomerID})
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        <span class="kw">return</span> err
+    }
+
+    <span class="cm">// Same transaction, same connection, same all-or-nothing guarantee</span>
+    <span class="cm">// as the INSERT above — this is the whole trick.</span>
+    _, err = tx.ExecContext(ctx,
+        <span class="str">`INSERT INTO outbox (id, topic, payload, created_at, processed_at)
+         VALUES (gen_random_uuid(), $1, $2, now(), NULL)`</span>,
+        <span class="str">"order.created"</span>, payload,
+    )
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        <span class="kw">return</span> err
+    }
+
+    <span class="kw">return</span> tx.Commit()
+}</code></pre>
+<p>This is exactly Lesson 6's atomicity, applied to a business row and an "event to publish" instead of two business rows: either both <code>INSERT</code>s land, or neither does. There is no window where the order exists but the outbox row doesn't, or vice versa — the dual-write problem is solved not by making Postgres and the message queue agree, but by never writing to the message queue in the request path at all. The whole pattern is called the <dfn data-en="the overall approach of writing an event to an outbox table in the same transaction as the business change that caused it, then relying on a separate process to actually deliver it — trading a two-system dual write for one transactional write plus an asynchronous, retriable delivery step" data-vn="transactional outbox (giữ nguyên) — ghi event vào outbox table cùng transaction với thay đổi nghiệp vụ, rồi để 1 tiến trình riêng lo publish thật sự">transactional outbox</dfn> pattern for exactly this reason.</p>
+
+<h2>3 · The relay: a second process that actually publishes</h2>
+<p>The outbox table now holds a durable, ordered to-do list of events — but nothing has actually reached the message queue yet. That's the job of a separate <dfn data-en="a standalone process that polls the outbox table for unprocessed rows, publishes each one to the real message queue or webhook, and marks it processed once the publish succeeds — the component that turns a written outbox row into a real delivered event" data-vn="relay / poller (giữ nguyên) — tiến trình riêng, đọc outbox table và publish thật ra message queue, xong thì đánh dấu đã xử lý">relay</dfn> (also called a poller): it reads unprocessed rows, calls the real publisher, and marks each row done once the call succeeds.</p>
+<pre><code><span class="kw">func</span> outboxRelay(ctx context.Context, db *sql.DB, pub Publisher, pollEvery time.Duration) {
+    ticker := time.NewTicker(pollEvery)
+    <span class="kw">defer</span> ticker.Stop()
+
+    <span class="kw">for</span> {
+        <span class="kw">select</span> {
+        <span class="kw">case</span> &lt;-ctx.Done():
+            <span class="kw">return</span>
+        <span class="kw">case</span> &lt;-ticker.C:
+            <span class="kw">if</span> err := relayOnce(ctx, db, pub); err != <span class="kw">nil</span> {
+                log.Printf(<span class="str">"outbox relay: %v"</span>, err)
+            }
+        }
+    }
+}
+
+<span class="kw">func</span> relayOnce(ctx context.Context, db *sql.DB, pub Publisher) <span class="kw">error</span> {
+    rows, err := db.QueryContext(ctx,
+        <span class="str">`SELECT id, topic, payload FROM outbox
+         WHERE processed_at IS NULL
+         ORDER BY created_at
+         LIMIT 100`</span>,
+    )
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        <span class="kw">return</span> err
+    }
+    <span class="kw">defer</span> rows.Close()
+
+    <span class="kw">var</span> batch []outboxRow
+    <span class="kw">for</span> rows.Next() {
+        <span class="kw">var</span> r outboxRow
+        <span class="kw">if</span> err := rows.Scan(&amp;r.ID, &amp;r.Topic, &amp;r.Payload); err != <span class="kw">nil</span> {
+            <span class="kw">return</span> err
+        }
+        batch = <span class="kw">append</span>(batch, r)
+    }
+
+    <span class="kw">for</span> _, r := <span class="kw">range</span> batch {
+        <span class="cm">// At-least-once: if Publish succeeds but the process dies before</span>
+        <span class="cm">// the UPDATE below runs, this row gets published again next poll.</span>
+        <span class="kw">if</span> err := pub.Publish(ctx, r.Topic, r.Payload); err != <span class="kw">nil</span> {
+            log.Printf(<span class="str">"publish failed, will retry next poll: %v"</span>, err)
+            <span class="kw">continue</span>
+        }
+        <span class="kw">if</span> _, err := db.ExecContext(ctx,
+            <span class="str">`UPDATE outbox SET processed_at = now() WHERE id = $1`</span>, r.ID,
+        ); err != <span class="kw">nil</span> {
+            <span class="kw">return</span> err
+        }
+    }
+    <span class="kw">return</span> <span class="kw">nil</span>
+}</code></pre>
+<p>Notice what the relay actually is: a standalone loop that wakes up on a timer, does work, and is never called from inside any HTTP handler — that's Lesson 10's background job definition, word for word. The relay <em>is</em> a background job; the outbox table is its job queue, "unprocessed rows" is the queue's pending set, and the relay is the worker.</p>
+
+<h2>4 · The relay's publish must survive being run twice</h2>
+<p>Look at the gap between <code>pub.Publish(...)</code> succeeding and the <code>UPDATE ... SET processed_at</code> that follows it. If the relay process dies in that gap — after the message genuinely reached the queue, before the row was marked processed — the next poll sees that row as still unprocessed and publishes it again. The event arrives twice.</p>
+<div class="callout"><strong>Same shape as Lesson 26:</strong> this is exactly the "did it actually happen?" ambiguity Lesson 26 built idempotency keys to survive on the client's retry path, and Lesson 10 named outright for job queues: <em>at-least-once delivery</em> — a message might be delivered more than once, but it is never silently dropped. The relay can't promise exactly-once delivery to the queue any more than a background job worker could promise exactly-once execution; it can only promise at-least-once, which pushes the same requirement Lesson 26 and Lesson 10 both landed on onto whoever consumes the event: the subscriber's handling of <code>order.created</code> must be safe to run twice — check "have I already shipped this order?" before shipping, the same idempotency instinct applied one hop further down the chain.</div>
+<p>This is why the transactional outbox pattern doesn't claim to solve dual-write by making delivery perfectly exactly-once — no practical mechanism across two separate systems can promise that. It solves the actual hazard: a crash can no longer silently <em>lose</em> the event (it's durably recorded in the same transaction as the business row), and a crash can at worst cause a harmless-if-idempotent duplicate — trading an unrecoverable loss for a recoverable, expected duplicate.</p>
+
+<div class="interview">
+<p><strong>Q: "You need to update a row and publish an event when it changes. Why not just do both in the handler?"</strong> A strong answer, out loud: <em>"Because the database write and the publish are two separate systems, and there's no ordering of the two calls that's safe on its own — a crash between them either loses the event or, if I retry to be safe, risks publishing it twice. I'd use the transactional outbox pattern instead: insert an outbox row in the same transaction as the business write, so they commit or roll back together — that's just Lesson 6's atomicity applied to an event instead of a second business row. A separate relay process polls that table, publishes each unprocessed row to the real queue, and marks it processed. The relay itself is a background job in the same sense as any other worker, and because a crash between publishing and marking-processed can cause a duplicate, the subscriber on the other end still has to tolerate at-least-once delivery — same idempotency requirement as any other queue consumer."</em> The signal: naming the dual-write problem specifically, not just "queues can drop messages," and tying the relay's guarantee back to at-least-once rather than claiming it's perfect.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="The database write and the event publish are two separate systems with no shared transaction between them, so a process crashing in the gap between the two either leaves the event unsent (lost) or, if it already went out before the crash, can end up sent again on a naive retry (duplicated).">
+    <p class="stem">What is the dual-write problem, concretely?</p>
+    <button class="opt" data-ok>a crash between the two steps loses or duplicates the event</button>
+    <button class="opt">a crash between the two steps speeds up the database write</button>
+    <button class="opt">a crash between the two steps always duplicates the row twice</button>
+    <button class="opt">a crash between the two steps only affects the message queue</button>
+  </div>
+  <div class="q" data-why="The transactional outbox pattern writes the event as a row in an outbox table using the SAME database transaction as the business change, so Postgres's own atomicity guarantee (Lesson 6) makes the two writes commit or roll back together — no separate coordination between two different systems is needed.">
+    <p class="stem">What makes the transactional outbox pattern actually work?</p>
+    <button class="opt" data-ok>writing the event row inside the same business transaction</button>
+    <button class="opt">writing the event row inside a separate slower transaction</button>
+    <button class="opt">writing the event straight to the message queue directly</button>
+    <button class="opt">writing the event only after the transaction fully commits</button>
+  </div>
+  <div class="q" data-why="If the relay process dies after Publish succeeds but before it marks the row processed, the next poll still sees that row as unprocessed and publishes it again — the same at-least-once shape Lesson 10 named for background job queues and Lesson 26 named for client retries, which is why the subscriber must tolerate duplicates.">
+    <p class="stem">If the outbox relay crashes right after publishing but before marking a row processed, what happens?</p>
+    <button class="opt" data-ok>it may go ahead and publish that exact same row again</button>
+    <button class="opt">it will skip that row and never publish it at all</button>
+    <button class="opt">it will delete that row and silently drop the whole event</button>
+    <button class="opt">it will pause polling entirely until an operator restarts it manually</button>
+  </div>
+  <div class="q" data-why="The relay wakes up on its own timer, does its work, and is never invoked from inside any HTTP handler's response cycle — exactly Lesson 10's definition of a background job, with the outbox table playing the role of the job queue and the relay playing the role of the worker.">
+    <p class="stem">In Lesson 10's terms, what is the outbox relay?</p>
+    <button class="opt" data-ok>a separate process running entirely outside any request's response cycle</button>
+    <button class="opt">a single step inside the handler that inserted the row</button>
+    <button class="opt">a database trigger that fires before that same row commits</button>
+    <button class="opt">a frontend poll that checks the order status every second</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> Martin Kleppmann, <em>Designing Data-Intensive Applications</em>, ch. 11 "Change Data Capture" (~30–40 min for the relevant section) — RESOURCES.md already cites DDIA generally for transactions (ch. 7); this extends it into ch. 11, which frames the dual-write problem and the transactional outbox explicitly as one instance of the book's broader change-data-capture idea (treating a database's writes as a stream other systems can reliably consume from).</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> open — this closes out ALL of Lesson 27's originally-named candidates (circuit breaker, graceful shutdown, outbox pattern). The next session should do a fresh gap-finding pass, or better, ask the user to pick a track to deepen — there's still no reported `lesson_completed` outcome for any lesson after 29 rounds.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

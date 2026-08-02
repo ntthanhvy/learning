@@ -62,6 +62,8 @@
       file: "lessons/0027-graceful-shutdown.html" },
     { n: 28, date: "2026-08-02", title: "Circuit breaker: stop calling what's already down",
       file: "lessons/0028-circuit-breaker.html" },
+    { n: 29, date: "2026-08-03", title: "The outbox pattern: making a DB write and an event atomic",
+      file: "lessons/0029-outbox-pattern.html" },
   ];
 
   const REFS = [

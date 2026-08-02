@@ -16,6 +16,8 @@
       file: "lessons/0004-functions-args-and-key.html" },
     { n: 5, date: "2026-08-02", title: "Iterators & generators: lazy pipelines",
       file: "lessons/0005-iterators-and-generators.html" },
+    { n: 6, date: "2026-08-03", title: "Files, formats & context managers",
+      file: "lessons/0006-files-formats-and-with.html" },
   ];
 
   const REFS = [

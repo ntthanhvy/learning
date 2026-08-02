@@ -950,3 +950,91 @@
   `pivot_table` multi-agg edge cases are NOT a valid candidate — Lessons
   6/14/15/16/17 already cover `pivot_table` thoroughly, re-confirmed by
   grep before ruling it out.
+- 2026-08-03 generation (Lesson 26, headless 06:00 run): direct `psql
+  "$LEARNING_DB_URL" ...` reads and `bin/query-progress` were both
+  unreachable this session (required interactive approval, no user
+  present, same class of block as every prior round) — still no
+  `course_progress` rows readable and no `lesson_completed`/quiz/kata
+  outcome record beyond the Lesson 1 baseline, so no reported weak spot to
+  target. Lesson 25's own teaser named `SettingWithCopy`/`.copy()`
+  explicitly (flagged since Lesson 23's scan, deferred twice for
+  `np.where()`/`np.select()` and `select_dtypes()`/category dtype) —
+  re-confirmed via grep that neither term, nor `chained indexing`/`view vs
+  copy`, appeared anywhere in `lessons/*.html` or `reference/glossary.html`
+  before today (only in NOTES.md and RESOURCES.md's Tom Augspurger
+  citation) — so Lesson 26 ships it as planned: views vs copies (a
+  slice/filter result may share memory with the original or be fully
+  independent, unpredictable from the code alone), chained indexing
+  (`df[mask]["col"] = value`, two indexing steps run one after another,
+  contrasted against one combined `.loc[row_selector, col_selector] =
+  value`), `SettingWithCopyWarning` framed as pandas' own uncertainty flag,
+  and `.copy()` as the explicit fix. `uv run --with pandas` worked
+  directly this round (pandas 3.0.5): first used to hand-verify the actual
+  behavior in `.scratch/data-lesson26/explore.py` (deleted after) against
+  the real `orders_raw.csv` clean 4-row slice before writing a word of the
+  lesson, and this surfaced a genuine, worth-flagging gap between the
+  classic textbook story and current pandas: with Copy-on-Write now the
+  permanent default (pandas >= 3.0), the classic ONE-LINE chained
+  assignment (`clean[clean["customer"]=="An"]["amount"] = 0`) no longer
+  just warns — it RAISES `pandas.errors.ChainedAssignmentError` outright,
+  leaving `clean` provably untouched. The more realistic TWO-STATEMENT
+  version of the same trap (`an_rows = clean[mask]; an_rows["amount"] = 0`)
+  is more dangerous than ever under current pandas: it raises nothing at
+  all and silently fails to update `clean`, a strictly worse "no crash,
+  quietly wrong" outcome than the old warning-based behavior every
+  pre-3.0-era blog post/SO answer describes. Both behaviors were verified
+  directly rather than assumed from older docs, and the lesson text was
+  written to the confirmed current behavior, following Lesson 25's own
+  precedent of correcting an outdated pandas-2.x-era gotcha description
+  before shipping. The `.copy()` fix and the single combined `.loc[]` fix
+  were both hand-verified to leave `clean` correctly independent/correctly
+  mutated respectively. Designing the practice file hit a new variant of
+  the by-now-expected Ellipsis-placeholder family: `clean["customer"] ==
+  ...` does NOT raise (Ellipsis compared with `==` against a string Series
+  just evaluates elementwise to all-False, silently producing an empty
+  filtered DataFrame instead of erroring) — confirmed via a standalone
+  throwaway script before trusting it. Fixed by moving every placeholder
+  into the column-lookup position instead (`clean[...] == "An"`), which
+  reliably raises `KeyError: Ellipsis`, same class of fix as Lessons
+  19/20/21/24/25's own placeholder-position corrections. The shipped
+  (unsolved) `practice/26_settingwithcopy_and_copy.py` was executed (first
+  in `.scratch/data-lesson26/practice/`, a scratch copy with the fixture
+  CSVs alongside it, then again from its real `practice/` location) and
+  printed 4 ✗ with no crash — the remaining 2 checks ("clean is untouched")
+  pass even unsolved, which is correct and expected rather than a bug: the
+  fixture genuinely never gets mutated in either the solved or unsolved
+  state, since neither the chained-indexing attempt nor the `.copy()` path
+  is SUPPOSED to touch `clean` — that's the entire point being tested. A
+  solved copy (`.scratch/data-lesson26/practice/26_solved.py`, deleted
+  after) printed all 6 ✓ against the real hand-verified fixture values (An
+  120.0/42.0 -> 0/0 in `an_rows`/`an_only`, `clean` unchanged at
+  120.0/42.0 throughout, `clean_loc` correctly mutated to 0/0 for An while
+  Binh's 35.5/180.0 stay untouched). `.scratch/data-lesson26/` was fully
+  removed (`rm -rf`) after verification, no approval needed this round.
+  Added `view vs copy`, `chained indexing`, `SettingWithCopyWarning`,
+  `.copy()`, and `Copy-on-Write (CoW)` to the glossary (five separate
+  entries — each is independently reusable/askable) and registered Lesson
+  26 in nav.js. Quiz options were drafted and checked with a Python-based
+  word-count extraction script run via `uv run` (plain `python3` required
+  approval and was blocked this round, a new wrinkle — `uv run python3
+  <script>` worked fine as a substitute) plus a `wc -w`/grep cross-check
+  for an independent second pass (this course's established convention,
+  following Lesson 19's repeated finding that a single pass isn't
+  infallible) — the first draft came out mismatched on 4 of 5 questions
+  (Q1 10/10/9, Q2 10/10/11, Q3 8/6/9, Q5 10/8/7; only Q4's SQL-contrast
+  options landed level at 10/10/10 on the first try) and needed multiple
+  rewrite + recount cycles per question (Q3 alone took three passes) before
+  a final independent recount (total word count across all 15 options via
+  `wc -w`, cross-checked arithmetically against the expected 144 = 3×10 +
+  3×10 + 3×8 + 3×10 + 3×10) confirmed all five genuinely level at 10/10/10,
+  10/10/10, 8/8/8, 10/10/10, and 10/10/10. `bin/record-progress data
+  lesson_generated --day 26 --lesson 0026-settingwithcopy-and-copy.html
+  --detail '{"by":"launchd"}'` was attempted once as instructed from the
+  repo root and required approval, blocked with no user present in this
+  headless session (same class of block hit in most rounds) —
+  `lesson_generated` could not be recorded; do it manually once DB/write
+  access is back. Not retried in a loop. Set the teaser going forward to
+  `.map()` (Series-level value-to-value mapping, distinct from `apply()`)
+  or `pd.wide_to_long()`, both re-confirmed genuinely uncovered this round
+  by a fresh grep — either is a valid next pick with no reported
+  drill-outcome signal to redirect otherwise.

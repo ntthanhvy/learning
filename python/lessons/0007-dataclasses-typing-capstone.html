@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 7 · Dataclasses, typing &amp; an ETL capstone</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 7 · ~20 min · 4 Aug 2026</p>
+<h1>Dataclasses, typing &amp; an ETL capstone</h1>
+<p class="byline">Six days built six separate tools: Day 1's names/objects, Day 2's comprehensions, Day 3's dict/set grouping, Day 4's <code>key=</code> functions, Day 5's generators, Day 6's <code>csv.DictReader</code> and <code>json</code>. Today adds the last piece — giving a loose dict a real shape — then spends everything at once on a working ETL script: <strong>E</strong>xtract a CSV, <strong>T</strong>ransform it into structured records, <strong>L</strong>oad a summary out as JSON. This is Phase 1's tangible proof: a script, built from an empty file, standard library only.</p>
+
+<div class="callout"><strong>Bridge from SQL:</strong> a dataclass is close to a <code>CREATE TABLE</code> statement — a fixed set of named, typed columns every row must have. Where SQL enforces that shape at the database, a dataclass enforces it (loosely — Python doesn't check types at runtime) at the object level: every instance is guaranteed to have exactly these fields.</div>
+
+<h2>1 · The problem: a dict has no guaranteed shape</h2>
+<p>Day 6's <code>read_sales()</code> yielded rows shaped like <code>{"city": "Hanoi", "amount": 120}</code> — a plain dict. That works, but nothing stops a typo (<code>row["citty"]</code> silently raises <code>KeyError</code> instead of catching itself earlier) or an inconsistent record (one row missing <code>"amount"</code> entirely, unnoticed until it's used). A dict's keys are just strings chosen at runtime; there's no fixed list of "the fields a sales record has."</p>
+<pre><code>row = {<span class="str">"city"</span>: <span class="str">"Hanoi"</span>, <span class="str">"amount"</span>: <span class="kw">120</span>}
+row[<span class="str">"citty"</span>]              <span class="cm"># KeyError — typo caught only when this line runs, if it ever runs</span>
+
+<span class="kw">def</span> total_for(row):
+    <span class="kw">return</span> row[<span class="str">"amount"</span>] * <span class="kw">1.1</span>
+total_for({<span class="str">"city"</span>: <span class="str">"Hanoi"</span>})   <span class="cm"># KeyError: 'amount' — this row is missing a field, found late</span></code></pre>
+<p>A plain class fixes the missing-field problem — <code>__init__</code> forces every instance to supply required fields — but costs boilerplate for things you'd want by default: printing a plain class instance shows <code>&lt;__main__.SalesRow object at 0x7f...&gt;</code>, not its data, and comparing two instances with <code>==</code> checks identity, not field values, unless you write <code>__repr__</code> and <code>__eq__</code> by hand.</p>
+<pre><code><span class="kw">class</span> SalesRowPlain:
+    <span class="kw">def</span> __init__(self, city, amount):
+        self.city = city
+        self.amount = amount
+
+a = SalesRowPlain(<span class="str">"Hanoi"</span>, <span class="kw">120</span>)
+b = SalesRowPlain(<span class="str">"Hanoi"</span>, <span class="kw">120</span>)
+<span class="kw">print</span>(a)          <span class="cm"># &lt;__main__.SalesRowPlain object at 0x7f2b1c0a4d90&gt; — useless for debugging</span>
+a == b            <span class="cm"># False — different objects, even though every field matches</span></code></pre>
+
+<h2>2 · <code>@dataclass</code>: fields with <code>__repr__</code>/<code>__eq__</code> for free</h2>
+<p>A <dfn data-en="a class decorated with @dataclass from the standard library dataclasses module; declaring typed fields as class-level annotations auto-generates __init__, a readable __repr__, and a field-by-field __eq__, removing the boilerplate a plain class needs for the same guarantees" data-vn="giữ nguyên &quot;dataclass&quot; — class khai báo field có kiểu, tự có __init__/__repr__/__eq__, đỡ phải viết tay">dataclass</dfn> is a normal class with one decorator and a list of typed fields — no <code>__init__</code> to write by hand:</p>
+<pre><code><span class="kw">from</span> dataclasses <span class="kw">import</span> dataclass
+
+<span class="kw">@dataclass</span>
+<span class="kw">class</span> SalesRow:
+    city: <span class="kw">str</span>
+    amount: <span class="kw">int</span>
+
+a = SalesRow(<span class="str">"Hanoi"</span>, <span class="kw">120</span>)
+b = SalesRow(<span class="str">"Hanoi"</span>, <span class="kw">120</span>)
+<span class="kw">print</span>(a)          <span class="cm"># SalesRow(city='Hanoi', amount=120) — readable, generated for free</span>
+a == b            <span class="cm"># True — compares field by field, generated for free</span>
+a.city            <span class="cm"># 'Hanoi' — attribute access, same as any object</span></code></pre>
+<p>Each line under the class header — <code>city: str</code>, <code>amount: int</code> — declares a field: a name plus its type hint (section 3 explains the <code>: str</code> part precisely). <code>@dataclass</code> reads that list and generates <code>__init__(self, city, amount)</code>, <code>__repr__</code>, and <code>__eq__</code> automatically, so <code>SalesRow("Hanoi", 120)</code> works immediately with no method written by hand. A field can carry a <dfn data-en="a value written directly in a dataclass field declaration, e.g. currency: str = &quot;VND&quot;, used automatically whenever a caller omits that field in the constructor call — same idea as Day 4's default argument, applied to a class field instead of a function parameter" data-vn="giữ nguyên &quot;default&quot; — giá trị mặc định khai trong field, dùng khi constructor không truyền">default</dfn> exactly like Day 4's default arguments:</p>
+<pre><code><span class="kw">@dataclass</span>
+<span class="kw">class</span> SalesRow:
+    city: <span class="kw">str</span>
+    amount: <span class="kw">int</span>
+    currency: <span class="kw">str</span> = <span class="str">"VND"</span>    <span class="cm"># default — same rule as Day 4's def f(x, rate=0.1)</span>
+
+SalesRow(<span class="str">"Hanoi"</span>, <span class="kw">120</span>)              <span class="cm"># SalesRow(city='Hanoi', amount=120, currency='VND')</span>
+SalesRow(<span class="str">"HCMC"</span>, <span class="kw">80</span>, <span class="str">"USD"</span>)          <span class="cm"># SalesRow(city='HCMC', amount=80, currency='USD')</span></code></pre>
+<p>Day 1's mutable-default-argument trap still applies here — a field default of <code>[]</code> or <code>{}</code> raises an error at class-definition time specifically to stop you from hitting it; the fix (<code>dataclasses.field(default_factory=list)</code>) is worth knowing exists but is out of scope for today's records, which need only <code>str</code>/<code>int</code>/<code>float</code> fields.</p>
+
+<h2>3 · Type hints: reading (and writing) an annotated signature</h2>
+<p>The <code>: str</code> and <code>: int</code> above are <dfn data-en="an optional annotation on a variable, function parameter, or return value stating the type it's expected to hold, written name: Type; Python does not enforce these at runtime — they're documentation plus input for external type checkers" data-vn="giữ nguyên &quot;type hint&quot; — chú thích kiểu dữ liệu, Python không tự kiểm tra lúc chạy">type hints</dfn> — Python has had them since 3.5, and they show up everywhere from here on, including every dataclass field. A hint on a plain variable or a function signature uses the same colon syntax:</p>
+<pre><code>city: <span class="kw">str</span> = <span class="str">"Hanoi"</span>              <span class="cm"># variable annotation — city is meant to hold a str</span>
+
+<span class="kw">def</span> total_for(row: SalesRow) -&gt; <span class="kw">float</span>:  <span class="cm"># row must be a SalesRow, function returns a float</span>
+    <span class="kw">return</span> row.amount * <span class="kw">1.1</span></code></pre>
+<p>Critically: <strong>Python never checks these at runtime.</strong> <code>total_for("not a SalesRow")</code> still runs — it just breaks (or silently misbehaves) somewhere inside, exactly as if the hint weren't there. A type hint is documentation with structure, read by humans and by external tools (editors, <code>mypy</code>), not a guard Python enforces itself. That's precisely why they're worth writing anyway: they turn "what does this function expect?" from a question you answer by reading the body into one the signature already answers.</p>
+<p>Two hints from the <code>typing</code> module cover most real signatures. <code>list[X]</code> means "a list whose elements are all type <code>X</code>":</p>
+<pre><code><span class="kw">def</span> total_amount(rows: list[SalesRow]) -&gt; <span class="kw">int</span>:   <span class="cm"># rows: a list of SalesRow objects</span>
+    <span class="kw">return</span> <span class="kw">sum</span>(row.amount <span class="kw">for</span> row <span class="kw">in</span> rows)     <span class="cm"># Day 5's generator expression, straight into sum()</span></code></pre>
+<p><dfn data-en="typing.Optional[X], equivalent to X | None, means a value is either type X or the literal None — used to hint a parameter or field that may legitimately be missing, e.g. a city with no known region yet" data-vn="giữ nguyên &quot;Optional&quot; — kiểu X hoặc None, dùng khi field có thể chưa có giá trị">Optional[X]</dfn> (from <code>typing</code>, or the newer <code>X | None</code> spelling) means "either type <code>X</code>, or literally <code>None</code>" — the hint for a field or parameter that might legitimately be missing:</p>
+<pre><code><span class="kw">from</span> typing <span class="kw">import</span> Optional
+
+<span class="kw">@dataclass</span>
+<span class="kw">class</span> SalesRow:
+    city: <span class="kw">str</span>
+    amount: <span class="kw">int</span>
+    region: Optional[<span class="kw">str</span>] = <span class="kw">None</span>   <span class="cm"># region: str | None = None — same meaning, newer spelling</span></code></pre>
+<p>Today's goal is recognition and practical use for exactly these shapes — plain types, <code>list[X]</code>, <code>Optional[X]</code> — not the rest of the <code>typing</code> module. That's enough to read almost any real-world annotated function and to write today's capstone.</p>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> a dataclass's fixed, typed fields are close in spirit to a DataFrame's typed columns (<code>df.dtypes</code>) — both are a fixed schema over rows — but a dataclass describes one row at a time in plain Python objects, not a whole columnar table. Not covered here; that's <code>data/</code>'s job, and this is the only sentence in this lesson that mentions it.</div>
+
+<h2>4 · The capstone: Extract → Transform → Load, standard library only</h2>
+<p>Every tool for this already exists across Days 1–6. <dfn data-en="an ETL pipeline: Extract reads raw data from its source format, Transform reshapes/cleans/aggregates it into the shape you actually need, and Load writes the result to its destination — the standard shape of nearly every real data pipeline" data-vn="giữ nguyên &quot;ETL&quot; — Extract (đọc), Transform (biến đổi), Load (ghi ra) — hình dạng chuẩn của pipeline dữ liệu">ETL</dfn> just names the three-stage shape the capstone script follows: <strong>Extract</strong> (read the raw CSV), <strong>Transform</strong> (turn rows into typed records and aggregate), <strong>Load</strong> (write a summary out as JSON).</p>
+
+<p><strong>Extract</strong> — Day 6's exact <code>read_sales()</code> generator, chaining <code>with open()</code> (Day 6 §3) over <code>csv.DictReader</code> (Day 6 §5) the way Day 5's generator functions chained stages, except now it yields a dataclass instance instead of a loose dict:</p>
+<pre><code><span class="kw">import</span> csv
+<span class="kw">from</span> dataclasses <span class="kw">import</span> dataclass
+
+<span class="kw">@dataclass</span>
+<span class="kw">class</span> SalesRow:
+    city: <span class="kw">str</span>
+    amount: <span class="kw">int</span>
+
+<span class="kw">def</span> extract(path: <span class="kw">str</span>):
+    <span class="kw">with</span> <span class="kw">open</span>(path) <span class="kw">as</span> f:               <span class="cm"># Day 6 §3 — with guarantees the file closes</span>
+        reader = csv.DictReader(f)       <span class="cm"># Day 6 §5 — rows as dicts keyed by column name</span>
+        <span class="kw">for</span> row <span class="kw">in</span> reader:
+            <span class="kw">yield</span> SalesRow(city=row[<span class="str">"city"</span>], amount=<span class="kw">int</span>(row[<span class="str">"amount"</span>]))   <span class="cm"># dict -> dataclass, str -> int</span></code></pre>
+
+<p><strong>Transform</strong> — Day 2's comprehensions filter and reshape, Day 3's <code>defaultdict</code> groups by key, Day 4's <code>key=</code> sorts the result:</p>
+<pre><code><span class="kw">from</span> collections <span class="kw">import</span> defaultdict
+
+<span class="kw">def</span> transform(rows) -&gt; <span class="kw">list</span>[<span class="kw">tuple</span>]:
+    positive = [r <span class="kw">for</span> r <span class="kw">in</span> rows <span class="kw">if</span> r.amount &gt; <span class="kw">0</span>]    <span class="cm"># Day 2 — list comprehension, drop bad rows</span>
+    totals = defaultdict(<span class="kw">int</span>)
+    <span class="kw">for</span> r <span class="kw">in</span> positive:
+        totals[r.city] += r.amount             <span class="cm"># Day 3 — grouping by key, by hand</span>
+    <span class="kw">return</span> <span class="kw">sorted</span>(totals.items(), key=<span class="kw">lambda</span> pair: pair[<span class="kw">1</span>], reverse=<span class="kw">True</span>)  <span class="cm"># Day 4 — key=</span></code></pre>
+
+<p><strong>Load</strong> — Day 6's <code>json.dump</code>, writing the summary a fresh consumer (a dashboard, another script) can read back with <code>json.load</code>:</p>
+<pre><code><span class="kw">import</span> json
+
+<span class="kw">def</span> load(totals: <span class="kw">list</span>[<span class="kw">tuple</span>], path: <span class="kw">str</span>) -&gt; <span class="kw">None</span>:
+    summary = [{<span class="str">"city"</span>: city, <span class="str">"total"</span>: total} <span class="kw">for</span> city, total <span class="kw">in</span> totals]  <span class="cm"># Day 2 comprehension again</span>
+    <span class="kw">with</span> <span class="kw">open</span>(path, <span class="str">"w"</span>) <span class="kw">as</span> f:
+        json.dump(summary, f, indent=<span class="kw">2</span>)      <span class="cm"># Day 6 §6 — Python objects out as JSON text</span></code></pre>
+
+<p>Wired together, the whole script is three function calls — <code>extract</code> stays lazy (a generator, Day 5) right up until <code>transform</code>'s list comprehension is the first thing that actually consumes it:</p>
+<pre><code><span class="kw">def</span> run(csv_path: <span class="kw">str</span>, json_path: <span class="kw">str</span>) -&gt; <span class="kw">None</span>:
+    rows = extract(csv_path)        <span class="cm"># Extract — a generator, nothing read yet (Day 5)</span>
+    totals = transform(rows)        <span class="cm"># Transform — comprehension + grouping + key= (Days 2-4)</span>
+    load(totals, json_path)         <span class="cm"># Load — json.dump (Day 6)</span>
+
+run(<span class="str">"sales.csv"</span>, <span class="str">"summary.json"</span>)
+<span class="cm"># summary.json: [{"city": "Danang", "total": 200}, {"city": "Hanoi", "total": 165}]</span></code></pre>
+<p>Every line above traces back to a specific earlier day — that's deliberate, not decoration: the capstone isn't new material, it's this week's seven tools used together on one real task, which is exactly what "own the language" (this course's whole point, per <code>MISSION.md</code>) means in practice.</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/07_dataclasses_typing_capstone.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/07_dataclasses_typing_capstone.py</code></pre>
+<p>No dependencies — standard library only. Exercises: defining a <code>@dataclass</code> with a default field, writing an <code>extract()</code> generator over <code>csv.DictReader</code> that yields dataclass instances, a <code>transform()</code> that filters/groups/sorts, and a <code>load()</code> that writes the summary with <code>json.dump</code> — the full ETL script, built by you.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="@dataclass reads a class's typed field declarations and auto-generates __init__, a readable __repr__ showing field values, and a field-by-field __eq__ — a plain class has none of these unless written by hand.">
+    <p class="stem">What does <code>@dataclass</code> generate automatically from a class's typed fields?</p>
+    <button class="opt" data-ok>an init, a readable repr, and equality by field</button>
+    <button class="opt">a database table exactly matching every single named field</button>
+    <button class="opt">a JSON schema file validating each field's own type</button>
+  </div>
+  <div class="q" data-why="Python never enforces type hints at runtime — they are documentation read by humans and external tools like editors or mypy. Calling a function with a mismatched type still runs; it just fails or misbehaves wherever the mismatch actually matters.">
+    <p class="stem">Does Python enforce a type hint like <code>def f(x: int)</code> at runtime?</p>
+    <button class="opt" data-ok>no, hints are only documentation, unchecked while running now</button>
+    <button class="opt">yes, calling f with a string always raises immediately</button>
+    <button class="opt">only inside a dataclass field, nowhere else at all</button>
+  </div>
+  <div class="q" data-why="Optional[X], equivalent to X | None, hints that a value is either type X or literally None — the right annotation for a field or parameter that may legitimately be missing, unlike list[X] which hints a list of same-typed elements.">
+    <p class="stem">What does a hint of <code>Optional[str]</code> mean for a field?</p>
+    <button class="opt" data-ok>the value is either a str or literally None</button>
+    <button class="opt">the value must always be a non-empty string only</button>
+    <button class="opt">the field itself is allowed to be skipped entirely</button>
+  </div>
+  <div class="q" data-why="extract() stays a lazy generator exactly per Day 5 — calling it runs no code at all. transform()'s list comprehension ([r for r in rows if ...]) is the first thing that actually iterates rows, which is what pulls values through extract()'s with-block and csv.DictReader for the first time.">
+    <p class="stem">In the capstone's <code>run()</code>, when does <code>extract()</code>'s file actually get read?</p>
+    <button class="opt" data-ok>once transform's own comprehension starts actually consuming rows</button>
+    <button class="opt">the instant extract(csv_path) itself gets called just above</button>
+    <button class="opt">only after load() finishes writing the JSON summary</button>
+  </div>
+  <div class="q" data-why="transform() reuses Day 2's list comprehension to filter, Day 3's defaultdict to group totals by city, and Day 4's key= (via sorted(..., key=lambda pair: pair[1])) to order the grouped totals by amount — three prior days' tools, not new mechanism.">
+    <p class="stem">Which prior days' tools does the capstone's <code>transform()</code> step reuse?</p>
+    <button class="opt" data-ok>comprehension filtering, defaultdict grouping, and key= sorting the totals</button>
+    <button class="opt">only file reading and writing, nothing about grouping data</button>
+    <button class="opt">just a single dataclass field default, nothing else reused</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the standard library's <a href="https://docs.python.org/3/library/dataclasses.html"><code>dataclasses</code></a> docs (cited in RESOURCES.md) — covers today's fields/defaults exactly, plus <code>field(default_factory=...)</code> for the mutable-default case skipped today. The <a href="https://docs.python.org/3/library/typing.html"><code>typing</code></a> docs are the natural next stop for hints beyond <code>list[X]</code>/<code>Optional[X]</code>.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day7">glossary</a> under Day 7.<br>
+<strong>Phase 1 complete.</strong> Seven days, seven tools, one working ETL script from an empty file — the tangible proof <code>PLAN.md</code> promised. Phase 2 starts 2026-08-05: open-ended, ~20 min/day, rounding out the language (exceptions, modules, <code>pytest</code>, decorators) before FastAPI + pydantic.<br><br>
+💬 Anything unclear — <code>@dataclass</code>, type hints, or the capstone script? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

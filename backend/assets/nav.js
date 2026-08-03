@@ -64,6 +64,8 @@
       file: "lessons/0028-circuit-breaker.html" },
     { n: 29, date: "2026-08-03", title: "The outbox pattern: making a DB write and an event atomic",
       file: "lessons/0029-outbox-pattern.html" },
+    { n: 30, date: "2026-08-04", title: "Webhook signature verification: trusting a request from outside",
+      file: "lessons/0030-webhook-signature-verification.html" },
   ];
 
   const REFS = [

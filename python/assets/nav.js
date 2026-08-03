@@ -18,6 +18,8 @@
       file: "lessons/0005-iterators-and-generators.html" },
     { n: 6, date: "2026-08-03", title: "Files, formats & context managers",
       file: "lessons/0006-files-formats-and-with.html" },
+    { n: 7, date: "2026-08-04", title: "Dataclasses, typing & an ETL capstone",
+      file: "lessons/0007-dataclasses-typing-capstone.html" },
   ];
 
   const REFS = [

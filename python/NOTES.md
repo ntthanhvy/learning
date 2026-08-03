@@ -364,3 +364,83 @@ fail *gracefully* so the learner sees which task failed.
   result as all Day 1–4 attempts. Day 5 had succeeded non-interactively, so
   this confirms that success was not a lasting sandbox change — behavior is
   inconsistent run to run, still unexplained.
+- 2026-08-04 — **Day 7 generated** (`lessons/0007-dataclasses-typing-capstone.html`),
+  the headless run's sixth end-to-end lesson and **the last day of Phase 1** —
+  the intensive week (2026-07-29 → 2026-08-04) is now complete. Taught
+  `@dataclass` (typed fields as class-level annotations, free `__init__` /
+  `__repr__` / `__eq__`, field defaults following Day 4's exact default-argument
+  rule, explicitly contrasted section-by-section against a plain dict — a typo
+  in a dict key raises `KeyError` late — and a hand-written plain class, which
+  gets the missing-field guarantee but none of the free dunder methods),
+  then basic type hints (plain `name: Type` annotations, `list[X]`,
+  `Optional[X]`/`X | None`, and the explicit, load-bearing claim that Python
+  never enforces any of this at runtime — hints are documentation only). Spent
+  both on the capstone: an `extract()`/`transform()`/`load()` ETL script
+  wiring every prior day together explicitly in the lesson prose, not just
+  implicitly — `extract()` is Day 6's `read_sales()` shape verbatim (Day 6 §3
+  `with`, Day 6 §5 `csv.DictReader`) now yielding a `SalesRow` dataclass
+  instead of a loose dict; `transform()` chains Day 2's list comprehension
+  (filter), Day 3's `defaultdict` (group by city), and Day 4's `sorted(...,
+  key=lambda ...)` (order by total); `load()` reuses Day 6's `json.dump`; and
+  the whole thing stays lazy per Day 5 until `transform()`'s comprehension is
+  the first thing to actually consume the `extract()` generator. Built
+  directly on Day 6 per PLAN.md and Day 6's own closing line, which had
+  already named `read_sales()` as "the exact shape tomorrow's capstone needs
+  before it adds a dataclass." Bridged from SQL per the baseline record: a
+  dataclass framed as close to `CREATE TABLE` — a fixed set of named, typed
+  columns every row must have — enforced at the object level instead of the
+  database, introduced before any Python in the top callout.
+  No-pandas rule: zero pandas/NumPy API anywhere in lesson or practice file
+  (checked by grep for `pandas|numpy|dataframe|read_csv`, case-insensitive,
+  across both new files — zero hits in the practice file, exactly one hit in
+  the lesson); exactly one contrast sentence, comparing a dataclass's fixed
+  typed fields to a DataFrame's typed columns (`df.dtypes`) without
+  demonstrating it, placed once after section 3 and called out in prose as
+  the only such sentence, matching the hard-rule section above.
+  Practice file `practice/07_dataclasses_typing_capstone.py` (5 exercises:
+  defining `SalesRow` as a `@dataclass` with an `Optional[str] = None` field
+  default, an `extract()` generator over `csv.DictReader` yielding `SalesRow`
+  instances, a `transform()` filtering/grouping/sorting, a `load()` writing
+  JSON via `json.dump`, and a `run()` wiring all three into the full ETL
+  script) was verified in a scratch dir (`.scratch_py7_verify/`, created
+  under the repo root and removed after use, per the Day 3–6 precedent that
+  `/tmp` is out of bounds for this sandbox): the shipped (unsolved) copy ran
+  via `uv run python3`, both from the scratch copy and from its real
+  `practice/` path with the documented command, and printed five clean ✗
+  lines with no traceback each time; a separately solved copy printed five ✓
+  and the "All green — lesson 7 done, Phase 1 complete!" tally. No bugs found
+  during verification — both passes succeeded on the first attempt. Ex 1's
+  check builds its own defensive `SalesRow` instance in a helper wrapped in
+  `try/except` so a missing Exercise 1 fails only its own check with a clean
+  ✗ instead of a `NameError` cascading into every later exercise's check.
+  Glossary: added a Day 7 section to `reference/glossary.html` (`dataclass`,
+  `default (dataclass field)`, `type hint`, `Optional[X]`, `ETL`) after
+  confirming via grep that none of the five terms collided with any Day 1–6
+  entry — `default (dataclass field)` was deliberately titled to disambiguate
+  from Day 4's existing `default argument` row, the same near-collision
+  pattern Day 4's own `key= (sorting)` entry had already flagged relative to
+  Day 3's `key`.
+  Quiz: 5 questions. Word counts were checked with `wc -w` per option
+  (individual `echo | wc -w` calls, not by eye) and mismatched on the first
+  draft for all five questions (Q1 10/8/8, Q2 8/9/9, Q3 11/9/9, Q4 6/7/9, Q5
+  7/9/9) — each was rewritten and recounted until every option matched (Q1
+  9/9/9, Q2 9/9/9, Q3 9/9/9, Q4 8/8/8, Q5 9/9/9), including one sub-iteration
+  on Q1's second option and Q4's third option that needed a second rewrite
+  after the first pass undershot or overshot the target count, then a full
+  final recount pass across all five questions' three options each (15 lines
+  total) confirmed every one before shipping, per this file's instruction to
+  recount after any edit. Registered in `assets/nav.js` with
+  `date: "2026-08-04"`.
+  `record-progress python lesson_generated --day 7 …` was attempted once per
+  convention; it required interactive approval in this sandbox and was not
+  retried — outcome is "not recorded to DB this run," consistent with all
+  prior attempts except Day 5's one-off success.
+  **Phase 1 is now complete** (Days 1–7, 2026-07-29 → 2026-08-04, all
+  date-locked filenames from `PLAN.md`'s table shipped exactly as assigned,
+  none pre-generated ahead of date). Per `PLAN.md`, **Phase 2 starts
+  2026-08-05**: open-ended, sequential numbering from `0008-…`, ~20 min/day,
+  no more date-locking — ordering should adapt to the learning records rather
+  than marching through the Phase 2 spine mechanically, starting with 2a
+  (exceptions, modules/imports, `uv`/`pyproject.toml`, `pytest`, decorators,
+  `pathlib`/`datetime`/`logging`) before 2b's FastAPI + pydantic backend
+  phase.

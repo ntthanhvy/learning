@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 30 · Webhook signature verification: trusting a request from outside</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 30 · ~20 min</p>
+<h1>Webhook signature verification: trusting a request from outside</h1>
+<p class="byline">Lessons 4, 17, 22, and 23 all guarded requests from your own users. A <dfn data-en="an HTTP callback: a third-party service makes an outbound POST request to a URL you registered, to notify you an event happened on their side" data-vn="webhook (giữ nguyên) — bên thứ 3 tự gọi POST tới URL của bạn để báo có sự kiện xảy ra">webhook</dfn> flips that: a payment processor, a git host, a messaging API calls <em>you</em>, unprompted, claiming to be them. Today: why that claim can't be trusted on its own, and the one mechanism (HMAC signing) that lets you verify it.</p>
+
+<h2>1 · A webhook endpoint is a URL anyone can find and POST to</h2>
+<p>Lessons 24 and 29 both mentioned webhooks in passing — SSRF's "the server fetches whatever URL the client sent" and the outbox pattern's "publish to a message queue or webhook" — but neither taught the endpoint that <em>receives</em> one. That endpoint looks ordinary: <code>POST /webhooks/payments</code>, a JSON body, a 200 response expected back. Nothing about the URL itself is secret — it's often visible in your own dashboard config, sometimes guessable, and always just an HTTP endpoint like any other.</p>
+<p>That's the problem. A normal request carries a session cookie or a bearer token proving <em>which of your users</em> is calling — Lesson 4's whole subject. A webhook has no user session at all; the caller claims to be Stripe, or GitHub, or Twilio, but anyone who finds the URL can send an identical-looking POST claiming the same thing. A handler that reads <code>event.type == "payment.succeeded"</code> and marks an order paid, with no check on where that claim came from, will happily mark an order paid because a stranger's curl command said so.</p>
+<div class="callout"><strong>Not the same gap as IDOR:</strong> Lesson 12's IDOR was "authenticated as <em>someone</em>, but never checked it was the right <em>someone</em>." A webhook without signature verification is one step earlier — there's no authentication at all, just an unverified claim of identity sitting in the request body.</div>
+
+<h2>2 · Why a shared secret in a header isn't enough by itself</h2>
+<p>The obvious first fix — put a secret token in a custom header, check it matches — is close, but it's checking the wrong thing. A header value is just a string sitting in transit; if it ever leaks (a proxy log, a debugging screenshot, a misconfigured CORS setup echoing headers back), anyone holding that one static string can forge <em>any</em> body they like, forever, until the secret is rotated. What you actually want to prove is narrower: <em>this exact body, unmodified, was produced by someone who holds the secret</em> — not just "someone once knew a password."</p>
+<p>That's what an <dfn data-en="a cryptographic function that combines a secret key with a message to produce a fixed-length tag; anyone holding the same secret can recompute the same tag from the same message, but cannot forge a valid tag without the secret, and changing even one byte of the message changes the tag completely" data-vn="HMAC (giữ nguyên) — hàm băm có khóa bí mật, tạo ra 1 chuỗi ký (tag) gắn liền với nội dung message; không có secret thì không tự tạo tag đúng được, đổi 1 byte trong message là tag khác hẳn">HMAC</dfn> (Hash-based Message Authentication Code) gives you: the sender computes a tag over the exact request body using the shared secret, attaches that tag as a header, and you recompute the same tag on your side over the bytes you actually received. If they match, two things are simultaneously proven — the body came from someone holding the secret, <em>and</em> it wasn't altered in transit, because changing even one byte of the body produces a completely different tag.</p>
+
+<h2>3 · Verifying against the raw bytes, not the parsed struct</h2>
+<p>The signature is computed over the request body's exact bytes — so verification has to happen before any JSON parsing, against those same raw bytes, not against a struct you decoded and could re-serialize slightly differently (key order, whitespace, number formatting all change the bytes without changing the meaning). Verify first, parse second — reversing that order defeats the whole point, since a forged body would already be trusted by the time you check it.</p>
+<pre><code><span class="kw">var</span> webhookSecret = []<span class="ty">byte</span>(os.Getenv(<span class="st">"WEBHOOK_SECRET"</span>)) <span class="cm">// Lesson 21: a secret is config too</span>
+
+<span class="cm">// verifySignature recomputes the HMAC-SHA256 over the raw body using the</span>
+<span class="cm">// shared secret, then compares it to the signature the sender attached —</span>
+<span class="cm">// in constant time, so a timing side-channel can't leak the right value</span>
+<span class="cm">// one byte at a time.</span>
+<span class="kw">func</span> verifySignature(body []<span class="ty">byte</span>, gotSignatureHex <span class="ty">string</span>) <span class="ty">bool</span> {
+    mac := hmac.New(sha256.New, webhookSecret)
+    mac.Write(body)
+    want := mac.Sum(<span class="kw">nil</span>)
+
+    got, err := hex.DecodeString(gotSignatureHex)
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        <span class="kw">return</span> <span class="kw">false</span>
+    }
+    <span class="kw">return</span> hmac.Equal(want, got) <span class="cm">// NOT want == string(got) or bytes.Equal</span>
+}
+
+<span class="kw">func</span> webhookHandler(w http.ResponseWriter, r *http.Request) {
+    body, err := io.ReadAll(r.Body)
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        http.Error(w, <span class="st">"cannot read body"</span>, http.StatusBadRequest)
+        <span class="kw">return</span>
+    }
+
+    signature := r.Header.Get(<span class="st">"X-Webhook-Signature"</span>)
+    <span class="kw">if</span> signature == <span class="st">""</span> || !verifySignature(body, signature) {
+        http.Error(w, <span class="st">"invalid signature"</span>, http.StatusUnauthorized)
+        <span class="kw">return</span> <span class="cm">// unverified — never reaches json.Unmarshal</span>
+    }
+
+    <span class="cm">// only now is it safe to parse and act on the body</span>
+    <span class="kw">var</span> event PaymentEvent
+    json.Unmarshal(body, &amp;event)
+    w.WriteHeader(http.StatusOK)
+}</code></pre>
+<p>The one deliberate, easy-to-miss detail: comparing tags with <code>hmac.Equal</code>, never <code>==</code> or a hand-rolled byte loop. A naive comparison returns as soon as it finds the first mismatched byte, so a forger measuring response times can learn the secret's tag one correct byte at a time — a <dfn data-en="an attack that infers a secret value by measuring how long an operation takes, since naive comparisons exit early on the first mismatched byte and take measurably longer the more leading bytes are correct" data-vn="timing attack (giữ nguyên) — đoán secret bằng cách đo thời gian so sánh, so sánh kiểu thường thoát sớm nên byte đúng nhiều thì lâu hơn">timing attack</dfn>. <code>hmac.Equal</code> always compares every byte in constant time regardless of where the first difference is, closing that leak.</p>
+
+<h2>4 · Real services do exactly this — same shape, different envelope</h2>
+<p>This isn't a hypothetical construction — it's what production webhook providers actually ship. Stripe sends a <code>Stripe-Signature</code> header containing a timestamp plus an HMAC-SHA256 tag computed over <code>timestamp + "." + body</code> (the timestamp defeats replaying an old, validly-signed request later); GitHub sends <code>X-Hub-Signature-256</code>, an HMAC-SHA256 tag over the raw body alone. Different header names, same core idea: a secret both sides know, a tag computed over exact bytes, compared in constant time.</p>
+<div class="callout"><strong>Frontend-habit trap:</strong> there's no client-side equivalent to reach for here. A frontend never receives unsolicited server-to-server callbacks — every request it handles starts because <em>it</em> called something, or the user clicked. Webhook verification is a genuinely backend-only problem: proving the origin of a request nobody in your own UI ever asked for.</div>
+
+<div class="interview">
+<p><strong>Q: "How do you make sure a webhook actually came from the provider that claims to have sent it?"</strong> A strong answer, out loud: <em>"I'd verify an HMAC signature, not just check a static shared-secret header. The provider signs each request body with a secret only we both hold and sends that signature in a header; on my side I recompute the same HMAC over the exact raw bytes I received and compare it to theirs. If they match, I know the body wasn't tampered with in transit and came from someone holding the secret. Two details matter: I verify against the raw body before any JSON parsing, since parsing and re-serializing can change the bytes, and I compare the tags with a constant-time function like Go's hmac.Equal, not a plain equality check, so timing can't leak the correct value byte by byte."</em> The signal: naming that it's the raw bytes being signed, and that comparison must be constant-time.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A webhook endpoint has no session or user login to authenticate against — the caller merely claims to be a known provider in the request body, so without a signature check, anyone who finds the URL can send a convincing forged payload.">
+    <p class="stem">Why can't a webhook endpoint just trust the request body's claimed sender?</p>
+    <button class="opt" data-ok>no session exists, the caller's identity is just an unverified claim</button>
+    <button class="opt">no database exists, the caller's identity is always a hard-coded value</button>
+    <button class="opt">no headers exist, the caller's identity is only in a URL</button>
+    <button class="opt">no HTTPS exists, the caller's identity is always sent fully unencrypted</button>
+  </div>
+  <div class="q" data-why="HMAC lets the receiver recompute the exact same tag from the same body using the shared secret, proving both that the sender holds the secret and that the body was not altered in transit, since changing even one byte changes the resulting tag entirely.">
+    <p class="stem">What does a valid HMAC signature actually prove about a webhook body?</p>
+    <button class="opt" data-ok>it came from the secret holder, unaltered in transit</button>
+    <button class="opt">it arrived sooner than every other request that queued</button>
+    <button class="opt">it was compressed before being sent over the wire</button>
+    <button class="opt">it matches a cached response from an earlier call</button>
+  </div>
+  <div class="q" data-why="Signature verification must run against the exact raw bytes the sender signed; parsing first and re-serializing later can change whitespace, key order, or number formatting, producing different bytes than what was actually signed and defeating the check entirely.">
+    <p class="stem">Why must signature verification happen before JSON parsing, on raw bytes?</p>
+    <button class="opt" data-ok>parsing then re-serializing can change the signed bytes</button>
+    <button class="opt">parsing then re-serializing always speeds up the handler</button>
+    <button class="opt">parsing then re-serializing removes every request header sent</button>
+    <button class="opt">parsing then re-serializing encrypts the payload body twice</button>
+  </div>
+  <div class="q" data-why="A naive equality check returns as soon as it hits the first mismatched byte, so measuring response time reveals how many leading bytes were guessed correctly, letting an attacker recover a valid signature one byte at a time; a constant-time compare always checks every byte, leaking no timing signal at all.">
+    <p class="stem">Why compare signatures with a constant-time function instead of plain equality?</p>
+    <button class="opt" data-ok>plain equality leaks timing info an attacker can exploit</button>
+    <button class="opt">plain equality leaks the raw secret key inside logs</button>
+    <button class="opt">plain equality leaks the response body to any client</button>
+    <button class="opt">plain equality leaks the database schema to any caller</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://cheatsheetseries.owasp.org/cheatsheets/REST_Security_Cheat_Sheet.html">OWASP REST Security Cheat Sheet</a> (~10 min, see its webhook/HMAC-adjacent input-validation and authentication sections) — RESOURCES.md already cites the OWASP Cheat Sheet Series generally for "input validation, SQL injection, session management, secrets"; webhook authenticity is the same trust-boundary problem applied to server-to-server calls. Stripe's own <a href="https://docs.stripe.com/webhooks#verify-manually">Verify webhook signatures manually</a> page is a good concrete second read — the exact <code>timestamp + "." + body</code> construction this lesson referenced in section 4.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> open — still no reported quiz/lesson-completion outcome exists for any lesson after 30 rounds; the next session should prioritize getting that signal, or a track to deepen, over inventing a 31st topic blind.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

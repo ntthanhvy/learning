@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 27 · .map(): recoding a Series value-by-value</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 27 · ~20 min · 4 Aug 2026</p>
+<h1>.map(): recoding a Series value-by-value</h1>
+<p class="byline">Lesson 26's own teaser named two candidates — <code>.map()</code> and <code>pd.wide_to_long()</code> — re-grepped every lesson body and the glossary before writing, both still genuinely absent. This one wins: it's the tool people reach for <code>apply()</code> (Lesson 12) instead of, for the single most common recoding task — swapping one value for another across a whole column.</p>
+
+<h2>1 · The task: recode a column of values into other values</h2>
+<p>You've seen this shape already: a customer's <code>region</code> lives in a lookup table (<code>customers.csv</code>), and Lessons 5/22 pulled it in via <code>merge()</code>. But sometimes the lookup is small and already in your head — a handful of codes to labels, a handful of raw category strings to cleaned-up ones — and setting up a whole second DataFrame just to <code>merge()</code> against it is overkill. <dfn data-en="a Series method that replaces each value with another value, looked up from a dict, Series, or function passed to it — one value in, one value out, per element" data-vn="giữ nguyên '.map()' — thay từng giá trị trong 1 cột bằng giá trị khác, tra theo dict/Series/hàm, luôn 1 vào 1 ra">.map()</dfn> is built exactly for this: a Series method, one value in, one value out, per row.</p>
+<pre><code><span class="cm"># customer -> region, as a plain dict, no second DataFrame needed</span>
+region_map = {<span class="str">"An"</span>: <span class="str">"North"</span>, <span class="str">"Binh"</span>: <span class="str">"South"</span>}
+clean[<span class="str">"customer"</span>].map(region_map)
+<span class="cm"># 0    North
+# 1    North
+# 2    South
+# 3    South</span></code></pre>
+<p>SQL bridge: this is a <code>CASE WHEN col = 'An' THEN 'North' WHEN col = 'Binh' THEN 'South' END</code> written as data instead of branches — or, if the lookup already lived in a table, exactly what a small dimension-table <code>JOIN</code> gives you. <code>.map()</code> is the "the lookup fits in a dict" shortcut for that same idea.</p>
+
+<h2>2 · Three things you can pass .map() — dict, Series, or function</h2>
+<p>A <strong>dict</strong> (shown above) is the most common case: a fixed, small lookup. A <strong>Series</strong> works identically — its <em>index</em> becomes the lookup key, its <em>values</em> become the replacement, which matters if the mapping itself came from computed data (e.g. a <code>groupby()</code> result) rather than something you typed by hand:</p>
+<pre><code>region_series = pd.Series({<span class="str">"An"</span>: <span class="str">"North"</span>, <span class="str">"Binh"</span>: <span class="str">"South"</span>})
+clean[<span class="str">"customer"</span>].map(region_series)  <span class="cm"># identical result to the dict above</span></code></pre>
+<p>A <strong>function</strong> works too — this is where <code>.map()</code> and <code>apply()</code> genuinely overlap on a single Series:</p>
+<pre><code>clean[<span class="str">"amount"</span>].map(<span class="kw">lambda</span> x: <span class="str">"High"</span> <span class="kw">if</span> x &gt;= <span class="kw">100</span> <span class="kw">else</span> <span class="str">"Low"</span>)
+<span class="cm"># 0    High
+# 1     Low
+# 2     Low
+# 3    High</span></code></pre>
+
+<h2>3 · .map() vs apply(): same Series-with-a-function case, different intent</h2>
+<p>Lesson 12 taught <code>apply()</code> as the honest per-row escape hatch, on rows spanning <em>multiple columns</em> (<code>axis=1</code>) with no vectorized shortcut. <code>.map()</code> only ever runs on <strong>one Series</strong> — it can't see other columns at all. When the transform genuinely is "one column's values, translated one at a time," <code>.map()</code> says that intent directly; <code>apply()</code> works too (a Series has <code>.apply()</code> as well) but reads as "run this arbitrary function," not "recode these values."</p>
+<pre><code><span class="cm">## Both give the identical result here -- .map() just names the intent:</span>
+clean[<span class="str">"customer"</span>].map(region_map)                         <span class="cm"># "I'm recoding values"</span>
+clean[<span class="str">"customer"</span>].apply(<span class="kw">lambda</span> c: region_map.get(c))     <span class="cm"># "I'm running a function"</span></code></pre>
+<p>The dict/Series form has no <code>apply()</code> equivalent at all without writing a lambda around <code>.get()</code> yourself — <code>.map()</code> takes the lookup directly, no wrapping needed.</p>
+
+<h2>4 · The gotcha: unmatched values become NaN, silently</h2>
+<p>If a value in the Series has no matching key in the dict/Series, <code>.map()</code> does not raise — it fills in <code>NaN</code> for that row and moves on, same "no crash, quietly wrong" shape this course has flagged since Lesson 19 (<code>nunique()</code>'s truthy Ellipsis, Lesson 24's NaN-into-default-branch, Lesson 25's fixed-category NaN, Lesson 26's silent no-op). Hand-verified on this course's fixture:</p>
+<pre><code>partial_map = {<span class="str">"An"</span>: <span class="str">"North"</span>}  <span class="cm"># Binh is missing on purpose</span>
+clean[<span class="str">"customer"</span>].map(partial_map)
+<span class="cm"># 0    North
+# 1    North
+# 2      NaN     &lt;- Binh had no key in partial_map -- no error, just NaN
+# 3      NaN</span></code></pre>
+<p>This is a real interview trap: a lookup dict that's missing an entry silently NaNs those rows out instead of failing loudly. Always check <code>.isna().sum()</code> after a <code>.map()</code> call against an external/hand-built dict, the same reflex Lesson 3 built for missing data generally — a value count of unexpected NaNs after a recode is the tell.</p>
+
+<div class="callout"><strong>Bonus, not the main lesson:</strong> a plain DataFrame also has its own <code>.map()</code> (the modern name for what used to be called <code>applymap()</code>, now deprecated) — it applies a function to <em>every cell</em> across the whole table at once, not one column: <code>small.map(lambda v: str(v).upper())</code>. Reach for the Series version taught above for recoding one column; the DataFrame version is rare in practice and mentioned here only so the name doesn't surprise you if you meet it.</div>
+
+<div class="interview">
+<p><strong>Q: "When would you use .map() instead of apply()?"</strong> A strong answer, out loud: <em>"map() is for recoding a single Series, value by value — I pass it a dict, a Series, or a function, and it looks up or computes one replacement per element. apply() is more general: it runs a function per row across multiple columns, or per column, and doesn't have a built-in dict-lookup shorthand. If I'm translating one column's codes into labels — a status code to a status name, say — map() says that intent directly and is the more idiomatic choice. The gotcha I watch for: map() doesn't raise on an unmatched value, it silently fills NaN, so I always check isna().sum() afterward against an external lookup dict to catch missing keys before they become silent data loss."</em> The signal: naming map() as Series-only and intent-revealing, not just "a synonym for apply()," and knowing the silent-NaN gotcha without being prompted.</p>
+</div>
+
+<h2>Try it — self-checking practice (~15 min)</h2>
+<p>Open <code>practice/27_map.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/27_map.py</code></pre>
+<p>Uses the same cleaned rows as Lessons 6-26 (An 120.0/01-05, An 42.0/01-10, Binh 35.5/01-06, Binh 180.0/01-09). Exercise 1 recodes <code>customer</code> to <code>region</code> with a dict; Exercise 2 recodes <code>amount</code> to a High/Low label with a function; Exercise 3 reproduces the unmatched-key-becomes-NaN gotcha on purpose and counts the resulting NaNs.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why=".map() only ever operates on a single Series -- one column's values, translated one at a time via a dict, Series, or function. apply() is the more general tool, able to run a function across multiple columns per row (axis=1) or per column, with no built-in dict-lookup shorthand.">
+    <p class="stem">What is the key difference between <code>.map()</code> and <code>apply()</code>?</p>
+    <button class="opt" data-ok>map() works on one Series; apply() spans columns too</button>
+    <button class="opt">map() always runs faster; apply() always runs much slower</button>
+    <button class="opt">map() only accepts functions; apply() only accepts dicts here</button>
+  </div>
+  <div class="q" data-why="When a value in the Series has no matching key in the dict or Series passed to .map(), pandas does not raise an error -- it silently fills NaN for that row and continues, the same 'no crash, quietly wrong' shape this course has flagged repeatedly since Lesson 19.">
+    <p class="stem">What happens when <code>.map()</code> hits a value with no matching dict key?</p>
+    <button class="opt" data-ok>that row silently becomes NaN; no error raised</button>
+    <button class="opt">a KeyError is always raised immediately, stopping everything</button>
+    <button class="opt">the original unmapped value stays completely unchanged always</button>
+  </div>
+  <div class="q" data-why="A pandas Series passed to .map() supplies the lookup through its index (the keys) and its values (the replacements) -- functionally identical to passing an equivalent plain dict, useful when the lookup itself came from computed data like a groupby() result rather than something typed by hand.">
+    <p class="stem">When <code>.map()</code> is given a Series instead of a dict, what supplies the lookup keys?</p>
+    <button class="opt" data-ok>the passed Series's index; its own values become replacements</button>
+    <button class="opt">the original Series's own row position, counted from zero</button>
+    <button class="opt">alphabetical order of every single distinct value found today</button>
+  </div>
+  <div class="q" data-why="A small, fixed customer-to-region lookup that already fits in a dict has no need for a second DataFrame and a merge() call -- .map() reads that same intent directly on the one column, in one line, without the setup merge() requires.">
+    <p class="stem">Why reach for <code>.map(region_map)</code> instead of a <code>merge()</code> against a lookup table?</p>
+    <button class="opt" data-ok>the lookup is small and fixed; no second DataFrame needed</button>
+    <button class="opt">merge() cannot ever handle a two-column lookup table at all</button>
+    <button class="opt">map() always executes faster than any merge(), no matter what</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the pandas User Guide's <a href="https://pandas.pydata.org/docs/reference/api/pandas.Series.map.html">Series.map()</a> reference page (~5-10 min) — covers the dict/Series/function forms and the <code>na_action</code> keyword in full; cross-reference with <a href="https://pandas.pydata.org/docs/user_guide/index.html">the pandas User Guide</a> more broadly for how it fits alongside <code>apply()</code> and <code>replace()</code>.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>.map()</code> is new today.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-27 comes back reported as shakiest, otherwise <code>pd.wide_to_long()</code> (Lesson 26's other named candidate, confirmed still genuinely uncovered as of this round's grep).<br><br>
+💬 Anything unclear — .map()'s dict/Series/function forms, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

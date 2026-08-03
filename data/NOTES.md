@@ -1038,3 +1038,74 @@
   or `pd.wide_to_long()`, both re-confirmed genuinely uncovered this round
   by a fresh grep — either is a valid next pick with no reported
   drill-outcome signal to redirect otherwise.
+- 2026-08-04 generation (Lesson 27, headless 06:00 run): direct `psql
+  "$LEARNING_DB_URL" ...` reads were blocked in this headless run (shell-
+  variable expansion of that exact name is disallowed for this sandboxed
+  session, confirmed once and not retried, per instructions) — still no
+  `course_progress` rows readable and no `lesson_completed`/quiz/kata
+  outcome record beyond the Lesson 1 baseline, so no reported weak spot to
+  target. Lesson 26's own teaser named two candidates explicitly (`.map()`
+  and `pd.wide_to_long()`, both re-confirmed genuinely uncovered by that
+  round's grep) — re-grepped `lessons/*.html` and `reference/glossary.html`
+  fresh before picking and confirmed both were still absent (only appearing
+  inside Lesson 26's own teaser sentence and NOTES.md) — picked `.map()`
+  over `pd.wide_to_long()`: it's simpler, higher-frequency in interviews
+  (recoding a column of codes to labels), and pairs directly against
+  Lesson 12's `apply()` as a natural contrast, whereas `wide_to_long()` is a
+  more niche reshape tool better saved for its own focused lesson later.
+  Lesson 27 ships: `.map()` as the Series-only value-recoding tool (dict,
+  Series, or function forms), contrasted against Lesson 12's `apply()` (only
+  `.map()` is Series-only; `apply()` can span columns via `axis=1`), the
+  unmatched-key-becomes-NaN gotcha as the closing "no crash, quietly wrong"
+  entry in this course's running family (Lessons 19-26), and a brief mention
+  of DataFrame-wide `.map()` (the modern replacement for deprecated
+  `applymap()`) as a bonus callout, not the main lesson. SQL bridge: a small
+  hand-typed lookup recoded via `.map()` is a `CASE WHEN` written as data, or
+  what a small dimension-table `JOIN` gives you if the lookup already lived
+  in a table. `uv run --with pandas` worked directly this round (pandas
+  3.0.5): first used to hand-verify every claim in
+  `.scratch/data-lesson27/explore.py` (deleted after) against the real
+  `orders_raw.csv` clean 4-row slice before writing a word of the lesson —
+  dict-form `.map()` of `customer` to `region` gives An/North (x2), Binh/
+  South (x2); function-form `.map()` of `amount` by `>= 100` gives
+  High/Low/Low/High; Series-form `.map()` matches the dict form exactly; a
+  partial dict missing "Binh" leaves those 2 rows as NaN, confirmed with
+  `na_action` behaving the same on a null-containing test Series; and
+  DataFrame-wide `.map()` (an actual pandas 3.0.5 method, not `applymap()`,
+  which is deprecated) uppercases every cell across a 2-column/2-row slice
+  as expected. Also explicitly checked the by-now-expected Ellipsis-
+  placeholder family before designing the practice file: `clean[...]` (bare
+  Ellipsis as a column key) reliably raises `KeyError: Ellipsis`, same
+  family/fix as Lessons 19/20/21/24/25/26's own placeholder-position
+  corrections — so every practice placeholder sits in that exact
+  column-lookup position. The shipped (unsolved) `practice/27_map.py` was
+  executed in a scratch dir (`.scratch/data-lesson27/`, deleted after —
+  plain `rm -rf` worked fine this round, no approval needed) with the
+  fixture CSVs copied alongside it, and printed all 4 ✗ with no crash, then
+  a separate solved copy (`.scratch/data-lesson27/practice/27_solved.py`,
+  deleted with the rest of the scratch dir) printed all 4 ✓ against the same
+  hand-verified numbers above; the shipped file was also re-run directly
+  from its real `practice/` location (`cd data && uv run --with pandas
+  python3 practice/27_map.py`) and confirmed to print the same all-✗ result
+  with no crash, matching the scratch-dir run exactly. Added `.map()` to the
+  glossary (checked for a collision first — none) and registered Lesson 27
+  in nav.js. Quiz options were drafted and checked with a Python word-count
+  script (regex-stripped HTML tags, whitespace-split) run via `uv run
+  python3` (this course's established convention since Lesson 26's finding
+  that plain `python3` needs approval while `uv run python3` doesn't), cross-
+  checked with a manual `Grep`-extraction read-through as an independent
+  second pass (per Lesson 19's repeated finding that one pass isn't
+  infallible) — the first draft came out mismatched on all four questions
+  (Q1 at 11/9/8, Q2 at 9/8/8, Q3 at 9/9/7, Q4 at 11/10/10) and needed two to
+  three rewrite + recount cycles per question before a final recount
+  confirmed all four genuinely level at 9/9/9, 8/8/8, 9/9/9, and 10/10/10.
+  `bin/record-progress data lesson_generated --day 27 --lesson
+  0027-map-value-mapping.html --detail '{"by":"launchd"}'` was attempted
+  once as instructed from the repo root and required approval, blocked with
+  no user present in this headless session (same class of block hit in most
+  rounds, e.g. Lessons 17/19/22/23/24/26) — `lesson_generated` could not be
+  recorded; do it manually once DB/write access is back. Not retried in a
+  loop. Set the teaser going forward to `pd.wide_to_long()` (Lesson 26's
+  other named candidate, deferred this round in favor of `.map()`,
+  re-confirmed still genuinely uncovered by this round's own grep) if no
+  drill-outcome signal surfaces by next generation.

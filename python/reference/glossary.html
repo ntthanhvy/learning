@@ -81,6 +81,16 @@
   <tr><td>JSON</td><td>giữ nguyên "JSON" — định dạng dữ liệu dạng text, object/array của nó map thẳng sang dict/list của Python</td><td>A text format for structured, nestable data whose <code>{...}</code> object and <code>[...]</code> array syntax map directly onto Python's own <code>dict</code> and <code>list</code> literals. <code>json.load(f)</code> reads a file straight into real Python objects, preserving types (<code>int</code>, <code>list</code>, ...); <code>json.dump(obj, f)</code> writes them back out as JSON text.</td></tr>
 </table>
 
+<h2 id="day7">Day 7 — Dataclasses, typing &amp; an ETL capstone</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>dataclass</td><td>giữ nguyên "dataclass" — class khai báo field có kiểu, tự có __init__/__repr__/__eq__, đỡ phải viết tay</td><td>A class decorated with <code>@dataclass</code> from the standard library <code>dataclasses</code> module. Declaring typed fields as class-level annotations auto-generates <code>__init__</code>, a readable <code>__repr__</code>, and a field-by-field <code>__eq__</code>, removing the boilerplate a plain class needs for the same guarantees.</td></tr>
+  <tr><td>default (dataclass field)</td><td>giữ nguyên "default" — giá trị mặc định khai trong field, dùng khi constructor không truyền</td><td>A value written directly in a dataclass field declaration, e.g. <code>currency: str = "VND"</code>, used automatically whenever a caller omits that field in the constructor call — same idea as Day 4's default argument, applied to a class field instead of a function parameter. Distinct from Day 4's <code>default argument</code>, which is a function-parameter default, not a class-field one.</td></tr>
+  <tr><td>type hint</td><td>giữ nguyên "type hint" — chú thích kiểu dữ liệu, Python không tự kiểm tra lúc chạy</td><td>An optional annotation on a variable, function parameter, or return value stating the type it's expected to hold, written <code>name: Type</code>. Python does not enforce these at runtime — they're documentation plus input for external tools like editors and <code>mypy</code>.</td></tr>
+  <tr><td>Optional[X]</td><td>giữ nguyên "Optional" — kiểu X hoặc None, dùng khi field có thể chưa có giá trị</td><td><code>typing.Optional[X]</code>, equivalent to <code>X | None</code>, means a value is either type <code>X</code> or the literal <code>None</code> — used to hint a parameter or field that may legitimately be missing.</td></tr>
+  <tr><td>ETL</td><td>giữ nguyên "ETL" — Extract (đọc), Transform (biến đổi), Load (ghi ra) — hình dạng chuẩn của pipeline dữ liệu</td><td>Extract reads raw data from its source format, Transform reshapes/cleans/aggregates it into the shape actually needed, and Load writes the result to its destination — the standard three-stage shape of nearly every real data pipeline, including the capstone script this lesson builds.</td></tr>
+</table>
+
 <p class="next">💬 A term here still unclear? Ask your teacher — hỏi bằng tiếng Việt cũng được.</p>
 
 <script src="../assets/nav.js"></script>

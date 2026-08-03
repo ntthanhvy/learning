@@ -889,3 +889,96 @@
   ask the user directly which track to deepen or for a completion signal —
   still no `lesson_completed` record exists for any lesson after 29
   rounds, now a 29-round-long standing gap.
+- 2026-08-04 generation (Lesson 30, headless 06:00 run): idempotency check
+  first — confirmed `lessons/0030-*.html` did not exist and lesson 30 was not
+  yet in nav.js before writing anything. Lesson 29 closed out all three named
+  candidates from Lesson 27's search (circuit breaker, graceful shutdown,
+  outbox pattern) and explicitly called for either a fresh gap-finding pass or
+  a user completion signal — still no `lesson_completed` record exists for any
+  lesson after 29 rounds (DB reads confirmed blocked again this session, one
+  attempt only, per the task's own guidance not to retry), so this round ran a
+  fresh gap-finding pass per the task's candidate list: grepped
+  `lessons/*.html` and `reference/glossary.html` for cache invalidation
+  (already covered, Lessons 4/8/9/14/20), N+1 (already covered, Lesson 5),
+  distributed locks (zero hits), webhooks/signature verification (webhook
+  named only in passing in Lessons 24 and 29 as an example use-case, never its
+  own topic; "signature verif"/"hmac" zero hits anywhere), feature flags
+  (already covered, Lesson 21), blue-green/canary (zero hits), read
+  replicas/sharding (zero hits, but MISSION.md's own Out of scope section
+  explicitly excludes "NoSQL, sharding, replication, distributed systems
+  beyond vocabulary level" — ruled out as out-of-scope, not a gap), pub-sub/
+  event-driven (zero hits, but adjacent to the same out-of-scope distributed-
+  systems line and already partially covered via Lesson 29's message-queue
+  framing), API gateway (zero hits, but edges toward
+  infra/cloud-provider-specifics MISSION.md also excludes), service-to-service
+  auth/mTLS (zero hits), timeouts/retries/backoff (backoff named only once in
+  passing in Lesson 28's frontend-habit callout; "jitter"/"exponential" zero
+  hits), health checks/readiness (already covered, Lessons 13/20/27). Chose
+  webhook signature verification: genuinely uncovered by exact-phrase and
+  tangential-mention grep alike, squarely in scope (MISSION criterion 4's
+  security/auth track, extending Lessons 4/17/22/23's inbound-request-trust
+  throughline to a new trust boundary — verifying a claimed third-party
+  caller instead of a claimed user), and avoids the two candidates MISSION.md's
+  own Out of scope section rules out (sharding/replication/distributed-systems-
+  beyond-vocabulary; Kubernetes/infra/cloud-provider-specifics, which API
+  gateway leans toward). Lesson 30 covers it: why a webhook endpoint has no
+  session to authenticate against and the caller's identity is just a claim in
+  the body (contrasted explicitly against Lesson 12's IDOR — that was
+  "authenticated as someone, wrong someone"; this is "no authentication at
+  all"), why a static shared-secret header alone is insufficient (a leaked
+  static string forges anything forever, versus proving THIS exact body came
+  from the secret holder), HMAC as the mechanism (tag computed over the exact
+  body bytes, unforgeable without the secret, changes completely if the body
+  changes), verifying against raw bytes before JSON parsing specifically (key
+  order/whitespace/number formatting can change bytes without changing
+  meaning), a Go `verifySignature`/`webhookHandler` snippet using
+  `hmac.New`/`hmac.Equal`, why `hmac.Equal` and never `==` (constant-time
+  comparison defeats a timing attack that could otherwise recover a valid
+  signature one byte at a time), and Stripe's `Stripe-Signature` /
+  GitHub's `X-Hub-Signature-256` as real, not hypothetical, instances of the
+  same shape. The Go snippet (`verifySignature`, `webhookHandler`, with a
+  `PaymentEvent` stand-in struct) was compile-checked clean with
+  `go build -C` / `go vet -C` in a scratch module
+  (`.scratch/backend-lesson30/`, built binary removed after, directory
+  deleted entirely after per the task's own instruction — earlier rounds left
+  `go.mod`/`main.go` in place, but this round's task briefing explicitly said
+  to delete the scratch dir, so it's gone, not left behind) — no approval
+  blocker for either `-C`-style invocation this round, consistent with every
+  round since Lesson 13's finding. Added `webhook`, `HMAC`, and `timing
+  attack` to the glossary (confirmed via grep beforehand that none of the
+  three existed anywhere in `lessons/*.html` or `glossary.html`) and
+  registered Lesson 30 in nav.js. Quiz options were drafted into four
+  per-question scratch files under `.scratch/backend-lesson30-quiz/` (deleted
+  after) and verified with `wc -w` per file, one literal command per line (no
+  loop/variable-expansion form attempted at all this round, per the task's
+  explicit warning that this sandbox rejects that pattern outright) — Q1 was
+  11/10/12/10 and Q4 was already even at 9/9/9/9 on the first draft; Q1 needed
+  one rewrite pass (a first attempt at fixing option c still overshot at 13
+  before landing at 11), Q2 was 10/8/9/9 and needed two rewrite passes (b/c/d
+  first raised to 9/9/9, then a needed trimming from 10 to 9), Q3 was 8/8/7/8
+  and needed one rewrite (option c only) — final tallies, each re-verified
+  with `wc -w` after every edit: Q1 11/11/11/11, Q2 9/9/9/9, Q3 8/8/8/8, Q4
+  9/9/9/9; cross-checked the final option text against the shipped file with
+  `grep -o` on the exact strings to confirm the scratch-file text and the
+  shipped HTML matched byte-for-byte before trusting the counts. Primary
+  source: the OWASP Cheat Sheet Series' REST Security Cheat Sheet (RESOURCES.md
+  already cites the series generally for "input validation, SQL injection,
+  session management, secrets"; this extends it to webhook/server-to-server
+  authenticity), with Stripe's own "Verify webhook signatures manually" docs
+  page named as a concrete second read for the exact `timestamp + "." + body`
+  construction mentioned in the lesson. `/home/runner/work/learning/learning/
+  bin/record-progress backend lesson_generated --day 30 --lesson
+  0030-webhook-signature-verification.html --detail '{"by":"launchd"}'` was
+  attempted once via its absolute path as instructed and required approval
+  with none available in this headless run — recorded here as blocked, not
+  retried (consistent with most rounds since Lesson 19; the write-path block
+  looks like the norm now). This closes the webhook-signature-verification gap
+  found by the task's candidate-topic grep; distributed locks, blue-green/
+  canary deploys, and service-to-service auth (mTLS/JWT) remain confirmed
+  zero-hit candidates from the same list for a future round, while read
+  replicas/sharding and API gateways were deliberately ruled out as brushing
+  against MISSION.md's own Out of scope section rather than genuine gaps.
+  Still no `lesson_completed` record exists for any lesson after 30 rounds —
+  the next session should keep treating a completion/quiz-outcome signal, or
+  a user-named track to deepen, as higher priority than a 31st topic picked
+  blind.

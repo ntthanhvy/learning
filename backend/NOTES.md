@@ -982,3 +982,84 @@
   the next session should keep treating a completion/quiz-outcome signal, or
   a user-named track to deepen, as higher priority than a 31st topic picked
   blind.
+- 2026-08-05 generation (Lesson 31, headless 06:00 run): idempotency check
+  first — confirmed `lessons/0031-*.html` did not exist and lesson 31 was not
+  yet in nav.js before writing anything (highest existing file was 0030,
+  dated 2026-08-04). `/home/runner/work/learning/learning/bin/query-progress`
+  (a read, no args) was attempted once as instructed via its absolute path
+  and required approval with none available in this headless run — not
+  retried, per the task's own guidance not to spend more than one or two
+  tries on it; `course_progress` could not be read, so still no
+  `lesson_completed` record confirmed for any of Lessons 1-30 either way.
+  Lesson 30 left its teaser open (no chosen next topic), so this round
+  re-checked Lesson 30's own closing note, which named three candidates from
+  Lesson 27/28's original gap-finding pass: distributed locks, blue-green/
+  canary deploys, and service-to-service auth (mTLS/JWT) — the first two
+  ruled out again as brushing against MISSION.md's own Out of scope section
+  (distributed-systems-beyond-vocabulary and infra/cloud-provider-specifics,
+  respectively). Service-to-service auth was squarely in scope (MISSION
+  criterion 4's auth track) and ties directly to a thread Lesson 4 itself
+  left open: its own rule of thumb said "tokens when multiple independent
+  services must verify identity without calling each other back" but never
+  showed how one backend actually authenticates to another. Grepped all 30
+  lesson bodies plus glossary.html for "service-to-service", "client
+  credentials", "mutual TLS", and "mTLS" beforehand — all came back empty
+  except NOTES.md's own retrospective mentions, confirming the gap was real.
+  Lesson 31 covers it: why Lesson 4's session/cookie and browser-JWT
+  mechanisms assume a human at a browser and don't apply to one backend
+  calling another with no request from any user upstream, three concrete
+  mechanisms (static API key with a constant-time comparison — reusing
+  Lesson 30's hmac.Equal reasoning applied to subtle.ConstantTimeCompare over
+  a plain shared secret; OAuth's client credentials grant trading a
+  rarely-exposed long-lived secret for a short-lived token; mutual TLS
+  proving identity in the TLS handshake itself, below the HTTP layer, with a
+  `tls.Config{ClientAuth: tls.RequireAndVerifyClientCert}` sketch), a
+  three-way comparison table (reusing Lesson 25's `table.cmp`/`.cmp-wrap`
+  component), and an explicit rule of thumb for picking between them rather
+  than declaring one "the secure one" — same non-absolutist framing as Lesson
+  4's session-vs-JWT verdict. Both Go snippets (`requireServiceAPIKey`,
+  `newMTLSServer`) were compile-checked clean with `go build -C` / `go vet
+  -C` in a scratch module (`.scratch/backend-lesson31/`, built binary written
+  to `/tmp/lesson31bin` and not copied into the scratch dir; `rm -f` on that
+  /tmp path was blocked by this session's sandbox as outside the allowed
+  working directory, left in place per the harmless precedent Lesson 27's
+  notes already established; scratch dir itself left with only
+  `go.mod`/`main.go`) — no approval blocker for either `-C`-style invocation
+  this round, consistent with every round since Lesson 13's finding. Added
+  `constant time (comparison)`, `client credentials grant`, and `mTLS (mutual
+  TLS)` to the glossary (confirmed via grep beforehand that none of the three
+  existed anywhere in `lessons/*.html` or `glossary.html`; `authentication`
+  itself was reused from Lesson 4 rather than re-added) and registered Lesson
+  31 in nav.js. Quiz options were drafted, then verified with `wc -w` per
+  line via individual `sed -n '<n>p' | wc -w` calls (no loop/variable-
+  expansion form attempted, per every round since Lesson 28's finding that
+  this sandbox rejects that pattern outright) — all four questions needed at
+  least one rewrite pass: Q1 was 9/8/8/8 (fixed by rewording option a twice,
+  since a hyphenated "logged-in" first reintroduced the same undercount class
+  Lessons 26-28's notes already flagged, before landing on a hyphen-free
+  8-word phrasing), Q2 was 8/7/9/7, Q3 was 8/7/8/8, Q4 was 10/9/10/9 (option c
+  needed three successive rewrites — the first two swapped words without
+  changing the count at all before one that actually added a word landed
+  correctly); final tallies, each re-verified after every edit: Q1 8/8/8/8,
+  Q2 8/8/8/8, Q3 8/8/8/8, Q4 9/9/9/9. Primary source: the OWASP Authentication
+  Cheat Sheet (RESOURCES.md already cites the OWASP Cheat Sheet Series
+  generally for "input validation, SQL injection, session management,
+  secrets"; this extends it to machine-to-machine authentication), with MDN's
+  HTTP Guide named as a secondary read for the Authorization header mechanism
+  without going as deep as the full OAuth 2.0 RFC.
+  `/home/runner/work/learning/learning/bin/record-progress backend
+  lesson_generated --day 31 --lesson 0031-service-to-service-auth.html
+  --detail '{"by":"launchd"}'` was attempted once via its absolute path as
+  instructed and required approval with none available in this headless run
+  — recorded here as blocked, not retried (consistent with most rounds since
+  Lesson 19; the write-path block looks like the norm now, same finding as
+  every recent round). This closes the service-to-service-auth gap, the last
+  in-scope candidate named by Lesson 27/28's original search — distributed
+  locks and blue-green/canary deploys remain confirmed zero-hit but
+  out-of-scope-per-MISSION.md candidates, not genuine gaps. Still no
+  `lesson_completed` record exists for any lesson after 31 rounds — the next
+  session should keep treating a completion/quiz-outcome signal, or a
+  user-named track to deepen, as higher priority than a 32nd topic picked
+  blind; a fresh gap-finding pass (re-scan MISSION.md/RESOURCES.md/OWASP-
+  adjacent terms, or grep for other not-yet-taught candidates the way Lessons
+  22-24 and 30 did) is the fallback if neither surfaces.

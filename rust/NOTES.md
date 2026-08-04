@@ -397,3 +397,17 @@ by the user there; they apply here identically.
   verification — data lesson 27 — `.map()` — and python Day 7 —
   dataclasses/typing capstone, closing Phase 1 — were generated this round
   via delegated agents.)
+- 2026-08-05 (headless 06:00 run): same as every prior post-week day —
+  verified `daily.html`, `assets/srs.js`, and `assets/quiz-bank.js` are all
+  present and untouched (`quiz-bank.js` shows 8 textual `id: "k` matches —
+  the 7 real kata entries `k1`-`k7` plus the commented-out example line,
+  consistent with every prior round's finding; `nav.js` still registers
+  only the 7 Jul 8-14 lessons, `LESSONS` array unchanged). Still the
+  correct "daily quiz+kata" for this post-week phase per PLAN.md, so
+  nothing new was generated. `bin/query-progress` hit a generic "requires
+  approval" gate with no user present this session (tried once, not
+  retried per instructions), so no `course_progress` rows could be read for
+  a scope-change signal (e.g. a request to keep growing the bank past Day
+  7). `bin/record-progress` was not invoked since nothing new was generated
+  or completed to log this round. No new learning record beyond the Day-1
+  baseline.

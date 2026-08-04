@@ -91,6 +91,17 @@
   <tr><td>ETL</td><td>giữ nguyên "ETL" — Extract (đọc), Transform (biến đổi), Load (ghi ra) — hình dạng chuẩn của pipeline dữ liệu</td><td>Extract reads raw data from its source format, Transform reshapes/cleans/aggregates it into the shape actually needed, and Load writes the result to its destination — the standard three-stage shape of nearly every real data pipeline, including the capstone script this lesson builds.</td></tr>
 </table>
 
+<h2 id="day8">Day 8 — Exceptions: catching failure on purpose</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>exception</td><td>giữ nguyên "exception" — object Python raise ra khi có lỗi, mang theo type và message, dừng chạy bình thường ngay lập tức</td><td>An object Python raises the instant something goes wrong, carrying a type (e.g. <code>ValueError</code>, <code>KeyError</code>) and a message. Raising one immediately stops normal execution and hands control to the nearest matching <code>except</code> block, or all the way out of the program if none exists.</td></tr>
+  <tr><td>traceback</td><td>giữ nguyên "traceback" — báo cáo Python in ra khi exception không ai bắt, cho thấy chuỗi hàm gọi nhau lúc lỗi xảy ra</td><td>The report Python prints when an exception reaches the top of the program uncaught: the exception's type, its message, and the chain of function calls active when it was raised. An uncaught exception is the default outcome, not a special failure mode.</td></tr>
+  <tr><td>try / except</td><td>giữ nguyên "try/except" — chạy code có thể lỗi trong try, bắt đúng loại lỗi mong đợi trong except</td><td><code>try:</code> runs code that might raise; each <code>except ExceptionType:</code> after it catches only that exact type, letting anything else propagate. Always name the exact type — a bare <code>except:</code> catches everything, including real bugs, and silently hides them.</td></tr>
+  <tr><td>else / finally (try statement)</td><td>giữ nguyên "else/finally" — else chạy khi try không lỗi, finally luôn chạy dù có lỗi hay không</td><td>In a <code>try</code> statement, <code>else</code> runs only if the <code>try</code> block raised nothing at all; <code>finally</code> runs unconditionally — success, caught failure, or even an uncaught failure still propagating afterward — the same "always runs" guarantee as Day 6's context-manager <code>__exit__</code>.</td></tr>
+  <tr><td>raise</td><td>giữ nguyên "raise" — chủ động tạo ra exception khi hàm gặp input không xử lý được</td><td>The statement that creates and triggers an exception on purpose, e.g. <code>raise ValueError("message")</code>, used inside a function when a caller has done something the function can't handle. Immediately stops that function and propagates like any other exception.</td></tr>
+  <tr><td>custom exception</td><td>giữ nguyên "custom exception" — exception type tự định nghĩa bằng cách subclass Exception, đặt tên riêng cho lỗi cụ thể của mình</td><td>A new exception type defined by subclassing <code>Exception</code> (or a more specific built-in type), giving a domain-specific failure its own name so callers can <code>except</code> it narrowly instead of guessing which built-in type a function happens to raise.</td></tr>
+</table>
+
 <p class="next">💬 A term here still unclear? Ask your teacher — hỏi bằng tiếng Việt cũng được.</p>
 
 <script src="../assets/nav.js"></script>

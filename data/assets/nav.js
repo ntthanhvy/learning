@@ -60,6 +60,8 @@
       file: "lessons/0026-settingwithcopy-and-copy.html" },
     { n: 27, date: "2026-08-04", title: ".map(): recoding a Series value-by-value",
       file: "lessons/0027-map-value-mapping.html" },
+    { n: 28, date: "2026-08-05", title: "pd.wide_to_long(): melting several metrics at once",
+      file: "lessons/0028-wide-to-long.html" },
   ];
 
   const REFS = [

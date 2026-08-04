@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 31 · Service-to-service auth: when the caller isn't a person</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 31 · ~20 min</p>
+<h1>Service-to-service auth: when the caller isn't a person</h1>
+<p class="byline">Lesson 4's rule of thumb said "tokens when multiple independent services must verify identity without calling each other back" — but it never showed <em>how</em> one backend proves its identity to another, with no human, no login form, and no browser cookie anywhere in the picture. Today: three real mechanisms for that, and when each earns its place.</p>
+
+<h2>1 · Every auth mechanism so far assumed a human at a browser</h2>
+<p>Lesson 4 built <dfn data-en="the process of proving who is making a request — as opposed to authorization, which decides what they're allowed to do once known" data-vn="authentication (giữ nguyên) — xác minh 'bạn là ai'">authentication</dfn> around a login form: a person types a password once, gets a cookie or JWT back, and the browser carries it on every later request. Lesson 30's webhook lesson broke one assumption — no session at all, just a signed claim — but a person was still, indirectly, the reason the call happened (a payment triggered it). This lesson breaks a second assumption: sometimes the caller is <em>your own</em> backend, calling <em>another</em> backend, on a schedule or in response to internal logic, with no request from any user anywhere upstream. Your order service calling your billing service to charge a card is the shape: two systems you both operate, one machine talking to another.</p>
+<div class="callout"><strong>Not a new problem, a missing mechanism:</strong> the question is still "who is this request from" — Lesson 4's question exactly. What's different is the answer can't be "look up a session" or "ask a person to log in," because there's no session and no person. The three options below are just different ways to answer that same question for a machine caller.</div>
+
+<h2>2 · Option 1: a static API key — simple, and only as strong as its handling</h2>
+<p>The simplest mechanism: generate a long random string per calling service, give it to that service out-of-band (a secrets manager, Lesson 21's config layer), and have it send that string on every request. The receiving service checks it against the value it expects — in <dfn data-en="comparing byte-for-byte in constant time, so measuring how long the comparison takes cannot reveal how many leading bytes matched — the same defense Lesson 30 used for HMAC signatures" data-vn="so sánh constant-time (giữ nguyên) — so từng byte với thời gian cố định, không lộ thông tin qua tốc độ so sánh">constant time</dfn>, for the same reason Lesson 30's HMAC comparison had to be:</p>
+<pre><code><span class="cm">// requireServiceAPIKey checks a static, per-service API key on every request.</span>
+<span class="cm">// Unlike a user password, this key is never hashed on the server side — it's</span>
+<span class="cm">// compared directly because it's already a random, high-entropy secret, not</span>
+<span class="cm">// something a human chose and might reuse elsewhere.</span>
+<span class="kw">func</span> requireServiceAPIKey(next http.Handler) http.Handler {
+    want := []<span class="ty">byte</span>(os.Getenv(<span class="st">"BILLING_SERVICE_API_KEY"</span>)) <span class="cm">// Lesson 21: a secret is config too</span>
+    <span class="kw">return</span> http.HandlerFunc(<span class="kw">func</span>(w http.ResponseWriter, r *http.Request) {
+        got := []<span class="ty">byte</span>(r.Header.Get(<span class="st">"X-Service-Key"</span>))
+        <span class="kw">if</span> len(got) == 0 || subtle.ConstantTimeCompare(got, want) != 1 {
+            http.Error(w, <span class="st">"invalid service key"</span>, http.StatusUnauthorized)
+            <span class="kw">return</span>
+        }
+        next.ServeHTTP(w, r)
+    })
+}</code></pre>
+<p>This is Lesson 30's <code>hmac.Equal</code> lesson applied to a plain shared secret instead of a signature — same timing-attack risk, same fix. Its weakness is exactly the one Lesson 30 named for a bare shared-secret header: the key is a single static string, so anyone who intercepts it (a log line, a misconfigured trace, a compromised service) can impersonate the calling service forever until it's rotated. Fine for a small number of internal services you fully control; risky as the only mechanism once more services, or less-trusted ones, are involved.</p>
+
+<h2>3 · Option 2: OAuth 2.0 client credentials — a short-lived token instead of a forever secret</h2>
+<p>The <dfn data-en="an OAuth 2.0 grant type where a service authenticates directly with its own client id and secret (no user, no browser redirect) and receives back a short-lived access token to use on subsequent calls" data-vn="client credentials grant (giữ nguyên) — service tự xác thực bằng client id/secret, đổi lấy access token ngắn hạn để gọi API">client credentials grant</dfn> fixes the "forever secret" problem by adding a step: the calling service still holds a long-lived client id and secret, but instead of sending that secret on every request, it exchanges it once (or once per token lifetime) with an authorization server for a short-lived access token — typically a JWT, Lesson 4's other design — and sends <em>that</em> on each call. If a token leaks, it's only useful until it expires, often minutes; the long-lived secret itself is exchanged rarely, so it's exposed far less often.</p>
+<table class="gloss">
+  <tr><th></th><th>Static API key</th><th>Client credentials grant</th></tr>
+  <tr><td>What travels on every call</td><td>The long-lived secret itself</td><td>A short-lived token derived from the secret</td></tr>
+  <tr><td>Blast radius of one leak</td><td>Valid until manually rotated</td><td>Valid only until the token expires</td></tr>
+  <tr><td>Moving parts</td><td>Just the two services</td><td>Adds a third party: the authorization server</td></tr>
+  <tr><td>Typical fit</td><td>A handful of internal services you own</td><td>Third-party integrations, many callers, compliance needs</td></tr>
+</table>
+<p>The trade-off is real, not free: a third party (the authorization server) is now in the request path for every token refresh, and that's one more system that can be slow or down. This is why a static key is still a completely reasonable choice for two services inside the same team's infrastructure — the extra moving part has to earn its cost.</p>
+
+<h2>4 · Option 3: mutual TLS — proving identity below the HTTP layer entirely</h2>
+<p>Both options above send a secret <em>inside</em> the request — a header value the application code checks. <dfn data-en="mutual TLS: both sides of a TLS connection present and verify a certificate, so the server confirms the client's identity as part of the handshake itself, before any HTTP request is read" data-vn="mTLS (giữ nguyên) — cả 2 bên xác minh certificate của nhau khi bắt tay TLS, xác thực xảy ra trước khi có request HTTP nào">mTLS</dfn> moves the check a layer lower: the calling service presents a client certificate as part of the TLS handshake, and the server only completes that handshake if the certificate is signed by a certificate authority it's configured to trust. No secret ever travels inside a request body or header — the identity proof happens before a single byte of the HTTP request is read.</p>
+<pre><code><span class="cm">// newMTLSServer wires up mutual TLS: the server only completes the TLS</span>
+<span class="cm">// handshake if the caller presents a certificate signed by a CA in</span>
+<span class="cm">// caCertPool. No bearer secret travels in the request at all — the identity</span>
+<span class="cm">// check happens below the HTTP layer, before a single byte of the request</span>
+<span class="cm">// is read.</span>
+<span class="kw">func</span> newMTLSServer(handler http.Handler, caCertPool *x509.CertPool) *http.Server {
+    <span class="kw">return</span> &amp;http.Server{
+        Addr:    <span class="st">":8443"</span>,
+        Handler: handler,
+        TLSConfig: &amp;tls.Config{
+            ClientCAs:  caCertPool,
+            ClientAuth: tls.RequireAndVerifyClientCert,
+        },
+    }
+}</code></pre>
+<p>The strength is also the cost: nothing to leak in application logs (there's no header value to accidentally print), and revocation is a certificate-authority operation rather than an app-level rotation. But issuing, distributing, and rotating certificates for every service is real operational machinery — usually something a service mesh or platform team owns, not something one backend developer wires up by hand per service. Per MISSION.md's own scope, the certificate-management infrastructure itself (a private CA, a service mesh) is out of scope here — what matters at this level is recognizing the shape and knowing it exists as the strongest of the three options.</p>
+
+<h2>5 · Picking one</h2>
+<div class="callout"><strong>Rule of thumb going into an interview:</strong> static API key for a small number of internal services you fully control and can rotate easily; client credentials (OAuth) when a third party or many independent teams need to call you and you want short-lived, revocable tokens without owning certificate infrastructure; mTLS when the platform already provides it (many service meshes do this automatically) or the security bar genuinely requires no secret ever appearing in a request at all.</div>
+<p>All three answer the same question Lesson 4 first asked — "who is this request from" — for a caller that isn't a person. None of them is "more secure" in the abstract, same as Lesson 4's session-vs-JWT verdict: each trades complexity for a different guarantee, and the right one depends on how many callers there are, who operates them, and what already exists in your infrastructure.</p>
+
+<div class="interview">
+<p><strong>Q: "Two of our backend services need to talk to each other. How would you authenticate that call?"</strong> A strong answer, out loud: <em>"First I'd ask how many callers and how much I trust them — for a couple of internal services on the same team, a static API key with a constant-time comparison is simple and enough, as long as it's stored as config and rotated occasionally. If it's a third-party integration or many independent callers, I'd lean toward OAuth's client credentials grant, so what travels on each request is a short-lived token instead of a forever secret. If the platform already supports mutual TLS, that's the strongest option since there's no secret in the request at all — the identity check happens in the TLS handshake itself, before the application even sees the request."</em> The signal: naming the trade-off (fewer moving parts vs. shorter-lived exposure vs. no secret in the request path) instead of asserting one option is simply "the secure one."</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Lesson 4's session and cookie mechanisms both assume a human logging in through a browser. A machine caller has no session to look up and no login form to fill in, so a different mechanism is needed to answer the same 'who is this request from' question.">
+    <p class="stem">Why don't Lesson 4's session/cookie mechanisms work for one backend calling another?</p>
+    <button class="opt" data-ok>they assume a human sitting at a browser</button>
+    <button class="opt">they assume every backend server runs Go code</button>
+    <button class="opt">they assume every request travels over plain HTTP</button>
+    <button class="opt">they assume every caller shares one static IP</button>
+  </div>
+  <div class="q" data-why="A static API key is compared byte-for-byte on every request; a naive == comparison exits early on the first mismatched byte, letting an attacker measuring response time recover the correct key one byte at a time — the exact risk Lesson 30 named for HMAC signatures.">
+    <p class="stem">Why compare a static service API key in constant time, not with plain equality?</p>
+    <button class="opt" data-ok>plain equality can leak the key through timing</button>
+    <button class="opt">plain equality always doubles the total request latency</button>
+    <button class="opt">plain equality only works for keys under eight</button>
+    <button class="opt">plain equality silently corrupts any non-ASCII key value</button>
+  </div>
+  <div class="q" data-why="Client credentials trades a forever-valid secret sent on every call for a short-lived token exchanged less often, so a leaked token is only useful until it expires, shrinking the exposure window compared to a static key that stays valid until manually rotated.">
+    <p class="stem">What does the OAuth client credentials grant improve on versus a static API key?</p>
+    <button class="opt" data-ok>a leaked token expires soon instead of forever</button>
+    <button class="opt">a leaked token instantly notifies every service admin</button>
+    <button class="opt">a leaked token still needs zero rotation ever</button>
+    <button class="opt">a leaked token cannot travel across any network</button>
+  </div>
+  <div class="q" data-why="mTLS proves identity during the TLS handshake itself, via a client certificate signed by a trusted CA, before any HTTP request bytes are read — unlike an API key or bearer token, which are secrets carried inside the request that the application code has to check.">
+    <p class="stem">What makes mTLS different from an API key or a client-credentials token?</p>
+    <button class="opt" data-ok>identity is proven in the handshake, not the request</button>
+    <button class="opt">identity is proven by the response body's status code</button>
+    <button class="opt">identity is proven by an early login cookie value</button>
+    <button class="opt">identity is proven by the request's total byte size</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html">OWASP Authentication Cheat Sheet</a> (~10 min, see its service-to-service and API key sections) — RESOURCES.md already cites the OWASP Cheat Sheet Series generally for "input validation, SQL injection, session management, secrets"; this extends it to machine-to-machine authentication. For the OAuth mechanism specifically, the <a href="https://developer.mozilla.org/en-US/docs/Web/HTTP">MDN HTTP Guide</a>'s Authorization header material is the right level of detail without going as deep as the full OAuth 2.0 RFC.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> open — still no reported quiz/lesson-completion outcome exists for any lesson after 31 rounds; distributed locks and blue-green/canary deploys remain the last named, confirmed-untaught candidates from Lesson 30's search if no user-chosen track surfaces first.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -444,3 +444,100 @@ fail *gracefully* so the learner sees which task failed.
   (exceptions, modules/imports, `uv`/`pyproject.toml`, `pytest`, decorators,
   `pathlib`/`datetime`/`logging`) before 2b's FastAPI + pydantic backend
   phase.
+- 2026-08-05 — **Day 8 generated** (`lessons/0008-exceptions.html`), **the
+  Phase 1 → Phase 2 transition lesson**. Confirmed before generating that Day
+  7 already existed on disk (no date-locked gap to backfill) and that no
+  `0008-…` or later file existed yet today — this is the first Phase 2
+  lesson, not a re-run. Idempotency check used on-disk state
+  (`python/lessons/` highest filename + this file's own dated log) since DB
+  access was unavailable this run (see below); no existing `0008-…` lesson
+  found, so generation proceeded.
+  Topic: exceptions — first item of `PLAN.md`'s Phase 2a spine
+  ("Exceptions: raising, catching narrowly, custom exception types,
+  try/finally") and squarely language-level, not library — satisfies the
+  scope rule. Taught: uncaught exceptions as the *default* outcome (a
+  traceback, not a special failure mode) using Day 6/7's
+  `int(row["amount"])` on a blank cell as the motivating crash; narrow
+  `try`/`except ExceptionType:` with the bare-`except:`-is-dangerous habit as
+  the single most-emphasized point in the lesson; `else`/`finally` (the
+  latter framed as the same "always runs" guarantee as Day 6's context
+  manager `__exit__`); `raise` with a built-in type; and a custom exception
+  (`class InvalidSalesRow(Exception)`) as the same "give it a fixed, named
+  shape" idea Day 7's dataclasses already established, applied to failures
+  instead of records. Closed by rewriting Day 7's capstone `extract()` to
+  catch `ValueError` narrowly around the `int()` call so one bad CSV row no
+  longer kills the whole generator — direct continuity with the capstone
+  rather than a fresh unrelated example. Bridged from SQL per the (sparse)
+  baseline record: a constraint violation aborting a statement and raising
+  in client code, introduced before any Python in the top callout, not from
+  a pandas or other "Python-adjacent" analogy.
+  Learning records: only the Day 1 baseline
+  (`learning-records/0001-baseline-reads-python-writes-little.md`) exists —
+  no completion/quiz record for Day 7 or any other day was found. Per this
+  run's instructions, treated that as "records are sparse" and generated
+  conservatively: one core mechanism (narrow catch) emphasized hard, `finally`
+  and custom exceptions kept deliberately small (recognition + one use each,
+  not a menu of edge cases), and the lesson stayed anchored to material
+  already taught (Days 5–7) rather than introducing several new unrelated
+  examples. This assumption — that Day 7 landed fine and no consolidation
+  lesson was needed — is unverified against real quiz/completion data and
+  should be revisited once a completion record exists.
+  No-pandas rule: zero pandas/NumPy API in the lesson body or practice file
+  (checked by grep for `pandas|numpy|dataframe|DataFrame`, case-insensitive,
+  across both new files — zero hits in the practice file, exactly one hit in
+  the lesson); exactly one contrast sentence, naming
+  `pd.to_numeric(col, errors="coerce")` without demonstrating it, placed once
+  after section 5 and labeled in prose as the only such sentence, matching
+  the hard-rule section above.
+  Practice file `practice/08_exceptions.py` (5 exercises: `safe_int()`
+  catching `ValueError` narrowly, `describe_lookup()` telling `KeyError` from
+  `ValueError` with separate `except` clauses, `count_attempts()` using
+  `finally` to count every attempt regardless of outcome, a custom
+  `InvalidSalesRow` exception raised by `parse_amount()`, and an
+  `extract()`-style generator skipping bad rows instead of crashing) was
+  verified in a scratch dir (`.scratch_py8_verify/`, created under the repo
+  root and removed after use, per the Day 3–7 precedent that `/tmp` is out of
+  bounds for this sandbox). **One bug was caught and fixed during
+  verification:** the first draft's Ex 4 check referenced a helper function
+  `_raises_invalid_sales_row()` defined *after* the `results = [...]` list —
+  since `check()` calls each lambda immediately rather than deferring to the
+  end of the file, Ex 4 failed with a swallowed `NameError` even in the
+  solved copy (caught because the solved-copy pass is a real pass/fail check,
+  not just "did it run"). Fixed by moving the helper's `def` above `results`.
+  After the fix: the shipped (unsolved) copy ran via `uv run python3`, both
+  from the scratch copy and from its real `practice/` path with the
+  documented command, and printed five clean ✗ lines with no traceback each
+  time; a separately solved copy printed five ✓ and the "All green" tally.
+  Glossary: added a Day 8 section to `reference/glossary.html` (`exception`,
+  `traceback`, `try / except`, `else / finally (try statement)`, `raise`,
+  `custom exception`) after confirming via grep that none of the six terms
+  collided with any Day 1–7 entry.
+  Quiz: 5 questions. Word counts were checked with individual `wc -w` calls
+  per option line (not by eye, not piped through `awk`/multi-stage pipelines
+  since this sandbox's approval gate blocks compound bash commands) and
+  mismatched on the first draft for four of the five questions (Q2 7/9/8, Q3
+  8/8/8 already matched, Q4 10/8/9, Q5 10/9/10) — each mismatched question
+  went through two to three rewrite-and-recount rounds until every option
+  matched (Q1 9/9/9, Q2 9/9/9, Q3 8/8/8, Q4 9/9/9, Q5 10/10/10), then a full
+  final recount pass across all five questions' three options each (15 lines
+  total, each checked individually) confirmed every one before shipping, per
+  this file's instruction to recount after any edit. Registered in
+  `assets/nav.js` with `date: "2026-08-05"` — kept the `date:` field for
+  display purposes even though Phase 2 has no date-locking, matching
+  `backend/`'s and `data/`'s own convention of still stamping a generation
+  date on sequential, non-gated entries.
+  **DB access:** `bin/query-progress` (Step 0) required approval in this
+  sandbox and was not retried beyond one attempt, so learning-record
+  freshness was judged from on-disk files only, per this run's fallback
+  instructions — the single baseline record above is what that fallback
+  found. `bin/record-progress python lesson_generated --day 8 --lesson
+  0008-exceptions.html --detail '{"by":"launchd"}'` also required approval
+  and was not retried — outcome is "not recorded to DB this run," consistent
+  with most prior Day 1–7 attempts (only Day 5 succeeded non-interactively,
+  still unexplained).
+  **This is the Phase 1 → Phase 2 transition lesson**: Day 7
+  (2026-08-04) was the last date-locked, PLAN.md-assigned filename, and it
+  was already present on disk before this run started — no gap to backfill.
+  Day 8 is the first lesson generated under Phase 2's open-ended, sequential,
+  no-date-lock rule, following the Phase 2a spine's first item (exceptions)
+  rather than jumping ahead to a later spine item.

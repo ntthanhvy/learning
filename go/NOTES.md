@@ -261,3 +261,14 @@
   Day 7 (dataclasses/typing capstone, closing out Phase 1) were generated
   this round via delegated agents; rust's post-week daily quiz+kata infra
   was verified unchanged, nothing new to generate.
+- 2026-08-05 (headless 06:00 run): skipped again per the same rule — the
+  course window closed 2026-07-20, now sixteen days past it. Day 13
+  (`0014-concurrency-capstone.html`) re-confirmed present on disk and
+  registered in `assets/nav.js` — moot either way. Direct `psql
+  "$LEARNING_DB_URL" ...` was blocked again this session (content-level
+  block on the variable name), and `bin/query-progress` hit a generic
+  "requires approval" gate with no user present — moot for this course
+  since it's a pure skip regardless of DB state. Python's Phase 1 window
+  also closed today (Day 7 was 2026-08-04, last date-locked day) — from
+  today python becomes open-ended/sequential per its own PLAN.md; rust,
+  backend, data handled separately this round.

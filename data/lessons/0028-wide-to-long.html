@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 28 · pd.wide_to_long(): melting several metrics at once</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 28 · ~20 min · 5 Aug 2026</p>
+<h1>pd.wide_to_long(): melting several metrics at once</h1>
+<p class="byline">Lesson 26's other named candidate, deferred once already for <code>.map()</code> — re-grepped every lesson body and the glossary before writing, still genuinely absent. This closes out the reshape family (Lessons 6, 14, 15, 17, 18) with the one tool built specifically for "several related columns share a suffix and belong together as one row."</p>
+
+<h2>1 · The shape: several value columns, sharing a naming pattern</h2>
+<p>Lesson 6's <code>melt()</code> turns wide columns into long rows one value at a time — every non-id column becomes its own row, no matter what it's named. That's fine when there's only one kind of value being un-pivoted. But a common real-world wide table has <em>several</em> related columns per "thing," named with a shared prefix and a distinguishing suffix — <code>amount_1</code>/<code>amount_2</code>, <code>order_date_1</code>/<code>order_date_2</code> for a customer's first and second visit. Melting that with plain <code>melt()</code> flattens everything into one undifferentiated <code>variable</code>/<code>value</code> pair, losing the fact that <code>amount_1</code> and <code>order_date_1</code> belong to the <em>same</em> visit:</p>
+<pre><code>wide.melt(id_vars=<span class="str">"customer"</span>)
+<span class="cm">#   customer      variable       value
+#0       An      amount_1       120.0
+#1     Binh      amount_1        35.5
+#2       An      amount_2        42.0
+#3     Binh      amount_2       180.0
+#4       An  order_date_1  2026-01-05
+#5     Binh  order_date_1  2026-01-06
+#...  -- amount_1 and order_date_1 are now unrelated rows, no way to re-pair them</span></code></pre>
+<p><dfn data-en="a pandas function reshaping several groups of wide 'stub_suffix' columns into long format simultaneously, pairing same-suffix columns back into one row per (id, suffix) combination" data-vn="giữ nguyên 'wide_to_long()' — gộp nhiều nhóm cột dạng 'tên_số' về long cùng lúc, các cột cùng số hậu tố được ghép lại thành 1 hàng">pd.wide_to_long()</dfn> is built exactly for this: it melts <em>multiple</em> stub-prefixed column groups at once, re-pairing same-suffix columns back into one row.</p>
+
+<h2>2 · Reading the call: stubnames, i, j, sep, suffix</h2>
+<pre><code>wide.columns.tolist()
+<span class="cm"># ['customer', 'amount_1', 'amount_2', 'order_date_1', 'order_date_2']</span>
+
+pd.wide_to_long(wide, stubnames=[<span class="str">"amount"</span>, <span class="str">"order_date"</span>],
+                 i=<span class="str">"customer"</span>, j=<span class="str">"visit"</span>, sep=<span class="str">"_"</span>, suffix=<span class="kw">r</span><span class="str">"\d+"</span>)
+<span class="cm">#                amount  order_date
+# customer visit
+# An       1       120.0  2026-01-05
+# Binh     1        35.5  2026-01-06
+# An       2        42.0  2026-01-10
+# Binh     2       180.0  2026-01-09</span></code></pre>
+<ul>
+<li><code>stubnames</code> — the shared prefixes to melt together: every <code>amount_*</code> column collapses into one <code>amount</code> column; every <code>order_date_*</code> column collapses into one <code>order_date</code> column.</li>
+<li><code>i</code> — the existing column(s) that already uniquely identify each entity (like <code>id_vars</code> in <code>melt()</code>) — here, <code>customer</code>. <strong>Must be unique per row</strong>, or it raises <code>ValueError: the id variables need to uniquely identify each row</code>.</li>
+<li><code>j</code> — the name for the new column holding the suffix (<code>1</code>/<code>2</code> here) — <code>melt()</code>'s <code>var_name</code>, but numeric and paired across every stub at once.</li>
+<li><code>sep</code>/<code>suffix</code> — how to split each column name into stub + suffix: <code>sep="_"</code> means split on the underscore, <code>suffix=r"\d+"</code> (a regex) means the suffix must be digits. Both default to <code>""</code> and <code>r"\d+"</code> — pass <code>sep</code> explicitly whenever your columns use one, as here.</li>
+</ul>
+<p>Note the result comes back with <code>customer</code> and <code>visit</code> as a <dfn data-en="a pandas index built from more than one column, here from Lesson 14/15's structure repurposed as a ROW index instead of columns" data-vn="giữ nguyên 'MultiIndex' — ở đây là index nhiều tầng theo HÀNG">MultiIndex</dfn> on the <em>rows</em> this time (Lessons 14/15 built one on columns) — call <code>.reset_index()</code> to get plain columns back, same reflex as unstacking.</p>
+
+<h2>3 · Building the wide table to see where this fits in a pipeline</h2>
+<p>In practice you rarely start with columns already named <code>amount_1</code>/<code>amount_2</code> — you build them, usually with <code>pivot_table</code> (Lesson 6), then reshape back with <code>wide_to_long</code> when a downstream step needs long format again. Numbering each customer's visits first with <code>groupby().cumcount()</code> (Lesson 4's split-apply-combine, computing a per-group running position):</p>
+<pre><code>clean[<span class="str">"visit"</span>] = clean.groupby(<span class="str">"customer"</span>).cumcount() + <span class="kw">1</span>
+wide = clean.pivot_table(index=<span class="str">"customer"</span>, columns=<span class="str">"visit"</span>,
+                          values=[<span class="str">"amount"</span>, <span class="str">"order_date"</span>], aggfunc=<span class="str">"first"</span>)
+wide.columns = [f<span class="str">"{a}_{b}"</span> <span class="kw">for</span> a, b <span class="kw">in</span> wide.columns]  <span class="cm"># flatten the MultiIndex, Lesson 14's move</span>
+wide = wide.reset_index()</code></pre>
+<p>This round-trip — long → wide (<code>pivot_table</code>) → long again (<code>wide_to_long</code>) — is a realistic ETL shape: a report needs the wide "one row per customer, columns per visit" view, but a downstream aggregation step needs long rows back. <code>melt()</code> alone can't cleanly reverse a <em>multi-metric</em> pivot; <code>wide_to_long()</code> can.</p>
+
+<h2>4 · The gotcha: a wrong/missing stubname doesn't raise — it silently NaNs</h2>
+<p>Hand-verified on this course's fixture: passing a <code>stubnames</code> entry that doesn't match any real column prefix does not error at all — it adds that column to the result filled entirely with <code>NaN</code>, same "no crash, quietly wrong" shape this course has flagged since Lesson 19 (<code>nunique()</code>'s truthy Ellipsis, Lesson 24's NaN-into-default-branch, Lesson 25's fixed-category NaN, Lesson 27's <code>.map()</code> unmatched key):</p>
+<pre><code>pd.wide_to_long(wide, stubnames=[<span class="str">"amount"</span>, <span class="str">"nonexistent"</span>],
+                 i=<span class="str">"customer"</span>, j=<span class="str">"visit"</span>, sep=<span class="str">"_"</span>, suffix=<span class="kw">r</span><span class="str">"\d+"</span>)
+<span class="cm"># ...  amount  nonexistent
+# ...   120.0          NaN     &lt;- "nonexistent" was never a real column -- no error
+# ...    35.5          NaN</span></code></pre>
+<p>Double-check the result's column list and row count against what you expect (rows = original rows × number of suffixes) before trusting a <code>wide_to_long</code> call — a typo'd stub name won't tell you it's wrong.</p>
+
+<div class="interview">
+<p><strong>Q: "melt() vs wide_to_long() — when do you reach for which?"</strong> A strong answer, out loud: <em>"melt() un-pivots one kind of value at a time — every non-id column becomes its own variable/value row, with no relationship between them. wide_to_long() handles the case where several columns share a naming pattern, like amount_1/amount_2 and date_1/date_2, and need to be melted together so same-suffix columns land back in the same row. It's the tool for 'multiple repeated measurements per entity' wide tables — survey data with q1_score/q1_time, q2_score/q2_time, or a customer's numbered visits. If I only have one value column to un-pivot, melt() is simpler and I reach for that first."</em> The signal: naming the multi-column-group pairing as the actual differentiator, not just "a fancier melt."</p>
+</div>
+
+<h2>Try it — self-checking practice (~15 min)</h2>
+<p>Open <code>practice/28_wide_to_long.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/28_wide_to_long.py</code></pre>
+<p>Uses the same cleaned rows as Lessons 6-27 (An 120.0/01-05, An 42.0/01-10, Binh 35.5/01-06, Binh 180.0/01-09), numbered into visit 1/2 per customer. Exercise 1 builds the wide two-metric table with <code>pivot_table</code>+flatten (Lesson 14's move); Exercise 2 reshapes it back to long with <code>wide_to_long</code>; Exercise 3 reproduces the missing-stubname gotcha on purpose.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="melt() treats every non-id column independently, producing one variable/value row per column with no relationship between them. wide_to_long() is built for columns sharing a stub+suffix naming pattern (amount_1/amount_2, date_1/date_2) -- it re-pairs same-suffix columns back into a single row per (id, suffix) combination, something plain melt() cannot do in one call.">
+    <p class="stem">What can <code>wide_to_long()</code> do that plain <code>melt()</code> cannot?</p>
+    <button class="opt" data-ok>re-pair several same-suffix stub columns into one row</button>
+    <button class="opt">reshape any wide table into long format only</button>
+    <button class="opt">reshape a long table back into wide format</button>
+  </div>
+  <div class="q" data-why="The i= argument names the existing column(s) that already uniquely identify each entity before the reshape, exactly like melt()'s id_vars -- and it must be genuinely unique per row, or wide_to_long() raises ValueError: the id variables need to uniquely identify each row.">
+    <p class="stem">What does the <code>i=</code> argument to <code>wide_to_long()</code> require of that column?</p>
+    <button class="opt" data-ok>its values must uniquely identify each original row</button>
+    <button class="opt">its values must already be sorted, ascending order</button>
+    <button class="opt">its values must all be numeric, never strings</button>
+  </div>
+  <div class="q" data-why="Hand-verified on this course's fixture: passing a stubnames entry with no matching column prefix does not raise an error at all -- it silently adds that column to the result filled entirely with NaN, the same 'no crash, quietly wrong' shape flagged since Lesson 19.">
+    <p class="stem">What happens if a <code>stubnames</code> entry matches no real column prefix?</p>
+    <button class="opt" data-ok>no error; the output column is silently NaN</button>
+    <button class="opt">a KeyError is always raised immediately, no exceptions</button>
+    <button class="opt">pandas guesses the closest real matching column name</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the pandas User Guide's <a href="https://pandas.pydata.org/docs/reference/api/pandas.wide_to_long.html">pandas.wide_to_long()</a> reference page (~5-10 min) — covers the <code>stubnames</code>/<code>i</code>/<code>j</code>/<code>sep</code>/<code>suffix</code> arguments in full, including multi-character suffixes; cross-reference with the <a href="https://pandas.pydata.org/docs/user_guide/reshaping.html">Reshaping and pivot tables</a> guide page, which places it alongside <code>melt()</code>/<code>pivot_table()</code>/<code>stack()</code>/<code>unstack()</code> as one family.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>pd.wide_to_long()</code> is new today.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-28 comes back reported as shakiest, otherwise a fresh curriculum/glossary scan for the next genuinely-uncovered pattern (no single obvious dangling candidate named in this lesson's own content).<br><br>
+💬 Anything unclear — wide_to_long()'s stubnames/i/j/sep/suffix arguments, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

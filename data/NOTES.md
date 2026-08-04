@@ -1109,3 +1109,78 @@
   other named candidate, deferred this round in favor of `.map()`,
   re-confirmed still genuinely uncovered by this round's own grep) if no
   drill-outcome signal surfaces by next generation.
+- 2026-08-05 generation (Lesson 28, headless 06:00 run): `bin/query-progress`
+  (no args, single attempt per instructions) required approval and was
+  blocked, no user present in this headless session — still no
+  `course_progress` rows readable and no `lesson_completed`/quiz/kata
+  outcome record beyond the Lesson 1 baseline, so no reported weak spot to
+  target; fell back to on-disk state per the fallback rule (highest lesson
+  file + this file's own dated log). Confirmed no lesson existed yet for
+  today (highest was Lesson 27, dated 2026-08-04) and no dated note below
+  mentioned today, so this round proceeded rather than skipping. Lesson 27's
+  own teaser named `pd.wide_to_long()` explicitly (Lesson 26's other named
+  candidate, deferred once for `.map()`) — re-grepped `lessons/*.html` and
+  `reference/glossary.html` before writing and confirmed it still only
+  appeared inside teaser sentences and this file, genuinely uncovered — so
+  Lesson 28 ships it as planned: `wide_to_long()` reshaping several
+  stub-prefixed column groups (`amount_1`/`amount_2`, `order_date_1`/
+  `order_date_2`) back to long format simultaneously, contrasted against
+  plain `melt()` (Lesson 6) which flattens every non-id column independently
+  with no pairing between same-suffix columns; walked through `stubnames`/
+  `i`/`j`/`sep`/`suffix`, a realistic long→wide (`pivot_table`, Lesson 6/14's
+  MultiIndex-flatten move)→long (`wide_to_long`) ETL round-trip built on a
+  new per-customer `visit` number via `groupby().cumcount()`, and closed
+  with the missing-stubname "no crash, quietly wrong" gotcha (an unmatched
+  stub name doesn't raise — it silently adds an all-NaN column), continuing
+  this course's running family since Lesson 19. This session's working
+  directory was restricted to the repo root (bare `mkdir`/`cp` outside it
+  were blocked outright, a harder restriction than most prior rounds' "needs
+  approval" framing) — used the repo-ignored `.scratch/data-lesson28/`
+  directory instead, consistent with this course's established `.scratch/`
+  convention. `uv run --with pandas` worked directly this round (pandas
+  3.0.5): first used to hand-verify every claim in
+  `.scratch/data-lesson28/explore.py` and `explore2.py` (both deleted after)
+  against the real `orders_raw.csv` clean 4-row slice before writing a word
+  of the lesson — `wide_to_long()` on the built wide table gives exactly An
+  visit 1 = 120.0/2026-01-05, An visit 2 = 42.0/2026-01-10, Binh visit 1 =
+  35.5/2026-01-06, Binh visit 2 = 180.0/2026-01-09 (4 long rows total);
+  explicitly tested and confirmed the gotcha (a `stubnames` entry with no
+  matching column raises nothing, just adds an all-NaN column) and the `i`
+  uniqueness requirement (a duplicated `i` column raises `ValueError: the id
+  variables need to uniquely identify each row`) before writing those claims
+  into the lesson text and quiz. The shipped (unsolved)
+  `practice/28_wide_to_long.py` was executed in the scratch dir (with the
+  fixture CSV copied alongside it under `practice/data/`) and printed all 5
+  ✗ with no crash on the first attempt — no Ellipsis-gotcha surprises this
+  round, since every placeholder already sat in a safe position (a bare list
+  literal `wide.columns = [...]`, a `stubnames=[...]`/`stubnames=["amount",
+  ...]` list argument) that raises `TypeError`/produces a clearly-wrong
+  result caught by the checks rather than silently passing. A solved copy
+  (`.scratch/data-lesson28/practice/28_solved.py`, not shipped) then printed
+  all 5 ✓ against the same hand-verified numbers. The shipped file was also
+  re-run a second time from its real `practice/` location
+  (`cd data && uv run --with pandas python3 practice/28_wide_to_long.py`)
+  and confirmed to print the identical all-✗ result. `.scratch/data-lesson28/`
+  was fully removed (`rm -rf`) after verification, no approval needed this
+  round. Added `pd.wide_to_long()` to the glossary (checked for a collision
+  first — none) and registered Lesson 28 in nav.js. Quiz options were
+  drafted and checked with a Python word-count script (regex-extracted
+  option strings, whitespace-split) — the first draft came out mismatched on
+  all three questions (Q1 8/9/9, Q2 8/9/9, Q3 9/8/8); several small
+  rewrite+recount cycles were needed since manual word-counting by eye kept
+  under/over-shooting by one word before the script actually confirmed the
+  count each time (consistent with this course's repeated finding that eyeballing
+  isn't reliable) — a final independent recount, plus a second manual
+  line-by-line read-through of the raw HTML, confirmed all three genuinely
+  level at 8/8/8, 8/8/8, and 8/8/8. `bin/record-progress data
+  lesson_generated --day 28 --lesson 0028-wide-to-long.html --detail
+  '{"by":"launchd"}'` was attempted once as instructed from the repo root
+  and required approval, blocked with no user present in this headless
+  session (same class of block hit in most rounds, e.g. Lessons 17/19/22/23/
+  24/26/27) — `lesson_generated` could not be recorded; do it manually once
+  DB/write access is back. Not retried in a loop. Set the teaser going
+  forward to a fresh curriculum/glossary scan for the next
+  genuinely-uncovered pattern (no single obvious dangling candidate named in
+  this lesson's own content — the reshape family started in Lesson 6 is now
+  fairly complete across melt/pivot_table/stack/unstack/crosstab/
+  wide_to_long) if no drill-outcome signal surfaces by next generation.

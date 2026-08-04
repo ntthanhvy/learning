@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 8 · Exceptions: catching failure on purpose</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 8 · ~20 min · 5 Aug 2026</p>
+<h1>Exceptions: catching failure on purpose</h1>
+<p class="byline">Phase 1 built seven tools and one working ETL script — but every example so far assumed the input was clean. Real CSVs have a blank <code>amount</code> cell, a missing file, a stray comma. Today: how Python signals "this failed" with an exception, how to catch exactly the failure you expect (and let everything else propagate), and how to define your own exception type so a caller can tell "bad row" apart from "bad file." First lesson of Phase 2 — open-ended from here, ~20 min/day.</p>
+
+<div class="callout"><strong>Bridge from SQL:</strong> a constraint violation — <code>NOT NULL</code>, a failed <code>FOREIGN KEY</code>, a type mismatch on insert — doesn't return a row saying "error"; it aborts the statement and the driver raises something in your client code. Python's exceptions are that same idea generalized to every operation, not just inserts: something goes wrong, the normal flow stops immediately, and control jumps to whoever said they'd handle it — or all the way out of the program if nobody did.</div>
+
+<h2>1 · What happens when nobody catches it</h2>
+<p>Day 6 and 7's <code>int(row["amount"])</code> assumed every row had a valid number. It doesn't always:</p>
+<pre><code>row = {<span class="str">"city"</span>: <span class="str">"Hanoi"</span>, <span class="str">"amount"</span>: <span class="str">""</span>}
+<span class="kw">int</span>(row[<span class="str">"amount"</span>])
+<span class="cm"># ValueError: invalid literal for int() with base 10: ''</span></code></pre>
+<p>That <code>ValueError</code> is an <dfn data-en="an object Python raises the instant something goes wrong, carrying a type (e.g. ValueError, KeyError) and a message; raising one immediately stops normal execution and hands control to the nearest matching except block, or all the way out of the program if none exists" data-vn="giữ nguyên &quot;exception&quot; — object Python raise ra khi có lỗi, mang theo type và message, dừng chạy bình thường ngay lập tức">exception</dfn>: an object carrying a type (<code>ValueError</code>) and a message, raised the instant something goes wrong. Nothing after that line runs. If nothing in the whole call chain says "I'll handle a <code>ValueError</code> here," Python prints a <dfn data-en="the report Python prints when an exception reaches the top of the program uncaught: the exception's type, its message, and the chain of function calls (bottom = where it happened, top = where the outermost call started) active when it was raised" data-vn="giữ nguyên &quot;traceback&quot; — báo cáo Python in ra khi exception không ai bắt, cho thấy chuỗi hàm gọi nhau lúc lỗi xảy ra">traceback</dfn> — the exception's type, message, and the chain of calls active when it happened — and the program stops:</p>
+<pre><code>Traceback (most recent call last):
+  File <span class="str">"pipeline.py"</span>, line 12, <span class="kw">in</span> &lt;module&gt;
+    <span class="kw">int</span>(row[<span class="str">"amount"</span>])
+ValueError: invalid literal <span class="kw">for</span> <span class="kw">int</span>() <span class="kw">with</span> base <span class="kw">10</span>: <span class="str">''</span></code></pre>
+<p>An uncaught exception is not a special failure mode — it's the <em>default</em> one. "Catching" an exception means writing code that intercepts it before it reaches the top and does something more useful than crashing.</p>
+
+<h2>2 · <code>try</code>/<code>except</code>: catching narrowly</h2>
+<p>A <dfn data-en="a try: block runs code that might raise; each except ExceptionType: after it catches only that exact type, letting anything else propagate. Always name the exact type — a bare except: catches everything, including real bugs, and silently hides them" data-vn="giữ nguyên &quot;try/except&quot; — chạy code có thể lỗi trong try, bắt đúng loại lỗi mong đợi trong except">try</dfn> block runs code that might raise; each <code>except</code> after it names one exception type it knows how to handle. Only a matching <code>except</code> runs — anything else still propagates:</p>
+<pre><code><span class="kw">try</span>:
+    amount = <span class="kw">int</span>(row[<span class="str">"amount"</span>])
+<span class="kw">except</span> ValueError:
+    <span class="kw">print</span>(<span class="str">f"skipping bad amount: {row}"</span>)
+    amount = <span class="kw">None</span></code></pre>
+<p>Name the exact exception type, never a bare <code>except:</code>. A bare <code>except:</code> catches <em>everything</em> — including a typo'd variable name (<code>NameError</code>), a genuine bug in your own code, even <code>KeyboardInterrupt</code> from Ctrl-C — and silently swallows all of them the same way, turning a real bug into a quiet no-op that's much harder to find later. This is the single most important habit in this lesson:</p>
+<pre><code><span class="kw">except</span>:                 <span class="cm"># catches literally everything — avoid</span>
+<span class="kw">except</span> Exception:       <span class="cm"># catches nearly everything — usually still too broad</span>
+<span class="kw">except</span> ValueError:      <span class="cm"># catches exactly what you expected — right</span></code></pre>
+<p>One <code>try</code> can list several <code>except</code> clauses for different exception types, checked top to bottom, first match wins — and the exception object itself can be captured with <code>as</code> to read its message:</p>
+<pre><code><span class="kw">try</span>:
+    amount = <span class="kw">int</span>(row[<span class="str">"amount"</span>])
+    city = row[<span class="str">"city"</span>]
+<span class="kw">except</span> ValueError <span class="kw">as</span> e:
+    <span class="kw">print</span>(<span class="str">f"bad amount: {e}"</span>)    <span class="cm"># e is the exception object; str(e) is its message</span>
+<span class="kw">except</span> KeyError <span class="kw">as</span> e:
+    <span class="kw">print</span>(<span class="str">f"missing column: {e}"</span>)</code></pre>
+
+<h2>3 · <code>else</code> and <code>finally</code>: the other two clauses</h2>
+<p><dfn data-en="in a try statement, else runs only if the try block raised nothing at all; finally runs unconditionally — success, caught failure, or even an uncaught failure still propagating afterward — the same always-runs guarantee as a context manager's __exit__" data-vn="giữ nguyên &quot;else/finally&quot; — else chạy khi try không lỗi, finally luôn chạy dù có lỗi hay không">else</dfn> runs only if <code>try</code> raised nothing — useful for code that should run on success but shouldn't itself be covered by the <code>except</code>. <code>finally</code> runs unconditionally, success or failure, exactly like Day 6's context-manager <code>__exit__</code> always running:</p>
+<pre><code><span class="kw">try</span>:
+    amount = <span class="kw">int</span>(row[<span class="str">"amount"</span>])
+<span class="kw">except</span> ValueError:
+    <span class="kw">print</span>(<span class="str">"bad row, skipped"</span>)
+<span class="kw">else</span>:
+    <span class="kw">print</span>(<span class="str">f"parsed {amount}"</span>)     <span class="cm"># only if int() succeeded</span>
+<span class="kw">finally</span>:
+    rows_seen += <span class="kw">1</span>              <span class="cm"># always — whether it succeeded, failed, or skipped</span></code></pre>
+<p><code>finally</code> is the one clause that runs even if the exception isn't caught at all — it fires, then the exception keeps propagating. That makes it the right place for cleanup that must happen no matter what (closing a handle opened outside a <code>with</code>, for instance) — though in practice, Day 6's <code>with</code> already covers the file case better, since it pairs the <code>finally</code>-style guarantee directly with the resource that needs it.</p>
+
+<h2>4 · <code>raise</code>: signaling failure on purpose</h2>
+<p>Catching isn't the only side of this — code you write can <dfn data-en="the statement that creates and triggers an exception on purpose, e.g. raise ValueError(&quot;message&quot;), used inside a function when a caller has done something the function can't handle; immediately stops that function and propagates like any other exception" data-vn="giữ nguyên &quot;raise&quot; — chủ động tạo ra exception khi hàm gặp input không xử lý được">raise</dfn> its own exceptions when a caller does something the function can't handle, using one of Python's built-in types with a message:</p>
+<pre><code><span class="kw">def</span> total_for(row):
+    <span class="kw">if</span> row[<span class="str">"amount"</span>] &lt; <span class="kw">0</span>:
+        <span class="kw">raise</span> ValueError(<span class="str">f"amount can't be negative: {row}"</span>)
+    <span class="kw">return</span> row[<span class="str">"amount"</span>] * <span class="kw">1.1</span></code></pre>
+<p>The most common built-ins worth recognizing: <code>ValueError</code> (right type, wrong value — Day 8's <code>int("")</code>), <code>KeyError</code> (dict key missing — Day 3's territory), <code>TypeError</code> (wrong type entirely), <code>FileNotFoundError</code> (Day 6's <code>open()</code> on a missing path), <code>ZeroDivisionError</code>. Reach for the one that already matches before inventing a new one.</p>
+
+<h2>5 · Custom exceptions: naming your own failure</h2>
+<p>When none of the built-ins say what actually went wrong, define a <dfn data-en="a new exception type defined by subclassing Exception (or a more specific built-in type), giving a domain-specific failure its own name so callers can except it narrowly instead of guessing which built-in type a library happens to raise" data-vn="giữ nguyên &quot;custom exception&quot; — exception type tự định nghĩa bằng cách subclass Exception, đặt tên riêng cho lỗi cụ thể của mình">custom exception</dfn> — a class subclassing <code>Exception</code>, often with no body at all beyond <code>pass</code>:</p>
+<pre><code><span class="kw">class</span> InvalidSalesRow(Exception):
+    <span class="kw">pass</span>
+
+<span class="kw">def</span> parse_row(row):
+    <span class="kw">try</span>:
+        <span class="kw">return</span> <span class="kw">int</span>(row[<span class="str">"amount"</span>])
+    <span class="kw">except</span> ValueError:
+        <span class="kw">raise</span> InvalidSalesRow(<span class="str">f"bad amount in row: {row}"</span>)</code></pre>
+<p>This is exactly what a dataclass's fixed shape (Day 7) and a custom exception have in common: both give a caller a precise, named thing to check for, instead of a generic dict or a generic <code>Exception</code> that could mean anything. A caller can now write <code>except InvalidSalesRow:</code> and know specifically "a sales row failed to parse" — not "something, somewhere, went wrong."</p>
+<pre><code><span class="kw">for</span> row <span class="kw">in</span> raw_rows:
+    <span class="kw">try</span>:
+        parsed.append(parse_row(row))
+    <span class="kw">except</span> InvalidSalesRow <span class="kw">as</span> e:
+        <span class="kw">print</span>(<span class="str">f"skipped: {e}"</span>)    <span class="cm"># one bad row doesn't stop the whole pipeline</span></code></pre>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> <code>pd.to_numeric(col, errors="coerce")</code> turns unparseable values into <code>NaN</code> across a whole column in one vectorized call, instead of a per-row <code>try</code>/<code>except</code>. Not covered here; that's <code>data/</code>'s job, and this is the only sentence in this lesson that mentions it.</div>
+
+<h2>6 · Wiring it into the capstone</h2>
+<p>Day 7's <code>extract()</code> crashed the whole pipeline on the first bad row. A narrow <code>except</code> around just the risky line fixes that without hiding real bugs:</p>
+<pre><code><span class="kw">def</span> extract(path: <span class="kw">str</span>):
+    <span class="kw">with</span> <span class="kw">open</span>(path) <span class="kw">as</span> f:
+        reader = csv.DictReader(f)
+        <span class="kw">for</span> row <span class="kw">in</span> reader:
+            <span class="kw">try</span>:
+                <span class="kw">yield</span> SalesRow(city=row[<span class="str">"city"</span>], amount=<span class="kw">int</span>(row[<span class="str">"amount"</span>]))
+            <span class="kw">except</span> ValueError:
+                <span class="kw">continue</span>              <span class="cm"># skip this row, keep the generator going</span></code></pre>
+<p>The <code>except ValueError</code> catches exactly the "amount isn't a number" failure and moves on; a genuinely different bug (say, a <code>TypeError</code> from a code change elsewhere) still propagates and crashes loudly, which is what you want — a silent bare <code>except:</code> here would have hidden it instead.</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/08_exceptions.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/08_exceptions.py</code></pre>
+<p>No dependencies — standard library only. Exercises: catching a <code>ValueError</code> narrowly instead of crashing, telling apart two different exception types with separate <code>except</code> clauses, using <code>finally</code> to count every attempt, defining a custom exception and raising it, and wiring a narrow <code>except</code> into an <code>extract()</code>-style generator so one bad row doesn't stop the rest.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A bare except: catches every exception type indiscriminately, including typos (NameError) and real bugs, silently turning them into a no-op. Naming the exact type (except ValueError:) catches only the failure you actually expected and planned for, letting anything else propagate loudly.">
+    <p class="stem">Why avoid a bare <code>except:</code> in favor of <code>except ValueError:</code>?</p>
+    <button class="opt" data-ok>bare except hides every error type, even real bugs</button>
+    <button class="opt">bare except runs measurably slower than a named one</button>
+    <button class="opt">bare except cannot capture the exception object at all</button>
+  </div>
+  <div class="q" data-why="finally always runs, whether the try block succeeded, raised a caught exception, or raised an uncaught one that keeps propagating afterward. else only runs if try raised nothing at all, so it is not unconditional.">
+    <p class="stem">Which <code>try</code> clause runs no matter what — success, caught failure, or uncaught failure?</p>
+    <button class="opt" data-ok>finally, which always runs no matter what happens next</button>
+    <button class="opt">else, which always runs after every try block ends</button>
+    <button class="opt">except, which always runs once for every try block</button>
+  </div>
+  <div class="q" data-why="An uncaught exception is the default outcome, not a special mode: it stops the program and prints a traceback showing the exception's type, message, and the chain of calls active when it was raised. Catching it is what changes that default.">
+    <p class="stem">What happens if an exception is raised and nothing catches it?</p>
+    <button class="opt" data-ok>the program stops and prints a full traceback</button>
+    <button class="opt">Python silently ignores it and continues running on</button>
+    <button class="opt">the exception quietly converts itself into a warning</button>
+  </div>
+  <div class="q" data-why="A custom exception, defined by subclassing Exception, gives a caller a precise, domain-specific name to except — InvalidSalesRow means exactly one thing, unlike a bare except Exception: which could mean anything went wrong anywhere.">
+    <p class="stem">What's the point of defining a custom exception like <code>InvalidSalesRow</code>?</p>
+    <button class="opt" data-ok>callers can except that one exact failure by name</button>
+    <button class="opt">it automatically retries the failing operation several times over</button>
+    <button class="opt">it converts every future ValueError into a new type</button>
+  </div>
+  <div class="q" data-why="Wrapping just the yield line's int() call in try/except ValueError and using continue skips only the one bad row and keeps the generator running for the rest of the file — the same narrow-except habit from section 2, applied inside a Day 5 generator function.">
+    <p class="stem">In the rewritten <code>extract()</code>, what does catching <code>ValueError</code> around <code>int(row["amount"])</code> achieve?</p>
+    <button class="opt" data-ok>one bad row is skipped, and the rest get read</button>
+    <button class="opt">every row silently becomes zero after just one bad error</button>
+    <button class="opt">the whole CSV file gets re-read from its first line</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official <a href="https://docs.python.org/3/tutorial/errors.html">Python Tutorial — Errors and Exceptions</a> (cited in RESOURCES.md) — covers today's <code>try</code>/<code>except</code>/<code>else</code>/<code>finally</code>/<code>raise</code> exactly, plus exception chaining beyond today's scope. The <a href="https://docs.python.org/3/library/exceptions.html">built-in exceptions reference</a> is the lookup table for which built-in type fits a given failure.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day8">glossary</a> under Day 8.<br>
+<strong>Phase 2 has started.</strong> Open-ended from here — next up per the plan: modules, packages, and imports, then <code>uv</code>/<code>pyproject.toml</code>, before <code>pytest</code> and decorators.<br><br>
+💬 Anything unclear — narrow <code>except</code>, <code>finally</code>, or custom exceptions? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -62,6 +62,8 @@
       file: "lessons/0027-map-value-mapping.html" },
     { n: 28, date: "2026-08-05", title: "pd.wide_to_long(): melting several metrics at once",
       file: "lessons/0028-wide-to-long.html" },
+    { n: 29, date: "2026-08-06", title: "isin(): filtering against a list of values",
+      file: "lessons/0029-isin.html" },
   ];
 
   const REFS = [

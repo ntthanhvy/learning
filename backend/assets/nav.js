@@ -68,6 +68,8 @@
       file: "lessons/0030-webhook-signature-verification.html" },
     { n: 31, date: "2026-08-05", title: "Service-to-service auth: when the caller isn't a person",
       file: "lessons/0031-service-to-service-auth.html" },
+    { n: 32, date: "2026-08-06", title: "Retries: exponential backoff and jitter",
+      file: "lessons/0032-retries-exponential-backoff-and-jitter.html" },
   ];
 
   const REFS = [

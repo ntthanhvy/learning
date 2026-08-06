@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 29 · isin(): filtering against a list of values</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 29 · ~20 min · 6 Aug 2026</p>
+<h1>isin(): filtering against a list of values</h1>
+<p class="byline">Lesson 28's teaser named no single dangling candidate, so this round did a fresh curriculum/glossary scan — the clearest genuinely-uncovered gap found: <code>isin()</code>, the direct pandas spelling of SQL's <code>WHERE col IN (...)</code>, has been used unglossed inside earlier lessons' fixture descriptions but never actually taught. A small, high-frequency win to close out today.</p>
+
+<h2>1 · The SQL you already know</h2>
+<p>You already write this constantly: <code>WHERE customer IN ('An', 'Chi')</code>. The naive pandas translation — chaining <code>==</code> comparisons with <code>|</code> (Lesson 24's boolean-mask OR) — works but doesn't scale past two or three values:</p>
+<pre><code><span class="cm"># works, but ugly for more than 2-3 values</span>
+clean[(clean[<span class="str">"customer"</span>] == <span class="str">"An"</span>) | (clean[<span class="str">"customer"</span>] == <span class="str">"Chi"</span>)]</code></pre>
+<p><dfn data-en="a Series method returning a True/False mask, True wherever that row's value appears anywhere in a given list/set/Series of candidates — the vectorized alternative to chaining == comparisons with |" data-vn="giữ nguyên 'isin()' — kiểm tra từng giá trị có nằm trong 1 danh sách cho trước không, trả về mask True/False, tương đương WHERE ... IN (...) trong SQL">isin()</dfn> replaces the whole OR chain with one call, for any number of candidates:</p>
+<pre><code>clean[clean[<span class="str">"customer"</span>].isin([<span class="str">"An"</span>, <span class="str">"Chi"</span>])]
+<span class="cm">#   order_id customer  amount  order_date
+#0         1       An   120.0  2026-01-05
+#1         6       An    42.0  2026-01-10</span></code></pre>
+<p>Hand-verified: the <code>isin()</code> mask and the equivalent chained <code>==</code>/<code>|</code> mask are element-for-element identical on this course's fixture — <code>isin()</code> is purely a readability/scaling win, not a different filter.</p>
+
+<h2>2 · NOT IN: negate with ~</h2>
+<p>SQL's <code>NOT IN</code> is pandas' <code>~</code> (Lesson 24's boolean-NOT) in front of <code>isin()</code>:</p>
+<pre><code>clean[~clean[<span class="str">"customer"</span>].isin([<span class="str">"An"</span>])]
+<span class="cm">#   order_id customer  amount  order_date
+#0         2     Binh    35.5  2026-01-06
+#1         5     Binh   180.0  2026-01-09</span></code></pre>
+<p>Same rule as every other boolean mask in this course: <code>~</code> flips every True/False in the mask before it's used to filter — nothing <code>isin()</code>-specific about the negation.</p>
+
+<h2>3 · Filtering against another column — a lightweight anti-join</h2>
+<p><code>isin()</code>'s argument doesn't have to be a hand-typed list — it can be any list-like, including another DataFrame's column. That gives Lesson 5's anti-join pattern without a full <code>merge(indicator=True)</code> call, when all you need is "which rows match/don't match by key," not the other side's columns:</p>
+<pre><code>customers = pd.read_csv(<span class="str">"practice/data/customers.csv"</span>)
+<span class="cm"># customer region
+# An       North
+# Binh     South
+# Danh     West</span>
+
+never_ordered = customers[~customers[<span class="str">"customer"</span>].isin(clean[<span class="str">"customer"</span>])]
+<span class="cm"># customer region
+# Danh     West       &lt;- Danh has no matching order, confirmed against Lesson 5's fixture</span></code></pre>
+<p>This is narrower than Lesson 5's merge-based anti-join: it only tells you <em>which rows</em> matched, with no ability to pull columns across from the other table in the same step. Reach for <code>merge(indicator=True)</code> when you need the other side's data too; reach for <code>isin()</code> when a key-only membership check is all the step needs.</p>
+
+<h2>4 · Two gotchas, both hand-verified on this pandas version (3.0.5)</h2>
+<p><strong>Gotcha 1 — a bare string instead of a list.</strong> Older pandas folklore warns that <code>isin("An")</code> silently iterates over the string's <em>characters</em> (checking membership in <code>{'A', 'n'}</code>) instead of matching the whole word — a classic "no crash, quietly wrong" trap. That folklore is now outdated: verified directly that current pandas (3.0.5) actually <strong>raises</strong> <code>TypeError: only list-like objects are allowed to be passed to isin()</code> for a bare string. pandas added a real guard here, same shape of correction this course made for Lesson 26's <code>SettingWithCopy</code> behavior — always wrap the candidates in <code>[...]</code>, a tuple, or a set regardless, since relying on today's guard existing forever isn't a safe habit.</p>
+<pre><code>clean[<span class="str">"customer"</span>].isin(<span class="str">"An"</span>)
+<span class="cm"># TypeError: only list-like objects are allowed to be passed to isin(), you passed a `str`</span></code></pre>
+<p><strong>Gotcha 2 — Python's bare <code>in</code> keyword is not <code>isin()</code>.</strong> Python's own <code>in</code> operator on a Series checks the <dfn data-en="the row labels of a Series/DataFrame, separate from its values — Python's bare `in` keyword checks membership against these labels, not the data" data-vn="giữ nguyên 'Index' — nhãn hàng; Python 'in' kiểm tra trong đây, KHÔNG kiểm tra giá trị dữ liệu">Index</dfn> labels, never the values — a real and easy mix-up since both spellings look almost identical:</p>
+<pre><code><span class="str">"An"</span> <span class="kw">in</span> clean[<span class="str">"customer"</span>]     <span class="cm"># False -- "An" is a VALUE, not an index label</span>
+<span class="kw">0</span> <span class="kw">in</span> clean[<span class="str">"customer"</span>]        <span class="cm"># True -- 0 IS a real index label on this DataFrame</span></code></pre>
+<p><code>isin()</code> is always the method call; bare <code>in</code> is a different question entirely (row-label membership) that happens to share the same English word.</p>
+
+<h2>5 · Inside query() and inside a method chain</h2>
+<p><code>isin()</code> combines directly with Lesson 22's <code>query()</code> via the same <code>@variable</code> syntax, and reads close to the SQL original:</p>
+<pre><code>allowed = [<span class="str">"An"</span>]
+clean.query(<span class="str">"customer in @allowed"</span>)   <span class="cm"># same @variable rule as Lesson 22, "in" spelled like SQL</span></code></pre>
+<p>Because it's one call returning a mask, <code>isin()</code> also drops straight into Lesson 8's method chains without breaking the chain to name an intermediate boolean variable first.</p>
+
+<div class="interview">
+<p><strong>Q: "How would you filter a DataFrame to rows where a column matches any of several values?"</strong> A strong answer, out loud: <em>"isin() — it's the direct pandas spelling of SQL's WHERE col IN (...). I pass it a list, and it returns a boolean mask I can index the DataFrame with, or wrap in ~ for NOT IN. It scales better than chaining == comparisons with | past two or three values, and it works against any list-like — a hand-typed list, or another DataFrame's column, which gives me a lightweight anti-join when I only need to check membership and don't need to pull columns across."</em> The signal: naming the SQL equivalence directly and knowing when NOT to reach for it (when you need the other table's columns too, that's a real merge).</p>
+</div>
+
+<h2>Try it — self-checking practice (~15 min)</h2>
+<p>Open <code>practice/29_isin.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/29_isin.py</code></pre>
+<p>Uses the same cleaned rows as Lessons 6-28 (An 120.0/01-05, An 42.0/01-10, Binh 35.5/01-06, Binh 180.0/01-09) plus <code>customers.csv</code> from Lesson 5 (An/Binh/Danh). Exercise 1 filters with <code>isin()</code>; Exercise 2 negates with <code>~isin()</code>; Exercise 3 rebuilds Lesson 5's "customer with no orders" anti-join using <code>isin()</code> instead of <code>merge(indicator=True)</code>.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="isin() takes a list-like of candidate values and returns a True/False mask, True wherever the row's value appears anywhere in that list -- it replaces chaining == comparisons together with | for each candidate value, and is the direct spelling of SQL's WHERE col IN (...).">
+    <p class="stem">What does <code>series.isin([a, b, c])</code> return?</p>
+    <button class="opt" data-ok>a mask, True where the value matches any listed item</button>
+    <button class="opt">a mask, True only where the value matches every item</button>
+    <button class="opt">the count of rows matching any of the listed items</button>
+  </div>
+  <div class="q" data-why="Hand-verified on pandas 3.0.5: isin() with a bare string argument now raises TypeError: only list-like objects are allowed to be passed to isin() -- older pandas folklore about it silently iterating over the string's characters is outdated behavior, not current. Always pass a real list/tuple/set regardless.">
+    <p class="stem">On current pandas (3.0.5), what happens when you call <code>series.isin("An")</code> (a bare string, not a list)?</p>
+    <button class="opt" data-ok>it raises TypeError; only list-like objects are allowed</button>
+    <button class="opt">it silently checks each character, "A" and "n"</button>
+    <button class="opt">it silently matches nothing and returns all False</button>
+  </div>
+  <div class="q" data-why="Python's bare `in` keyword on a Series checks membership against the Index labels, never the data values -- a real and easy mix-up since it looks almost identical to isin(). isin() is always the correct method call for checking whether a VALUE appears in the data.">
+    <p class="stem">What does Python's bare <code>"An" in clean["customer"]</code> actually check?</p>
+    <button class="opt" data-ok>whether "An" is one of the Series' index labels</button>
+    <button class="opt">whether "An" is one of the Series' data values</button>
+    <button class="opt">whether "An" is the Series' current dtype name value</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the pandas User Guide's <a href="https://pandas.pydata.org/docs/user_guide/indexing.html#indexing-with-isin">"Indexing with isin"</a> section (~5 min) — covers list, Series, and DataFrame forms of <code>isin()</code> in full, including the multi-column DataFrame case this lesson didn't cover; cross-reference with <a href="https://pandas.pydata.org/docs/getting_started/comparison/comparison_with_sql.html">Comparison with SQL</a> (this course's backbone, per RESOURCES.md) for the <code>IN</code>/<code>NOT IN</code> side-by-side.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>isin()</code> and <code>Index</code> (membership use) are new today.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-29 comes back reported as shakiest, otherwise another fresh curriculum/glossary scan — candidates worth checking first: <code>broadcasting</code> as its own standalone lesson (mentioned inside Lessons 16/24 but never taught on its own, and MISSION.md explicitly puts NumPy broadcasting in scope), or <code>sort_values()</code>/<code>reset_index()</code> edge cases (used constantly across every practice file but never explained as their own topic).<br><br>
+💬 Anything unclear — isin()'s list/Series forms, the bare-string TypeError, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

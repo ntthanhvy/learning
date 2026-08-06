@@ -1063,3 +1063,88 @@
   blind; a fresh gap-finding pass (re-scan MISSION.md/RESOURCES.md/OWASP-
   adjacent terms, or grep for other not-yet-taught candidates the way Lessons
   22-24 and 30 did) is the fallback if neither surfaces.
+- 2026-08-06 generation (Lesson 32, headless 06:00 GitHub Actions run):
+  idempotency check first — confirmed no `lessons/0032-*.html` file existed
+  and lesson 32 was not yet in nav.js before writing anything. Per this
+  session's own briefing, the two DB-read paths were treated as
+  reliably blocked and not spent time on: a direct `psql
+  "$LEARNING_DB_URL" ...` invocation is hard-blocked by this sandbox's
+  static analysis on expanding that exact variable name (same class of
+  block every round since Lesson 9 has hit), and `bin/query-progress`/
+  `bin/record-progress` reads hit an approval gate with no user present in
+  a headless run — neither was retried more than the task's own
+  instruction allowed, so still no `course_progress` rows could be read and
+  no `lesson_completed` record is confirmed for any of Lessons 1-31 either
+  way. Fell back to this course's established convention: pace from
+  `learning-records/` (0001's baseline, 0002's concurrency-gap note, both
+  already reflected in Lessons 1-25, nothing new to act on) plus the
+  lessons/nav.js file state alone. Lesson 31 left its teaser open with only
+  two named candidates, both already ruled out as brushing MISSION.md's own
+  Out of scope section (distributed locks, blue-green/canary deploys) — so
+  this round ran a fresh gap-finding pass rather than reuse either: grepped
+  `lessons/*.html` for "exponential backoff", "jitter", "retry storm", and
+  "timeout" as a dedicated topic. Timeouts only ever appeared incidentally
+  inside code snippets (Lessons 13, 24, 27); backoff was named exactly once,
+  in passing, in Lesson 28's own frontend-habit callout ("react-query's
+  default retry-with-backoff") and never taught; jitter and retry storm had
+  zero hits anywhere. A genuine, previously-flagged-in-passing gap, not an
+  invented topic — and it directly completes the sentence Lesson 28 started
+  but explicitly deferred. Lesson 32 covers it: why a frontend's simple
+  fixed-delay retry habit breaks down once many clients retry in lockstep
+  (a retry storm re-hitting an already-struggling dependency), exponential
+  backoff as the first fix and why doubling the delay alone still leaves
+  every client synchronized with every other client that failed at the same
+  moment, full jitter (AWS's own formula: wait a uniformly random amount
+  between 0 and the computed backoff, not just a small wobble around it) as
+  what actually breaks the synchronized wave, a `callWithBackoff` Go
+  snippet combining both with a `context.Context` deadline escape hatch,
+  and a `retriable` helper making the 4xx-vs-5xx retry decision explicit
+  (reusing Lesson 3's status-code line: the caller's problem vs. the
+  server's). Framed explicitly as a companion to Lesson 28 (a breaker
+  decides whether to call at all; backoff/jitter decide the spacing of the
+  calls still allowed) rather than a replacement, and closed with an
+  explicit callout tying back to Lesson 26: backoff and jitter only handle
+  timing safely, not correctness — a retried POST is only actually safe
+  because of Lesson 26's idempotency key, not because of anything in this
+  lesson alone. The `callWithBackoff`/`retriable`/`statusError` Go snippet
+  was compile-checked clean with `go build -C` / `go vet -C` in a scratch
+  module (`.scratch/backend-lesson32/`, built binary written to `/tmp` and
+  not copied into the scratch dir — `rm -f` on that `/tmp` path was blocked
+  by this session's sandbox as outside the allowed working directory, left
+  in place per the harmless precedent Lesson 27's notes already
+  established; scratch dir itself left with only `go.mod`/`main.go`, same
+  end-state as every prior round) — no approval blocker for either
+  `-C`-style invocation this round, consistent with every round since
+  Lesson 13's finding. Added `retry storm`, `exponential backoff`,
+  `jitter`, and `full jitter` to the glossary (confirmed via grep
+  beforehand that none of the four existed anywhere in `lessons/*.html` or
+  `glossary.html`) and registered Lesson 32 in nav.js. Quiz options were
+  drafted, then verified with `wc -w` per line via individual `sed -n
+  '<n>p' | wc -w` calls (no loop/variable-expansion form attempted, since
+  this session's sandbox rejects bash variable expansion outright,
+  consistent with every round since Lesson 28's finding) — all four
+  questions needed at least one rewrite pass before landing on equal
+  counts, including one self-correction mid-round where an edit intended
+  for Q4 was mistakenly applied to Q3's options instead, caught by
+  re-running the full-file grep and per-line word counts again rather than
+  trusting the edit had landed where intended; final tallies, each
+  re-verified after every edit: Q1 8/8/8/8, Q2 7/7/7/7, Q3 8/8/8/8, Q4
+  9/9/9/9. Also caught and fixed a markup bug while proofreading: the
+  Section 1 `<div class="callout">` closed with a stray `</p></div>`
+  though it never opened a `<p>` tag — cross-checked against Lessons 28's
+  and 31's own callout divs (both open and close with no `<p>` wrapper at
+  all) to confirm the established convention before removing the stray
+  `</p>`. Primary source: AWS Architecture Blog's "Exponential Backoff And
+  Jitter" post (the origin of the full-jitter formula used in the lesson's
+  own snippet) — RESOURCES.md doesn't yet carry a dedicated
+  resilience-patterns citation, so this was cited inline only, the same
+  choice Lesson 28 made for its Fowler citation. `/home/runner/work/
+  learning/learning/bin/record-progress backend lesson_generated --day 32
+  --lesson 0032-retries-exponential-backoff-and-jitter.html --detail
+  '{"by":"github-actions"}'` will be attempted once via its absolute path
+  as instructed after this entry is written. This closes the
+  backoff/jitter gap Lesson 28 named in passing; still no
+  `lesson_completed` record exists for any lesson after 32 rounds — the
+  next session should keep treating a completion/quiz-outcome signal, or a
+  user-named track to deepen, as higher priority than a 33rd topic picked
+  blind.

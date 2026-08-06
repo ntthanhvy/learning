@@ -1184,3 +1184,86 @@
   this lesson's own content — the reshape family started in Lesson 6 is now
   fairly complete across melt/pivot_table/stack/unstack/crosstab/
   wide_to_long) if no drill-outcome signal surfaces by next generation.
+- 2026-08-06 generation (Lesson 29, headless GitHub Actions 06:00 run):
+  `bin/query-progress` (no args, single attempt per instructions) required
+  approval and was blocked, no user present in this headless run — still no
+  `course_progress` rows readable and no `lesson_completed`/quiz/kata
+  outcome record beyond the Lesson 1 baseline, so no reported weak spot to
+  target; fell back to on-disk state per the fallback rule (highest lesson
+  file + this file's own dated log). Confirmed no lesson existed yet for
+  today (highest was Lesson 28, dated 2026-08-05) and no dated note below
+  mentioned today, so this round proceeded rather than skipping. Lesson 28's
+  own teaser named no single dangling candidate ("a fresh curriculum/
+  glossary scan for the next genuinely-uncovered pattern"), so this round
+  did exactly that: grepped `lessons/*.html` and `reference/glossary.html`
+  for a batch of common pandas interview terms not yet confirmed taught —
+  `isin()` came back genuinely uncovered (used unglossed only inside a
+  handful of earlier lessons' code/text, never taught or added to the
+  glossary as its own concept) and is high-frequency (direct spelling of
+  SQL's `WHERE col IN (...)`), so Lesson 29 ships it: `isin()` replacing a
+  chained `==`/`|` OR (Lesson 24), `~isin()` for `NOT IN`, `isin()` against
+  another DataFrame's column as a lightweight anti-join alternative to
+  Lesson 5's `merge(indicator=True)`, combining with Lesson 22's `query()`
+  via `"col in @variable"`, and two hand-verified gotchas. This session's
+  working directory was restricted to the repo root (bare `mkdir`/`cp`
+  outside it were blocked outright, same restriction Lesson 28's round hit)
+  — used the repo's own `.scratch/data-lesson29/` directory instead, this
+  course's established convention. `uv run --with pandas` worked directly
+  this round (pandas 3.0.5): first used to hand-verify every claim in
+  `.scratch/data-lesson29/explore.py`/`explore2.py` (both deleted after)
+  against the real `orders_raw.csv`/`customers.csv` clean fixtures before
+  writing a word of the lesson — `isin(["An","Chi"])` matches exactly An's 2
+  rows (Chi has no clean row); `~isin(["An"])` matches exactly Binh's 2 rows;
+  the `isin()` mask and the equivalent chained `==`/`|` mask are
+  element-for-element identical; `~customers["customer"].isin(clean
+  ["customer"])` gives exactly Danh/West, matching Lesson 5's known
+  never-ordered customer. Also caught and corrected an outdated-folklore
+  gotcha before writing it into the lesson (same pattern as Lessons 25/26's
+  own corrections): the classic warning that `isin("An")` (a bare string)
+  silently iterates over individual characters is NOT current behavior —
+  verified directly that pandas 3.0.5 actually raises `TypeError: only
+  list-like objects are allowed to be passed to isin()`; the lesson text and
+  quiz were written to this confirmed current behavior, explicitly flagging
+  the folklore as outdated rather than repeating it. Also verified the
+  separate, still-live gotcha that Python's bare `in` keyword on a Series
+  checks Index labels, not values (`"An" in clean["customer"]` is False;
+  `0 in clean["customer"]` is True). Checked the by-now-expected
+  Ellipsis-placeholder family before shipping: `isin([...])` with a bare
+  Ellipsis inside a list literal does NOT raise (returns an empty match, a
+  new variant distinct from Lessons 19-27's other Ellipsis findings) — but
+  confirmed this is still safe to ship as-is, since every check condition
+  (exact row count/values) still correctly evaluates to False against that
+  empty/all-NaN-anti-join result, so all 4 checks print ✗ with no crash
+  regardless; the Exercise 3 placeholder sits in a column-lookup position
+  (`clean[...]`) that does raise `KeyError: Ellipsis` directly. The shipped
+  (unsolved) `practice/29_isin.py` was executed both in
+  `.scratch/data-lesson29/` (fixture CSVs copied alongside, matching this
+  course's convention for a restricted-cwd session) and a second time
+  directly from its real `practice/` location inside `data/` — both runs
+  printed the identical all-4-✗ result with no crash. A solved copy
+  (`.scratch/data-lesson29/practice.py`, not shipped) then printed all 4 ✓
+  against the same hand-verified numbers above. `.scratch/data-lesson29/`
+  was fully removed (`rm -rf`) after verification, no approval needed this
+  round. Added `isin()` to the glossary (checked for a collision first —
+  none) and registered Lesson 29 in nav.js. Quiz options were drafted and
+  checked with a Python word-count script (regex-extracted option strings,
+  whitespace-split) run via `uv run python3` — the first draft came out
+  mismatched on one of three questions (Q3 at 9/9/8) and needed one
+  rewrite+recount cycle before a final independent recount, plus a manual
+  `Grep`-based line-by-line read-through of the raw HTML as a second pass
+  (this course's established convention, following Lesson 19's repeated
+  finding that a single pass isn't infallible), confirmed all three
+  genuinely level at 10/10/10, 8/8/8, and 9/9/9. `bin/record-progress data
+  lesson_generated --day 29 --lesson 0029-isin.html --detail
+  '{"by":"github-actions"}'` was run once from the repo root as instructed
+  and succeeded on the first try, no approval blocker this round (write
+  path worked even though the read-side `bin/query-progress` stayed
+  blocked, same asymmetry as most prior rounds) — `lesson_generated` was
+  recorded for day 29. Set the teaser going forward to
+  either `broadcasting` as its own standalone lesson (mentioned inside
+  Lessons 16/24 but never taught on its own; NumPy broadcasting is
+  explicitly in scope per MISSION.md) or `sort_values()`/`reset_index()`
+  edge cases (used constantly across every practice file since Lesson 1 but
+  never explained as their own topic) if no drill-outcome signal surfaces by
+  next generation — both re-confirmed genuinely uncovered by this round's
+  grep.

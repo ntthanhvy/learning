@@ -411,3 +411,15 @@ by the user there; they apply here identically.
   7). `bin/record-progress` was not invoked since nothing new was generated
   or completed to log this round. No new learning record beyond the Day-1
   baseline.
+- 2026-08-06 (headless 06:00 run, GitHub Actions): same as every prior
+  post-week day - verified daily.html, assets/srs.js, and
+  assets/quiz-bank.js are all present and untouched (8 textual id: "k
+  matches: the 7 real kata entries k1-k7 plus the commented-out example
+  line, consistent with every prior round's finding; nav.js still
+  registers only the 7 Jul 8-14 lessons). Still the correct "daily
+  quiz+kata" for this post-week phase per PLAN.md, so nothing new was
+  generated. bin/query-progress hit a generic "requires approval" gate
+  with no user present this session (tried once, not retried), so no
+  course_progress rows could be read for a scope-change signal. No new
+  learning record beyond the Day-1 baseline. (Go skipped again per its own
+  window close, now seventeen days past it.)

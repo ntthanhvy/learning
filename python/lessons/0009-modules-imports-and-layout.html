@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 9 · Modules, packages & imports</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 9 · ~20 min · 6 Aug 2026</p>
+<h1>Modules, packages & imports</h1>
+<p class="byline">Every practice file so far has been a single script, run alone. Real projects — the capstone included — split across several files that need to call each other. Today: what a Python file becomes the moment another file imports it, why <code>if __name__ == "__main__":</code> exists, how a folder becomes an importable package, and a minimal project layout so tomorrow's <code>uv</code>/<code>pyproject.toml</code> lesson has something concrete to sit on top of.</p>
+
+<div class="callout"><strong>Bridge from SQL:</strong> think of a <code>module</code> the way you'd think of a <code>VIEW</code> or a stored function library — a named, reusable unit that other queries reference by name instead of copy-pasting its definition inline. <code>import parsing</code> is the Python version of "use whatever's defined over there," not a copy of the code.</div>
+
+<h2>1 · A file is a module the moment something imports it</h2>
+<p>Every Day-1-through-8 practice file has run as a lone script: <code>uv run python3 practice/08_exceptions.py</code>. But any <code>.py</code> file is also a <dfn data-en="a single .py file, importable by name (without the .py extension) from another file in the same directory or on Python's import path; the unit import statements pull code from" data-vn="giữ nguyên &quot;module&quot; — một file .py, import được bằng tên (bỏ .py) từ file khác cùng thư mục hoặc nằm trên import path">module</dfn> — a unit another file can pull code from by name:</p>
+<pre><code><span class="cm"># parsing.py</span>
+<span class="kw">def</span> safe_int(text):
+    <span class="kw">try</span>:
+        <span class="kw">return</span> <span class="kw">int</span>(text)
+    <span class="kw">except</span> ValueError:
+        <span class="kw">return</span> <span class="kw">None</span></code></pre>
+<pre><code><span class="cm"># main.py, same folder</span>
+<span class="kw">import</span> parsing
+parsing.safe_int(<span class="str">"42"</span>)          <span class="cm"># 42 — call anything via module.name</span>
+
+<span class="kw">from</span> parsing <span class="kw">import</span> safe_int
+safe_int(<span class="str">"42"</span>)                   <span class="cm"># 42 — pull the name in directly</span></code></pre>
+<p>Both forms run <code>parsing.py</code> top to bottom exactly once, the first time it's imported anywhere in a program, then cache the result — a second <code>import parsing</code> elsewhere reuses that same already-run module instead of re-running the file. <code>import parsing</code> keeps everything behind the <code>parsing.</code> prefix (no name clashes); <code>from parsing import safe_int</code> pulls just that one name into the current file directly.</p>
+
+<h2>2 · <code>if __name__ == "__main__":</code>: script vs. import</h2>
+<p>Every module has a built-in variable called <dfn data-en="a built-in string variable every Python module has automatically: it holds &quot;__main__&quot; when the file is run directly (uv run python3 file.py) and the module's own name when the file is imported by another file instead" data-vn="giữ nguyên &quot;__name__&quot; — biến string tự có trong mọi module, giá trị &quot;__main__&quot; khi chạy trực tiếp, tên module khi bị import">__name__</dfn>. Python sets it to <code>"__main__"</code> when the file is run directly, or to the module's own name (<code>"parsing"</code>) when the file is imported instead:</p>
+<pre><code><span class="cm"># parsing.py</span>
+<span class="kw">def</span> safe_int(text):
+    ...
+
+<span class="kw">if</span> __name__ == <span class="str">"__main__"</span>:
+    <span class="cm"># only runs when this file is executed directly —</span>
+    <span class="cm"># NOT when another file does `import parsing`</span>
+    <span class="kw">print</span>(safe_int(<span class="str">"42"</span>))</code></pre>
+<p>Without that guard, any quick self-test or demo code at the bottom of <code>parsing.py</code> would also run every single time <em>any other file</em> imports it — surprising side effects triggered by the mere act of importing. The guard makes a file work both ways on purpose: a runnable script by itself, and a clean, side-effect-free library when imported elsewhere. Every practice file in this course already ends this way, right before its own <code>check()</code> calls — that block only prints its ✓/✗ tally when you run the file directly.</p>
+
+<h2>3 · <code>import</code> variants and where Python looks</h2>
+<p>Four spellings cover nearly everything:</p>
+<pre><code><span class="kw">import</span> csv                       <span class="cm"># stdlib module, use as csv.reader(...)</span>
+<span class="kw">import</span> csv <span class="kw">as</span> c                  <span class="cm"># alias — c.reader(...)</span>
+<span class="kw">from</span> csv <span class="kw">import</span> DictReader      <span class="cm"># pull one name in directly</span>
+<span class="kw">from</span> csv <span class="kw">import</span> DictReader <span class="kw">as</span> DR <span class="cm"># pull in, renamed</span></code></pre>
+<p>When Python sees <code>import csv</code>, it searches, in order: (1) already-imported modules (the cache from section 1), (2) the directory of the file doing the importing, (3) installed packages (what <code>uv</code> manages — tomorrow's topic), (4) the standard library. That search order is why a local file named <code>csv.py</code> in your own project would silently shadow the real <code>csv</code> module — one more reason not to name a file after a stdlib module.</p>
+
+<h2>4 · Packages: a folder of modules</h2>
+<p>A <dfn data-en="a directory containing an __init__.py file (possibly empty), making the directory itself importable as a namespace whose modules are reached with dotted names, e.g. mypkg.parsing" data-vn="giữ nguyên &quot;package&quot; — thư mục chứa __init__.py, biến thư mục thành namespace import được, module bên trong gọi bằng tên có dấu chấm">package</dfn> is a directory containing an <code>__init__.py</code> file — often empty — which tells Python "treat this folder as an importable namespace":</p>
+<pre><code>mypkg/
+    __init__.py
+    parsing.py
+    loading.py</code></pre>
+<pre><code><span class="kw">from</span> mypkg <span class="kw">import</span> parsing
+parsing.safe_int(<span class="str">"42"</span>)
+
+<span class="kw">from</span> mypkg.parsing <span class="kw">import</span> safe_int
+safe_int(<span class="str">"42"</span>)</code></pre>
+<p>This is the exact mechanism behind every stdlib import so far — <code>csv</code>, <code>json</code>, <code>dataclasses</code>, <code>collections</code> are each either a single module or a package, and <code>import csv</code> has been doing this same lookup the whole course. Modern Python (3.3+) technically allows a package directory without <code>__init__.py</code> at all (an "implicit namespace package"), but writing the file explicitly, even empty, remains the clearer, more common convention and is what this course uses.</p>
+
+<h2>5 · A minimal project layout</h2>
+<p>Tomorrow's lesson formalizes this with <code>uv</code> and <code>pyproject.toml</code>; today's job is just to recognize the shape it will manage:</p>
+<pre><code>myproject/
+    pyproject.toml      <span class="cm"># tomorrow: project metadata + dependencies</span>
+    src/
+        mypkg/
+            __init__.py
+            parsing.py
+            loading.py
+    tests/
+        test_parsing.py <span class="cm"># pytest, coming later this week</span></code></pre>
+<p>Splitting <code>extract</code>/<code>transform</code>/<code>load</code> from Day 7's capstone into three separate modules (<code>extract.py</code>, <code>transform.py</code>, <code>load.py</code>) inside a package like this is the natural next step once a single-file script outgrows itself — each stage becomes independently importable and independently testable, which matters once <code>pytest</code> enters the picture.</p>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> <code>import pandas as pd</code> is this exact mechanism, aliased — pandas itself is just a (very large) package following the same <code>__init__.py</code>/module rules taught today. Not covered here beyond that one sentence; the library itself is <code>data/</code>'s job.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/09_modules_imports_and_layout.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/09_modules_imports_and_layout.py</code></pre>
+<p>No dependencies — standard library only. Exercises: importing a name from a sibling module in <code>practice/helpers/</code>, using the module-prefix form instead, reading <code>__name__</code> to tell whether a module is running as a script or being imported, wiring an <code>if __name__ == "__main__":</code> guard, and importing a function from a package (a folder with <code>__init__.py</code>).</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Python sets __name__ to &quot;__main__&quot; only when a file is executed directly, and to the module's own name when it is imported elsewhere — that's exactly what the guard checks before running its body.">
+    <p class="stem">When does <code>__name__</code> equal <code>"__main__"</code> inside a module?</p>
+    <button class="opt" data-ok>only when that file is run directly, not imported</button>
+    <button class="opt">only when that file defines at least one function</button>
+    <button class="opt">only when that file is inside a package folder</button>
+  </div>
+  <div class="q" data-why="Without the guard, any demo/self-test code at module level runs every single time the file is imported anywhere, not just when run directly — a surprising side effect. The guard makes the file safe to import while still runnable standalone.">
+    <p class="stem">Why wrap demo code in <code>if __name__ == "__main__":</code> instead of leaving it bare?</p>
+    <button class="opt" data-ok>bare code reruns itself on every single import</button>
+    <button class="opt">Python refuses to import files lacking the guard</button>
+    <button class="opt">the guard measurably speeds up every import statement</button>
+  </div>
+  <div class="q" data-why="A package is a directory containing an __init__.py file, which tells Python to treat that folder as an importable namespace whose modules are reached with dotted names like mypkg.parsing.">
+    <p class="stem">What makes a plain directory of <code>.py</code> files into an importable package?</p>
+    <button class="opt" data-ok>an __init__.py file present inside that same directory</button>
+    <button class="opt">giving every file inside it a .pkg extension</button>
+    <button class="opt">naming the directory identically to Python itself, always</button>
+  </div>
+  <div class="q" data-why="A module runs top to bottom exactly once on its first import anywhere in the program; Python caches the result, so a second import of the same module elsewhere reuses that cached module instead of re-running the file's code.">
+    <p class="stem">How many times does a module's top-level code actually run across a program with two separate <code>import</code> statements for it?</p>
+    <button class="opt" data-ok>once — the second import reuses the cached module</button>
+    <button class="opt">twice — once per each separate import statement used</button>
+    <button class="opt">zero — imports only load names, never run code</button>
+  </div>
+  <div class="q" data-why="Python's import search checks already-imported (cached) modules first, then the importing file's own directory, then installed packages, then the standard library — so a local file literally named csv.py would be found before the real stdlib csv module.">
+    <p class="stem">Why can a local file named <code>csv.py</code> break code that expects the real <code>csv</code> stdlib module?</p>
+    <button class="opt" data-ok>its own local directory gets searched before the stdlib</button>
+    <button class="opt">Python silently renames the stdlib module to avoid clashes</button>
+    <button class="opt">it can't, since stdlib modules always beat local ones</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official <a href="https://docs.python.org/3/tutorial/modules.html">Python Tutorial — Modules</a> (cited in RESOURCES.md) — covers today's <code>import</code> forms, <code>__name__</code>, and packages exactly, plus the full import-path search order (<code>sys.path</code>) beyond today's scope.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day9">glossary</a> under Day 9.<br>
+Next up per the plan: environments and dependencies with <code>uv</code>, reading <code>pyproject.toml</code> — the natural follow-on now that today's layout exists to manage.<br><br>
+💬 Anything unclear — <code>__name__</code>, packages, or the import search order? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

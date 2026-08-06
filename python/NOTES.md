@@ -541,3 +541,96 @@ fail *gracefully* so the learner sees which task failed.
   Day 8 is the first lesson generated under Phase 2's open-ended, sequential,
   no-date-lock rule, following the Phase 2a spine's first item (exceptions)
   rather than jumping ahead to a later spine item.
+- 2026-08-06 — **Day 9 generated**
+  (`lessons/0009-modules-imports-and-layout.html`), the headless run's second
+  Phase 2 lesson. Idempotency check used on-disk state (`python/lessons/`
+  highest filename plus this file's own dated log) since DB access was
+  unavailable again this run (see below); no `0009-…` file or today's-date
+  nav.js entry existed yet, so generation proceeded.
+  Topic: modules, packages, imports, `__name__`, project layout — the second
+  item of `PLAN.md`'s Phase 2a spine, directly after Day 8's exceptions, and
+  squarely language-level (the import system itself), not library — satisfies
+  the scope rule. Taught: a `.py` file becomes an importable module the
+  moment something imports it, and runs its top-level code exactly once,
+  cached on repeat imports; `__name__` as `"__main__"` when run directly vs.
+  the module's own name when imported, and why every practice file's closing
+  `if __name__ == "__main__":` guard exists (demo/self-test code would
+  otherwise re-run on every import elsewhere); the four `import` spellings
+  and Python's search order (cache → importing file's own directory →
+  installed packages → stdlib), used to explain why a local `csv.py` would
+  shadow the real stdlib module; packages as a directory with `__init__.py`
+  making it an importable namespace, framed as the exact mechanism `csv`,
+  `json`, `dataclasses`, and `collections` have been using all course; and a
+  minimal `pyproject.toml`/`src/`/`tests/` project layout shown only to
+  recognize the shape, explicitly deferred to tomorrow's `uv`/`pyproject.toml`
+  lesson for real management. Bridged from SQL per the baseline record: a
+  module framed as a `VIEW` or stored-function library — a named, reusable
+  unit other queries reference instead of copy-pasting — introduced before
+  any Python in the top callout, not from a pandas or other
+  "Python-adjacent" analogy.
+  Learning records: still only the Day 1 baseline
+  (`learning-records/0001-baseline-reads-python-writes-little.md`) — no
+  completion/quiz record for Day 8 or any other day was found (same gap
+  Day 8's entry already flagged). Per this run's instructions, treated that
+  as "records are sparse" and kept pacing conservative and anchored to
+  material already taught: no new unrelated examples, and the project-layout
+  section was deliberately kept to recognition-only (a picture of the shape)
+  rather than teaching `pyproject.toml` mechanics, which stays tomorrow's job
+  per PLAN.md's own ordering. This assumption remains unverified against real
+  quiz/completion data, same caveat as Day 8's entry.
+  No-pandas rule: zero pandas/NumPy API in the lesson body or practice file
+  (checked by grep for `pandas|numpy|DataFrame|dataframe`, case-insensitive,
+  across both new files — zero hits in the practice file, exactly one hit in
+  the lesson); exactly one contrast sentence, naming `import pandas as pd` as
+  the same import mechanism aliased, without demonstrating any pandas API,
+  placed once near the end and labeled in prose as the only such sentence,
+  matching the hard-rule section above.
+  Practice file `practice/09_modules_imports_and_layout.py` (5 exercises:
+  importing a name directly from a sibling module with `from ... import`,
+  the module-prefix `import`-then-`module.name` form, reading the file's own
+  `__name__`, importing a function from a package via `from mypkg.parsing
+  import safe_int`, and confirming a module is cached rather than re-run on a
+  second `import`) needed a different fixture strategy than every prior day:
+  today's topic is inherently about *multiple files* importing each other,
+  which a single self-contained script can't demonstrate honestly. Followed
+  Day 6's precedent of writing its own fixtures at runtime instead — the
+  practice file builds a throwaway `helpers.py` module and a `mypkg/`
+  package (with `__init__.py` and `parsing.py`) into a `tempfile.mkdtemp()`
+  directory at startup, then prepends it to `sys.path` so the TODOs import
+  real code from real files on disk, without adding any extra files under
+  `practice/` itself. Verified in a scratch dir
+  (`.scratch_py9_verify/`, created under the repo root and removed after
+  use, per the Day 3–8 precedent that `/tmp` is out of bounds for this
+  sandbox): the shipped (unsolved) copy ran via `uv run python3`, both from
+  the scratch copy and from its real `practice/` path with the documented
+  command, and printed five clean ✗ lines with no traceback each time; a
+  separately solved copy printed five ✓ and the "All green" tally. No bugs
+  found during verification — both passes succeeded on the first attempt.
+  Glossary: added a Day 9 section to `reference/glossary.html` (`module`,
+  `__name__`, `import`, `package`) after confirming via grep that none of
+  the four terms collided with any Day 1–8 entry.
+  Quiz: 5 questions. Word counts were checked with individual manual
+  word-by-word counts per option (not by eye, `wc -w`/pipeline commands
+  blocked by this sandbox's approval gate as in prior days) and mismatched
+  on the first draft for all five questions — each went through two to four
+  rewrite-and-recount rounds (Q3 and Q5 needed the most iterations, each
+  requiring a second pass after an em-dash or a compound word like
+  `__init__.py`/`.pkg` was miscounted once) until every option matched (Q1
+  9/9/9, Q2 8/8/8, Q3 8/8/8, Q4 9/9/9, Q5 9/9/9), then a full final recount
+  pass across all five questions' three options each (15 lines total, each
+  checked individually) confirmed every one before shipping, per this file's
+  instruction to recount after any edit. Registered in `assets/nav.js` with
+  `date: "2026-08-06"`.
+  **DB access:** both the read path (`bin/query-progress`) and the direct
+  `psql "$LEARNING_DB_URL"` path were unavailable again this run — the direct
+  path is hard-blocked by this sandbox's static analysis whenever
+  `LEARNING_DB_URL` is expanded inline, and the helper script hits a
+  permission-approval gate with no user present — consistent with every
+  prior day's experience, so learning-record freshness was judged from
+  on-disk files only, per this run's fallback instructions; the single
+  baseline record above is what that fallback found.
+  `bin/record-progress python lesson_generated --day 9 --lesson
+  0009-modules-imports-and-layout.html --detail '{"by":"github-actions"}'`
+  was run once after shipping, per this run's instructions (writes are
+  pre-approved and source DB creds internally, unlike the blocked read
+  paths) — see its own output for whether it recorded successfully.

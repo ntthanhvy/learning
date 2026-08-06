@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 32 · Retries: exponential backoff and jitter</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 32 · ~20 min</p>
+<h1>Retries: exponential backoff and jitter</h1>
+<p class="byline">Lesson 28's circuit breaker named "retry-with-backoff" in passing and moved on. Today's the lesson that was always the other half of that sentence: how a caller should actually retry a failed call — how long to wait, why doubling the wait isn't quite enough, and why every client waiting the exact same amount of time is itself a bug.</p>
+
+<h2>1 · The frontend habit, and where it stops being enough</h2>
+<p>A frontend retry is usually simple: refetch on failure, maybe with a fixed one-second delay, because the assumption is the network hiccuped and the server is fine. Lesson 28 named the case where that assumption breaks — the server side, or a dependency behind it, is genuinely struggling — and built a circuit breaker to stop hammering it. But a circuit breaker only decides <em>whether</em> to call at all. It doesn't decide how a caller should space out the retries it's still allowed to make. That's a separate, smaller decision, and getting it wrong causes real outages on its own.</p>
+<div class="callout"><strong>Not a replacement for Lesson 28, a companion to it:</strong> a circuit breaker trips after repeated failures and stops calling entirely for a while. A backoff strategy governs the spacing of the calls made <em>before</em> that threshold is hit. A well-built client caller uses both — backoff between attempts, a breaker as the outer safety net once attempts keep failing.</div>
+
+<h2>2 · Fixed-delay retries synchronize into a wave</h2>
+<p>Picture 500 client instances that all just got the same <code>503</code> from an overloaded service, each retrying after exactly one fixed second. All 500 land back on the service at nearly the same instant — a second wave shaped exactly like the first. If the service was struggling under the original load, it now takes a second hit at full force, right as it was trying to recover. This is the actual failure mode <dfn data-en="a retry storm: many clients retrying at the same moment, re-creating or amplifying the load spike that caused the original failure" data-vn="giữ nguyên 'retry storm' — nhiều client cùng retry một lúc, tái tạo lại đúng cái spike gây lỗi ban đầu">retry storm</dfn> names, and it's why "just retry" is not, by itself, a safe default.</p>
+
+<h2>3 · Exponential backoff: wait longer after each failure</h2>
+<p><dfn data-en="a retry strategy where the wait between attempts roughly doubles each time a call fails, so a client backs off harder the longer a dependency stays down" data-vn="exponential backoff (giữ nguyên) — mỗi lần fail thì chờ lâu gấp đôi lần trước">exponential backoff</dfn> fixes the "hit it again immediately" half of the problem: instead of a fixed delay, each retry waits roughly double the previous one (200ms, 400ms, 800ms, 1.6s, capped at some maximum so it doesn't grow forever). A dependency that's down for a few seconds gets far fewer requests during that window than a fixed-delay strategy would send, and a client backs off harder the longer the trouble lasts — matching effort to how bad things actually are.</p>
+<p>But doubling alone doesn't fix the synchronization problem from Section 2. If every one of those 500 clients started at the same moment and doubles the same way, they're still all retrying in lockstep — just at 200ms, then 400ms, then 800ms instead of every second. The wave got taller intervals, not less of a wave.</p>
+
+<h2>4 · Jitter: make the wave stop being a wave</h2>
+<p><dfn data-en="randomizing the retry delay instead of using the exact computed backoff value, so many clients that failed at the same moment don't retry at the same moment too" data-vn="jitter (giữ nguyên) — random hóa thời gian chờ, tránh nhiều client retry cùng lúc">jitter</dfn> is the fix: instead of waiting exactly the computed backoff value, each client waits a <em>random</em> amount up to that value. The specific version used below is <dfn data-en="a jitter strategy that picks the actual wait uniformly at random between 0 and the full computed backoff value, rather than only randomizing a small amount around it" data-vn="full jitter (giữ nguyên) — chọn thời gian chờ ngẫu nhiên đều trong khoảng [0, backoff], không chỉ dao động nhẹ quanh nó">full jitter</dfn> — AWS's own backoff writeup (cited below) found it outperforms smaller "add a little randomness" variants, because spreading the wait across the <em>entire</em> range, not just wobbling near the edge, is what actually breaks up the synchronized wave. 500 clients that failed together now retry spread smoothly across the whole window instead of arriving in one spike.</p>
+
+<pre><code><span class="cm">// callWithBackoff retries fn up to maxAttempts times, waiting between</span>
+<span class="cm">// attempts with exponential backoff (doubling each time) plus full jitter</span>
+<span class="cm">// (a random value between 0 and the computed delay), and gives up early if</span>
+<span class="cm">// ctx is cancelled or its deadline passes.</span>
+<span class="kw">func</span> callWithBackoff(ctx context.Context, maxAttempts <span class="ty">int</span>, fn <span class="kw">func</span>() error) error {
+    base := <span class="kw">200</span> * time.Millisecond
+    cap := <span class="kw">5</span> * time.Second
+
+    <span class="kw">var</span> lastErr error
+    <span class="kw">for</span> attempt := <span class="kw">0</span>; attempt &lt; maxAttempts; attempt++ {
+        lastErr = fn()
+        <span class="kw">if</span> lastErr == <span class="kw">nil</span> {
+            <span class="kw">return</span> <span class="kw">nil</span> <span class="cm">// success, stop retrying</span>
+        }
+        <span class="kw">if</span> !retriable(lastErr) {
+            <span class="kw">return</span> lastErr <span class="cm">// don't retry a client error like 400</span>
+        }
+        <span class="kw">if</span> attempt == maxAttempts-<span class="kw">1</span> {
+            <span class="kw">break</span> <span class="cm">// last attempt already used, no point sleeping again</span>
+        }
+
+        backoff := time.Duration(math.Min(
+            <span class="ty">float64</span>(cap),
+            <span class="ty">float64</span>(base)*math.Pow(<span class="kw">2</span>, <span class="ty">float64</span>(attempt)),
+        ))
+        jittered := time.Duration(rand.Int63n(<span class="ty">int64</span>(backoff) + <span class="kw">1</span>)) <span class="cm">// full jitter: [0, backoff]</span>
+
+        <span class="kw">select</span> {
+        <span class="kw">case</span> &lt;-time.After(jittered):
+        <span class="kw">case</span> &lt;-ctx.Done():
+            <span class="kw">return</span> ctx.Err() <span class="cm">// caller's deadline won — stop waiting</span>
+        }
+    }
+    <span class="kw">return</span> fmt.Errorf(<span class="st">"giving up after %d attempts: %w"</span>, maxAttempts, lastErr)
+}</code></pre>
+
+<h2>5 · Not every failure deserves a retry</h2>
+<p>The <code>retriable</code> check above is doing real work, not boilerplate. A <code>5xx</code> or a network-level error (connection reset, timeout) might succeed on a second try — the failure could be transient. A <code>4xx</code> won't: if the server rejected the request because it was malformed or unauthorized, retrying sends the exact same wrong request again and wastes an attempt for nothing. This is the same status-code line Lesson 3 first drew (4xx is the caller's problem, 5xx is the server's) — here it decides which failures are even worth a second attempt.</p>
+<pre><code><span class="cm">// retriable reports whether an error is worth retrying at all — a 5xx or a</span>
+<span class="cm">// network-level failure might succeed next time, but a 4xx won't, since the</span>
+<span class="cm">// request itself was wrong and retrying just repeats the same mistake.</span>
+<span class="kw">func</span> retriable(err error) <span class="ty">bool</span> {
+    <span class="kw">var</span> httpErr *statusError
+    <span class="kw">if</span> errors.As(err, &amp;httpErr) {
+        <span class="kw">return</span> httpErr.code &gt;= <span class="kw">500</span>
+    }
+    <span class="kw">return</span> <span class="kw">true</span> <span class="cm">// treat unknown errors (timeouts, connection resets) as worth retrying</span>
+}</code></pre>
+
+<h2>6 · The piece this whole strategy assumes: Lesson 26</h2>
+<div class="callout"><strong>Retries are only safe if the handler tolerates running twice:</strong> everything in this lesson controls <em>when</em> a retry happens. It says nothing about what happens if the first attempt actually succeeded on the server side but the response was lost before the client saw it — a client-side timeout doesn't mean the server-side write didn't happen. Retrying blind in that case can double-create. Lesson 26's <code>Idempotency-Key</code> is what makes a retried <code>POST</code> safe rather than merely "spaced out nicely" — backoff and jitter decide the timing; idempotency decides the safety. Both matter together.</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="If every failed client retries after the same fixed delay, they all land back on the struggling service at nearly the same instant, re-creating the load spike that caused the failure in the first place — a retry storm.">
+    <p class="stem">Why is a fixed, identical retry delay for every client a problem?</p>
+    <button class="opt" data-ok>every client retries together, causing a fresh spike</button>
+    <button class="opt">every client permanently stops retrying right at once</button>
+    <button class="opt">every client silently skips its very next request</button>
+    <button class="opt">every client doubles its own request timeout value</button>
+  </div>
+  <div class="q" data-why="Exponential backoff makes each client wait longer between successive attempts, but if every client started failing at the same moment and doubles identically, they stay synchronized with each other — just at longer intervals, not spread apart.">
+    <p class="stem">What does exponential backoff alone fail to fix?</p>
+    <button class="opt" data-ok>clients retrying in the same synchronized pattern</button>
+    <button class="opt">clients retrying with a slowly increasing delay</button>
+    <button class="opt">clients giving up after only one attempt</button>
+    <button class="opt">clients ignoring every 5xx server response code</button>
+  </div>
+  <div class="q" data-why="Full jitter picks the actual wait uniformly at random across the entire [0, backoff] range rather than only wobbling slightly around the computed value, and that full spread is what actually breaks up a synchronized wave of retries.">
+    <p class="stem">What does "full jitter" randomize, compared to a small wobble?</p>
+    <button class="opt" data-ok>the entire wait, anywhere from zero to backoff</button>
+    <button class="opt">only the request's outgoing HTTP method verb name</button>
+    <button class="opt">only whether a retry ever even happens today</button>
+    <button class="opt">only the maximum number of allowed retry attempts</button>
+  </div>
+  <div class="q" data-why="A 4xx means the request itself was wrong — malformed input, missing auth — and retrying sends the identical wrong request again, wasting an attempt for a failure that won't change. A 5xx or network error may well succeed on a later try.">
+    <p class="stem">Why shouldn't a client retry after receiving a 4xx response?</p>
+    <button class="opt" data-ok>the request itself was wrong and retrying repeats that</button>
+    <button class="opt">the request body itself was already much too large</button>
+    <button class="opt">the request itself used some very unsupported HTTP version</button>
+    <button class="opt">the request itself had already used its one retry</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/">"Exponential Backoff And Jitter" — AWS Architecture Blog</a> (~10 min) — the source of the full-jitter formula used above, with measured comparisons against fixed and equal-jitter alternatives under simulated load. RESOURCES.md doesn't yet carry a dedicated resilience-patterns citation; this AWS post is the concrete primary source for this lesson specifically, in the same spirit as Lesson 28's Fowler citation and Lesson 29's DDIA chapter extension — cited inline rather than added as a new standing RESOURCES.md entry, since it covers one mechanism rather than a whole track.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> open — still no reported quiz/lesson-completion outcome exists for any lesson after 32 rounds; distributed locks and blue-green/canary deploys remain the last named, confirmed-untaught candidates from Lesson 30's search (both out-of-scope per MISSION.md) if no user-chosen track surfaces first.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

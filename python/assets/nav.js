@@ -22,6 +22,8 @@
       file: "lessons/0007-dataclasses-typing-capstone.html" },
     { n: 8, date: "2026-08-05", title: "Exceptions: catching failure on purpose",
       file: "lessons/0008-exceptions.html" },
+    { n: 9, date: "2026-08-06", title: "Modules, packages & imports",
+      file: "lessons/0009-modules-imports-and-layout.html" },
   ];
 
   const REFS = [

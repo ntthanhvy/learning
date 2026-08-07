@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 34 · Soft delete: keeping the row, hiding the record</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 34 · ~20 min</p>
+<h1>Soft delete: keeping the row, hiding the record</h1>
+<p class="byline">Every lesson so far that touched a row's lifecycle — Lesson 2's entities, Lesson 12's ownership checks, Lesson 19's migrations — has quietly assumed "delete" means <code>DELETE FROM</code> and the row is gone. Lesson 19 even said it outright: once a migration destroys data, there's no getting it back. Today's the lesson on the alternative almost every real product actually uses instead — and the constraint-and-query cost of choosing it.</p>
+
+<h2>1 · Why a hard DELETE is often the wrong tool</h2>
+<p>Picture an <code>accounts</code> table with orders, invoices, and support tickets all holding a foreign key back to it (Lesson 2's join-table territory, just via a plain FK here). A user closes their account. Run <code>DELETE FROM accounts WHERE id = $1</code> and one of two things happens: either the delete fails outright, because Postgres won't let you remove a row something else still points at, or — worse — it was allowed to <code>CASCADE</code>, and every order that account ever placed disappears with it. Neither is what "close my account" should mean. The order history, the invoices, the audit trail of what happened — a support agent, a finance report, or the user themselves reopening the account later still needs that data to exist.</p>
+<div class="callout"><strong>Frontend-habit trap:</strong> a frontend "delete" almost always means "remove from my local list" — the item vanishes from the UI, and what happens server-side is someone else's problem. On the backend, you <em>are</em> that someone else, and "gone from the list" and "gone from the database" are two very different decisions with very different consequences.</div>
+<p>The fix most products reach for is <dfn data-en="marking a row as deleted by setting a flag or timestamp column instead of removing it with DELETE — the row still physically exists and can still be referenced by foreign keys, joined, or restored, but normal application queries treat it as gone" data-vn="soft delete (giữ nguyên) — đánh dấu dòng là đã xóa (set timestamp/flag) thay vì DELETE thật, dòng vẫn còn trong DB nhưng query bình thường coi như không tồn tại">soft delete</dfn>: instead of removing the row, mark it deleted and leave it exactly where it is.</p>
+
+<h2>2 · The shape: one column, one filter</h2>
+<p>The common version adds a single nullable timestamp column:</p>
+<pre><code>ALTER TABLE accounts ADD COLUMN deleted_at timestamptz;</code></pre>
+<p><code>NULL</code> means "still active" — the default and normal state for every existing row. A non-null value means "deleted at this exact moment," and doubles as an answer to "when." <code>DELETE FROM</code> never runs; "deleting" a row becomes an <code>UPDATE</code>:</p>
+<pre><code><span class="cm">-- "deleting" an account</span>
+UPDATE accounts SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL;
+
+<span class="cm">-- every normal read has to say so explicitly</span>
+SELECT * FROM accounts WHERE id = $1 AND deleted_at IS NULL;
+</code></pre>
+<p>That second query is the entire cost of this pattern in one line: a soft-deleted row still physically exists, so <em>every</em> query that shouldn't return it needs its own <code>WHERE deleted_at IS NULL</code>. Forget it once, in one handler, in one report, in one admin script — and a "deleted" account quietly reappears somewhere it shouldn't. A hard delete never has this problem, because there's nothing left to accidentally select.</p>
+
+<pre><code><span class="cm">// GetAccount reads a single account, but only if it hasn't been soft-deleted.
+// A plain SELECT with no deleted_at filter would happily return a "deleted"
+// row to a caller who has no business seeing it.</span>
+<span class="kw">func</span> GetAccount(ctx context.Context, db DB, id <span class="ty">int64</span>) (name <span class="ty">string</span>, err error) {
+    row := db.QueryRowContext(ctx, <span class="st">`
+        SELECT name FROM accounts
+        WHERE id = $1 AND deleted_at IS NULL`</span>, id)
+    <span class="kw">if</span> err := row.Scan(&amp;name); err != <span class="kw">nil</span> {
+        <span class="kw">if</span> errors.Is(err, sql.ErrNoRows) {
+            <span class="kw">return</span> <span class="st">""</span>, ErrNotFound <span class="cm">// same 404 whether truly missing or soft-deleted</span>
+        }
+        <span class="kw">return</span> <span class="st">""</span>, err
+    }
+    <span class="kw">return</span> name, <span class="kw">nil</span>
+}
+
+<span class="cm">// SoftDeleteAccount marks an account deleted instead of removing the row —
+// existing foreign keys (orders.account_id, invoices.account_id) stay valid,
+// and the row can still be read directly by id for audit/support purposes.</span>
+<span class="kw">func</span> SoftDeleteAccount(ctx context.Context, db DB, id <span class="ty">int64</span>, now time.Time) error {
+    res, err := db.ExecContext(ctx, <span class="st">`
+        UPDATE accounts SET deleted_at = $2
+        WHERE id = $1 AND deleted_at IS NULL`</span>, id, now)
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        <span class="kw">return</span> err
+    }
+    n, err := res.RowsAffected()
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        <span class="kw">return</span> err
+    }
+    <span class="kw">if</span> n == <span class="kw">0</span> {
+        <span class="kw">return</span> ErrNotFound <span class="cm">// already gone, or never existed — same response either way</span>
+    }
+    <span class="kw">return</span> <span class="kw">nil</span>
+}</code></pre>
+<p>Notice <code>GetAccount</code> returns the same <code>ErrNotFound</code> whether the row never existed or was soft-deleted — from the caller's side of the API contract, "deleted" and "never was" should usually look identical (a 404, per Lesson 3), even though internally the row is still sitting right there in the table.</p>
+
+<h2>3 · The constraint problem soft delete quietly creates</h2>
+<p>A plain <code>UNIQUE</code> constraint on <code>email</code> stops working the way you'd expect the moment soft delete enters the picture. Someone closes their account, then later signs up again with the same email — a completely normal thing for a user to do — and the second signup fails, because the first row, soft-deleted or not, still holds that email value and the constraint doesn't know or care about <code>deleted_at</code>. The fix is Lesson 5's indexing lesson coming back with a new use: a <dfn data-en="a UNIQUE (or other) index built over only the rows matching a WHERE clause, instead of the whole table — used to enforce uniqueness only among 'live' rows, letting soft-deleted rows keep a value without blocking it from being reused" data-vn="partial index (giữ nguyên) — index chỉ build trên các dòng thỏa WHERE, không phải cả bảng — dùng để enforce unique chỉ trong các dòng còn sống">partial index</dfn>:</p>
+<pre><code>CREATE UNIQUE INDEX accounts_email_unique_live
+  ON accounts (email)
+  WHERE deleted_at IS NULL;</code></pre>
+<p>This index only covers rows where <code>deleted_at IS NULL</code> — "live" rows. Two live rows still can't share an email, exactly as before. But a soft-deleted row's email is invisible to this index entirely, so a new signup with that same address is free to succeed. A plain table-wide <code>UNIQUE</code> constraint has no <code>WHERE</code> clause to give it this distinction — it protects every row equally, dead or alive, which is precisely the wrong rule once "dead" rows are still physically present.</p>
+
+<h2>4 · When soft delete is the wrong call too</h2>
+<p>Soft delete is not a universal default — it trades "deleted" for "always filtered," and that trade isn't free. Two cases where a real <code>DELETE</code> is still the right tool:</p>
+<ul>
+<li><strong>Legally required erasure.</strong> GDPR's "right to erasure" and similar regulations can require that personal data actually stop existing, not merely stop being queried by default — a <code>deleted_at</code> flag alone doesn't satisfy "erase this person's data," since the data is all still sitting right there in the table.</li>
+<li><strong>Data with no downstream reason to keep it.</strong> A password-reset token, an expired idempotency key (Lesson 26) — nothing reads these once they've served their purpose or expired, and nothing references them by foreign key. Soft-deleting something nobody will ever want back just grows the table forever for no benefit; a hard delete (often on a schedule, not per-request) is simpler and correct.</li>
+</ul>
+<p>The deciding question is the same shape every time: does something else still legitimately need this row to exist — a foreign key, an audit trail, a "can I undo this" support request — or is a plain frontend-shaped "it's gone" actually true here too? Soft delete earns its cost only in the first case.</p>
+
+<div class="interview">
+<p><strong>Q: "A user asks you to delete their account. Walk me through what actually happens in the database."</strong> A strong answer, out loud: <em>"I wouldn't run a hard DELETE, because that account almost certainly has orders, invoices, or other rows pointing at it by foreign key — either the delete fails outright, or a CASCADE takes all that history down with it, which isn't what 'close my account' should mean. I'd add a deleted_at timestamp column, set it on 'delete' instead of removing the row, and make every normal read filter WHERE deleted_at IS NULL so the account stops appearing anywhere a live user should see it. The one thing I'd watch for is any UNIQUE constraint on a column like email — a plain table-wide UNIQUE would block the same email from signing up again later, so that needs to become a partial unique index scoped to deleted_at IS NULL instead. And if there's a legal erasure requirement involved, soft delete alone doesn't satisfy it — that's a real DELETE, possibly on a retention schedule."</em> The subtext: naming the constraint problem unprompted is what separates "knows the deleted_at trick" from having actually shipped it.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A hard DELETE either fails outright (Postgres won't remove a row still referenced by a foreign key) or, if CASCADE is configured, silently takes every referencing row down with it — neither is what closing an account should mean when orders and invoices still need to exist.">
+    <p class="stem">Why is a hard <code>DELETE</code> often wrong for a row other tables reference?</p>
+    <button class="opt" data-ok>it fails or cascades away rows still needed</button>
+    <button class="opt">it fails or cascades away rows never needed</button>
+    <button class="opt">it succeeds and cascades away rows still needed</button>
+    <button class="opt">it succeeds and cascades away rows never needed</button>
+  </div>
+  <div class="q" data-why="Soft delete never runs DELETE FROM at all — it sets a deleted_at timestamp (or similar flag) on the row via UPDATE, leaving the row physically in the table so foreign keys, joins, and audit reads still work.">
+    <p class="stem">What does a soft delete actually do to the row in the database?</p>
+    <button class="opt" data-ok>it updates a deleted_at column, row still exists</button>
+    <button class="opt">it removes the row, foreign keys updated first</button>
+    <button class="opt">it renames the table, row moves to archive</button>
+    <button class="opt">it updates a deleted_at column, row is removed</button>
+  </div>
+  <div class="q" data-why="Because soft-deleted rows physically remain in the table, a plain table-wide UNIQUE constraint still counts them — so a new signup can't reuse an email a closed account already holds. A partial index scoped to WHERE deleted_at IS NULL fixes this, protecting only live rows.">
+    <p class="stem">Why does a plain <code>UNIQUE</code> constraint misbehave once soft delete is added?</p>
+    <button class="opt" data-ok>it still blocks reuse of a soft-deleted row's value</button>
+    <button class="opt">it stops blocking reuse of any live row's value</button>
+    <button class="opt">it silently removes itself once a row is deleted</button>
+    <button class="opt">it only blocks reuse for exactly one hour total</button>
+  </div>
+  <div class="q" data-why="A regulation requiring erasure of personal data means the data must actually stop existing, not merely stop appearing in default queries — a deleted_at flag leaves every byte still sitting in the table, so it doesn't satisfy that requirement on its own.">
+    <p class="stem">Why doesn't soft delete alone satisfy a legal "right to erasure" request?</p>
+    <button class="opt" data-ok>the personal data still physically exists in the table</button>
+    <button class="opt">the personal data gets copied into a backup table</button>
+    <button class="opt">the personal data becomes visible to every other user</button>
+    <button class="opt">the personal data triggers an automatic full account restore</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the <a href="https://www.postgresql.org/docs/current/indexes-partial.html">PostgreSQL Manual — Partial Indexes</a> (~10 min) — the exact <code>CREATE UNIQUE INDEX ... WHERE</code> mechanism used above, straight from this course's standing Postgres reference (already cited for Lesson 5's indexing material and Lesson 19's migrations); this lesson is a direct, practical extension of both into a pattern most schemas eventually need.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> open — still no reported quiz/lesson-completion outcome exists for any lesson after 34 rounds; distributed locks and blue-green/canary deploys remain the last named, confirmed out-of-scope-per-MISSION.md candidates if no fresh gap or user-chosen track surfaces first.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

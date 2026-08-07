@@ -731,3 +731,147 @@ fail *gracefully* so the learner sees which task failed.
   python/lesson_generated day=10 lesson=0010-environments-and-pyproject.html`
   — the write path continues to work reliably even though the read paths
   remain blocked, consistent with Day 9's outcome.
+- 2026-08-08 — **Day 11 generated** (`lessons/0011-testing-with-pytest.html`),
+  the headless run's fourth Phase 2 lesson. Idempotency check confirmed
+  on-disk: highest existing lesson file was `0010-…` dated 2026-08-07, no
+  `0011-…` file and no `date: "2026-08-08"` entry existed yet in
+  `assets/nav.js` before this run, so generation proceeded as Day 11.
+  Topic: testing with `pytest` — assertions, fixtures, `parametrize` — the
+  fourth item of `PLAN.md`'s Phase 2a spine, directly after Day 10's
+  environments/`pyproject.toml`. Taught: `pytest` as the one deliberate,
+  explicitly-flagged exception to this course's "standard library only"
+  constraint, installed ad hoc via `uv run --with pytest pytest ...` (Day
+  10's own "one-off dependency, no file changes" vocabulary, chosen over
+  `uv add --dev pytest` because no `pyproject.toml` exists anywhere in this
+  course yet — that project-file case is mentioned in prose as what a real
+  project would do instead, not demonstrated); plain `assert` inside a
+  `test_*` function as pytest's entire assertion mechanism, explicitly
+  contrasted against `unittest`'s `self.assertEqual(...)` class-based style,
+  which this course does not teach; `@pytest.fixture` with `yield` splitting
+  a fixture into setup (before `yield`) and teardown (after `yield`,
+  guaranteed to run), framed as the same "always runs" guarantee already
+  established by Day 6's context-manager `__exit__` and Day 8's `finally`;
+  and `@pytest.mark.parametrize` as the pytest-native replacement for the
+  "list of check() calls" idiom every practice file through Day 10 has used,
+  now reporting each case as its own separately-named pass/fail. Grounded in
+  the course's own practice files as instructed: section 2's plain-`assert`
+  example and the practice file's Exercise 1/4 both pytest-ify Day 8's
+  `safe_int()` directly (same two/four cases the old `check()` covered), and
+  Exercise 3 pytest-ifies Day 8's `extract()` behind a fixture instead of a
+  hand-built temp-dir block at module scope. Bridged from SQL per the
+  baseline record: a test suite framed as the set of query-result assertions
+  you'd run after every schema migration — "this SELECT must return exactly
+  these rows, every time" — introduced before any Python/pytest in the top
+  callout, not from a pandas or other "Python-adjacent" analogy.
+  Learning records: still only the Day 1 baseline
+  (`learning-records/0001-baseline-reads-python-writes-little.md`) — no
+  completion/quiz record for any later day was found (same gap every Day
+  8–10 entry already flagged). Paced conservatively per that same
+  assumption: exactly one core mechanism (fixture `yield`-as-setup/teardown)
+  given the most explanatory weight, tied back to two already-taught
+  mechanisms (context managers, `finally`) rather than introduced as
+  something new and unrelated, and no additional pytest features (fixture
+  scopes, marks beyond `parametrize`, plugins) pulled in beyond the spine's
+  named three (assertions, fixtures, parametrize). Unverified against real
+  quiz/completion data, same caveat as every entry since Day 8.
+  No-pandas rule: zero pandas/NumPy API in the lesson body or practice file
+  (checked by grep for `pandas|numpy|dataframe`, case-insensitive, across
+  both new files — zero hits in the practice file, exactly one hit in the
+  lesson); exactly one contrast sentence, naming a DataFrame's contents as
+  what a real pandas-pipeline test would assert on instead of a plain
+  function's return value, without demonstrating any pandas API, placed once
+  near the end and labeled in prose as the only such sentence, matching the
+  hard-rule section above.
+  Practice file `practice/11_testing_with_pytest.py`: a genuine
+  **idiom change from every prior day**, discussed explicitly in the file's
+  own header comment and in lesson section 5 — this is the first practice
+  file that is itself a real `pytest` test file (functions named `test_*`,
+  run by the `pytest` CLI) rather than a script with a hand-rolled
+  `check()`/✓/✗ tally. Decision: keeping the ✓/✗ idiom would have meant
+  testing pytest without ever actually invoking pytest's own runner, which
+  contradicts the lesson's own point that pytest's reporting is a strict
+  upgrade over the hand-rolled tally — so this file adopts pytest's native
+  reporting instead (`pytest -v` output: dots/`F`/a per-test summary),
+  matching "pick whichever fits pytest's actual usage pattern" from this
+  run's instructions. 5 exercises: a plain-`assert` test against `safe_int()`
+  (Ex 1), a `@pytest.fixture` writing a small CSV to a `tempfile.mkdtemp()`
+  path and yielding it (Ex 2, the same "write my own fixture" strategy Day
+  6/9/10 used, now expressed as a real pytest fixture instead of module-level
+  setup code), a test consuming that fixture against `extract()` (Ex 3), a
+  `@pytest.mark.parametrize` list covering four `safe_int()` cases in one
+  test body (Ex 4), and a fixture with real setup **and** teardown proven by
+  a shared `_log` list a second, later test checks (Ex 5) — concretely
+  demonstrating that teardown code after `yield` really does run, not just
+  stating it in prose.
+  **One design bug was caught and fixed during verification, worth flagging
+  since it's a new failure mode this course's practice files hadn't hit
+  before:** the first draft used bare `pass` as the TODO placeholder inside
+  test bodies (copying the hand-rolled-script convention). Under pytest this
+  is silently wrong in two different ways rather than failing gracefully: (a)
+  a `pass`-only test body with no `assert` at all trivially **passes** with
+  nothing left to do — Exercises 1, 3, and 4's shipped (unsolved) forms were
+  found reporting PASSED instead of FAILED on the first scratch-dir run; (b)
+  a bare `...` (Ellipsis) left inside an `@pytest.mark.parametrize(...)`
+  list's argument tuple crashes **test collection for the entire file** with
+  `TypeError: object of type 'ellipsis' has no len()` before any test even
+  runs, rather than failing just that one exercise. Both violate this file's
+  own "must fail gracefully so the learner sees which task failed" rule, and
+  neither would have been caught without actually running `pytest` on the
+  shipped file and reading its verdict, not just checking it didn't crash —
+  the same lesson Day 3's entry already drew about running (not just
+  eyeballing) both the unsolved and solved copies. Fixed by replacing every
+  unsolved test body with `assert False, "TODO: ..."` (fails visibly with
+  the exact next step named in the message) and the parametrize placeholder
+  with one clearly-fake but list-shaped tuple (`("TODO", "TODO")`, so
+  collection succeeds and the test simply fails instead of crashing
+  collection). Exercise 2's fixture placeholder uses `raise
+  NotImplementedError(...)` instead, so pytest reports it as an `ERROR` at
+  fixture setup — still a clean, obviously-intentional signal, not a
+  traceback that looks like a real bug.
+  After the fix, verified in a scratch dir (`.scratch_py11_verify/`, created
+  under the repo root and removed after use, per the Day 3–10 precedent that
+  `/tmp` is out of bounds for this sandbox): the shipped (unsolved) copy, run
+  via `uv run --with pytest pytest practice/11_testing_with_pytest.py -v`
+  both from a scratch copy and from its real `practice/` path with the
+  documented command, reported **"4 failed, 1 error"** — every one of the
+  five exercises failing or erroring with a message naming exactly what's
+  unsolved, zero unexpected tracebacks, zero false PASSED lines; a separately
+  written solved copy reported **"8 passed"** (5 exercises, with Exercise 4's
+  `parametrize` correctly expanding into 4 separately-reported cases, e.g.
+  `test_safe_int_parametrized[7-7] PASSED`). Real command output for the
+  fixed shipped file:
+  `FAILED ...::test_safe_int_parses_a_valid_number`,
+  `ERROR ...::test_extract_reads_every_row - NotImplementedError: fill in
+  sales_csv() — write the CSV and yield its path`,
+  `FAILED ...::test_safe_int_parametrized[TODO-TODO]`,
+  `FAILED ...::test_resource_is_open_during_the_test - TypeError: 'NoneType'
+  object is not subscriptable`,
+  `FAILED ...::test_teardown_already_ran_for_the_previous_test - assert []
+  == ['closed']`, tallied as `4 failed, 1 error in 0.03s`; the solved copy's
+  final line was `8 passed in 0.02s`.
+  Glossary: added a Day 11 section to `reference/glossary.html` (`pytest`,
+  `assert (in a test)`, `fixture`, `parametrize`) after confirming via grep
+  that none of the four terms collided with any Day 1–10 entry. All four also
+  got matching `<dfn>` markup at first use in the lesson body (`pytest`,
+  `assert`, `fixture`, `parametrize`), matching the density of Day 9/10's
+  lessons rather than leaving newly glossaried terms undefined inline.
+  Quiz: 5 questions. Word counts were checked with individual `wc -w` calls
+  per option line (not by eye, and not piped through compound
+  awk/multi-stage commands, since this sandbox's approval gate blocks
+  compound bash commands exactly as in every prior day) and mismatched on
+  the first draft for four of the five questions (Q1 7/6/8, Q2 10/9/9, Q3
+  11/10/10, Q4 10/11/10) — Q5 was already equal on the first draft (8/8/8).
+  Each mismatched question went through one to two rewrite-and-recount
+  rounds until every option matched (Q1 7/7/7, Q2 9/9/9, Q3 10/10/10, Q4
+  10/10/10), then a full final recount pass across all five questions' three
+  options each (15 lines total, each checked individually with its own
+  `wc -w` call) confirmed every one before shipping, per this file's
+  instruction to recount after any edit. Registered in `assets/nav.js` with
+  `date: "2026-08-08"`.
+  `bin/record-progress python lesson_generated --day 11 --lesson
+  0011-testing-with-pytest.html --detail '{"by":"github-actions"}'` was run
+  once after shipping and **succeeded**: `recorded: python/lesson_generated
+  day=11 lesson=0011-testing-with-pytest.html` — third consecutive success
+  (Days 9, 10, 11), suggesting the write path may simply be reliable in this
+  sandbox regardless of the read-path blockage, though still only three data
+  points.

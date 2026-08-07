@@ -1353,3 +1353,88 @@
   (Lesson 29's other named candidate, deferred this round in favor of
   `broadcasting`, re-confirmed still genuinely uncovered by this round's own
   grep) if no drill-outcome signal surfaces by next generation.
+- 2026-08-08 generation (Lesson 31, headless 06:00 GitHub Actions run):
+  confirmed the idempotency check first — no `data/lessons/0031-*.html`
+  existed yet and Lesson 31 wasn't in `assets/nav.js` (highest was Lesson 30,
+  dated 2026-08-07) — so this round proceeded. Lesson 30's own teaser named
+  `sort_values()`/`reset_index()` edge cases explicitly, and it named its own
+  supporting grep ("appear everywhere as tool calls but never explained on
+  their own") — re-ran that grep fresh before trusting it: `sort_values`
+  appears 20 times and `reset_index` 16 times across `lessons/*.html`, but
+  neither has its own glossary entry (only referenced obliquely inside the
+  `top N per group` and `nlargest()/nsmallest()` entries) — confirmed the
+  gap was still real, not stale. `bin/query-progress`/direct `psql` reads
+  were not attempted this round per the task's own note that Day 1 is the
+  only learning-record baseline with no completion data — no reported weak
+  spot to target regardless. Lesson 31 ships: Section 1 establishes that
+  `sort_values()` reorders rows but leaves each row's original Index label
+  attached (hand-verified: sorting `clean` by amount gives index order
+  `[1, 5, 0, 4]`, not `[0,1,2,3]`); Section 2 is the concrete gotcha this
+  fact enables — after that sort, `.iloc[0]` (35.5, Binh, true first row)
+  and `.loc[0]` (120.0, An, whatever row is still labeled 0) silently
+  disagree, no error either way; Section 3 covers `reset_index()`'s
+  `drop=False` default (old labels survive as a new literal `"index"`
+  column) vs `drop=True`; Section 4 is the `sort_values(...,
+  ignore_index=True)` shortcut, hand-verified via `.equals()` to produce an
+  identical result to the two-call chain; Section 5 is `na_position=`
+  (pandas' default sorts NaN last regardless of ascending/descending;
+  `"first"` moves it to the front); Section 6 is multi-key sort with
+  independent per-column `ascending=[...]`; Section 7 is `sort_index()` as
+  the inverse, hand-verified to exactly restore `clean`'s original row
+  order via `.equals()`; Section 8 — the section most likely to matter in
+  practice — is `reset_index()` on a grouped Series (`groupby(...)[col]
+  .sum()` returns a Series indexed by the group key, not a DataFrame;
+  `reset_index()` converts it back, and `name=` renames the value column in
+  the same call); Section 9 contrasts operations that do vs don't hand back
+  a clean `0..n-1` index unprompted (a boolean filter leaves gaps `[0, 4]`;
+  `merge()` always re-indexes its result to `0..n-1` even when the left
+  side was left unreset — both hand-verified). `uv run --with pandas`
+  worked directly this round (pandas 3.0.5): every number above was
+  hand-verified in `.scratch/data-lesson31/explore.py` and `explore2.py`
+  (both deleted after) against the real `orders_raw.csv`/`customers.csv`
+  fixtures before writing a word of the lesson — including the `merge()`
+  auto-reindex finding, which wasn't assumed going in and only surfaced
+  from actually running it. The shipped (unsolved)
+  `practice/31_sort_values_and_reset_index.py` was first run in
+  `.scratch/data-lesson31/practice/` (fixture CSVs copied alongside) and
+  caught a real false-positive before shipping, the same "Ellipsis is
+  truthy" class of bug this course has hit repeatedly (Lessons 19/21):
+  Exercise 2's first draft placed the placeholder at
+  `sort_values("amount", ignore_index=...)`, and since bare `Ellipsis` is
+  truthy it behaves exactly like `True`, silently passing Exercise 2 even
+  fully unsolved — confirmed directly with a throwaway script before
+  fixing. Moved the placeholder into the column-name position instead
+  (`sort_values(..., ignore_index=True)`), confirmed via the same
+  throwaway script that this reliably raises `KeyError: Ellipsis`, then
+  re-ran the full practice file and confirmed all 6 checks now print ✗ with
+  no crash. Exercise 3's `reset_index(name=...)` placeholder was also
+  explicitly checked and found NOT to raise (a bare Ellipsis silently
+  becomes a column literally named `Ellipsis` rather than `total_amount`)
+  — but confirmed safe to ship as-is since the check itself
+  (`"total_amount" in grouped_df.columns`) still correctly evaluates False
+  regardless, so no crash and no false-positive either way. A solved copy
+  (`.scratch/data-lesson31/practice/31_solved.py`, not shipped) then
+  printed all 6 ✓ against the same hand-verified numbers above. The shipped
+  file was also re-run a second time directly from its real `practice/`
+  location (`cd data && uv run --with pandas python3
+  practice/31_sort_values_and_reset_index.py`) and confirmed to print the
+  identical all-✗ result with no crash. `.scratch/data-lesson31/` was fully
+  removed (`rm -rf`) after verification. Added `sort_values()`,
+  `sort_index()`, and `reset_index()` to the glossary as three separate
+  entries (checked for collisions first — none; all three were previously
+  used unglossed) and registered Lesson 31 in nav.js. Quiz options were
+  drafted and checked with a Python regex/word-count script (this course's
+  established convention) — the first draft came out mismatched on all
+  three questions (Q1 at 8/9/8, Q2 at 11/8/8, Q3 at 5/6/8) and needed
+  several rewrite + recount cycles per question (Q2 took four passes) before
+  a final independent recount, plus a manual `Grep`-based read-through as a
+  second pass, confirmed all three genuinely level at 8/8/8, 7/7/7, and
+  7/7/7. `bin/record-progress data lesson_generated --day 31 --lesson
+  0031-sort-values-and-reset-index.html --detail '{"by":"github-actions"}'`
+  was run once from the repo root as instructed and succeeded on the first
+  try, no approval blocker this round. Set the teaser going forward to a
+  fresh curriculum/glossary scan for the next genuinely-uncovered pattern
+  (no single obvious dangling candidate named in this lesson's own content
+  — the "trusts row order only" family started in Lesson 7 and the "no
+  crash, quietly wrong" family started in Lesson 19 are both fairly mature
+  at this point) if no drill-outcome signal surfaces by next generation.

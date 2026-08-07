@@ -121,6 +121,15 @@
   <tr><td>uv add / uv run --with</td><td>giữ nguyên "uv add" / "uv run --with" — add ghi vào pyproject.toml lâu dài, --with chỉ cài tạm cho 1 lần chạy</td><td><code>uv add pkg</code> permanently adds a dependency to <code>pyproject.toml</code> and updates <code>uv.lock</code>; <code>uv run --with pkg script.py</code> installs it into a temporary environment for that single run only, leaving both project files untouched.</td></tr>
 </table>
 
+<h2 id="day11">Day 11 — Testing with pytest</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>pytest</td><td>giữ nguyên "pytest" — thư viện test bên thứ 3, ngoại lệ duy nhất của luật "chỉ dùng standard library" trong khoá này</td><td>A third-party testing framework — the one deliberate exception to this course's standard-library-only rule. Finds any function named <code>test_*</code> in any file named <code>test_*</code>, runs it, and reports pass/fail based on whether an <code>assert</code> inside it fails. Installed ad hoc with <code>uv run --with pytest pytest ...</code>, or project-wide with <code>uv add --dev pytest</code>.</td></tr>
+  <tr><td>assert (in a test)</td><td>giữ nguyên "assert" — pytest chỉ cần assert thường, không cần self.assertEqual kiểu unittest</td><td>A plain <code>assert expr</code> statement is all a <code>pytest</code> test needs to check a value — no <code>self.assertEqual(...)</code> or test-class boilerplate, which belongs to the standard library's older <code>unittest</code> style and is not taught in this course. On failure, pytest shows the actual values on both sides of the comparison automatically.</td></tr>
+  <tr><td>fixture</td><td>giữ nguyên "fixture" — hàm chuẩn bị dữ liệu/tài nguyên cho test, test nào cần thì khai tên fixture làm tham số</td><td>A function decorated <code>@pytest.fixture</code> that prepares something a test needs (data, a temp file, a connection) and hands it to any test naming that fixture as a parameter. Code before <code>yield</code> is setup, run once per using test; code after <code>yield</code> is teardown, guaranteed to run once that test finishes — the same "always runs" guarantee as a context manager's <code>__exit__</code> (Day 6) or a <code>finally</code> block (Day 8).</td></tr>
+  <tr><td>parametrize</td><td>giữ nguyên "parametrize" — chạy 1 test body nhiều lần với nhiều bộ input/output khác nhau, mỗi lần báo cáo riêng</td><td><code>@pytest.mark.parametrize("names", [(...), (...)])</code> runs one test body once per listed tuple of arguments, reporting each case as its own separate pass/fail instead of one test looping silently over several cases — the pytest-native replacement for a hand-rolled list of check calls.</td></tr>
+</table>
+
 <p class="next">💬 A term here still unclear? Ask your teacher — hỏi bằng tiếng Việt cũng được.</p>
 
 <script src="../assets/nav.js"></script>

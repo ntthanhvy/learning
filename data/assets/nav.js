@@ -66,6 +66,8 @@
       file: "lessons/0029-isin.html" },
     { n: 30, date: "2026-08-07", title: "Broadcasting: why pandas arithmetic \"just works\"",
       file: "lessons/0030-broadcasting.html" },
+    { n: 31, date: "2026-08-08", title: "sort_values() and reset_index() edge cases",
+      file: "lessons/0031-sort-values-and-reset-index.html" },
   ];
 
   const REFS = [

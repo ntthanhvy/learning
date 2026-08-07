@@ -286,3 +286,20 @@
   present; `bin/record-progress` (write) is pre-approved and works, as
   every prior round found. Moot for this course since it's a pure skip
   regardless of DB state.
+- 2026-08-08 (headless 06:00 run, GitHub Actions): skipped again per the
+  same rule — the course window closed 2026-07-20, now nineteen days past
+  it. Day 13 (`0014-concurrency-capstone.html`) re-confirmed present on disk
+  and registered in `assets/nav.js` (`grep` match at the expected LESSONS
+  entry) — moot either way. Direct DB access (`bin/query-progress`,
+  `psql "$LEARNING_DB_URL" ...`) was blocked again this session (env-var
+  expansion of that name is rejected outright by the sandbox's static
+  check; the query-progress helper hits a generic "requires approval" gate
+  with no user present) — moot for this course since it's a pure skip
+  regardless of DB state. Backend lesson 34 (soft delete), data lesson 31
+  (`sort_values()`/`reset_index()` edge cases), and python Day 11 (pytest
+  testing) were generated this round via delegated agents; rust's
+  post-week daily quiz+kata infra was verified unchanged, nothing new to
+  generate. (No 2026-08-07 entry exists in this file — that round evidently
+  didn't log a go-skip note, though backend/data/python all show 08-07
+  entries; flagged here in case a future session wants to chase it, though
+  it's moot for this course's decision either way.)

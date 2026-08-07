@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 11 · Testing with pytest</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 11 · ~20 min · 8 Aug 2026</p>
+<h1>Testing with <code>pytest</code></h1>
+<p class="byline">Every practice file so far has checked itself with a hand-rolled <code>check()</code> function printing ✓/✗. That was never a coincidence — it's a small, homemade version of what a real Python project uses <code>pytest</code> for. Today: the one deliberate exception to "standard library only" in this course, why it's worth it, and the three pieces that make it work — plain <code>assert</code>, fixtures, and <code>parametrize</code>.</p>
+
+<div class="callout"><strong>Bridge from SQL:</strong> think of a test suite the way you'd think of a set of query-result assertions you'd run after every schema migration — "this <code>SELECT</code> must return exactly these rows, every time, or something broke." <code>pytest</code> is that same idea for functions: run the function, assert the output is what it should be, and re-run automatically on every change instead of eyeballing it by hand.</div>
+
+<h2>1 · The one deliberate exception to "standard library only"</h2>
+<p><dfn data-en="a third-party testing framework: finds any function named test_* in any file named test_*, runs it, and reports pass/fail based on whether an assert inside it fails" data-vn="giữ nguyên &quot;pytest&quot; — thư viện test bên thứ 3, ngoại lệ duy nhất của luật &quot;chỉ dùng standard library&quot; trong khoá này"><code>pytest</code></dfn> is not part of the standard library — it's a third-party package. Every prior lesson's practice file avoided third-party packages on purpose (MISSION.md's constraint: <code>uv run python3 …</code>, no <code>--with</code> needed). Today breaks that rule deliberately, because testing is common enough, and <code>pytest</code> good enough, that avoiding it would teach a worse habit than depending on one well-known package. Day 10 already built the vocabulary for exactly this case: run it once, ad hoc, with no project file at all —</p>
+<pre><code>uv run --with pytest pytest practice/11_testing_with_pytest.py</code></pre>
+<p><code>uv run --with pytest</code> installs <code>pytest</code> into a temporary environment for that one command only, touching neither a <code>pyproject.toml</code> nor a <code>uv.lock</code> — this course has neither yet. A real project instead runs <code>uv add --dev pytest</code> once, which writes <code>pytest</code> into the <code>dev</code> dependency group Day 10's <code>pyproject.toml</code> example already sketched (tools a developer needs, never installed for an end user) — after that, plain <code>uv run pytest</code> works with no <code>--with</code> flag, the same way every practice file's <code>uv run python3</code> already works with no flag once a dependency is declared instead of one-off.</p>
+
+<h2>2 · What <code>pytest</code> actually replaces: plain <code>assert</code></h2>
+<p>Every practice file's <code>check()</code> function has been doing this by hand:</p>
+<pre><code><span class="kw">def</span> check(name, cond):
+    <span class="kw">try</span>:
+        ok = <span class="kw">bool</span>(cond())
+    <span class="kw">except</span> Exception:
+        ok = <span class="kw">False</span>
+    <span class="kw">print</span>((<span class="str">"✓"</span> <span class="kw">if</span> ok <span class="kw">else</span> <span class="str">"✗"</span>), name)</code></pre>
+<p><code>pytest</code> replaces all of that machinery with one keyword: a plain <dfn data-en="a statement that checks a condition and raises AssertionError if it's false; in a pytest test, a plain assert is enough to make the test fail with a detailed report of what the actual values were" data-vn="giữ nguyên &quot;assert&quot; — pytest chỉ cần assert thường, không cần self.assertEqual kiểu unittest"><code>assert</code></dfn>. Any function whose name starts with <code>test_</code>, in any file whose name starts with <code>test_</code>, is a test — <code>pytest</code> finds it, runs it, and reports pass or fail based on whether an <code>assert</code> inside it fails:</p>
+<pre><code><span class="cm"># test_parsing.py</span>
+<span class="kw">from</span> parsing <span class="kw">import</span> safe_int
+
+<span class="kw">def</span> test_safe_int_parses_a_valid_number():
+    <span class="kw">assert</span> safe_int(<span class="str">"42"</span>) == <span class="kw">42</span>
+
+<span class="kw">def</span> test_safe_int_returns_none_on_garbage():
+    <span class="kw">assert</span> safe_int(<span class="str">"nope"</span>) <span class="kw">is</span> <span class="kw">None</span></code></pre>
+<p>No <code>self.assertEqual(...)</code>, no test-class boilerplate — that's the older <code>unittest</code> style, and this course doesn't teach it; <code>pytest</code>'s whole design point is that a bare <code>assert expr</code> is enough, plus better failure output than the plain interpreter gives when one fails (it shows the actual values on both sides of <code>==</code>, not just <code>AssertionError</code>). This is exactly Day 8's <code>safe_int()</code> from the exceptions practice file, pytest-ified: same function, same two cases the hand-rolled <code>check()</code> already covered, now as two separate named tests instead of one lambda each.</p>
+
+<h2>3 · Fixtures: shared setup, requested by name</h2>
+<p>Day 6, 9, and 10's practice files each built a throwaway file or directory at the top of the script with <code>tempfile.mkdtemp()</code> before any exercise could run. A <dfn data-en="a function decorated with @pytest.fixture that prepares something a test needs (data, a temp file, a connection) and hands it to any test that names the fixture as a parameter; code after yield runs as teardown once that test finishes" data-vn="giữ nguyên &quot;fixture&quot; — hàm chuẩn bị dữ liệu/tài nguyên cho test, test nào cần thì khai tên fixture làm tham số">fixture</dfn> is <code>pytest</code>'s name for that same pattern, formalized: a function decorated <code>@pytest.fixture</code> that prepares something and hands it to any test that asks for it by naming it as a parameter:</p>
+<pre><code><span class="kw">import</span> pytest
+<span class="kw">import</span> tempfile
+<span class="kw">from</span> pathlib <span class="kw">import</span> Path
+
+<span class="kw">@pytest.fixture</span>
+<span class="kw">def</span> sales_csv():
+    tmp = Path(tempfile.mkdtemp())
+    path = tmp / <span class="str">"sales.csv"</span>
+    path.write_text(<span class="str">"city,amount\nHanoi,120\nDanang,80\n"</span>)
+    <span class="kw">yield</span> path                      <span class="cm"># hands the path to the test</span>
+    <span class="cm"># nothing after yield here — no cleanup needed for a temp dir</span>
+
+<span class="kw">def</span> test_extract_reads_two_rows(sales_csv):
+    rows = <span class="kw">list</span>(extract(sales_csv))
+    <span class="kw">assert</span> <span class="kw">len</span>(rows) == <span class="kw">2</span></code></pre>
+<p><code>pytest</code> sees that <code>test_extract_reads_two_rows</code> has a parameter named <code>sales_csv</code>, matches it to the fixture of the same name, runs the fixture first, and passes its <code>yield</code>ed value in as the argument — no manual wiring, no import beyond <code>pytest</code> itself. Code <em>before</em> <code>yield</code> is setup, running once per test that uses the fixture; code <em>after</em> <code>yield</code> is teardown, guaranteed to run once that test finishes, success or failure — the identical "always runs" guarantee Day 6's context managers and Day 8's <code>finally</code> already made, applied here to test cleanup (closing a real file handle, deleting a row from a test database, and so on).</p>
+
+<h2>4 · <code>parametrize</code>: one test body, many inputs</h2>
+<p>Day 8's <code>safe_int()</code> test above needed two separate functions for two cases. <dfn data-en="a decorator, @pytest.mark.parametrize(names, cases), that runs one test body once per listed tuple of arguments, reporting each case as its own separate pass/fail" data-vn="giữ nguyên &quot;parametrize&quot; — chạy 1 test body nhiều lần với nhiều bộ input/output khác nhau, mỗi lần báo cáo riêng"><code>@pytest.mark.parametrize</code></dfn> collapses that into one test body run once per row of input/expected-output pairs:</p>
+<pre><code><span class="kw">@pytest.mark.parametrize</span>(<span class="str">"text, expected"</span>, [
+    (<span class="str">"42"</span>, <span class="kw">42</span>),
+    (<span class="str">""</span>, <span class="kw">None</span>),
+    (<span class="str">"nope"</span>, <span class="kw">None</span>),
+    (<span class="str">"-7"</span>, -<span class="kw">7</span>),
+])
+<span class="kw">def</span> test_safe_int(text, expected):
+    <span class="kw">assert</span> safe_int(text) == expected</code></pre>
+<p>The first argument is a comma-separated string naming the parameters the test function takes; the second is a list of tuples, one per case. <code>pytest</code> runs <code>test_safe_int</code> four times, once per tuple, reporting each as its own pass/fail (<code>test_safe_int[42-42]</code>, <code>test_safe_int[--None]</code>, ...) instead of one test silently covering four cases inside a loop, where a failure on case 2 would hide whether cases 3 and 4 also passed. This is the direct pytest-native replacement for the "list of lambdas" shape every practice file's <code>results = [check(...), check(...), ...]</code> has used all course — same idea (several small cases against one function), pytest's own idiom instead of a hand-rolled list.</p>
+
+<h2>5 · Running it and reading the output</h2>
+<p><code>pytest</code> reports itself — no <code>check()</code>, no ✓/✗ tally to write by hand. A dot per passing test, an <code>F</code> per failing one, then a summary:</p>
+<pre><code>....F.                                                    [100%]
+=================================== FAILURES ===================================
+______________________________ test_safe_int[nope-None] ______________________________
+    <span class="kw">assert</span> safe_int(<span class="str">"nope"</span>) == <span class="kw">None</span>
+E   assert 'nope' == None
+=================================== 1 failed, 5 passed in 0.02s ===================================</code></pre>
+<p>A failing <code>assert</code> shows the actual left- and right-hand values automatically — no need to write a custom message. This is a strictly more capable version of every prior practice file's <code>check()</code> tally, which is why today's practice file abandons the ✓/✗ idiom entirely and lets <code>pytest</code> report for itself, explained further at the bottom of this lesson.</p>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> testing a pandas pipeline uses the exact same <code>pytest</code>/<code>assert</code>/fixture/parametrize mechanics taught today, just asserting on a DataFrame's contents instead of a plain function's return value — not demonstrated further here; the library itself stays <code>data/</code>'s job.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Today's practice is a real <code>pytest</code> test file, not a hand-rolled ✓/✗ script — see the note above on why. Open <code>practice/11_testing_with_pytest.py</code>, follow the TODOs (each is a test body with a missing <code>assert</code>, a fixture, or a <code>parametrize</code> list to fill in), and re-run until every test passes:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run --with pytest pytest practice/11_testing_with_pytest.py -v</code></pre>
+<p><code>-v</code> (verbose) prints one line per test instead of just dots — useful while several are still unsolved. Exercises: a plain <code>assert</code> test against Day 8's <code>safe_int()</code>, a <code>@pytest.fixture</code> building a small CSV file for <code>extract()</code> to read (Day 6/8's shape), a test using that fixture, a <code>@pytest.mark.parametrize</code> list covering several <code>safe_int()</code> cases in one test body, and a fixture with real setup/teardown (a counter that must reach zero again after the test using it finishes) to make the <code>yield</code>-splits-into-two-halves point concrete.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="pytest tests use a plain assert expr — no self.assertEqual or test-class boilerplate. That older style belongs to the standard library's own unittest module, which this course deliberately does not teach.">
+    <p class="stem">How does a <code>pytest</code> test check that a value is correct?</p>
+    <button class="opt" data-ok>a plain assert statement comparing two values</button>
+    <button class="opt">calling self.assertEqual inside a test class body</button>
+    <button class="opt">returning True or False from the function</button>
+  </div>
+  <div class="q" data-why="pytest matches a test function's parameter name to a fixture of the same name, runs the fixture first, and passes its yielded value in as that argument automatically — no manual wiring or extra import needed.">
+    <p class="stem">How does a test function receive a <code>@pytest.fixture</code>'s value?</p>
+    <button class="opt" data-ok>by naming the fixture as one of its parameters</button>
+    <button class="opt">by importing the fixture function and calling it directly</button>
+    <button class="opt">fixtures run automatically before every test in the file</button>
+  </div>
+  <div class="q" data-why="Code before yield is setup, run once per test using that fixture; code after yield is teardown, guaranteed to run once that test finishes regardless of pass or fail — the same always-runs guarantee as a context manager's __exit__ or a finally block.">
+    <p class="stem">What happens to the code written after <code>yield</code> inside a fixture?</p>
+    <button class="opt" data-ok>it runs as teardown once the test finishes either way</button>
+    <button class="opt">it never runs — yield always ends the fixture immediately</button>
+    <button class="opt">it only runs if the test using that fixture fails</button>
+  </div>
+  <div class="q" data-why="parametrize takes a comma-separated parameter-name string and a list of value tuples, then runs the same test body once per tuple, reporting each case as its own separate pass/fail instead of one test silently looping over every case.">
+    <p class="stem">What does <code>@pytest.mark.parametrize</code> do to a test function?</p>
+    <button class="opt" data-ok>runs its body once per listed case, each reported separately</button>
+    <button class="opt">runs the whole test file several times, back to back</button>
+    <button class="opt">skips the test entirely unless every case is listed first</button>
+  </div>
+  <div class="q" data-why="pytest is explicitly the one deliberate exception to this course's standard-library-only rule for practice files — installed ad hoc via uv run --with pytest, or via uv add --dev pytest for a real project, never assumed to already be present.">
+    <p class="stem">Why does today's practice file need <code>uv run --with pytest</code> instead of plain <code>uv run python3</code>?</p>
+    <button class="opt" data-ok>pytest is third-party, this course's one deliberate exception</button>
+    <button class="opt">every practice file has always secretly required it</button>
+    <button class="opt">plain python3 cannot execute assert statements at all</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official <a href="https://docs.pytest.org/en/stable/">pytest documentation</a> (cited in RESOURCES.md) — "Get Started," "How to write and report assertions," and "How to use fixtures" cover today's material exactly, plus fixture scopes (<code>session</code>, <code>module</code>) and plugins beyond today's scope.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day11">glossary</a> under Day 11.<br>
+Next up per the plan: decorators — and why <code>@pytest.fixture</code> and <code>@pytest.mark.parametrize</code>, both used today without explaining the <code>@</code> syntax itself, actually work.<br><br>
+💬 Anything unclear — fixtures, parametrize, or why pytest is the one third-party exception? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

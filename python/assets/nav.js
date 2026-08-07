@@ -26,6 +26,8 @@
       file: "lessons/0009-modules-imports-and-layout.html" },
     { n: 10, date: "2026-08-07", title: "Environments & pyproject.toml",
       file: "lessons/0010-environments-and-pyproject.html" },
+    { n: 11, date: "2026-08-08", title: "Testing with pytest",
+      file: "lessons/0011-testing-with-pytest.html" },
   ];
 
   const REFS = [

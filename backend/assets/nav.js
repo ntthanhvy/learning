@@ -72,6 +72,8 @@
       file: "lessons/0032-retries-exponential-backoff-and-jitter.html" },
     { n: 33, date: "2026-08-07", title: "Optimistic locking: the version-column alternative to FOR UPDATE",
       file: "lessons/0033-optimistic-locking-version-columns.html" },
+    { n: 34, date: "2026-08-08", title: "Soft delete: keeping the row, hiding the record",
+      file: "lessons/0034-soft-delete.html" },
   ];
 
   const REFS = [

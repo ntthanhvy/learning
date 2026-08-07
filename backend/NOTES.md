@@ -1224,3 +1224,94 @@
   blind. Distributed locks and blue-green/canary deploys remain the last
   named, confirmed out-of-scope-per-MISSION.md candidates if no fresh gap
   surfaces next round either.
+- 2026-08-08 generation (Lesson 34, headless 06:00 GitHub Actions run):
+  idempotency check first — confirmed no `lessons/0034-*.html` file existed
+  and lesson 34 was not yet in nav.js before writing anything (highest
+  existing file was 0033, dated 2026-08-07). Lesson 33 left only the same two
+  out-of-scope-per-MISSION.md candidates (distributed locks, blue-green/
+  canary deploys) with no new in-scope candidate, and this round's own
+  briefing flagged that those two are settled dead ends — so, per the
+  briefing's instruction, this round ran a fresh gap-finding pass by
+  re-reading existing lessons closely for a mechanism used or implied but
+  never explained, the same method that found Lessons 32 (backoff, implied by
+  Lesson 28's "retry-with-backoff" aside) and 33 (optimistic locking, the
+  unexplained other half of Lesson 6's locking material). Re-read Lesson 2
+  (entities/tables), Lesson 9 (caching), and Lesson 21 (config) closely
+  looking for exactly this shape, and found one: no lesson anywhere ever
+  discusses what "delete" means at the database level — Lesson 3's idempotent
+  DELETE verb and Lesson 19's migration lesson both use/imply row removal
+  (Lesson 19 explicitly says "a down migration can't un-delete data a drop
+  already destroyed"), but neither, nor any other lesson, ever explains a
+  hard DELETE's foreign-key consequences or the soft-delete alternative most
+  real products actually use. Confirmed via grep across all 33 lesson bodies
+  and glossary.html that "soft delete", "deleted_at", "is_deleted", and
+  "tombstone" all came back with zero hits before writing — a genuine,
+  previously unflagged gap, in scope under MISSION criterion 1 ("entities,
+  relationships, constraints"), not infra/NoSQL/distributed. Direct DB reads
+  (`psql`/`bin/query-progress`) were not attempted this round, consistent
+  with the established finding that they're reliably blocked every round
+  since Lesson 9 and not worth spending time on; still no `lesson_completed`
+  record exists for any of Lessons 1-33. Lesson 34 covers it: why a hard
+  `DELETE` on a row other tables reference either fails outright or, with
+  `CASCADE`, silently destroys everything pointing at it (framed against a
+  frontend "delete" instinct — remove from the local list — which has no
+  backend-side consequence to reason about); the `deleted_at timestamptz`
+  column shape (`NULL` = active, non-null = deleted-and-when) and the
+  `WHERE deleted_at IS NULL` filter every normal read now needs; the
+  constraint problem this quietly creates — a plain table-wide `UNIQUE` on
+  `email` still blocks a new signup from reusing a soft-deleted row's email,
+  fixed with a partial unique index (`CREATE UNIQUE INDEX ... WHERE
+  deleted_at IS NULL`), tying back explicitly to Lesson 5's indexing lesson
+  and Lesson 19's migration/`CREATE INDEX CONCURRENTLY` material as the same
+  index-adding mechanism; and two named cases where soft delete is still the
+  wrong tool — legally required erasure (GDPR-style "right to erasure,"
+  where the data must actually stop existing, not just stop being queried by
+  default) and data with no downstream reason to keep it (an expired
+  idempotency key, tying back to Lesson 26). The `GetAccount`/
+  `SoftDeleteAccount` Go snippet (a `DB` interface stand-in plus the two
+  methods, `ErrNotFound` returned identically whether a row never existed or
+  was soft-deleted) was compile-checked clean with `go build -C` / `go vet
+  -C` in a scratch module (`.scratch/backend-lesson34/`, deleted entirely
+  after, same as Lessons 30 and 33's precedent) — no approval blocker for
+  either `-C`-style invocation this round, consistent with every round since
+  Lesson 13's finding. Caught and fixed one markup bug while proofreading:
+  the fourth quiz question's opening `<div class="q" data-why="...">` had a
+  stray `</p>` in place of the closing `>` (a copy-paste slip while drafting,
+  not present in Lessons 32/33's own callout-div bug class but the same
+  general lesson — proofread the actual shipped markup, not just the
+  content). Added `soft delete` and `partial index` to the glossary
+  (confirmed via grep beforehand that neither existed anywhere in
+  `lessons/*.html` or `glossary.html`) and registered Lesson 34 in nav.js.
+  Quiz options were drafted, then verified with `wc -w`-equivalent manual
+  counting per option (the sandbox rejected both loop/variable-expansion
+  forms and chained `sed -E '...'` pipes as requiring approval this round, a
+  slightly narrower block than prior rounds' — worked around by printing each
+  raw line individually via single-operation `sed -n '<n>p'` calls and
+  counting whitespace-separated tokens by hand, treating hyphenated words
+  like "soft-deleted" as one token exactly as `wc -w` would) — two of four
+  questions needed a rewrite pass: Q2 was 7/8/8/7 on the first draft (fixed
+  by prefixing three options with "it" to reach 8 words evenly), Q4 was
+  9/10/9/8 (option b trimmed from 10 to 9 words, option d extended from 8 to
+  9 by adding "full"); Q1 and Q3 were correct on the first draft. Final
+  tallies, each recounted after every edit: Q1 8/8/8/8, Q2 8/8/8/8, Q3
+  9/9/9/9, Q4 9/9/9/9. Primary source: the PostgreSQL Manual's Partial
+  Indexes page — RESOURCES.md already cites the PostgreSQL Manual generally
+  for "tables, constraints, defaults, schemas," and this extends it into the
+  specific `CREATE UNIQUE INDEX ... WHERE` mechanism the lesson uses, the
+  same already-cited-source-extension choice Lessons 19/21 made rather than
+  adding a new RESOURCES.md entry for one mechanism. `bin/record-progress
+  backend lesson_generated --day 34 --lesson 0034-soft-delete.html --detail
+  '{"by":"github-actions"}'` was run directly via its relative path from the
+  repo root as instructed and succeeded on the first try, no approval
+  blocker this round — consistent with Lessons 32/33's finding that the
+  write path works reliably when invoked this way. This closes the
+  soft-delete gap found by re-reading Lessons 2/9/21 rather than re-scanning
+  MISSION.md or reusing Lesson 30/31's out-of-scope leftovers; still no
+  `lesson_completed` record exists for any lesson after 34 rounds — the next
+  session should keep treating a completion/quiz-outcome signal, or a
+  user-named track to deepen, as higher priority than a 35th topic picked
+  blind. No new in-scope teaser candidate surfaced this round beyond the one
+  just closed; distributed locks and blue-green/canary deploys remain the
+  standing out-of-scope-per-MISSION.md candidates if a fresh gap-finding pass
+  (re-reading more existing lessons closely, the method that has now found
+  three gaps running — Lessons 32, 33, 34) is needed again next time.

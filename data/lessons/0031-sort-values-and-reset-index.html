@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 31 · sort_values() and reset_index() edge cases</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 31 · ~20 min · 8 Aug 2026</p>
+<h1>sort_values() and reset_index() edge cases</h1>
+<p class="byline">Lesson 30's teaser named this exactly: <code>sort_values()</code> and <code>reset_index()</code> have been called in almost every practice file since Lesson 6, always as setup, never as the lesson. Today is the edge cases that actually bite in an interview — what the index looks like <em>after</em> a sort, and the silent traps in <code>.loc[]</code> that follow.</p>
+
+<h2>1 · sort_values() moves rows, not labels</h2>
+<p>The one fact this whole lesson hangs on: <dfn data-en="a DataFrame/Series method that reorders the ROWS by the values in one or more columns -- it does NOT renumber the Index; each row keeps carrying its original index label along with it after the move" data-vn="giữ nguyên 'sort_values()' — sắp xếp lại các HÀNG theo giá trị 1 hay nhiều cột; KHÔNG đánh số lại Index, mỗi hàng vẫn giữ nhãn index cũ của nó">sort_values()</dfn> reorders the <em>rows</em>, but each row keeps carrying its original <a href="../reference/glossary.html">Index</a> label along with it. Watch the labels on the left column after sorting <code>clean</code> (the same cleaned 4-row slice as Lessons 6-30) by <code>amount</code>:</p>
+<pre><code>sorted_clean = clean.sort_values(<span class="str">"amount"</span>)
+<span class="cm">#    order_id customer  amount  order_date
+# 1         2     Binh    35.5  2026-01-06
+# 5         6       An    42.0  2026-01-10
+# 0         1       An   120.0  2026-01-05
+# 4         5     Binh   180.0  2026-01-09</span>
+sorted_clean.index.tolist()   <span class="cm"># [1, 5, 0, 4] -- NOT [0, 1, 2, 3]</span></code></pre>
+<p>The rows are in the right order now, but the index still says <code>1, 5, 0, 4</code> — the position each row held <em>before</em> the sort. That mismatch between "row order" and "index label" is where every edge case below comes from.</p>
+
+<h2>2 · The trap: .iloc[0] and .loc[0] now disagree</h2>
+<p>This is the concrete gotcha worth rehearsing out loud. After the sort above, <code>.iloc[0]</code> (position 0 — the actual first row) and <code>.loc[0]</code> (the row still labeled <code>0</code>) point to two <em>different</em> rows:</p>
+<pre><code>sorted_clean.iloc[<span class="kw">0</span>][<span class="str">"amount"</span>]   <span class="cm"># 35.5  -- Binh, the true smallest amount, position 0</span>
+sorted_clean.loc[<span class="kw">0</span>][<span class="str">"amount"</span>]    <span class="cm"># 120.0 -- An, whatever row was originally at position 0</span></code></pre>
+<p>Neither call raises an error — both return a perfectly valid row, just not the same one. Reaching for <code>.loc[0]</code> out of habit right after a sort is a real "no crash, quietly wrong" trap, the same family this course has flagged since Lesson 19: it looks like "give me the first row" but it actually means "give me whatever row happens to still be labeled 0."</p>
+
+<h2>3 · reset_index(): renumber the labels to match the new order</h2>
+<p><dfn data-en="a DataFrame/Series method that replaces the current Index with a fresh default 0..n-1 RangeIndex, matching the CURRENT row order -- by default it keeps the old index as a new 'index' column rather than discarding it" data-vn="giữ nguyên 'reset_index()' — đánh số lại Index thành 0,1,2... theo thứ tự hàng HIỆN TẠI; mặc định giữ index cũ lại thành 1 cột tên 'index', muốn bỏ hẳn phải truyền drop=True">reset_index()</dfn> is the fix: it replaces the index with a fresh <code>0, 1, 2, 3</code> that matches the DataFrame's <em>current</em> row order, so <code>.loc[0]</code> and <code>.iloc[0]</code> agree again. But its default behavior surprises people the first time:</p>
+<pre><code>sorted_clean.reset_index()
+<span class="cm">#    index  order_id customer  amount  order_date
+# 0      1         2     Binh    35.5  2026-01-06
+# 1      5         6       An    42.0  2026-01-10
+# 2      0         1       An   120.0  2026-01-05
+# 3      4         5     Binh   180.0  2026-01-09</span></code></pre>
+<p>The old labels didn't vanish — they became a brand-new column literally called <code>index</code>. That's rarely what you want mid-pipeline; <code>drop=True</code> is the version people actually mean almost every time:</p>
+<pre><code>sorted_clean.reset_index(drop=<span class="kw">True</span>)
+<span class="cm">#    order_id customer  amount  order_date
+# 0         2     Binh    35.5  2026-01-06
+# 1         6       An    42.0  2026-01-10
+# 2         1       An   120.0  2026-01-05
+# 3         5       Binh  180.0  2026-01-09</span></code></pre>
+<p>Rule of thumb worth saying out loud in an interview: <em>"if I don't need the old positions kept around as data, I always pass <code>drop=True</code>."</em></p>
+
+<h2>4 · The shortcut: sort_values(..., ignore_index=True)</h2>
+<p><code>sort_values()</code> takes its own <code>ignore_index=True</code> keyword, which does the sort and the reset in one call — hand-verified to produce an identical result to chaining the two:</p>
+<pre><code>clean.sort_values(<span class="str">"amount"</span>, ignore_index=<span class="kw">True</span>).equals(
+    clean.sort_values(<span class="str">"amount"</span>).reset_index(drop=<span class="kw">True</span>)
+)  <span class="cm"># True</span></code></pre>
+<p>Same result, one call instead of two chained ones — a small method-chaining (Lesson 8) win when the old labels are never needed.</p>
+
+<h2>5 · na_position: where do missing values sort to?</h2>
+<p>Coercing the raw fixture's non-numeric <code>"unknown"</code> amount to NaN (Lesson 3's <code>errors="coerce"</code>) and sorting shows pandas' default: NaN always sorts <em>last</em>, regardless of ascending/descending:</p>
+<pre><code>raw[<span class="str">"amount_num"</span>] = pd.to_numeric(raw[<span class="str">"amount"</span>], errors=<span class="str">"coerce"</span>)
+raw.sort_values(<span class="str">"amount_num"</span>)[[<span class="str">"customer"</span>, <span class="str">"amount_num"</span>]]
+<span class="cm">#   35.5, 42.0, 99.9, 120.0, 180.0, NaN   &lt;- NaN last even in ascending order</span>
+
+raw.sort_values(<span class="str">"amount_num"</span>, na_position=<span class="str">"first"</span>)[[<span class="str">"customer"</span>, <span class="str">"amount_num"</span>]]
+<span class="cm">#   NaN, 35.5, 42.0, 99.9, 120.0, 180.0   &lt;- na_position="first" moves it to the front instead</span></code></pre>
+<p>SQL's default is implementation-defined here (Postgres sorts NaN/NULL last in ascending order by default too, but not every database agrees) — <code>na_position=</code> makes pandas' choice explicit either way instead of leaving it to a default someone has to look up.</p>
+
+<h2>6 · Multiple sort keys, independent directions</h2>
+<p><code>by=</code> takes a list of columns, and <code>ascending=</code> takes a matching list — each key can sort its own direction:</p>
+<pre><code>clean.sort_values([<span class="str">"customer"</span>, <span class="str">"amount"</span>], ascending=[<span class="kw">True</span>, <span class="kw">False</span>])
+<span class="cm">#   customer  amount
+#   An         120.0    &lt;- customer A-Z, but amount high-to-low WITHIN each customer
+#   An          42.0
+#   Binh       180.0
+#   Binh        35.5</span></code></pre>
+<p>Same idea as SQL's <code>ORDER BY customer ASC, amount DESC</code> — each column in the list gets paired with the <code>ascending</code> value at the same position.</p>
+
+<h2>7 · sort_index(): the inverse operation</h2>
+<p>Since the original labels survive a sort (Section 1), they're still usable to get back to the pre-sort row order — <dfn data-en="a DataFrame/Series method that sorts rows by their INDEX LABELS instead of by any column's values -- the inverse tool to sort_values(), useful for restoring an original row order after a sort_values() call that didn't reset the index" data-vn="giữ nguyên 'sort_index()' — sắp xếp hàng theo NHÃN index, không phải theo giá trị cột nào; dùng để khôi phục lại thứ tự hàng ban đầu sau khi sort_values() mà chưa reset_index()">sort_index()</dfn> sorts by the index labels themselves, not by any column:</p>
+<pre><code>sorted_clean.sort_index().equals(clean)   <span class="cm"># True -- exactly restores the original row order</span></code></pre>
+<p>Worth knowing this exists, mostly so you recognize it when reading someone else's code — it's a much rarer interview ask than <code>sort_values()</code>.</p>
+
+<h2>8 · reset_index() after groupby: Series becomes a DataFrame</h2>
+<p>This is the single most common place <code>reset_index()</code> actually shows up in real pipelines. A <code>groupby()</code> aggregation like Lesson 4's <code>.sum()</code> returns a <strong>Series</strong> indexed by the group key, not a DataFrame:</p>
+<pre><code>g = clean.groupby(<span class="str">"customer"</span>)[<span class="str">"amount"</span>].sum()
+<span class="cm"># customer
+# An      162.0
+# Binh    215.5
+# Name: amount, dtype: float64      &lt;- a Series; "customer" IS the index, not a column</span>
+type(g)   <span class="cm"># pandas.Series</span></code></pre>
+<p><code>reset_index()</code> turns that grouped Series back into an ordinary DataFrame with the group key as a real column again — the shape most downstream code (another <code>merge()</code>, writing to CSV) actually expects:</p>
+<pre><code>g.reset_index()
+<span class="cm">#   customer  amount
+# 0       An   162.0
+# 1     Binh   215.5</span>
+type(g.reset_index())   <span class="cm"># pandas.DataFrame</span>
+
+g.reset_index(name=<span class="str">"total_amount"</span>)   <span class="cm"># rename the value column while resetting, in one call</span>
+<span class="cm">#   customer  total_amount
+# 0       An         162.0
+# 1     Binh         215.5</span></code></pre>
+<p><code>name=</code> only applies to a Series (there's no single "the value column" to rename on a multi-column DataFrame) — it's the one <code>reset_index()</code> keyword worth remembering specifically for this groupby pattern.</p>
+
+<h2>9 · Downstream operations that quietly reset the index for you</h2>
+<p>Not every operation leaves gappy index labels lying around — worth knowing which ones already hand you a clean <code>0..n-1</code> index so an extra <code>reset_index()</code> isn't needed. A boolean filter does <em>not</em> renumber:</p>
+<pre><code>clean[clean[<span class="str">"amount"</span>] &gt; <span class="kw">50</span>].index.tolist()   <span class="cm"># [0, 4] -- gaps, not [0, 1]</span></code></pre>
+<p>...but <code>merge()</code> (Lesson 5) always returns a fresh <code>0..n-1</code> index on its result, regardless of what the inputs' indexes looked like:</p>
+<pre><code>clean.sort_values(<span class="str">"amount"</span>).merge(customers, on=<span class="str">"customer"</span>, how=<span class="str">"left"</span>).index.tolist()
+<span class="cm"># [0, 1, 2, 3] -- merge() re-indexes the result even though the left side was unreset</span></code></pre>
+<p>The row <em>order</em> from the sort survives the merge — merge just doesn't carry the old labels forward. Don't assume every DataFrame method leaves the index as-is; check the one you're using rather than guessing.</p>
+
+<div class="interview">
+<p><strong>Q: "You sorted a DataFrame and then indexed into row 0 — but got the wrong row. What happened?"</strong> A strong answer, out loud: <em>"sort_values() reorders the rows but keeps each row's original index label attached — it doesn't renumber. So .loc[0] still means 'the row labeled 0', which after a sort is whatever row used to be first, not the row that's first now. .iloc[0] is what I actually wanted — position, not label. The fix going forward is reset_index(drop=True), or sort_values(..., ignore_index=True) to do both in one call, so the labels match the new row order and .loc[] and .iloc[] agree again."</em> The signal: naming .loc/.iloc as the actual mechanism, not just "I added reset_index() and it worked."</p>
+</div>
+
+<h2>Try it — self-checking practice (~15 min)</h2>
+<p>Open <code>practice/31_sort_values_and_reset_index.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/31_sort_values_and_reset_index.py</code></pre>
+<p>Uses the same cleaned rows as Lessons 6-30 (An 120.0/01-05, An 42.0/01-10, Binh 35.5/01-06, Binh 180.0/01-09). Exercise 1 reproduces the <code>.iloc[0]</code> vs <code>.loc[0]</code> mismatch from Section 2; Exercise 2 uses <code>ignore_index=True</code>; Exercise 3 rebuilds Section 8's grouped-Series-to-DataFrame reset with <code>name=</code>; Exercise 4 checks <code>na_position="first"</code>.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="sort_values() reorders the ROWS but leaves each row's original Index label attached to it -- the index after a sort is a scrambled version of the old one, not a fresh 0..n-1. That mismatch between row order and label is exactly what makes .loc[0] risky right after a sort.">
+    <p class="stem">After <code>df.sort_values("amount")</code>, what happens to the DataFrame's index labels?</p>
+    <button class="opt" data-ok>stay attached, still unsorted, to their original rows</button>
+    <button class="opt">get renumbered to match the freshly sorted order</button>
+    <button class="opt">get dropped, leaving the DataFrame with no index</button>
+  </div>
+  <div class="q" data-why="reset_index()'s default behavior is drop=False: it keeps the old index labels, but moves them into a brand-new column literally called 'index', rather than discarding them. drop=True is the version that throws the old labels away entirely and is what most people actually want mid-pipeline.">
+    <p class="stem">What does <code>df.reset_index()</code> do BY DEFAULT (no <code>drop=</code> argument)?</p>
+    <button class="opt" data-ok>renumbers, keeps old labels as a column</button>
+    <button class="opt">renumbers, discards the old labels for good</button>
+    <button class="opt">raises an error unless drop= gets passed</button>
+  </div>
+  <div class="q" data-why="groupby(...)[col].sum() (and similar single-column aggregations) return a Series, with the group key as the Series' Index, not a DataFrame column. reset_index() converts it back into a two-column DataFrame with the group key as a real column -- the most common real-world use of reset_index() in practice.">
+    <p class="stem"><code>clean.groupby("customer")["amount"].sum()</code> returns what kind of object?</p>
+    <button class="opt" data-ok>a Series, indexed only by customer name</button>
+    <button class="opt">a DataFrame, with a customer name column</button>
+    <button class="opt">a plain Python dict, customer to sum</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the pandas User Guide's <a href="https://pandas.pydata.org/docs/user_guide/basics.html#sorting">"Sorting"</a> section (~5 min) — covers <code>sort_values()</code>/<code>sort_index()</code> side by side including <code>na_position</code> and multi-key sorts; cross-reference the <a href="https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.reset_index.html">reset_index() API reference</a> for the full keyword list (this lesson covered <code>drop=</code> and <code>name=</code>, the two used constantly — <code>level=</code> is the MultiIndex-specific one left for when Lesson 14/15's MultiIndex work comes back up).</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>sort_values()</code>/<code>sort_index()</code> and <code>reset_index()</code> are new today.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-31 comes back reported as shakiest, otherwise a fresh curriculum/glossary scan for the next genuinely-uncovered pattern (no single obvious dangling candidate named in this lesson's own content).<br><br>
+💬 Anything unclear — the .loc/.iloc mismatch, reset_index()'s drop= default, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

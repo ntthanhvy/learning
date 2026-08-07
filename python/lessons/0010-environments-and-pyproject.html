@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 10 · Environments &amp; pyproject.toml</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 10 · ~20 min · 7 Aug 2026</p>
+<h1>Environments &amp; <code>pyproject.toml</code></h1>
+<p class="byline">Every practice file so far has run with <code>uv run python3 practice/NN_x.py</code> without a second thought. Today: what that command is actually doing, why it never touches a system-wide Python install, and how to read the one file — <code>pyproject.toml</code> — that names a project and its dependencies. Direct follow-on to Day 9's project-layout sketch, which left <code>pyproject.toml</code> as "tomorrow's job."</p>
+
+<div class="callout"><strong>Bridge from SQL:</strong> think of a Python <dfn data-en="an isolated, self-contained directory holding one project's own Python interpreter and installed packages, kept separate from every other project's so their dependencies never collide" data-vn="giữ nguyên &quot;virtual environment&quot; hoặc &quot;venv&quot; — thư mục riêng chứa interpreter và package cho 1 project, tách biệt project khác">virtual environment</dfn> the way you'd think of a separate database per project instead of one shared schema everyone writes tables into — isolating dependencies is the same motivation as isolating data: two projects wanting different, conflicting versions of the same thing must never collide.</div>
+
+<h2>1 · Why isolation: the collision problem</h2>
+<p>Suppose Project A needs <code>requests</code> version 2.10 and Project B, on the same machine, needs version 2.31 with breaking changes since 2.10. Installing packages "globally" — one shared location for the whole machine — means only one version of <code>requests</code> can exist at a time; installing B's version breaks A. A <dfn data-en="a tool that installs packages into an isolated per-project directory instead of system-wide, so different projects can hold different, non-conflicting versions of the same package" data-vn="giữ nguyên &quot;package manager&quot; — công cụ cài package vào thư mục riêng cho từng project thay vì cài toàn máy">package manager</dfn> like <code>uv</code> solves this by giving every project its own private directory holding its own interpreter and its own installed packages — nothing is shared, so nothing collides.</p>
+
+<h2>2 · <code>uv run</code>: what actually happens</h2>
+<p>Every practice file in this course has been launched the same way:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/09_modules_imports_and_layout.py</code></pre>
+<p><code>uv run</code> does three things before your code ever executes: (1) finds or creates a virtual environment for this project — a <code>.venv/</code> folder, created the first time it's needed; (2) makes sure every dependency the project declares is installed inside that <code>.venv/</code>, installing anything missing; (3) runs <code>python3</code> from <em>inside</em> that environment, not whatever <code>python3</code> the operating system happens to have on its own path. This is exactly why every practice file so far has needed no separate "install first" step — <code>uv run</code> already did it, and because these files are standard-library only, step 2 has had nothing to install.</p>
+
+<h2>3 · <code>pyproject.toml</code>: the project's own name tag</h2>
+<p>A <dfn data-en="the standard Python project metadata file: declares the project's name, version, and the exact list of packages it depends on, so any tool (including uv) can reproduce the same environment elsewhere" data-vn="giữ nguyên &quot;pyproject.toml&quot; — file khai báo tên project, version, và list dependency chuẩn của Python">pyproject.toml</dfn> file sits at a project's root and answers one question: what is this project, and what does it need to run? A minimal one looks like:</p>
+<pre><code><span class="cm">[project]</span>
+name = <span class="str">"sales-pipeline"</span>
+version = <span class="str">"0.1.0"</span>
+requires-python = <span class="str">"&gt;=3.12"</span>
+dependencies = [
+    <span class="str">"httpx&gt;=0.27"</span>,
+    <span class="str">"pydantic&gt;=2.0"</span>,
+]
+
+<span class="cm">[dependency-groups]</span>
+dev = [<span class="str">"pytest&gt;=8.0"</span>]</code></pre>
+<p><code>dependencies</code> lists what the running program itself needs — the two packages Phase 2b's backend work will add. A separate dev group holds tools only a developer needs, like <code>pytest</code>, never installed for an end user running the finished program. This course's own practice files have had an empty <code>dependencies</code> list the whole time, which is precisely why <code>uv run python3 practice/x.py</code> has never needed a <code>--with</code> flag — there was nothing to add.</p>
+
+<h2>4 · Adding a dependency and reading the lock file</h2>
+<p><code>uv add httpx</code> does two things: appends <code>"httpx&gt;=0.27"</code> (or whatever the current version resolves to) into <code>pyproject.toml</code>'s <code>dependencies</code> list, and writes the <em>exact</em> resolved versions of httpx and everything <em>it</em> depends on into a second file, <code>uv.lock</code>. <code>pyproject.toml</code> states loose, human-chosen constraints ("0.27 or newer"); <code>uv.lock</code> pins the precise versions actually installed, so a teammate — or CI — running <code>uv sync</code> against the same lock file gets byte-identical dependency versions, not just "something matching the constraint." <code>pyproject.toml</code> is meant to be hand-edited occasionally; <code>uv.lock</code> is generated and normally left alone.</p>
+
+<h2>5 · <code>uv run --with</code>: a one-off dependency, no file changes</h2>
+<p>Occasionally a script needs a package without committing to it project-wide — <code>uv run --with rich python3 scratch.py</code> installs <code>rich</code> into a temporary environment for that one run only, touching neither <code>pyproject.toml</code> nor <code>uv.lock</code>. Every practice file's documented run command in this course has deliberately never used <code>--with</code>, which is itself a signal: standard-library-only code needs nothing beyond what <code>uv run python3</code> already provides on its own.</p>
+
+<h2>6 · Where this lands in the layout Day 9 sketched</h2>
+<p>Day 9 ended with an unmanaged picture of a project folder. Today fills in the piece it deliberately left blank:</p>
+<pre><code>myproject/
+    pyproject.toml      <span class="cm"># today: name, version, dependencies — read/write with uv</span>
+    uv.lock              <span class="cm"># today: exact resolved versions — generated, don't hand-edit</span>
+    .venv/                <span class="cm"># today: the isolated environment uv run uses automatically</span>
+    src/
+        mypkg/
+            __init__.py
+            parsing.py
+    tests/
+        test_parsing.py</code></pre>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> adding pandas to a real project is exactly <code>uv add pandas</code> — one line in <code>dependencies</code>, resolved and locked the same way as any other package. Not demonstrated further here; using the library itself stays <code>data/</code>'s job.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/10_environments_and_pyproject.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/10_environments_and_pyproject.py</code></pre>
+<p>No dependencies — standard library only. Exercises: parsing a small <code>pyproject.toml</code>-shaped TOML file with the standard library's own <code>tomllib</code> to read the project name back out, pulling the <code>dependencies</code> list out of that same parsed data, splitting a version-constraint string like <code>"httpx&gt;=0.27"</code> into its package name and constraint, telling apart a project's runtime <code>dependencies</code> from its <code>dev</code> group, and confirming which of two version strings satisfies a <code>&gt;=</code> constraint.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A virtual environment is an isolated per-project directory holding that project's own interpreter and installed packages, so two projects needing different, conflicting versions of the same package never collide — exactly the problem section 1 opens with.">
+    <p class="stem">What problem does a virtual environment solve?</p>
+    <button class="opt" data-ok>two projects needing conflicting package versions colliding</button>
+    <button class="opt">Python scripts running measurably slower than expected</button>
+    <button class="opt">functions accidentally sharing the exact same name</button>
+  </div>
+  <div class="q" data-why="uv run finds or creates the project's .venv, installs any declared dependency that's missing, and only then runs python3 from inside that isolated environment — never whatever python3 the operating system happens to provide globally.">
+    <p class="stem">Which interpreter does <code>uv run python3 script.py</code> actually execute?</p>
+    <button class="opt" data-ok>the one inside that project's own isolated environment</button>
+    <button class="opt">whichever system-wide python3 the OS installed by default</button>
+    <button class="opt">a random interpreter chosen fresh on each run</button>
+  </div>
+  <div class="q" data-why="pyproject.toml states loose, human-editable version constraints (e.g. httpx>=0.27); uv.lock records the exact resolved versions actually installed, so another machine running uv sync reproduces the identical dependency set instead of merely something matching the constraint.">
+    <p class="stem">What's the practical difference between <code>pyproject.toml</code> and <code>uv.lock</code>?</p>
+    <button class="opt" data-ok>one holds loose constraints, the other exact resolved versions</button>
+    <button class="opt">they store identical content in two different file formats</button>
+    <button class="opt">only uv.lock is allowed to list runtime dependencies ever</button>
+  </div>
+  <div class="q" data-why="dependencies lists what the running program itself needs at runtime; a separate dev group (like pytest) holds tools only a developer needs while working on the project, never installed when an end user just runs the finished program.">
+    <p class="stem">Why does <code>pytest</code> belong in a <code>dev</code> dependency group instead of <code>dependencies</code>?</p>
+    <button class="opt" data-ok>end users running the finished program never need it installed</button>
+    <button class="opt">pytest cannot be listed inside any pyproject.toml file at all</button>
+    <button class="opt">dev-group packages always install noticeably faster than all other ones</button>
+  </div>
+  <div class="q" data-why="uv run --with rich installs rich into a temporary environment for that single run only, leaving both pyproject.toml and uv.lock completely untouched — no lasting project-wide commitment, unlike uv add.">
+    <p class="stem">What does <code>uv run --with rich python3 scratch.py</code> change in <code>pyproject.toml</code>?</p>
+    <button class="opt" data-ok>nothing — that flag never edits the project's own files</button>
+    <button class="opt">it permanently appends rich to the dependencies list shown</button>
+    <button class="opt">it silently replaces the entire existing dependencies array shown</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official <a href="https://docs.astral.sh/uv/">uv documentation</a> (cited in RESOURCES.md) — the "Projects" and "Concepts" sections cover today's <code>pyproject.toml</code>, <code>uv.lock</code>, and <code>uv add</code>/<code>uv run</code> behavior exactly, plus workspace and Python-version-pinning features beyond today's scope.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day10">glossary</a> under Day 10.<br>
+Next up per the plan: testing with <code>pytest</code> — assertions, fixtures, and <code>parametrize</code> — the natural follow-on now that today's <code>dev</code> dependency group has a named place for it to live.<br><br>
+💬 Anything unclear — <code>uv.lock</code>, dependency groups, or what <code>uv run</code> does under the hood? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

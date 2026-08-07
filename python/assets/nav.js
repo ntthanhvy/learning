@@ -24,6 +24,8 @@
       file: "lessons/0008-exceptions.html" },
     { n: 9, date: "2026-08-06", title: "Modules, packages & imports",
       file: "lessons/0009-modules-imports-and-layout.html" },
+    { n: 10, date: "2026-08-07", title: "Environments & pyproject.toml",
+      file: "lessons/0010-environments-and-pyproject.html" },
   ];
 
   const REFS = [

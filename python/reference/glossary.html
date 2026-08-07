@@ -111,6 +111,16 @@
   <tr><td>package</td><td>giữ nguyên "package" — thư mục chứa __init__.py, biến thư mục thành namespace import được, module bên trong gọi bằng tên có dấu chấm</td><td>A directory containing an <code>__init__.py</code> file (possibly empty), making the directory itself importable as a namespace whose modules are reached with dotted names, e.g. <code>mypkg.parsing</code>.</td></tr>
 </table>
 
+<h2 id="day10">Day 10 — Environments &amp; pyproject.toml</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>virtual environment</td><td>giữ nguyên "virtual environment" hoặc "venv" — thư mục riêng chứa interpreter và package cho 1 project, tách biệt project khác</td><td>An isolated, self-contained directory holding one project's own Python interpreter and installed packages, kept separate from every other project's so their dependencies never collide. <code>uv run</code> finds or creates one automatically as <code>.venv/</code>.</td></tr>
+  <tr><td>package manager</td><td>giữ nguyên "package manager" — công cụ cài package vào thư mục riêng cho từng project thay vì cài toàn máy</td><td>A tool, like <code>uv</code>, that installs packages into an isolated per-project environment instead of system-wide, so different projects can hold different, non-conflicting versions of the same package at once.</td></tr>
+  <tr><td>pyproject.toml</td><td>giữ nguyên "pyproject.toml" — file khai báo tên project, version, và list dependency chuẩn của Python</td><td>The standard Python project metadata file: declares the project's name, version, required Python version, and the exact list of packages it depends on (split into runtime <code>dependencies</code> and a <code>dev</code> group), so any tool — including <code>uv</code> — can reproduce the same environment elsewhere.</td></tr>
+  <tr><td>uv.lock</td><td>giữ nguyên "uv.lock" — file chốt version chính xác đã cài, tự sinh ra, không sửa tay</td><td>A generated file recording the exact resolved version of every dependency (and their own dependencies) actually installed, as opposed to <code>pyproject.toml</code>'s loose, human-edited constraints. Running <code>uv sync</code> against the same lock file reproduces an identical set of versions on another machine.</td></tr>
+  <tr><td>uv add / uv run --with</td><td>giữ nguyên "uv add" / "uv run --with" — add ghi vào pyproject.toml lâu dài, --with chỉ cài tạm cho 1 lần chạy</td><td><code>uv add pkg</code> permanently adds a dependency to <code>pyproject.toml</code> and updates <code>uv.lock</code>; <code>uv run --with pkg script.py</code> installs it into a temporary environment for that single run only, leaving both project files untouched.</td></tr>
+</table>
+
 <p class="next">💬 A term here still unclear? Ask your teacher — hỏi bằng tiếng Việt cũng được.</p>
 
 <script src="../assets/nav.js"></script>

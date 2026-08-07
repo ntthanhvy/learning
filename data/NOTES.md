@@ -1267,3 +1267,89 @@
   never explained as their own topic) if no drill-outcome signal surfaces by
   next generation — both re-confirmed genuinely uncovered by this round's
   grep.
+- 2026-08-07 generation (Lesson 30, headless GitHub Actions 06:00 run): direct
+  `psql "$LEARNING_DB_URL" ...` / `bin/query-progress` reads were still
+  blocked in this headless session (hard content-level block on expanding
+  that variable name via shell, plus a generic "requires approval" gate on
+  the query-progress helper with no user present) — confirmed again per this
+  round's single-attempt instruction, not retried; still no `course_progress`
+  rows readable and no `lesson_completed`/quiz/kata outcome record beyond the
+  Lesson 1 baseline, so no reported weak spot to target; fell back to on-disk
+  state (highest lesson file + this file's own dated log). Confirmed no
+  lesson existed yet for today (highest was Lesson 29, dated 2026-08-06) and
+  no dated note below mentioned today. Lesson 29's own teaser named two
+  candidates explicitly (`broadcasting` as its own standalone lesson, or
+  `sort_values()`/`reset_index()` edge cases) — re-grepped `lessons/*.html`
+  and `reference/glossary.html` before picking and confirmed both still
+  genuinely uncovered as standalone topics (`broadcast` only appeared inside
+  Lessons 16/24/29's prose and the glossary's own cross-references;
+  `sort_values`/`reset_index` appear everywhere as tool calls but never
+  explained on their own). Picked `broadcasting`: it's explicitly named in
+  MISSION.md's scope ("read NumPy-flavored code (broadcasting, dtype, NaN
+  behavior) and predict its output"), it's been the longer-deferred of the
+  two candidates, and it explains a mechanism this course has used silently
+  since Lesson 1 (`clean["amount"] * 1.1`-style scalar ops) without ever
+  naming it. Lesson 30 ships: scalar broadcasting (Section 1), Series-minus-
+  scalar as the mechanism under Lesson 16's `transform()` (Section 2),
+  DataFrame-minus-Series showing pandas' label alignment layered on top of
+  NumPy's shape broadcasting (Section 3), the raw NumPy shape-compatibility
+  rule with a `(2,3)`/`(3,)`/`(2,1)` example and the loud `ValueError` on a
+  genuinely incompatible `(2,3)`/`(2,)` pair (Section 4), and the index-
+  mismatch gotcha where two same-length Series with different labels do NOT
+  raise — silently produce NaN for the unmatched label — continuing this
+  course's running "no crash, quietly wrong" family since Lesson 19 (Section
+  5). `uv run --with pandas` worked directly this round (pandas 3.0.5, numpy
+  installed alongside via `--with pandas` pulling it in as a dependency):
+  first used to hand-verify every number in `.scratch/data-lesson30/
+  explore.py` (deleted after) against the real `orders_raw.csv` clean 4-row
+  slice before writing a word of the lesson — `amount * 1.1` gives
+  132.00/46.20/39.05/198.00; `amount.mean()` is exactly 94.375, so the
+  deviation column is 25.625/-52.375/-58.875/85.625 (sums to 0.0); the raw
+  NumPy `(2,3)+(3,)` and `(2,3)+(2,1)` broadcasts and the `(2,3)+(2,)`
+  `ValueError` were all confirmed by direct execution, not assumed; the
+  index-mismatch gotcha confirmed `s1 + s2` produces NaN at label "c" with no
+  exception raised. The shipped (unsolved) `practice/30_broadcasting.py` was
+  first run in `.scratch/data-lesson30/practice/` (fixture CSV copied
+  alongside) and caught a real false-positive before shipping: Exercise 2's
+  first-draft check ("deviation's mean is 0") passed even fully unsolved,
+  since the unsolved fallback `deviation = pd.Series(dtype=float)` is empty
+  and an empty Series' `.sum()` is `0.0`, satisfying `abs(x) < 1e-9` — fixed
+  by adding a `len(deviation) == 4` guard to that check (same class of bug as
+  Lesson 20's silently-already-solved Exercise 1); every placeholder position
+  was also explicitly checked against this course's by-now-expected
+  Ellipsis-gotcha family before trusting it: `clean[...]` raises `KeyError`
+  (Exercises 1-2, same fix as Lessons 19/20/21/24/25/26/27), a bare Ellipsis
+  inside `np.array([...])` does NOT raise on its own (becomes an object-dtype
+  array containing the Ellipsis object) but the subsequent `arr + row` DOES
+  raise `TypeError` when that object array meets a real int array (Exercise
+  3, a new variant not previously catalogued), and `pd.Series([10,20],
+  index=[...])` raises `ValueError` (length-1 index vs length-2 values,
+  Exercise 4, also a new variant) — all four confirmed safe via a standalone
+  throwaway script before shipping. Re-ran after the Exercise 2 fix and
+  confirmed all 8 checks print ✗ with no crash, then a solved copy
+  (`.scratch/data-lesson30/practice/30_solved.py`, deleted after) printed all
+  8 ✓ against the same hand-verified numbers above. The shipped file was also
+  re-run a second time directly from its real `practice/` location (`cd data
+  && uv run --with pandas python3 practice/30_broadcasting.py`) and confirmed
+  to print the identical all-✗ result with no crash. `.scratch/
+  data-lesson30/` was fully removed (`rm -rf`) after verification, no
+  approval needed this round. Added `broadcasting` to the glossary (checked
+  for a collision first — none; reused the existing `Index` entry's alignment
+  sense rather than adding a duplicate) and registered Lesson 30 in nav.js.
+  Quiz options were drafted and checked with a Python regex/word-count script
+  run via `uv run python3` (this course's established convention) — the
+  first draft came out mismatched on 2 of 3 questions (Q1 at 12/10/9, Q3 at
+  10/7/8; Q2's three short shape-tuple options were already 3/3/3 on the
+  first draft) and needed three successive rewrite + recount cycles on Q3
+  specifically before a final independent recount (plus a manual `Grep`-based
+  line-by-line read-through as a second pass, this course's established
+  convention since Lesson 19) confirmed all three genuinely level at 9/9/9,
+  3/3/3, and 9/9/9. `bin/record-progress data lesson_generated --day 30
+  --lesson 0030-broadcasting.html --detail '{"by":"github-actions"}'` was run
+  once from the repo root as instructed and succeeded on the first try, no
+  approval blocker this round (write path worked even though the read-side
+  `bin/query-progress` stayed blocked, same asymmetry as most prior rounds).
+  Set the teaser going forward to `sort_values()`/`reset_index()` edge cases
+  (Lesson 29's other named candidate, deferred this round in favor of
+  `broadcasting`, re-confirmed still genuinely uncovered by this round's own
+  grep) if no drill-outcome signal surfaces by next generation.

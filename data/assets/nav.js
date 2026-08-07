@@ -64,6 +64,8 @@
       file: "lessons/0028-wide-to-long.html" },
     { n: 29, date: "2026-08-06", title: "isin(): filtering against a list of values",
       file: "lessons/0029-isin.html" },
+    { n: 30, date: "2026-08-07", title: "Broadcasting: why pandas arithmetic \"just works\"",
+      file: "lessons/0030-broadcasting.html" },
   ];
 
   const REFS = [

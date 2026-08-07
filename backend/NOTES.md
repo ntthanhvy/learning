@@ -1148,3 +1148,79 @@
   next session should keep treating a completion/quiz-outcome signal, or a
   user-named track to deepen, as higher priority than a 33rd topic picked
   blind.
+- 2026-08-07 generation (Lesson 33, headless 06:00 GitHub Actions run):
+  idempotency check first — confirmed no `lessons/0033-*.html` file existed
+  and lesson 33 was not yet in nav.js before writing anything (highest
+  existing file was 0032, dated 2026-08-06). Per this session's own
+  briefing, DB reads were treated as reliably blocked and not spent time on
+  beyond a mental note — no direct `psql`/`bin/query-progress` attempt was
+  made this round, consistent with the task's instruction not to spend more
+  than one attempt confirming a finding already established every round
+  since Lesson 9; still no `course_progress` rows read, no `lesson_completed`
+  record confirmed for any of Lessons 1-32. Lesson 32 left its teaser open
+  with the same two out-of-scope-per-MISSION.md candidates Lesson 30/31
+  already named (distributed locks, blue-green/canary deploys) and no new
+  in-scope candidate — so this round ran a fresh gap-finding pass instead of
+  reusing either: re-read Lesson 6 (transactions) closely, since it's the
+  natural place a companion topic would live, and found it teaches only
+  pessimistic locking (`SELECT ... FOR UPDATE`) as its second fix, with
+  optimistic locking/version columns never mentioned anywhere — confirmed by
+  grepping all 32 lesson bodies plus glossary.html for "optimistic lock" and
+  "version column", both zero hits. A genuine, previously-unflagged gap
+  sourced directly from re-reading existing material for what it left
+  unsaid, not from re-mining MISSION.md a sixth time. Lesson 33 covers it:
+  why holding a row lock across human think-time (an edit-a-profile-form
+  gap, not a two-requests-in-the-same-millisecond gap) blocks unrelated
+  writers for far too long, optimistic locking's shape (a `version` column,
+  a plain unlocked `SELECT` on read, an `UPDATE ... WHERE version = $seen`
+  on write that fails fast — zero rows — instead of blocking when someone
+  else already wrote), explicitly named as structurally the same "fold the
+  check into the WHERE clause" trick as Lesson 6's own first fix, just
+  checking a version instead of a stock count, three honest options for
+  handling a zero-rows conflict (tell the user via `409` — reusing Lesson
+  3's status-code table, which already lists 409 for "stale edit" without
+  ever explaining the mechanism until now; auto-retry only when the write is
+  commutative; merge, named as the most expensive and reached for last), and
+  a pessimistic-vs-optimistic comparison table (reusing Lesson 25's
+  `table.cmp`/`.cmp-wrap` component) with the actual deciding factor named
+  explicitly (how long the read-to-write gap is, not a general "which is
+  more secure" framing). The `updateProfile` Go snippet (an
+  `UPDATE ... WHERE version = $3 RETURNING version`, translating
+  `sql.ErrNoRows` into a named `ErrStaleUpdate` sentinel) was compile-checked
+  clean with `go build -C` / `go vet -C` in a scratch module
+  (`.scratch/backend-lesson33/`, deleted entirely after, same as Lessons 30
+  and 32's precedent) — no approval blocker for either `-C`-style invocation
+  this round, consistent with every round since Lesson 13's finding. Added
+  `optimistic locking` to the glossary (confirmed via grep beforehand it
+  didn't already exist; "version column" itself was left as plain
+  description rather than glossed separately, per the "prefer plain words
+  when the jargon isn't the thing being taught" rule) and registered Lesson
+  33 in nav.js. Quiz options were drafted, then verified with `wc -w` per
+  line via individual `sed -n '<n>p' | wc -w` calls (no loop/variable-
+  expansion form attempted, since this session's sandbox rejects bash
+  variable expansion outright, consistent with every round since Lesson
+  28's finding) — three of four questions needed at least one rewrite pass,
+  including two self-corrections where a first fix overshot or undershot
+  the target count by eye before a literal `wc -w` recount caught it (a
+  repeat of the exact failure mode Lesson 28's notes already flagged —
+  hand-counting words while drafting is unreliable, the tool count is not);
+  final tallies, each re-verified after every edit and cross-checked a
+  second time via `grep -o` extraction of the same option text: Q1 9/9/9/9,
+  Q2 8/8/8/8, Q3 8/8/8/8, Q4 9/9/9/9. Primary source: Kleppmann's
+  *Designing Data-Intensive Applications*, ch. 7 ("Transactions"), the
+  optimistic-concurrency-control section — RESOURCES.md already cites DDIA
+  ch. 7 for Lesson 6's own material, and this lesson is explicitly framed as
+  the other half of that same chapter rather than a new citation.
+  `bin/record-progress backend lesson_generated --day 33 --lesson
+  0033-optimistic-locking-version-columns.html --detail
+  '{"by":"github-actions"}'` was run directly via its relative path as
+  instructed and succeeded on the first try, no approval blocker this round
+  — consistent with Lesson 32's finding that the write path works when
+  invoked this way. This closes the optimistic-locking gap found by
+  re-reading Lesson 6 rather than re-scanning MISSION.md; still no
+  `lesson_completed` record exists for any lesson after 33 rounds — the next
+  session should keep treating a completion/quiz-outcome signal, or a
+  user-named track to deepen, as higher priority than a 34th topic picked
+  blind. Distributed locks and blue-green/canary deploys remain the last
+  named, confirmed out-of-scope-per-MISSION.md candidates if no fresh gap
+  surfaces next round either.

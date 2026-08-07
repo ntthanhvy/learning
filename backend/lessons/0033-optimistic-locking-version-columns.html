@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 33 · Optimistic locking: the version-column alternative to FOR UPDATE</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 33 · ~20 min</p>
+<h1>Optimistic locking: the version-column alternative to FOR UPDATE</h1>
+<p class="byline">Lesson 6 fixed the lost-update race two ways: fold the check into the UPDATE, or take a row lock with <code>SELECT ... FOR UPDATE</code> and make the second transaction wait. Both assume the conflict is worth blocking for. Today's the case where it usually isn't — and the version-column pattern that handles it without ever holding a lock.</p>
+
+<h2>1 · Where FOR UPDATE stops being the right tool</h2>
+<p>Lesson 6's <code>FOR UPDATE</code> fix works well when a conflict is likely and the window is short — a flash-sale counter, two requests landing in the same millisecond. It works badly when the read and the write are far apart in time with a human in between: a user opens an "edit profile" form, reads the current bio, thinks for two minutes, then submits. Taking a row lock at the moment of the read and holding it open across two minutes of human typing would mean any other writer touching that row — even an unrelated admin action — blocks for the whole time the form sits open. That's not a rare edge case; it's most form-editing UIs.</p>
+<div class="callout"><strong>Frontend-habit trap:</strong> a form's "last write wins" instinct — whoever clicks Save last silently overwrites whoever saved first — is exactly the lost update Lesson 6 named, just stretched across human-scale time instead of two requests racing in the same millisecond. The fix isn't a longer lock; it's not locking at all.</div>
+
+<h2>2 · Optimistic locking: don't lock, just check on write</h2>
+<p><dfn data-en="a concurrency-control strategy that assumes conflicts are rare: reads take no lock at all, and a write only succeeds if the row hasn't changed since it was read, detected via a version number or timestamp — a conflicting write fails instead of blocking" data-vn="optimistic locking (giữ nguyên) — không khóa gì lúc đọc, chỉ check lúc ghi xem dòng có bị đổi chưa, có thì ghi fail chứ không chờ">Optimistic locking</dfn> bets that two people editing the same row at the same time is rare enough not to pay for up front. Every table using it gets one extra column:</p>
+<pre><code>ALTER TABLE profiles ADD COLUMN version integer NOT NULL DEFAULT 1;</code></pre>
+<p>The read is a plain <code>SELECT</code> — no lock, no wait, no blocking any other reader or writer. The write is where the check happens: the <code>UPDATE</code>'s <code>WHERE</code> clause demands the exact version the caller saw when it read the row, and bumps it by one on success.</p>
+<pre><code>UPDATE profiles SET bio = $1, version = version + 1
+WHERE id = $2 AND version = $3;
+<span class="cm">-- $3 is the version this caller read earlier.
+-- 1 row updated  = nobody else wrote in between, this write wins.
+-- 0 rows updated = someone else already wrote and bumped the version —
+--                   this caller's view is stale, and the app must decide
+--                   what to do about it (see Section 3).</span></code></pre>
+<p>This is structurally the same trick as Lesson 6's first fix — fold the check into the <code>WHERE</code> clause of the write itself — just checking a version number instead of a stock quantity. The difference is what happens on conflict: Lesson 6's ticket counter check (<code>remaining &gt; 0</code>) fails because there's truly nothing left to sell. A version mismatch here doesn't mean the row is unusable — it means someone else's write already landed, and it's an application-level decision what happens next, not a database-level dead end.</p>
+
+<h2>3 · Handling the conflict: it's not an error, it's a decision</h2>
+<p>Zero rows updated is not a bug and not something to silently swallow. Three honest options, in order of how often each is actually right:</p>
+<ul>
+<li><strong>Tell the user and let them decide.</strong> "This profile changed since you opened it — reload and reapply your edit." The HTTP-level version of this is a <code>409 Conflict</code>, reusing Lesson 3's status-code vocabulary: the request was well-formed, but the state it assumed no longer holds.</li>
+<li><strong>Re-read and retry automatically</strong>, only when the write is commutative enough that blind reapplication is safe — incrementing a counter, appending to a list. Reapplying "set bio to exactly this string" over someone else's newer edit is just last-write-wins with extra steps; reapplying "increment view count by 1" is fine no matter who else wrote in between.</li>
+<li><strong>Merge</strong>, when the domain supports it (two people editing different fields of the same row) — the most work to build correctly, so reach for it last.</li>
+</ul>
+<pre><code><span class="cm">// updateProfile applies an optimistic-locking write: the UPDATE's WHERE
+// clause requires the version the caller last read, so a concurrent writer
+// who already bumped the version makes this UPDATE match zero rows instead
+// of silently overwriting their change.</span>
+<span class="kw">func</span> updateProfile(ctx context.Context, db DB, id <span class="ty">int64</span>, newBio <span class="ty">string</span>, seenVersion <span class="ty">int</span>) error {
+    <span class="kw">var</span> newVersion <span class="ty">int</span>
+    err := db.QueryRowContext(ctx, <span class="st">`
+        UPDATE profiles
+        SET bio = $1, version = version + 1
+        WHERE id = $2 AND version = $3
+        RETURNING version`</span>,
+        newBio, id, seenVersion,
+    ).Scan(&amp;newVersion)
+
+    <span class="kw">if</span> errors.Is(err, sql.ErrNoRows) {
+        <span class="cm">// Zero rows matched: either the id doesn't exist, or — the
+        // interesting case — a concurrent writer already bumped the
+        // version since this caller last read the row.</span>
+        <span class="kw">return</span> ErrStaleUpdate
+    }
+    <span class="kw">return</span> err
+}</code></pre>
+
+<h2>4 · Picking a side: optimistic vs. pessimistic</h2>
+<div class="cmp-wrap">
+<table class="cmp">
+<thead><tr><th></th><th>Pessimistic (<code>FOR UPDATE</code>, Lesson 6)</th><th>Optimistic (version column)</th></tr></thead>
+<tbody>
+<tr><th>Read cost</th><td>Takes a lock, blocks other writers immediately</td><td>Plain read, blocks nobody</td></tr>
+<tr><th>Best when</th><td>Conflicts likely, gap between read and write is short</td><td>Conflicts rare, gap includes human think-time</td></tr>
+<tr><th>On conflict</th><td>Second transaction waits its turn</td><td>Second write fails fast — app decides what's next</td></tr>
+<tr><th>Cost of being wrong</th><td>Unrelated writers pile up waiting on a lock held too long</td><td>A rare wasted round trip, retried or shown to the user</td></tr>
+</tbody>
+</table>
+</div>
+<p>Neither one is "the correct concurrency control" in general — Lesson 6 already made that point about its own two fixes, and it holds here too. The actual question is where the time gap between read and write comes from: a few milliseconds inside one request favors locking; anything spanning a network round trip to a human favors optimistic.</p>
+
+<div class="interview">
+<p><strong>Q: "Two users open the same settings page, both edit different fields, both hit Save a minute apart. How do you stop the second save from wiping out the first user's change?"</strong> A strong answer, out loud: <em>"Taking a row lock on open would mean holding it for as long as the form stays open, which blocks unrelated writers for no good reason — that's a job for optimistic locking instead. Add a version column, have the read return it, and require the client to send it back on save. The UPDATE's WHERE clause checks version = $seen; if zero rows update, someone else already saved and I return a 409 so the second user can reload and reapply their change instead of silently overwriting it."</em> The subtext: recognizing that a lock held across human time is the actual problem, not "add more locking."</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Holding a row lock from the moment the form is opened until the user finally submits means any other writer touching that row blocks for the entire time the form sits open with a human doing nothing — often minutes, for no real reason.">
+    <p class="stem">Why is <code>SELECT ... FOR UPDATE</code> a poor fit for a slow, human-driven edit form?</p>
+    <button class="opt" data-ok>the lock stays held across minutes of think time</button>
+    <button class="opt">the lock stays held across only one millisecond total</button>
+    <button class="opt">the lock always silently fails on any edit form</button>
+    <button class="opt">the lock cannot ever be released until server restart</button>
+  </div>
+  <div class="q" data-why="Optimistic locking takes no lock on read at all — the check only happens at write time, comparing the version the caller last saw against the current row's version.">
+    <p class="stem">In optimistic locking, when does the actual conflict check happen?</p>
+    <button class="opt" data-ok>only later, right at the actual write itself</button>
+    <button class="opt">immediately, at the very first moment of read</button>
+    <button class="opt">never, since no check happens at either point</button>
+    <button class="opt">continuously, while the row stays open for edit</button>
+  </div>
+  <div class="q" data-why="Zero rows updated means the WHERE clause's version = $seen no longer matched — someone else already wrote and bumped the version since this caller last read the row. It's a signal to handle, not a database error.">
+    <p class="stem">An optimistic-locking UPDATE returns zero rows affected. What does that mean?</p>
+    <button class="opt" data-ok>a concurrent writer already changed this exact row</button>
+    <button class="opt">the underlying database connection itself just now failed</button>
+    <button class="opt">the version column reached its own maximum value</button>
+    <button class="opt">the SQL statement contained a plain syntax mistake</button>
+  </div>
+  <div class="q" data-why="Pessimistic locking (FOR UPDATE) suits a short, likely-to-collide window inside one request/transaction. Optimistic locking suits a gap that spans a network round trip and human think time, where conflicts are rare and blocking everyone else isn't worth it.">
+    <p class="stem">What's the real deciding factor between pessimistic and optimistic locking?</p>
+    <button class="opt" data-ok>how long the gap between read and write is</button>
+    <button class="opt">how many total database tables the one query touches</button>
+    <button class="opt">whether the client happens to be a mobile app</button>
+    <button class="opt">whether the exact column being changed allows null values</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://dataintensive.net">Designing Data-Intensive Applications</a> — Martin Kleppmann, ch. 7 ("Transactions"), the section on optimistic concurrency control; RESOURCES.md already cites DDIA's ch. 7 for Lesson 6's transaction material, and this lesson is the other half of that same section. For the Postgres-specific mechanics, the <a href="https://www.postgresql.org/docs/current/ddl.html">PostgreSQL Manual — Data Definition</a> covers adding a column with a default (exactly the <code>ALTER TABLE ... ADD COLUMN version</code> statement above) the same way Lesson 19's migration lesson used it.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> open — still no reported quiz/lesson-completion outcome exists for any lesson after 33 rounds; distributed locks and blue-green/canary deploys remain the last named, confirmed-untaught candidates from Lesson 30's search (both out-of-scope per MISSION.md) if no user-chosen track surfaces first.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

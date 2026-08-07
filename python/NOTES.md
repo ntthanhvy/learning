@@ -634,3 +634,100 @@ fail *gracefully* so the learner sees which task failed.
   was run once after shipping, per this run's instructions (writes are
   pre-approved and source DB creds internally, unlike the blocked read
   paths) — see its own output for whether it recorded successfully.
+- 2026-08-07 — **Day 10 generated**
+  (`lessons/0010-environments-and-pyproject.html`), the headless run's third
+  Phase 2 lesson. Idempotency check used on-disk state (`python/lessons/`
+  highest filename plus this file's own dated log) since DB read access was
+  unavailable again this run (see below); no `0010-…` file or today's-date
+  nav.js entry existed yet, so generation proceeded.
+  Topic: environments and dependencies with `uv`, reading `pyproject.toml` —
+  the third item of `PLAN.md`'s Phase 2a spine, directly after Day 9's
+  modules/imports/layout, and squarely language/tooling-level (the project
+  metadata format and the mechanics of `uv run`/`uv add`), not library —
+  satisfies the scope rule. Also cross-checked against `RESOURCES.md`, which
+  already lists "Docs: uv — Astral … Use for: the environments lesson,"
+  confirming this is the intended next topic rather than a guess. Taught: why
+  isolation exists (two projects needing conflicting versions of the same
+  package colliding under one shared global install); what `uv run` actually
+  does in three steps (find/create `.venv/`, install any missing declared
+  dependency, run `python3` from inside that environment — never the OS's own
+  `python3`) — explaining retroactively why every Day 1–9 practice file has
+  run via plain `uv run python3 …` with no separate install step; a minimal
+  `pyproject.toml` (`[project]` name/version/`dependencies`, plus a
+  `[dependency-groups]` `dev` group for tools like `pytest` that end users
+  never need installed); `uv add` vs. `uv.lock` (loose human-edited
+  constraints vs. exact resolved versions, the latter reproducible elsewhere
+  via `uv sync`); and `uv run --with` as a one-off dependency that touches
+  neither project file. Closed by filling in the two pieces Day 9's project
+  layout sketch had deliberately left blank (`pyproject.toml` and `uv.lock`)
+  onto that same directory tree. Bridged from SQL per the baseline record: a
+  virtual environment framed as a separate database per project instead of
+  one shared schema — isolating dependencies for the same reason you'd
+  isolate data — introduced before any Python/tooling in the top callout, not
+  from a pandas or other "Python-adjacent" analogy.
+  Learning records: still only the Day 1 baseline
+  (`learning-records/0001-baseline-reads-python-writes-little.md`) — no
+  completion/quiz record for any later day was found (same gap Days 8–9's
+  entries already flagged). Kept pacing conservative per that same
+  assumption: one core mechanism (`uv run`'s three-step behavior) emphasized
+  first and explicitly tied back to something already observed (every prior
+  practice file's run command), `pyproject.toml` kept to the fields this
+  course's own dependency lists actually need (no extra build-system/tool
+  config sections), and no new unrelated examples introduced. Unverified
+  against real quiz/completion data, same caveat as Days 8–9.
+  No-pandas rule: zero pandas/NumPy API in the lesson body or practice file
+  (checked by grep for `pandas|numpy|dataframe`, case-insensitive, across
+  both new files — zero hits in the practice file, exactly one hit in the
+  lesson); exactly one contrast sentence, naming `uv add pandas` as the same
+  one-line mechanism as any other package, without demonstrating any pandas
+  API, placed once near the end and labeled in prose as the only such
+  sentence, matching the hard-rule section above.
+  Practice file `practice/10_environments_and_pyproject.py` (5 exercises:
+  reading a project's `name` back out of parsed TOML, pulling the
+  `dependencies` list out of that same parsed data, splitting a constraint
+  string like `"httpx>=0.27"` into `(name, constraint)`, telling a runtime
+  dependency from a dev-only one by name, and checking whether an installed
+  version satisfies a `>=` constraint via integer-tuple comparison) needed a
+  fixture strategy for the same reason Day 9's did — today's subject is a
+  project *file*, not an in-memory data structure — so it writes a small
+  `pyproject.toml` to a `tempfile.mkdtemp()` directory at startup and parses
+  it once with the standard library's own `tomllib` (Python 3.11+, confirmed
+  available: this sandbox's `uv run python3 --version` reports 3.12.3), with
+  no extra fixture files shipped under `practice/` itself, following the
+  Day 6/9 precedent named in this run's instructions. Verified in a scratch
+  dir (`.scratch_py10_verify/`, created under the repo root and removed after
+  use, per the Day 3–9 precedent that `/tmp` is out of bounds for this
+  sandbox): the shipped (unsolved) copy ran via `uv run python3`, both from
+  the scratch copy and from its real `practice/` path with the documented
+  command, and printed five clean ✗ lines with no traceback each time; a
+  separately solved copy printed five ✓ and the "All green" tally. No bugs
+  found during verification — both passes succeeded on the first attempt.
+  Glossary: added a Day 10 section to `reference/glossary.html` (`virtual
+  environment`, `package manager`, `pyproject.toml`, `uv.lock`, `uv add / uv
+  run --with`) after confirming via grep that none of the five terms/entries
+  collided with any Day 1–9 entry.
+  Quiz: 5 questions. Word counts were checked with individual manual
+  word-by-word counts per option (not by eye, `wc -w`/scripted counting
+  commands blocked again by this sandbox's approval gate, consistent with
+  every prior day) and mismatched on the first draft for four of the five
+  questions (Q2 8/8/9, Q3 9/9/10, Q4 10/10/8, Q5 9/9/8) — Q1 was already
+  equal on the first draft (7/7/7). Each mismatched question went through one
+  to three rewrite-and-recount rounds — Q4's third option in particular
+  needed three attempts (8 → 9 → 10 words) before landing on the target count
+  — until every option matched (Q2 8/8/8, Q3 9/9/9, Q4 10/10/10, Q5 9/9/9),
+  then a full final recount pass across all five questions' three options
+  each (15 lines total, each checked individually) confirmed every one before
+  shipping, per this file's instruction to recount after any edit. Registered
+  in `assets/nav.js` with `date: "2026-08-07"`.
+  **DB access:** both the read path (`bin/query-progress`) and the direct
+  `psql "$LEARNING_DB_URL"` path were unavailable again this run — same
+  hard content-level block on `LEARNING_DB_URL` shell expansion and the same
+  permission-approval gate on the helper script with no user present,
+  consistent with every prior day — so learning-record freshness was judged
+  from on-disk files only, per this run's fallback instructions.
+  `bin/record-progress python lesson_generated --day 10 --lesson
+  0010-environments-and-pyproject.html --detail '{"by":"github-actions"}'`
+  was run once after shipping and **succeeded**: `recorded:
+  python/lesson_generated day=10 lesson=0010-environments-and-pyproject.html`
+  — the write path continues to work reliably even though the read paths
+  remain blocked, consistent with Day 9's outcome.

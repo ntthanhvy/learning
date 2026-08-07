@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 30 · Broadcasting: why pandas arithmetic "just works"</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 30 · ~20 min · 7 Aug 2026</p>
+<h1>Broadcasting: why pandas arithmetic "just works"</h1>
+<p class="byline">Lesson 29's teaser named two candidates. This one wins: <code>broadcasting</code> is explicitly in MISSION.md's scope ("read NumPy-flavored code... predict its output"), and it's been used silently since Lesson 16 (<code>transform()</code>'s docstring literally says "broadcast back to the original row count") without ever being taught as its own idea. Today closes that gap.</p>
+
+<h2>1 · The question you've been dodging since Lesson 1</h2>
+<p>Every lesson so far has written something like <code>clean["amount"] * 1.1</code> or <code>clean["amount"] - clean["amount"].mean()</code> without asking: <em>why does a single number apply to every row?</em> There's no loop, no <code>for</code>, nothing that says "do this once per row." The mechanism that makes it work has a name: <dfn data-en="NumPy's rule set for applying an operation between arrays of different shapes by mentally 'stretching' the smaller one to match the larger one's shape, without actually copying data — every pandas arithmetic op that mixes a DataFrame/Series with a scalar or a smaller Series relies on this" data-vn="giữ nguyên 'broadcasting' — quy tắc của NumPy để áp 1 phép tính giữa 2 mảng khác shape, bằng cách 'kéo giãn' mảng nhỏ hơn cho khớp mảng lớn, không thật sự copy dữ liệu">broadcasting</dfn>.</p>
+<pre><code>clean[<span class="str">"amount"</span>] * <span class="kw">1.1</span>
+<span class="cm"># 0    132.00   (120.0 * 1.1)
+# 1     46.20   ( 42.0 * 1.1)
+# 2     39.05   ( 35.5 * 1.1)
+# 3    198.00   (180.0 * 1.1)</span></code></pre>
+<p>The scalar <code>1.1</code> has no shape of its own — NumPy treats it as if it were repeated once per row, without actually allocating a 4-row array of <code>1.1</code>s in memory. That "as if repeated, but not really copied" behavior is broadcasting's whole trick: same result as a loop, without the loop's cost.</p>
+
+<h2>2 · Two ranks up: Series vs Series</h2>
+<p>The pattern behind almost every "deviation from X" calculation this course has used — Lesson 16's <code>transform()</code>, Lesson 23's <code>diff()</code> family — is a Series minus a single number, itself computed from that Series:</p>
+<pre><code>clean[<span class="str">"amount"</span>] - clean[<span class="str">"amount"</span>].mean()
+<span class="cm"># mean is 94.375
+# 0    25.625
+# 1   -52.375
+# 2   -58.875
+# 3    85.625</span></code></pre>
+<p><code>.mean()</code> collapses 4 values into 1 — a 0-dimensional scalar. Subtracting it from the original 4-row Series broadcasts that single number across every row again. This is exactly the shape rule SQL's <code>amount - AVG(amount) OVER ()</code> describes, and it's exactly what Lesson 16's <code>groupby().transform("mean")</code> automates <em>per group</em>: compute one number per group, then broadcast it back out to every row in that group.</p>
+<pre><code>clean.groupby(<span class="str">"customer"</span>)[<span class="str">"amount"</span>].transform(<span class="str">"mean"</span>)
+<span class="cm"># 0     81.00   (An's group mean, broadcast to both An rows)
+# 1     81.00
+# 2    107.75   (Binh's group mean, broadcast to both Binh rows)
+# 3    107.75</span></code></pre>
+<p>Lesson 16 taught this as "transform broadcasts a group value back to every row" — today names the actual mechanism underneath that word.</p>
+
+<h2>3 · A DataFrame and a Series: alignment happens first, broadcasting second</h2>
+<p>Subtracting a Series from a whole DataFrame is a step up in shape, and pandas does something NumPy alone doesn't: it aligns by label before it broadcasts by shape. <code>df - df.mean()</code> matches <code>mean()</code>'s per-column results to the matching column name, then broadcasts each one down that column's rows:</p>
+<pre><code>sub = clean[[<span class="str">"amount"</span>, <span class="str">"order_id"</span>]]
+sub - sub.mean()
+<span class="cm">#    amount  order_id
+# 0  25.625     -2.5
+# 1 -52.375      2.5
+# 2 -58.875     -1.5
+# 3  85.625      1.5</span></code></pre>
+<p>Each column got <em>its own</em> mean subtracted — <code>amount</code>'s values used 94.375, <code>order_id</code>'s used its own mean (3.5) — not one shared number. That's label alignment (pandas' contribution) layered on top of broadcasting (NumPy's contribution): two different mechanisms that look like one when you're just reading the result.</p>
+
+<h2>4 · Raw NumPy: the rule in full, no pandas label-matching to hide behind</h2>
+<p>Pandas' column alignment can mask what plain NumPy broadcasting actually checks: shapes are compared from the <em>right</em>, and two dimensions are compatible only if they're equal or one of them is 1.</p>
+<pre><code><span class="kw">import</span> numpy <span class="kw">as</span> np
+arr = np.array([[<span class="kw">1</span>, <span class="kw">2</span>, <span class="kw">3</span>], [<span class="kw">4</span>, <span class="kw">5</span>, <span class="kw">6</span>]])   <span class="cm"># shape (2, 3)</span>
+row = np.array([<span class="kw">10</span>, <span class="kw">20</span>, <span class="kw">30</span>])                 <span class="cm"># shape    (3,)</span>
+arr + row
+<span class="cm"># [[11 22 33]
+#  [14 25 36]]        -- row is stretched across BOTH rows of arr</span>
+
+col = np.array([[<span class="kw">100</span>], [<span class="kw">200</span>]])              <span class="cm"># shape (2, 1)</span>
+arr + col
+<span class="cm"># [[101 102 103]
+#  [204 205 206]]     -- col is stretched across BOTH columns of arr</span></code></pre>
+<p><code>(2, 3)</code> and <code>(3,)</code> line up because trailing dimensions match (3 == 3) and the shorter shape is implicitly padded with a leading 1. <code>(2, 3)</code> and <code>(2, 1)</code> line up because the last dimension is 1, so it stretches to fit. When neither condition holds, broadcasting simply refuses rather than guessing:</p>
+<pre><code>arr + np.array([<span class="kw">1</span>, <span class="kw">2</span>])           <span class="cm"># shape (2,) against (2, 3)</span>
+<span class="cm"># ValueError: operands could not be broadcast together with shapes (2,3) (2,)</span></code></pre>
+<p><code>(2,)</code> against <code>(2, 3)</code>: the trailing dimensions are 2 vs 3 — neither equal nor 1 — so it's a hard error, not a silent wrong answer. That's actually the reassuring part: shape mismatches in raw NumPy fail loudly. (The gotcha below is a different case.)</p>
+
+<h2>5 · The gotcha: index mismatch is NOT a shape error</h2>
+<p>Pandas' label alignment (Section 3) is usually a feature — but it means two same-length Series can still fail to line up if their <dfn data-en="the row labels attached to a Series/DataFrame — pandas arithmetic between two Series matches rows by these labels first, not by position, before any broadcasting happens" data-vn="giữ nguyên 'Index' — nhãn hàng; 2 Series cộng/trừ nhau sẽ khớp theo NHÃN trước, không phải theo vị trí">Index</dfn> labels don't match — and this one does NOT raise:</p>
+<pre><code>s1 = pd.Series([<span class="kw">1</span>, <span class="kw">2</span>, <span class="kw">3</span>], index=[<span class="str">"a"</span>, <span class="str">"b"</span>, <span class="str">"c"</span>])
+s2 = pd.Series([<span class="kw">10</span>, <span class="kw">20</span>], index=[<span class="str">"a"</span>, <span class="str">"b"</span>])
+s1 + s2
+<span class="cm"># a    11.0
+# b    22.0
+# c     NaN     &lt;- no error, no warning -- "c" had no match in s2</span></code></pre>
+<p>Both Series are perfectly valid shapes on their own. Pandas aligns by label first (same mechanism as Section 3), finds no <code>"c"</code> in <code>s2</code>, and fills the gap with NaN rather than raising — the same "no crash, quietly wrong" shape as this course's other running gotcha family (Lessons 19-29). If you ever see an unexpected NaN appear after adding two Series that "should" be the same length, check whether their indexes actually match before suspecting the data itself — <code>reset_index(drop=True)</code> on both sides is the usual fix when the labels shouldn't matter.</p>
+
+<div class="interview">
+<p><strong>Q: "Why does <code>df["amount"] * 1.1</code> work without a loop, and what's actually happening underneath?"</strong> A strong answer, out loud: <em>"That's NumPy broadcasting — pandas columns are NumPy arrays underneath, and broadcasting is the rule set for applying an operation between arrays of different shapes by conceptually stretching the smaller one, without actually copying it into a bigger array. A scalar broadcasts against every row; two same-shape arrays just apply element-wise; and shapes only broadcast together if, compared from the right, every dimension is either equal or 1 — otherwise NumPy raises instead of guessing. It's why transform() and window functions like a group mean can 'broadcast a value back to every row' — that's the same mechanism, just automated per group by pandas on top."</em> The signal: naming the actual shape-compatibility rule, not just "pandas is smart about it."</p>
+</div>
+
+<h2>Try it — self-checking practice (~15 min)</h2>
+<p>Open <code>practice/30_broadcasting.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/30_broadcasting.py</code></pre>
+<p>Uses the same cleaned rows as Lessons 6-29 (An 120.0/01-05, An 42.0/01-10, Binh 35.5/01-06, Binh 180.0/01-09). Exercise 1 broadcasts a scalar percentage increase; Exercise 2 subtracts the column's own mean (deviation-from-mean, tied to Lesson 16); Exercise 3 builds the raw NumPy <code>(2,3)</code> + <code>(3,)</code> row-broadcast from Section 4; Exercise 4 reproduces the Section 5 index-mismatch gotcha and checks the resulting NaN.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Broadcasting is NumPy's rule for applying an operation between differently-shaped arrays by conceptually stretching the smaller one to match, without actually copying it into a full-size array first -- it's why a scalar or a smaller array applies across every row/column with no explicit loop.">
+    <p class="stem">What is "broadcasting" in NumPy/pandas?</p>
+    <button class="opt" data-ok>stretching a smaller shape to match a larger shape</button>
+    <button class="opt">copying every row into a brand new larger array</button>
+    <button class="opt">a special loop pandas quietly runs row by row</button>
+  </div>
+  <div class="q" data-why="Comparing shapes from the right (trailing dimension first): (2,3) vs (3,) pads the shorter shape with a leading 1 to (1,3), and 3==3 / 1 broadcasts against 2, so it's compatible -- the (3,) row is stretched across both rows of the (2,3) array. (2,3) vs (2,) compares trailing dims 3 vs 2, neither equal nor 1, so it raises ValueError instead.">
+    <p class="stem">Which shape pair broadcasts together successfully against a <code>(2, 3)</code> array?</p>
+    <button class="opt" data-ok>a <code>(3,)</code> array</button>
+    <button class="opt">a <code>(2,)</code> array</button>
+    <button class="opt">a <code>(4,)</code> array</button>
+  </div>
+  <div class="q" data-why="Pandas aligns two Series by INDEX LABEL before any arithmetic happens -- a label present on only one side produces NaN in the result, silently, with no error or warning raised. This is a real, easy-to-miss source of unexpected NaN after what looks like simple Series addition.">
+    <p class="stem">Adding two same-length Series whose index labels don't fully match (e.g. one has label "c", the other doesn't) does what?</p>
+    <button class="opt" data-ok>aligns by label, quietly fills the gap with NaN</button>
+    <button class="opt">raises a ValueError about the two unmatched labels here</button>
+    <button class="opt">ignores the labels entirely, quietly adds by row position</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official <a href="https://numpy.org/doc/stable/user/basics.broadcasting.html">NumPy fundamentals — broadcasting</a> page (cited in this course's RESOURCES.md) — the diagrams there make the "compare shapes from the right" rule visual in a way prose can't; read it once, then re-read Section 4 above and it should click immediately.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>broadcasting</code> and this lesson's use of <code>Index</code> (alignment sense) are new today.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-30 comes back reported as shakiest, otherwise <code>sort_values()</code>/<code>reset_index()</code> edge cases (Lesson 29's other named candidate — used constantly across every practice file since Lesson 1 but never explained as their own topic; still genuinely uncovered per that round's grep).<br><br>
+💬 Anything unclear — the shape-compatibility rule, the index-alignment gotcha, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

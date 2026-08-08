@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 12 · Decorators</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 12 · ~20 min · 9 Aug 2026</p>
+<h1>Decorators</h1>
+<p class="byline">Day 11's practice file used <code>@pytest.fixture</code> and <code>@pytest.mark.parametrize</code> without ever explaining what the <code>@</code> above a function actually does — the lesson said so explicitly, and promised today would fix it. A <dfn data-en="a function that takes another function, wraps it with extra behavior, and returns the wrapper — @ syntax is shorthand for reassigning the decorated name to that wrapper" data-vn="giữ nguyên &quot;decorator&quot; — hàm nhận 1 hàm khác, bọc thêm hành vi, rồi trả về hàm bọc đó">decorator</dfn> is just a function that takes a function and returns a new one wrapped around it — nothing more exotic than that, built entirely from Day 4's "a function is a value."</p>
+
+<div class="callout"><strong>Bridge from SQL:</strong> think of a decorator like a <code>BEFORE</code>/<code>AFTER</code> trigger wrapped around a table write — the original <code>INSERT</code> still happens exactly as written, but extra logic runs around it (logging, a check, a timestamp) without touching the statement itself. A decorator wraps a function the same way: the original function still runs, extra behavior runs around the call.</p></div>
+
+<h2>1 · The mechanism: a function that takes a function</h2>
+<p>Day 4 established that a function is a value — a name bound to a function object, passable to another function like any other argument. Nothing stops a function from also <em>returning</em> a function as its result:</p>
+<pre><code><span class="kw">def</span> shout(func):
+    <span class="kw">def</span> wrapper(*args, **kwargs):
+        result = func(*args, **kwargs)
+        <span class="kw">return</span> result.upper()
+    <span class="kw">return</span> wrapper
+
+<span class="kw">def</span> greet(name):
+    <span class="kw">return</span> <span class="str">f"hello, {name}"</span>
+
+loud_greet = shout(greet)     <span class="cm"># shout() returns wrapper, a NEW function</span>
+loud_greet(<span class="str">"an"</span>)                <span class="cm"># "HELLO, AN" — greet() ran, then .upper() ran around it</span></code></pre>
+<p><code>shout</code> never calls <code>greet</code> itself when <code>shout(greet)</code> runs — it defines a <dfn data-en="the inner function a decorator defines and returns; it calls the original function, usually forwarding *args/**kwargs, and may add behavior before, after, or around that call" data-vn="giữ nguyên &quot;wrapper&quot; — hàm nằm bên trong decorator, gọi lại hàm gốc và có thể thêm hành vi quanh nó"><code>wrapper</code></dfn>, a fresh function that calls <code>func</code> (the function it was handed) and does something extra with the result, then hands <code>wrapper</code> back as an ordinary return value. <code>*args, **kwargs</code> inside <code>wrapper</code> is Day 4's recognition-level syntax finally earning its keep: it lets <code>wrapper</code> accept whatever arguments <code>greet</code> would have taken, without <code>shout</code> needing to know what they are in advance — one <code>shout</code> works for any function, not just <code>greet</code>.</p>
+
+<h2>2 · <code>@decorator</code> is sugar for <code>func = decorator(func)</code></h2>
+<p>Writing <code>loud_greet = shout(greet)</code> and keeping the plain <code>greet</code> around too is one pattern, but the far more common one is: replace <code>greet</code> itself with the wrapped version, permanently, right where it's defined. That rebind-in-place is exactly what <code>@</code> spells:</p>
+<pre><code><span class="kw">@shout</span>
+<span class="kw">def</span> greet(name):
+    <span class="kw">return</span> <span class="str">f"hello, {name}"</span>
+
+greet(<span class="str">"an"</span>)   <span class="cm"># "HELLO, AN" — greet the NAME now points at shout's wrapper</span></code></pre>
+<p>This does <em>exactly</em> the same thing as writing the <code>def</code> normally and then, on the next line, <code>greet = shout(greet)</code> — Python performs that rebind automatically the moment it sees <code>@shout</code> above a <code>def</code>. There is no new runtime concept here, only new syntax for something section 1 already showed working: define <code>greet</code>, call <code>shout</code> with it, and rebind the name <code>greet</code> to whatever comes back — Day 1's binding/rebinding vocabulary applies unchanged. After decoration, calling <code>greet(...)</code> anywhere else in the program calls the wrapper, not the original body, by itself.</p>
+
+<h2>3 · Why decorators are everywhere in FastAPI</h2>
+<p>You have not seen FastAPI yet — that's Phase 2b's job, not today's — but it's worth naming the shape now because you will meet it on day one of that phase and it will already make sense: a FastAPI route looks like this.</p>
+<pre><code><span class="kw">@app.get</span>(<span class="str">"/users/{id}"</span>)
+<span class="kw">def</span> get_user(id):
+    <span class="kw">return</span> {<span class="str">"id"</span>: id}</code></pre>
+<p><code>@app.get("/users/{id}")</code> is a decorator exactly like <code>@shout</code> above — it takes the <code>get_user</code> function, wraps it with the machinery that registers "when a GET request arrives at this URL, call this function and turn its return value into an HTTP response," and hands back a function that still works if you call it directly in a test. Nothing about that machinery is new today; only the fact that it happens to be a decorator, not a special kind of function, is worth landing now — so that FastAPI's routing does not look like new magic when Phase 2b introduces it, only a very well-chosen wrapper.</p>
+
+<h2>4 · A <dfn data-en="a decorator spelled with its own call, e.g. @repeat(3): an extra outer function taking an argument that returns a real decorator (one function argument), which is then applied to the target function" data-vn="giữ nguyên &quot;decorator có tham số&quot; — hàm nhận tham số riêng, trả về 1 decorator thật, decorator đó mới bọc hàm đích">decorator that takes arguments</dfn> of its own</h2>
+<p><code>@app.get("/users/{id}")</code> above has parentheses with an argument inside them — different from plain <code>@shout</code>, which has none. That extra call is a second layer: a function that takes an argument and <em>returns</em> a decorator, which then wraps the target function:</p>
+<pre><code><span class="kw">def</span> repeat(times):
+    <span class="kw">def</span> decorator(func):
+        <span class="kw">def</span> wrapper(*args, **kwargs):
+            result = <span class="kw">None</span>
+            <span class="kw">for</span> _ <span class="kw">in</span> <span class="kw">range</span>(times):
+                result = func(*args, **kwargs)
+            <span class="kw">return</span> result
+        <span class="kw">return</span> wrapper
+    <span class="kw">return</span> decorator
+
+<span class="kw">@repeat</span>(<span class="kw">3</span>)
+<span class="kw">def</span> greet(name):
+    <span class="kw">print</span>(<span class="str">f"hi {name}"</span>)
+
+greet(<span class="str">"an"</span>)   <span class="cm"># prints "hi an" three times</span></code></pre>
+<p>Read <code>@repeat(3)</code> in two steps: first <code>repeat(3)</code> runs and returns <code>decorator</code> (a real decorator, taking exactly one function argument, same shape as <code>shout</code>); then that returned <code>decorator</code> is applied to <code>greet</code>, same as <code>@shout</code> was. Three nested functions is the most this course will build today — recognizing this shape when it appears in FastAPI's own decorators (most of which take arguments, like the URL path above) is the goal, not writing one from scratch under pressure.</p>
+
+<h2>5 · <dfn data-en="a standard-library decorator, @functools.wraps(func), applied to a wrapper function so it inherits func's __name__, docstring, and a few other attributes instead of reporting the wrapper's own generic identity" data-vn="giữ nguyên &quot;functools.wraps&quot; — decorator chuẩn thư viện, copy __name__/docstring của hàm gốc sang wrapper"><code>functools.wraps</code></dfn>: keeping the original function's identity</h2>
+<p>One easy-to-miss side effect: after decoration, <code>greet.__name__</code> reports <code>"wrapper"</code>, not <code>"greet"</code> — the name and docstring of the original function are lost, because <code>wrapper</code> really is a different function object. The standard library fixes this with one more decorator, applied to <code>wrapper</code> itself:</p>
+<pre><code><span class="kw">from</span> functools <span class="kw">import</span> wraps
+
+<span class="kw">def</span> shout(func):
+    <span class="kw">@wraps</span>(func)
+    <span class="kw">def</span> wrapper(*args, **kwargs):
+        <span class="kw">return</span> func(*args, **kwargs).upper()
+    <span class="kw">return</span> wrapper</code></pre>
+<p><code>@wraps(func)</code> copies <code>func</code>'s <code>__name__</code>, docstring, and a few other attributes onto <code>wrapper</code> before it's returned — a small detail, but one every well-behaved decorator in real code includes, precisely because it is itself a decorator (taking <code>func</code>, wrapping <code>wrapper</code>) applied to the function you're already writing.</p>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> pandas doesn't lean on custom decorators the way FastAPI does — this is squarely a language mechanism, not a library one, so there is nothing to contrast today; this callout exists only to note the absence, matching the hard rule above.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/12_decorators.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/12_decorators.py</code></pre>
+<p>No dependencies — standard library only. Exercises: write a plain decorator that wraps a function's return value, apply it with <code>@</code>, write a decorator that counts how many times the wrapped function was called, write a decorator-with-arguments (<code>@repeat(n)</code> shape), and use <code>functools.wraps</code> to preserve a wrapped function's <code>__name__</code>.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="@decorator above a def is shorthand Python performs automatically: define the function, call decorator with it, then rebind the original name to whatever decorator returned — identical to writing greet = decorator(greet) by hand right after the def.">
+    <p class="stem">What does <code>@decorator</code> written above a <code>def</code> actually do?</p>
+    <button class="opt" data-ok>rebinds the function's own name to decorator's return value</button>
+    <button class="opt">runs the function once immediately, then discards the result</button>
+    <button class="opt">renames the function permanently to match its own decorator</button>
+  </div>
+  <div class="q" data-why="A decorator is just a function taking one function argument and returning another function — the wrapper — built from nothing more than Day 4's already-taught fact that functions are values that can be passed around and returned.">
+    <p class="stem">What kind of value does a decorator function itself return?</p>
+    <button class="opt" data-ok>another function, usually a new wrapper around the first</button>
+    <button class="opt">a boolean value saying whether decoration succeeded or failed</button>
+    <button class="opt">a string naming only whichever function got just wrapped</button>
+  </div>
+  <div class="q" data-why="*args and **kwargs inside a wrapper let it accept whatever positional and keyword arguments the wrapped function would have taken, without the decorator needing to know that function's exact signature in advance — one decorator then works on many different functions.">
+    <p class="stem">Why does a wrapper function usually take <code>*args, **kwargs</code>?</p>
+    <button class="opt" data-ok>so it can forward any arguments to the wrapped function</button>
+    <button class="opt">so Python allows the decorator syntax to run at all</button>
+    <button class="opt">so the wrapper never has to call the original function</button>
+  </div>
+  <div class="q" data-why="A decorator written as @repeat(3) is really two calls: repeat(3) runs first and must return a real decorator (one function argument), which Python then applies to the target function — one extra layer of nesting compared to a plain @shout with no parentheses.">
+    <p class="stem">How does a decorator like <code>@repeat(3)</code>, with arguments, differ from plain <code>@shout</code>?</p>
+    <button class="opt" data-ok>repeat(3) runs first, and it must return the real decorator</button>
+    <button class="opt">nothing at all — those parentheses there are just cosmetic</button>
+    <button class="opt">it decorates the number 3 there, instead of the function</button>
+  </div>
+  <div class="q" data-why="A decorated function's wrapper is a genuinely different function object than the original, so without functools.wraps its __name__ and docstring report the wrapper's own, generic identity (e.g. 'wrapper') instead of the original function's — @wraps(func) copies those attributes across.">
+    <p class="stem">Why does a decorated function need <code>@functools.wraps(func)</code> inside it?</p>
+    <button class="opt" data-ok>without it, __name__ still reports the wrapper's, not the original's</button>
+    <button class="opt">without it, the decorator fails to run at import time</button>
+    <button class="opt">without it, *args and **kwargs stop being forwarded at all</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the Python Tutorial's <a href="https://docs.python.org/3/glossary.html#term-decorator">decorator glossary entry</a> and the worked examples in the <a href="https://docs.python.org/3/library/functools.html#functools.wraps">functools docs</a> (both cited in RESOURCES.md's language section) — the shortest official path from "what is <code>@</code>" to <code>functools.wraps</code>.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day12">glossary</a> under Day 12.<br>
+Next up per the plan: <code>pathlib</code>, <code>datetime</code>/timezones, and <code>logging</code> — the last three stdlib corners before Phase 2b's FastAPI + pydantic work begins.<br><br>
+💬 Anything unclear — the two-layer nesting in <code>@repeat(3)</code>, or why FastAPI leans on this so heavily? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

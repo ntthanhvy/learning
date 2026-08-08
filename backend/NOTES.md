@@ -1315,3 +1315,87 @@
   standing out-of-scope-per-MISSION.md candidates if a fresh gap-finding pass
   (re-reading more existing lessons closely, the method that has now found
   three gaps running — Lessons 32, 33, 34) is needed again next time.
+- 2026-08-09 generation (Lesson 35, headless GitHub Actions run): idempotency
+  check first — confirmed no `lessons/0035-*.html` file existed and lesson 35
+  was not yet in nav.js before writing anything (highest existing file was
+  0034, dated 2026-08-08). DB access for progress-checking was confirmed
+  blocked before this round started, so — per this course's own established
+  fallback convention (every round since Lesson 9) — no `psql`/
+  `bin/query-progress` read was attempted; pacing came from
+  `learning-records/` (0001's baseline, 0002's concurrency-gap note, both
+  already reflected in Lessons 1-25, nothing new to act on) plus
+  `lessons/`/`nav.js` file state alone, and still no `lesson_completed`
+  record exists for any of Lessons 1-34. Lesson 34 left only the same two
+  out-of-scope-per-MISSION.md candidates (distributed locks, blue-green/
+  canary deploys) with no new in-scope candidate, so this round used the
+  same re-read-existing-lessons method that found Lessons 32-34: re-read
+  Lesson 6 (transactions) and Lesson 33 (optimistic locking) closely, since
+  both are exactly where a companion topic would live. Lesson 6 taught the
+  check-then-act race on `UPDATE` (two transactions both read `remaining = 1`,
+  both decide to sell, lost update); Lesson 33 taught the analogous race on
+  `UPDATE` again, at human timescale, fixed with a version column. Neither,
+  nor any other lesson, ever covers the same race on `INSERT` — two
+  concurrent signups both passing a `SELECT EXISTS` check before either
+  commits — or Postgres's purpose-built one-statement fix for it. Confirmed
+  via grep across all 34 lesson bodies and glossary.html that "upsert",
+  "ON CONFLICT", and "unique violation" all came back with zero real hits
+  before writing (one incidental "ON CONFLICT"-adjacent mention inside
+  Lesson 33's own `version` column context, never explained as its own
+  mechanism) — a genuine, previously unflagged gap, in scope under MISSION
+  criterion 1 ("entities, relationships, constraints"), not infra/NoSQL/
+  distributed. Lesson 35 covers it: the check-then-insert race explicitly
+  framed as Lesson 6's shape landing on `INSERT` instead of `UPDATE`,
+  `INSERT ... ON CONFLICT` as the fold-the-check-into-the-statement fix
+  (mirroring Lesson 6's `UPDATE ... WHERE remaining > 0` move and Lesson 33's
+  `UPDATE ... WHERE version = $seen` move, now as a named Postgres feature
+  rather than a hand-rolled `WHERE` trick), `DO NOTHING` for the
+  claim-or-skip case with a `RETURNING`/`sql.ErrNoRows` Go pattern identical
+  in shape to every other "does this exist" check in the course, and
+  `DO UPDATE` for the insert-or-increment case (a daily login counter,
+  referencing the table's own current value via `daily_logins.count + 1`).
+  The `claimUsernameNaive`/`claimUsername`/`recordDailyLoginCount` Go
+  snippets were compile-checked clean with `go build -C` / `go vet -C` in a
+  scratch module (`.scratch/backend-lesson35/`, built binary written to
+  `/tmp/lesson35bin` and not copied into the scratch dir — `rm -f` on that
+  `/tmp` path was blocked by this session's sandbox as outside the allowed
+  working directory, left in place per the harmless precedent Lessons 27/31/
+  32's notes already established; scratch dir itself left with only
+  `go.mod`/`main.go`, same end-state as every prior round) — no approval
+  blocker for either `-C`-style invocation this round, consistent with every
+  round since Lesson 13's finding. Added `unique violation` and `upsert` to
+  the glossary (confirmed via grep beforehand that neither existed anywhere
+  in `lessons/*.html` or `glossary.html`) and registered Lesson 35 in
+  nav.js; no new reference sheet needed this round. Quiz options were
+  drafted into a scratch file (`.scratch/backend-lesson35/quiz.txt`, deleted
+  after) and verified with `wc -w` per option via individual `sed -n
+  '<n>p' | sed 's/^x) //' | wc -w` calls, one literal command per line (no
+  loop/variable-expansion form attempted, consistent with every round since
+  Lesson 28's finding that this sandbox rejects that pattern outright), then
+  cross-checked with a second, independent method (`grep -o '[^ ]+' | wc
+  -l`) on the final shipped option text — Q1 needed one rewrite pass (option
+  c was 10 words, option d was 8, both adjusted to 9), Q4 needed one rewrite
+  pass (option d overshot to 11 then undershot to 9 before landing at 10 to
+  match a/b/c), Q2 and Q3 were correct on the first draft; final tallies,
+  each re-verified against the shipped HTML: Q1 9/9/9/9, Q2 9/9/9/9, Q3
+  9/9/9/9, Q4 10/10/10/10. Primary source: the PostgreSQL Manual's INSERT
+  page, ON CONFLICT Clause section — RESOURCES.md already cites the
+  PostgreSQL Manual generally for "tables, constraints, defaults, schemas,"
+  and this extends it into the specific `ON CONFLICT` mechanism, the same
+  already-cited-source-extension choice Lessons 19/21/34 made rather than
+  adding a new RESOURCES.md entry for one mechanism. `bin/record-progress
+  backend lesson_generated --day 35 --lesson
+  0035-upsert-insert-on-conflict.html --detail '{"by":"github-actions"}'`
+  was run directly via its relative path from the repo root as instructed
+  and succeeded on the first try, no approval blocker this round —
+  consistent with Lessons 32-34's finding that the write path works
+  reliably when invoked this way. This closes the upsert/`ON CONFLICT` gap
+  found by re-reading Lessons 6 and 33 rather than re-scanning MISSION.md or
+  reusing Lesson 30/31's out-of-scope leftovers; still no `lesson_completed`
+  record exists for any lesson after 35 rounds — the next session should
+  keep treating a completion/quiz-outcome signal, or a user-named track to
+  deepen, as higher priority than a 36th topic picked blind. No new
+  in-scope teaser candidate surfaced this round beyond the one just closed;
+  distributed locks and blue-green/canary deploys remain the standing
+  out-of-scope-per-MISSION.md candidates if a fresh gap-finding pass
+  (re-reading more existing lessons closely, the method that has now found
+  four gaps running — Lessons 32, 33, 34, 35) is needed again next time.

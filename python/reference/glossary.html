@@ -130,6 +130,15 @@
   <tr><td>parametrize</td><td>giữ nguyên "parametrize" — chạy 1 test body nhiều lần với nhiều bộ input/output khác nhau, mỗi lần báo cáo riêng</td><td><code>@pytest.mark.parametrize("names", [(...), (...)])</code> runs one test body once per listed tuple of arguments, reporting each case as its own separate pass/fail instead of one test looping silently over several cases — the pytest-native replacement for a hand-rolled list of check calls.</td></tr>
 </table>
 
+<h2 id="day12">Day 12 — Decorators</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>decorator</td><td>giữ nguyên "decorator" — hàm nhận 1 hàm khác, bọc thêm hành vi, rồi trả về hàm bọc đó</td><td>A function that takes another function, wraps it with extra behavior in a new inner function (usually called <code>wrapper</code>), and returns that wrapper. <code>@decorator</code> above a <code>def</code> is shorthand for calling the decorator on the function just defined and rebinding the original name to its result — no new runtime concept beyond Day 1's binding/rebinding and Day 4's "a function is a value."</td></tr>
+  <tr><td>wrapper</td><td>giữ nguyên "wrapper" — hàm nằm bên trong decorator, gọi lại hàm gốc và có thể thêm hành vi quanh nó</td><td>The inner function a decorator defines and returns — it calls the original function (usually via <code>*args, **kwargs</code> so it accepts whatever arguments the original takes) and may add behavior before, after, or around that call.</td></tr>
+  <tr><td>decorator with arguments</td><td>giữ nguyên "decorator có tham số" — hàm nhận tham số riêng, trả về 1 decorator thật, decorator đó mới bọc hàm đích</td><td>A decorator spelled with its own call, e.g. <code>@repeat(3)</code>: an extra outer function that takes an argument (<code>times</code>) and returns a real decorator (one function argument), which is then applied to the target function — one more layer of nesting than a plain <code>@shout</code>.</td></tr>
+  <tr><td>functools.wraps</td><td>giữ nguyên "functools.wraps" — decorator chuẩn thư viện, copy __name__/docstring của hàm gốc sang wrapper</td><td>A standard-library decorator, <code>@functools.wraps(func)</code>, applied to a wrapper function so it inherits <code>func</code>'s <code>__name__</code>, docstring, and a few other attributes — without it, a decorated function's identity (as reported by <code>__name__</code>) silently becomes the generic <code>"wrapper"</code> instead of its own name.</td></tr>
+</table>
+
 <p class="next">💬 A term here still unclear? Ask your teacher — hỏi bằng tiếng Việt cũng được.</p>
 
 <script src="../assets/nav.js"></script>

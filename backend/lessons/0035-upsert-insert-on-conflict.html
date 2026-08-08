@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 35 · Upsert: INSERT ... ON CONFLICT</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 35 · ~20 min</p>
+<h1>Upsert: INSERT ... ON CONFLICT</h1>
+<p class="byline">Lesson 6 fixed a lost-update race on <code>UPDATE</code> by folding the check into the statement itself. Lesson 33 did the same thing for a slow, human-timescale conflict with a version column. Today's the third member of that family — the same race, but on <code>INSERT</code> instead of <code>UPDATE</code>, and the one-statement fix Postgres ships for it by name.</p>
+
+<h2>1 · The bug: check-then-insert, twice, at once</h2>
+<p>A "claim a username" feature looks safe written the obvious way: check if the username is taken, and if not, insert it.</p>
+<pre><code><span class="cm">-- both requests run this first, both see zero rows</span>
+SELECT EXISTS(SELECT 1 FROM usernames WHERE username = $1);
+
+<span class="cm">-- both requests then run this — both think it's safe</span>
+INSERT INTO usernames (account_id, username) VALUES ($1, $2);</code></pre>
+<p>Two requests for the same username arrive close together. Both run the <code>SELECT</code> before either has committed an <code>INSERT</code>, so both see "not taken." Both proceed to insert. If <code>username</code> has a <code>UNIQUE</code> constraint, the second <code>INSERT</code> fails outright with a <dfn data-en="a Postgres error returned when an INSERT or UPDATE would violate a UNIQUE or PRIMARY KEY constraint — the row conflicts with one already present" data-vn="unique violation (giữ nguyên) — lỗi Postgres trả về khi INSERT/UPDATE vi phạm UNIQUE hoặc PRIMARY KEY, tức là dòng bị trùng">unique violation</dfn> — an ugly, easy-to-mishandle error the handler has to catch and translate into a sane response. If <code>username</code> has no constraint at all, both inserts succeed and now two rows claim the same name. Either way, this is Lesson 6's exact shape — <em>check-then-act, twice, at once</em> — just landing on <code>INSERT</code> instead of <code>UPDATE</code>.</p>
+<div class="callout"><strong>Frontend-habit trap:</strong> a frontend form usually only ever fires one submit per click, so "check availability, then submit" reads as obviously safe — there's no second browser tab racing the same request in most UI flows. A backend handler has no such luxury: two different users, or one user's double-clicked retry, can hit the same handler within the same millisecond, and the database is the only thing positioned to referee that.</div>
+
+<h2>2 · The fix: let the constraint do the checking</h2>
+<p>Postgres has a purpose-built statement for exactly this: <dfn data-en="an INSERT statement with an ON CONFLICT clause naming what to do if the new row collides with an existing UNIQUE or PRIMARY KEY value — insert normally on no conflict, or apply the named fallback (DO NOTHING or DO UPDATE) instead of erroring" data-vn="upsert (giữ nguyên) — INSERT có ON CONFLICT, nếu trùng UNIQUE/PRIMARY KEY thì làm theo fallback đã khai (DO NOTHING hoặc DO UPDATE) thay vì báo lỗi">upsert</dfn> — an <code>INSERT ... ON CONFLICT</code> that names what should happen if the row collides with one already there, instead of just erroring:</p>
+<pre><code>INSERT INTO usernames (account_id, username)
+VALUES ($1, $2)
+ON CONFLICT (username) DO NOTHING
+RETURNING account_id;</code></pre>
+<p>One statement, one round trip to the database. If no row with that <code>username</code> exists, the insert happens normally and <code>RETURNING</code> hands back the row that was just written. If a row already holds that username, Postgres skips the insert entirely — no error, no violation — and <code>RETURNING</code> simply returns nothing. The application code tells the two outcomes apart the same way <code>sql.ErrNoRows</code> already does everywhere else in this course:</p>
+<pre><code><span class="cm">// claimUsername is the upsert-shaped fix: one statement, the constraint
+// itself is the check, and ON CONFLICT names what to do when it fires.</span>
+<span class="kw">func</span> claimUsername(ctx context.Context, db DB, accountID <span class="ty">int64</span>, username <span class="ty">string</span>) error {
+    <span class="kw">var</span> claimedBy <span class="ty">int64</span>
+    row := db.QueryRowContext(ctx, <span class="st">`
+        INSERT INTO usernames (account_id, username)
+        VALUES ($1, $2)
+        ON CONFLICT (username) DO NOTHING
+        RETURNING account_id`</span>, accountID, username)
+    err := row.Scan(&amp;claimedBy)
+    <span class="kw">if</span> errors.Is(err, sql.ErrNoRows) {
+        <span class="kw">return</span> ErrAlreadyClaimed <span class="cm">// someone else's row already holds this username</span>
+    }
+    <span class="kw">return</span> err
+}</code></pre>
+<p>Why this actually closes the race and the two-step version doesn't: there's no longer a window between a read and a write for a second request to land in. The uniqueness check <em>is</em> the <code>INSERT</code> — Postgres evaluates the constraint as part of committing the row, and only one of the two concurrent inserts can win it. This is the exact "fold the check into the statement" move Lesson 6 taught for <code>UPDATE</code>, applied to <code>INSERT</code> instead: the constraint the database already enforces becomes the check, rather than a separate <code>SELECT</code> the application runs and then has to trust.</p>
+
+<h2>3 · The other half: DO UPDATE</h2>
+<p><code>DO NOTHING</code> answers "insert, or silently skip." Often the better answer is "insert, or update the row that's already there" — a single upsert that works whether or not a row exists yet, useful for counters, caches, and any "set this value" operation where the caller doesn't know or care which case applies:</p>
+<pre><code><span class="cm">-- recordDailyLoginCount: insert a fresh counter row, or bump the
+-- existing one atomically, in one round trip either way.</span>
+INSERT INTO daily_logins (account_id, login_date, count)
+VALUES ($1, $2, 1)
+ON CONFLICT (account_id, login_date)
+DO UPDATE SET count = daily_logins.count + 1;</code></pre>
+<p>First login of the day for that account: no conflicting row exists, so the plain <code>INSERT</code> runs and <code>count</code> starts at 1. Every login after that: the <code>(account_id, login_date)</code> pair already exists, so instead of erroring, Postgres runs the <code>DO UPDATE</code> clause — note it reads <code>daily_logins.count + 1</code>, the table's own current value, not the <code>1</code> from the failed <code>VALUES</code> list — incrementing the existing row instead. One statement handles both the "doesn't exist yet" and "already exists" cases correctly, with no race between checking which case applies and acting on it.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Both requests run the SELECT before either request's INSERT has committed, so both see 'not taken' and both proceed to insert — the same check-then-act race Lesson 6 taught for UPDATE, just on INSERT instead.">
+    <p class="stem">Why does the check-then-insert pattern race under concurrent requests?</p>
+    <button class="opt" data-ok>both requests can pass the SELECT before either commits</button>
+    <button class="opt">both requests always fail the SELECT before either commits</button>
+    <button class="opt">only the second request can pass the SELECT check</button>
+    <button class="opt">the database always serializes every SELECT before an INSERT</button>
+  </div>
+  <div class="q" data-why="ON CONFLICT turns the separate SELECT-then-INSERT into one INSERT statement — the UNIQUE constraint itself becomes the check, evaluated atomically as part of the insert, so there's no window for a second request to race into.">
+    <p class="stem">What does ON CONFLICT actually replace in the naive two-step pattern?</p>
+    <button class="opt" data-ok>the separate SELECT check, folded into one INSERT statement</button>
+    <button class="opt">the separate INSERT check, folded into one SELECT statement</button>
+    <button class="opt">the separate UPDATE check, folded into one DELETE statement</button>
+    <button class="opt">the separate DELETE check, folded into one UPDATE statement</button>
+  </div>
+  <div class="q" data-why="DO NOTHING makes Postgres skip the insert with no error at all when the row already conflicts — RETURNING then returns zero rows (sql.ErrNoRows in Go), and the existing row is left exactly as it was.">
+    <p class="stem">What does ON CONFLICT (username) DO NOTHING do when a row already has that username?</p>
+    <button class="opt" data-ok>skips the insert silently, leaving the existing row untouched</button>
+    <button class="opt">skips the insert loudly, leaving the existing row untouched</button>
+    <button class="opt">skips the insert silently, deleting the existing row instead</button>
+    <button class="opt">skips the insert silently, overwriting the existing row's username</button>
+  </div>
+  <div class="q" data-why="DO UPDATE runs an UPDATE against the row that already exists (referencing the table's own current values, e.g. count + 1) instead of silently skipping — useful when the caller wants 'insert, or update' as one statement regardless of which case applies.">
+    <p class="stem">What does ON CONFLICT ... DO UPDATE do differently from DO NOTHING?</p>
+    <button class="opt" data-ok>it merges new values into the row that already exists</button>
+    <button class="opt">it merges old values into the row that already exists</button>
+    <button class="opt">it merges new values into a second, freshly inserted row</button>
+    <button class="opt">it merges new values into every row that already exists</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the <a href="https://www.postgresql.org/docs/current/sql-insert.html#SQL-ON-CONFLICT">PostgreSQL Manual — INSERT, the ON CONFLICT Clause</a> (~10 min) — straight from this course's standing Postgres reference (already cited for Lessons 5, 19, and 34's constraint/index material), and the authoritative source for exactly what <code>DO NOTHING</code> and <code>DO UPDATE</code> guarantee.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> open — still no reported quiz/lesson-completion outcome exists for any lesson after 35 rounds; distributed locks and blue-green/canary deploys remain the last named, confirmed out-of-scope-per-MISSION.md candidates if no fresh gap or user-chosen track surfaces first.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

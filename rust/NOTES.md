@@ -441,3 +441,17 @@ by the user there; they apply here identically.
   beyond the Day-1 baseline. (Go skipped again per its own window close,
   now nineteen days past it; backend lesson 34, data lesson 31, and python
   Day 11 were generated this round via delegated agents.)
+- 2026-08-09 (headless 06:00 run, GitHub Actions): same as every prior
+  post-week day — verified `daily.html`, `assets/srs.js`, and
+  `assets/quiz-bank.js` are all present and untouched (`quiz-bank.js` still
+  shows 8 textual `id: "k` matches: the 7 real kata entries `k1`-`k7` plus
+  the commented-out example line; `nav.js` still registers only the 7 Jul
+  8-14 lessons, `LESSONS` array unchanged). Still the correct "daily
+  quiz+kata" for this post-week phase per PLAN.md, so nothing new was
+  generated. Both `psql "$LEARNING_DB_URL" ...` (content-level block on the
+  variable name) and `bin/query-progress` (generic "requires approval" gate,
+  no user present, tried twice) were blocked again this session, so no
+  `course_progress` rows could be read for a scope-change signal. No new
+  learning record beyond the Day-1 baseline. (Go skipped again per its own
+  window close, now twenty days past it; backend lesson 35, data lesson 32,
+  and python Day 12 were generated this round via delegated agents.)

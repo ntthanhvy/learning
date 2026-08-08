@@ -68,6 +68,8 @@
       file: "lessons/0030-broadcasting.html" },
     { n: 31, date: "2026-08-08", title: "sort_values() and reset_index() edge cases",
       file: "lessons/0031-sort-values-and-reset-index.html" },
+    { n: 32, date: "2026-08-09", title: "The .dt accessor: pulling parts out of a datetime column",
+      file: "lessons/0032-dt-accessor-datetime-columns.html" },
   ];
 
   const REFS = [

@@ -1438,3 +1438,84 @@
   — the "trusts row order only" family started in Lesson 7 and the "no
   crash, quietly wrong" family started in Lesson 19 are both fairly mature
   at this point) if no drill-outcome signal surfaces by next generation.
+- 2026-08-09 generation (Lesson 32, headless GitHub Actions run): confirmed
+  the idempotency check first — no `data/lessons/0032-*.html` existed yet and
+  Lesson 32 wasn't in `assets/nav.js` (highest was Lesson 31, dated
+  2026-08-08) — so this round proceeded. DB access for progress-checking was
+  confirmed already blocked for this run before starting, so no read attempt
+  was made — fell back to on-disk state (highest lesson file + this file's
+  own dated log) per this course's established fallback convention; still no
+  `course_progress`/`lesson_completed` signal beyond the Lesson 1 baseline to
+  target a reported weak spot. Lesson 31's own teaser named no single
+  dangling candidate ("a fresh curriculum/glossary scan"), so this round did
+  exactly that: listed every lesson title 1-31 and grepped `lessons/*.html`
+  for a batch of common pandas terms not yet confirmed taught (`.dt.`,
+  `set_index(`, `.clip(`, `.between(`, `combine_first`, `to_datetime`,
+  `describe(`/`.info(`). The `.dt` accessor came back genuinely uncovered —
+  Lesson 10 taught its sibling `.str` accessor for text columns and Lesson 2
+  already parses `order_date` with `pd.to_datetime()`, but no lesson ever
+  used `.dt` itself, a clean natural-difficulty-step gap in the same shape as
+  Lesson 23's `shift()` gap. Lesson 32 ships it: the parse-first requirement
+  (`.dt` raises `AttributeError` immediately on a still-text column, a loud
+  guard rail rather than a silent one), `.dt.year`/`.month`/`.day` as
+  one-liners replacing a per-row `.apply(lambda d: d.year)` loop,
+  `.dt.day_name()`/`.dt.dayofweek` for weekday extraction and an
+  `.isin([5, 6])` weekend mask (reusing Lesson 29's `isin()`), grouping
+  directly on a `.dt` expression inside `groupby()` (with an explicit callout
+  that the result sorts alphabetically, not calendar order — a real "check
+  before presenting" catch), Timedelta and `.dt.days` from subtracting two
+  dates, and closing with the NaT gotcha as this course's running "no crash,
+  quietly wrong" family's latest entry since Lesson 19: `.dt.year` on a NaT
+  row does not raise, it silently returns NaN (and flips the whole result
+  Series to float dtype). `uv run --with pandas` worked directly this round
+  (pandas 3.0.5): every number in `.scratch/data-lesson32/explore.py` and
+  `explore2.py` (both deleted after) was hand-verified against the real
+  `orders_raw.csv` clean 4-row slice before writing a word of the lesson —
+  day names Monday/Saturday/Tuesday/Friday for An 01-05/An 01-10/Binh
+  01-06/Binh 01-09; the weekend mask matches exactly 1 row (An's Saturday
+  order, 42.0); groupby-by-day_name sums to Friday 180.0/Monday
+  120.0/Saturday 42.0/Tuesday 35.5 (377.5 total), sorted alphabetically not
+  calendar order (confirmed by inspecting `.index.tolist()` directly, not
+  assumed); `.dt` on a still-text Series raises `AttributeError: Can only use
+  .dt accessor with datetimelike values` (confirmed directly, not assumed);
+  the raw fixture's NaT row (order_id 4, blank date) gives `.dt.year` of
+  `nan` alongside 5 real `2026.0` values, confirming both the silent-NaN
+  gotcha and the int-to-float dtype flip in one run. Checked candidate
+  Ellipsis-placeholder positions against this course's by-now-expected
+  gotcha family (Lessons 19-31) with a standalone throwaway script before
+  writing the practice file: `getattr(clean["order_date"].dt, ...)` raises
+  `TypeError` (attribute name must be a string), `clean[...]` raises
+  `KeyError: Ellipsis`, `.isin(...)` (bare Ellipsis, not inside a list) raises
+  `TypeError` (only list-like objects allowed), `groupby(...)[...]` raises
+  `KeyError`, and `pd.to_datetime(..., errors=...)` raises `AssertionError` —
+  all five confirmed-safe positions were used, avoiding the "Ellipsis is
+  truthy"/"valid .loc[] indexer"/"valid list element" traps this course has
+  repeatedly hit in Lessons 19-31. The shipped (unsolved)
+  `practice/32_dt_accessor.py` was executed in `.scratch/data-lesson32/`
+  (fixture CSVs copied alongside) and printed all 6 ✗ with no crash on the
+  first attempt — no gotcha surprises needed fixing this round, unlike most
+  prior rounds — then a separately-saved solved copy
+  (`.scratch/data-lesson32/practice/32_solved.py`, not shipped) printed all 6
+  ✓ against the same hand-verified numbers above. The shipped file was also
+  re-run a second time directly from its real `practice/` location (`cd data
+  && uv run --with pandas python3 practice/32_dt_accessor.py`) and confirmed
+  to print the identical all-✗ result with no crash. `.scratch/
+  data-lesson32/` was fully removed (`rm -rf`) after verification, no
+  approval needed this round. Added `.dt accessor` and `Timedelta` to the
+  glossary (checked for collisions first — none) and registered Lesson 32 in
+  nav.js. Quiz options were drafted and checked with a Python regex/word-
+  count script run via `uv run python3` (this course's established
+  convention) — the first draft came out mismatched on all three questions
+  (Q1 at 3/6/6, Q2 at 5/5/7, Q3 at 8/6/8) and needed three successive rewrite
+  + recount cycles before a final independent recount, plus a manual `Grep`-
+  based read-through as a second pass (this course's established convention
+  since Lesson 19), confirmed all three genuinely level at 6/6/6, 6/6/6, and
+  7/7/7. `bin/record-progress data lesson_generated --day 32 --lesson
+  0032-dt-accessor-datetime-columns.html --detail '{"by":"github-actions"}'`
+  was run once from the repo root as instructed and succeeded on the first
+  try, no approval blocker this round. Set the teaser going forward to
+  `set_index()` as its own topic (used constantly as a call across 9 lessons
+  but, like `sort_values()`/`reset_index()` before Lesson 31, never explained
+  on its own — spotted during this round's scan, confirmed genuinely
+  uncovered as a standalone topic by grep) if no drill-outcome signal
+  surfaces by next generation.

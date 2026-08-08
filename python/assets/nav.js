@@ -28,6 +28,8 @@
       file: "lessons/0010-environments-and-pyproject.html" },
     { n: 11, date: "2026-08-08", title: "Testing with pytest",
       file: "lessons/0011-testing-with-pytest.html" },
+    { n: 12, date: "2026-08-09", title: "Decorators",
+      file: "lessons/0012-decorators.html" },
   ];
 
   const REFS = [

@@ -74,6 +74,8 @@
       file: "lessons/0033-optimistic-locking-version-columns.html" },
     { n: 34, date: "2026-08-08", title: "Soft delete: keeping the row, hiding the record",
       file: "lessons/0034-soft-delete.html" },
+    { n: 35, date: "2026-08-09", title: "Upsert: INSERT ... ON CONFLICT",
+      file: "lessons/0035-upsert-insert-on-conflict.html" },
   ];
 
   const REFS = [

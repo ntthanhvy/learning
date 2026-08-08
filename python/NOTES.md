@@ -875,3 +875,112 @@ fail *gracefully* so the learner sees which task failed.
   (Days 9, 10, 11), suggesting the write path may simply be reliable in this
   sandbox regardless of the read-path blockage, though still only three data
   points.
+- 2026-08-09 — **Day 12 generated** (`lessons/0012-decorators.html`), the
+  headless run's fifth Phase 2 lesson. Idempotency check confirmed on-disk:
+  highest existing lesson file was `0011-…` dated 2026-08-08, no `0012-…`
+  file and no `date: "2026-08-09"` entry existed yet in `assets/nav.js`
+  before this run, so generation proceeded as Day 12.
+  Topic: decorators, and why they appear everywhere in FastAPI — the fifth
+  item of `PLAN.md`'s Phase 2a spine, directly after Day 11's pytest, and
+  squarely language-level (functions wrapping functions), not library —
+  satisfies the scope rule trivially. Taught: the plain mechanism first
+  (`shout(func)` returning a `wrapper(*args, **kwargs)`, built from nothing
+  more than Day 4's already-taught "a function is a value, passable and
+  returnable like any other"); `@decorator` as sugar for `name =
+  decorator(name)`, framed explicitly through Day 1's binding/rebinding
+  vocabulary rather than as new syntax — the exact same rebind Day 1
+  already explained, applied automatically by Python at the `def` site;
+  the FastAPI-relevance angle named explicitly per PLAN.md's own framing
+  (`@app.get("/users/{id}")` shown and explained as the identical mechanism
+  as `@shout`, with a plain note that no FastAPI itself is being taught yet —
+  that stays Phase 2b's job); decorators-with-arguments as one more layer of
+  nesting (`repeat(times)` returning a real decorator, which then wraps the
+  target), tied back to `@app.get("/users/{id}")`'s own parenthesized
+  argument shown moments earlier; and `functools.wraps` closing the lesson
+  as the detail that keeps a decorated function's `__name__`/docstring
+  intact. Bridged from SQL per the baseline record: a decorator framed as a
+  `BEFORE`/`AFTER` trigger wrapped around a table write — the original
+  statement still runs unchanged, extra logic runs around it — introduced
+  before any Python in the top callout, not from a pandas or other
+  "Python-adjacent" analogy.
+  Learning records: still only the Day 1 baseline
+  (`learning-records/0001-baseline-reads-python-writes-little.md`) — no
+  completion/quiz record for any later day was found (same gap every Day
+  8–11 entry already flagged). Paced conservatively per that same
+  assumption: one core mechanism (plain wrap-and-return) given the most
+  explanatory weight before layering on arguments, at most three nested
+  function levels shown (the `repeat(times)` example), and no additional
+  decorator features (class-based decorators, stacking multiple decorators
+  on one function, `@staticmethod`/`@classmethod`) pulled in beyond what the
+  spine's single line ("decorators, and why they appear everywhere in
+  FastAPI") calls for. Unverified against real quiz/completion data, same
+  caveat as every entry since Day 8.
+  No-pandas rule: zero pandas/NumPy API in the lesson body or practice file
+  (checked by grep for `pandas|numpy|dataframe`, case-insensitive, across
+  both new files — zero hits in the practice file, exactly one hit in the
+  lesson); exactly one contrast sentence, and an unusual one for this
+  course — decorators have no real pandas equivalent to name, so the
+  sentence explicitly says so ("pandas doesn't lean on custom decorators the
+  way FastAPI does … nothing to contrast today") rather than naming a
+  specific pandas call, still placed once in its own callout and labeled in
+  prose as the only such sentence, matching the hard-rule section above.
+  Practice file `practice/12_decorators.py` (5 exercises: a plain
+  `shout(func)` decorator upper-casing a return value, a `count_calls(func)`
+  decorator tracking call count via a `wrapper.calls` attribute, a
+  `repeat(times)` decorator-with-arguments calling the wrapped function
+  `times` times and collecting a list, a `noisy(func)` decorator using
+  `@functools.wraps(func)` to preserve `__name__`/`__doc__`, and a manual
+  `triple_it = plain_double(triple_it)` rebind with no `@` syntax at all, to
+  make the sugar equivalence from lesson section 2 concrete) was verified in
+  a scratch dir (`.scratch_py12_verify/`, created under the repo root and
+  removed after use, per the Day 3–11 precedent that `/tmp` is out of bounds
+  for this sandbox). **One bug was caught and fixed during verification,**
+  a new failure mode this course's practice files hadn't hit before: the
+  first draft's Exercise 3 TODO left `repeat(times)`'s body as a bare `...`,
+  which makes `repeat(times)` implicitly return `None` — and because
+  `@repeat(3)` is applied to `roll()` eagerly, at *import/run* time, not
+  when a check later calls `roll()`, the shipped (unsolved) file crashed
+  immediately with `TypeError: 'NoneType' object is not callable` before a
+  single check could even run, violating this file's "must fail gracefully"
+  rule in the same spirit as Day 11's parametrize-collection crash, though
+  the trigger here is decoration order rather than test collection. Fixed
+  by giving `repeat(times)`'s TODO body a real placeholder decorator
+  (`def decorator(func): return func`) that lets the module import cleanly
+  — `roll()` then stays undecorated in effect, so calling it later returns
+  a bare `4` instead of `[4, 4, 4]`, and Exercise 3's check reports a clean
+  ✗ instead of crashing. After the fix: the shipped (unsolved) copy ran via
+  `uv run python3`, both from the scratch copy and from its real
+  `practice/` path with the documented command, and printed five clean ✗
+  lines with no traceback each time; a separately solved copy printed five
+  ✓ and the "All green" tally.
+  Glossary: added a Day 12 section to `reference/glossary.html` (`decorator`,
+  `wrapper`, `decorator with arguments`, `functools.wraps`) after confirming
+  via grep that none of the four terms collided with any Day 1–11 entry. All
+  four also got matching `<dfn>` markup at first use in the lesson body,
+  matching Day 11's density of glossarying every newly introduced term
+  inline rather than leaving any undefined.
+  Quiz: 5 questions. Word counts were checked with individual `wc -w` calls
+  per option line (not by eye, not piped through compound
+  grep/awk/multi-stage commands, since this sandbox's approval gate blocks
+  compound bash commands exactly as in every prior day) and mismatched on
+  the first draft for four of the five questions (Q1 8/9/8, Q2 8/8/9, Q4
+  9/9/10, Q5 9/10/10) — Q3 was already equal on the first draft (10/10/10).
+  Each mismatched question needed multiple rewrite-and-recount rounds — Q2
+  and Q4 in particular needed three attempts each, including one round where
+  an edit changed only punctuation (a comma, an em-dash) and left the word
+  count unchanged, a false start also seen in Day 6's entry — until every
+  option matched (Q1 9/9/9, Q2 9/9/9, Q3 10/10/10, Q4 10/10/10, Q5
+  10/10/10), then a full final recount pass across all five questions' three
+  options each (15 lines total, each checked individually) confirmed every
+  one before shipping, per this file's instruction to recount after any
+  edit. Registered in `assets/nav.js` with `date: "2026-08-09"`.
+  **DB access:** the read path (`bin/query-progress`) was confirmed blocked
+  again before this run started, per this run's own instructions, so
+  learning-record freshness was judged from on-disk files only, consistent
+  with every prior day since Day 8.
+  `bin/record-progress python lesson_generated --day 12 --lesson
+  0012-decorators.html --detail '{"by":"github-actions"}'` was run once
+  after shipping and **succeeded**: `recorded: python/lesson_generated
+  day=12 lesson=0012-decorators.html` — fourth consecutive success (Days 9,
+  10, 11, 12), continuing to suggest the write path is reliable in this
+  sandbox regardless of the read-path blockage.

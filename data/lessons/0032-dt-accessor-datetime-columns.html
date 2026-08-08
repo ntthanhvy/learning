@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 32 · The .dt accessor: pulling parts out of a datetime column</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 32 · ~20 min · 9 Aug 2026</p>
+<h1>The .dt accessor: pulling parts out of a datetime column</h1>
+<p class="byline">Lesson 31's own teaser named no single dangling candidate, so this round is a fresh scan: Lesson 10 taught the <code>.str</code> accessor for vectorized string operations, but its datetime sibling — the <code>.dt</code> accessor — was never taught, despite <code>order_date</code> being parsed with <code>pd.to_datetime()</code> back in Lesson 2. Today closes that gap: getting year/month/weekday out of a date column without a Python loop.</p>
+
+<h2>1 · Parsing is step one — text isn't a date until you say so</h2>
+<p>Lesson 2 already showed that <code>order_date</code> loads as plain text (<code>object</code>/<code>str</code> dtype) until explicitly converted with <code>pd.to_datetime()</code>. That conversion is the prerequisite for everything below — <dfn data-en="a namespace of vectorized datetime-part accessors on a Series, available ONLY when that Series' dtype is datetime64 (or Timedelta) -- the direct sibling of .str for text columns, exposing one operation per row without a Python loop" data-vn="giữ nguyên '.dt accessor' — namespace các hàm lấy thành phần ngày giờ, chỉ dùng được khi cột đã là kiểu datetime64; giống hệt .str nhưng dành cho cột ngày giờ">.dt accessor</dfn> only exists on a Series whose dtype is already datetime — calling it on the still-text version raises immediately, loudly, before anything can go quietly wrong:</p>
+<pre><code>raw[<span class="str">"order_date"</span>].dt.year
+<span class="cm"># AttributeError: Can only use .dt accessor with datetimelike values</span>
+
+clean[<span class="str">"order_date"</span>] = pd.to_datetime(clean[<span class="str">"order_date"</span>])
+clean[<span class="str">"order_date"</span>].dtype   <span class="cm"># datetime64[us] -- NOW .dt is available</span></code></pre>
+<p>Same cleaned 4-row slice as Lessons 6-31 (An 120.0/01-05, An 42.0/01-10, Binh 35.5/01-06, Binh 180.0/01-09), with <code>order_date</code> parsed this time instead of left as text.</p>
+
+<h2>2 · One call, every row: year / month / day</h2>
+<p>Once parsed, every part of the date is a vectorized one-liner — no <code>.apply(lambda d: d.year)</code> loop needed, same vectorization argument this course has made since Lesson 1:</p>
+<pre><code>clean[<span class="str">"order_date"</span>].dt.year    <span class="cm"># [2026, 2026, 2026, 2026]</span>
+clean[<span class="str">"order_date"</span>].dt.month   <span class="cm"># [1, 1, 1, 1]</span>
+clean[<span class="str">"order_date"</span>].dt.day     <span class="cm"># [5, 10, 6, 9]</span></code></pre>
+<p>SQL cousin: <code>EXTRACT(YEAR FROM order_date)</code> / <code>EXTRACT(MONTH FROM ...)</code> / <code>EXTRACT(DAY FROM ...)</code>, or Postgres' <code>DATE_PART()</code>.</p>
+
+<h2>3 · The weekday tools: day_name() and dayofweek</h2>
+<p><code>dt.day_name()</code> gives the human-readable weekday; <code>dt.dayofweek</code> gives its 0-6 integer form (Monday = 0), useful for filtering:</p>
+<pre><code>clean[<span class="str">"order_date"</span>].dt.day_name()   <span class="cm"># ['Monday', 'Saturday', 'Tuesday', 'Friday']</span>
+clean[<span class="str">"order_date"</span>].dt.dayofweek    <span class="cm"># [0, 5, 1, 4]</span>
+
+weekend_mask = clean[<span class="str">"order_date"</span>].dt.dayofweek.isin([<span class="kw">5</span>, <span class="kw">6</span>])
+clean[weekend_mask][[<span class="str">"customer"</span>, <span class="str">"order_date"</span>]]
+<span class="cm">#   customer order_date
+# 1       An 2026-01-10   &lt;- the only Saturday order</span></code></pre>
+<p>That <code>.isin([5, 6])</code> is Lesson 29's tool doing real work here — "weekend" isn't one value to equal, it's membership in a small set.</p>
+
+<h2>4 · Grouping by a date part</h2>
+<p>A <code>.dt</code> expression can sit directly inside <code>groupby()</code>, same pattern as Lesson 16's <code>groupby()[col]</code> — group by day-of-week to see which weekday brings in the most revenue:</p>
+<pre><code>clean.groupby(clean[<span class="str">"order_date"</span>].dt.day_name())[<span class="str">"amount"</span>].sum()
+<span class="cm"># order_date
+# Friday      180.0
+# Monday      120.0
+# Saturday     42.0
+# Tuesday      35.5
+# Name: amount, dtype: float64   &lt;- sorted alphabetically, NOT Mon-Sun order</span></code></pre>
+<p>Worth flagging out loud: the result group order is alphabetical by default (<code>groupby</code>'s usual sort-by-key behavior, Lesson 4), not calendar order — a real report would reindex against an explicit Monday-through-Sunday list before presenting it.</p>
+
+<h2>5 · Date arithmetic: subtracting two dates gives a Timedelta</h2>
+<p>Subtracting one datetime Series from another (or from a single <code>pd.Timestamp</code>) doesn't give a number — it gives a <dfn data-en="pandas' dtype for a DURATION between two datetimes (e.g. '5 days'), the result of subtracting one datetime Series/Timestamp from another -- has its own .dt accessor for pulling out the duration as a plain number" data-vn="giữ nguyên 'Timedelta' — kiểu dữ liệu biểu diễn KHOẢNG THỜI GIAN giữa 2 mốc datetime, ví dụ '5 ngày'; cũng có .dt accessor riêng để lấy ra số ngày">Timedelta</dfn> Series, which has its own <code>.dt</code> accessor to pull the duration out as a plain integer:</p>
+<pre><code>today = pd.Timestamp(<span class="str">"2026-08-09"</span>)
+days_since = (today - clean[<span class="str">"order_date"</span>]).dt.days
+days_since.tolist()   <span class="cm"># [216, 211, 215, 212]</span></code></pre>
+<p>SQL cousin: <code>current_date - order_date</code> (Postgres date subtraction already returns an integer number of days directly — pandas needs the explicit <code>.dt.days</code> step since the intermediate Timedelta object carries more precision than just whole days).</p>
+
+<h2>6 · The gotcha: .dt on a NaT row doesn't crash, it goes quietly NaN</h2>
+<p>Lesson 3 introduced <code>NaT</code> as datetime's missing-value marker. Parsing the raw fixture's blank <code>order_date</code> (order_id 4) with <code>errors="coerce"</code> produces one NaT row — and calling <code>.dt</code> on a Series containing it does <strong>not</strong> raise, continuing this course's "no crash, quietly wrong" family since Lesson 19:</p>
+<pre><code>raw[<span class="str">"order_date_parsed"</span>] = pd.to_datetime(raw[<span class="str">"order_date"</span>], errors=<span class="str">"coerce"</span>)
+raw[<span class="str">"order_date_parsed"</span>].dt.year
+<span class="cm"># [2026.0, 2026.0, 2026.0, nan, 2026.0, 2026.0]
+# order_id 4's NaT row silently becomes NaN -- and note the dtype: the whole
+# Series becomes float (2026.0, not 2026 as int), because a column that can
+# hold NaN can't stay integer</span></code></pre>
+<p>No exception, no warning — just one row quietly turning into a float NaN plus the whole column's dtype flipping from int-like to float. Same instinct as every prior "no crash" entry in this family: check <code>.isna().sum()</code> before trusting a <code>.dt</code> result on real data with any missing dates in it.</p>
+
+<div class="interview">
+<p><strong>Q: "How would you compute revenue by weekday from an orders table?"</strong> A strong answer, out loud: <em>"First I'd confirm the date column is actually parsed as datetime64, not still a string — pandas won't let you use .dt otherwise, it raises immediately, which is actually a helpful guard rail. Once it's parsed, `df.groupby(df['order_date'].dt.day_name())['amount'].sum()` does it in one vectorized line — no Python loop over rows extracting weekdays by hand. I'd also flag that the groupby result sorts alphabetically by default, not Monday-through-Sunday, so I'd reindex against an explicit weekday order before presenting it. And I'd check for NaT first — a missing date doesn't error under .dt, it just silently drops out of one group's total instead."</em> The signal: naming the parse-first requirement, the vectorization win, AND the two gotchas unprompted.</p>
+</div>
+
+<h2>Try it — self-checking practice (~15 min)</h2>
+<p>Open <code>practice/32_dt_accessor.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/32_dt_accessor.py</code></pre>
+<p>Uses the same cleaned rows as Lessons 6-31, parsed to datetime this time. Exercise 1 pulls <code>.dt.day_name()</code>; Exercise 2 builds the weekend mask with <code>.dt.dayofweek.isin(...)</code>; Exercise 3 groups revenue by weekday; Exercise 4 reproduces Section 6's NaT gotcha on the raw (unfiltered) fixture.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="the .dt accessor requires the Series to already be datetime64 dtype -- calling it on a plain text/object column raises AttributeError immediately, rather than silently doing nothing or auto-converting. pd.to_datetime() must run first, exactly like Lesson 2 already showed for order_date.">
+    <p class="stem">Calling <code>.dt.year</code> on a column that's still plain text (not yet parsed with <code>pd.to_datetime()</code>) does what?</p>
+    <button class="opt" data-ok>raises AttributeError right away, no parse</button>
+    <button class="opt">auto-parses the column, then returns years</button>
+    <button class="opt">returns NaN silently for every row</button>
+  </div>
+  <div class="q" data-why="groupby() sorts its resulting groups by key alphabetically by default (Lesson 4's established behavior), and day names are just strings to groupby -- it has no built-in awareness that 'Monday' should sort before 'Tuesday' in calendar order. Getting calendar order back requires an explicit reindex against a Monday-Sunday list.">
+    <p class="stem"><code>df.groupby(df["order_date"].dt.day_name())["amount"].sum()</code> — what order are the weekday groups in by default?</p>
+    <button class="opt" data-ok>alphabetical order, not calendar weekday order</button>
+    <button class="opt">calendar order, from Monday through Sunday</button>
+    <button class="opt">order the rows first appear in</button>
+  </div>
+  <div class="q" data-why="A NaT row does not raise under .dt -- it silently becomes NaN in the result, the same 'no crash, quietly wrong' shape this course has flagged since Lesson 19 (nunique/explode) through Lesson 30 (broadcasting's index-mismatch NaN). The fix is the same reflex as always: check .isna().sum() before trusting the result.">
+    <p class="stem">A datetime Series has one <code>NaT</code> row (a missing date). What happens when you call <code>.dt.year</code> on it?</p>
+    <button class="opt" data-ok>that row's result quietly becomes NaN instead</button>
+    <button class="opt">the whole call raises an exception instead</button>
+    <button class="opt">that row silently vanishes from the Series</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the pandas User Guide's <a href="https://pandas.pydata.org/docs/user_guide/timeseries.html#time-date-components">"Time/Date components"</a> table (~5 min) — the full list of <code>.dt</code> attributes/methods (this lesson covered <code>year</code>/<code>month</code>/<code>day</code>/<code>day_name()</code>/<code>dayofweek</code>/Timedelta's <code>.dt.days</code>; the table also covers <code>quarter</code>, <code>is_leap_year</code>, and more not needed today).</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>.dt accessor</code> and <code>Timedelta</code> are new today.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-32 comes back reported as shakiest, otherwise a fresh curriculum/glossary scan for the next genuinely-uncovered pattern — <code>set_index()</code> as its own topic (used constantly as a call across 9 lessons but, like <code>sort_values()</code>/<code>reset_index()</code> before Lesson 31, never explained on its own) is a real candidate spotted during this round's scan.<br><br>
+💬 Anything unclear — the parse-first requirement, the alphabetical groupby order, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

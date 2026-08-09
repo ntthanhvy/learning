@@ -1519,3 +1519,91 @@
   on its own — spotted during this round's scan, confirmed genuinely
   uncovered as a standalone topic by grep) if no drill-outcome signal
   surfaces by next generation.
+- 2026-08-10 generation (Lesson 33, headless GitHub Actions run): confirmed
+  the idempotency check first — no `data/lessons/0033-*.html` existed yet and
+  Lesson 33 wasn't in `assets/nav.js` (highest was Lesson 32, dated
+  2026-08-09) — so this round proceeded. DB access (`psql`/`bin/query-progress`)
+  was confirmed already blocked for this run before starting (shell-variable
+  expansion of `LEARNING_DB_URL` and generic script approval both disallowed
+  outright for this sandbox), so no read attempt was made — fell back to
+  on-disk state; still no `course_progress`/`lesson_completed` signal beyond
+  the Lesson 1 baseline to target a reported weak spot. Lesson 32's own
+  teaser named `set_index()` explicitly ("used constantly as a call across 9
+  lessons but never explained on its own") — re-ran the grep fresh before
+  trusting it: `set_index` appears (as an uncredited call) in 10 lesson files
+  today (one more than Lesson 32's own count, since Lesson 32 itself uses it),
+  confirmed via `grep -rln` that none of those actually teaches it as a
+  concept — genuinely the same "used everywhere, explained nowhere" gap
+  Lesson 31 resolved for `sort_values()`/`reset_index()`. Lesson 33 ships it:
+  the default RangeIndex most lessons have silently relied on since Lesson 1,
+  contrasted against `set_index("order_id")` making a real column the row
+  label; `.loc[]` becoming a direct, meaningful lookup once the index IS the
+  key (tied back explicitly to Lesson 20's `idxmax()`/`.loc[]` material, whose
+  index labels happened to be RangeIndex positions — this lesson makes the
+  index a real business key instead); `reset_index()` named as the exact
+  inverse, chained straight after `set_index()` to reproduce the original
+  DataFrame (Lesson 31's tool, now run in the opposite direction); multi-
+  column `set_index(["customer","order_date"])` producing a MultiIndex
+  (tied back to Lesson 14/15) with a tuple `.loc[]` lookup; `inplace=True`
+  vs. reassignment, with reassignment named as this course's established
+  default (checked Lesson 31's precedent — it uses reassignment throughout,
+  never `inplace=True` — and no prior lesson had explicitly named the
+  convention until now); and the honest SQL bridge closing section — a
+  pandas Index is a client-side row-label convenience, NOT a SQL primary
+  key, since pandas never enforces uniqueness on a `set_index()` column,
+  continuing this course's "no crash, quietly wrong" gotcha family since
+  Lesson 19. `uv run --with pandas` worked directly this round (pandas
+  3.0.5): first used to hand-verify every claim in
+  `.scratch/data-lesson33/explore.py` and `explore2.py` (both deleted after)
+  against the real `orders_raw.csv` clean 4-row slice before writing a word
+  of the lesson — `set_index("order_id")` then `.loc[1]` gives An/120.0/
+  2026-01-05, `.loc[5]` gives Binh/180.0/2026-01-09; `reset_index()` chained
+  right after reproduces `clean` exactly (`.equals()` True); multi-column
+  `set_index(["customer","order_date"])` gives a real `MultiIndex`, and
+  `.loc[("Binh","2026-01-09")]` returns order_id 5/amount 180.0; `inplace=True`
+  returns `None` and mutates the object directly, confirmed by direct
+  execution rather than assumed. For the non-unique-index gotcha, deliberately
+  chose `set_index("customer")` over an artificially duplicated row — the
+  clean fixture already has An and Binh appearing twice each, so no synthetic
+  duplicate was needed: confirmed `by_customer.index.is_unique` is `False` and
+  `.loc["An"]` silently returns a 2-row DataFrame (not a Series, no error)
+  rather than picking one row or raising. Checked the by-now-expected
+  Ellipsis-placeholder family (Lessons 19-32) with a standalone throwaway
+  script before writing the practice file: `clean.set_index(...)` (bare
+  Ellipsis as the column-name argument) reliably raises `KeyError: 'None of
+  [Ellipsis] are in the columns'`, same fix as most prior rounds' placeholder
+  corrections — but `by_id.loc[...]` does NOT raise (Ellipsis is a valid
+  whole-DataFrame `.loc[]` indexer, the exact same family Lesson 20 first
+  catalogued), so Exercise 2's placeholder was kept in the `set_index(...)`
+  position for `by_id` itself while the subsequent `.loc[5]` stayed a literal
+  working call — confirmed end-to-end that `row_5["amount"]` on the
+  no-raise whole-DataFrame result gives a Series, and `float()` on that Series
+  raises `TypeError`, caught by the surrounding try/except with no crash and
+  no false-positive either. Also confirmed `.equals(...)` (bare Ellipsis
+  argument) does not raise either but safely returns `False`, correctly
+  failing Exercise 3's check with no crash. The shipped (unsolved)
+  `practice/33_set_index.py` was executed in `.scratch/data-lesson33/practice/`
+  (fixture CSVs copied alongside) and printed all 6 ✗ with no crash, then a
+  separately-saved solved copy (`.scratch/data-lesson33/practice/33_solved.py`,
+  not shipped) printed all 6 ✓ against the same hand-verified numbers above.
+  The shipped file was also re-run a second time directly from its real
+  `practice/` location (`cd data && uv run --with pandas python3
+  practice/33_set_index.py`) and confirmed to print the identical all-✗
+  result with no crash. `.scratch/data-lesson33/` was fully removed
+  (`rm -rf`) after verification, no approval needed this round. Added
+  `set_index()` to the glossary (checked for a collision first — none) and
+  registered Lesson 33 in nav.js. Quiz options were drafted and checked with
+  a Python regex/word-count script run via `uv run python3` (this course's
+  established convention) — the first draft came out mismatched on all four
+  questions (Q1 at 7/6/7, Q2 at 6/8/6, Q3 at 6/5/6, Q4 at 6/4/6) and needed
+  several rewrite + recount cycles per question (Q4 took four passes) before
+  a final independent recount, plus a manual line-by-line `Grep`-based
+  read-through as a second pass (this course's established convention since
+  Lesson 19), confirmed all four genuinely level at 7/7/7, 6/6/6, 6/6/6, and
+  6/6/6. `bin/record-progress data lesson_generated --day 33 --lesson
+  0033-set-index.html --detail '{"by":"github-actions"}'` was run once from
+  the repo root as instructed and succeeded on the first try, no approval
+  blocker this round. Set the teaser going forward to a fresh
+  curriculum/glossary scan for the next genuinely-uncovered pattern (no
+  single obvious dangling candidate named in this lesson's own content) if
+  no drill-outcome signal surfaces by next generation.

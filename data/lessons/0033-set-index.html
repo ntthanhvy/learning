@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 33 · set_index()</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 33 · ~20 min · 10 Aug 2026</p>
+<h1>set_index(): making a real column the row label</h1>
+<p class="byline">Lesson 32's teaser named this exactly: <code>set_index()</code> has been called in 10 lesson files since Lesson 2, always as setup for something else, never as the lesson. Today is what it actually does, why <code>.loc[]</code> becomes so much more useful once you use it, and a genuine gotcha worth naming in an interview.</p>
+
+<h2>1 · The default index has never meant anything</h2>
+<p>Every DataFrame in this course has quietly relied on the same thing: <code>pd.read_csv()</code> hands back a <dfn data-en="the default pandas Index after loading data: 0, 1, 2, 3... -- just positions, carrying no business meaning until you set_index a real key" data-vn="giữ nguyên &quot;RangeIndex&quot; — index mặc định 0,1,2,3..., không mang ý nghĩa nghiệp vụ">RangeIndex</dfn>, plain positions <code>0, 1, 2, 3…</code> with no connection to the data itself. On the cleaned 4-row slice this course has reused since Lesson 6 (An 120.0/01-05, An 42.0/01-10, Binh 35.5/01-06, Binh 180.0/01-09):</p>
+<pre><code>clean.index.tolist()   <span class="cm"># [0, 1, 2, 3] -- RangeIndex, just positions</span></code></pre>
+<p><dfn data-en="a DataFrame/Series method that moves one or more existing columns OUT of the data and makes them the row Index instead -- the column stops being a regular column and becomes the row label" data-vn="giữ nguyên 'set_index()' — lấy 1 hay nhiều cột đang có, biến nó thành Index của hàng thay vì để trong bảng dữ liệu">set_index()</dfn> replaces that meaningless RangeIndex with a real column's values:</p>
+<pre><code>by_id = clean.set_index(<span class="str">"order_id"</span>)
+<span class="cm">#           customer  amount  order_date
+# order_id
+# 1               An   120.0  2026-01-05
+# 6               An    42.0  2026-01-10
+# 2             Binh    35.5  2026-01-06
+# 5             Binh   180.0  2026-01-09</span></code></pre>
+<p><code>order_id</code> is gone from the columns — it's the row label now. Everything else shifted one column left.</p>
+
+<h2>2 · Why bother: .loc[] becomes a real lookup</h2>
+<p>Lesson 20 taught <code>idxmax()</code>/<code>.loc[]</code> on the RangeIndex — <code>clean["amount"].idxmax()</code> happened to return a label like <code>3</code>, which only meant "whichever row was third when the CSV loaded." After <code>set_index("order_id")</code>, the same <code>.loc[]</code> call becomes a lookup by an actual business key:</p>
+<pre><code>by_id.loc[<span class="kw">1</span>]
+<span class="cm"># customer              An
+# amount             120.0
+# order_date    2026-01-05
+# Name: 1, dtype: object</span>
+
+by_id.loc[<span class="kw">5</span>]
+<span class="cm"># customer            Binh
+# amount             180.0
+# order_date    2026-01-09
+# Name: 5, dtype: object</span></code></pre>
+<p><code>.loc[1]</code> now reads exactly like <code>WHERE order_id = 1</code> — the index label IS the thing you're looking up by, not an accident of load order. That's the whole point of <code>set_index()</code>: it turns "the label happens to match a row position" into "the label IS a meaningful key."</p>
+
+<h2>3 · reset_index(): the exact inverse</h2>
+<p>Lesson 31 already taught <code>reset_index()</code> in the other direction — replacing whatever index is currently there with a fresh <code>0..n-1</code> RangeIndex. Chained straight after <code>set_index()</code>, it's a literal round trip back to where you started:</p>
+<pre><code>by_id.reset_index().equals(clean)   <span class="cm"># True -- set_index() then reset_index() undoes itself exactly</span></code></pre>
+<p><code>set_index("order_id")</code> moved <code>order_id</code> out of the columns and into the label; <code>reset_index()</code> moves it right back. Same pair of tools Lesson 31 already introduced, just run in the opposite order.</p>
+
+<h2>4 · Multiple columns: a MultiIndex</h2>
+<p>Passing a list instead of a single column name builds a <dfn data-en="a pandas column (or row) index with more than one level, so a single row is identified by a tuple like (customer, order_date) rather than one plain label" data-vn="giữ nguyên 'MultiIndex' — hàng (hoặc cột) có nhiều tầng, 1 hàng = 1 tuple">MultiIndex</dfn> — the same row-label structure Lesson 14/15 built from <code>groupby()</code>/<code>stack()</code>, here built directly by naming two columns at once:</p>
+<pre><code>multi = clean.set_index([<span class="str">"customer"</span>, <span class="str">"order_date"</span>])
+<span class="cm">#                      order_id  amount
+# customer order_date
+# An       2026-01-05         1   120.0
+#          2026-01-10         6    42.0
+# Binh     2026-01-06         2    35.5
+#          2026-01-09         5   180.0</span></code></pre>
+<p>A row is now identified by the <em>pair</em> — <code>("Binh", "2026-01-09")</code> — not either column alone. That enables a clean tuple lookup:</p>
+<pre><code>multi.loc[(<span class="str">"Binh"</span>, <span class="str">"2026-01-09"</span>)]
+<span class="cm"># order_id      5.0
+# amount      180.0
+# Name: (Binh, 2026-01-09), dtype: float64</span></code></pre>
+<p>Same idea as SQL's composite <code>WHERE customer = 'Binh' AND order_date = '2026-01-09'</code> — <code>set_index()</code> with a list is how pandas builds the composite key that tuple <code>.loc[]</code> then searches by.</p>
+
+<h2>5 · inplace=True vs. reassignment</h2>
+<p><code>set_index()</code> (like most pandas methods this course has covered) takes an <code>inplace=True</code> keyword that mutates the DataFrame directly and returns <code>None</code>:</p>
+<pre><code>demo.set_index(<span class="str">"order_id"</span>, inplace=<span class="kw">True</span>)   <span class="cm"># returns None; demo is mutated directly</span></code></pre>
+<p>This course's convention, same as every other method covered so far (<code>sort_values()</code>, <code>reset_index()</code>, <code>drop_duplicates()</code>) — <strong>reassignment is the default to reach for</strong>, not <code>inplace=True</code>:</p>
+<pre><code>by_id = clean.set_index(<span class="str">"order_id"</span>)   <span class="cm"># preferred: clean, chainable, and clean itself is untouched</span></code></pre>
+<p>Two concrete reasons: it chains cleanly into the method-chaining style Lesson 8 already established (<code>inplace=True</code> can't be chained — it returns <code>None</code>, not a DataFrame, so nothing after it has anything to call), and it never silently mutates a DataFrame some other part of the code still expects to be untouched — the same "which variable actually got changed" confusion Lesson 26's view-vs-copy material already warned about. Reassignment keeps the answer to "what changed?" always visible in the code: whatever's on the left of <code>=</code>.</p>
+
+<h2>6 · The honest SQL bridge — and a real gotcha</h2>
+<p>It's tempting to think of <code>set_index()</code> as "making this column the primary key," but that framing oversells it. A pandas Index is a client-side, in-memory row-label convenience — closer to a local lookup structure than a database constraint. Critically: <strong>pandas does NOT enforce uniqueness</strong> on a <code>set_index()</code> column, unlike a SQL <code>PRIMARY KEY</code> or <code>UNIQUE</code> constraint, which would reject a duplicate outright.</p>
+<p>Watch what happens setting the index to <code>customer</code> — a column that's genuinely non-unique in this fixture (An and Binh each appear twice):</p>
+<pre><code>by_customer = clean.set_index(<span class="str">"customer"</span>)
+by_customer.index.is_unique   <span class="cm"># False -- pandas allows this without a word</span>
+
+by_customer.loc[<span class="str">"An"</span>]
+<span class="cm">#           order_id  amount  order_date
+# customer
+# An               1   120.0  2026-01-05
+# An               6    42.0  2026-01-10</span>
+type(by_customer.loc[<span class="str">"An"</span>])   <span class="cm"># pandas.DataFrame -- TWO rows back, not one</span></code></pre>
+<p><code>.loc["An"]</code> doesn't raise, and it doesn't quietly pick one row either — it returns every matching row as a DataFrame. That's actually the "safe" outcome here. The real trap is code written assuming a unique key that silently keeps working right up until it doesn't: a <code>.loc[key]</code> call that returns a single-row <code>Series</code> when the key happens to be unique will switch to returning a multi-row <code>DataFrame</code> the moment a duplicate sneaks in — no error, no warning, just a different shape landing in whatever code runs next. Continuing this course's "no crash, quietly wrong" family since Lesson 19: check <code>df.index.is_unique</code> before trusting <code>set_index()</code> to behave like a primary key, because pandas never checks it for you.</p>
+
+<div class="interview">
+<p><strong>Q: "What does set_index() do, and is the resulting index guaranteed unique like a SQL primary key?"</strong> A strong answer, out loud: <em>"set_index() takes an existing column and makes it the DataFrame's row label instead of a regular column — after that, .loc[] can look rows up by that label directly, which is much more useful than the default RangeIndex pandas gives you on load. But it's not a primary key in the SQL sense — pandas never checks uniqueness. If I set_index() on a column with duplicate values, it just works: .loc[key] silently returns a DataFrame with all matching rows instead of a single Series row, no error either way. So before I treat a pandas index like a key, I check index.is_unique myself — pandas won't do it for me."</em> The signal: naming the missing uniqueness guarantee unprompted, not just describing what set_index() does mechanically.</p>
+</div>
+
+<h2>Try it — self-checking practice (~15-20 min)</h2>
+<p>Open <code>practice/33_set_index.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/33_set_index.py</code></pre>
+<p>Uses the same cleaned rows as Lessons 6-32 (An 120.0/01-05, An 42.0/01-10, Binh 35.5/01-06, Binh 180.0/01-09). Exercise 1 is <code>set_index("order_id")</code>; Exercise 2 is a <code>.loc[]</code> lookup by that new index; Exercise 3 is the <code>reset_index()</code> round trip from Section 3; Exercise 4 is the multi-column MultiIndex <code>.loc[]</code> tuple lookup from Section 4; Exercise 5 reproduces Section 6's non-unique-index gotcha directly.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="set_index() moves an existing column OUT of the regular columns and makes its values the DataFrame's row Index (row label) instead -- the column is gone from df.columns afterward, and .loc[] now looks values up by it directly.">
+    <p class="stem">What does <code>df.set_index("order_id")</code> do to the <code>order_id</code> column?</p>
+    <button class="opt" data-ok>moves it out, becomes the row index</button>
+    <button class="opt">duplicates it, keeps it as a column</button>
+    <button class="opt">deletes it, no index change at all</button>
+  </div>
+  <div class="q" data-why="reset_index() is set_index()'s exact inverse: it takes the current index and moves it back into a regular column, replacing the index itself with a fresh 0..n-1 RangeIndex -- chaining the two back to back reproduces the original DataFrame exactly, confirmed here with .equals().">
+    <p class="stem">Chaining <code>df.set_index("order_id").reset_index()</code> produces what, compared to the original <code>df</code>?</p>
+    <button class="opt" data-ok>the exact same DataFrame back again</button>
+    <button class="opt">the same rows, but reordered columns</button>
+    <button class="opt">an error, since order_id was removed</button>
+  </div>
+  <div class="q" data-why="pandas never enforces uniqueness on a set_index() column, unlike a SQL PRIMARY KEY/UNIQUE constraint. Setting the index to a column with duplicate values works silently -- .loc[key] just returns every matching row as a DataFrame instead of one Series row, with no error or warning either way.">
+    <p class="stem">A column has duplicate values. What happens when you <code>set_index()</code> on it, then <code>.loc[]</code> a duplicated key?</p>
+    <button class="opt" data-ok>no error; .loc[] returns all matches</button>
+    <button class="opt">set_index() itself raises a uniqueness error</button>
+    <button class="opt">.loc[] silently drops the duplicate rows</button>
+  </div>
+  <div class="q" data-why="Passing a LIST of column names to set_index() (instead of one plain column name) builds a MultiIndex -- a row is then identified by a tuple of values across those columns, and .loc[] accepts that same tuple to look a single row up by its composite key, e.g. .loc[(\"Binh\", \"2026-01-09\")].">
+    <p class="stem"><code>df.set_index(["customer", "order_date"])</code> — what kind of index results?</p>
+    <button class="opt" data-ok>a MultiIndex, keyed by both columns</button>
+    <button class="opt">two separate, totally unrelated single-level indexes</button>
+    <button class="opt">a plain Index built from "customer"</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the pandas User Guide's <a href="https://pandas.pydata.org/docs/user_guide/indexing.html#setting-with-enlargement">"Indexing and selecting data"</a> guide (~10 min) — covers <code>set_index()</code>/<code>reset_index()</code> together with <code>.loc[]</code> label lookups; the <a href="https://pandas.pydata.org/docs/user_guide/advanced.html">"MultiIndex / advanced indexing"</a> page is the deeper follow-up for Section 4's tuple lookups.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>set_index()</code> is new today.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-33 comes back reported as shakiest, otherwise a fresh curriculum/glossary scan for the next genuinely-uncovered pattern.<br><br>
+💬 Anything unclear — the MultiIndex tuple lookup, the non-unique-index gotcha, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

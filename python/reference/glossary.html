@@ -139,6 +139,15 @@
   <tr><td>functools.wraps</td><td>giữ nguyên "functools.wraps" — decorator chuẩn thư viện, copy __name__/docstring của hàm gốc sang wrapper</td><td>A standard-library decorator, <code>@functools.wraps(func)</code>, applied to a wrapper function so it inherits <code>func</code>'s <code>__name__</code>, docstring, and a few other attributes — without it, a decorated function's identity (as reported by <code>__name__</code>) silently becomes the generic <code>"wrapper"</code> instead of its own name.</td></tr>
 </table>
 
+<h2 id="day13">Day 13 — pathlib</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>pathlib</td><td>giữ nguyên "pathlib" — module chuẩn thư viện, biểu diễn đường dẫn file như 1 object có method thay vì string tự ghép</td><td>The standard-library module for representing a filesystem path as a <code>Path</code> object with methods and properties on it, instead of a plain string built and re-parsed by hand. Fixes the structural bugs manual concatenation risks — the wrong separator on Windows, an accidental double slash — by deciding the correct separator itself.</td></tr>
+  <tr><td>Path</td><td>giữ nguyên "Path" — object đại diện 1 đường dẫn, hỗ trợ / để nối, và các method như exists()/read_text()</td><td>The core class from <code>pathlib</code>, e.g. <code>Path("data") / "sales.csv"</code>. Building one never touches the filesystem by itself — it just describes a location; methods like <code>.exists()</code>, <code>.read_text()</code>, and <code>.glob()</code> are the explicit, separate steps that actually touch disk.</td></tr>
+  <tr><td>/ operator (path joining)</td><td>giữ nguyên "/ operator" — Path định nghĩa lại dấu / để nối đường dẫn, không phải phép chia</td><td><code>Path</code> overloads <code>/</code> to mean "join this path with the next component," returning a new <code>Path</code> — the same way <code>+</code> means concatenation for two strings and addition for two numbers, dispatched by the type on the left of the operator, not a new kind of division.</td></tr>
+  <tr><td>glob (pattern matching)</td><td>giữ nguyên "glob" — tìm file theo mẫu ký tự đại diện như *.csv, glob() chỉ tìm 1 cấp, rglob() tìm cả thư mục con</td><td><code>Path.glob(pattern)</code> lazily yields every path in a directory matching a shell-style wildcard (<code>"*.csv"</code>), staying within that one directory; <code>Path.rglob(pattern)</code> does the same but recurses into every subdirectory too.</td></tr>
+</table>
+
 <p class="next">💬 A term here still unclear? Ask your teacher — hỏi bằng tiếng Việt cũng được.</p>
 
 <script src="../assets/nav.js"></script>

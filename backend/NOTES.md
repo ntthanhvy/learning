@@ -1399,3 +1399,91 @@
   out-of-scope-per-MISSION.md candidates if a fresh gap-finding pass
   (re-reading more existing lessons closely, the method that has now found
   four gaps running — Lessons 32, 33, 34, 35) is needed again next time.
+- 2026-08-10 generation (Lesson 36, headless GitHub Actions run): idempotency
+  check first — confirmed no `lessons/0036-*.html` file existed and lesson 36
+  was not yet in nav.js before writing anything (highest existing file was
+  0035, dated 2026-08-09). DB access was confirmed blocked before this round
+  started per this course's own established fallback convention (every round
+  since Lesson 9) — no `psql`/`bin/query-progress` read was attempted; pacing
+  came from `learning-records/` (0001's baseline, 0002's concurrency-gap note,
+  both already reflected in Lessons 1-25, nothing new to act on) plus
+  `lessons/`/`nav.js` file state alone, still no `lesson_completed` record
+  exists for any of Lessons 1-35. This round's incoming brief claimed a grep
+  showed "N+1" appearing exactly once, in passing, in Lesson 5 — re-confirming
+  that grep before writing (as this course's practice requires) found the
+  claim was WRONG: Lesson 5 section 3 already has a full dedicated `<h2>` on
+  N+1, a glossed `<dfn>` definition, a pseudocode example, the JOIN/batched-
+  `IN` fix, the "ORMs lazy-load in a loop" callout, a dedicated quiz question,
+  and a glossary.html row — all already shipped. Rather than either blindly
+  duplicate that material (which NOTES.md's own rule against rewriting/
+  duplicating forbids) or blindly follow a false premise, this round narrowed
+  the actual gap: Lesson 5's N+1 section is prose/pseudocode only, with no
+  real compiling Go+pgx code, and — confirmed via grep — Lesson 18 (connection
+  pool exhaustion) never once mentions N+1, so the "N+1 multiplies
+  concurrently-held pool connections under load" connection was itself
+  genuinely untaught. Lesson 36 covers it as an explicit deepening of Lesson
+  5's passing mention (said so directly in its own byline), not a from-scratch
+  topic: the concrete shape (1 query + N per-row queries) with a real,
+  compiling `naiveGetOrdersWithItems` Go+pgx snippet showing the innocent-
+  looking `for` loop; why it's invisible in review (compiles clean, passes
+  fixture-scale tests, only shows up at list-length-times-network-latency
+  scale); the Lesson 18 tie-in as its own callout (a request holds a pool
+  connection across the whole 1+N sequence, not a leak, just held far longer
+  than the work needs); the misconception named directly per the brief's
+  request (an index makes each of the N queries fast, it does not reduce N);
+  both fix patterns with real code — a single JOIN for a flat result, and a
+  batched `WHERE id = ANY($1)` query plus in-memory grouping via a
+  `batchedGetOrdersWithItems` snippet for when the parent/child shape needs to
+  stay separate; and a closing section naming ORM/query-builder lazy-loading
+  as where N+1 sneaks in silently, vocabulary-only per MISSION.md's ORMs-out-
+  of-scope line, no specific ORM taught. Both Go snippets
+  (`naiveGetOrdersWithItems`, `batchedGetOrdersWithItems`) were compile-checked
+  clean with `go build -C` / `go vet -C` in a scratch module
+  (`.scratch/backend-lesson36/`, built binary written to `/tmp` and not copied
+  into the scratch dir — `rm -f` on that `/tmp` path was blocked by this
+  session's sandbox as outside the allowed working directory, left in place
+  per the harmless precedent Lessons 27/31/32/35's notes already established;
+  scratch dir itself left with only `go.mod`/`main.go`, same end-state as
+  every prior round) — no approval blocker for either `-C`-style invocation
+  this round, consistent with every round since Lesson 13's finding. Added
+  `batched query` and `lazy-loading` to the glossary (confirmed via grep
+  beforehand that neither existed; `N+1 query problem` itself was reused from
+  Lesson 5, not re-added) and registered Lesson 36 in nav.js. Quiz options
+  were drafted into sixteen individual per-option scratch files under
+  `.scratch/backend-lesson36/` (deleted after, per convention) and verified
+  with one `wc -w` call per file (no loop/variable-expansion form attempted,
+  consistent with every round since Lesson 28's finding that this sandbox
+  rejects that pattern outright) — Q1 was already even at 10/10/10/10 on the
+  first draft; Q2, Q3, and Q4 each needed one or more rewrite passes (Q2 was
+  12/11/11/12, Q3 was 13/11/10/11, Q4 was 11/10/10/9), with several small
+  overshoot/undershoot misses along the way (e.g. a word-swap edit that
+  changed wording but not count, an edit that added two words instead of one)
+  each caught by re-running `wc -w` after every change rather than trusting
+  the edit; final tallies Q1 10/10/10/10, Q2 11/11/11/11, Q3 11/11/11/11, Q4
+  10/10/10/10, then independently cross-checked a second time by manually
+  token-counting the live `grep`-extracted option text straight from the
+  shipped file (this course's established "one pass isn't infallible"
+  practice) — both methods agreed on all sixteen options. Primary source:
+  Kleppmann's *Designing Data-Intensive Applications* ch. 2, extending the
+  same standing DDIA citation Lessons 6/29/33 already used (Lesson 5's own
+  "Go deeper" section had already pointed at this exact chapter for N+1
+  specifically); Use The Index, Luke named as a secondary read for JOIN
+  execution plans, also an already-standing citation since Lesson 5. `bin/
+  record-progress backend lesson_generated --day 36 --lesson
+  0036-n-plus-one-queries.html --detail '{"by":"github-actions"}'` was run
+  directly via its relative path from the repo root as instructed and
+  succeeded on the first try, no approval blocker this round — consistent
+  with Lessons 32-35's finding that the write path works reliably when
+  invoked this way. Open note for the next session: this round's incoming brief's own grep
+  claim was wrong (N+1 was NOT an untaught topic, just a shallowly-taught
+  one) — a reminder that even a brief's stated "already confirmed via grep"
+  claim should be re-verified before writing, not just the task's own
+  standing instruction to do so; a future round should treat any remaining
+  N+1-adjacent depth (e.g. `EXPLAIN ANALYZE` showing the query count
+  directly, or ORM-specific eager-loading syntax) as already covered at the
+  right depth for this course's scope, not a further gap. Still no
+  `lesson_completed` record exists for any lesson after 36 rounds — the next
+  session should keep treating a completion/quiz-outcome signal, or a
+  user-named track to deepen, as higher priority than a 37th topic picked
+  blind; distributed locks and blue-green/canary deploys remain the standing
+  out-of-scope-per-MISSION.md candidates if a fresh gap-finding pass is needed.

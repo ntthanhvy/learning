@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 13 · pathlib</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 13 · ~20 min · 10 Aug 2026</p>
+<h1>pathlib</h1>
+<p class="byline">Every lesson through Day 12 has handed <code>open()</code> a path already written as a plain string — <code>"notes.txt"</code>, a fixture built with <code>tempfile.mkdtemp()</code>. Today looks at where those strings actually come from once a program has to build one out of pieces itself: joining a directory to a filename, checking whether something exists first, listing files that match a pattern. Doing that with string concatenation breaks in ways that are easy to miss until they don't — <code><dfn data-en="Python's standard-library module for representing a filesystem path as an object with methods, instead of a plain string built by hand" data-vn="giữ nguyên &quot;pathlib&quot; — module chuẩn thư viện, biểu diễn đường dẫn file như 1 object có method thay vì string tự ghép">pathlib</dfn></code> is the standard-library fix.</p>
+
+<div class="callout"><strong>Bridge from SQL:</strong> a file path is a lookup key into the filesystem, the same role a primary key plays for a table row — you don't rebuild a row from its individual column values by hand every time you need it, you <code>SELECT ... WHERE id = ?</code> and let the database resolve the key to the row. <code>pathlib</code> gives paths the same treatment: a path is a real object with operations on it (does this key resolve to something? what "columns" — name, parent, extension — does it decompose into?), not a string you re-parse by hand every time.</div>
+
+<h2>1 · The problem: paths built by string concatenation</h2>
+<p>Nothing stops you from building a path with plain string operations — it is exactly what beginners reach for first:</p>
+<pre><code>directory = <span class="str">"data"</span>
+filename = <span class="str">"sales.csv"</span>
+full_path = directory + <span class="str">"/"</span> + filename   <span class="cm"># "data/sales.csv"</span></code></pre>
+<p>This works, right up until it doesn't. Three concrete failure modes, all structural rather than typos: the hardcoded <code>"/"</code> is wrong on Windows, which expects <code>\</code> — code that works on your machine breaks for a teammate; if <code>directory</code> already ends in <code>"/"</code> (easy to do by accident, e.g. from a config value), the concatenation produces <code>"data//sales.csv"</code>, a double slash that some tools tolerate and others don't; and every other question about the path — does it exist, is it a file or a folder, what's its extension — needs its own separate string-slicing or <code>os.path</code> function call, each with its own edge cases. None of this is a Python weakness so much as strings being the wrong representation for something that isn't fundamentally text — it's a location, with real operations (join, exists, list contents) that a plain string has no way to expose.</p>
+
+<h2>2 · <code>Path</code> and the <code>/</code> operator</h2>
+<p><dfn data-en="the core class from pathlib representing one filesystem path as an object with methods and properties, instead of a plain string built and re-parsed by hand" data-vn="giữ nguyên &quot;Path&quot; — object đại diện 1 đường dẫn, hỗ trợ / để nối, và các method như exists()/read_text()"><code>pathlib.Path</code></dfn> represents a filesystem path as an object instead of a string, and overloads the <dfn data-en="Path defines the / operator to mean 'join this path with the next component,' returning a new Path — the same operator that means division for numbers means something completely different here, dispatched by the type on the left" data-vn="giữ nguyên &quot;/ operator&quot; — với Path, dấu / có nghĩa nối đường dẫn, không phải phép chia">division operator, <code>/</code></dfn>, to mean "join this path with the next piece" instead of arithmetic division. It looks unusual the first time you see it — an operator doing something other than math — but it is no stranger a mechanism than the fact that <code>+</code> means concatenation for two strings and addition for two numbers: Python always asks the object on the left what an operator should do, and <code>Path</code> answers that <code>/</code> means "join":</p>
+<pre><code><span class="kw">from</span> pathlib <span class="kw">import</span> Path
+
+directory = Path(<span class="str">"data"</span>)
+full_path = directory / <span class="str">"sales.csv"</span>   <span class="cm"># Path("data/sales.csv") — correct separator, always</span>
+<span class="kw">print</span>(full_path)                    <span class="cm"># "data/sales.csv" on Linux/macOS, "data\sales.csv" on Windows</span></code></pre>
+<p><code>directory / "sales.csv"</code> never produces a double slash and never hardcodes the wrong separator — <code>Path</code> decides the correct one for whatever operating system the code is actually running on, structurally, not by remembering to write it correctly every time. Chaining works too: <code>Path("data") / "raw" / "2026" / "sales.csv"</code> builds up a nested path the same way, one join at a time.</p>
+
+<h2>3 · Checking what's actually there: <code>.exists()</code>, <code>.is_file()</code>, <code>.is_dir()</code>, <code>.mkdir()</code></h2>
+<p>A <code>Path</code> object can point at something that doesn't exist yet — building one with <code>/</code> never touches the filesystem, it just describes a location. Asking whether that location is real is a separate, explicit step:</p>
+<pre><code>p = Path(<span class="str">"data"</span>) / <span class="str">"sales.csv"</span>
+p.exists()      <span class="cm"># True/False — is there anything at all at this path?</span>
+p.is_file()     <span class="cm"># True only if it exists AND is a regular file</span>
+p.is_dir()      <span class="cm"># True only if it exists AND is a directory</span>
+
+out_dir = Path(<span class="str">"data"</span>) / <span class="str">"processed"</span>
+out_dir.mkdir(parents=<span class="kw">True</span>, exist_ok=<span class="kw">True</span>)   <span class="cm"># create it (and any missing parents), don't error if it's already there</span></code></pre>
+<p><code>mkdir(parents=True, exist_ok=True)</code> is the combination worth remembering as one unit: plain <code>.mkdir()</code> raises <code>FileNotFoundError</code> if <code>data/</code> itself doesn't exist yet, and raises <code>FileExistsError</code> if <code>processed/</code> is already there — <code>parents=True</code> creates any missing ancestor directories along the way, and <code>exist_ok=True</code> makes an already-existing target a no-op instead of an error, which is almost always what you actually want when preparing an output directory.</p>
+
+<h2>4 · <code>.read_text()</code> / <code>.write_text()</code>: shortcuts over Day 6's <code>with open(...)</code></h2>
+<p>Day 6 taught <code>open()</code> plus <code>with</code> as the safe way to read or write a file, and none of that material is being replaced today — a <code>Path</code> object works as a drop-in argument to <code>open()</code>, and supports <code>with</code> identically:</p>
+<pre><code>p = Path(<span class="str">"notes.txt"</span>)
+<span class="kw">with</span> open(p, <span class="str">"r"</span>) <span class="kw">as</span> f:      <span class="cm"># Path works directly where Day 6 used a string</span>
+    text = f.read()</code></pre>
+<p>What <code>pathlib</code> adds on top is a shortcut for the common case where the whole file is small enough to read or write in one call, collapsing <code>open()</code> + <code>with</code> + <code>.read()</code>/<code>.write()</code> + the implicit close into a single method:</p>
+<pre><code>p.write_text(<span class="str">"first line\nsecond line\n"</span>)   <span class="cm"># opens "w", writes, closes — one call</span>
+p.read_text()                                <span class="cm"># opens "r", reads the whole file, closes — one call</span></code></pre>
+<p><code>.read_text()</code>/<code>.write_text()</code> still open and close a real file underneath — they are not a different I/O mechanism, just Day 6's pattern written once instead of three lines. For anything that needs a mode other than whole-file read/write (appending, streaming line by line, binary mode), reach back for <code>open(path, mode)</code> with <code>with</code> exactly as Day 6 taught, passing the <code>Path</code> straight in.</p>
+
+<h2>5 · Listing files: <code>.glob()</code> and <code>.rglob()</code></h2>
+<p><dfn data-en="Path.glob(pattern) lazily yields every path in a directory matching a shell-style wildcard pattern like *.csv, staying within that one directory; Path.rglob(pattern) does the same but recurses into every subdirectory too" data-vn="giữ nguyên &quot;glob&quot; — tìm file theo mẫu ký tự đại diện như *.csv, glob() chỉ tìm 1 cấp, rglob() tìm cả thư mục con"><code>.glob(pattern)</code></dfn> returns every path inside a directory matching a shell-style wildcard pattern, lazily (Day 5's generator idea — it yields matches one at a time rather than building the whole list up front before returning):</p>
+<pre><code>data_dir = Path(<span class="str">"data"</span>)
+<span class="kw">for</span> csv_path <span class="kw">in</span> data_dir.glob(<span class="str">"*.csv"</span>):   <span class="cm"># every *.csv directly inside data/, not subfolders</span>
+    <span class="kw">print</span>(csv_path)
+
+<span class="kw">for</span> csv_path <span class="kw">in</span> data_dir.rglob(<span class="str">"*.csv"</span>):  <span class="cm"># same, but recurses into every subfolder too</span>
+    <span class="kw">print</span>(csv_path)</code></pre>
+<p><code>*</code> matches any run of characters within one path segment, so <code>"*.csv"</code> means "any name ending in <code>.csv</code>." <code>.glob()</code> stays in the one directory you called it on; <code>.rglob()</code> ("recursive glob") walks every nested subdirectory too — the difference to reach for depends entirely on whether the files you want could live in subfolders.</p>
+
+<h2>6 · Decomposing a path: <code>.name</code>, <code>.stem</code>, <code>.suffix</code>, <code>.parent</code></h2>
+<p>The same questions string-slicing used to answer by hand — find the last <code>/</code>, find the last <code>.</code> — are plain properties on a <code>Path</code>, computed correctly regardless of platform:</p>
+<pre><code>p = Path(<span class="str">"data/raw/sales.csv"</span>)
+p.name      <span class="cm"># "sales.csv"      — the final component, filename + extension</span>
+p.stem      <span class="cm"># "sales"          — the filename with the extension removed</span>
+p.suffix    <span class="cm"># ".csv"           — just the extension, dot included</span>
+p.parent    <span class="cm"># Path("data/raw") — the directory one level up, itself a Path</span></code></pre>
+<p><code>.parent</code> returning a real <code>Path</code> (not a string) is what makes it chain: <code>p.parent.parent</code> walks up two levels, and <code>p.parent / "processed.csv"</code> builds a sibling path next to the original, both using the exact same <code>/</code> join from section 2.</p>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> pandas accepts a path (string or <code>Path</code>, either works) as the first argument to <code>pd.read_csv(path)</code> without caring which one you hand it — mentioned here by name only, not demonstrated, matching the hard rule above.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/13_pathlib.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/13_pathlib.py</code></pre>
+<p>No dependencies — standard library only. Exercises: join two path pieces with <code>/</code>, check <code>.exists()</code>/<code>.is_file()</code> on a file the script creates itself, round-trip a file with <code>.write_text()</code>/<code>.read_text()</code>, find files with <code>.glob()</code> against a small throwaway directory, and decompose a path into <code>.name</code>/<code>.stem</code>/<code>.suffix</code>.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Path overloads / to mean 'join this path with the next component' and returns a new Path — the same way + means concatenation for strings but addition for numbers, decided by the type on the left of the operator, not a special new kind of division.">
+    <p class="stem">What does the <code>/</code> operator do between two <code>Path</code> pieces?</p>
+    <button class="opt" data-ok>joins them into one new Path, using correct separator</button>
+    <button class="opt">divides the first path's length by the second one</button>
+    <button class="opt">deletes the second path from inside the first one</button>
+  </div>
+  <div class="q" data-why="Manual string concatenation like dir + '/' + filename hardcodes a separator that is wrong on Windows and produces a double slash if dir already ends in one — both are structural bugs Path avoids by deciding the correct separator itself and never duplicating it.">
+    <p class="stem">What concrete bug does manual string concatenation risk that <code>Path</code> avoids?</p>
+    <button class="opt" data-ok>wrong separator on Windows, or an accidental double slash</button>
+    <button class="opt">Python refuses to run code joining strings that way</button>
+    <button class="opt">the resulting file silently opens itself in write mode</button>
+  </div>
+  <div class="q" data-why="A Path object works as a drop-in argument to open() and with, identical to a plain string — pathlib doesn't replace Day 6's with/context-manager material, it only replaces manual path-string building around it. .read_text()/.write_text() are shortcuts for the common whole-file case, not a separate I/O mechanism.">
+    <p class="stem">How does <code>Path</code> relate to Day 6's <code>open()</code> and <code>with</code>?</p>
+    <button class="opt" data-ok>a Path works directly as open()'s argument, just like a string</button>
+    <button class="opt">with cannot use a Path at all, only plain strings work</button>
+    <button class="opt">Path objects can never be opened — convert to str() first</button>
+  </div>
+  <div class="q" data-why="mkdir(parents=True, exist_ok=True) is the combination that creates any missing ancestor directories along the way (parents=True) and treats an already-existing target as a no-op instead of raising FileExistsError (exist_ok=True) — the pairing almost always wanted when preparing an output directory.">
+    <p class="stem">Why call <code>.mkdir(parents=True, exist_ok=True)</code> instead of plain <code>.mkdir()</code>?</p>
+    <button class="opt" data-ok>it builds missing parent folders and tolerates one that exists</button>
+    <button class="opt">plain mkdir() never actually creates a real folder on disk</button>
+    <button class="opt">exist_ok=True quietly renames any folder that is already sitting there</button>
+  </div>
+  <div class="q" data-why="For Path('data/raw/sales.csv'): .name is 'sales.csv' (the final component), .stem is 'sales' (name minus the extension), .suffix is '.csv' (just the extension, dot included), and .parent is Path('data/raw'), itself a real Path so it can be chained or joined further.">
+    <p class="stem">For <code>Path("data/raw/sales.csv")</code>, what does <code>.stem</code> give back?</p>
+    <button class="opt" data-ok>"sales" — the filename with its extension removed</button>
+    <button class="opt">"sales.csv" — the filename together with its extension</button>
+    <button class="opt">"data/raw" — the parent directory one level up</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official <a href="https://docs.python.org/3/library/pathlib.html">pathlib docs</a> — the "Basic use" section near the top covers everything today did, and the reference below it covers the rest for when a less-common case shows up. RESOURCES.md's language section points to the same official docs for canonical stdlib behavior.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day13">glossary</a> under Day 13.<br>
+Next up per the plan: <code>datetime</code>/timezones — the natural next stdlib corner, since it's the second of the three PLAN.md bundles into this spine's last line alongside <code>pathlib</code> and <code>logging</code>.<br><br>
+💬 Anything unclear — the <code>/</code> operator, or when to reach for <code>.glob()</code> vs <code>.rglob()</code>? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

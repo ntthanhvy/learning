@@ -76,6 +76,8 @@
       file: "lessons/0034-soft-delete.html" },
     { n: 35, date: "2026-08-09", title: "Upsert: INSERT ... ON CONFLICT",
       file: "lessons/0035-upsert-insert-on-conflict.html" },
+    { n: 36, date: "2026-08-10", title: "The N+1 query problem",
+      file: "lessons/0036-n-plus-one-queries.html" },
   ];
 
   const REFS = [

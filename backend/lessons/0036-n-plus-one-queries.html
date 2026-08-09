@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 36 · The N+1 Query Problem</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 36 · ~20 min</p>
+<h1>The N+1 query problem</h1>
+<p class="byline">Lesson 5 named this in passing while answering a different question ("should I add an index?") — one paragraph, no code, no fix worked through. Today it gets the full treatment: the concrete shape in real Go+pgx code, why it's invisible in the diff, and both fix patterns worked all the way through.</p>
+
+<h2>1 · The shape: 1 query becomes 1 + N</h2>
+<p>A list endpoint needs each order's line items too. Written the way it reads naturally — fetch the orders, then loop and fetch each one's items — looks like this:</p>
+<pre>
+orders := SELECT id FROM orders WHERE user_id = $1        -- 1 query
+for each order:
+    SELECT * FROM order_items WHERE order_id = order.id   -- N more queries, one per order
+</pre>
+<p>One query fetches the list. Then the loop fires one more query per row. Ten orders means 11 round trips to Postgres instead of 1 or 2; a thousand orders means 1,001. That's the <dfn data-en="a performance bug where code fetches a list (1 query), then loops over the list issuing one more query per row (N queries) — instead of a single query that fetches everything together via a JOIN or a batched WHERE id = ANY(...) lookup" data-vn="giữ nguyên 'N+1 query problem' — 1 query lấy danh sách, rồi lặp N lần query thêm cho từng dòng, thay vì gộp lại 1 lần">N+1 query problem</dfn>: the total isn't proportional to how much data comes back, it's proportional to how many <em>round trips</em> it took to get it — and round trips are the expensive part, not the query itself.</p>
+
+<h2>2 · Why it's invisible in the diff</h2>
+<p>Nothing here is wrong Go. There's no error, no panic, no lint warning — a `for` loop calling <code>store.GetItems(order.ID)</code> is exactly what "fetch related data for each item" looks like in ordinary application code:</p>
+<pre><code><span class="cm">// naiveGetOrdersWithItems fetches N orders, then loops and issues one
+// more query per order to fetch that order's line items: 1 + N round
+// trips. Nothing here looks wrong — it reads like straightforward Go.</span>
+<span class="kw">func</span> naiveGetOrdersWithItems(ctx context.Context, db *pgxpool.Pool, userID <span class="ty">int64</span>) ([]Order, error) {
+    rows, err := db.Query(ctx, <span class="st">`SELECT id FROM orders WHERE user_id = $1`</span>, userID)
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        <span class="kw">return</span> <span class="kw">nil</span>, err
+    }
+    <span class="kw">defer</span> rows.Close()
+
+    <span class="kw">var</span> orders []Order
+    <span class="kw">for</span> rows.Next() {
+        <span class="kw">var</span> o Order
+        <span class="kw">if</span> err := rows.Scan(&amp;o.ID); err != <span class="kw">nil</span> {
+            <span class="kw">return</span> <span class="kw">nil</span>, err
+        }
+        orders = <span class="kw">append</span>(orders, o)
+    }
+
+    <span class="kw">for</span> i := <span class="kw">range</span> orders {
+        <span class="cm">// one query per order — this is the +N</span>
+        itemRows, err := db.Query(ctx, <span class="st">`SELECT order_id, sku, qty FROM order_items WHERE order_id = $1`</span>, orders[i].ID)
+        <span class="kw">if</span> err != <span class="kw">nil</span> {
+            <span class="kw">return</span> <span class="kw">nil</span>, err
+        }
+        <span class="kw">for</span> itemRows.Next() {
+            <span class="kw">var</span> it Item
+            <span class="kw">if</span> err := itemRows.Scan(&amp;it.OrderID, &amp;it.SKU, &amp;it.Qty); err != <span class="kw">nil</span> {
+                itemRows.Close()
+                <span class="kw">return</span> <span class="kw">nil</span>, err
+            }
+            orders[i].Items = <span class="kw">append</span>(orders[i].Items, it)
+        }
+        itemRows.Close()
+    }
+    <span class="kw">return</span> orders, <span class="kw">nil</span>
+}</code></pre>
+<p>It compiles, it passes every test written against a handful of fixture rows, and it returns the right data. The only thing wrong with it is a runtime property that doesn't show up until the list is long and the database is one network hop away instead of on localhost — exactly the class of bug Lesson 13's "it works on my machine" framing warned about for logs, now showing up for query count instead.</p>
+<div class="callout"><strong>Ties to Lesson 18:</strong> N+1 doesn't just multiply round trips, it multiplies <em>concurrently held pool connections</em> under load. Each in-flight request running this handler holds a connection from Lesson 18's <code>pgxpool</code> for the entire 1 + N sequence, not just for one quick query — ten concurrent requests against a 1,000-row list each hold a connection through roughly 1,001 round trips apiece. That's exactly the pool-exhaustion shape Lesson 18 taught (<code>Acquire</code> without a fast <code>Release</code> starves everyone else), except here it's not a leaked <code>Release()</code> causing it — connections come back fine, they're just held far longer than the work actually requires.</div>
+
+<h2>3 · The misconception: an index doesn't fix this</h2>
+<p>Lesson 5 named this directly and it's worth repeating on its own, because it's a genuinely common reflex: seeing a slow list endpoint and reaching for an index on <code>order_items.order_id</code>. An index there is not wrong — each of the individual N queries does get faster, from a table scan down to an index lookup. But <strong>an index makes each of the N queries fast; it does nothing to reduce N.</strong> 1,001 fast round trips is still 1,001 round trips, still paying full network latency and connection-acquisition cost on every single one. The bug is the shape of the access pattern, not the speed of any one query in it — the fix has to change how many queries run, not how fast each one runs.</p>
+
+<h2>4 · Fix pattern one: a single JOIN</h2>
+<p>When the goal is one flat combined result, a <code>JOIN</code> collapses the whole thing into one query and one round trip:</p>
+<pre><code>SELECT o.id, i.sku, i.qty
+FROM orders o
+JOIN order_items i ON i.order_id = o.id
+WHERE o.user_id = $1;</code></pre>
+<p>Postgres does the matching server-side; the client reads one result set with a row per (order, item) pair instead of orchestrating N separate connections. The trade-off: each order's own columns repeat once per item row, and reassembling "one order object with a slice of items" from that flat shape takes a little scan-and-group logic in the handler — a fine cost for a genuinely flat, single-purpose result.</p>
+
+<h2>5 · Fix pattern two: one batched query + in-memory grouping</h2>
+<p>When the parent/child shape should stay separate in the application — orders as one slice, each with its own <code>Items</code> field, same as the naive version's return type — the fix is a single batched query using <code>WHERE id = ANY($1)</code>, covering every order's items in one round trip, then grouping the results back onto their parent in Go:</p>
+<pre><code><span class="cm">// batchedGetOrdersWithItems fetches the same orders, then fetches every
+// order's line items in ONE additional query using ANY($1), and assembles
+// the parent/child shape back together in application code: 2 round trips
+// total, no matter how many orders there are.</span>
+<span class="kw">func</span> batchedGetOrdersWithItems(ctx context.Context, db *pgxpool.Pool, userID <span class="ty">int64</span>) ([]Order, error) {
+    rows, err := db.Query(ctx, <span class="st">`SELECT id FROM orders WHERE user_id = $1`</span>, userID)
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        <span class="kw">return</span> <span class="kw">nil</span>, err
+    }
+    <span class="kw">defer</span> rows.Close()
+
+    <span class="kw">var</span> orders []Order
+    ids := <span class="kw">make</span>([]<span class="ty">int64</span>, <span class="kw">0</span>)
+    byID := <span class="kw">make</span>(<span class="kw">map</span>[<span class="ty">int64</span>]*Order)
+    <span class="kw">for</span> rows.Next() {
+        <span class="kw">var</span> o Order
+        <span class="kw">if</span> err := rows.Scan(&amp;o.ID); err != <span class="kw">nil</span> {
+            <span class="kw">return</span> <span class="kw">nil</span>, err
+        }
+        orders = <span class="kw">append</span>(orders, o)
+        ids = <span class="kw">append</span>(ids, o.ID)
+    }
+    <span class="kw">for</span> i := <span class="kw">range</span> orders {
+        byID[orders[i].ID] = &amp;orders[i]
+    }
+    <span class="kw">if</span> <span class="kw">len</span>(ids) == <span class="kw">0</span> {
+        <span class="kw">return</span> orders, <span class="kw">nil</span> <span class="cm">// nothing to batch-fetch</span>
+    }
+
+    <span class="cm">// one query for every order's items, not one query per order</span>
+    itemRows, err := db.Query(ctx, <span class="st">`SELECT order_id, sku, qty FROM order_items WHERE order_id = ANY($1)`</span>, ids)
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        <span class="kw">return</span> <span class="kw">nil</span>, err
+    }
+    <span class="kw">defer</span> itemRows.Close()
+
+    <span class="kw">for</span> itemRows.Next() {
+        <span class="kw">var</span> it Item
+        <span class="kw">if</span> err := itemRows.Scan(&amp;it.OrderID, &amp;it.SKU, &amp;it.Qty); err != <span class="kw">nil</span> {
+            <span class="kw">return</span> <span class="kw">nil</span>, err
+        }
+        <span class="kw">if</span> o, ok := byID[it.OrderID]; ok {
+            o.Items = <span class="kw">append</span>(o.Items, it)
+        }
+    }
+    <span class="kw">return</span> orders, <span class="kw">nil</span>
+}</code></pre>
+<p>This is the same <dfn data-en="a single query that fetches the same kind of row for many parent IDs at once (typically via WHERE id = ANY($1) or WHERE id IN (...)), replacing one query per parent with one query for all of them" data-vn="batched query (giữ nguyên) — 1 câu query duy nhất lấy dữ liệu cho nhiều ID cha cùng lúc, thay vì query riêng cho từng cái">batched query</dfn> Lesson 5 called "a batched <code>WHERE id IN (...)</code>" in passing — <code>ANY($1)</code> is pgx's idiomatic form, passing a Go slice as one parameter instead of building an <code>IN (...)</code> list by hand. Two round trips total: one for the orders, one for every order's items together, regardless of whether the list has 10 rows or 10,000.</p>
+
+<div class="interview">
+<p><strong>Q: "You added an index on <code>order_items.order_id</code> but the list endpoint is still slow. What would you check?"</strong> A strong answer, out loud: <em>"I'd suspect the index didn't fix the actual problem — an index makes each individual query faster, but if the code is running one query per row in a loop, the count of round trips is still N, index or not. I'd check the handler for a loop that calls the store once per item instead of once total. The fix isn't a better index, it's collapsing the loop into one query — a JOIN if I want one flat result, or a single WHERE id = ANY($1) batched query plus in-memory grouping if I want to keep the parent/child shape the handler already returns."</em> The signal: naming that an index doesn't reduce query count, and naming both fix patterns, not just "add caching" or "add an index" as a reflex.</p>
+</div>
+
+<h2>6 · Where it sneaks in silently: ORMs and query builders</h2>
+<p>This course doesn't teach any specific ORM — the Go/pgx examples above are hand-written SQL on purpose. But it's worth knowing the vocabulary for where N+1 is the single most common bug ORMs and query builders introduce: <dfn data-en="fetching a related object or collection only when code first accesses it, rather than up front — convenient because it looks like a normal field access, but silently issues a new query every time it fires inside a loop" data-vn="lazy-loading (giữ nguyên) — chỉ query dữ liệu liên quan khi code thực sự truy cập tới, tiện nhưng dễ gây N+1 nếu gọi trong vòng lặp">lazy-loading</dfn> an association. <code>order.Items</code> reading like a plain field access, but secretly firing a fresh query the first time it's touched, is exactly this bug wearing a disguise — the loop in section 2 is still there, it's just hidden behind property syntax instead of an explicit method call. The fix vocabulary carries over unchanged: ORMs generally expose an "eager load" or "prefetch related rows" option that turns the hidden per-row query into one of the two patterns above, JOIN or batched fetch, run up front instead of lazily inside the loop.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="N+1 means 1 query fetches a list, then a loop fires one more query per row — the round-trip count grows with the number of rows, not with how much data comes back, which is why it gets linearly slower as the list grows.">
+    <p class="stem">What makes the N+1 query problem get slower as a list grows?</p>
+    <button class="opt" data-ok>one extra round trip runs per row in the list</button>
+    <button class="opt">one extra column gets added per row in the list</button>
+    <button class="opt">one extra index gets built per row in the list</button>
+    <button class="opt">one extra connection pool opens per row in the list</button>
+  </div>
+  <div class="q" data-why="An index makes each of the N per-row queries individually faster, but does nothing to reduce how many round trips run in total — the bug is the access pattern's shape, not any single query's speed.">
+    <p class="stem">Why doesn't adding an index fix an N+1 query pattern?</p>
+    <button class="opt" data-ok>it speeds up each query but the round-trip count stays fixed</button>
+    <button class="opt">it speeds up the round trips but each query stays slow</button>
+    <button class="opt">indexes only ever apply to the parent table, never the child</button>
+    <button class="opt">indexes make every query in the loop run twice as fast</button>
+  </div>
+  <div class="q" data-why="Each in-flight request holding a pool connection across a whole 1 + N sequence instead of one quick query means concurrent requests hold connections far longer than the work requires — the same pool-exhaustion shape Lesson 18 taught, just triggered by a slow access pattern instead of a leaked Release().">
+    <p class="stem">How does N+1 connect to Lesson 18's connection pool material?</p>
+    <button class="opt" data-ok>a request holds a pool connection across the whole query chain</button>
+    <button class="opt">each request opens a brand new pool for every extra query</button>
+    <button class="opt">N+1 queries always leak a connection and never release it back</button>
+    <button class="opt">pool exhaustion is what causes N+1 queries to happen at all</button>
+  </div>
+  <div class="q" data-why="WHERE id = ANY($1) fetches every parent's related rows in one query, keeping the parent/child shape separate from a JOIN's flat combined result — the loop's N separate queries collapse into one batched query plus grouping in application code.">
+    <p class="stem">What does a batched WHERE id = ANY($1) query replace, compared to the naive loop?</p>
+    <button class="opt" data-ok>N separate per-row queries, collapsed into one query for all</button>
+    <button class="opt">the single query that fetches the parent list of rows</button>
+    <button class="opt">the JOIN clause, replacing it with a slower nested loop</button>
+    <button class="opt">the index on the parent table's own primary key column</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> Martin Kleppmann's <a href="https://dataintensive.net">Designing Data-Intensive Applications</a>, ch. 2 — search "N+1 query problem" in the index; Kleppmann covers it in the context of ORMs, the same lazy-loading angle section 6 above named. RESOURCES.md already cites DDIA generally (this extends the same standing citation Lessons 6, 29, and 33 already drew on into ch. 2's data-model material). For the two fix patterns themselves, <a href="https://use-the-index-luke.com/">Use The Index, Luke</a> — already this course's standing index/query-performance reference since Lesson 5 — covers JOIN execution plans in its "The Join Operation" chapter.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> open — still no reported quiz/lesson-completion outcome exists for any lesson after 35 rounds; distributed locks and blue-green/canary deploys remain the last named, confirmed out-of-scope-per-MISSION.md candidates if no fresh gap or user-chosen track surfaces first.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

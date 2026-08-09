@@ -70,6 +70,8 @@
       file: "lessons/0031-sort-values-and-reset-index.html" },
     { n: 32, date: "2026-08-09", title: "The .dt accessor: pulling parts out of a datetime column",
       file: "lessons/0032-dt-accessor-datetime-columns.html" },
+    { n: 33, date: "2026-08-10", title: "set_index(): making a real column the row label",
+      file: "lessons/0033-set-index.html" },
   ];
 
   const REFS = [

@@ -984,3 +984,115 @@ fail *gracefully* so the learner sees which task failed.
   day=12 lesson=0012-decorators.html` — fourth consecutive success (Days 9,
   10, 11, 12), continuing to suggest the write path is reliable in this
   sandbox regardless of the read-path blockage.
+- 2026-08-10 — **Day 13 generated** (`lessons/0013-pathlib.html`), the
+  headless run's sixth Phase 2 lesson. Idempotency check confirmed on-disk:
+  highest existing lesson file was `0012-…` dated 2026-08-09, no `0013-…`
+  file and no `date: "2026-08-10"` entry existed yet in `assets/nav.js`
+  before this run, so generation proceeded as Day 13. Also grepped
+  `python/lessons/` for `pathlib|Path\(` before writing anything: two hits
+  (`0011-testing-with-pytest.html`, `0012-decorators.html`), both confirmed
+  incidental — Day 9's practice file's own `from pathlib import Path`
+  fixture-building infrastructure isn't a lesson file at all, and Day 12's
+  only mention is its own forward-reference "next up" line naming `pathlib`
+  as a future topic — so pathlib itself had not actually been taught yet.
+  Topic: `pathlib` — the first of the three items bundled into PLAN.md's
+  Phase 2a spine's last bullet ("`pathlib`, `datetime`/timezones, `logging`
+  — the three most-used stdlib corners left"). Per this run's instructions,
+  split that bundled line into one topic per day, matching every prior
+  spine bullet's own one-day treatment, and took `pathlib` first since it's
+  named first in the bullet; `datetime`/timezones and `logging` are
+  deliberately not attempted today. Taught: the concrete failure modes of
+  building a path with plain string concatenation (`dir + "/" + filename`)
+  — wrong separator on Windows, an accidental double slash if `dir` already
+  ends in one — framed as structural bugs a string representation cannot
+  avoid, not typos; `Path` and the `/` operator overload (join, not
+  division), explicitly compared to `+` already meaning two different
+  things for strings vs. numbers so the unusual mental model lands as "one
+  more operator overload," not a wholly new idea; `.exists()`/`.is_file()`/
+  `.is_dir()` and `.mkdir(parents=True, exist_ok=True)` as one memorizable
+  unit; `.read_text()`/`.write_text()` explicitly framed as a shortcut
+  *over* Day 6's `open()`/`with` material, not a replacement — a `Path`
+  works as a drop-in `open()` argument and supports `with` identically,
+  stated directly in section 4; `.glob()`/`.rglob()` as a lazy, Day-5-style
+  generator over matching files; and `.name`/`.stem`/`.suffix`/`.parent` as
+  properties replacing hand-rolled string-slicing, with `.parent` returning
+  a real `Path` so it chains. Bridged from SQL per the baseline record: a
+  file path framed as a lookup key into the filesystem, the same role a
+  primary key plays for a `SELECT ... WHERE id = ?` — introduced before any
+  Python in the top callout, not from a pandas or other "Python-adjacent"
+  analogy, per this run's explicit instruction to bridge from SQL and not
+  from pandas.
+  Learning records: still only the Day 1 baseline
+  (`learning-records/0001-baseline-reads-python-writes-little.md`) — no
+  completion/quiz record for any later day was found (same gap every Day
+  8–12 entry already flagged). Paced conservatively per that same
+  assumption: exactly one sub-topic of the spine's bundled last line taught
+  today rather than cramming all three, and every method covered is one
+  actually needed for the exercises (no `Path.home()`, `Path.cwd()`,
+  `resolve()`, or `PurePath` variants pulled in beyond what the lesson and
+  practice file use). Unverified against real quiz/completion data, same
+  caveat as every entry since Day 8.
+  No-pandas rule: `pathlib` itself is standard library, fully in scope; grep
+  for `pandas|numpy|dataframe`, case-insensitive, across both new files
+  found zero hits in the practice file and exactly one hit in the lesson —
+  `pd.read_csv(path)` named, not demonstrated, as the single allowed
+  contrast sentence (pandas accepting either a string or a `Path`
+  interchangeably), placed once after section 6 and labeled in prose as the
+  only such sentence, matching the hard-rule section above.
+  Practice file `practice/13_pathlib.py` (5 exercises: joining two path
+  pieces with `/`, creating a file and checking `.exists()`/`.is_file()`
+  before/after, a `.write_text()`/`.read_text()` round trip, `.glob()`
+  matching only the top-level `*.csv` files against a small fixture
+  directory with a nested `archive/` subfolder to prove `.glob()` doesn't
+  recurse, and decomposing a path into `.name`/`.stem`/`.suffix`) needed
+  real files on disk to check honestly, so it followed the Day 6/9/10
+  precedent of writing its own fixtures at runtime into a
+  `tempfile.mkdtemp()` directory rather than touching any existing fixture
+  file — no extra files added under `practice/` itself. Went back to the
+  normal ✓/✗ `check()` idiom (Days 8, 9, 10, 12's convention) rather than
+  Day 11's one-off real-pytest-file exception, since nothing about
+  `pathlib` calls for pytest specifically. Verified in a scratch dir
+  (`.scratch_py13_verify/`, created under the repo root and removed after
+  use, per the Day 3–12 precedent that `/tmp` is out of bounds for this
+  sandbox): the shipped (unsolved) copy ran via `uv run python3`, both from
+  the scratch copy and from its real `practice/` path with the documented
+  command, and printed five clean ✗ lines with no traceback each time —
+  checked each placeholder position carefully per this run's own warning
+  about silent-success bugs, and confirmed every unsolved function's bare
+  `...` body returns `None`, which fails every check's equality comparison
+  rather than raising or silently passing; a separately solved copy printed
+  five ✓ and the "All green" tally. No bugs found during verification —
+  both passes succeeded on the first attempt.
+  Glossary: added a Day 13 section to `reference/glossary.html` (`pathlib`,
+  `Path`, `/ operator (path joining)`, `glob (pattern matching)`) after
+  confirming via grep that none of the four terms/entries collided with any
+  Day 1–12 entry. All four also got matching `<dfn>` markup at first use in
+  the lesson body, matching Day 11/12's density of glossarying every newly
+  introduced term inline rather than leaving any undefined.
+  Quiz: 5 questions. Word counts were checked with individual `wc -w` calls
+  per option line (not by eye, not piped through compound commands, since
+  this sandbox's approval gate blocks compound bash commands exactly as in
+  every prior day) and mismatched on the first draft for four of the five
+  questions (Q1 10/9/9, Q2 9/10/9, Q3 12/11/10, Q4 11/10/9) — Q5 was already
+  equal on the first draft (8/8/8). Each mismatched question went through
+  one to two rewrite-and-recount rounds — Q3 in particular needed two full
+  rewrites of all three options before landing on a common count — until
+  every option matched (Q1 9/9/9, Q2 9/9/9, Q3 11/11/11, Q4 10/10/10, Q5
+  8/8/8), then a full final recount pass across all five questions' three
+  options each (15 lines total, each checked individually) confirmed every
+  one before shipping, per this file's instruction to recount after any
+  edit. Registered in `assets/nav.js` with `date: "2026-08-10"`.
+  **DB access:** the read path (`bin/query-progress`) was not attempted
+  separately this run; learning-record freshness was judged from on-disk
+  files only, consistent with every prior day since Day 8.
+  `bin/record-progress python lesson_generated --day 13 --lesson
+  0013-pathlib.html --detail '{"by":"github-actions"}'` was run once after
+  shipping and **succeeded**: `recorded: python/lesson_generated day=13
+  lesson=0013-pathlib.html` — fifth consecutive success (Days 9, 10, 11, 12,
+  13), continuing to suggest the write path is reliable in this sandbox
+  regardless of the read-path blockage.
+  **Next-day note:** per this run's own instructions, `datetime`/timezones
+  is the natural next-day candidate — the second item of PLAN.md's bundled
+  last spine line, left deliberately untouched today alongside `logging`,
+  which should come after it, completing the three-item bundle one day at a
+  time.

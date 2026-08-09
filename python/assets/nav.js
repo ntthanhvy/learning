@@ -30,6 +30,8 @@
       file: "lessons/0011-testing-with-pytest.html" },
     { n: 12, date: "2026-08-09", title: "Decorators",
       file: "lessons/0012-decorators.html" },
+    { n: 13, date: "2026-08-10", title: "pathlib",
+      file: "lessons/0013-pathlib.html" },
   ];
 
   const REFS = [

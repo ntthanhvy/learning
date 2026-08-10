@@ -72,6 +72,8 @@
       file: "lessons/0032-dt-accessor-datetime-columns.html" },
     { n: 33, date: "2026-08-10", title: "set_index(): making a real column the row label",
       file: "lessons/0033-set-index.html" },
+    { n: 34, date: "2026-08-11", title: "pd.get_dummies(): one-hot encoding a category column",
+      file: "lessons/0034-get-dummies-one-hot-encoding.html" },
   ];
 
   const REFS = [

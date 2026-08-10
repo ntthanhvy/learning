@@ -455,3 +455,22 @@ by the user there; they apply here identically.
   learning record beyond the Day-1 baseline. (Go skipped again per its own
   window close, now twenty days past it; backend lesson 35, data lesson 32,
   and python Day 12 were generated this round via delegated agents.)
+- 2026-08-11 (headless 06:00 run, GitHub Actions): same as every prior
+  post-week day — verified `daily.html`, `assets/srs.js`, and
+  `assets/quiz-bank.js` are all present and untouched (`quiz-bank.js` still
+  shows 8 textual `id: "k` matches: the 7 real kata entries `k1`-`k7` plus
+  the commented-out example line; `nav.js` still registers only the 7 Jul
+  8-14 lessons, `LESSONS` array unchanged). Still the correct "daily
+  quiz+kata" for this post-week phase per PLAN.md, so nothing new was
+  generated. This session's sandbox blocked all environment-variable reads
+  outright (even a bare `env`/`printenv LEARNING_DB_URL` required approval
+  with no user present, on top of the usual content-level block on the
+  variable name), and `~/.config/learning/db.env` does not exist in this
+  checkout — so no `course_progress` rows could be read for a scope-change
+  signal (e.g. a request to keep growing the bank past Day 7). No new
+  learning record beyond the Day-1 baseline. (Go skipped again per its own
+  window close, now twenty-two days past it; backend, data, and python
+  lessons were generated this round via delegated agents — see their own
+  NOTES.md entries for detail. Note: no 2026-08-10 entry was logged here,
+  an apparent gap in this file even though the other three courses did
+  generate that day — flagging for awareness, not corrected retroactively.)

@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 37 · Transaction Isolation Levels</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 37 · ~20 min</p>
+<h1>Transaction isolation levels</h1>
+<p class="byline">Lesson 6 named this in passing while fixing a lost update: "Postgres also offers stricter isolation levels — REPEATABLE READ, SERIALIZABLE — that catch this class of conflict automatically... worth knowing the knob exists." That knob was never actually turned. Today it gets the full treatment: what each level promises, the anomalies each one closes off, and why SERIALIZABLE trades automatic safety for an obligation the caller must honor.</p>
+
+<h2>1 · Isolation is a dial, not a switch</h2>
+<p>Lesson 6 drew the line between two different transaction guarantees: atomicity (your own statements commit together) and <dfn data-en="how much a transaction is protected from the effects of OTHER transactions running at the same time — what one transaction sees or doesn't see of another's uncommitted or concurrently-committed changes" data-vn="isolation (giữ nguyên) — mức độ transaction này bị ảnh hưởng bởi transaction khác chạy song song">isolation</dfn> (protection from other transactions running at the same time). What that lesson left unsaid: isolation isn't one fixed guarantee — it's a dial with four standard settings, each closing off a different category of interleaving bug at a different cost. Postgres lets you set it per transaction:</p>
+<pre><code>BEGIN;
+SET TRANSACTION ISOLATION LEVEL SERIALIZABLE;
+-- ...statements...
+COMMIT;</code></pre>
+<p>Every level below the strictest one is a deliberate trade: allow some specific category of cross-transaction interference, in exchange for less blocking and better throughput. The four levels are named by which categories of anomaly they promise to prevent.</p>
+
+<h2>2 · The three anomalies, in order of severity</h2>
+<p>Each named anomaly is a concrete way one transaction's view can be corrupted by another's:</p>
+<ul>
+<li><strong><dfn data-en="a transaction reads a row another transaction has written but not yet committed — if that other transaction rolls back, the first transaction acted on data that never actually existed" data-vn="dirty read (giữ nguyên) — đọc phải dữ liệu của transaction khác chưa commit, lỡ nó rollback thì coi như đọc phải dữ liệu không tồn tại">Dirty read</dfn></strong> — reading another transaction's uncommitted change. If that transaction later rolls back, you acted on data that never actually existed.</li>
+<li><strong><dfn data-en="a transaction reads the same row twice and gets two different values, because another transaction committed a change to that row in between the two reads" data-vn="non-repeatable read (giữ nguyên) — đọc cùng 1 dòng 2 lần trong 1 transaction mà ra 2 giá trị khác nhau, vì transaction khác đã commit thay đổi ở giữa">Non-repeatable read</dfn></strong> — reading the same row twice inside one transaction and getting two different answers, because another transaction committed a change in between.</li>
+<li><strong><dfn data-en="a transaction re-runs the same WHERE query twice and gets a different set of rows, because another transaction committed an INSERT or DELETE matching that condition in between" data-vn="phantom read (giữ nguyên) — chạy lại đúng 1 câu query WHERE 2 lần mà ra khác số dòng, vì transaction khác đã INSERT/DELETE dòng khớp điều kiện ở giữa">Phantom read</dfn></strong> — re-running the same <code>WHERE</code> query twice and getting a different <em>set</em> of rows, because another transaction inserted or deleted a matching row in between.</li>
+</ul>
+<p>Notice the escalation: dirty read is about seeing something that was never real at all; non-repeatable read is about a single row changing under you; phantom read is about the row <em>count</em> changing under you — the hardest of the three to guard against, since there's no single row to lock.</p>
+
+<h2>3 · The four levels, and what Postgres actually gives you</h2>
+<div class="cmp-wrap">
+<table class="cmp">
+<thead><tr><th>Level</th><th>Dirty read</th><th>Non-repeatable read</th><th>Phantom read</th></tr></thead>
+<tbody>
+<tr><th>READ UNCOMMITTED</th><td>allowed</td><td>allowed</td><td>allowed</td></tr>
+<tr><th><dfn data-en="Postgres's default isolation level — each individual statement sees whatever was committed at the moment that statement runs, so a later statement in the same transaction can see a different value than an earlier one did" data-vn="READ COMMITTED (giữ nguyên) — mức mặc định của Postgres, mỗi câu lệnh thấy dữ liệu đã commit tại đúng thời điểm nó chạy">READ COMMITTED</dfn> (default)</th><td>prevented</td><td>allowed</td><td>allowed</td></tr>
+<tr><th><dfn data-en="an isolation level where a transaction's reads are pinned to a single consistent snapshot taken at its first statement, so re-reading the same row or the same query always returns the same result for the rest of that transaction" data-vn="REPEATABLE READ (giữ nguyên) — cả transaction nhìn dữ liệu theo đúng 1 snapshot chụp từ câu lệnh đầu tiên, đọc lại không đổi">REPEATABLE READ</dfn></th><td>prevented</td><td>prevented</td><td>prevented*</td></tr>
+<tr><th><dfn data-en="the strictest isolation level — guarantees the result is equivalent to SOME serial (one-at-a-time) ordering of all concurrent transactions, and aborts a transaction with a serialization failure if it cannot guarantee that, leaving the retry to the caller" data-vn="SERIALIZABLE (giữ nguyên) — mức chặt nhất, đảm bảo kết quả y như chạy tuần tự từng transaction một; phát hiện xung đột thì abort, bắt caller tự retry">SERIALIZABLE</dfn></th><td>prevented</td><td>prevented</td><td>prevented</td></tr>
+</tbody>
+</table>
+</div>
+<p>Two Postgres-specific footnotes worth knowing, because they surprise people coming from the SQL standard alone: Postgres's <code>READ UNCOMMITTED</code> actually behaves like <code>READ COMMITTED</code> — dirty reads were never implemented, because Postgres's row-versioning storage engine (MVCC) makes them nearly free to prevent regardless of level. And Postgres's <code>REPEATABLE READ</code> already blocks phantom reads too (marked * above) — stricter than the SQL standard technically requires at that level, again a side effect of how its snapshot mechanism works. <code>SERIALIZABLE</code> is the only level that goes further still: it doesn't just prevent these three named anomalies, it guarantees the outcome is <em>equivalent to running every concurrent transaction one at a time in some order</em> — closing off anomaly categories that don't even have their own names, at the cost of a transaction sometimes aborting and asking the caller to retry.</p>
+
+<div class="callout"><strong>Ties to Lesson 6:</strong> Lesson 6's lost-update bug — two transactions both reading <code>remaining = 1</code>, both writing, one commit overwriting the other's effect — happens under Postgres's default <code>READ COMMITTED</code> precisely because that level never promised to stop it; a lost update isn't dirty, non-repeatable, or phantom, it's a write-write conflict on a value both sides read as a separate earlier statement. Lesson 6's two fixes (fold the check into the <code>WHERE</code>, or take a row lock) solve it without touching the isolation level at all. <code>REPEATABLE READ</code> or <code>SERIALIZABLE</code> would <em>also</em> have caught it — Postgres detects the conflict and aborts one transaction — which is exactly the "catches this class of conflict automatically" Lesson 6 gestured at. The difference: Lesson 6's fixes cost nothing extra when there's no conflict; a stricter isolation level costs the same for every transaction, conflict or not, and hands you a new failure mode (the abort) to handle in every single call site instead of just the ones that need it.</div>
+
+<h2>4 · SERIALIZABLE's trade: safety in exchange for a retry loop</h2>
+<p>Nothing above is free. <code>READ COMMITTED</code> almost never blocks or aborts a transaction for isolation reasons — it's fast precisely because it promises the least. <code>SERIALIZABLE</code> promises the most, and pays for it by sometimes aborting a transaction that touched no row the other transaction touched, purely because Postgres can't otherwise guarantee the "as if run one at a time" property. That failure has a specific, checkable error code (Postgres SQLSTATE <code>40001</code>), and the contract is explicit: the caller is expected to retry the whole transaction from the top.</p>
+<pre><code><span class="cm">// ErrSerializationFailure is the sentinel this snippet translates a Postgres
+// serialization_failure (SQLSTATE 40001) into, after checking the error
+// with errors.As against pgconn.PgError in real pgx code.</span>
+<span class="kw">var</span> ErrSerializationFailure = errors.New(<span class="st">"serialization failure: retry the transaction"</span>)
+
+<span class="cm">// transferBalance moves amount from one account to another inside a
+// SERIALIZABLE transaction. Postgres may abort this transaction with a
+// serialization_failure if it detects a conflict with another concurrent
+// SERIALIZABLE transaction — the caller is expected to retry from the top.</span>
+<span class="kw">func</span> transferBalance(ctx context.Context, db DB, fromID, toID <span class="ty">int64</span>, amount <span class="ty">int</span>) error {
+    tx, err := db.BeginTx(ctx, &amp;sql.TxOptions{Isolation: sql.LevelSerializable})
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        <span class="kw">return</span> err
+    }
+    <span class="kw">defer</span> tx.Rollback()
+
+    <span class="kw">var</span> fromBalance <span class="ty">int</span>
+    <span class="kw">if</span> err := tx.QueryRowContext(ctx, <span class="st">`SELECT balance FROM accounts WHERE id = $1`</span>, fromID).Scan(&amp;fromBalance); err != <span class="kw">nil</span> {
+        <span class="kw">return</span> err
+    }
+    <span class="kw">if</span> fromBalance &lt; amount {
+        <span class="kw">return</span> fmt.Errorf(<span class="st">"insufficient balance"</span>)
+    }
+    <span class="kw">if</span> _, err := tx.ExecContext(ctx, <span class="st">`UPDATE accounts SET balance = balance - $1 WHERE id = $2`</span>, amount, fromID); err != <span class="kw">nil</span> {
+        <span class="kw">return</span> translateSerializationFailure(err)
+    }
+    <span class="kw">if</span> _, err := tx.ExecContext(ctx, <span class="st">`UPDATE accounts SET balance = balance + $1 WHERE id = $2`</span>, amount, toID); err != <span class="kw">nil</span> {
+        <span class="kw">return</span> translateSerializationFailure(err)
+    }
+    <span class="kw">return</span> translateSerializationFailure(tx.Commit())
+}
+
+<span class="cm">// runWithSerializableRetry retries a SERIALIZABLE transaction a bounded
+// number of times on serialization failure — the pattern Postgres's own
+// docs recommend, since SERIALIZABLE hands the retry obligation to the caller.</span>
+<span class="kw">func</span> runWithSerializableRetry(ctx context.Context, attempt <span class="kw">func</span>(ctx context.Context) error) error {
+    <span class="kw">const</span> maxAttempts = <span class="kw">3</span>
+    <span class="kw">var</span> err error
+    <span class="kw">for</span> i := <span class="kw">0</span>; i &lt; maxAttempts; i++ {
+        err = attempt(ctx)
+        <span class="kw">if</span> !errors.Is(err, ErrSerializationFailure) {
+            <span class="kw">return</span> err
+        }
+    }
+    <span class="kw">return</span> err
+}</code></pre>
+<p>That retry loop is the same shape Lesson 32 already taught for a flaky dependency — bounded attempts, give up and surface the error past the cap — applied here to a transaction the database itself asked to be re-run, not a network call that timed out. And it composes with Lesson 26: if the work inside the retried transaction has any side effect visible outside the database (an email, a queued job), the retry is only safe if that side effect is idempotent — a bare <code>SERIALIZABLE</code> retry loop only makes the database writes safe to repeat, nothing else.</p>
+
+<div class="interview">
+<p><strong>Q: "When would you actually reach for SERIALIZABLE instead of Lesson 6's row-lock or check-in-the-WHERE fixes?"</strong> A strong answer, out loud: <em>"Those fixes work when I can name the exact conflict up front and fold it into one statement or one lock. SERIALIZABLE is for the harder case — a transaction that reads a set of rows via a WHERE condition, then writes based on what it saw, where the bug would be a phantom read someone else's INSERT causes, not a single row I can lock. It's still not free: I need a bounded retry loop around it, because Postgres aborts on a genuine conflict and expects the caller to re-run the whole transaction, not just fix a status code and move on."</em> The signal: naming phantom reads specifically as the case row-locking can't cover, and knowing the retry loop is mandatory, not optional cleanup.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A dirty read means reading another transaction's uncommitted change — if that transaction rolls back, the data read never actually existed. Postgres never allows this at any level, regardless of what READ UNCOMMITTED is named.">
+    <p class="stem">What specifically does a dirty read mean?</p>
+    <button class="opt" data-ok>reading a row another transaction wrote but hasn't committed</button>
+    <button class="opt">reading a row that was deleted several minutes earlier</button>
+    <button class="opt">reading the same committed row twice in a row</button>
+    <button class="opt">reading a row while a schema migration is running</button>
+  </div>
+  <div class="q" data-why="Non-repeatable read is one row changing value between two reads in the same transaction. Phantom read is the row COUNT changing — a new row matching the WHERE condition appears or disappears between two runs of the same query, which no single row lock can prevent.">
+    <p class="stem">How does a phantom read differ from a non-repeatable read?</p>
+    <button class="opt" data-ok>phantom read changes which rows match, not one row's value</button>
+    <button class="opt">phantom read only ever happens to the primary key column</button>
+    <button class="opt">phantom read means a query's returned rows come back scrambled</button>
+    <button class="opt">phantom read only ever happens with a dropped database index</button>
+  </div>
+  <div class="q" data-why="READ COMMITTED, Postgres's default, only prevents dirty reads — the lost update in Lesson 6 is a write-write conflict on separately-read values, a category READ COMMITTED never promised to catch, which is exactly why Lesson 6 needed its own WHERE-clause or row-lock fix rather than relying on isolation alone.">
+    <p class="stem">Why does Lesson 6's lost update happen under Postgres's default isolation level?</p>
+    <button class="opt" data-ok>READ COMMITTED never promises to prevent that category of conflict</button>
+    <button class="opt">READ COMMITTED disables row locks for every table by default</button>
+    <button class="opt">READ COMMITTED can only ever apply inside a read-only transaction</button>
+    <button class="opt">READ COMMITTED was deprecated long ago and silently ignored now</button>
+  </div>
+  <div class="q" data-why="SERIALIZABLE guarantees the outcome is equivalent to some one-at-a-time ordering of every concurrent transaction, and enforces that by aborting a transaction with a serialization failure when it can't guarantee the property — the caller must catch that specific error and retry the whole transaction from the top.">
+    <p class="stem">What must a caller do to safely use SERIALIZABLE transactions?</p>
+    <button class="opt" data-ok>catch the serialization failure and retry the whole transaction</button>
+    <button class="opt">manually call FOR UPDATE on every single table involved</button>
+    <button class="opt">disable atomicity so that partial commits are allowed through</button>
+    <button class="opt">switch every read in the transaction to READ UNCOMMITTED</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://www.postgresql.org/docs/current/transaction-iso.html">PostgreSQL docs — Transaction Isolation</a> — RESOURCES.md already cites the PostgreSQL Manual generally for "tables, constraints, defaults, schemas," and Lesson 6 already linked this exact page for the READ COMMITTED/lost-update material; this lesson reads further down the same page, through the REPEATABLE READ and SERIALIZABLE sections and the SQLSTATE <code>40001</code> retry contract. For the anomaly definitions and the general theory, Kleppmann's <a href="https://dataintensive.net">Designing Data-Intensive Applications</a>, ch. 7 ("Transactions") — the same standing citation Lessons 6, 29, 33, and 36 already draw on — covers dirty/non-repeatable/phantom reads and serializability in more depth than the Postgres docs alone.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> open — still no reported quiz/lesson-completion outcome exists for any lesson after 36 rounds; distributed locks and blue-green/canary deploys remain the last named, confirmed out-of-scope-per-MISSION.md candidates if no fresh gap or user-chosen track surfaces first.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

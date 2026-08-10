@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 14 · datetime & timezones</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 14 · ~20 min · 11 Aug 2026</p>
+<h1>datetime & timezones</h1>
+<p class="byline">Day 13 turned filesystem paths from strings you re-parse by hand into real objects with operations on them. Today does the same for the other value every backend touches constantly: a moment in time. A <code>datetime</code> built without a timezone looks fine, prints fine, and is a silent trap the moment two computers in different timezones compare notes — a bug class that string-based date handling can't even describe, let alone catch. This is also direct prep for the FastAPI/pydantic phase next: request timestamps, database <dfn data-en="a PostgreSQL/SQL column type storing a date and time; TIMESTAMPTZ additionally stores it with timezone awareness, converting to/from UTC internally, versus plain TIMESTAMP which stores a naive value with no timezone attached" data-vn="giữ nguyên &quot;TIMESTAMP/TIMESTAMPTZ&quot; — kiểu cột SQL lưu ngày-giờ, TIMESTAMPTZ có kèm timezone (quy về UTC), TIMESTAMP thì không">TIMESTAMPTZ</dfn> columns, and API responses all live or die on getting this right.</p>
+
+<div class="callout"><strong>Bridge from SQL:</strong> a SQL schema usually offers two column types for a moment in time — <code>TIMESTAMP</code>, which stores a date and time with no timezone attached (whose "3pm" is it?), and <code>TIMESTAMPTZ</code>, which stores it unambiguously by normalizing to UTC internally and converting on the way in and out. Python's <code>datetime</code> module has the exact same split, at the object level instead of the column level: a <strong>naive</strong> <code>datetime</code> is <code>TIMESTAMP</code>'s twin (a time with no attached zone, ambiguous the moment it crosses a machine boundary), and an <strong>aware</strong> <code>datetime</code> is <code>TIMESTAMPTZ</code>'s twin (a time anchored to a specific zone, safe to compare). The rule for both is the same: prefer the zone-aware one unless you have a specific reason not to.</div>
+
+<h2>1 · Naive vs. aware: the split that matters most</h2>
+<p>A <code><dfn data-en="the class from Python's standard-library datetime module representing a specific point in calendar time — year, month, day, hour, minute, second, microsecond" data-vn="giữ nguyên &quot;datetime&quot; — class biểu diễn 1 thời điểm cụ thể: năm, tháng, ngày, giờ, phút, giây">datetime</dfn></code> object can be one of two kinds, and nothing in how it prints tells you which:</p>
+<pre><code><span class="kw">from</span> datetime <span class="kw">import</span> datetime, timezone
+
+naive = datetime(2026, 8, 11, 15, 0, 0)                  <span class="cm"># 3:00pm — but whose 3:00pm?</span>
+aware = datetime(2026, 8, 11, 15, 0, 0, tzinfo=timezone.utc)  <span class="cm"># 3:00pm UTC — unambiguous</span>
+
+<span class="kw">print</span>(naive)   <span class="cm"># 2026-08-11 15:00:00</span>
+<span class="kw">print</span>(aware)   <span class="cm"># 2026-08-11 15:00:00+00:00</span></code></pre>
+<p>A <dfn data-en="a datetime object with no tzinfo attached — a time with no attached timezone, so it is ambiguous the moment it needs to be compared against a time from a different timezone" data-vn="giữ nguyên &quot;naive datetime&quot; — datetime không gắn timezone, mơ hồ khi so sánh giữa các múi giờ khác nhau">naive datetime</dfn> is missing a <code>tzinfo</code> attribute — it's a time with no attached zone, exactly SQL's plain <code>TIMESTAMP</code>. An <dfn data-en="a datetime object with a tzinfo attached, anchoring it to a specific timezone or UTC offset, so it can be compared or converted unambiguously against other aware datetimes" data-vn="giữ nguyên &quot;aware datetime&quot; — datetime có gắn timezone, so sánh/convert được rõ ràng, giống TIMESTAMPTZ">aware datetime</dfn> has a real <code>tzinfo</code>, exactly SQL's <code>TIMESTAMPTZ</code>. The two kinds can't be safely compared or subtracted from each other — Python raises <code>TypeError</code> rather than guess which one you meant, which is the language actively protecting you from the ambiguity a naive value carries.</p>
+
+<h2>2 · <code>datetime.now()</code> vs. <code>datetime.now(timezone.utc)</code></h2>
+<p>The most common place this bites: <code>datetime.now()</code> called with no argument returns a <strong>naive</strong> datetime in whatever timezone the local machine happens to be set to — a laptop in Hanoi and a server in a US data center get two different naive answers for "now," neither one saying which zone it's in:</p>
+<pre><code>local_naive = datetime.now()                 <span class="cm"># naive — local clock, zone unstated</span>
+utc_aware   = datetime.now(timezone.utc)     <span class="cm"># aware — anchored to UTC, unambiguous anywhere</span></code></pre>
+<p>For anything that leaves one machine — a timestamp saved to a database, sent in an API response, compared against a timestamp from another server — <code>datetime.now(timezone.utc)</code> is the one to reach for by default. Storing everything in UTC and only converting to a human's local zone for display is the same discipline <code>TIMESTAMPTZ</code> already applies at the database layer: one canonical, unambiguous value, converted at the edges.</p>
+
+<h2>3 · Why a naive datetime is a footgun</h2>
+<p>The failure isn't hypothetical. Two servers, each calling <code>datetime.now()</code> at the literal same instant but configured to different local zones, produce two different-looking naive values with no record of the offset between them — subtract one from the other and Python computes a wrong, silently-plausible-looking duration instead of raising an error, because nothing marks either value as being in a different zone to begin with:</p>
+<pre><code>server_a = datetime(2026, 8, 11, 15, 0, 0)   <span class="cm"># naive "3pm" — recorded in Hanoi's local zone</span>
+server_b = datetime(2026, 8, 11, 8, 0, 0)    <span class="cm"># naive "8am" — recorded in UTC, same actual instant</span>
+server_a - server_b                          <span class="cm"># 7:00:00 — looks fine, means nothing; it's actually the same moment</span></code></pre>
+<p>Mixing an aware and a naive value is the one case Python does refuse outright — <code>aware - naive</code> raises <code>TypeError: can't subtract offset-naive and offset-aware datetimes</code>. That error is a feature: it surfaces the bug at the point of comparison instead of letting a wrong duration silently flow downstream into a report or a billing calculation.</p>
+
+<h2>4 · <code>timedelta</code> arithmetic</h2>
+<p>A <dfn data-en="the class from datetime representing a duration or difference between two points in time — days, seconds, microseconds — usable directly in arithmetic with datetime objects" data-vn="giữ nguyên &quot;timedelta&quot; — class biểu diễn khoảng thời gian (duration), cộng/trừ trực tiếp được với datetime">timedelta</dfn> represents a span of time, not a point — the result of subtracting two datetimes, or a value you add to shift one forward or back:</p>
+<pre><code><span class="kw">from</span> datetime <span class="kw">import</span> timedelta
+
+now = datetime.now(timezone.utc)
+one_week_later = now + timedelta(days=7)
+ninety_min_ago = now - timedelta(minutes=90)
+
+elapsed = one_week_later - now              <span class="cm"># timedelta(days=7) — subtracting two datetimes gives a timedelta</span>
+elapsed.total_seconds()                     <span class="cm"># 604800.0 — the duration as a plain float, for comparisons/thresholds</span></code></pre>
+<p><code>timedelta</code> arithmetic only works cleanly when both datetimes are the same kind (both naive, or both aware) — the same rule section 3 already established, just applied here to addition and subtraction instead of a bare comparison.</p>
+
+<h2>5 · Parsing and formatting</h2>
+<p>Two different jobs come up constantly and use different tools. Going from a <code>datetime</code> to text uses <code><dfn data-en="the datetime method converting a datetime object into a string according to a format code (e.g. %Y-%m-%d), the inverse of strptime" data-vn="giữ nguyên &quot;strftime&quot; — method convert datetime thành string theo format tùy chỉnh (vd %Y-%m-%d)">strftime</dfn></code> ("string format time"); going from text to a <code>datetime</code> uses its inverse, <code><dfn data-en="the datetime class method parsing a string into a datetime object according to a format code matching strftime's codes" data-vn="giữ nguyên &quot;strptime&quot; — method parse string thành datetime theo format code, ngược lại với strftime">strptime</dfn></code> ("string parse time") — both driven by the same format codes (<code>%Y</code> four-digit year, <code>%m</code> month, <code>%d</code> day, <code>%H</code>/<code>%M</code>/<code>%S</code> hour/minute/second):</p>
+<pre><code>dt = datetime(2026, 8, 11, 15, 30)
+dt.strftime(<span class="str">"%Y-%m-%d %H:%M"</span>)              <span class="cm"># "2026-08-11 15:30" — datetime -> custom string</span>
+
+parsed = datetime.strptime(<span class="str">"2026-08-11 15:30"</span>, <span class="str">"%Y-%m-%d %H:%M"</span>)  <span class="cm"># string -> datetime</span></code></pre>
+<p>For the one format that comes up constantly in backend work — ISO 8601, the format databases and JSON APIs actually use (<code>"2026-08-11T15:30:00+00:00"</code>) — there's a shortcut pair that needs no format string at all: <code><dfn data-en="the datetime method producing the standard ISO 8601 string representation of a datetime — the same format databases, JSON APIs, and most logs use by default" data-vn="giữ nguyên &quot;isoformat&quot; — method xuất datetime ra string chuẩn ISO 8601, format mà DB/JSON API hay dùng">.isoformat()</dfn></code> and <code><dfn data-en="the datetime class method parsing a standard ISO 8601 string back into a datetime object, the inverse of isoformat, correctly reconstructing timezone info if the string includes an offset" data-vn="giữ nguyên &quot;fromisoformat&quot; — method parse ngược lại chuỗi ISO 8601 thành datetime, tự nhận offset timezone nếu có">datetime.fromisoformat()</dfn></code>:</p>
+<pre><code>aware.isoformat()                              <span class="cm"># "2026-08-11T15:00:00+00:00"</span>
+datetime.fromisoformat(<span class="str">"2026-08-11T15:00:00+00:00"</span>)  <span class="cm"># back to an aware datetime, offset preserved</span></code></pre>
+<p><code>isoformat()</code>/<code>fromisoformat()</code> is the pair to reach for first whenever the string is ISO-shaped, which is most of the time in a JSON API or a database round trip; <code>strftime</code>/<code>strptime</code> stay the right tool when the format is something else (a log line, a report a human reads).</p>
+
+<h2>6 · <code>zoneinfo</code>: real timezone conversions</h2>
+<p><code>timezone.utc</code> from section 1 is one specific, fixed offset — enough for "store everything in UTC," but not enough for "what time is it in Ho Chi Minh City right now," because a named zone like <code>Asia/Ho_Chi_Minh</code> or <code>America/New_York</code> can carry rules (daylight saving changes) that a bare fixed offset can't express. That's <code><dfn data-en="the Python 3.9+ standard-library module providing real named-timezone support (IANA database entries like Asia/Ho_Chi_Minh), used for converting an aware datetime between timezones — the modern stdlib replacement for the third-party pytz package" data-vn="giữ nguyên &quot;zoneinfo&quot; — module chuẩn thư viện (Python 3.9+) cho timezone thật theo tên (IANA), dùng để convert aware datetime giữa các múi giờ, thay thế package pytz cũ">zoneinfo</dfn></code>'s job, standard library since Python 3.9 — no third-party <code>pytz</code> package needed:</p>
+<pre><code><span class="kw">from</span> zoneinfo <span class="kw">import</span> ZoneInfo
+
+utc_now = datetime.now(timezone.utc)
+hcmc_time = utc_now.astimezone(ZoneInfo(<span class="str">"Asia/Ho_Chi_Minh"</span>))
+<span class="kw">print</span>(hcmc_time)   <span class="cm"># same instant, displayed in Ho Chi Minh City's local offset</span></code></pre>
+<p><code>.astimezone(zone)</code> doesn't change *when* something happened — it re-expresses the same instant under a different zone's local clock, the same underlying moment section 4's <code>timedelta</code> arithmetic would still measure identically either way. This only works starting from an aware datetime; calling <code>.astimezone()</code> on a naive one forces Python to guess the source zone (assumes the local machine's), which is exactly the ambiguity section 3 flagged — one more reason to build aware datetimes from the start.</p>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> pandas has its own datetime handling built on top of all this — <code>Timestamp</code>, the <code>.dt</code> accessor, vectorized timezone conversion across a whole column — covered in the <code>data/</code> course; today is stdlib <code>datetime</code>/<code>zoneinfo</code> only, named here once and not demonstrated, matching the hard rule above.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/14_datetime_and_timezones.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/14_datetime_and_timezones.py</code></pre>
+<p>No dependencies — standard library only. Exercises: building an aware UTC datetime with <code>datetime.now(timezone.utc)</code>, computing a <code>timedelta</code>-shifted datetime, confirming a naive/aware comparison raises <code>TypeError</code>, an <code>isoformat()</code>/<code>fromisoformat()</code> round trip, and converting an aware datetime to a named zone with <code>zoneinfo</code>.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A naive datetime has no tzinfo attached, so it is a time with an unstated zone — exactly SQL's plain TIMESTAMP. An aware datetime has a real tzinfo, anchoring it unambiguously, exactly SQL's TIMESTAMPTZ.">
+    <p class="stem">What makes a <code>datetime</code> object "naive" instead of "aware"?</p>
+    <button class="opt" data-ok>it has no tzinfo attached, so its zone is unstated</button>
+    <button class="opt">it was built by calling strptime rather than isoformat itself</button>
+    <button class="opt">it stores only a plain date, no hour or minute</button>
+  </div>
+  <div class="q" data-why="datetime.now() with no argument returns a naive datetime in whatever zone the local machine is set to, which differs between machines. datetime.now(timezone.utc) returns an aware datetime anchored to UTC, safe to compare or store regardless of where it was created.">
+    <p class="stem">What's the key difference between <code>datetime.now()</code> and <code>datetime.now(timezone.utc)</code>?</p>
+    <button class="opt" data-ok>one is naive and local, the other is zone-aware</button>
+    <button class="opt">both return the exact same aware object either way</button>
+    <button class="opt">now() always fails unless a zone argument is supplied</button>
+  </div>
+  <div class="q" data-why="Python refuses to compare or subtract an aware datetime against a naive one, raising TypeError rather than guessing which zone the naive value meant — surfacing the ambiguity immediately instead of silently computing a wrong duration.">
+    <p class="stem">What happens when you subtract a naive datetime from an aware one?</p>
+    <button class="opt" data-ok>Python raises TypeError instead of guessing the missing zone</button>
+    <button class="opt">Python silently assumes the naive value already means UTC</button>
+    <button class="opt">Python converts both values to plain date objects first</button>
+  </div>
+  <div class="q" data-why="isoformat() and fromisoformat() are the shortcut pair for ISO 8601 strings specifically ('2026-08-11T15:00:00+00:00'), the format databases and JSON APIs use by default, needing no format-code string at all — strftime/strptime remain the tool for other, non-ISO formats.">
+    <p class="stem">When is <code>.isoformat()</code>/<code>fromisoformat()</code> the right tool over <code>strftime</code>/<code>strptime</code>?</p>
+    <button class="opt" data-ok>when the string is already the standard ISO 8601 shape</button>
+    <button class="opt">only when converting a date into a Unix integer timestamp</button>
+    <button class="opt">only inside a pandas DataFrame's own special datetime column accessor</button>
+  </div>
+  <div class="q" data-why="zoneinfo is the Python 3.9+ standard-library module for real named-timezone conversion (IANA entries like Asia/Ho_Chi_Minh), replacing the older third-party pytz package that used to be needed for the same job.">
+    <p class="stem">What is <code>zoneinfo</code>, and what did it replace?</p>
+    <button class="opt" data-ok>stdlib named-timezone support, replacing the older third-party pytz package</button>
+    <button class="opt">a faster reimplementation of the stdlib's built-in timedelta class</button>
+    <button class="opt">a pandas accessor for parsing dates inside a column</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official <a href="https://docs.python.org/3/library/datetime.html">datetime docs</a> — the "Aware and Naive Objects" section covers section 1/3 above precisely, and the <code>strftime()</code>/<code>strptime()</code> format-code table is the canonical reference for section 5. For section 6, the official <a href="https://docs.python.org/3/library/zoneinfo.html">zoneinfo docs</a> cover the named-timezone API directly. RESOURCES.md's language section points to the same official docs for canonical stdlib behavior.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day14">glossary</a> under Day 14.<br>
+Next up per the plan: <code>logging</code> — the third and last of the three PLAN.md bundles into this spine's last line, alongside <code>pathlib</code> and today's <code>datetime</code>/timezones, completing Phase 2a's stdlib-corners bullet.<br><br>
+💬 Anything unclear — naive vs. aware, or when to reach for <code>zoneinfo</code> vs. plain UTC? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

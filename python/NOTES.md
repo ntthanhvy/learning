@@ -1096,3 +1096,113 @@ fail *gracefully* so the learner sees which task failed.
   last spine line, left deliberately untouched today alongside `logging`,
   which should come after it, completing the three-item bundle one day at a
   time.
+- 2026-08-11 — **Day 14 generated** (`lessons/0014-datetime-and-timezones.html`),
+  the headless run's seventh Phase 2 lesson. Idempotency check confirmed
+  on-disk before writing anything: highest existing lesson file was `0013-…`
+  dated 2026-08-10, no `0014-…` file existed, and no `2026-08-11` entry
+  existed yet in this file's own log or in `assets/nav.js` — generation
+  proceeded as Day 14, not a re-run.
+  Topic: `datetime`/timezones — the second of the three items bundled into
+  PLAN.md's Phase 2a spine's last bullet ("`pathlib`, `datetime`/timezones,
+  `logging` — the three most-used stdlib corners left"), directly following
+  Day 13's split of that bundle, and Day 13's own closing line, which had
+  already named this as next. Taught: naive vs. aware datetimes framed
+  through SQL's `TIMESTAMP` vs. `TIMESTAMPTZ` split (no `tzinfo` attached vs.
+  a real one, ambiguous vs. unambiguous when compared across machines);
+  `datetime.now()` (naive, local-machine zone, unstated) vs.
+  `datetime.now(timezone.utc)` (aware, unambiguous everywhere) as the
+  concrete default-to-reach-for distinction; the naive-datetime footgun made
+  literal — two servers in different zones producing plausible-looking but
+  wrong subtraction results, versus Python's actual behavior of raising
+  `TypeError` outright when an aware and a naive value are mixed, framed as
+  the language protecting against the bug rather than an obstacle; `timedelta`
+  arithmetic (`+`/`-` with a `datetime`, `.total_seconds()`); parsing/
+  formatting split into two tool pairs — `strftime`/`strptime` for arbitrary
+  format codes, `.isoformat()`/`datetime.fromisoformat()` as the shortcut for
+  the ISO 8601 shape databases and JSON APIs actually use; and `zoneinfo`
+  (Python 3.9+ stdlib, confirmed not `pytz`) for real named-timezone
+  conversion via `.astimezone(ZoneInfo(name))`, explicitly gated on starting
+  from an aware datetime. Kept deliberately to this subset — no `date`-only
+  objects, no `time`-only objects, no `calendar` module, no exhaustive
+  `strftime` code table — per this run's own instruction to pick the
+  highest-value backend-relevant slice rather than encyclopedic coverage,
+  consistent with MISSION.md's "Success does NOT look like" clause. Bridged
+  from SQL per the baseline record and per this run's explicit instruction:
+  `TIMESTAMP`/`TIMESTAMPTZ` introduced before any Python in the top callout
+  and callout box, mapped directly onto naive/aware, not from a pandas or
+  other "Python-adjacent" analogy.
+  Learning records: still only the Day 1 baseline
+  (`learning-records/0001-baseline-reads-python-writes-little.md`) — no
+  completion/quiz record for any later day was found (same gap every Day
+  8–13 entry already flagged). Paced conservatively per that same assumption:
+  one core distinction (naive vs. aware) given the most explanatory weight
+  and returned to in three different sections (1, 3, 6) rather than treated
+  as a single aside, and no additional stdlib time modules pulled in beyond
+  what the spine's bundled line and the practice file's five exercises
+  actually need. Unverified against real quiz/completion data, same caveat
+  as every entry since Day 8.
+  No-pandas rule: zero pandas/NumPy API in the lesson body or practice file
+  (checked by grep for `pandas|numpy|dataframe`, case-insensitive, across
+  both new files — zero hits in the practice file; the lesson has exactly one
+  true prose contrast sentence, naming `Timestamp`/the `.dt` accessor/
+  vectorized timezone conversion without demonstrating any of them, placed
+  once in its own callout after section 6 and labeled in prose as the only
+  such sentence, matching the hard-rule section above — plus two quiz
+  distractor options that name "pandas" as a wrong answer, the same
+  distractor pattern prior lessons' quizzes have used, not a second
+  contrast/teaching instance).
+  Practice file `practice/14_datetime_and_timezones.py` (5 exercises: building
+  an aware UTC datetime from year/month/day/hour/minute pieces, shifting a
+  datetime forward with `timedelta`, confirming a naive/aware subtraction
+  raises `TypeError` via `try`/`except`, an `isoformat()`/`fromisoformat()`
+  round trip, and converting an aware UTC datetime to a named zone with
+  `zoneinfo`/`ZoneInfo`) needed no on-disk fixtures — every exercise operates
+  on in-memory `datetime` objects, unlike Days 6/9/10/13's file/module-based
+  topics — so it stayed with the plain ✓/✗ `check()` idiom used by every day
+  except Day 11's pytest exception, with no `tempfile` scaffolding needed this
+  time. Verified in a scratch dir (`.scratch_py14_verify/`, created under the
+  repo root and removed after use, per the Day 3–13 precedent that `/tmp` is
+  out of bounds for this sandbox): the shipped (unsolved) copy ran via
+  `uv run python3`, both from the scratch copy and from its real `practice/`
+  path with the documented command, and printed five clean ✗ lines with no
+  traceback each time — checked that every unsolved function's bare `...`
+  body returns `None`, which fails every check's comparison rather than
+  raising, per this run's own warning about silent-success bugs; a separately
+  solved copy (each TODO filled in directly in the scratch copy, not copied
+  from the commented-out answer lines blindly) printed five ✓ and the "All
+  green" tally. No bugs found during verification — both passes succeeded on
+  the first attempt.
+  Glossary: added a Day 14 section to `reference/glossary.html` (`datetime`,
+  `naive datetime`, `aware datetime`, `timedelta`, `strftime / strptime`,
+  `isoformat / fromisoformat`, `zoneinfo`) after confirming via grep that none
+  of the seven terms/entries collided with any Day 1–13 entry. All seven also
+  got matching `<dfn>` markup at first use in the lesson body, matching Day
+  11–13's density of glossarying every newly introduced term inline rather
+  than leaving any undefined.
+  Quiz: 5 questions. Word counts were checked with individual `wc -w` calls
+  per option line (not by eye, not piped through compound commands, since
+  this sandbox's approval gate blocks compound bash commands exactly as in
+  every prior day) and mismatched on the first draft for all five questions
+  (Q1 10/8/10, Q2 11/9/9, Q3 8/8/9, Q4 10/10/7, Q5 7/8/9). Each mismatched
+  question went through one to four rewrite-and-recount rounds — Q1's third
+  option in particular needed three attempts (10 → 11 → 12 → 10 words,
+  overshooting twice before landing back on the target) and Q4's third option
+  needed three attempts to climb from 7 to 10 — until every option matched
+  (Q1 10/10/10, Q2 9/9/9, Q3 9/9/9, Q4 10/10/10, Q5 9/9/9), then a full final
+  recount pass across all five questions' three options each (15 lines total,
+  each checked individually with its own `wc -w` call) confirmed every one
+  before shipping, per this file's instruction to recount after any edit.
+  Registered in `assets/nav.js` with `date: "2026-08-11"`.
+  **DB access:** environment-variable reads were blocked outright in this
+  sandbox (even a bare `env` invocation required approval with no user
+  present), and `~/.config/learning/db.env` did not exist in this checkout,
+  so no read-path attempt was made this run beyond confirming those two facts
+  — consistent with every prior day's experience that the read path is
+  unavailable.
+  `bin/record-progress python lesson_generated --day 14 --lesson
+  0014-datetime-and-timezones.html --detail '{"by":"launchd"}'` was attempted
+  once after shipping, per this run's instructions, and **required
+  interactive approval with no user present, so it did not complete** —
+  outcome is "not recorded to DB this run," not retried, consistent with the
+  majority of prior days (only Days 5 and 9–13 succeeded non-interactively;
+  Days 1–4, 6, 7, 8 all required approval and were not recorded).

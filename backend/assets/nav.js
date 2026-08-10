@@ -78,6 +78,8 @@
       file: "lessons/0035-upsert-insert-on-conflict.html" },
     { n: 36, date: "2026-08-10", title: "The N+1 query problem",
       file: "lessons/0036-n-plus-one-queries.html" },
+    { n: 37, date: "2026-08-11", title: "Transaction isolation levels",
+      file: "lessons/0037-transaction-isolation-levels.html" },
   ];
 
   const REFS = [

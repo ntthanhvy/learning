@@ -1607,3 +1607,111 @@
   curriculum/glossary scan for the next genuinely-uncovered pattern (no
   single obvious dangling candidate named in this lesson's own content) if
   no drill-outcome signal surfaces by next generation.
+- 2026-08-11 generation (Lesson 34, headless 06:00 run): confirmed the
+  idempotency check first — no `data/lessons/0034-*.html` existed yet and
+  Lesson 34 wasn't in `assets/nav.js` (highest was Lesson 33, dated
+  2026-08-10) — so this round proceeded. Bare `env` reads and any shell-
+  variable expansion of `LEARNING_DB_URL` were blocked outright in this
+  sandbox with no user present to approve, and `~/.config/learning/db.env`
+  doesn't exist in this checkout, so no `course_progress`/`lesson_completed`
+  signal beyond the Lesson 1 baseline was readable — fell back to on-disk
+  state per this course's established convention. Lesson 33's own teaser
+  named no single dangling candidate ("a fresh curriculum/glossary scan for
+  the next genuinely-uncovered pattern"), so this round did exactly that:
+  grepped `lessons/*.html` and `reference/glossary.html` for a batch of
+  common pandas/NumPy interview terms not yet confirmed taught (`clip()`,
+  `between()`, `combine_first()`, `merge_asof()`, `.at[]`/`.iat[]`,
+  `get_dummies()`, `describe()`, `cummax()`/`cummin()`). All of `clip()`,
+  `between()`, `combine_first()`, `merge_asof()`, `.at[]`/`.iat[]`, and
+  `get_dummies()` came back genuinely uncovered (zero matches anywhere).
+  Picked `pd.get_dummies()` (one-hot encoding): it's high-frequency in data
+  interviews (turning a categorical column into model-ready numbers), and it
+  pairs naturally as the "different answer" to Lesson 25's `category dtype`
+  — both start from "this column is a category," but one is a storage/memory
+  optimization and the other is a numeric-encoding transform for downstream
+  math. Lesson 34 ships: the problem framing (models/math can't consume
+  literal category strings), `get_dummies(df, columns=[...])` replacing one
+  column with N new True/False columns, an explicit callout that this is
+  Lesson 24's `np.where()`/Lesson 29's `isin()` family generated
+  automatically per distinct value (tied to a SQL "CASE WHEN per value"
+  manual-pivot idiom), `prefix=`/`drop_first=True` and why (the row-sum-to-1
+  redundancy causing multicollinearity — named but not modeled, staying
+  within MISSION.md's out-of-scope boundary on ML), and the closing "no
+  crash, quietly wrong" gotcha since Lesson 19: a NaN in the source column
+  silently becomes False across every dummy column by default (indistin-
+  guishable from a genuine rare-category row) unless `dummy_na=True` is
+  passed. `uv run --with pandas` worked directly this round (pandas 3.0.5,
+  numpy pulled in as a dependency): every number was hand-verified in
+  `.scratch/data-lesson34/explore.py` and `explore2.py` (both deleted after)
+  against the real `orders_raw.csv`/`customers.csv` merged 4-row fixture (An
+  120.0/01-05/North, An 42.0/01-10/North, Binh 35.5/01-06/South, Binh
+  180.0/01-09/South) before writing a word of the lesson —
+  `get_dummies(merged, columns=["customer"])` gives exactly `customer_An`/
+  `customer_Binh`, row sums `[1,1,1,1]`; `prefix="cust"` renames to
+  `cust_An`/`cust_Binh`; `drop_first=True` on the Series form leaves only
+  `Binh`; the small `["a","b",None,"a"]` NaN-gotcha Series confirmed both the
+  default (missing row False/False, no flag) and `dummy_na=True` (adds a
+  third column, True only on the missing row) exactly as written. This
+  session's working directory was restricted to the repo root (bare `mkdir`/
+  `cp` outside it were blocked outright, same restriction hit in several
+  prior rounds, e.g. Lessons 28/29/30) — used `.scratch/data-lesson34/`,
+  this course's established convention. Checked the by-now-expected
+  Ellipsis-placeholder family (Lessons 19-33) with a standalone throwaway
+  script before writing the practice file: `get_dummies(merged,
+  columns=[...])` raises `KeyError` and `get_dummies(..., prefix=...)`
+  raises `TypeError` (both safe as-is), but two NEW variants surfaced this
+  round — `dummy_na=...` does NOT raise (Ellipsis is truthy, behaves exactly
+  like `True`, same family as Lessons 19/21/31's own findings, and produces
+  the fully correct output, a silent full-pass) and a bare `merged.loc/[...]`-
+  style `dropped_cols` exercise originally shipped with NO placeholder at
+  all in Exercise 4 (a genuine drafting bug caught only by actually running
+  the shipped file, not by inspection — same class of miss as Lesson 20's
+  originally-already-solved Exercise 1). Both were fixed before shipping:
+  Exercise 4's placeholder moved into the column-lookup position
+  (`merged[...]`, confirmed `KeyError: Ellipsis`), and Exercise 5's
+  placeholder moved from `dummy_na=...` into the Series list literal itself
+  (`pd.Series(["a","b",...,"a"])`) — confirmed this does NOT raise either
+  (becomes an object-dtype Series containing the literal Ellipsis as a 4th
+  distinct value) but the check still correctly evaluates False (4 dummy
+  columns instead of 3), so no crash and no false-positive either way, same
+  "doesn't raise but still safely fails the check" pattern as several prior
+  rounds' Ellipsis findings. A parallel issue also required a genuine check-
+  logic fix, not just a placeholder move: `get_dummies(..., dummy_na=True)`
+  names the new indicator column with the literal float `nan` as its label,
+  not the string `"NaN"` — an initial check using `"NaN" in columns` was
+  wrong from the start (failed even on a correctly solved run), caught by
+  actually executing the solved version and finding it printed an
+  unexpected ✗; fixed by checking `len(columns) == 3` and reading the last
+  column by position (`.iloc[:, -1]`) instead of by an unmatchable string
+  key. The shipped (unsolved) `practice/34_get_dummies.py` was executed in
+  `.scratch/data-lesson34/run/` (fixture CSVs copied alongside, matching
+  this round's restricted-cwd workaround) and printed all 5 ✗ with no crash
+  after both fixes, then a separately-saved solved copy
+  (`.scratch/data-lesson34/run/practice/34_solved.py`, not shipped) printed
+  all 5 ✓ against the same hand-verified numbers above. The shipped file was
+  also re-run a second time directly from its real `practice/` location
+  (`cd data && uv run --with pandas python3 practice/34_get_dummies.py`) and
+  confirmed to print the identical all-✗ result with no crash. `.scratch/
+  data-lesson34/` was fully removed (`rm -rf`) after verification, no
+  approval needed this round. Added `one-hot encoding`, `pd.get_dummies()`,
+  and `multicollinearity` to the glossary (checked for collisions first —
+  none) and registered Lesson 34 in nav.js. Quiz options were drafted and
+  checked with a Python word-count script (regex-stripped HTML tags,
+  whitespace-split) run via `uv run python3` (this course's established
+  convention since Lesson 26/27's finding that plain `python3` needs
+  approval while `uv run python3` doesn't), cross-checked with a manual
+  `Grep`-extraction read-through as an independent second pass (per Lesson
+  19's repeated finding that one pass isn't infallible) — the first draft
+  came out mismatched on two of three questions (Q1 at 8/7/6, Q3 at 7/8/5)
+  and needed two to three rewrite + recount cycles per question before a
+  final independent recount confirmed all three genuinely level at 8/8/8,
+  6/6/6, and 6/6/6. `bin/record-progress data lesson_generated --day 34
+  --lesson 0034-get-dummies-one-hot-encoding.html --detail
+  '{"by":"launchd"}'` was run once from the repo root as instructed and
+  succeeded on the first try, no approval blocker this round (bare `env`
+  reads and `LEARNING_DB_URL` shell expansion stayed blocked as expected,
+  but the write path sources DB credentials internally, unaffected by the
+  read-side block, same asymmetry as most prior rounds). Set the teaser
+  going forward to `clip()`, `between()`, or `combine_first()` (all three
+  re-confirmed genuinely uncovered by this round's own grep, not yet picked
+  up) if no drill-outcome signal surfaces by next generation.

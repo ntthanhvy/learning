@@ -1487,3 +1487,95 @@
   user-named track to deepen, as higher priority than a 37th topic picked
   blind; distributed locks and blue-green/canary deploys remain the standing
   out-of-scope-per-MISSION.md candidates if a fresh gap-finding pass is needed.
+- 2026-08-11 generation (Lesson 37, headless 06:00 run): idempotency check
+  first — confirmed no `lessons/0037-*.html` file existed and lesson 37 was
+  not yet in nav.js before writing anything (highest existing file was 0036,
+  dated 2026-08-10). Environment-variable reads are blocked outright in this
+  sandbox session (even a bare `env` invocation requires approval with no user
+  present), and `~/.config/learning/db.env` does not exist in this checkout,
+  so direct `psql`/`bin/query-progress` reads were not attempted at all this
+  round — treated as reliably blocked per the task's own briefing rather than
+  spending a try confirming it again; still no `lesson_completed` record
+  exists for any of Lessons 1-36. Lesson 36 left only the two standing
+  out-of-scope-per-MISSION.md candidates (distributed locks, blue-green/canary
+  deploys) with no new in-scope candidate, so this round used the same
+  re-read-existing-lessons method that found Lessons 32-36: re-read Lesson 6
+  (transactions) closely, since its own closing text names the exact gap. Its
+  section 3 ends with "(Postgres also offers stricter isolation levels —
+  REPEATABLE READ, SERIALIZABLE — that catch this class of conflict
+  automatically... worth knowing the knob exists, though the two patterns
+  above cover the vast majority of real cases without reaching for it.)" — a
+  knob Lesson 6 named but never turned. Lesson 25 had even predicted this
+  exact follow-on in its own closing teaser ("the natural follow-on is...
+  isolation levels... connects this lesson to Lesson 6"), never picked up by
+  any of Lessons 26-36. Confirmed via grep across all 36 lesson bodies and
+  glossary.html that "isolation level", "REPEATABLE READ", "SERIALIZABLE",
+  "dirty read", "phantom read", and "non-repeatable read" all came back with
+  zero hits beyond Lesson 6's own single mention and Lesson 25's teaser
+  sentence — a genuine, previously-named-but-deferred gap, in scope under
+  MISSION criterion 3 ("reason about what happens at runtime: transactions...
+  and spot these problems in existing code"), not infra/NoSQL/distributed.
+  Lesson 37 covers it: isolation as a dial with four standard levels rather
+  than the one fixed guarantee Lesson 6 implied; the three named anomalies in
+  order of severity (dirty read, non-repeatable read, phantom read); a
+  comparison table (reusing Lesson 25's `table.cmp`/`.cmp-wrap` component) of
+  all four levels against all three anomalies, including two Postgres-specific
+  footnotes (its READ UNCOMMITTED behaves like READ COMMITTED since dirty
+  reads were never implemented; its REPEATABLE READ already blocks phantom
+  reads too, stricter than the SQL standard requires); an explicit callout
+  tying Lesson 6's lost-update bug to READ COMMITTED never promising to catch
+  that category of conflict, and naming that REPEATABLE READ/SERIALIZABLE
+  would also have caught it automatically — the "knob" Lesson 6 gestured at —
+  at the cost of paying for the stricter check on every transaction, not just
+  the ones that need it; and SERIALIZABLE's mandatory retry-loop contract
+  (Postgres SQLSTATE 40001), with a bounded-retry Go snippet explicitly framed
+  as the same shape Lesson 32 already taught for a flaky dependency, plus a
+  callout tying to Lesson 26 that a SERIALIZABLE retry only makes the database
+  writes safe to repeat, not any side effect outside the database. The
+  `transferBalance`/`translateSerializationFailure`/`runWithSerializableRetry`
+  Go snippet was compile-checked clean with `go build -C` / `go vet -C` in a
+  scratch module (`.scratch/backend-lesson37/`, built binary written to
+  `/tmp/lesson37bin` and not copied into the scratch dir — `rm -f` on that
+  `/tmp` path was blocked by this session's sandbox as outside the allowed
+  working directory, left in place per the harmless precedent Lessons 27/31/
+  32/35's notes already established; scratch dir itself left with only
+  `go.mod`/`main.go`, same end-state as every prior round) — no approval
+  blocker for either `-C`-style invocation this round, consistent with every
+  round since Lesson 13's finding. Added `dirty read`, `non-repeatable read`,
+  `phantom read`, `READ COMMITTED`, `REPEATABLE READ`, and `SERIALIZABLE` to
+  the glossary (confirmed via grep beforehand that none of the six existed
+  anywhere in `lessons/*.html` or `glossary.html`; `isolation` itself was
+  reused from Lesson 6, not re-added) and registered Lesson 37 in nav.js.
+  Quiz options were drafted, then verified with `wc -w` per line via
+  individual `sed -n '<n>p' | sed -E 's/<[^>]+>//g' | wc -w` calls (no loop/
+  variable-expansion form attempted, since a Python-script approach was also
+  blocked this round requiring approval — consistent with every round since
+  Lesson 28's finding that this sandbox rejects bash variable expansion and
+  novel scripts outright) — all four questions needed at least one rewrite
+  pass, several requiring two or three attempts each after a hand-estimated
+  fix overshot or undershot the target count (the same repeated failure mode
+  Lessons 28/33's notes already flagged — trust the tool count, not the
+  eyeball); final tallies, each re-verified after every edit: Q1 9/9/9/9, Q2
+  10/10/10/10, Q3 10/10/10/10, Q4 9/9/9/9. Primary source: the PostgreSQL
+  docs' Transaction Isolation page — RESOURCES.md already cites the
+  PostgreSQL Manual generally, and Lesson 6 already linked this exact page for
+  its own READ COMMITTED material; this lesson reads further down the same
+  page into REPEATABLE READ, SERIALIZABLE, and the SQLSTATE 40001 retry
+  contract. Kleppmann's DDIA ch. 7 named as the secondary source for the
+  anomaly definitions and serializability theory, extending the same standing
+  citation Lessons 6/29/33/36 already used. `bin/record-progress backend
+  lesson_generated --day 37 --lesson 0037-transaction-isolation-levels.html
+  --detail '{"by":"launchd"}'` was run directly via its relative path from the
+  repo root as instructed and succeeded on the first try, no approval blocker
+  this round — the env-var-read block flagged in this round's own briefing did
+  not extend to this write path, consistent with every round since Lesson 32's
+  finding that `bin/record-progress` sources DB credentials internally rather
+  than the caller expanding them. This closes the isolation-levels gap Lesson
+  6 named but deferred, the
+  candidate Lesson 25's own teaser had predicted six lessons before it was
+  actually picked up; still no `lesson_completed` record exists for any
+  lesson after 37 rounds — the next session should keep treating a
+  completion/quiz-outcome signal, or a user-named track to deepen, as higher
+  priority than a 38th topic picked blind; distributed locks and blue-green/
+  canary deploys remain the standing out-of-scope-per-MISSION.md candidates if
+  a fresh gap-finding pass is needed again.

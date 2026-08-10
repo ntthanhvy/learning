@@ -148,6 +148,18 @@
   <tr><td>glob (pattern matching)</td><td>giữ nguyên "glob" — tìm file theo mẫu ký tự đại diện như *.csv, glob() chỉ tìm 1 cấp, rglob() tìm cả thư mục con</td><td><code>Path.glob(pattern)</code> lazily yields every path in a directory matching a shell-style wildcard (<code>"*.csv"</code>), staying within that one directory; <code>Path.rglob(pattern)</code> does the same but recurses into every subdirectory too.</td></tr>
 </table>
 
+<h2 id="day14">Day 14 — datetime &amp; timezones</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>datetime</td><td>giữ nguyên "datetime" — class biểu diễn 1 thời điểm cụ thể: năm, tháng, ngày, giờ, phút, giây</td><td>The class from Python's standard-library <code>datetime</code> module representing a specific point in calendar time — year, month, day, hour, minute, second, microsecond.</td></tr>
+  <tr><td>naive datetime</td><td>giữ nguyên "naive datetime" — datetime không gắn timezone, mơ hồ khi so sánh giữa các múi giờ khác nhau</td><td>A <code>datetime</code> object with no <code>tzinfo</code> attached — a time with no attached timezone, exactly SQL's plain <code>TIMESTAMP</code>. Ambiguous the moment it needs comparing against a time from a different zone.</td></tr>
+  <tr><td>aware datetime</td><td>giữ nguyên "aware datetime" — datetime có gắn timezone, so sánh/convert được rõ ràng, giống TIMESTAMPTZ</td><td>A <code>datetime</code> object with a real <code>tzinfo</code> attached, anchoring it to a specific timezone or UTC offset — exactly SQL's <code>TIMESTAMPTZ</code>. Safe to compare or subtract against other aware datetimes.</td></tr>
+  <tr><td>timedelta</td><td>giữ nguyên "timedelta" — class biểu diễn khoảng thời gian (duration), cộng/trừ trực tiếp được với datetime</td><td>The class from <code>datetime</code> representing a duration or difference between two points in time — days, seconds, microseconds — usable directly in arithmetic with <code>datetime</code> objects (<code>dt + timedelta(days=7)</code>).</td></tr>
+  <tr><td>strftime / strptime</td><td>giữ nguyên "strftime/strptime" — strftime convert datetime thành string theo format, strptime parse string ngược lại thành datetime</td><td><code>strftime</code> ("string format time") converts a <code>datetime</code> into a string according to a format code (e.g. <code>%Y-%m-%d</code>); <code>strptime</code> ("string parse time") is its inverse, parsing a string into a <code>datetime</code> using the same format codes.</td></tr>
+  <tr><td>isoformat / fromisoformat</td><td>giữ nguyên "isoformat/fromisoformat" — isoformat() xuất datetime ra string chuẩn ISO 8601, fromisoformat() parse ngược lại</td><td><code>.isoformat()</code> produces the standard ISO 8601 string representation of a <code>datetime</code> (e.g. <code>"2026-08-11T15:00:00+00:00"</code>) — the format databases and JSON APIs use by default; <code>datetime.fromisoformat()</code> parses that string back, correctly reconstructing timezone info if the string includes an offset.</td></tr>
+  <tr><td>zoneinfo</td><td>giữ nguyên "zoneinfo" — module chuẩn thư viện (Python 3.9+) cho timezone thật theo tên (IANA), dùng để convert aware datetime giữa các múi giờ, thay thế package pytz cũ</td><td>The Python 3.9+ standard-library module providing real named-timezone support (IANA database entries like <code>Asia/Ho_Chi_Minh</code>), used with <code>.astimezone(ZoneInfo(name))</code> to convert an aware <code>datetime</code> between timezones — the modern stdlib replacement for the third-party <code>pytz</code> package.</td></tr>
+</table>
+
 <p class="next">💬 A term here still unclear? Ask your teacher — hỏi bằng tiếng Việt cũng được.</p>
 
 <script src="../assets/nav.js"></script>

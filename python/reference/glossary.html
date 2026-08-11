@@ -160,6 +160,17 @@
   <tr><td>zoneinfo</td><td>giữ nguyên "zoneinfo" — module chuẩn thư viện (Python 3.9+) cho timezone thật theo tên (IANA), dùng để convert aware datetime giữa các múi giờ, thay thế package pytz cũ</td><td>The Python 3.9+ standard-library module providing real named-timezone support (IANA database entries like <code>Asia/Ho_Chi_Minh</code>), used with <code>.astimezone(ZoneInfo(name))</code> to convert an aware <code>datetime</code> between timezones — the modern stdlib replacement for the third-party <code>pytz</code> package.</td></tr>
 </table>
 
+<h2 id="day15">Day 15 — logging</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>logging</td><td>giữ nguyên "logging" module — module chuẩn thư viện ghi lại chương trình đang làm gì, theo mức độ ưu tiên, thay cho việc rải print() khắp code</td><td>Python's standard-library module for recording what a running program is doing, at a chosen severity level, routed to one or more destinations — the production-grade replacement for scattering <code>print()</code> calls through code.</td></tr>
+  <tr><td>level</td><td>giữ nguyên "level" — mức độ ưu tiên gắn với mỗi log record: DEBUG, INFO, WARNING, ERROR, CRITICAL, tăng dần, dùng để lọc log nào được in ra</td><td>A named severity ranking attached to every log record — <code>DEBUG</code>, <code>INFO</code>, <code>WARNING</code>, <code>ERROR</code>, <code>CRITICAL</code> in increasing order — used to filter which messages a logger or handler actually emits.</td></tr>
+  <tr><td>logger</td><td>giữ nguyên "logger" — object mà code gọi trực tiếp (logger.info(...)), có tên riêng, tự quyết định record có đạt level không rồi mới đưa cho handler</td><td>The object application code actually calls (<code>logger.info(...)</code>, <code>logger.error(...)</code>), identified by name via <code>logging.getLogger(__name__)</code>. Decides whether a record clears its own level, then hands surviving records to its handlers.</td></tr>
+  <tr><td>handler</td><td>giữ nguyên "handler" — object quyết định record đi đâu (console, file, ...), gắn vào logger bằng addHandler(), 1 logger có thể có nhiều handler</td><td>The object owning where a log record is sent — a stream (console), a file, or elsewhere — attached to a logger with <code>.addHandler()</code>. A single logger can have several handlers, sending the same record to multiple destinations.</td></tr>
+  <tr><td>formatter</td><td>giữ nguyên "formatter" — object quyết định record hiển thị thành text như thế nào (timestamp, field nào, thứ tự), gắn vào handler bằng setFormatter()</td><td>The object owning how a log record renders as text — timestamp format, which fields appear, in what order — attached to a handler with <code>.setFormatter()</code>, so the same record looks different depending on the handler it went through.</td></tr>
+  <tr><td>root logger</td><td>giữ nguyên "root logger" — logger gốc mà mọi logger khác mặc định báo cáo lên, basicConfig() cấu hình logger này</td><td>The implicit top-level logger every module's <code>getLogger(__name__)</code> logger reports up to by default. <code>logging.basicConfig()</code> configures this one logger in a single call, and every other logger inherits its level/handler unless overridden.</td></tr>
+</table>
+
 <p class="next">💬 A term here still unclear? Ask your teacher — hỏi bằng tiếng Việt cũng được.</p>
 
 <script src="../assets/nav.js"></script>

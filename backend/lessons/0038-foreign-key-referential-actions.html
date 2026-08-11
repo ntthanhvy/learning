@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 38 · Foreign Key Referential Actions</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 38 · ~20 min</p>
+<h1>Foreign key referential actions: what happens to the children</h1>
+<p class="byline">Lesson 2 defined a foreign key as "this row belongs to that row" and stopped there. Lesson 34 leaned on the missing half without explaining it: "either the delete fails outright... or — worse — it was allowed to <code>CASCADE</code>, and every order that account ever placed disappears with it." Today closes that gap — the four things Postgres can do to a child row when its parent disappears, and why picking the wrong one is a design bug, not a syntax detail.</p>
+
+<h2>1 · A foreign key is silent about deletes by default</h2>
+<p>Lesson 2's <dfn data-en="a column holding another table's primary key, expressing 'this row belongs to that row'" data-vn="foreign key / khóa ngoại (hay nói tắt FK)">foreign key</dfn> only says a child row points at a parent row. It says nothing about what should happen when that parent row is deleted or its key changes — and Postgres won't let you skip the question. Every <code>REFERENCES</code> clause has an answer, whether you wrote one or not:</p>
+<pre><code>CREATE TABLE orders (
+    id INT PRIMARY KEY,
+    account_id INT REFERENCES accounts(id) <span class="cm">-- no ON DELETE clause...</span>
+);</code></pre>
+<p>...silently means <code>ON DELETE RESTRICT</code>: Postgres refuses to delete an <code>accounts</code> row while any <code>orders</code> row still points at it. That's exactly the "delete fails outright" half of Lesson 34's sentence — not a bug, the default behavior nobody named. The <dfn data-en="a rule attached to a foreign key naming what Postgres should do to a child row when the parent row it references is deleted or its key changes — RESTRICT, CASCADE, SET NULL, or SET DEFAULT" data-vn="referential action (giữ nguyên) — quy tắc trên foreign key, quyết định dòng con bị ảnh hưởng thế nào khi dòng cha bị xóa/đổi key">referential action</dfn> is the explicit version of that same choice, spelled out per relationship instead of left to the default.</p>
+
+<h2>2 · The four actions, and what each one actually does</h2>
+<div class="cmp-wrap">
+<table class="cmp">
+<thead><tr><th>Action</th><th>When the parent row is deleted</th><th>Reach for it when</th></tr></thead>
+<tbody>
+<tr><th><dfn data-en="the default referential action — Postgres refuses to delete or update a parent row while any child row still references it, returning a foreign_key_violation error instead" data-vn="RESTRICT (giữ nguyên) — mặc định, Postgres từ chối xóa/đổi dòng cha nếu còn dòng con tham chiếu">RESTRICT</dfn> (default)</th><td>delete is refused with an error</td><td>the parent must never disappear while dependents exist — force a deliberate decision first</td></tr>
+<tr><th><dfn data-en="a referential action where deleting the parent row automatically deletes every child row that references it, in the same transaction" data-vn="CASCADE (giữ nguyên) — xóa dòng cha thì tự động xóa luôn mọi dòng con tham chiếu tới nó">CASCADE</dfn></th><td>every referencing child row is deleted too</td><td>the child has no meaning without its exact parent — it dies with it by definition</td></tr>
+<tr><th><dfn data-en="a referential action where deleting the parent row sets the child row's foreign key column to NULL instead of deleting the child" data-vn="SET NULL (giữ nguyên) — xóa dòng cha thì cột FK ở dòng con tự chuyển thành NULL, dòng con vẫn còn">SET NULL</dfn></th><td>the child row's FK column becomes <code>NULL</code></td><td>the child should outlive the parent, just un-link it — the FK column must be nullable</td></tr>
+<tr><th><dfn data-en="a referential action where deleting the parent row resets the child row's foreign key column to its declared DEFAULT value instead of NULL or deletion" data-vn="SET DEFAULT (giữ nguyên) — xóa dòng cha thì cột FK ở dòng con quay về giá trị DEFAULT đã khai">SET DEFAULT</dfn></th><td>the FK column resets to its declared <code>DEFAULT</code> value</td><td>rare — a "fallback parent" must already exist as a real row (e.g. an "Unassigned" category)</td></tr>
+</tbody>
+</table>
+</div>
+<p>Each is written on the foreign key itself:</p>
+<pre><code><span class="cm">-- order_items has no meaning without its order — it dies with it</span>
+CREATE TABLE order_items (
+    order_id INT REFERENCES orders(id) ON DELETE CASCADE,
+    product_id INT NOT NULL,
+    qty INT NOT NULL
+);
+
+<span class="cm">-- a comment should survive its author leaving; just show "deleted user"</span>
+CREATE TABLE comments (
+    id INT PRIMARY KEY,
+    author_id INT REFERENCES accounts(id) ON DELETE SET NULL,
+    body TEXT NOT NULL
+);</code></pre>
+<p><code>ON UPDATE</code> takes the same four actions, for the rarer case where a parent's primary key value itself changes (almost never, if you use a stable generated id) — the same reasoning applies, so this lesson focuses on <code>ON DELETE</code>, the one you'll actually decide on regularly.</p>
+
+<div class="callout"><strong>Ties to Lesson 34:</strong> that lesson picked soft delete for <code>accounts</code> specifically because neither RESTRICT nor CASCADE was the right answer — RESTRICT blocks the "close my account" feature outright, and CASCADE would erase order history a finance report still needs. Soft delete sidesteps the referential-action question entirely: the parent row never actually goes away, so nothing downstream ever fires. That's not a coincidence — soft delete and referential actions are two different answers to the same question ("what happens to the children"), and real schemas mix both depending on the relationship.</div>
+
+<h2>3 · A per-relationship judgment call, not one rule for the whole schema</h2>
+<p>The mistake is treating this as one setting for the whole database instead of one decision per relationship. Lesson 2's own order example has both shapes sitting right next to each other:</p>
+<ul>
+<li><code>order_items.order_id</code> → <strong>CASCADE.</strong> A line item with no order is meaningless — it can't exist independently, so it shouldn't outlive the row it belongs to.</li>
+<li><code>orders.account_id</code> → <strong>RESTRICT</strong> (or soft delete on <code>accounts</code>, per Lesson 34). An order is a legal/financial record — it must never silently vanish just because someone closed their account.</li>
+</ul>
+<p>The test that separates them: <strong>does the child row mean anything without this exact parent?</strong> Yes → CASCADE is honest, not dangerous. No, but the link itself is optional → SET NULL. No, and the child must never lose its parent silently → RESTRICT, and force whoever's deleting to make an explicit decision (soft delete, reassign, or a confirmed cascade in application code).</p>
+
+<h2>4 · Handling RESTRICT in application code</h2>
+<p>A RESTRICT violation isn't a bug to fix — it's Postgres correctly refusing an unsafe delete. The handler's job is to catch that specific error and turn it into a clear response, the same "translate the database error into a named sentinel" shape Lesson 37's <code>translateSerializationFailure</code> used for a different Postgres error code:</p>
+<pre><code><span class="cm">// ErrAccountHasOrders is returned when a RESTRICT-protected foreign key
+// blocks the delete — checked via errors.Is at the call site, same pattern
+// as every other sentinel error in this course.</span>
+<span class="kw">var</span> ErrAccountHasOrders = errors.New(<span class="st">"account still has orders: cannot close"</span>)
+
+<span class="cm">// closeAccount attempts to delete an account row. If accounts.id is still
+// referenced by a RESTRICT foreign key (e.g. orders.account_id), Postgres
+// returns a foreign_key_violation (SQLSTATE 23503) instead of deleting —
+// translated here into a clear, expected error instead of a raw DB message
+// leaking to the caller (Lesson 7's information-disclosure rule, applied
+// to a constraint error instead of a 500).</span>
+<span class="kw">func</span> closeAccount(ctx context.Context, db DB, accountID <span class="ty">int64</span>) error {
+    _, err := db.ExecContext(ctx, <span class="st">`DELETE FROM accounts WHERE id = $1`</span>, accountID)
+    <span class="kw">if</span> err == <span class="kw">nil</span> {
+        <span class="kw">return</span> <span class="kw">nil</span>
+    }
+    <span class="kw">if</span> isForeignKeyViolation(err) { <span class="cm">// checks pgconn.PgError.Code == "23503" in real pgx code</span>
+        <span class="kw">return</span> ErrAccountHasOrders
+    }
+    <span class="kw">return</span> fmt.Errorf(<span class="st">"close account: %w"</span>, err)
+}</code></pre>
+<p>That's the same fold-the-database's-own-guarantee-into-a-named-error move this course keeps returning to: Lesson 35's unique violation, Lesson 37's serialization failure, and now a foreign-key violation — three different Postgres error codes, one shared habit of translating them into sentinels the caller can branch on instead of a raw driver error.</p>
+
+<div class="interview">
+<p><strong>Q: "Your team is designing a `documents` table where each document belongs to a `folder`. What FK behavior would you pick for `documents.folder_id` when a folder is deleted, and why?"</strong> A strong answer, out loud: <em>"It depends what deleting a folder is supposed to mean to the user. If 'delete this folder' should delete everything in it — the way a filesystem trash works — CASCADE is honest: the documents genuinely have no home without it. If instead the product wants 'delete this folder' to just ungroup the documents back to some root level, SET NULL is closer, as long as folder_id is nullable and the UI already handles a document with no folder. What I wouldn't do is default to RESTRICT and let users hit a confusing error the first time they try to delete a folder with anything in it — that's a product decision hiding behind a database error."</em> The signal: treating it as a product question first, a constraint syntax question second.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A foreign key with no ON DELETE clause defaults to RESTRICT: Postgres refuses the delete with an error while any child row still references the parent, rather than silently allowing or cascading it.">
+    <p class="stem">A foreign key is declared with no ON DELETE clause at all. What happens when someone tries to delete the referenced parent row?</p>
+    <button class="opt" data-ok>the delete is refused while any child row references it</button>
+    <button class="opt">every referencing child row is deleted along with the parent</button>
+    <button class="opt">the foreign key column on each child becomes NULL instead</button>
+    <button class="opt">Postgres silently ignores the constraint and deletes the parent anyway</button>
+  </div>
+  <div class="q" data-why="order_items has no meaning independent of its order — a line item existing without the order it belongs to is meaningless, which is exactly the case CASCADE is honest for rather than dangerous.">
+    <p class="stem">Why is ON DELETE CASCADE the right choice for order_items.order_id specifically?</p>
+    <button class="opt" data-ok>a line item means nothing without its own order</button>
+    <button class="opt">CASCADE always executes noticeably faster than RESTRICT does here</button>
+    <button class="opt">order_items has no primary key of its own here</button>
+    <button class="opt">CASCADE is required for every foreign key in Postgres</button>
+  </div>
+  <div class="q" data-why="Lesson 34 chose soft delete for accounts specifically because CASCADE would have destroyed order history a finance report still needs, and RESTRICT would block the close-my-account feature outright — soft delete sidesteps the referential-action question by never actually deleting the parent row.">
+    <p class="stem">Why did Lesson 34 reach for soft delete on accounts instead of ON DELETE CASCADE?</p>
+    <button class="opt" data-ok>CASCADE would erase order history other records still need</button>
+    <button class="opt">Postgres does not support CASCADE on that particular table</button>
+    <button class="opt">soft delete always runs measurably faster than any CASCADE</button>
+    <button class="opt">accounts has no foreign keys pointing back at it</button>
+  </div>
+  <div class="q" data-why="This mirrors the pattern this course already uses for other Postgres error codes (Lesson 35's unique violation, Lesson 37's serialization failure): catch the specific error code and translate it into a named sentinel the caller can check with errors.Is, instead of leaking the raw driver error or crashing.">
+    <p class="stem">A DELETE fails because of a RESTRICT foreign key. What should the handler do with that error?</p>
+    <button class="opt" data-ok>translate it into a named sentinel error the caller checks</button>
+    <button class="opt">just retry the exact same DELETE statement a few times</button>
+    <button class="opt">silently swallow the error and report a fake success anyway</button>
+    <button class="opt">switch the whole transaction over to a stricter isolation level</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://www.postgresql.org/docs/current/ddl-constraints.html#DDL-CONSTRAINTS-FK">PostgreSQL Manual — Foreign Keys</a> — RESOURCES.md already cites the PostgreSQL Manual generally for "tables, constraints, defaults, schemas" (already extended by Lessons 19, 21, and 34 into specific mechanisms); this lesson reads the same Constraints chapter into the <code>ON DELETE</code>/<code>ON UPDATE</code> action list. Kleppmann's <a href="https://dataintensive.net">Designing Data-Intensive Applications</a>, ch. 2, is the same standing citation Lesson 2 already used for why relationships are modeled as keys in the first place.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> open — still no reported quiz/lesson-completion outcome exists for any lesson after 37 rounds; distributed locks and blue-green/canary deploys remain the last named, confirmed out-of-scope-per-MISSION.md candidates if no fresh gap or user-chosen track surfaces first.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

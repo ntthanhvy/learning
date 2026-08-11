@@ -34,6 +34,8 @@
       file: "lessons/0013-pathlib.html" },
     { n: 14, date: "2026-08-11", title: "datetime & timezones",
       file: "lessons/0014-datetime-and-timezones.html" },
+    { n: 15, date: "2026-08-12", title: "logging",
+      file: "lessons/0015-logging.html" },
   ];
 
   const REFS = [

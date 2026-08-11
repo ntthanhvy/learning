@@ -1715,3 +1715,101 @@
   going forward to `clip()`, `between()`, or `combine_first()` (all three
   re-confirmed genuinely uncovered by this round's own grep, not yet picked
   up) if no drill-outcome signal surfaces by next generation.
+- 2026-08-12 generation (Lesson 35, headless 06:00 run): confirmed the
+  idempotency check first — no `data/lessons/0035-*.html` existed yet and
+  Lesson 35 wasn't in `assets/nav.js` (highest was Lesson 34, dated
+  2026-08-11) — so this round proceeded. DB access (`psql`/`bin/query-progress`,
+  bare `env`, and `~/.config/learning/db.env`) was treated as unreachable per
+  this round's own guidance (established across every prior round) and not
+  re-attempted — no `course_progress`/`lesson_completed` signal beyond the
+  Lesson 1 baseline, so no reported weak spot to target. Lesson 34's own
+  teaser named three candidates explicitly (`clip()`, `between()`,
+  `combine_first()`) — re-grepped `lessons/*.html` and `reference/
+  glossary.html` fresh before picking and confirmed all three still only
+  appeared inside Lesson 34's own teaser sentence, genuinely uncovered.
+  Picked `clip()` per the task's own recommendation (highest interview
+  frequency of the three — capping outliers/enforcing a valid range is a
+  routine cleaning step) and confirmed it also pairs cleanly as a named,
+  one-call vectorized answer to the nested-if/else shape Lessons 12
+  (`apply()`) and 24 (`np.where()`) already covered by hand. Lesson 35
+  ships: the outlier/typo-capping problem framing, `clip(lower=, upper=)`
+  with both bounds at once, either bound alone (`lower=` only / `upper=`
+  only), the explicit nested-`np.where()` equivalence with a SQL
+  `GREATEST(lower, LEAST(upper, col))` bridge, per-row bounds via a
+  same-length Series passed to `lower=`/`upper=` (tied to Lesson 16's
+  `transform()` for building a per-group bound first), DataFrame-wide
+  `clip()` applying the same bounds to every numeric column independently,
+  and the closing "no crash, quietly wrong" gotcha since Lesson 19: NaN
+  passes straight through `clip()` untouched and unflagged, not filled with
+  either bound — it is a bounding step, not a `fillna()`. `uv run --with
+  pandas` worked directly this round (pandas 3.0.5, numpy pulled in as a
+  dependency): every number was hand-verified in
+  `.scratch/data-lesson35/explore.py` (deleted after) against the real
+  `orders_raw.csv` clean 4-row slice before writing a word of the lesson —
+  `clip(lower=50, upper=150)` gives `[120.0, 50.0, 50.0, 150.0]`;
+  `clip(lower=50)` gives `[120.0, 50.0, 50.0, 180.0]`; `clip(upper=100)`
+  gives `[100.0, 42.0, 35.5, 100.0]`; the nested `np.where()` hand-written
+  equivalent matched the two-bound clip exactly; a per-row Series floor
+  `[100, 40, 50, 40]` gives `[120.0, 42.0, 50.0, 180.0]` (only Binh's 35.5
+  row is pulled up, to its own row's floor of 50); a DataFrame-wide
+  `clip(lower=0, upper=8)` on a small 2-column table clips each column
+  independently; and a 3-element Series with one NaN confirmed the NaN
+  passthrough exactly (`[50.0, NaN, 150.0]`, still NaN, not filled). Also
+  explored — and deliberately did NOT teach — an inverted-bounds edge case
+  (`lower > upper`) after finding its actual per-element output matched
+  neither of the two obvious "sequential clip" hypotheses tested
+  (`max(lower, min(upper, x))` nor `min(upper, max(lower, x))`); since this
+  isn't documented, standard, or interview-relevant behavior, it was left
+  out of the lesson entirely rather than teaching an under-verified quirk —
+  worth a note here in case a future round is tempted to add it without
+  re-deriving the real formula first. Checked the by-now-expected
+  Ellipsis-placeholder family (Lessons 19-34) with a standalone throwaway
+  script before writing the practice file: unlike most prior lessons,
+  EVERY candidate placeholder position tested for `clip()` reliably raised
+  `TypeError: '>=' / '<=' not supported between instances of 'float' and
+  'ellipsis'` — `clip(lower=...)`, `clip(upper=...)`, `clip(lower=...,
+  upper=150)`, a bare Ellipsis inside a `pd.Series([...])` list literal used
+  as a per-row bound, and `s.clip(lower=50, upper=...)` all raised cleanly,
+  with no "Ellipsis is truthy"/"valid .loc[] indexer"/"valid list element"
+  silent-pass variant surfacing this round — the simplest placeholder-design
+  round in this course's history. One real drafting bug was still caught
+  before shipping: Exercise 4's first draft built `row_floor =
+  pd.Series([100, 40, 50, 40])` (fully solved, no placeholder at all) and
+  called `amounts.clip(lower=...)` instead of using `row_floor`, which
+  would have shipped Exercise 4 testing a plain scalar clip instead of the
+  per-row-Series feature it's supposed to cover — caught by proofreading
+  before the first run, fixed by moving the `...` into the `row_floor` list
+  literal itself and changing the call to `amounts.clip(lower=row_floor)`.
+  The shipped (unsolved) `practice/35_clip.py` was executed in
+  `.scratch/data-lesson35/practice/` (fixture CSVs copied alongside) and
+  printed all 5 ✗ with no crash on the first attempt after that fix, then a
+  separately-saved solved copy (`.scratch/data-lesson35/practice/
+  35_solved.py`, not shipped, each `...` filled in by hand rather than
+  uncommenting a pre-written answer) printed all 5 ✓ against the same
+  hand-verified numbers above. The shipped file was also re-run a second
+  time directly from its real `practice/` location (`cd data && uv run
+  --with pandas python3 practice/35_clip.py`) and confirmed to print the
+  identical all-✗ result with no crash. `.scratch/data-lesson35/` was fully
+  removed (`rm -rf`) after verification, no approval needed this round.
+  Added `clip()` to the glossary (checked for a collision first — none) and
+  registered Lesson 35 in nav.js. Quiz options were drafted and checked
+  with a Python word-count script (regex-extracted option strings,
+  whitespace-split) run via `uv run python3` (this course's established
+  convention since Lesson 26/27's finding that plain `python3` needs
+  approval while `uv run python3` doesn't) — the first draft came out
+  mismatched on all three questions (Q1 at 6/6/4, Q2 at 5/3/7, Q3 at
+  6/5/5) and needed several rewrite + recount cycles per question (Q2 took
+  four passes, since two early "fixes" changed one option's count without
+  checking the other two moved too) before a final independent recount via
+  a `Grep` extraction plus manual read-through (this course's established
+  convention since Lesson 19) confirmed all three genuinely level at 6/6/6,
+  7/7/7, and 6/6/6. Also caught and fixed a stray `</p>` left over inside
+  the Section 3 `.callout` div (should have closed with `</div>` only) during
+  a final proofread pass before shipping. `bin/record-progress data
+  lesson_generated --day 35 --lesson 0035-clip-bounding-values.html
+  --detail '{"by":"launchd"}'` was run once from the repo root as instructed
+  and succeeded on the first try, no approval blocker this round. Set the
+  teaser going forward to `between()` or `combine_first()` (Lesson 34's
+  other two named candidates, both re-confirmed still genuinely uncovered
+  by this round's own grep, deferred once in favor of `clip()`) if no
+  drill-outcome signal surfaces by next generation.

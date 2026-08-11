@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 15 · logging</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 15 · ~20 min · 12 Aug 2026</p>
+<h1>logging</h1>
+<p class="byline">Day 8 taught catching exceptions narrowly instead of letting them crash the program. But a caught exception that vanishes silently is its own bug — nobody finds out it happened until a customer complains. Today's module is how real programs keep a permanent, filterable record of what happened, including the failures Day 8 already knows how to catch. This closes out Phase 2a's last spine bullet, alongside Day 13's <code>pathlib</code> and Day 14's <code>datetime</code>/timezones, and is the third of the "most-used stdlib corners" trio.</p>
+
+<div class="callout"><strong>Bridge from SQL:</strong> think of a busy production database — nobody tails a live <code>SELECT</code> stream to know if something broke; they check a log table of statement failures, each one stamped with a severity and a timestamp, and query it after the fact ordered by time or filtered by severity. Python's <code>logging</code> module is that log table for a running program: every entry gets a severity <strong>level</strong>, a timestamp, and a source, and can be filtered or routed without touching the code that produced it.</div>
+
+<h2>1 · Why <code>print()</code> isn't enough</h2>
+<p><code>print()</code> has done fine as a debugging tool all course, but it breaks down the moment code needs to run unattended: a <code>print()</code> statement has no severity (a routine status line looks identical to "the database is unreachable"), always goes to the same place (there's no separating "warnings only" from "everything"), and can't be turned off per-module without deleting or commenting out every call. The standard library's <code><dfn data-en="Python's standard-library module for recording what a running program is doing, at a chosen severity level, routed to one or more destinations — the production-grade replacement for scattering print() calls through code" data-vn="giữ nguyên &quot;logging&quot; module — module chuẩn thư viện ghi lại chương trình đang làm gì, theo mức độ ưu tiên, thay cho việc rải print() khắp code">logging</dfn></code> module exists to fix exactly these three gaps at once.</p>
+
+<h2>2 · Levels: severity, not just text</h2>
+<p>Every log call carries a <dfn data-en="a named severity ranking attached to every log record — DEBUG, INFO, WARNING, ERROR, CRITICAL in increasing order — used to filter which messages are actually emitted" data-vn="giữ nguyên &quot;level&quot; — mức độ ưu tiên gắn với mỗi log record: DEBUG, INFO, WARNING, ERROR, CRITICAL, tăng dần, dùng để lọc log nào được in ra">level</dfn>, one of five standard names in increasing severity:</p>
+<pre><code><span class="kw">import</span> logging
+
+logging.debug(<span class="str">"opened connection pool"</span>)     <span class="cm"># fine-grained detail, dev only</span>
+logging.info(<span class="str">"loaded 42 rows"</span>)             <span class="cm"># routine, expected events</span>
+logging.warning(<span class="str">"row 17 missing a currency"</span>)  <span class="cm"># unexpected but recoverable</span>
+logging.error(<span class="str">"could not write output file"</span>) <span class="cm"># a real failure</span>
+logging.critical(<span class="str">"database unreachable"</span>)    <span class="cm"># the program likely can't continue</span></code></pre>
+<p>A level isn't decoration — it's the filter. Tell the logging system "only show me WARNING and above" and every <code>debug()</code>/<code>info()</code> call goes silent without deleting a single line of code, the exact per-module on/off switch <code>print()</code> can't give you.</p>
+
+<h2>3 · Logger, handler, formatter: who does what</h2>
+<p>Three objects cooperate on every log call, and keeping their jobs separate is the one idea this lesson spends most of its time on:</p>
+<pre><code><span class="kw">import</span> logging
+
+logger = logging.getLogger(__name__)      <span class="cm"># 1. the logger — the thing your code calls</span>
+handler = logging.StreamHandler()         <span class="cm"># 2. the handler — where records go</span>
+formatter = logging.Formatter(            <span class="cm"># 3. the formatter — how a record renders</span>
+    <span class="str">"%(asctime)s %(levelname)s %(name)s: %(message)s"</span>
+)
+handler.setFormatter(formatter)
+logger.addHandler(handler)
+logger.setLevel(logging.INFO)
+
+logger.info(<span class="str">"pipeline started"</span>)
+<span class="cm"># 2026-08-12 09:00:00,123 INFO __main__: pipeline started</span></code></pre>
+<p>A <dfn data-en="the object application code actually calls (logger.info(...), logger.error(...)); identified by name (getLogger(__name__)), decides whether a record clears its own level, then hands surviving records to its handlers" data-vn="giữ nguyên &quot;logger&quot; — object mà code gọi trực tiếp (logger.info(...)), có tên riêng, tự quyết định record có đạt level không rồi mới đưa cho handler">logger</dfn> is what application code actually calls — created with <code>logging.getLogger(name)</code>, almost always <code>__name__</code> so the logger's name matches Day 9's module name exactly, making it obvious which file produced a given line. A <dfn data-en="the object owning where a log record is sent — a stream (console), a file, or elsewhere — attached to a logger with addHandler(); a single logger can have several, sending the same record to multiple destinations" data-vn="giữ nguyên &quot;handler&quot; — object quyết định record đi đâu (console, file, ...), gắn vào logger bằng addHandler(), 1 logger có thể có nhiều handler">handler</dfn> owns the destination — a console stream, a file, or elsewhere — and a single logger can have several handlers, sending the same record to more than one place at once. A <dfn data-en="the object owning how a log record renders as text — timestamp format, which fields appear, in what order — attached to a handler with setFormatter(), so the same record looks different depending on the handler it went through" data-vn="giữ nguyên &quot;formatter&quot; — object quyết định record hiển thị thành text như thế nào (timestamp, field nào, thứ tự), gắn vào handler bằng setFormatter()">formatter</dfn> owns how a record renders as text — attached to the handler, not the logger, so the exact same call can print two different-looking lines through two different handlers. Splitting these three jobs is what lets one <code>logger.info(...)</code> call end up on the console *and* in a file, formatted differently for each, with zero change to the calling code.</p>
+
+<h2>4 · <code>basicConfig</code>: the one-call setup for a script</h2>
+<p>Wiring a logger, handler, and formatter by hand every time is more than most scripts need. <code>logging.basicConfig(...)</code> does the same three-step setup from section 3 in one call, applied to the shared <dfn data-en="the implicit top-level logger every module's getLogger(__name__) logger reports up to by default; logging.basicConfig() configures this one, and every other logger inherits its level/handler unless overridden" data-vn="giữ nguyên &quot;root logger&quot; — logger gốc mà mọi logger khác mặc định báo cáo lên, basicConfig() cấu hình logger này">root logger</dfn> every other logger reports up to by default:</p>
+<pre><code>logging.basicConfig(
+    level=logging.INFO,
+    format=<span class="str">"%(asctime)s %(levelname)s %(name)s: %(message)s"</span>,
+)
+
+logger = logging.getLogger(__name__)
+logger.info(<span class="str">"pipeline started"</span>)
+logger.warning(<span class="str">"row 17 missing a currency"</span>)</code></pre>
+<p><code>basicConfig()</code> must run once, before the first log call, and only the first call in a process has any effect — later calls are silently ignored, which is the standard-library's way of keeping one script's setup from clobbering another module's. This is the right tool for a single script; section 3's manual wiring is what a library module reaches for so it never forces its own format choices onto the program importing it.</p>
+
+<h2>5 · Logging a caught exception</h2>
+<p>This is where Day 8 and today meet. A narrow <code>except</code> block that swallows an error silently is exactly the kind of bug this course has warned against since Day 8 — the fix isn't to stop catching narrowly, it's to log inside the block before moving on:</p>
+<pre><code>logger = logging.getLogger(__name__)
+
+<span class="kw">def</span> safe_int(text):
+    <span class="kw">try</span>:
+        <span class="kw">return</span> int(text)
+    <span class="kw">except</span> ValueError:
+        logger.error(<span class="str">"could not parse %r as an int"</span>, text, exc_info=<span class="kw">True</span>)
+        <span class="kw">return</span> <span class="kw">None</span></code></pre>
+<p><code>exc_info=True</code> tells the handler to attach the full traceback under the log line, the same traceback an uncaught exception would have printed — so the failure is still fully visible, just captured instead of crashing the program. Note the message uses <code>%r</code> with <code>text</code> passed as a separate argument rather than an f-string: <code>logging</code> only builds the final string if the record actually clears its handler's level, so an expensive-to-format DEBUG message costs nothing when DEBUG output is filtered out — an f-string would already have paid that cost before <code>logging</code> ever saw it.</p>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> pandas pipelines still log through this exact same stdlib module — there's no separate "pandas logging" — so everything here carries over directly once <code>data/</code> pipelines get real, unattended.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/15_logging.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/15_logging.py</code></pre>
+<p>No dependencies — standard library only. Exercises: building a logger with a handler and formatter attached, filtering records by level, reading back a formatted record's text, logging a caught <code>ValueError</code> with a traceback attached, and confirming a below-threshold call produces no record at all.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="print() has no severity, always writes to the same place, and can't be selectively silenced per module without editing code. logging attaches a level to every record and can filter or route it without touching the calling code.">
+    <p class="stem">What's the core gap <code>logging</code> fixes that <code>print()</code> can't?</p>
+    <button class="opt" data-ok>print() has no severity level or per-module filtering at all</button>
+    <button class="opt">print() cannot format a string with a variable inside it</button>
+    <button class="opt">print() is slower than every logging call at any level</button>
+  </div>
+  <div class="q" data-why="The logger is what application code calls directly and decides whether a record clears its own level. The handler owns the destination a record is sent to, and a single logger can have more than one handler attached at once.">
+    <p class="stem">What does a <strong>handler</strong> own, as distinct from the logger itself?</p>
+    <button class="opt" data-ok>the destination a log record is actually sent to</button>
+    <button class="opt">the severity level assigned to each log call made</button>
+    <button class="opt">the name printed for the module that logged it</button>
+  </div>
+  <div class="q" data-why="A formatter is attached to a handler with setFormatter(), controlling how a record renders as text for that specific destination, so the same logger.info() call can render two different ways through two different handlers.">
+    <p class="stem">Where does a <strong>formatter</strong> get attached, and what does that enable?</p>
+    <button class="opt" data-ok>to a handler, so each destination can render text differently</button>
+    <button class="opt">to a logger, so every handler shares one text layout</button>
+    <button class="opt">to the root logger only, globally, with no per-call override</button>
+  </div>
+  <div class="q" data-why="basicConfig() only has an effect on its first call in a process — later calls are silently ignored, which is why it must run once, early, before any log call, rather than being called repeatedly from different modules.">
+    <p class="stem">What happens if <code>logging.basicConfig()</code> is called a second time later in the same process?</p>
+    <button class="opt" data-ok>it is silently ignored — only the first call takes effect</button>
+    <button class="opt">it overwrites the earlier setup entirely with a brand new configuration</button>
+    <button class="opt">it raises an exception since setup can only run once ever</button>
+  </div>
+  <div class="q" data-why="exc_info=True attaches the full traceback to the log record, the same traceback an uncaught exception would print, so the error stays fully visible in the log instead of vanishing silently inside a narrow except block that only logs a plain message.">
+    <p class="stem">Inside an <code>except</code> block, what does passing <code>exc_info=True</code> to a log call add?</p>
+    <button class="opt" data-ok>the full traceback of the exception that was just caught</button>
+    <button class="opt">a second copy of the message sent to every handler</button>
+    <button class="opt">the exact line number of the log call itself only</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official <a href="https://docs.python.org/3/howto/logging.html">Logging HOWTO</a> — walks through levels, the logger/handler/formatter split, and <code>basicConfig()</code> in the same order this lesson used; the <a href="https://docs.python.org/3/library/logging.html">logging module docs</a> are the full API reference once the HOWTO's shape is familiar.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day15">glossary</a> under Day 15.<br>
+This completes Phase 2a's stdlib-corners bullet (<code>pathlib</code>, <code>datetime</code>/timezones, <code>logging</code>) — Phase 2b's FastAPI + pydantic backend phase is next per PLAN.md.<br><br>
+💬 Anything unclear — logger vs. handler vs. formatter, or when to reach for <code>exc_info=True</code>? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

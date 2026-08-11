@@ -1206,3 +1206,120 @@ fail *gracefully* so the learner sees which task failed.
   outcome is "not recorded to DB this run," not retried, consistent with the
   majority of prior days (only Days 5 and 9–13 succeeded non-interactively;
   Days 1–4, 6, 7, 8 all required approval and were not recorded).
+- 2026-08-12 generation (Day 15): **Day 15 generated**
+  (`lessons/0015-logging.html`), the headless run's eighth Phase 2 lesson and
+  **the last item of Phase 2a's stdlib-corners bullet** — Phase 2b's FastAPI +
+  pydantic backend phase is next per PLAN.md. Idempotency check confirmed
+  on-disk before writing anything: highest existing lesson file was `0014-…`
+  dated 2026-08-11, no `0015-…` file existed, and no `2026-08-12` entry
+  existed yet in this file's own log or in `assets/nav.js` — generation
+  proceeded as Day 15, not a re-run.
+  Topic: `logging` — the third and last of the three items bundled into
+  PLAN.md's Phase 2a spine's last bullet ("`pathlib`, `datetime`/timezones,
+  `logging` — the three most-used stdlib corners left"), directly following
+  Day 13's `pathlib` and Day 14's `datetime`/timezones, and Day 14's own
+  closing line, which had already named `logging` as next. Kept to one core
+  mechanism taught deeply, per this run's own instruction: the
+  logger/handler/formatter split (section 3) — logger is what code calls and
+  decides on its own level, handler owns the destination, formatter owns text
+  rendering, attached to the handler not the logger, so one log call can
+  render two different ways through two different handlers. Also taught: why
+  `print()` isn't enough (no severity, no destination routing, no per-module
+  on/off switch); the five standard levels (DEBUG/INFO/WARNING/ERROR/CRITICAL)
+  as the filter mechanism itself, not just labels; `basicConfig()` as the
+  one-call setup for a script versus manual wiring for a library module, and
+  the load-bearing detail that only its first call in a process has any
+  effect; and logging a caught exception with `exc_info=True` to attach the
+  traceback, tied directly back to Day 8's exceptions material — a narrow
+  `except` block that logs before returning instead of silently swallowing
+  the error, plus the `%r`/lazy-formatting argument over an f-string (a
+  filtered-out DEBUG call never pays the string-building cost). Bridged from
+  SQL per the baseline record and per this run's explicit instruction: a
+  production database's log table of statement failures, each stamped with a
+  severity and queried after the fact, introduced before any Python in the
+  top callout, not from a pandas or other "Python-adjacent" analogy.
+  Learning records: still only the Day 1 baseline
+  (`learning-records/0001-baseline-reads-python-writes-little.md`) — no
+  completion/quiz record for any later day was found (same gap every Day
+  8–14 entry already flagged). Paced conservatively per that same assumption:
+  exactly one core mechanism (logger/handler/formatter split) given the most
+  explanatory weight, anchored to already-taught material (Day 6 context
+  managers implicitly via "always runs" framing reused from Day 8/11 rather
+  than restated, Day 8 exceptions explicitly in section 5, Day 9 modules via
+  `getLogger(__name__)`), and no additional logging features (custom filters,
+  `RotatingFileHandler`, `dictConfig`, structured/JSON logging, the
+  `logging.config` module) pulled in beyond the spine's single line.
+  Unverified against real quiz/completion data, same caveat as every entry
+  since Day 8.
+  No-pandas rule: `logging` itself is standard library, fully in scope; grep
+  for `pandas|numpy|dataframe`, case-insensitive, across both new files found
+  zero hits in the practice file and exactly one hit in the lesson — a
+  one-line callout stating pandas pipelines log through this same stdlib
+  module with no separate "pandas logging," placed once after section 5 and
+  labeled in prose as the only such sentence, matching the hard-rule section
+  above.
+  Practice file `practice/15_logging.py` (5 exercises: building a logger with
+  a handler and formatter attached via `build_logger()`, filtering by level
+  via `set_logger_level()`, logging a message and reading back the formatted
+  text from an in-memory `io.StringIO` stream via `log_and_read()`, logging a
+  caught `ValueError` with `exc_info=True` via `safe_int()`, and confirming a
+  below-threshold `logger.info()` call produces no output at all via
+  `log_below_threshold()`) needed no on-disk fixtures — every exercise logs
+  into an in-memory `io.StringIO` stream via a `StreamHandler`, avoiding both
+  real files and stdout/stderr capture, so checks stay deterministic; each
+  check calls a `_fresh_logger()` helper that clears any existing handlers on
+  a uniquely-named logger before wiring a new stream+handler, since
+  `logging.getLogger(name)` returns the *same* cached logger object for a
+  repeated name (this course's own Day 9 module-caching idea, applied to
+  loggers) and stale handlers from an earlier check would otherwise leak into
+  a later one's output. Verified in a scratch dir (`.scratch_py15_verify/`,
+  created under the repo root and removed after use, per the Day 3–14
+  precedent that `/tmp` is out of bounds for this sandbox): the shipped
+  (unsolved) copy ran via `uv run python3`, both from the scratch copy and
+  from its real `practice/` path with the documented command, and printed
+  five clean ✗ lines with no traceback each time — confirmed every unsolved
+  function's bare `...` body returns `None`, which fails every check's
+  comparison rather than raising, per this run's own warning about
+  silent-success bugs; a separately solved copy (each TODO filled in directly
+  in the scratch copy) printed five ✓ and the "All green" tally. No bugs
+  found during verification — both passes succeeded on the first attempt.
+  Glossary: added a Day 15 section to `reference/glossary.html` (`logging`,
+  `level`, `logger`, `handler`, `formatter`, `root logger`) after confirming
+  via grep that none of the six terms/entries collided with any Day 1–14
+  entry — each appears exactly once in the glossary file, at its own Day 15
+  row. All six also got matching `<dfn>` markup at first use in the lesson
+  body, matching Day 11–14's density of glossarying every newly introduced
+  term inline rather than leaving any undefined (`logger`/`handler`/
+  `formatter`/`root logger` are all defined within section 3/4's shared
+  paragraphs rather than one dfn per short standalone sentence, but each
+  still gets its own distinct `<dfn>` tag at its first mention).
+  Quiz: 5 questions. Word counts were checked with individual `wc -w` calls
+  per option line (not by eye, not piped through compound commands, since
+  this sandbox's approval gate blocks compound bash commands exactly as in
+  every prior day) and mismatched on the first draft for four of the five
+  questions (Q1 9/10/10, Q3 10/11/10, Q4 11/9/11, Q5 8/10/10) — Q2 was
+  already equal on the first draft (9/9/9). Each mismatched question went
+  through one to two rewrite-and-recount rounds — Q4's second option in
+  particular needed two attempts (9 → 10 → 11 words) before matching its
+  siblings — until every option matched (Q1 10/10/10, Q3 10/10/10, Q4
+  11/11/11, Q5 10/10/10), then a full final recount pass across all five
+  questions' three options each (15 lines total, each checked individually
+  with its own `wc -w` call) confirmed every one before shipping, per this
+  file's instruction to recount after any edit. Registered in `assets/nav.js`
+  with `date: "2026-08-12"`.
+  **DB access:** the read path (`bin/query-progress`) was not attempted this
+  run, per this run's own explicit instruction to treat DB reads as
+  unreachable and not retry; learning-record freshness was judged from
+  on-disk files only, consistent with every prior day since Day 8.
+  `bin/record-progress python lesson_generated --day 15 --lesson
+  0015-logging.html --detail '{"by":"launchd"}'` was run once after shipping
+  and **succeeded**: `recorded: python/lesson_generated day=15
+  lesson=0015-logging.html` — continuing the recent run of non-interactive
+  successes (Days 9–13 succeeded, Day 14 required approval and failed, Day 15
+  succeeded again), still inconsistent run to run and unexplained.
+  **This completes Phase 2a's stdlib-corners bullet** (`pathlib` Day 13,
+  `datetime`/timezones Day 14, `logging` Day 15) and, with it, all of Phase
+  2a's spine items (exceptions, modules, `uv`/`pyproject.toml`, `pytest`,
+  decorators, `pathlib`, `datetime`, `logging` — Days 8 through 15). Per
+  PLAN.md, **Phase 2b — FastAPI + pydantic backend — is the natural next
+  topic**, starting with HTTP handlers, path/query params, and status codes.

@@ -80,6 +80,8 @@
       file: "lessons/0036-n-plus-one-queries.html" },
     { n: 37, date: "2026-08-11", title: "Transaction isolation levels",
       file: "lessons/0037-transaction-isolation-levels.html" },
+    { n: 38, date: "2026-08-12", title: "Foreign key referential actions: what happens to the children",
+      file: "lessons/0038-foreign-key-referential-actions.html" },
   ];
 
   const REFS = [

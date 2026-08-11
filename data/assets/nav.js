@@ -74,6 +74,8 @@
       file: "lessons/0033-set-index.html" },
     { n: 34, date: "2026-08-11", title: "pd.get_dummies(): one-hot encoding a category column",
       file: "lessons/0034-get-dummies-one-hot-encoding.html" },
+    { n: 35, date: "2026-08-12", title: "clip(): capping values into a min/max range",
+      file: "lessons/0035-clip-bounding-values.html" },
   ];
 
   const REFS = [

@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 35 · clip()</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 35 · ~20 min · 12 Aug 2026</p>
+<h1>clip(): capping values into a min/max range, vectorized</h1>
+<p class="byline">Lesson 34's teaser named three genuinely-uncovered candidates (confirmed by grep before writing): <code>clip()</code>, <code>between()</code>, and <code>combine_first()</code>. Picked <code>clip()</code>: it's the highest interview-frequency of the three — capping outliers or enforcing a valid range is a routine cleaning step, and it's a clean vectorized answer to a per-row if/else people otherwise reach for <code>apply()</code> or nested <code>np.where()</code> for (Lessons 12 and 24).</p>
+
+<h2>1 · The problem: values outside a valid or sane range</h2>
+<p>Real data has outliers and typos that survive type conversion — a sensor misfire, a fat-fingered extra digit, a discount that should never exceed 100%. Sometimes the fix isn't to drop the row (Lesson 3) or flag it, but to cap it: keep the row, just pull its value back inside a known-valid range. <dfn data-en="a pandas method that caps every value in a Series/DataFrame between a given minimum and maximum -- values already inside the range pass through untouched, values outside are pulled to the nearest bound" data-vn="giữ nguyên 'clip()' — giới hạn giá trị trong khoảng [lower, upper], vượt ngoài thì kéo về biên gần nhất">clip()</dfn> does exactly this in one vectorized call, no loop and no <code>np.where()</code> nesting required.</p>
+<p>On this course's cleaned 4-row slice (An 120.0/01-05, An 42.0/01-10, Binh 35.5/01-06, Binh 180.0/01-09):</p>
+<pre><code>clean[<span class="str">"amount"</span>]
+<span class="cm"># 0    120.0
+# 1     42.0
+# 2     35.5
+# 3    180.0</span></code></pre>
+
+<h2>2 · clip(lower=, upper=): both bounds at once</h2>
+<pre><code>clean[<span class="str">"amount"</span>].clip(lower=<span class="num">50</span>, upper=<span class="num">150</span>)
+<span class="cm"># 0    120.0   <span class="cm"># already inside [50, 150] -- untouched</span>
+# 1     50.0   <span class="cm"># 42.0 was below 50 -- pulled up to 50</span>
+# 2     50.0   <span class="cm"># 35.5 was below 50 -- pulled up to 50</span>
+# 3    150.0   <span class="cm"># 180.0 was above 150 -- pulled down to 150</span></span></code></pre>
+<p>Every value inside <code>[lower, upper]</code> passes through unchanged; anything below <code>lower</code> becomes exactly <code>lower</code>, anything above <code>upper</code> becomes exactly <code>upper</code>. Either bound is optional — pass only <code>lower=</code> to floor values with no ceiling, or only <code>upper=</code> to cap values with no floor:</p>
+<pre><code>clean[<span class="str">"amount"</span>].clip(lower=<span class="num">50</span>)   <span class="cm"># [120.0, 50.0, 50.0, 180.0] -- 180.0 untouched, no upper bound given</span>
+clean[<span class="str">"amount"</span>].clip(upper=<span class="num">100</span>)  <span class="cm"># [100.0, 42.0, 35.5, 100.0] -- 42.0/35.5 untouched, no lower bound given</span></code></pre>
+
+<h2>3 · The vectorized answer to a per-row if/else you'd otherwise nest</h2>
+<div class="callout">Written by hand, the same logic is a nested <code>np.where()</code> (Lesson 24) or an <code>apply()</code> (Lesson 12) — <code>clip()</code> is the named, one-call shortcut for exactly this shape: <code>np.where(x &lt; lower, lower, np.where(x &gt; upper, upper, x))</code>, hand-verified on this slice to produce the identical result <code>[120.0, 50.0, 50.0, 150.0]</code> as Section 2's <code>clip(lower=50, upper=150)</code>. SQL cousin: <code>GREATEST(lower, LEAST(upper, col))</code> — the same "clamp between two bounds" idea, just spelled as nested built-ins instead of one named function.</div>
+
+<h2>4 · Per-row bounds: lower/upper can be a Series too</h2>
+<p><code>lower=</code>/<code>upper=</code> don't have to be a single scalar — passing a same-length Series clips each row against its OWN bound, aligned by position:</p>
+<pre><code>amounts = clean[<span class="str">"amount"</span>].reset_index(drop=<span class="kw">True</span>)   <span class="cm"># [120.0, 42.0, 35.5, 180.0]</span>
+row_floor = pd.Series([<span class="num">100</span>, <span class="num">40</span>, <span class="num">50</span>, <span class="num">40</span>])
+amounts.clip(lower=row_floor)
+<span class="cm"># 0    120.0   <span class="cm"># 120.0 >= 100 -- untouched</span>
+# 1     42.0   <span class="cm"># 42.0 >= 40 -- untouched</span>
+# 2     50.0   <span class="cm"># 35.5 < 50 -- pulled up to that row's own floor, 50</span>
+# 3    180.0   <span class="cm"># 180.0 >= 40 -- untouched</span></span></code></pre>
+<p>This is the shape a "cap this column at each row's group-specific limit" task takes — pair it with Lesson 16's <code>transform()</code> to build a per-group bound Series first, then <code>clip()</code> against it in one more call.</p>
+
+<h2>5 · DataFrame-wide clip()</h2>
+<p>Called directly on a DataFrame (not just one Series), <code>clip()</code> applies the same bounds to every numeric column at once:</p>
+<pre><code>df2 = pd.DataFrame({<span class="str">"a"</span>: [<span class="num">1</span>, <span class="num">5</span>, <span class="num">10</span>], <span class="str">"b"</span>: [<span class="num">100</span>, <span class="num">5</span>, -<span class="num">3</span>]})
+df2.clip(lower=<span class="num">0</span>, upper=<span class="num">8</span>)
+<span class="cm">#    a  b
+# 0  1  8
+# 1  5  5
+# 2  8  0</span></code></pre>
+<p>Column <code>a</code>'s 10 is capped to 8; column <code>b</code>'s 100 is also capped to 8 and its -3 floored to 0 — the same <code>[0, 8]</code> bounds applied independently, column by column.</p>
+
+<h2>6 · The gotcha: NaN passes straight through, untouched and unflagged</h2>
+<p>Continuing this course's "no crash, quietly wrong" family since Lesson 19: <code>clip()</code> does not raise and does not fill a NaN with a bound — a missing value simply stays NaN, invisible in the clipped output unless checked for separately:</p>
+<pre><code>s = pd.Series([<span class="num">10.0</span>, np.nan, <span class="num">200.0</span>])
+s.clip(lower=<span class="num">50</span>, upper=<span class="num">150</span>)
+<span class="cm"># 0     50.0
+# 1      NaN   <span class="cm"># still NaN -- clip() never touches missing values</span>
+# 2    150.0</span></code></pre>
+<p>If a pipeline's next step assumes "every value is now inside <code>[lower, upper]</code>," a leftover NaN silently breaks that assumption. Same reflex as every gotcha since Lesson 19: check <code>.isna().sum()</code> before and after, don't assume <code>clip()</code> also cleaned missing data — it's a bounding step, not a <code>fillna()</code>.</p>
+
+<div class="interview">
+<p><strong>Q: "How would you cap outlier values in a column without dropping the rows?"</strong> A strong answer, out loud: <em>"clip(lower=, upper=) — every value below the lower bound gets pulled up to it, every value above the upper bound gets pulled down to it, everything already inside the range passes through untouched. It's the vectorized version of a nested np.where, or GREATEST/LEAST in SQL. Either bound is optional, and both lower and upper can be a Series instead of a scalar, so I can clip each row against its own per-row or per-group limit. One thing to watch: clip() doesn't touch NaN at all — a missing value stays missing, it's not a substitute for fillna()."</em> The signal: naming the per-row-bound capability and the NaN-passthrough gotcha unprompted, not just describing the two-bound mechanic.</p>
+</div>
+
+<h2>Try it — self-checking practice (~15-20 min)</h2>
+<p>Open <code>practice/35_clip.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/35_clip.py</code></pre>
+<p>Uses the same cleaned rows as Lessons 6-34 (An 120.0/01-05, An 42.0/01-10, Binh 35.5/01-06, Binh 180.0/01-09). Exercise 1 is <code>clip(lower=, upper=)</code> with both bounds; Exercise 2 is <code>lower=</code> only; Exercise 3 is <code>upper=</code> only; Exercise 4 is a per-row Series bound; Exercise 5 reproduces Section 6's NaN-passthrough gotcha.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="clip(lower=50, upper=150) leaves any value already between 50 and 150 unchanged, pulls anything below 50 up to exactly 50, and pulls anything above 150 down to exactly 150 -- it never drops a row or raises an error.">
+    <p class="stem">What does <code>series.clip(lower=50, upper=150)</code> do to a value of 200?</p>
+    <button class="opt" data-ok>pulls it down to exactly 150</button>
+    <button class="opt">drops that row from the Series</button>
+    <button class="opt">raises a ValueError right away, always</button>
+  </div>
+  <div class="q" data-why="clip() is the named, one-call vectorized equivalent of a nested np.where(x < lower, lower, np.where(x > upper, upper, x)) -- both produce the identical clamped result, but clip() is the direct spelling for this exact shape.">
+    <p class="stem">Which is the closest vectorized equivalent to <code>series.clip(lower=a, upper=b)</code>?</p>
+    <button class="opt" data-ok>a nested floor check then ceiling np.where</button>
+    <button class="opt">a plain groupby then mean transform call</button>
+    <button class="opt">a merge against a separate bounds lookup</button>
+  </div>
+  <div class="q" data-why="clip() never touches NaN -- a missing value passes straight through the call unchanged, still NaN in the output. It is a bounding step, not a substitute for fillna(), so a pipeline that assumes every value is now inside [lower, upper] can be silently wrong if NaN rows were never checked separately.">
+    <p class="stem">What happens to a NaN value when you call <code>clip(lower=50, upper=150)</code> on it?</p>
+    <button class="opt" data-ok>it stays NaN, untouched by clip</button>
+    <button class="opt">it becomes the lower bound, 50</button>
+    <button class="opt">it raises a TypeError right away</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the pandas User Guide's <a href="https://pandas.pydata.org/docs/reference/api/pandas.Series.clip.html">"pandas.Series.clip"</a> reference page (~5 min) — covers <code>lower=</code>/<code>upper=</code> as scalars or array-likes and the DataFrame-wide form together; RESOURCES.md's <a href="https://pandas.pydata.org/docs/getting_started/comparison/comparison_with_sql.html">Comparison with SQL</a> page is the source for the <code>GREATEST</code>/<code>LEAST</code> bridge in Section 3.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>clip()</code> is new today.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-35 comes back reported as shakiest, otherwise <code>between()</code> or <code>combine_first()</code> — Lesson 34's other two named candidates, both still genuinely uncovered per this round's own grep.<br><br>
+💬 Anything unclear — per-row bounds, the NaN gotcha, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

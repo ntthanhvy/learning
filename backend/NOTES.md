@@ -1579,3 +1579,91 @@
   priority than a 38th topic picked blind; distributed locks and blue-green/
   canary deploys remain the standing out-of-scope-per-MISSION.md candidates if
   a fresh gap-finding pass is needed again.
+- 2026-08-12 generation (Lesson 38, headless 06:00 run): idempotency check
+  first — confirmed no `lessons/0038-*.html` file existed and lesson 38 was
+  not yet in nav.js before writing anything (highest existing file was 0037,
+  dated 2026-08-11). Per this round's own briefing, `psql`/`bin/query-progress`/
+  reading `~/.config/learning/db.env`/a bare `env` invocation were all treated
+  as reliably unreachable in this headless sandbox and none were attempted —
+  still no `lesson_completed` record exists for any of Lessons 1-37, so pacing
+  came from `lessons/`/`nav.js` file state and Lesson 37's own closing note
+  alone. Lesson 37 left only the two standing out-of-scope-per-MISSION.md
+  candidates (distributed locks, blue-green/canary deploys, both excluded
+  again this round) with no new in-scope candidate, so this round used the
+  same re-read-existing-lessons method that found Lessons 32-37 (six straight
+  gaps found this way): dispatched a research pass over all 37 lesson bodies
+  plus glossary.html, which surfaced that Lesson 34 (soft delete) uses
+  CASCADE twice in passing while motivating its own topic — "either the
+  delete fails outright... or — worse — it was allowed to CASCADE, and every
+  order that account ever placed disappears with it" — without ever explaining
+  it as its own mechanism, and Lesson 2's own foreign-key definition stops at
+  "this row belongs to that row" with no mention of delete/update behavior.
+  Independently re-confirmed via grep across all 37 lesson bodies and
+  glossary.html before writing: "CASCADE"/"RESTRICT" appear only inside
+  Lesson 34's own two sentences, and "SET NULL"/"referential action" had zero
+  hits anywhere — a genuine, previously-named-but-unexplained gap, in scope
+  under MISSION criterion 1 ("entities, relationships, constraints"), not
+  infra/NoSQL/distributed. Lesson 38 covers it: why a foreign key with no
+  ON DELETE clause silently means RESTRICT (Postgres refuses the delete
+  while a child row still references the parent — the "delete fails outright"
+  half of Lesson 34's own sentence, finally named), the four referential
+  actions (RESTRICT, CASCADE, SET NULL, SET DEFAULT) in a comparison table
+  (reusing Lesson 25's `table.cmp`/`.cmp-wrap` component) with what each does
+  and when to reach for it, the per-relationship judgment call illustrated
+  with Lesson 2's own order example split two ways (order_items.order_id
+  wants CASCADE — a line item is meaningless without its order — versus
+  orders.account_id wanting RESTRICT/soft delete, tying directly back to why
+  Lesson 34 picked soft delete in the first place: neither RESTRICT nor
+  CASCADE was the right answer for that relationship), and a Go closeAccount
+  snippet translating a RESTRICT foreign-key violation (SQLSTATE 23503) into
+  a named sentinel error, framed as the same translate-the-database-error-
+  into-a-sentinel habit as Lesson 35's unique violation and Lesson 37's
+  serialization failure. The closeAccount/isForeignKeyViolation/
+  ErrAccountHasOrders Go snippet was compile-checked clean with
+  `go build -C` / `go vet -C` in a scratch module (`.scratch/backend-lesson38/`,
+  built binary written to `/tmp/lesson38bin` and not copied into the scratch
+  dir — `rm -f` on that `/tmp` path was blocked by this session's sandbox as
+  outside the allowed working directory, left in place per the harmless
+  precedent Lessons 27/31/32/35/36/37's notes already established; scratch dir
+  itself left with only `go.mod`/`main.go`, same end-state as every prior
+  round) — no approval blocker for either `-C`-style invocation this round,
+  consistent with every round since Lesson 13's finding. Added `referential
+  action`, `RESTRICT`, `CASCADE`, `SET NULL`, and `SET DEFAULT` to the
+  glossary (confirmed via grep beforehand that none of the five existed
+  anywhere in `lessons/*.html` or `glossary.html`; `foreign key` itself was
+  reused from Lesson 2, not re-added) and registered Lesson 38 in nav.js.
+  Quiz options were drafted, then verified with `wc -w` per line via
+  individual `sed -n '<n>p' | sed -E 's/<[^>]+>//g' | wc -w` calls (no loop/
+  variable-expansion form attempted, consistent with every round since Lesson
+  28's finding that this sandbox rejects that pattern outright) — all four
+  questions needed at least one rewrite pass before landing on equal counts,
+  with one detour where a same-count word-swap edit didn't fix a mismatch (a
+  reminder that "reword" and "add/remove a word" are different fixes); final
+  tallies, each re-verified after every edit and cross-checked a second,
+  independent way (stripping HTML tags first, then `grep -o '[^ ]+' | wc -l`,
+  since the raw untagged version double-counts markup tokens and had to be
+  discarded as an unreliable method for this file): Q1 10/10/10/10, Q2
+  9/9/9/9, Q3 9/9/9/9, Q4 10/10/10/10. Primary source: the PostgreSQL
+  Manual's Foreign Keys section (part of the Constraints chapter) —
+  RESOURCES.md already cites the PostgreSQL Manual generally for "tables,
+  constraints, defaults, schemas" (already extended by Lessons 19, 21, and 34
+  into specific mechanisms), and this lesson reads the same chapter into the
+  ON DELETE/ON UPDATE action list; Kleppmann's DDIA ch. 2 named as the
+  secondary source Lesson 2 already used for why relationships are modeled as
+  keys in the first place. `bin/record-progress backend lesson_generated
+  --day 38 --lesson 0038-foreign-key-referential-actions.html --detail
+  '{"by":"github-actions"}'` was run directly via its relative path from the
+  repo root as instructed and succeeded on the first try, no approval blocker
+  this round — consistent with every round since Lesson 32's finding that the
+  write path works reliably when invoked this way. This closes the
+  referential-action gap found by re-reading Lesson 34 (and Lesson 2) rather
+  than re-scanning MISSION.md or reusing the distributed-locks/blue-green
+  leftovers; still no `lesson_completed` record exists for any lesson after
+  38 rounds — the next session should keep treating a completion/quiz-outcome
+  signal, or a user-named track to deepen, as higher priority than a 39th
+  topic picked blind. No new in-scope teaser candidate surfaced this round
+  beyond the one just closed; distributed locks and blue-green/canary
+  deploys remain the standing out-of-scope-per-MISSION.md candidates if a
+  fresh gap-finding pass (re-reading more existing lessons closely, the
+  method that has now found seven gaps running — Lessons 32-38) is needed
+  again next time.

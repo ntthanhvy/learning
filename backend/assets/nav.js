@@ -82,6 +82,8 @@
       file: "lessons/0037-transaction-isolation-levels.html" },
     { n: 38, date: "2026-08-12", title: "Foreign key referential actions: what happens to the children",
       file: "lessons/0038-foreign-key-referential-actions.html" },
+    { n: 39, date: "2026-08-13", title: "MVCC: how Postgres actually does isolation",
+      file: "lessons/0039-mvcc-how-postgres-does-isolation.html" },
   ];
 
   const REFS = [

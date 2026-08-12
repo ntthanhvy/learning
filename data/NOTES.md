@@ -1813,3 +1813,123 @@
   other two named candidates, both re-confirmed still genuinely uncovered
   by this round's own grep, deferred once in favor of `clip()`) if no
   drill-outcome signal surfaces by next generation.
+- 2026-08-13 generation (Lesson 36, headless GitHub Actions 06:00 run):
+  confirmed the idempotency check first — no `data/lessons/0036-*.html`
+  existed yet, `2026-08-13` was not already logged anywhere in this file,
+  and Lesson 36 wasn't in `assets/nav.js` (highest was Lesson 35, dated
+  2026-08-12) — so this round proceeded. DB access (`psql
+  "$LEARNING_DB_URL" ...`, `source ~/.config/learning/db.env`, `printenv`,
+  `bin/query-progress`) was treated as unreachable per this round's own
+  instructions (established across every prior round since 2026-07-16,
+  per this file's own history and the parallel finding in
+  `rust/NOTES.md`) and was not re-attempted — no `course_progress`/
+  `lesson_completed` signal beyond the Lesson 1 baseline, so no reported
+  weak spot to target; paced from on-disk state alone (this file's
+  history, `lessons/`, `learning-records/`, practice file states) per the
+  task's own guidance. Lesson 35's own teaser named two remaining
+  candidates explicitly (`between()` or `combine_first()`, Lesson 34's
+  other two originally-named candidates, deferred once already in favor
+  of `clip()`) — re-grepped `lessons/*.html` and `reference/glossary.html`
+  fresh before picking and confirmed both still only appeared inside
+  Lesson 35's own teaser sentence, genuinely uncovered. Picked
+  `between()` over `combine_first()`: checked MISSION.md's interview-prep
+  framing (front-load the highest-frequency interview topics) and scanned
+  Lessons 1-35's coverage first — `between()` is a high-frequency,
+  everyday range-filter one-liner (the direct pandas spelling of SQL's
+  `WHERE col BETWEEN a AND b`, a shape that comes up constantly), and it
+  pairs directly with Lesson 35's just-taught `clip()` as its filtering
+  sibling (same "is this value inside [lower, upper]" question, but
+  `between()` answers it as a boolean mask instead of bounding the value
+  itself) — a clean, natural next-difficulty step in the same shape as
+  several prior rounds' picks (e.g. Lesson 20 after Lesson 4, Lesson 32
+  after Lesson 10). `combine_first()` is a narrower, lower-frequency tool
+  (filling gaps in one Series from another, aligned by index) that
+  overlaps conceptually with territory this course already covered in
+  Lesson 3 (missing-data cleaning) and Lesson 21 (`concat()`/combining
+  frames) — it remains a valid, still-uncovered candidate but was judged
+  the weaker pick on interview frequency and curriculum novelty, so it's
+  carried forward as next lesson's teaser instead. Lesson 36 ships
+  `between()`: the boolean-mask-typo problem framing (`&` binding tighter
+  than `>=` is a classic bug in the hand-written two-comparison version),
+  `between(lower, upper)` as a mask (not a filtered result, still needs
+  `df[mask]` to actually filter), the exact equivalence to
+  `(s >= a) & (s <= b)` (Lesson 35's callout-box pattern reused for the
+  clip()-vs-nested-np.where() relationship), `inclusive=` (`"both"`
+  default/`"neither"`/`"left"`/`"right"`, explicitly named as having no
+  direct SQL equivalent since standard `BETWEEN` is always both-
+  inclusive), a date-range example on `order_date` (tied to Lesson 32's
+  `.dt` material), and the closing "no crash, quietly wrong" gotcha since
+  Lesson 19: a NaN in the tested Series returns False, silently — neither
+  "in range" nor "out of range," so a shorter `between()`-filtered result
+  can mean either genuine non-matches or invisible missing data. `uv run
+  --with pandas` worked directly this round (pandas 3.0.5, numpy pulled
+  in as a dependency): every number was hand-verified in
+  `.scratch/data-lesson36/explore.py` (deleted after) against the real
+  `orders_raw.csv` clean 4-row slice before writing a word of the lesson
+  — `between(50, 150)` gives `[True, False, False, False]` (only An's
+  120.0 qualifies), confirmed byte-for-byte identical to the
+  `(amounts >= 50) & (amounts <= 150)` mask; `inclusive="both"/"neither"/
+  "left"/"right"` on `between(42, 120)` gave `[True,True,False,False]`/
+  `[False,False,False,False]`/`[False,True,False,False]`/
+  `[True,False,False,False]` respectively (42 and 120 are both real
+  values in the slice — An's 42.0 and An's 120.0 — so each inclusive mode
+  produces a genuinely different result, not a degenerate one); the
+  date-range `between("2026-01-06", "2026-01-09")` on parsed
+  `order_date` gives `[False, False, True, True]` (Binh's two rows only);
+  and a 3-element Series with one NaN confirmed the NaN-returns-False
+  gotcha exactly (`[True, False, True]`, the NaN row False, not raising
+  and not True). Checked the by-now-expected Ellipsis-placeholder family
+  (Lessons 19-35) with a standalone throwaway script before writing the
+  practice file: unlike most prior lessons but LIKE Lesson 35's `clip()`
+  round, every candidate `between()` placeholder position tested reliably
+  raised cleanly — `between(..., 150)` and `between(50, ...)` both raise
+  `TypeError` (comparison against Ellipsis), `between(50, 150,
+  inclusive=...)` raises `ValueError` (not a recognized inclusive string)
+  — no "Ellipsis is truthy"/"valid indexer"/"valid list element" silent-
+  pass variant surfaced for any `between()`-specific placeholder this
+  round; `amounts[...]` and `amounts.loc[...]` (Lesson 20's original
+  finding) still no-raise as expected but weren't used as placeholder
+  positions in this round's practice file. The shipped (unsolved)
+  `practice/36_between.py` was executed in
+  `.scratch/data-lesson36/practice/` (fixture CSVs copied alongside) and
+  printed all 5 ✗ with no crash on the first attempt, then a
+  separately-saved solved copy (`.scratch/data-lesson36/practice/
+  36_solved.py`, not shipped, each `...` filled in by hand rather than
+  uncommenting a pre-written answer) printed all 5 ✓ against the same
+  hand-verified numbers above. The shipped file was also re-run a second
+  time directly from its real `practice/` location (`cd data && uv run
+  --with pandas python3 practice/36_between.py`) and confirmed to print
+  the identical all-✗ result with no crash. `.scratch/data-lesson36/` was
+  fully removed (`rm -rf`) after verification, no approval needed this
+  round. Added `between()` to the glossary, placed directly after the
+  `clip()` entry (checked for a collision first — none; reused the
+  existing `boolean mask` dfn gloss text verbatim inside the lesson body,
+  same convention as reusing prior terms' glosses when the concept
+  recurs) and registered Lesson 36 in nav.js. Quiz options were drafted
+  and checked with a Python regex/word-count script (extracts each
+  `<div class="q">` block, strips HTML tags, whitespace-splits) run via
+  `uv run python3` (this course's established convention since Lesson
+  26/27's finding that plain `python3` needs approval while `uv run
+  python3` doesn't) — the first draft came out mismatched on all three
+  questions (Q1 at 5/7/6, Q2 at 7/2/2 — the second question's original
+  code-snippet options were rewritten to prose descriptions entirely
+  after several rewrite passes on the code-snippet phrasing failed to
+  equalize meaningfully without padding options with filler words, a
+  deliberate choice over gaming the count — and Q3 at 7/7/6) and needed
+  several rewrite + recount cycles per question before a final
+  independent recount via the same script plus a manual `Grep`-based
+  read-through as a second pass (this course's established convention
+  since Lesson 19) confirmed all three genuinely level at 7/7/7, 8/8/8,
+  and 7/7/7. `bin/record-progress data lesson_generated --day 36 --lesson
+  0036-between-range-filtering.html --detail '{"by":"github-actions"}'`
+  was run once from the repo root as instructed and succeeded on the
+  first try, no approval blocker this round (`recorded: data/
+  lesson_generated day=36 lesson=0036-between-range-filtering.html`).
+  This agent does not run `git commit` — leaving working-tree changes
+  uncommitted is this course's established convention (confirmed by
+  every prior entry in this file, none of which mention a commit step);
+  no commit was made this round either. Set the teaser going forward to
+  `combine_first()` (Lesson 34's last remaining named candidate,
+  deferred twice now, re-confirmed still genuinely uncovered by this
+  round's own grep) if no drill-outcome signal surfaces by next
+  generation.

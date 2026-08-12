@@ -76,6 +76,8 @@
       file: "lessons/0034-get-dummies-one-hot-encoding.html" },
     { n: 35, date: "2026-08-12", title: "clip(): capping values into a min/max range",
       file: "lessons/0035-clip-bounding-values.html" },
+    { n: 36, date: "2026-08-13", title: "between(): a readable range filter",
+      file: "lessons/0036-between-range-filtering.html" },
   ];
 
   const REFS = [

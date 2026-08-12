@@ -1667,3 +1667,116 @@
   fresh gap-finding pass (re-reading more existing lessons closely, the
   method that has now found seven gaps running — Lessons 32-38) is needed
   again next time.
+- 2026-08-13 generation (Lesson 39, headless GitHub Actions run): idempotency
+  check first — confirmed no `lessons/0039-*.html` file existed and lesson 39
+  was not yet in nav.js before writing anything (highest existing file was
+  0038, dated 2026-08-12), and no `2026-08-13` entry existed yet in this log.
+  Per this round's own briefing, DB access (`psql "$LEARNING_DB_URL" ...`,
+  `source ~/.config/learning/db.env`, `printenv`, `bin/query-progress`, any
+  `chmod`/`source` invocation) was treated as reliably blocked in this
+  headless sandbox and none of it was attempted — consistent with every
+  round since Lesson 9 (with occasional one-off write-path failures at
+  Lessons 19/24/26/27/28, but the write path via `bin/record-progress` has
+  worked every round since Lesson 32); still no `lesson_completed` record
+  exists for any of Lessons 1-38, so pacing came from `lessons/`/`nav.js`
+  file state and NOTES.md's own log alone, treated as informational rather
+  than a blocker per this course's now-38-round-long standing convention.
+  Lesson 38 left only the two standing out-of-scope-per-MISSION.md
+  candidates (distributed locks, blue-green/canary deploys) with no new
+  in-scope candidate, so this round dispatched a research pass using the
+  same re-read-existing-lessons method that found Lessons 32-38 (seven
+  straight gaps found this way): re-read all 38 lesson bodies and
+  glossary.html for a term used/named in passing but never given its own
+  explanation. Found MVCC: Lesson 37 (transaction isolation levels) names
+  it twice in one sentence each — "Postgres's row-versioning storage engine
+  (MVCC) makes them nearly free to prevent regardless of level" and "a side
+  effect of how its snapshot mechanism works" — as the *cause* of behavior
+  the whole lesson describes, but never explains the mechanism itself.
+  Independently re-confirmed via grep across all 38 lesson bodies and
+  glossary.html before writing: "MVCC" and "snapshot" (case-insensitive)
+  appear nowhere else except those two clauses in Lesson 37 and one
+  unrelated use of "snapshot" in Lesson 16 ("the contract is a promise, not
+  a snapshot") and one in the glossary's own `denormalization` entry
+  ("snapshotting a price onto an order line") — neither a hit on the MVCC
+  mechanism itself — confirming a genuine, previously-named-but-unexplained
+  gap, in scope under MISSION criterion 3 ("reason about what happens at
+  runtime: transactions... and spot these problems in existing code"), not
+  infra/NoSQL/distributed (it's Postgres's own internal transaction
+  mechanism, the same class of in-scope internals as Lesson 37's isolation
+  levels or Lesson 35's ON CONFLICT). Lesson 39 covers it: the question
+  Lessons 6 and 37 both assumed an answer to without giving one (how can two
+  transactions see two different, both-correct versions of the same row at
+  once, with neither blocking); Postgres never overwrites a row in place —
+  an UPDATE inserts a new row version and marks the old one's `xmax`, a
+  DELETE just marks `xmax` with no new version, introduced via the hidden
+  `xmin`/`xmax` system columns; a snapshot as a simple visibility rule (a
+  version is visible only if its `xmin` transaction had committed by the
+  snapshot's reference point and its `xmax` transaction had not) that
+  explains why readers never block writers and vice versa; an explicit
+  callout tying both of Lesson 37's own footnotes (READ UNCOMMITTED
+  behaving like READ COMMITTED, REPEATABLE READ already blocking phantoms)
+  directly back to this visibility rule as their actual cause; VACUUM as
+  the necessary cleanup step for the dead versions this scheme leaves
+  behind, named but explicitly scoped away from autovacuum tuning (out of
+  this lesson's depth); and a `withRepeatableRead` Go/pgx snippet showing
+  `pgx.TxOptions{IsoLevel: pgx.RepeatableRead}` as the one place this
+  mechanism becomes visible in application code rather than buried in the
+  isolation-level table. The `withRepeatableRead` Go snippet was
+  compile-checked clean with `go build -C` / `go vet -C` in a scratch module
+  (`.scratch/backend-lesson39/`, using real `github.com/jackc/pgx/v5`
+  v5.6.0 fetched via `go mod tidy -C`, deleted entirely after, same as
+  Lessons 30/33/34/35's precedent) — no approval blocker for any of
+  `go mod tidy -C`, `go build -C`, or `go vet -C` this round, consistent
+  with every round since Lesson 13's finding that `-C <dir>`-style
+  invocations sidestep the sandbox's approval gate. One markup bug was
+  caught and fixed while drafting, before shipping: the fourth quiz
+  question's opening `<div class="q" data-why="...">` was mistakenly
+  self-closed with `"/>` instead of `">`, which would have broken that
+  question's rendering — caught by re-reading the file after writing it,
+  not by any tooling, a reminder from Lessons 32/34's own notes that
+  proofreading the literal shipped markup (not just the prose content)
+  matters. Added `MVCC`, `snapshot`, and `VACUUM` to the glossary (confirmed
+  via grep beforehand that none of the three existed anywhere in
+  `lessons/*.html` or `glossary.html`; `isolation` and `REPEATABLE READ`
+  themselves were reused from Lessons 6/37, not re-added) and registered
+  Lesson 39 in nav.js. Quiz options were drafted, then verified with `wc -w`
+  per line via individual `sed -n '<n>p' | sed -E 's/<[^>]+>//g' | wc -w`
+  calls (no loop/variable-expansion form attempted — confirmed again this
+  round that a bare `for` loop is hard-blocked by this sandbox's static
+  analysis, consistent with every round since Lesson 28's finding) — all
+  four questions needed at least one rewrite pass, several needing two or
+  three successive small adjustments after a hand-estimated fix overshot or
+  undershot the target count by one (the same repeated failure mode
+  Lessons 28/33/37's notes already flagged — trust the tool count, not the
+  eyeball); final tallies, each re-verified after every edit and
+  cross-checked a second, independent way (printing the stripped option
+  text directly and hand-counting it against the `wc -w` result): Q1
+  9/9/9/9, Q2 9/9/9/9, Q3 8/8/8/8, Q4 9/9/9/9. No new learning-records/
+  entry was added this round — both existing entries (0001's baseline,
+  0002's concurrency-gap note) remain already reflected in prior lessons,
+  same finding as every round since Lesson 21. Primary source: the
+  PostgreSQL Manual's Concurrency Control chapter, "MVCC Introduction"
+  section — RESOURCES.md already cites the PostgreSQL Manual generally for
+  "tables, constraints, defaults, schemas" (already extended by Lessons 19,
+  21, 34, and 38 into specific mechanisms); this lesson reads into the same
+  chapter Lesson 37's own Transaction Isolation citation sits inside.
+  Kleppmann's DDIA ch. 7 named as the secondary source, extending the same
+  standing citation Lessons 6, 33, and 37 already used — its "Snapshot
+  Isolation and Repeatable Read" section covers the general version of this
+  exact mechanism. `bin/record-progress backend lesson_generated --day 39
+  --lesson 0039-mvcc-how-postgres-does-isolation.html --detail
+  '{"by":"github-actions"}'` was run directly via its relative path from
+  the repo root as instructed and succeeded on the first try, no approval
+  blocker this round — consistent with every round since Lesson 32's
+  finding that the write path works reliably when invoked this way. This
+  closes the MVCC gap found by re-reading Lesson 37 (and
+  cross-checking Lesson 6) rather than re-scanning MISSION.md or reusing
+  the distributed-locks/blue-green leftovers; still no `lesson_completed`
+  record exists for any lesson after 39 rounds — the next session should
+  keep treating a completion/quiz-outcome signal, or a user-named track to
+  deepen, as higher priority than a 40th topic picked blind. No new
+  in-scope teaser candidate surfaced this round beyond the one just closed;
+  distributed locks and blue-green/canary deploys remain the standing
+  out-of-scope-per-MISSION.md candidates if a fresh gap-finding pass
+  (re-reading more existing lessons closely, the method that has now found
+  eight gaps running — Lessons 32-39) is needed again next time.

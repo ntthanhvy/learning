@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 36 · between()</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 36 · ~20 min · 13 Aug 2026</p>
+<h1>between(): a readable range filter, clip()'s filtering sibling</h1>
+<p class="byline">Lesson 35's teaser named two remaining candidates from Lesson 34's original scan: <code>between()</code> and <code>combine_first()</code>. Picked <code>between()</code>: it's the higher interview-frequency of the two (a range-filter one-liner comes up constantly, while <code>combine_first()</code> is a niche fillna-from-another-Series variant closer to Lesson 3's/Lesson 21's territory already covered), and it pairs directly with Lesson 35's <code>clip()</code> — same "is this value inside [lower, upper]" shape, but <code>between()</code> answers it as a boolean mask for filtering instead of bounding the value itself.</p>
+
+<h2>1 · The problem: a range check people write longer than it needs to be</h2>
+<p>"Orders between $50 and $150" is one of the most common filter shapes in any wrangling task — and the boolean-mask spelling for it, <code>(s &gt;= 50) &amp; (s &lt;= 150)</code>, is correct but easy to get wrong (missing parens around each comparison is a classic bug, since <code>&amp;</code> binds tighter than <code>&gt;=</code> in Python). <dfn data-en="a pandas method returning a True/False Series marking which values fall within a given [lower, upper] range -- the readable, harder-to-typo spelling of a two-sided comparison mask" data-vn="giữ nguyên 'between()' — trả về mask True/False cho giá trị nằm trong khoảng [lower, upper]">between()</dfn> is the named shortcut for exactly this: one call, both bounds, no parens to get wrong.</p>
+<p>On this course's cleaned 4-row slice (An 120.0/01-05, An 42.0/01-10, Binh 35.5/01-06, Binh 180.0/01-09):</p>
+<pre><code>clean[<span class="str">"amount"</span>]
+<span class="cm"># 0    120.0
+# 1     42.0
+# 2     35.5
+# 3    180.0</span></code></pre>
+
+<h2>2 · between(lower, upper): a boolean mask, not a filtered result</h2>
+<pre><code>clean[<span class="str">"amount"</span>].between(<span class="num">50</span>, <span class="num">150</span>)
+<span class="cm"># 0     True   <span class="cm"># 120.0 is inside [50, 150]</span>
+# 1    False   <span class="cm"># 42.0 is below 50</span>
+# 2    False   <span class="cm"># 35.5 is below 50</span>
+# 3    False</span>  <span class="cm"># 180.0 is above 150</span></code></pre>
+<p>Unlike <code>clip()</code> (Lesson 35), which returns the SAME shape with values pulled inside the range, <code>between()</code> returns a <dfn data-en="a True/False Series aligned to the original rows -- the same object clip() and every other boolean comparison produce" data-vn="giữ nguyên 'mask' — mảng True/False dùng để lọc hàng">boolean mask</dfn> — you still filter with it, exactly like any other comparison:</p>
+<pre><code>clean[clean[<span class="str">"amount"</span>].between(<span class="num">50</span>, <span class="num">150</span>)]
+<span class="cm">#   order_id customer  amount  order_date
+# 0        1       An   120.0  2026-01-05</span></code></pre>
+<p>This is the direct pandas spelling of SQL's <code>WHERE amount BETWEEN 50 AND 150</code> — same name, same inclusive-both-ends default, same meaning.</p>
+
+<h2>3 · Exactly the same mask as the two-comparison version</h2>
+<div class="callout"><code>series.between(a, b)</code> is confirmed identical, element for element, to <code>(series &gt;= a) &amp; (series &lt;= b)</code> — hand-verified on this slice, both give <code>[True, False, False, False]</code> for <code>between(50, 150)</code>. <code>between()</code> doesn't do anything the boolean-mask version couldn't already do; it's purely a readability and typo-safety win, the same relationship Lesson 35's <code>clip()</code> has to a hand-written nested <code>np.where()</code>.</div>
+
+<h2>4 · inclusive=: which end(s) count as "in range"</h2>
+<p>The default includes both bounds (<code>inclusive="both"</code>). Three other modes narrow that, useful when a range boundary is exclusive on purpose (a discount tier that starts strictly ABOVE a threshold, for example):</p>
+<pre><code>amounts = clean[<span class="str">"amount"</span>]  <span class="cm"># [120.0, 42.0, 35.5, 180.0]</span>
+amounts.between(<span class="num">42</span>, <span class="num">120</span>, inclusive=<span class="str">"both"</span>)     <span class="cm"># [True, True, False, False]  -- 42 and 120 both count</span>
+amounts.between(<span class="num">42</span>, <span class="num">120</span>, inclusive=<span class="str">"neither"</span>)  <span class="cm"># [False, False, False, False] -- neither 42 nor 120 counts</span>
+amounts.between(<span class="num">42</span>, <span class="num">120</span>, inclusive=<span class="str">"left"</span>)     <span class="cm"># [False, True, False, False]  -- only the 42 (lower) match counts</span>
+amounts.between(<span class="num">42</span>, <span class="num">120</span>, inclusive=<span class="str">"right"</span>)    <span class="cm"># [True, False, False, False]  -- only the 120 (upper) match counts</span></code></pre>
+<p>SQL has no built-in equivalent to <code>inclusive=</code> — <code>BETWEEN</code> is always both-inclusive in standard SQL, so an exclusive-bound range there has to fall back to plain <code>&gt;</code>/<code>&lt;</code> comparisons instead.</p>
+
+<h2>5 · between() works on dates too</h2>
+<p><code>between()</code> isn't limited to numbers — it works on any orderable dtype, including datetime columns (Lesson 32's <code>.dt</code> territory), for a "date range" filter:</p>
+<pre><code>dates = pd.to_datetime(clean[<span class="str">"order_date"</span>])
+dates.between(<span class="str">"2026-01-06"</span>, <span class="str">"2026-01-09"</span>)
+<span class="cm"># 0    False   <span class="cm"># 01-05 is before the range</span>
+# 1    False   <span class="cm"># 01-10 is after the range</span>
+# 2     True   <span class="cm"># 01-06 -- Binh's first order</span>
+# 3     True</span>  <span class="cm"># 01-09 -- Binh's second order</span></code></pre>
+<p>pandas parses the string bounds against the Series' own datetime dtype automatically — no separate <code>pd.to_datetime()</code> call needed on the bounds themselves.</p>
+
+<h2>6 · The gotcha: NaN never matches, in or out</h2>
+<p>Continuing this course's "no crash, quietly wrong" family since Lesson 19: a NaN value in the Series being tested is neither inside nor outside the range — <code>between()</code> quietly returns <code>False</code> for it, same as any other comparison against NaN, never raising and never separately flagging it:</p>
+<pre><code>s = pd.Series([<span class="num">10.0</span>, np.nan, <span class="num">100.0</span>])
+s.between(<span class="num">0</span>, <span class="num">200</span>)
+<span class="cm"># 0     True
+# 1    False   <span class="cm"># NaN -- not "in range", not "out of range" either -- just False</span>
+# 2     True</span></code></pre>
+<p>A row with a missing value silently disappears from a <code>between()</code>-filtered result — indistinguishable, by looking at the filtered output alone, from a row that was genuinely outside the range. Same reflex as every gotcha since Lesson 19: know your NaN count before filtering, don't assume a shorter result means "fewer matches," it might mean "some rows were unmeasurable."</p>
+
+<div class="interview">
+<p><strong>Q: "How would you filter a column to a value range, and what's a subtlety to watch for?"</strong> A strong answer, out loud: <em>"series.between(lower, upper) — it's the readable, harder-to-typo spelling of (series &gt;= lower) &amp; (series &lt;= upper), both give the identical boolean mask, so I'd still wrap it in df[...] to actually filter. It defaults to inclusive on both ends, same as SQL's BETWEEN, but inclusive= lets me drop either or both ends if the range is meant to be exclusive there — SQL has no direct equivalent for that, you'd fall back to plain > / < comparisons. It also works on datetime columns for a date-range filter, not just numbers. One gotcha: NaN never matches, in or out — it silently comes back False, so a shorter filtered result doesn't necessarily mean fewer real matches, it might mean some rows were missing data entirely."</em> The signal: naming the inclusive= modes and the NaN-is-always-False gotcha unprompted, not just describing the two-bound mechanic.</p>
+</div>
+
+<h2>Try it — self-checking practice (~15-20 min)</h2>
+<p>Open <code>practice/36_between.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/36_between.py</code></pre>
+<p>Uses the same cleaned rows as Lessons 6-35 (An 120.0/01-05, An 42.0/01-10, Binh 35.5/01-06, Binh 180.0/01-09). Exercise 1 is <code>between(50, 150)</code> as a mask; Exercise 2 filters the DataFrame with that mask; Exercise 3 is <code>inclusive="neither"</code>; Exercise 4 is a date-range <code>between()</code> on <code>order_date</code>; Exercise 5 reproduces Section 6's NaN gotcha.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="series.between(50, 150) returns a True/False Series the same length as the original -- True for values inside [50, 150], False otherwise. It does not filter or change any values by itself; you still need to index with the mask (df[mask]) to get a filtered result, same as any other boolean comparison.">
+    <p class="stem">What does <code>series.between(50, 150)</code> return?</p>
+    <button class="opt" data-ok>a True/False mask, same shape as before</button>
+    <button class="opt">a new Series with values pulled in</button>
+    <button class="opt">a single count of the matching rows</button>
+  </div>
+  <div class="q" data-why="series.between(a, b) is confirmed identical, element for element, to (series >= a) & (series <= b) -- both produce the exact same boolean mask. between() is purely a readable, typo-safe spelling of that two-sided comparison, not a different computation.">
+    <p class="stem">Which expression is <code>series.between(a, b)</code> exactly equivalent to?</p>
+    <button class="opt" data-ok>a chained two-sided comparison, joined with logical and</button>
+    <button class="opt">a clip() call, then a comparison against a</button>
+    <button class="opt">an isin() call against a Python range object</button>
+  </div>
+  <div class="q" data-why="A NaN value in the tested Series is neither inside nor outside the range -- between() quietly returns False for it, exactly like any other direct comparison against NaN. It never raises and never separately flags the row as missing, so a shorter between()-filtered result can mean either genuinely out-of-range values or silently-missing ones.">
+    <p class="stem">What does <code>between()</code> return for a NaN value in the Series?</p>
+    <button class="opt" data-ok>False, silently -- neither in nor out</button>
+    <button class="opt">True, since NaN has no real bound</button>
+    <button class="opt">raises a ValueError right away, no exceptions</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the pandas User Guide's <a href="https://pandas.pydata.org/docs/reference/api/pandas.Series.between.html">"pandas.Series.between"</a> reference page (~5 min) — covers <code>inclusive=</code> and the datetime-dtype behavior together; RESOURCES.md's <a href="https://pandas.pydata.org/docs/getting_started/comparison/comparison_with_sql.html">Comparison with SQL</a> page is the source for the <code>BETWEEN</code> bridge in Section 2.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>between()</code> is new today.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-36 comes back reported as shakiest, otherwise <code>combine_first()</code> — Lesson 34's last remaining named candidate, still genuinely uncovered.<br><br>
+💬 Anything unclear — inclusive=, the date-range form, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 16 · FastAPI handlers, path/query params &amp; status codes</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 16 · ~20 min · 13 Aug 2026</p>
+<h1>FastAPI handlers, path/query params &amp; status codes</h1>
+<p class="byline">Day 12 already showed you <code>@app.get("/users/{id}")</code> and told you it's a decorator exactly like the ones you'd built by hand — nothing new to learn about <code>@</code> itself. Today that preview becomes real: <strong><dfn data-en="the FastAPI framework — a Python library for building HTTP APIs, where a route decorator registers a plain function as the code that runs for a given URL and HTTP method" data-vn="giữ nguyên &quot;FastAPI&quot; — framework Python để xây HTTP API, decorator route đăng ký 1 hàm xử lý cho 1 URL + method">FastAPI</dfn></strong> is installed for the first time, one route is written end to end, and you learn how a URL's moving parts and a response's status code fit together. This opens <strong>Phase 2b</strong> — the backend phase — and is the first lesson whose practice file needs anything beyond the standard library.</p>
+
+<div class="callout"><strong>Bridge from SQL:</strong> think of a route as a stored procedure with a name (the URL) instead of a function name — a client "calls" <code>GET /users/42</code> the way code calls <code>get_user(42)</code>, and what comes back is a result set of exactly one row, serialized as JSON instead of printed as a table. A <strong>path parameter</strong> is like a procedure's required argument; a <strong>query parameter</strong> is like an optional one with a default, the same distinction Day 4 already drew between positional and keyword-with-default arguments.</div>
+
+<h2>1 · Installing FastAPI, and a first route</h2>
+<p>Every practice file through Day 15 ran on the standard library alone. Today is a deliberate, permanent exception, flagged explicitly because it's the first one: FastAPI is a third-party package, installed the same one-off way Day 11 first installed <code>pytest</code> — via <code>uv run --with</code>, no <code>pyproject.toml</code> anywhere in this course yet:</p>
+<pre><code><span class="kw">from</span> fastapi <span class="kw">import</span> FastAPI
+
+app = FastAPI()
+
+<span class="kw">@app.get</span>(<span class="str">"/ping"</span>)
+<span class="kw">def</span> ping():
+    <span class="kw">return</span> {<span class="str">"status"</span>: <span class="str">"ok"</span>}</code></pre>
+<p><code>app</code> is a single <code>FastAPI</code> instance representing the whole application — every route registers itself onto that one object. <code>@app.get("/ping")</code> is Day 12's decorator mechanism, applied: it takes the plain function <code>ping</code> and wraps it with the machinery that says "when a <dfn data-en="an HTTP request whose method is GET — used to fetch a resource without changing anything on the server; FastAPI's @app.get(...) registers a function to run for GET requests to a given URL" data-vn="giữ nguyên &quot;GET request&quot; — request HTTP method GET, dùng để lấy dữ liệu, không thay đổi gì trên server">GET request</dfn> arrives at <code>/ping</code>, call this function and turn its return value into an HTTP response" — exactly the shape Day 12 previewed, with no new decorator concept to learn today. A function registered this way is called a <dfn data-en="a function decorated with a route decorator like @app.get(...) or @app.post(...) — the code FastAPI calls when a matching HTTP request arrives, whose return value becomes the response body" data-vn="giữ nguyên &quot;handler&quot; — hàm được đăng ký bằng route decorator, chạy khi có request khớp URL + method, giá trị return thành response body"><strong>handler</strong></dfn>. Returning a plain <code>dict</code> is enough — FastAPI serializes it to a JSON response body automatically, no <code>json.dump</code> call needed even though Day 6 taught exactly that module for the same job by hand.</p>
+
+<h2>2 · Path parameters: part of the URL itself</h2>
+<p>Most real routes need input, and the first way to take it is inside the URL:</p>
+<pre><code><span class="kw">@app.get</span>(<span class="str">"/users/{user_id}"</span>)
+<span class="kw">def</span> get_user(user_id: <span class="kw">int</span>):
+    <span class="kw">return</span> {<span class="str">"user_id"</span>: user_id, <span class="str">"name"</span>: <span class="str">f"user-{user_id}"</span>}</code></pre>
+<p>The <code>{user_id}</code> segment in the decorator's URL string is a <dfn data-en="a variable segment of a route's URL, written {name} in the decorator and matched to a same-named handler function parameter; required — no request without it can match the route at all" data-vn="giữ nguyên &quot;path parameter&quot; — phần biến trong URL, viết {name} trong decorator, khớp với tham số cùng tên của handler, bắt buộc phải có">path parameter</dfn> — a placeholder FastAPI fills from the real URL and matches, by name, to the handler's own parameter <code>user_id</code>. Day 7's type hints are doing real work here, not just documentation: <code>user_id: int</code> tells FastAPI to convert the URL's text (<code>"42"</code>) into a real <code>int</code> before the handler ever runs, and to reject the request automatically if the text isn't a valid integer — a request to <code>/users/abc</code> never reaches your code at all. A path parameter is never optional; a route with <code>{user_id}</code> in its URL simply doesn't match any request that doesn't supply one.</p>
+
+<h2>3 · Query parameters: optional, after the <code>?</code></h2>
+<p>The second way to take input is a plain function parameter that <em>isn't</em> named inside the URL string:</p>
+<pre><code><span class="kw">@app.get</span>(<span class="str">"/users"</span>)
+<span class="kw">def</span> list_users(active: <span class="kw">bool</span> = <span class="kw">True</span>, limit: <span class="kw">int</span> = 10):
+    <span class="kw">return</span> {<span class="str">"active"</span>: active, <span class="str">"limit"</span>: limit}</code></pre>
+<p>A request to <code>/users?active=false&amp;limit=5</code> calls <code>list_users(active=False, limit=5)</code> — FastAPI reads everything after the URL's <code>?</code>, matches each <code>key=value</code> pair to a parameter by name, and converts it using the same type-hint mechanism section 2 just showed. This is exactly Day 4's default-argument rule, reused rather than reinvented: a handler parameter with a default (<code>active: bool = True</code>) becomes a <dfn data-en="an optional key=value pair after a URL's ?, matched to a handler parameter that has a default value — omitted in the request, the handler's default is used instead" data-vn="giữ nguyên &quot;query parameter&quot; — cặp key=value tùy chọn sau dấu ? trong URL, khớp với tham số handler có giá trị mặc định">query parameter</dfn>, optional in the request exactly because omitting a default argument in a normal function call is already legal. A parameter with no default becomes a *required* query parameter instead — same rule, just no fallback to reach for. The only thing that decides path vs. query is whether the name appears inside <code>{}</code> in the URL string: everything else uses the identical parameter syntax.</p>
+
+<h2>4 · Status codes: telling the client what happened, not just what came back</h2>
+<p>Every HTTP response carries a three-digit <dfn data-en="a three-digit code every HTTP response carries, in five ranges by leading digit (2xx success, 4xx client error, 5xx server error), telling the caller what happened independent of the response body's contents" data-vn="giữ nguyên &quot;status code&quot; — mã 3 chữ số trên mỗi response HTTP, báo kết quả (2xx thành công, 4xx lỗi client, 5xx lỗi server), độc lập với nội dung body">status code</dfn> alongside its body, grouped by leading digit: <code>2xx</code> success, <code>4xx</code> the client's fault (bad input, missing resource), <code>5xx</code> the server's fault. FastAPI defaults every handler to <code>200 OK</code> on a normal return, but real APIs need to say more than "it worked":</p>
+<pre><code><span class="kw">from</span> fastapi <span class="kw">import</span> FastAPI, HTTPException
+
+app = FastAPI()
+_users = {1: <span class="str">"an"</span>, 2: <span class="str">"binh"</span>}
+
+<span class="kw">@app.get</span>(<span class="str">"/users/{user_id}"</span>)
+<span class="kw">def</span> get_user(user_id: <span class="kw">int</span>):
+    <span class="kw">if</span> user_id <span class="kw">not in</span> _users:
+        <span class="kw">raise</span> HTTPException(status_code=<span class="kw">404</span>, detail=<span class="str">"user not found"</span>)
+    <span class="kw">return</span> {<span class="str">"user_id"</span>: user_id, <span class="str">"name"</span>: _users[user_id]}
+
+<span class="kw">@app.post</span>(<span class="str">"/users"</span>, status_code=<span class="kw">201</span>)
+<span class="kw">def</span> create_user(name: <span class="kw">str</span>):
+    new_id = <span class="kw">max</span>(_users) + <span class="kw">1</span>
+    _users[new_id] = name
+    <span class="kw">return</span> {<span class="str">"user_id"</span>: new_id, <span class="str">"name"</span>: name}</code></pre>
+<p>Two mechanisms, one for each direction: <code>raise HTTPException(status_code=404, ...)</code> is Day 8's <code>raise</code>, reused unchanged — a built-in exception type FastAPI specifically knows to catch and turn into an error response instead of a crash, so a missing user becomes a clean <code>404</code>, never a <code>500</code> traceback. Going the other way, <code>@app.post("/users", status_code=201)</code> sets the *success* code up front, in the decorator, since <code>201 Created</code> (not the default <code>200</code>) is the correct code for "a new resource now exists" — the HTTP convention behind every REST API you'll ever call. <code>@app.post</code> itself is the same decorator family as <code>@app.get</code>, just bound to a different HTTP method, matched the same way <code>GET</code> requests match <code>@app.get</code> routes.</p>
+
+<h2>5 · Testing a handler without running a server</h2>
+<p>A route is still just a function underneath the decorator — Day 12's whole point — so testing one doesn't require starting a real server and sending real network requests. FastAPI's <code>TestClient</code>, built on <code>httpx</code>, calls routes in-process:</p>
+<pre><code><span class="kw">from</span> fastapi.testclient <span class="kw">import</span> TestClient
+
+client = TestClient(app)
+
+response = client.get(<span class="str">"/users/1"</span>)
+<span class="kw">assert</span> response.status_code == <span class="kw">200</span>
+<span class="kw">assert</span> response.json() == {<span class="str">"user_id"</span>: <span class="kw">1</span>, <span class="str">"name"</span>: <span class="str">"an"</span>}
+
+missing = client.get(<span class="str">"/users/999"</span>)
+<span class="kw">assert</span> missing.status_code == <span class="kw">404</span></code></pre>
+<p>This is Day 11's plain <code>assert</code> again, aimed at <code>.status_code</code> and <code>.json()</code> instead of a plain function's return value — the same retrieval-practice idiom, a new target. Today's practice file uses this pattern directly rather than pytest's fixture/parametrize machinery, since the goal right now is reading a response, not pytest mechanics Day 11 already covered.</p>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> a FastAPI handler's return value is one JSON object per request — never a DataFrame; if an endpoint needs to hand back tabular data, it converts a DataFrame to records first (<code>df.to_dict("records")</code>, named only, not demonstrated) rather than returning the DataFrame itself.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/16_fastapi_handlers_and_status_codes.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run --with fastapi --with httpx python3 practice/16_fastapi_handlers_and_status_codes.py</code></pre>
+<p>Needs <code>fastapi</code> and <code>httpx</code>, installed one-off via <code>--with</code> — the first practice file in this course that isn't standard-library-only, matching Day 11's own one-off <code>pytest</code> exception. Exercises: writing a <code>GET</code> handler with a path parameter, a <code>GET</code> handler with a default-valued query parameter, raising <code>HTTPException(404, ...)</code> for a missing resource, a <code>POST</code> handler returning <code>201</code>, and testing all four with <code>TestClient</code>.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A path parameter is written {name} inside the route's URL string and is always required — no request missing it can match that route at all. A query parameter is a plain handler parameter not named in the URL, and becomes optional exactly when it has a default value, the same rule Day 4 already taught for ordinary functions.">
+    <p class="stem">What decides whether a handler parameter is a path parameter or a query one?</p>
+    <button class="opt" data-ok>whether its name appears inside {} in the route's URL string</button>
+    <button class="opt">whether the parameter was given a type hint in the function</button>
+    <button class="opt">whether the request used GET instead of POST as its method</button>
+  </div>
+  <div class="q" data-why="A path parameter has no fallback — a route with {user_id} in its URL simply does not match any request missing that segment. A query parameter becomes optional precisely because it carries a default value, exactly the default-argument rule Day 4 already established for plain function calls.">
+    <p class="stem">Why can a query parameter be optional but a path parameter never can?</p>
+    <button class="opt" data-ok>a query parameter's default value is what makes omitting it legal</button>
+    <button class="opt">query parameters are always validated less strictly than path ones are</button>
+    <button class="opt">path parameters cannot be given a type hint at all today</button>
+  </div>
+  <div class="q" data-why="raise HTTPException(status_code=404, ...) is Day 8's raise mechanism reused unchanged - FastAPI specifically catches this built-in exception type and converts it into a clean error response with that status code, instead of it crashing the handler into an uncaught 500.">
+    <p class="stem">What does <code>raise HTTPException(status_code=404, ...)</code> reuse from Day 8?</p>
+    <button class="opt" data-ok>raising a built-in exception type, now caught by FastAPI itself</button>
+    <button class="opt">the try/finally block that guarantees some cleanup always runs once</button>
+    <button class="opt">a custom exception class defined once and reused every route</button>
+  </div>
+  <div class="q" data-why="200 OK is FastAPI's default success code for any handler that returns normally. 201 Created is the correct HTTP convention for a successful POST that creates a new resource, and is set explicitly via status_code=201 in the route decorator rather than left at the default.">
+    <p class="stem">Why does the <code>create_user</code> route pass <code>status_code=201</code> explicitly?</p>
+    <button class="opt" data-ok>201 is the correct code for creating a new resource</button>
+    <button class="opt">FastAPI otherwise has no default success status code at all</button>
+    <button class="opt">a POST route always fails validation with no status code</button>
+  </div>
+  <div class="q" data-why="TestClient, built on httpx, calls routes in-process without starting a real server or sending real network traffic - a route is still just a function under the decorator, per Day 12, so calling it in a test needs no live server at all.">
+    <p class="stem">What does <code>TestClient</code> let a test avoid doing entirely?</p>
+    <button class="opt" data-ok>starting a real server to send it real network requests</button>
+    <button class="opt">writing any assert statements against a response object at all</button>
+    <button class="opt">importing the fastapi package into the test file being run</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official FastAPI tutorial's <a href="https://fastapi.tiangolo.com/tutorial/first-steps/">First Steps</a>, <a href="https://fastapi.tiangolo.com/tutorial/path-params/">Path Parameters</a>, and <a href="https://fastapi.tiangolo.com/tutorial/query-params/">Query Parameters</a> pages, cited in RESOURCES.md as the spine for this whole phase — genuinely teaches the concepts, not just the API surface.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day16">glossary</a> under Day 16.<br>
+Next up per PLAN.md's Phase 2b spine: pydantic models — validation, coercion, custom validators, settings.<br><br>
+💬 Anything unclear — path vs. query params, or why <code>HTTPException</code> works the way it does? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

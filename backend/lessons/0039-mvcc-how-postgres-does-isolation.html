@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 39 · MVCC: how Postgres actually does isolation</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 39 · ~20 min</p>
+<h1>MVCC: how Postgres actually does isolation</h1>
+<p class="byline">Lesson 37 named the mechanism behind every isolation level twice, in passing, and moved on: "Postgres's row-versioning storage engine (MVCC) makes them nearly free" and "a side effect of how its snapshot mechanism works." Today opens that box — what MVCC actually keeps on disk, and why it's the real reason Lesson 6's readers and writers never blocked each other in the first place.</p>
+
+<h2>1 · The question Lessons 6 and 37 both dodged</h2>
+<p>Lesson 6 said a plain <code>SELECT</code> "sees whatever was committed at the moment it runs." Lesson 37 said <code>REPEATABLE READ</code> "pins a transaction's reads to a single consistent snapshot." Both sentences assume something neither explained: how can Postgres show two different transactions two different, both-correct versions of the *same row*, at the *same instant*, without either one blocking the other? A naive single-copy database can't — if transaction A is mid-write on a row, transaction B's read has to either wait or read A's half-finished change. Postgres does neither. The answer is <dfn data-en="Multi-Version Concurrency Control — Postgres's storage strategy of never overwriting a row in place; an UPDATE or DELETE inserts a new row version and marks the old one obsolete instead, so readers and writers never block each other over the same row" data-vn="MVCC (giữ nguyên) — Postgres không ghi đè dòng cũ, UPDATE/DELETE tạo phiên bản mới, giữ phiên bản cũ lại, nên đọc và ghi không cần chờ nhau">MVCC</dfn>: multi-version concurrency control.</p>
+
+<h2>2 · Postgres never overwrites a row — it adds a new one</h2>
+<p>The mental model a frontend dev brings to <code>UPDATE</code> is "find the row, change its bytes in place" — the same way you'd mutate a JS object. Postgres does something different: an <code>UPDATE</code> leaves the old row physically on disk, unchanged, and inserts a brand-new row version next to it. A <code>DELETE</code> doesn't erase bytes either — it just marks the existing version as no longer current. Every row secretly carries two hidden system columns that make this work:</p>
+<pre><code><span class="cm">-- not columns you SELECT normally, but every row has them:
+-- xmin: the id of the transaction that created this row version
+-- xmax: the id of the transaction that deleted/replaced this row version
+--       (0 / null while the version is still the current one)</span></code></pre>
+<p>An <code>UPDATE</code>, under the hood, is really "set <code>xmax</code> on the old version to my transaction id, then <code>INSERT</code> a new version with my transaction id as its <code>xmin</code>." Both versions sit in the table at once, at least for a while. This is exactly what "row-versioning" in Lesson 37's parenthetical meant: multiple <em>versions</em> of one logical row, coexisting.</p>
+
+<h2>3 · A snapshot is just a rule for which versions to see</h2>
+<p>Once you know rows come in versions, "what a transaction sees" stops being mysterious. At the moment a transaction takes its <dfn data-en="the fixed rule a transaction uses to decide which row versions are visible to it — in practice, 'committed before I started (or before my current statement, depending on isolation level) and not yet deleted as of that point'" data-vn="snapshot (giữ nguyên) — mốc để transaction quyết định thấy phiên bản dòng nào: đã commit trước mốc đó và chưa bị xóa">snapshot</dfn> — once per statement under <code>READ COMMITTED</code>, once for the whole transaction under <code>REPEATABLE READ</code>/<code>SERIALIZABLE</code> — Postgres fixes a simple visibility rule: a row version is visible only if its <code>xmin</code> transaction had already committed by that point, and its <code>xmax</code> either doesn't exist yet or belongs to a transaction that hadn't committed by that point. Everything else on disk is invisible to this transaction, as if it didn't exist.</p>
+<p>That single rule is the whole trick. A writer creating a new version never has to block a reader — the reader's snapshot rule simply skips the not-yet-committed version and keeps seeing the old one. A reader never has to block a writer either — the writer just adds another version. No locks are needed for ordinary reads at all, which is why Lesson 6's <code>SELECT</code>s never contended with each other, only the two competing <em>writes</em> did.</p>
+
+<div class="callout"><strong>Ties to Lesson 37:</strong> this is what actually explains both footnotes. Postgres skips <code>READ UNCOMMITTED</code>'s dirty reads for free because the visibility rule above already excludes any uncommitted <code>xmin</code> — there is no code path that would show you another transaction's in-progress write even if you asked for the loosest level. And <code>REPEATABLE READ</code> blocking phantom reads (stricter than the SQL standard requires) is a direct consequence of taking the snapshot once, at the transaction's first statement, instead of once per statement — a row inserted by another transaction after that point simply has no visible version yet, no matter what later query asks for it.</div>
+
+<h2>4 · Why old versions don't pile up forever: VACUUM</h2>
+<p>Every <code>UPDATE</code> or <code>DELETE</code> leaves a dead row version behind — invisible to new transactions, but still physically occupying disk space, because some already-running transaction might still need it for its own snapshot. Postgres reclaims that space with <dfn data-en="Postgres's background process that scans tables for dead row versions no longer visible to any active transaction's snapshot and marks that space reusable — MVCC's necessary cleanup step, since old row versions are never deleted immediately" data-vn="VACUUM (giữ nguyên) — tiến trình nền dọn các phiên bản dòng cũ không còn transaction nào cần, trả lại chỗ trống">VACUUM</dfn>, a background process (usually autovacuum, running on its own) that periodically scans for dead versions no visible transaction still needs and marks that space reusable. This is why a table that gets heavy <code>UPDATE</code> traffic but rarely runs autovacuum can visibly bloat in size — it isn't a leak in your application, it's row versions Postgres hasn't reclaimed yet. Tuning autovacuum itself is operations work beyond this lesson's scope; the point here is only the causal link — <em>why</em> dead versions exist at all traces straight back to Section 2.</p>
+
+<h2>5 · Seeing it from Go</h2>
+<p>Nothing about MVCC changes how you write Go against Postgres — <code>pgx</code> never touches <code>xmin</code>/<code>xmax</code> directly. What it does explain is a behavior that otherwise looks like a mystery: setting <code>REPEATABLE READ</code> genuinely freezes what a transaction sees, even of rows other transactions commit while it's still open, because the snapshot was fixed at the start and never moves.</p>
+<pre><code><span class="cm">// withRepeatableRead opens a transaction pinned to one snapshot for its
+// whole lifetime (Lesson 37's isolation level), which MVCC is what actually
+// makes possible: every read inside fn sees the same row versions, no
+// matter what other transactions commit in the meantime.</span>
+<span class="kw">func</span> withRepeatableRead(ctx context.Context, pool *pgxpool.Pool, fn <span class="kw">func</span>(pgx.Tx) error) error {
+    tx, err := pool.BeginTx(ctx, pgx.TxOptions{
+        IsoLevel: pgx.RepeatableRead,
+    })
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        <span class="kw">return</span> fmt.Errorf(<span class="st">"begin repeatable read: %w"</span>, err)
+    }
+    <span class="kw">defer</span> tx.Rollback(ctx) <span class="cm">// no-op if fn already committed</span>
+
+    <span class="kw">if</span> err := fn(tx); err != <span class="kw">nil</span> {
+        <span class="kw">return</span> err
+    }
+    <span class="kw">return</span> tx.Commit(ctx)
+}</code></pre>
+<p>Two back-to-back <code>SELECT</code>s inside <code>fn</code> return identical results even if another transaction commits a change to that exact row in between — not because Postgres blocks the other writer, but because this transaction's snapshot never advances to see the new version. Same MVCC mechanism, now visible in application code instead of buried in the isolation-level table.</p>
+
+<div class="interview">
+<p><strong>Q: "How does Postgres let a long-running report query read consistent data without blocking every write that happens while it runs?"</strong> A strong answer, out loud: <em>"Postgres uses MVCC — an UPDATE never overwrites a row in place, it writes a new version and keeps the old one around. My report's transaction took a snapshot at the start, so it just keeps seeing the row versions that were visible then; new writes create newer versions the report's snapshot doesn't know about yet. Nobody blocks anybody — the tradeoff is Postgres has to eventually clean up those old versions with vacuum, and a long-running transaction can delay that cleanup by keeping old versions 'possibly still needed' for longer."</em> The signal: naming MVCC as the actual mechanism, not just "Postgres handles it."</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="MVCC means Postgres never overwrites a row's bytes in place — an UPDATE inserts a new row version (new xmin) and marks the old version's xmax, leaving both temporarily on disk, rather than mutating the existing row.">
+    <p class="stem">Under MVCC, what does Postgres actually do when a row is UPDATEd?</p>
+    <button class="opt" data-ok>it inserts a new row version, keeping the old</button>
+    <button class="opt">it overwrites the exact same row bytes in place</button>
+    <button class="opt">it locks the whole table until commit finally lands</button>
+    <button class="opt">it deletes the row and recreates it from backup</button>
+  </div>
+  <div class="q" data-why="A transaction's snapshot is a visibility rule fixed at a point in time: a row version is visible only if its creating transaction had committed by then and its deleting transaction (if any) had not. Rows failing that rule are simply invisible, not blocked or waited on.">
+    <p class="stem">What is a transaction's "snapshot," in MVCC terms?</p>
+    <button class="opt" data-ok>a fixed rule for which row versions are visible</button>
+    <button class="opt">a full physical backup copy of the entire database</button>
+    <button class="opt">a lock held on every row that transaction reads</button>
+    <button class="opt">a cached result set returned instead of a query</button>
+  </div>
+  <div class="q" data-why="MVCC is exactly why plain reads never block writes and writes never block plain reads: a reader's snapshot just skips versions it isn't meant to see yet, and a writer just adds another version — neither has to wait on the other for an ordinary SELECT.">
+    <p class="stem">Why don't ordinary SELECTs and concurrent writers block each other under MVCC?</p>
+    <button class="opt" data-ok>a reader simply skips versions its snapshot excludes</button>
+    <button class="opt">Postgres queues every write until readers finish first</button>
+    <button class="opt">every SELECT silently takes a full row lock</button>
+    <button class="opt">writers pause automatically whenever any reader is active</button>
+  </div>
+  <div class="q" data-why="Dead row versions left behind by UPDATE/DELETE aren't removed immediately, since some still-running transaction's snapshot might still need them — VACUUM is the background process that later reclaims that space once no active snapshot could possibly need those versions anymore.">
+    <p class="stem">Why does Postgres need a background VACUUM process at all?</p>
+    <button class="opt" data-ok>old row versions must eventually be reclaimed by something</button>
+    <button class="opt">to re-sort every table's rows into primary key order</button>
+    <button class="opt">to re-validate every single foreign key constraint each night</button>
+    <button class="opt">to rotate the write-ahead log files to cold storage</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://www.postgresql.org/docs/current/mvcc-intro.html">PostgreSQL Manual — Concurrency Control, "MVCC Introduction"</a> — RESOURCES.md already cites the PostgreSQL Manual generally for "tables, constraints, defaults, schemas" (already extended by Lessons 19, 21, 34, and 38 into specific mechanisms); this lesson reads into the Concurrency Control chapter Lesson 37's own Transaction Isolation citation sits inside. Kleppmann's <a href="https://dataintensive.net">Designing Data-Intensive Applications</a>, ch. 7, is the same standing citation Lessons 6, 33, and 37 already used — its "Snapshot Isolation and Repeatable Read" section covers the general version of this exact mechanism.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> open — still no reported quiz/lesson-completion outcome exists for any lesson after 38 rounds; distributed locks and blue-green/canary deploys remain the last named, confirmed out-of-scope-per-MISSION.md candidates if no fresh gap or user-chosen track surfaces first.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

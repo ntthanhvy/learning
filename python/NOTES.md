@@ -1323,3 +1323,160 @@ fail *gracefully* so the learner sees which task failed.
   decorators, `pathlib`, `datetime`, `logging` — Days 8 through 15). Per
   PLAN.md, **Phase 2b — FastAPI + pydantic backend — is the natural next
   topic**, starting with HTTP handlers, path/query params, and status codes.
+- 2026-08-13 — **Day 16 generated**
+  (`lessons/0016-fastapi-handlers-and-status-codes.html`), the headless run's
+  ninth Phase 2 lesson and **the first lesson of Phase 2b** — the FastAPI +
+  pydantic backend phase. Idempotency check confirmed on-disk before writing
+  anything: highest existing lesson file was `0015-…` dated 2026-08-12, no
+  `0016-…` file existed, and no `2026-08-13` entry existed yet in this file's
+  own log or in `assets/nav.js` — generation proceeded as Day 16, not a
+  re-run.
+  Topic: HTTP handlers, path/query params, status codes — the first item of
+  `PLAN.md`'s Phase 2b spine, directly after Day 15 completed all of Phase
+  2a. Taught: a route decorator (`@app.get("/ping")`) as Day 12's decorator
+  mechanism applied for real, with FastAPI itself installed for the first
+  time — explicitly framed as the payoff of Day 12's own "you'll meet this on
+  day one of Phase 2b and it will already make sense" promise, not a new
+  concept; a handler as the plain function a route decorator wraps, returning
+  a `dict` that FastAPI serializes to JSON automatically (contrasted with Day
+  6's manual `json.dump` for the same job); path parameters (`{user_id}` in
+  the URL, matched by name to a handler parameter, always required, converted
+  via Day 7's type hints — `user_id: int` rejects non-integer URL segments
+  before the handler runs); query parameters as Day 4's default-argument rule
+  reused verbatim — a handler parameter not named in the URL becomes an
+  optional query parameter exactly when it carries a default, required
+  otherwise; status codes (`2xx`/`4xx`/`5xx` by leading digit,
+  `raise HTTPException(status_code=404, ...)` as Day 8's `raise` mechanism
+  reused unchanged and specifically caught by FastAPI, and a route's own
+  `status_code=201` for a successful `POST`); and testing a handler via
+  `TestClient` (built on `httpx`) as Day 11's plain `assert` aimed at
+  `.status_code`/`.json()` instead of a plain return value, calling routes
+  in-process with no real server needed — a direct consequence of Day 12's
+  point that a route is still just a function under the decorator. Bridged
+  from SQL per the baseline record and this run's instructions: a route
+  framed as a stored procedure named by URL instead of function name, and
+  path/query parameters mapped onto required vs. optional-with-default
+  procedure arguments — the same distinction Day 4 already drew for Python
+  functions — introduced before any Python in the top callout, not from a
+  pandas or other "Python-adjacent" analogy.
+  **Scope-change flag, explicitly called out per this run's instructions:**
+  this is the first lesson in the course whose practice file needs a
+  non-stdlib dependency for a reason other than testing tooling — Days 1–10
+  and 12–15 were pure standard library, and Day 11's `pytest` was the sole
+  prior exception (a testing tool, not application code). Today's `fastapi`
+  (plus `httpx`, which `fastapi.testclient.TestClient` is built on) is a
+  deliberate, MISSION-sanctioned scope change: PLAN.md's Phase 2b spine
+  explicitly commits this course to "a small FastAPI + pydantic service," so
+  application-level third-party dependencies are now legitimate, not a
+  drift from the "stdlib only" rule that governed Phase 1 and Phase 2a.
+  Installed the same one-off way as Day 11's `pytest` — `uv run --with
+  fastapi --with httpx python3 …`, mirroring `data/`'s own established
+  `uv run --with pandas …` convention for its practice files — with no
+  `pyproject.toml` changes, since this course still has none. Confirmed both
+  packages install and import cleanly in this sandbox before writing the
+  lesson (`uv run --with fastapi --with httpx python3 -c "import fastapi,
+  httpx; ..."` succeeded, reporting fastapi 0.141.1 / httpx 0.28.1).
+  Learning records: still only the Day 1 baseline
+  (`learning-records/0001-baseline-reads-python-writes-little.md`) — no
+  completion/quiz record for any later day was found (same gap every Day
+  8–15 entry already flagged). Paced conservatively per that same
+  assumption: one lesson covering exactly the spine's first named trio
+  (handlers, path/query params, status codes), no pydantic models, dependency
+  injection, or `async`/`await` pulled forward from later spine items, and
+  every new mechanism tied back explicitly to material already taught
+  (Day 12 decorators, Day 4 default arguments, Day 7 type hints, Day 8
+  `raise`, Day 11 `assert`) rather than introduced as unrelated new ground.
+  Unverified against real quiz/completion data, same caveat as every entry
+  since Day 8.
+  No-pandas rule: zero pandas/NumPy API in the lesson body or practice file
+  (checked by grep for `pandas|numpy|dataframe|DataFrame`, case-insensitive,
+  across both new files — zero hits in the practice file, exactly one hit in
+  the lesson); exactly one contrast sentence, naming `df.to_dict("records")`
+  without demonstrating it, placed once in its own callout after section 5
+  and labeled in prose as the only such sentence, matching the hard-rule
+  section above.
+  Practice file `practice/16_fastapi_handlers_and_status_codes.py` (5
+  exercises: a `GET` handler with a path parameter, a `GET` handler with a
+  default-valued query parameter, a `GET` handler raising
+  `HTTPException(404, ...)` for a missing user, a `POST` handler returning
+  `201`, and a helper reading a parsed JSON body back from `TestClient`) is
+  the first practice file in this course requiring `--with` flags for
+  application code rather than test tooling, per the scope-change flag
+  above; the shipped (unsolved) form leaves the decorator line itself as a
+  bare `...` expression statement (a no-op, so the function underneath stays
+  undecorated and FastAPI never registers that route) rather than leaving the
+  function body unsolved under a real decorator — chosen deliberately after
+  recalling Day 12's own caught bug, where decorating eagerly at import time
+  with an unsolved decorator body crashed the whole file before any check
+  could run; leaving the decorator itself as the TODO sidesteps that failure
+  mode entirely, since an unregistered route just makes its own check fail
+  cleanly (a 404 or a `KeyError` inside the lambda, caught by `check()`'s own
+  `try/except`) without touching any other exercise. Verified in a scratch
+  dir (`.scratch/py16_verify/`, created under the repo root rather than
+  `/tmp` per the Day 3–15 precedent that `/tmp` is out of bounds for this
+  sandbox, and removed after use): the shipped (unsolved) copy ran via
+  `uv run --with fastapi --with httpx python3`, both from the scratch copy
+  and from its real `practice/` path with the documented command, and
+  printed five clean ✗ lines with no traceback each time; a separately
+  solved copy (each TODO filled in directly, not copied from the
+  commented-out answer lines blindly) printed five ✓ and the "All green"
+  tally. No bugs found during verification — both passes succeeded on the
+  first attempt. One non-bug observation worth recording: both runs printed
+  a `StarletteDeprecationWarning` about using `httpx` with
+  `starlette.testclient` (recommending an `httpx2` package), coming from the
+  very-latest `fastapi`/`starlette` versions this sandbox resolved via
+  `--with` with no version pin; it is a warning only, prints identically for
+  both the unsolved and solved copies, and does not affect any check's
+  pass/fail outcome — left unpinned since this course has no
+  `pyproject.toml`/`uv.lock` anywhere to pin against (Day 10's own territory)
+  and every other `--with`-based practice file in this course (Day 11) is
+  similarly unpinned by design.
+  Glossary: added a Day 16 section to `reference/glossary.html` (`FastAPI`,
+  `GET request`, `handler (FastAPI route)`, `path parameter`, `query
+  parameter`, `status code`) after checking via grep that none collided with
+  Day 1–15 entries — found one real collision: Day 15 already has a `handler`
+  row (a logging handler, owning a log record's destination). Followed this
+  course's own established disambiguation pattern (Day 4's `key= (sorting)`
+  vs. Day 3's `key`; Day 7's `default (dataclass field)` vs. Day 4's `default
+  argument`) and titled today's entry `handler (FastAPI route)`, with its own
+  "In software" cell explicitly naming the Day 15 sense and why the title
+  differs. All six terms also got matching `<dfn>` markup at first use in the
+  lesson body, matching Day 11–15's density of glossarying every newly
+  introduced term inline.
+  Quiz: 5 questions. Word counts were checked with a small Python script
+  (`uv run python3 …`, run from a `.scratch_wc16/` scratch dir removed after
+  use) that regex-extracts every `<button class="opt">` line and counts
+  `.split()` words per option — chosen over individual `wc -w` calls per this
+  run's explicit instruction to verify word counts via a Python word-count
+  script rather than looped/compound bash, which this sandbox's approval gate
+  blocks anyway, consistent with every prior day's experience. Mismatched on
+  the first draft for four of the five questions (Q2 11/10/11, Q3 10/8/10, Q4
+  13/10/11, Q5 11/10/10) — Q1 was already equal on the first draft
+  (11/11/11). Each mismatched question went through one to three
+  rewrite-and-recount rounds — Q4 in particular needed three attempts on its
+  first option (13 → 12 → 10 words) before landing on the target count, and
+  one round changed only "with no"/"without a" (same word count either way, a
+  false-start edit in the same spirit as Day 6 and Day 12's own logged
+  false-starts) before an actual word was cut — until every option matched
+  (Q1 11/11/11, Q2 11/11/11, Q3 10/10/10, Q4 10/10/10, Q5 10/10/10), then a
+  full final script run across all five questions' three options each (15
+  lines total) confirmed every one before shipping, per this file's
+  instruction to recount after any edit. Registered in `assets/nav.js` with
+  `date: "2026-08-13"`.
+  **DB access:** per this run's explicit instructions, no attempt was made
+  this run at `psql "$LEARNING_DB_URL" ...`, `source
+  ~/.config/learning/db.env`, `printenv`, or `bin/query-progress` — all
+  require interactive approval with no approver present in this headless run
+  and have failed or been blocked on every day since Day 8, so this run
+  skipped re-spending an attempt on the read path per that established
+  precedent, and paced from on-disk state alone (this file's own log,
+  `python/lessons/`, and `python/learning-records/`, which still holds only
+  the Day 1 baseline record).
+  `bin/record-progress python lesson_generated --day 16 --lesson
+  0016-fastapi-handlers-and-status-codes.html --detail
+  '{"by":"github-actions"}'` was run once after shipping, per this run's
+  instructions — see its own output for whether it recorded successfully.
+  **This is Phase 2b's opening lesson.** Per PLAN.md's Phase 2b spine, the
+  natural next-day candidate is pydantic models — validation, coercion,
+  custom validators, settings — the second item, directly following today's
+  handlers/params/status-codes foundation.

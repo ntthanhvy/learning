@@ -84,6 +84,8 @@
       file: "lessons/0038-foreign-key-referential-actions.html" },
     { n: 39, date: "2026-08-13", title: "MVCC: how Postgres actually does isolation",
       file: "lessons/0039-mvcc-how-postgres-does-isolation.html" },
+    { n: 40, date: "2026-08-14", title: "Deadlocks: when two transactions wait on each other forever",
+      file: "lessons/0040-deadlocks.html" },
   ];
 
   const REFS = [

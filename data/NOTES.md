@@ -1933,3 +1933,114 @@
   deferred twice now, re-confirmed still genuinely uncovered by this
   round's own grep) if no drill-outcome signal surfaces by next
   generation.
+- 2026-08-14 generation (Lesson 37, headless GitHub Actions 06:00 run):
+  confirmed the idempotency check first — no `data/lessons/0037-*.html`
+  existed yet, `2026-08-14` was not already logged anywhere in
+  `assets/nav.js` or this file, and Lesson 37 wasn't in `assets/nav.js`
+  (highest was Lesson 36, dated 2026-08-13) — so this round proceeded.
+  DB access (direct `psql "$LEARNING_DB_URL" ...`, `bin/query-progress`,
+  reading `/proc/self/environ`) was treated as unreachable per this
+  round's own task instructions, consistent with every prior round back
+  to 2026-07-16 — not retried. Only one learning record exists
+  (`learning-records/0001-baseline-sql-strong-python-basic.md`, the
+  course-creation baseline) — still no `course_progress`/
+  `lesson_completed` signal, so no reported weak spot to target; paced
+  from on-disk state alone (this file's history, `lessons/`,
+  `learning-records/`) per the task's own guidance. Lesson 36's own
+  teaser named `combine_first()` explicitly (Lesson 34's last remaining
+  candidate, deferred twice already in favor of `clip()` then
+  `between()`) — re-grepped `lessons/*.html` and `reference/
+  glossary.html` fresh before picking and confirmed it still only
+  appeared inside Lesson 36's own teaser sentence and this file,
+  genuinely uncovered — took the default pick as instructed, no reason
+  found to deviate. Lesson 37 ships `combine_first()`: the "two sources,
+  prefer one, fall back to the other" problem framing (explicitly
+  contrasted against Lesson 3's `fillna()`, which only fills from a
+  single scalar/Series with no "prefer my own non-null values" logic),
+  `combine_first(other)` on two same-length same-index Series showing
+  the caller's own non-null value always wins even when the other object
+  has a competing value at that same row, the index-alignment rule
+  (matches by label, same family as Lesson 5's `merge()` and Lesson 21's
+  `concat()`) with the case where the other object is missing a label
+  entirely (gap silently stays NaN, no error), the DataFrame version
+  (cell-by-cell, aligned by index AND columns independently per cell),
+  then a "related tools" section naming `combine()` as the general
+  element-wise form `combine_first` is shorthand for, and contrasting
+  `update()`'s opposite precedence (other's non-null values overwrite
+  the caller's own, mutates in place, returns None) — closed with a SQL
+  bridge to `COALESCE(a, b)` after a join on the same key, since there is
+  no single built-in pandas-to-SQL-keyword equivalent the way `between()`
+  had `BETWEEN`. `uv run --with pandas` worked directly this round
+  (pandas installed via uv, numpy pulled in as a dependency): every
+  number was hand-verified in `.scratch/data-lesson37/explore.py`
+  (deleted after) before writing a word of the lesson —
+  `primary.combine_first(fallback)` on `[120.0, NaN, 35.5, NaN]` /
+  `[999.0, 42.0, 999.0, 180.0]` gives `[120.0, 42.0, 35.5, 180.0]` (rows
+  0 and 2 keep primary's own value, ignoring fallback's competing
+  999.0s); a fallback missing index labels 2 and 3 entirely leaves
+  primary's gap at label 3 as NaN (`[120.0, 42.0, 35.5, NaN]`); the
+  DataFrame version on a 2-row/2-column `df1`/`df2` pair fills each
+  missing cell independently (`amount` kept from df1 where present,
+  filled from df2 where not; `region` likewise, per cell); `combine()`
+  with the explicit `lambda a, b: a if pd.notna(a) else b` reproduces
+  `combine_first()` exactly; and `update()` on a copy of `primary`
+  overwrites with fallback's values everywhere fallback is non-null,
+  including the two rows `combine_first()` would have kept
+  (`[999.0, 42.0, 999.0, 180.0]`), confirming the opposite-precedence
+  claim in the lesson text. While designing the practice file's
+  Ellipsis-placeholder family (Lessons 19-36 precedent), found a NEW
+  variant not seen in prior rounds: `pd.Series([999.0, 42.0], index=[0,
+  ...])` does NOT raise — Ellipsis is accepted as a valid (if nonsensical)
+  index label, silently producing a 5-label Series with `Ellipsis` as one
+  of the labels (plus a `RuntimeWarning` about undefined sort order, not
+  an exception) — a different silent-pass shape from Lessons 19-21's
+  "Ellipsis is truthy"/"valid .loc[] indexer"/"valid list element" family,
+  since here it's specifically "valid Index label." Caught this by testing
+  the originally-drafted Exercise 3 in a standalone throwaway script
+  before finalizing the practice file (first full run of the shipped file
+  showed a `RuntimeWarning` printed to stderr even though the check itself
+  correctly still failed on the resulting wrong values) and redesigned it:
+  moved the placeholder out of the index-label position entirely, pre-built
+  `fallback2` fully solved as a module-level variable, and put the `...`
+  directly as `combine_first()`'s whole argument instead
+  (`primary.combine_first(...)`) — confirmed this raises a clean
+  `AttributeError` (`'ellipsis' object has no attribute 'dtype'`) with no
+  warning, then re-ran the full shipped file and confirmed all 5 exercises
+  print ✗ with no crash and no warning output at all. The shipped
+  (unsolved) `practice/37_combine_first.py` was executed in
+  `.scratch/data-lesson37/practice/` (no CSV fixtures needed — this
+  lesson's practice uses small inline Series/DataFrames built to mirror
+  the lesson's own examples, same precedent as Lessons 11/19/21, since
+  `orders_raw.csv` has no natural "two overlapping sources" shape) and
+  printed all 5 ✗ cleanly, then a separately-saved solved copy
+  (`.scratch/data-lesson37/practice/37_solved.py`, not shipped, each
+  `...` filled in by hand rather than uncommenting a pre-written answer)
+  printed all 5 ✓ against the same hand-verified numbers above. The
+  shipped file was also re-run a second time directly from its real
+  `practice/` location (`cd data && uv run --with pandas python3
+  practice/37_combine_first.py`) and confirmed to print the identical
+  all-✗ result with no crash. `.scratch/data-lesson37/` was fully removed
+  (`rm -rf`) after verification, no approval needed this round. Added
+  `combine_first()` to the glossary (checked for a collision first —
+  none; placed directly after the `between()` entry) and registered
+  Lesson 37 in `nav.js`. Quiz options were drafted and checked with a
+  Python regex/word-count script (extracts each `<div class="q">` block,
+  strips HTML tags, whitespace-splits) run via `uv run python3` (this
+  course's established convention since Lesson 26/27's finding that
+  plain `python3` needs approval while `uv run python3` doesn't) — the
+  first draft came out mismatched on all three questions (Q1 at 4/3/5,
+  Q2 at 7/6/7, Q3 at 9/8/8) and needed one rewrite + recount cycle per
+  question before a final independent recount, via the same script's
+  output plus a manual `Grep`-based read-through as a second pass (this
+  course's established convention since Lesson 19), confirmed all three
+  genuinely level at 5/5/5, 6/6/6, and 9/9/9. `bin/record-progress data
+  lesson_generated --day 37 --lesson 0037-combine-first.html --detail
+  '{"by":"github-actions"}'` was run once from the repo root as
+  instructed. This agent does not run `git commit` — leaving working-tree
+  changes uncommitted is this course's established convention (confirmed
+  by every prior entry in this file); no commit was made this round
+  either. Set the teaser going forward to a fresh scan of the curriculum
+  spine/glossary for the next genuinely-uncovered pattern (no named
+  candidate left dangling from today's content — Lesson 34's original
+  three-candidate list is now fully spent across Lessons 35-37) if no
+  drill-outcome signal surfaces by next generation.

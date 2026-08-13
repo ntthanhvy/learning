@@ -38,6 +38,8 @@
       file: "lessons/0015-logging.html" },
     { n: 16, date: "2026-08-13", title: "FastAPI handlers, path/query params & status codes",
       file: "lessons/0016-fastapi-handlers-and-status-codes.html" },
+    { n: 17, date: "2026-08-14", title: "pydantic models: validation, coercion & settings",
+      file: "lessons/0017-pydantic-models-and-validation.html" },
   ];
 
   const REFS = [

@@ -1480,3 +1480,167 @@ fail *gracefully* so the learner sees which task failed.
   natural next-day candidate is pydantic models — validation, coercion,
   custom validators, settings — the second item, directly following today's
   handlers/params/status-codes foundation.
+- 2026-08-14 — **Day 17 generated**
+  (`lessons/0017-pydantic-models-and-validation.html`), the headless run's
+  tenth Phase 2 lesson. Idempotency check confirmed on-disk before writing
+  anything: highest existing lesson file was `0016-…` dated 2026-08-13, no
+  `0017-…` file existed, and no `2026-08-14` entry existed yet in this file's
+  own log or in `assets/nav.js` — generation proceeded as Day 17, not a
+  re-run.
+  Topic: pydantic models — validation, coercion, custom validators, settings
+  — the second item of `PLAN.md`'s Phase 2b spine, directly after Day 16
+  completed the first (handlers/params/status-codes), and named explicitly
+  as "next up" in Day 16's own closing line. Taught: the gap a plain
+  `@dataclass` leaves open — Day 7 already said type hints are documentation
+  only, demonstrated concretely today with a dataclass silently storing a
+  string where `price: float` was promised, then crashing far away from the
+  real mistake; a pydantic `BaseModel` closing that gap, with **coercion**
+  (a compatible input like `"12.5"` converted into the declared `float`) and
+  **validation** (the check that makes coercion possible or raises
+  `ValidationError` when it isn't) introduced as two distinct, named
+  mechanisms rather than one blurred idea; `ValidationError` itself, shown
+  reporting every failing field in one message; a custom `@field_validator`
+  rule (paired with `@classmethod`), explicitly built from two Day-12 ideas
+  already taught (a decorator wrapping a function, called during
+  construction) plus Day 8's `raise ValueError(...)` reused unchanged and
+  caught by pydantic instead of the caller — and the load-bearing detail that
+  a validator's return value becomes the field's final stored value, which
+  is how one function both rejects bad input and normalizes good input
+  (lower-casing a username); and `pydantic_settings.BaseSettings` as the
+  identical `BaseModel` mechanics pointed at `os.environ`, checking a
+  case-insensitively matched environment variable before falling back to a
+  field's coded default. Also closed the loop back to Day 16 explicitly:
+  section 2 names that FastAPI's `user_id: int` path-parameter validation
+  (Day 16 section 2) was already this exact mechanism, unnamed until today.
+  Bridged from SQL per the baseline record and this run's instructions: a
+  pydantic model framed as `CREATE TABLE` with `CHECK` constraints enforced
+  client-side instead of in the database, extending Day 7's own
+  dataclass-as-`CREATE-TABLE` framing with the constraint-checking a plain
+  dataclass never had, introduced before any Python in the top callout, not
+  from a pandas or other "Python-adjacent" analogy.
+  Version/behavior confirmed before writing the lesson, in a scratch dir
+  (`.scratch_py17_explore/`, created under the repo root and removed after
+  use, per the Day 3–16 precedent that `/tmp` is out of bounds for this
+  sandbox): `uv run --with fastapi --with httpx python3 -c "..."` reported
+  `fastapi 0.141.1` / `pydantic 2.13.4` (pydantic v2, bundled as a FastAPI
+  dependency, no separate `--with pydantic` needed when fastapi is already
+  requested); a small script confirmed pydantic v2's real coercion behavior
+  (`price='12.5'` → `12.5: float`, `qty='3'` → `3: int`) and its real
+  `ValidationError` message text for a genuinely bad value; a second script
+  confirmed a `@field_validator`/`@classmethod` pair raising `ValueError`
+  produces a `ValidationError` wrapping that message; a third script
+  confirmed `pydantic_settings.BaseSettings` is a **separate package**
+  (`ImportError: No module named 'pydantic_settings'` when only
+  `pydantic`/`fastapi`/`httpx` were requested) and, once installed via
+  `--with pydantic-settings`, correctly read `APP_NAME`/`DEBUG` from
+  `os.environ` with the same string-to-`bool` coercion (`"true"` → `True`).
+  This confirmed exploration is why the lesson and practice file's `--with`
+  commands list `pydantic-settings` explicitly rather than assuming it rides
+  along with `pydantic` or `fastapi`.
+  Learning records: still only the Day 1 baseline
+  (`learning-records/0001-baseline-reads-python-writes-little.md`) — no
+  completion/quiz record for any later day was found (same gap every Day
+  8–16 entry already flagged). Paced conservatively per that same assumption
+  and this run's own instruction to pace from file-state alone: exactly the
+  spine's named quartet (validation, coercion, custom validators, settings)
+  covered, no request/response schemas, dependency injection, or `async`
+  pulled forward from later Phase 2b spine items, and every new mechanism
+  tied back explicitly to material already taught (Day 7 dataclasses/type
+  hints, Day 8 `raise`, Day 12 decorators, Day 16 path-parameter validation)
+  rather than introduced as unrelated new ground. Unverified against real
+  quiz/completion data, same caveat as every entry since Day 8.
+  No-pandas rule: zero pandas/NumPy API in the lesson body or practice file
+  (checked by grep for `pandas|numpy|dataframe|DataFrame`, case-insensitive,
+  across both new files — zero hits in the practice file, exactly one hit in
+  the lesson); exactly one contrast sentence, contrasting a pydantic model's
+  single-record shape validation against a DataFrame's column-wide `dtypes`,
+  without demonstrating any pandas API, placed once in its own callout after
+  section 4 and labeled in prose as the only such sentence, matching the
+  hard-rule section above.
+  Practice file `practice/17_pydantic_models_and_validation.py` (4
+  exercises: defining an `Item(BaseModel)` with a coerced/defaulted field,
+  `item_is_valid()` catching `ValidationError` to tell good kwargs from bad,
+  a `SignUp` model's `field_validator` rejecting spaces and lower-casing
+  good input, and a `Settings(BaseSettings)` reading `APP_NAME`/`DEBUG` back
+  from `os.environ`) needed no on-disk fixtures — every exercise operates on
+  in-memory model construction and `os.environ`, so it stayed with the plain
+  ✓/✗ `check()` idiom used by every day except Day 11's pytest exception, no
+  `tempfile` scaffolding needed. Uses `--with pydantic --with
+  pydantic-settings` (no `fastapi`/`httpx`, unlike Day 16, since nothing
+  here runs a route), confirmed sufficient by running the shipped file with
+  exactly that command. **One bug was caught and fixed during verification,
+  a repeat of a known failure mode this course has hit before (Day 12, Day
+  16):** the first draft's Exercise 1 and Exercise 4 TODO placeholders wrote
+  `class Item(...):` / `class Settings(...):`, using a bare `...` as the
+  base-class expression — this is not a no-op the way an unsolved `...`
+  statement is elsewhere in this course's practice files; a class base list
+  is evaluated eagerly at class-definition time, and `...` (the `Ellipsis`
+  object) is not a valid base class, so the shipped file crashed immediately
+  with `TypeError: EllipsisType takes no arguments` before any check could
+  run, violating this file's "must fail gracefully" rule. Fixed by leaving
+  each class as a plain, unparameterized class (`class Item:` /
+  `class Settings:`) with a TODO comment naming the exact base to add,
+  matching Day 16's own resolution of a related eager-evaluation bug
+  (leaving a route decorator's TODO as a no-op statement above the `def`
+  rather than inside a still-eagerly-applied decorator). After the fix: the
+  shipped (unsolved) copy, run via `uv run --with pydantic --with
+  pydantic-settings python3`, both from a scratch copy
+  (`.scratch_py17_verify/`, created under the repo root and removed after
+  use) and from its real `practice/` path with the documented command,
+  printed four clean ✗ lines with no traceback each time — a plain `Item`/
+  `Settings` class with no `BaseModel`/`BaseSettings` parent raises a plain
+  `TypeError` on construction with keyword arguments it doesn't accept,
+  caught cleanly by `check()`'s own `try`/`except`; a separately solved copy
+  printed four ✓ and the "All green" tally.
+  Glossary: added a Day 17 section to `reference/glossary.html` (`pydantic
+  model`, `coercion`, `validation`, `ValidationError`, `field_validator`,
+  `BaseSettings`) after confirming via grep — extracting every existing
+  `<tr><td>term</td>` row across Days 1–16 — that none of the six
+  terms/entries collided with any prior entry (no existing `model`,
+  `field`, `validator`, `settings`, or `error`-only row anywhere in the
+  file, so no disambiguating title was needed today, unlike Day 4's `key=
+  (sorting)`, Day 7's `default (dataclass field)`, or Day 16's own `handler
+  (FastAPI route)`). All six also got matching `<dfn>` markup at first use
+  in the lesson body (confirmed by counting `<dfn data-en` occurrences,
+  6 total), matching Day 11–16's density of glossarying every newly
+  introduced term inline rather than leaving any undefined.
+  Quiz: 5 questions. Word counts were checked with a small Python script
+  (`uv run python3 …`, run from a `.scratch_wc17/` scratch dir removed after
+  use) that regex-splits the quiz block into its five question `<div>`s and
+  counts `.split()` words per `<button class="opt">` line — chosen over
+  individual `wc -w` calls or bash loops per this course's established
+  convention (loops blocked by this sandbox's static analysis; a Python
+  script is the documented workaround). The script's first version had a
+  greedy regex that collapsed all five questions into one 15-option match —
+  caught immediately since the printed option count (15 for "Q1") didn't
+  match the expected 3, fixed by splitting on each `<div class="q"` start
+  instead of a single greedy `.*?` span. Mismatched on the first draft for
+  all five questions (Q1 11/11/7, Q2 10/9/9, Q3 11/9/10, Q4 10/8/10, Q5
+  11/11/14) — each went through two to four rewrite-and-recount rounds,
+  including a couple of overshoot/undershoot cycles on Q1's and Q3's third
+  options before landing on the target count — until every option matched
+  (Q1 11/11/11, Q2 10/10/10, Q3 11/11/11, Q4 10/10/10, Q5 11/11/11), then a
+  full final script run across all five questions' three options each (15
+  lines total) confirmed every one before shipping, per this file's
+  instruction to recount after any edit. Registered in `assets/nav.js` with
+  `date: "2026-08-14"`.
+  **DB access:** per this run's explicit instructions, no attempt was made
+  this run at `psql "$LEARNING_DB_URL" ...`, `bin/query-progress`, or any
+  other read-path command — all have required interactive approval with no
+  approver present and been blocked on every day since Day 8, so this run
+  skipped re-spending an attempt on the read path per that established
+  precedent, and paced from on-disk state alone (this file's own log,
+  `python/lessons/`, `python/learning-records/` — still only the Day 1
+  baseline record — and `python/practice/`).
+  `bin/record-progress python lesson_generated --day 17 --lesson
+  0017-pydantic-models-and-validation.html --detail
+  '{"by":"github-actions"}'` was run once after shipping, per this run's
+  instructions and the established convention that the write path (unlike
+  the read paths) is reliably invocable directly by relative path from the
+  repo root — see its own output below for whether it recorded
+  successfully.
+  **Next-day note:** per `PLAN.md`'s Phase 2b spine, the natural next-day
+  candidate is request/response schemas — and why the type hints on a
+  FastAPI handler *are* the contract — the third item, directly following
+  today's pydantic-model foundation, already named in today's lesson's own
+  closing line.

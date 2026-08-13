@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 40 · Deadlocks: when two transactions wait on each other forever</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 40 · ~20 min</p>
+<h1>Deadlocks: when two transactions wait on each other forever</h1>
+<p class="byline">Lesson 6's own quiz used "a deadlock" as a wrong answer to a different question — the word shown, never explained. Lesson 6 taught <code>SELECT ... FOR UPDATE</code> as a fix for lost updates; today covers the failure mode that same row lock can introduce once a transaction takes more than one lock.</p>
+
+<h2>1 · Why one row lock was safe, and two can not be</h2>
+<p>Lesson 6's fix for a lost update was <code>SELECT ... FOR UPDATE</code>: lock the row, do your work, commit — a second transaction wanting the same row simply waits. That's safe as long as a transaction only ever locks <em>one</em> row before committing. The moment a transaction needs to lock two rows — a funds transfer touching both the sending and receiving account — a new failure becomes possible that never came up with a single lock.</p>
+<p>Picture two transfers running at the same time, in opposite directions, between accounts <code>A</code> and <code>B</code>:</p>
+<pre>
+Transaction 1: transfer A -> B         Transaction 2: transfer B -> A
+  LOCK account A   (FOR UPDATE)          LOCK account B   (FOR UPDATE)
+  ... now wants to LOCK account B        ... now wants to LOCK account A
+  -- but Transaction 2 already holds B   -- but Transaction 1 already holds A
+  -- so Transaction 1 WAITS              -- so Transaction 2 WAITS
+</pre>
+<p>Transaction 1 holds <code>A</code> and waits for <code>B</code>. Transaction 2 holds <code>B</code> and waits for <code>A</code>. Neither can ever proceed — each is waiting on a lock the other is holding, and neither will release its lock until it gets the other. This is a <dfn data-en="a situation where two (or more) transactions each hold a lock the other is waiting for, so neither can ever proceed — distinct from a lost update, which produces a silently wrong result with no waiting at all" data-vn="deadlock (giữ nguyên) — 2 transaction giữ khóa của nhau, cả hai cùng chờ mãi, không transaction nào chạy tiếp được">deadlock</dfn>. Notice this is a genuinely different bug from Lesson 6's lost update: a lost update happens with <em>no locks at all</em> and produces a silently wrong number; a deadlock happens <em>because of</em> locks and produces two transactions stuck, not a wrong result.</p>
+
+<div class="callout"><strong>Postgres doesn't let this hang forever.</strong> Postgres runs a background deadlock detector that periodically checks for exactly this circular-wait pattern. When it finds one, it picks one of the two transactions as the victim, aborts it with an error (SQLSTATE <code>40P01</code>, "deadlock detected"), and releases its locks — letting the other transaction proceed. The aborted transaction gets nothing; its work is rolled back exactly as if it had called <code>ROLLBACK</code> itself. Nothing hangs forever, but the aborted transaction's caller has to notice the failure and decide what to do about it.</div>
+
+<h2>2 · The fix: always take locks in the same order</h2>
+<p>The deadlock above only happens because the two transactions locked the accounts in <em>opposite</em> order — one went A-then-B, the other went B-then-A. If both transactions always lock the lower account id first, the circular wait becomes structurally impossible: whichever transaction gets there first locks the lower id, the second transaction blocks waiting for it (not the reverse), and once the first commits and releases, the second proceeds normally. No cycle can form.</p>
+<pre><code><span class="cm">// transferFunds locks BOTH account rows involved in a transfer, always in
+// ascending account id order — regardless of which account is "from" and
+// which is "to" — so two concurrent transfers between the same two accounts
+// can never each hold one row and wait for the other's.</span>
+<span class="kw">func</span> transferFunds(ctx context.Context, tx Tx, fromID, toID <span class="ty">int64</span>, amountCents <span class="ty">int64</span>) error {
+    first, second := fromID, toID
+    <span class="kw">if</span> second &lt; first {
+        first, second = second, first
+    }
+    <span class="kw">if</span> err := tx.Exec(ctx, <span class="st">`SELECT id FROM accounts WHERE id = $1 FOR UPDATE`</span>, first); err != <span class="kw">nil</span> {
+        <span class="kw">return</span> fmt.Errorf(<span class="st">"lock account %d: %w"</span>, first, err)
+    }
+    <span class="kw">if</span> err := tx.Exec(ctx, <span class="st">`SELECT id FROM accounts WHERE id = $1 FOR UPDATE`</span>, second); err != <span class="kw">nil</span> {
+        <span class="kw">return</span> fmt.Errorf(<span class="st">"lock account %d: %w"</span>, second, err)
+    }
+    <span class="kw">if</span> err := tx.Exec(ctx, <span class="st">`UPDATE accounts SET balance_cents = balance_cents - $1 WHERE id = $2`</span>, amountCents, fromID); err != <span class="kw">nil</span> {
+        <span class="kw">return</span> err
+    }
+    <span class="kw">return</span> tx.Exec(ctx, <span class="st">`UPDATE accounts SET balance_cents = balance_cents + $1 WHERE id = $2`</span>, amountCents, toID)
+}</code></pre>
+<p>Notice the lock order (by account id, ascending) is completely independent of the transfer's <em>direction</em> (from/to) — that independence is the whole trick. Any two transactions calling this same function, transferring in whichever direction, always agree on which row to lock first.</p>
+
+<div class="cmp-wrap">
+<table class="cmp">
+<thead><tr><th>Lesson 6's lost update</th><th>Deadlock</th></tr></thead>
+<tbody>
+<tr><th>What happens</th><td>Two transactions both read stale data, both write; one write silently overwrites the other</td><td>Two transactions each hold a lock the other needs; both wait forever</td></tr>
+<tr><th>Locks involved</th><td>None — that's exactly the bug</td><td>At least two, taken in opposite order across two transactions</td></tr>
+<tr><th>Result</th><td>A wrong number, no error, no warning</td><td>Postgres aborts one side with an explicit error</td></tr>
+<tr><th>Fix</th><td>Fold check into the write, or take a row lock</td><td>Always take locks in the same, agreed order</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2>3 · When ordering isn't enough: retry on 40P01</h2>
+<p>Consistent lock ordering prevents deadlocks between transactions that all go through the same code path, like every call to <code>transferFunds</code> above. It doesn't cover every case — a hand-written report query taking locks in a different sequence, or a bug in a rarely-hit branch, can still produce one occasionally. Because Postgres's detector always aborts one side rather than hanging, a deadlock is <em>always safe to retry</em> — this is the same bounded-retry shape Lesson 37 used for a <code>SERIALIZABLE</code> transaction's serialization failure, just triggered by a different SQLSTATE:</p>
+<pre><code><span class="cm">// runWithDeadlockRetry retries the whole transaction once Postgres aborts one
+// side of a deadlock with SQLSTATE 40P01 — the same bounded-retry shape
+// Lesson 37 used for a SERIALIZABLE serialization failure (40001), applied to
+// a different SQLSTATE.</span>
+<span class="kw">func</span> runWithDeadlockRetry(ctx context.Context, attempts <span class="ty">int</span>, fn <span class="kw">func</span>(context.Context) error) error {
+    <span class="kw">var</span> err error
+    <span class="kw">for</span> i := <span class="kw">0</span>; i &lt; attempts; i++ {
+        err = fn(ctx)
+        <span class="kw">if</span> err == <span class="kw">nil</span> {
+            <span class="kw">return</span> <span class="kw">nil</span>
+        }
+        <span class="kw">if</span> !isDeadlock(err) {
+            <span class="kw">return</span> err
+        }
+        time.Sleep(time.Duration(i+<span class="kw">1</span>) * <span class="kw">5</span> * time.Millisecond)
+    }
+    <span class="kw">return</span> fmt.Errorf(<span class="st">"gave up after %d deadlock retries: %w"</span>, attempts, err)
+}</code></pre>
+<p>The order of priorities matters here: fix the lock ordering first, because it prevents the deadlock from ever happening for the common path. Retry-on-<code>40P01</code> is the safety net underneath, for the cases ordering doesn't reach — the same "prevent, then retry as a backstop" layering Lesson 32's backoff sat underneath Lesson 28's circuit breaker.</p>
+
+<div class="interview">
+<p><strong>Q: "Your funds-transfer endpoint occasionally fails with a Postgres error about a deadlock. What's happening, and what would you check?"</strong> A strong answer, out loud: <em>"A deadlock means two transactions each hold a lock the other one is waiting for — Postgres's deadlock detector caught the cycle and aborted one side rather than let both hang forever. First thing I'd check is whether the transfer code locks the two accounts in a consistent order regardless of transfer direction — if a transfer from A to B locks A first, but a transfer from B to A locks B first, two concurrent transfers between the same pair can deadlock. The fix is ordering the locks by something stable, like account id, so every transaction agrees on which row to lock first. I'd also wrap the call in a bounded retry on the deadlock SQLSTATE as a backstop, since Postgres guarantees the aborted side is a clean rollback, safe to retry."</em> The signal: naming the lock-ordering fix first, retry only as the backstop — not the other way around.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A deadlock is two (or more) transactions each holding a lock the other is waiting for, so neither can ever proceed on its own — a lost update, by contrast, involves no locks at all and produces a silently wrong result instead of any waiting.">
+    <p class="stem">What is a deadlock, in terms of what each transaction is holding and waiting for?</p>
+    <button class="opt" data-ok>each transaction holds a lock the other is waiting</button>
+    <button class="opt">each transaction read stale data before writing it back</button>
+    <button class="opt">each transaction committed cleanly before the other one started</button>
+    <button class="opt">each transaction opened a connection the pool had none</button>
+  </div>
+  <div class="q" data-why="Postgres runs a background deadlock detector that finds the circular-wait pattern, aborts one transaction with a SQLSTATE 40P01 error, and releases its locks so the other transaction can proceed — nothing is left hanging forever.">
+    <p class="stem">What does Postgres actually do once it detects a deadlock between two transactions?</p>
+    <button class="opt" data-ok>it aborts one transaction and lets the other proceed</button>
+    <button class="opt">it silently merges both transactions into a single one</button>
+    <button class="opt">it pauses the whole database until an admin intervenes</button>
+    <button class="opt">it silently lets both transactions keep waiting indefinitely forever</button>
+  </div>
+  <div class="q" data-why="A deadlock cycle needs the two transactions to have locked the same two rows in opposite order — if every transaction always locks rows in the same agreed order (e.g. ascending account id), whichever transaction arrives first always gets the first lock, and the circular wait can never form.">
+    <p class="stem">Why does locking rows in a consistent order across transactions prevent deadlocks?</p>
+    <button class="opt" data-ok>a circular wait needs locks taken in opposite order</button>
+    <button class="opt">it makes every single lock acquisition finish noticeably faster</button>
+    <button class="opt">it removes the need for FOR UPDATE locking entirely</button>
+    <button class="opt">it forces both transactions to commit at once, instantly</button>
+  </div>
+  <div class="q" data-why="Because Postgres always aborts the losing side of a deadlock as a clean rollback rather than leaving it half-done, retrying that transaction from the start is safe — but it's a backstop for cases lock ordering doesn't reach, not a substitute for fixing the ordering on the common path.">
+    <p class="stem">Why is retrying a transaction that failed with SQLSTATE 40P01 considered safe?</p>
+    <button class="opt" data-ok>the aborted side is always guaranteed to be clean</button>
+    <button class="opt">Postgres automatically merges the retry with the earlier winner</button>
+    <button class="opt">the retry always skips straight past the lock entirely</button>
+    <button class="opt">deadlocks can only ever occur once per database connection</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the <a href="https://www.postgresql.org/docs/current/explicit-locking.html#LOCKING-DEADLOCKS">PostgreSQL Manual — Explicit Locking, "Deadlocks"</a> section — RESOURCES.md already cites the PostgreSQL Manual generally for "tables, constraints, defaults, schemas" (already extended by Lessons 19, 21, 34, 38, and 39 into specific mechanisms); this lesson reads the Concurrency Control chapter's locking material one section past Lesson 6's own <code>FOR UPDATE</code> citation. Kleppmann's <a href="https://dataintensive.net">Designing Data-Intensive Applications</a>, ch. 7, is the same standing citation Lessons 6, 33, 37, and 39 already used — its "Two-Phase Locking" section covers why lock-based isolation makes deadlocks possible in general, beyond Postgres specifically.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> open — still no reported quiz/lesson-completion outcome exists for any lesson after 39 rounds; distributed locks and blue-green/canary deploys remain the last named, confirmed out-of-scope-per-MISSION.md candidates if no fresh gap or user-chosen track surfaces first.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

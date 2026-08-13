@@ -1780,3 +1780,123 @@
   out-of-scope-per-MISSION.md candidates if a fresh gap-finding pass
   (re-reading more existing lessons closely, the method that has now found
   eight gaps running — Lessons 32-39) is needed again next time.
+- 2026-08-14 generation (Lesson 40, headless GitHub Actions run): idempotency
+  check first — confirmed no `lessons/0040-*.html` file existed and no
+  `2026-08-14` entry existed yet in `nav.js` before writing anything (highest
+  existing file was 0039, dated 2026-08-13). Per this round's own briefing,
+  `psql "$LEARNING_DB_URL" ...` / `${LEARNING_DB_URL}` reads are hard-blocked
+  by this sandbox's static analysis on the literal variable name, and any
+  not-preapproved read script (`bin/query-progress`, `/proc/self/environ`)
+  hits an approval gate with no user present in a headless run — this has
+  been true and documented every round since Lesson 9, so neither was
+  attempted this round, per the briefing's explicit instruction not to retry
+  a settled finding; still no `lesson_completed` record exists for any of
+  Lessons 1-39, so pacing came from `learning-records/` (0001's baseline,
+  0002's concurrency-gap note, both already reflected in prior lessons,
+  nothing new to act on) plus `lessons/`/`nav.js` file state alone. Lesson 39
+  left only the two standing out-of-scope-per-MISSION.md candidates
+  (distributed locks, blue-green/canary deploys) with no new in-scope
+  candidate, so this round used the same re-read-existing-lessons method that
+  found Lessons 32-39 (eight straight gaps found this way): re-read Lesson 6
+  (transactions) closely again, since it's now found three separate gaps
+  (optimistic locking for Lesson 33, isolation levels for Lesson 37) by being
+  re-read for what it left unsaid or misused. This time its own quiz was the
+  tell: Lesson 6's second quiz question uses "A deadlock" as a wrong-answer
+  distractor for what is actually a lost update, meaning the word is shown to
+  the student but the actual mechanism is never explained anywhere — a
+  student could easily walk away thinking a deadlock and a lost update are
+  the same thing, or worse, never learn what a deadlock actually is at all.
+  Independently re-confirmed via grep across all 39 lesson bodies and
+  glossary.html before writing: "deadlock" (case-insensitive) appears exactly
+  once, on that single quiz-option line in Lesson 6, nowhere else; "40P01"
+  and "lock ordering" had zero hits anywhere — confirming a genuine,
+  previously-named-but-unexplained gap (the same shape as Lesson 38's CASCADE
+  gap: a term used in passing, here as a wrong quiz answer rather than
+  descriptive prose, but never taught), in scope under MISSION criterion 3
+  ("reason about what happens at runtime: transactions... and spot these
+  problems in existing code"), not infra/NoSQL/distributed (Postgres's own
+  single-node lock manager, not a distributed-systems concept — kept
+  carefully distinct from the still-out-of-scope "distributed locks"
+  candidate, which is a different topic entirely: locking across separate
+  services/machines, not two transactions on one Postgres instance). Lesson
+  40 covers it: why Lesson 6's single-row `FOR UPDATE` fix was safe but a
+  transaction locking a *second* row introduces a new failure mode never
+  possible with one lock; a worked two-transaction, opposite-direction
+  funds-transfer scenario showing the circular wait forming; an explicit
+  callout that Postgres's own background deadlock detector always aborts one
+  side with SQLSTATE `40P01` rather than hanging forever, so nothing is left
+  stuck, but the aborted side's caller has to notice and react; a
+  side-by-side comparison table (reusing Lesson 25's `table.cmp`/`.cmp-wrap`
+  component) explicitly contrasting deadlock against Lesson 6's own lost
+  update, since the quiz gap this lesson closes is exactly that the two are
+  easy to conflate; consistent lock ordering (always lock the lower account
+  id first, independent of transfer direction) as the structural fix,
+  reusing the same "fold consistency into the code path itself" shape Lesson
+  6's own `WHERE remaining > 0` and Lesson 33's `WHERE version = $seen`
+  already taught, applied here to lock acquisition order instead of a
+  write's WHERE clause; and a bounded retry-on-`40P01` backstop for cases
+  ordering doesn't reach, framed explicitly as the same shape Lesson 37 used
+  for a `SERIALIZABLE` transaction's `40001` serialization failure, with an
+  explicit priority order named (fix ordering first, retry only as the
+  backstop underneath, the same "prevent, then retry as backstop" layering
+  named between Lesson 28's circuit breaker and Lesson 32's backoff). The
+  `transferFunds`/`runWithDeadlockRetry`/`isDeadlock` Go snippet (with
+  minimal stand-in `Tx`/`PGError` types, no real pgx/database dependency
+  needed since the lesson's point is the algorithm, not the driver call) was
+  compile-checked clean with `go build -C` / `go vet -C` in a scratch module
+  (`.scratch/backend-lesson40/`, built binary removed after, directory left
+  with only `go.mod`/`main.go`, same end-state as most prior rounds) — no
+  approval blocker for either `-C`-style invocation this round, consistent
+  with every round since Lesson 13's finding. One markup bug was caught and
+  fixed before shipping: a copy-paste slip left a stray `"></button>`
+  immediately after the fourth quiz question's `data-why="..."` attribute
+  (instead of closing the `<div class="q" ...>` tag normally) — caught by
+  proofreading the raw file after writing it, the same catch method Lessons
+  32/34/39's notes already flagged as necessary since tooling won't catch a
+  structurally-valid-but-wrong tag on its own. Added `deadlock` to the
+  glossary (confirmed via grep beforehand it didn't already exist anywhere in
+  `lessons/*.html` or `glossary.html`) and registered Lesson 40 in nav.js.
+  Quiz options were drafted, then verified with `wc -w` per line via
+  individual `sed -n '<n>p' | sed -E 's/<[^>]+>//g' | wc -w` calls (no
+  loop/variable-expansion form attempted, consistent with every round since
+  Lesson 28's finding that this sandbox rejects that pattern outright, and no
+  Python/script-based counting attempted either — a bare `python3` invocation
+  was tried once this round and required approval with none available,
+  confirming the same class of block NOTES.md has already documented for
+  novel scripts/interpreters) — all four questions needed at least one
+  rewrite pass before landing on equal counts; Q3's fourth option in
+  particular needed four successive small adjustments (10 to 8 to 11 to 10 to
+  9 words) after several hand-estimated fixes over- or under-shot the target
+  by one or more words, the same repeated failure mode Lessons 28/33/37's
+  notes already flagged — trust the tool count after every single edit, not
+  an estimate of how many words a rewrite added or removed; final tallies,
+  each re-verified after every edit and cross-checked a second, independent
+  way (a full-file grep of every option line, manually re-counting the
+  visible text against the `wc -w` result): Q1 9/9/9/9, Q2 9/9/9/9, Q3
+  9/9/9/9, Q4 9/9/9/9. Primary source: the PostgreSQL Manual's Explicit
+  Locking chapter, "Deadlocks" section — RESOURCES.md already cites the
+  PostgreSQL Manual generally for "tables, constraints, defaults, schemas"
+  (already extended by Lessons 19, 21, 34, 38, and 39 into specific
+  mechanisms); this lesson reads the same Concurrency Control/locking
+  material one section past Lesson 6's own `FOR UPDATE` citation. Kleppmann's
+  *Designing Data-Intensive Applications*, ch. 7, named as the secondary
+  source (its "Two-Phase Locking" section), extending the same standing
+  citation Lessons 6, 33, 37, and 39 already used. `bin/record-progress
+  backend lesson_generated --day 40 --lesson 0040-deadlocks.html --detail
+  '{"by":"github-actions"}'` was run directly via its relative path from the
+  repo root as instructed and succeeded on the first try, no approval
+  blocker this round — consistent with every round since Lesson 32's finding
+  that the write path works reliably when invoked this way. This closes the
+  deadlock gap found by re-reading Lesson 6's own
+  quiz a third time (after optimistic locking and isolation levels), rather
+  than re-scanning MISSION.md or reusing the distributed-locks/blue-green
+  leftovers — worth noting this makes Lesson 6 the single most gap-productive
+  lesson to re-read so far (three separate later lessons traced back to
+  something it named or used without explaining); still no `lesson_completed`
+  record exists for any lesson after 40 rounds — the next session should keep
+  treating a completion/quiz-outcome signal, or a user-named track to deepen,
+  as higher priority than a 41st topic picked blind. Distributed locks and
+  blue-green/canary deploys remain the last named, confirmed
+  out-of-scope-per-MISSION.md candidates if a fresh gap-finding pass is
+  needed again next time; no other in-scope candidate surfaced from this
+  round's re-read of Lesson 6 beyond the one just closed.

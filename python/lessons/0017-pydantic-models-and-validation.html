@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 17 · pydantic models: validation, coercion &amp; settings</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 17 · ~20 min · 14 Aug 2026</p>
+<h1>pydantic models: validation, coercion &amp; settings</h1>
+<p class="byline">Day 16's handlers already trusted a type hint like <code>user_id: int</code> to reject a bad URL segment before the handler ran. Today that same trust gets a name and a shape of its own: <strong><dfn data-en="a class, usually subclassing pydantic's BaseModel, whose type-hinted fields are checked and converted on every construction — the mechanism behind FastAPI's automatic request validation" data-vn="giữ nguyên &quot;pydantic model&quot; — class kế thừa BaseModel, field có type hint được kiểm tra và convert mỗi lần tạo object">pydantic model</dfn></strong>. You'll build one from a plain class first, watch it reject and coerce input on its own, write a custom validation rule, and read settings from the environment the same way.</p>
+
+<div class="callout"><strong>Bridge from SQL:</strong> a pydantic model is close to a <code>CREATE TABLE</code> with <code>CHECK</code> constraints, enforced on the client side instead of the database — Day 7's dataclass already gave you the fixed, named, typed columns; today's model adds the constraint-checking a plain dataclass never does, rejecting a bad row before it's ever "inserted" (constructed) at all.</div>
+
+<h2>1 · What a plain class and a dataclass don't do</h2>
+<p>Day 7 taught <code>@dataclass</code> as a fixed, named, typed shape with free <code>__init__</code>/<code>__repr__</code>/<code>__eq__</code>. But type hints, Day 7 also said plainly, are documentation only — Python never enforces them at runtime:</p>
+<pre><code><span class="kw">from</span> dataclasses <span class="kw">import</span> dataclass
+
+<span class="kw">@dataclass</span>
+<span class="kw">class</span> Item:
+    name: <span class="kw">str</span>
+    price: <span class="kw">float</span>
+
+bad = Item(name=<span class="str">"pen"</span>, price=<span class="str">"twelve"</span>)  <span class="kw"># no error at all</span>
+<span class="kw">print</span>(bad.price + <span class="kw">1</span>)              <span class="kw"># crashes later, far from the real mistake</span></code></pre>
+<p><code>price: str</code> being passed where <code>price: float</code> was promised raises nothing at construction — the dataclass happily stores the string, and the program crashes minutes later at an unrelated line that assumed the hint was true. This is exactly the gap a pydantic model closes.</p>
+
+<h2>2 · A pydantic model: validation and coercion, for free</h2>
+<p>A pydantic model looks like a dataclass with one change — it subclasses <code>BaseModel</code> — and behaves completely differently at construction time:</p>
+<pre><code><span class="kw">from</span> pydantic <span class="kw">import</span> BaseModel
+
+<span class="kw">class</span> Item(BaseModel):
+    name: <span class="kw">str</span>
+    price: <span class="kw">float</span>
+    qty: <span class="kw">int</span> = <span class="kw">1</span>
+
+item = Item(name=<span class="str">"pen"</span>, price=<span class="str">"12.5"</span>, qty=<span class="str">"3"</span>)
+<span class="kw">print</span>(item.price, <span class="kw">type</span>(item.price))  <span class="kw"># 12.5 &lt;class 'float'&gt;</span>
+<span class="kw">print</span>(item.qty, <span class="kw">type</span>(item.qty))      <span class="kw"># 3 &lt;class 'int'&gt;</span></code></pre>
+<p>Two things happened, and they're different mechanisms even though one line triggered both. <dfn data-en="pydantic converting an input value of a plausible but different type into the field's declared type at construction — a numeric string becomes a real int or float, for instance — rather than storing the raw input unchanged" data-vn="giữ nguyên &quot;coercion&quot; — pydantic tự convert giá trị input hợp lý (như string số) sang đúng type khai báo của field, không giữ nguyên type gốc"><strong>Coercion</strong></dfn> is the string <code>"12.5"</code> being converted into a real <code>float</code> because that conversion is safe and unambiguous — pydantic doesn't just check the type, it tries to *produce* the declared type from what it was given. <dfn data-en="pydantic checking every field against its declared type and any custom rules the instant a model is constructed, raising ValidationError immediately if something doesn't fit — instead of the silent, delayed failure a plain dataclass allows" data-vn="giữ nguyên &quot;validation&quot; — pydantic kiểm tra mọi field theo type + rule tự định nghĩa ngay lúc tạo object, sai thì raise ValidationError ngay, không để lỗi âm thầm rồi crash sau"><strong>validation</strong></dfn> is the check that makes coercion possible or, when it isn't, stops construction cold:</p>
+<pre><code><span class="kw">from</span> pydantic <span class="kw">import</span> ValidationError
+
+<span class="kw">try</span>:
+    Item(name=<span class="str">"pen"</span>, price=<span class="str">"not-a-number"</span>)
+<span class="kw">except</span> ValidationError <span class="kw">as</span> e:
+    <span class="kw">print</span>(e)
+<span class="kw"># 1 validation error for Item</span>
+<span class="kw"># price</span>
+<span class="kw">#   Input should be a valid number, unable to parse string as a number [...]</span></code></pre>
+<p>A <dfn data-en="the exception pydantic raises when one or more fields fail validation at construction — carries the model name and, for every failing field, its name and exactly what was wrong" data-vn="giữ nguyên &quot;ValidationError&quot; — exception pydantic raise khi 1+ field không hợp lệ lúc tạo object, kèm tên field + lý do sai cho từng field"><strong>ValidationError</strong></dfn> names every failing field and exactly why, in one message, listing all failures at once rather than stopping at the first — this is Day 8's <code>raise</code> mechanism, just raised by pydantic's own code instead of yours. This is also precisely the mechanism Day 16 already relied on for <code>user_id: int</code> in a path parameter — FastAPI builds a pydantic model behind the scenes for every typed handler parameter, so today names the machinery that lesson was already using.</p>
+
+<h2>3 · Custom validators: rules pydantic can't infer from a type</h2>
+<p>A type hint alone can say "this must be a string," but not "this string must have no spaces." For rules like that, a field gets its own function:</p>
+<pre><code><span class="kw">from</span> pydantic <span class="kw">import</span> BaseModel, field_validator
+
+<span class="kw">class</span> SignUp(BaseModel):
+    username: <span class="kw">str</span>
+    age: <span class="kw">int</span>
+
+    <span class="kw">@field_validator</span>(<span class="str">"username"</span>)
+    <span class="kw">@classmethod</span>
+    <span class="kw">def</span> username_no_spaces(cls, v):
+        <span class="kw">if</span> <span class="str">" "</span> <span class="kw">in</span> v:
+            <span class="kw">raise</span> ValueError(<span class="str">"username must not contain spaces"</span>)
+        <span class="kw">return</span> v.lower()
+
+SignUp(username=<span class="str">"Anh Tuan"</span>, age=<span class="kw">20</span>)  <span class="kw"># ValidationError: username must not contain spaces</span>
+SignUp(username=<span class="str">"AnhTuan"</span>, age=<span class="kw">20</span>).username  <span class="kw"># "anhtuan" — lowercased by the same function</span></code></pre>
+<p>Two Day-12 ideas are doing the work here, stacked: <dfn data-en="a decorator (from pydantic) attaching a custom rule function to one specific field, called during construction with that field's value; the function can raise ValueError to reject the input or return a value to become the field's final stored value" data-vn="giữ nguyên &quot;field_validator&quot; — decorator gắn 1 hàm kiểm tra/chuẩn hoá tuỳ chỉnh vào 1 field cụ thể, hàm raise ValueError để từ chối, return giá trị mới để chuẩn hoá"><code>@field_validator("username")</code></dfn> is a decorator wrapping <code>username_no_spaces</code> so pydantic calls it during construction with the field's value; <code>@classmethod</code> is new syntax but not a new idea — it just means the function receives the model class (<code>cls</code>) instead of an instance, since validation runs before any instance fully exists. Inside, a plain <code>raise ValueError(...)</code> — Day 8's mechanism again — is caught by pydantic and folded into the same <code>ValidationError</code> section 2 showed, with your message attached. Returning a value from a validator matters too: whatever it returns becomes the field's final value, which is how <code>username_no_spaces</code> both rejects bad input <em>and</em> normalizes good input (lower-casing it) in one function.</p>
+
+<h2>4 · Settings: the same model, reading the environment</h2>
+<p>Configuration — a database URL, a debug flag, an API key — usually comes from environment variables, not a request body. Pydantic's settings package is the same model idea, pointed at <code>os.environ</code> instead:</p>
+<pre><code><span class="kw">from</span> pydantic_settings <span class="kw">import</span> BaseSettings
+
+<span class="kw">class</span> Settings(BaseSettings):
+    app_name: <span class="kw">str</span> = <span class="str">"myapp"</span>
+    debug: <span class="kw">bool</span> = <span class="kw">False</span>
+
+settings = Settings()  <span class="kw"># reads APP_NAME / DEBUG from the environment, falls back to the defaults above</span></code></pre>
+<p><dfn data-en="a pydantic_settings.BaseSettings subclass — a settings model whose field values are read from environment variables by default (matched to field names case-insensitively) instead of constructor arguments, with the same validation and coercion as any other pydantic model" data-vn="giữ nguyên &quot;BaseSettings&quot; — model đọc giá trị field từ environment variable thay vì tham số constructor, vẫn validate/coerce như model thường"><strong><code>BaseSettings</code></strong></dfn> is a separate package (<code>pydantic-settings</code>, installed one-off exactly like Day 16's <code>fastapi</code>/<code>httpx</code>) built on the exact same <code>BaseModel</code> mechanics as sections 2–3 — same coercion, same validators, same <code>ValidationError</code> — the only difference is where a field's value comes from when the constructor doesn't supply one: instead of a plain Python default, it checks an environment variable matching the field's name (case-insensitively — <code>APP_NAME</code> or <code>app_name</code> both work) before falling back to the code's own default. Setting <code>DEBUG=true</code> in the shell and calling <code>Settings()</code> with no arguments coerces that string into <code>debug=True</code>, the identical string-to-<code>bool</code> coercion section 2 already showed for numbers.</p>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> pydantic validates one record's *shape* before it's used — a single row's fields, checked once, at the boundary; a DataFrame's <code>dtypes</code> instead describe an entire column's type across every row at once, which is a table-wide concern pandas owns, not something pydantic models are for.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/17_pydantic_models_and_validation.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run --with pydantic --with pydantic-settings python3 practice/17_pydantic_models_and_validation.py</code></pre>
+<p>Needs <code>pydantic</code> and <code>pydantic-settings</code>, installed one-off via <code>--with</code> — no <code>fastapi</code>/<code>httpx</code> needed today since nothing here runs a route. Exercises: defining a <code>BaseModel</code> and observing coercion, catching a <code>ValidationError</code> for bad input, a <code>field_validator</code> that rejects and one that normalizes, and reading a <code>BaseSettings</code> value back from an environment variable.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A plain @dataclass stores whatever value it's given, whatever its actual type, since Day 7 already established that type hints are documentation only and Python never enforces them at runtime. A pydantic BaseModel checks and, where safe, converts every field's value the instant the model is constructed.">
+    <p class="stem">What does a <code>@dataclass</code> do that a pydantic <code>BaseModel</code> does not, for a field like <code>price: float</code> given a string?</p>
+    <button class="opt" data-ok>store the string unchanged, with no check or conversion at all</button>
+    <button class="opt">convert the string to a float, then silently discard the object</button>
+    <button class="opt">raise ValidationError immediately, naming exactly which one field has now failed</button>
+  </div>
+  <div class="q" data-why="Coercion is pydantic converting a plausible input, like the string '12.5', into the field's declared type - here a real float - when that conversion is safe and unambiguous. Validation is the broader check making that decision, and it's validation that also produces ValidationError when no safe conversion exists at all.">
+    <p class="stem">In pydantic, what specifically is coercion?</p>
+    <button class="opt" data-ok>converting a compatible input value into the field's declared type</button>
+    <button class="opt">rejecting a whole request before any field is even checked</button>
+    <button class="opt">renaming a field so it matches an environment variable's name</button>
+  </div>
+  <div class="q" data-why="Inside a @field_validator function, a plain raise ValueError(...) is Day 8's exact raise mechanism, caught by pydantic itself and folded into the model's ValidationError with the validator's own message attached - not a new exception-handling idea, just pydantic catching one you already know how to raise.">
+    <p class="stem">What does <code>raise ValueError(...)</code> inside a <code>field_validator</code> reuse from Day 8?</p>
+    <button class="opt" data-ok>raising an exception, now caught by pydantic and wrapped for you</button>
+    <button class="opt">the try/finally guarantee that some cleanup code always runs once, unconditionally</button>
+    <button class="opt">a bare except clause that quietly swallows every kind of error</button>
+  </div>
+  <div class="q" data-why="A field_validator's return value becomes that field's final stored value, not just a pass/fail signal - so a validator can reject bad input with raise ValueError(...) and also normalize good input, such as lower-casing a username, by returning the changed value instead of the original.">
+    <p class="stem">Why does <code>username_no_spaces</code> both reject bad input and lower-case good input?</p>
+    <button class="opt" data-ok>whatever a validator returns becomes the field's actual stored value</button>
+    <button class="opt">pydantic always lower-cases every single string field that it sees</button>
+    <button class="opt">field_validator only runs a second time after the first rejection</button>
+  </div>
+  <div class="q" data-why="pydantic_settings.BaseSettings shares BaseModel's exact validation and coercion mechanics - the only difference is where an unsupplied field's value comes from: BaseSettings checks a matching environment variable (case-insensitively) before falling back to the field's own coded default, instead of only ever using that coded default.">
+    <p class="stem">How does <code>BaseSettings</code> differ from a plain <code>BaseModel</code> for a field with no constructor argument?</p>
+    <button class="opt" data-ok>it also checks a matching environment variable before the coded default</button>
+    <button class="opt">it skips validation entirely for every field with a coded default</button>
+    <button class="opt">it never allows a field to have a coded default value</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official <a href="https://docs.pydantic.dev/latest/concepts/models/">pydantic Models</a> page and its <a href="https://docs.pydantic.dev/latest/concepts/validators/">Validators</a> page, plus <a href="https://docs.pydantic.dev/latest/concepts/pydantic_settings/">Settings Management</a> for section 4 — cited in RESOURCES.md as the source for validation, coercion, custom validators, and settings.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day17">glossary</a> under Day 17.<br>
+Next up per PLAN.md's Phase 2b spine: request/response schemas, and why the type hints on a FastAPI handler <em>are</em> the contract.<br><br>
+💬 Anything unclear — coercion vs. validation, or how <code>field_validator</code> decides what to keep? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

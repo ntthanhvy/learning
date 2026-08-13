@@ -78,6 +78,8 @@
       file: "lessons/0035-clip-bounding-values.html" },
     { n: 36, date: "2026-08-13", title: "between(): a readable range filter",
       file: "lessons/0036-between-range-filtering.html" },
+    { n: 37, date: "2026-08-14", title: "combine_first(): filling gaps in one Series from another",
+      file: "lessons/0037-combine-first.html" },
   ];
 
   const REFS = [

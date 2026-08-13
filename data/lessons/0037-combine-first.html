@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 37 · combine_first()</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 37 · ~20 min · 14 Aug 2026</p>
+<h1>combine_first(): filling gaps in one Series from another</h1>
+<p class="byline">Lesson 34's original scan named three candidates; Lesson 35 picked <code>clip()</code>, Lesson 36 picked <code>between()</code>, and both times deferred <code>combine_first()</code> as the weaker interview-frequency pick. It is the last remaining candidate — genuinely uncovered, so today it ships.</p>
+
+<h2>1 · The problem: two sources, prefer one, fall back to the other</h2>
+<p>A recurring wrangling shape: two Series describing the same rows, each with its own gaps — a "verified amount" column and an "estimated amount" column, say — and the rule is "use the verified value where it exists, otherwise fall back to the estimate." <code>fillna()</code> (Lesson 3) only fills from a single scalar or a single Series lined up positionally; it has no notion of "prefer my own non-null values, fall back to this OTHER Series' values only where mine are missing." <dfn data-en="a pandas method combining two Series (or two DataFrames) element by element, keeping the caller's own value wherever it is non-null and taking the other object's value only where the caller's is missing -- aligned by index (and by column, for DataFrames)" data-vn="giữ nguyên 'combine_first()' — ưu tiên giá trị của Series gọi hàm, chỗ nào NaN mới lấy từ Series kia, khớp theo index">combine_first()</dfn> is the named tool for exactly this.</p>
+
+<h2>2 · combine_first(other): caller wins, other only fills gaps</h2>
+<p>Two same-length Series, aligned by the same index (0-3, same as the cleaned 4-row slice from Lessons 6-36):</p>
+<pre><code>primary   = pd.Series([<span class="num">120.0</span>, np.nan, <span class="num">35.5</span>, np.nan])
+fallback  = pd.Series([<span class="num">999.0</span>, <span class="num">42.0</span>, <span class="num">999.0</span>, <span class="num">180.0</span>])
+
+primary.combine_first(fallback)
+<span class="cm"># 0    120.0   <span class="cm"># primary had 120.0 -- kept, fallback's 999.0 ignored</span>
+# 1     42.0   <span class="cm"># primary was NaN -- fallback's 42.0 used</span>
+# 2     35.5   <span class="cm"># primary had 35.5 -- kept, fallback's 999.0 ignored</span>
+# 3    180.0</span>  <span class="cm"># primary was NaN -- fallback's 180.0 used</span></code></pre>
+<p>Notice row 0 and row 2: even though <code>fallback</code> has a value there too, <code>primary</code>'s own non-null value always wins. <code>combine_first()</code> never overwrites a value the caller already has — it only ever fills gaps.</p>
+
+<h2>3 · Aligned by index, not by position</h2>
+<div class="callout">Like every pandas alignment operation (Lesson 5's merge, Lesson 21's <code>concat()</code>), <code>combine_first()</code> matches rows by INDEX LABEL, not row position. If <code>other</code> is missing a label that <code>primary</code> has, that gap simply stays NaN — there is nothing to fall back to, and no error is raised.</div>
+<pre><code>fallback2 = pd.Series([<span class="num">999.0</span>, <span class="num">42.0</span>], index=[<span class="num">0</span>, <span class="num">1</span>])  <span class="cm"># no labels 2, 3</span>
+primary.combine_first(fallback2)
+<span class="cm"># 0    120.0
+# 1     42.0
+# 2     35.5
+# 3      NaN</span>   <span class="cm"># primary was NaN, fallback2 has no label 3 either -- still NaN</span></code></pre>
+
+<h2>4 · DataFrames: cell by cell, aligned by index AND columns</h2>
+<p>The same rule extends to whole DataFrames — each cell is filled from <code>other</code> only where the caller's own cell at that (row, column) is null:</p>
+<pre><code>df1 = pd.DataFrame({<span class="str">"amount"</span>: [<span class="num">120.0</span>, np.nan], <span class="str">"region"</span>: [np.nan, <span class="str">"South"</span>]})
+df2 = pd.DataFrame({<span class="str">"amount"</span>: [<span class="num">999.0</span>, <span class="num">35.5</span>], <span class="str">"region"</span>: [<span class="str">"North"</span>, <span class="str">"South"</span>]})
+
+df1.combine_first(df2)
+<span class="cm">#   amount region
+# 0  120.0  North   <span class="cm"># amount kept from df1, region filled from df2</span>
+# 1   35.5  South</span>  <span class="cm"># amount filled from df2, region kept from df1 (already "South")</span></code></pre>
+<p>Row 0's <code>amount</code> keeps <code>df1</code>'s 120.0 but its <code>region</code> (NaN in df1) is filled from <code>df2</code>'s "North" — the fill decision is made independently per cell, not per row or per whole object.</p>
+
+<h2>5 · Related tools: combine(), fillna(), update()</h2>
+<p><code>combine_first(other)</code> is shorthand for the more general <code>combine(other, func)</code>, where <code>func</code> decides per pair of aligned values which one survives — <code>combine_first</code> is just <code>combine(other, lambda a, b: a if pd.notna(a) else b)</code> pre-written. Two easy mix-ups to keep straight for an interview:</p>
+<ul>
+<li><strong><code>fillna(value)</code></strong> (Lesson 3) fills from one scalar or a single aligned Series/dict — no "prefer mine" logic needed because there's no competing second object with its own gaps.</li>
+<li><strong><code>update(other)</code></strong> looks similar but has the OPPOSITE precedence and mutates <strong>in place</strong>: wherever <code>other</code> has a non-null value, it overwrites the caller's value — even if the caller already had one. It also returns <code>None</code>, not a new Series.</li>
+</ul>
+<pre><code>p2 = primary.copy()
+p2.update(fallback)  <span class="cm"># mutates p2 in place, returns None</span>
+<span class="cm"># 0    999.0   <span class="cm"># fallback's 999.0 OVERWRITES primary's 120.0 -- opposite of combine_first</span>
+# 1     42.0
+# 2    999.0   <span class="cm"># overwrites 35.5 too</span>
+# 3    180.0</span></code></pre>
+<p>SQL bridge: there's no single built-in equivalent, but the shape matches <code>COALESCE(primary.amount, fallback.amount)</code> after a <code>LEFT JOIN</code> on the same key — "take the first non-null value in this list," left to right.</p>
+
+<div class="interview">
+<p><strong>Q: "How would you merge two overlapping data sources where each has its own gaps, preferring one over the other?"</strong> A strong answer, out loud: <em>"series_a.combine_first(series_b) — it keeps series_a's own value wherever it's non-null, and only pulls from series_b where series_a is missing, aligned by index the same way merge or concat align. It never overwrites a value series_a already has, which is the opposite of update(), which mutates in place and lets the OTHER object's non-null values win. If the two sources don't share every index label, a gap with no match in either stays NaN, it doesn't raise. It's really COALESCE(a, b) from SQL, and combine(other, func) is the general form underneath it if I need custom tie-breaking logic instead of just 'prefer non-null'."</em> The signal: naming the precedence rule explicitly (caller wins) and contrasting it with <code>update()</code>'s opposite behavior unprompted.</p>
+</div>
+
+<h2>Try it — self-checking practice (~15-20 min)</h2>
+<p>Open <code>practice/37_combine_first.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/37_combine_first.py</code></pre>
+<p>Uses two small inline Series/DataFrames built to mirror this lesson's exact examples (a <code>primary</code>/<code>fallback</code> amount pair, and a two-column <code>df1</code>/<code>df2</code> pair) rather than the shared CSV fixtures, since <code>orders_raw.csv</code> has no natural "two overlapping sources" shape — same precedent as Lessons 11/19/21's inline tables. Exercise 1 is a basic <code>combine_first()</code> fill; Exercise 2 confirms the caller's own value always wins over a conflicting fallback; Exercise 3 is the missing-index-label gap-stays-NaN case; Exercise 4 is the DataFrame cell-by-cell version; Exercise 5 contrasts <code>update()</code>'s opposite (other-wins) precedence.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="combine_first() keeps the caller's own value wherever it is already non-null -- the other Series is only ever used to fill a gap where the caller's value is missing. A value present in both is never overwritten by the other object's value.">
+    <p class="stem">In <code>a.combine_first(b)</code>, when both <code>a</code> and <code>b</code> have a non-null value at the same row, which one is kept?</p>
+    <button class="opt" data-ok>a's own existing value wins</button>
+    <button class="opt">b's value overwrites a's value</button>
+    <button class="opt">whichever value is numerically larger</button>
+  </div>
+  <div class="q" data-why="combine_first() aligns the two objects by index label, the same alignment rule as merge() and concat(). If a row's label exists in the caller but has no matching label in the other object, there is nothing to fall back to, so that gap simply stays NaN -- no error is raised.">
+    <p class="stem">If <code>other</code> has no row at all for one of <code>a</code>'s index labels, what happens to that gap in <code>a</code>?</p>
+    <button class="opt" data-ok>it stays NaN, quietly, no error</button>
+    <button class="opt">pandas raises a KeyError right away</button>
+    <button class="opt">that whole row gets dropped instead</button>
+  </div>
+  <div class="q" data-why="update() has the opposite precedence from combine_first(): wherever the OTHER Series has a non-null value, it overwrites the caller's value even if the caller already had one -- and update() mutates in place and returns None, rather than returning a new combined object.">
+    <p class="stem">How does <code>a.update(b)</code> differ from <code>a.combine_first(b)</code>?</p>
+    <button class="opt" data-ok>update() lets b overwrite a's own values in place</button>
+    <button class="opt">update() only ever works on whole DataFrames, never Series</button>
+    <button class="opt">update() requires both objects to already share a dtype</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the pandas User Guide's <a href="https://pandas.pydata.org/docs/reference/api/pandas.Series.combine_first.html">"pandas.Series.combine_first"</a> reference page (~5 min) — covers the index-alignment rule and links to <code>combine()</code>'s general form; RESOURCES.md's <a href="https://wesmckinney.com/book/">Python for Data Analysis</a> ch. 7 covers this alongside the rest of the missing-data toolkit from Lesson 3.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>combine_first()</code> is new today.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-37 comes back reported as shakiest, otherwise a fresh scan of the curriculum spine/glossary for the next genuinely-uncovered pattern — no named candidate is left dangling from today's content.<br><br>
+💬 Anything unclear — the index-alignment rule, the DataFrame version, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 38 · resample(): bucketing a datetime index into fixed periods</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 38 · ~20 min · 15 Aug 2026</p>
+<h1>resample(): bucketing a datetime index into fixed periods</h1>
+<p class="byline">Lesson 37's teaser named no single dangling candidate, so this round is a fresh scan against the curriculum spine and glossary. Lesson 32 taught the <code>.dt</code> accessor for pulling date parts out row by row, and Lesson 4 taught <code>groupby()</code> for grouping by an existing column's values — but neither one fills in a period with zero rows, which is exactly the gap a real "daily revenue" or "weekly active customers" report needs closed. <code>resample()</code> is pandas' purpose-built tool for that: group by fixed time buckets (day, week, month) directly off a datetime index, buckets with no rows included.</p>
+
+<h2>1 · The problem: groupby by date silently skips empty periods</h2>
+<p>On this course's cleaned 4-row slice (An 120.0/01-05, An 42.0/01-10, Binh 35.5/01-06, Binh 180.0/01-09), grouping daily revenue with Lesson 32's own <code>.dt</code>-accessor pattern looks reasonable at first:</p>
+<pre><code>clean.groupby(clean[<span class="str">"order_date"</span>].dt.date)[<span class="str">"amount"</span>].sum()
+<span class="cm"># order_date
+# 2026-01-05    120.0
+# 2026-01-06     35.5
+# 2026-01-09    180.0
+# 2026-01-10     42.0</span></code></pre>
+<p>Four rows in, four dates out — but <code>2026-01-07</code> and <code>2026-01-08</code>, the two days with zero orders, are not in the result at all. <code>groupby()</code> can only group values that exist; a day nobody ordered on has no row to begin with, so there's nothing to group. For a daily revenue chart or a "days since last order" calculation, a missing row and a genuine $0 day look identical from the output alone — which is wrong in exactly the way Lesson 3's missing-data lessons warned about.</p>
+
+<h2>2 · resample(): groupby for fixed time periods, gaps included</h2>
+<p><dfn data-en="a pandas method that groups a datetime-indexed Series/DataFrame into fixed-length time buckets (day, week, month, ...) and aggregates each bucket, INCLUDING buckets with zero source rows -- the time-series-native sibling of groupby(), which can only group values that already exist" data-vn="giữ nguyên 'resample()' — gom dữ liệu theo mốc thời gian cố định (ngày/tuần/tháng...), CÓ tính cả khoảng trống không có dòng nào">resample()</dfn> requires a <dfn data-en="a pandas Index made of datetime64 values instead of plain labels/positions -- resample() and several other time-series methods require the object they're called on to have one, usually set via set_index() on a parsed datetime column" data-vn="giữ nguyên 'DatetimeIndex' — Index của DataFrame/Series là các mốc thời gian, không phải nhãn hay số thứ tự thường">DatetimeIndex</dfn> — Lesson 33's <code>set_index()</code> on the already-parsed <code>order_date</code> column, exactly the setup step both tools share:</p>
+<pre><code>indexed = clean.set_index(<span class="str">"order_date"</span>)
+indexed[<span class="str">"amount"</span>].resample(<span class="str">"D"</span>).sum()
+<span class="cm"># order_date
+# 2026-01-05    120.0
+# 2026-01-06     35.5
+# 2026-01-07      0.0   &lt;- no orders that day -- resample still emits the row
+# 2026-01-08      0.0   &lt;- same
+# 2026-01-09    180.0
+# 2026-01-10     42.0
+# Freq: D, Name: amount, dtype: float64</span></code></pre>
+<p><code>"D"</code> is the <dfn data-en="the string code passed to resample()/asfreq() naming the fixed bucket width -- 'D' for calendar day, 'W' for week, 'M' for calendar month-end, 'Q' for quarter-end, and others -- pandas' own vocabulary, not a strptime format string" data-vn="giữ nguyên 'offset alias' — mã chuỗi đặt độ rộng mỗi khoảng thời gian cho resample(), như 'D'/'W'/'M'">offset alias</dfn> naming the bucket width. Every calendar day between the Series' first and last timestamp gets its own row now — <code>2026-01-07</code> and <code>2026-01-08</code> included, summed to <code>0.0</code> because <code>sum()</code> of an empty group is zero. That's the entire difference from Section 1's <code>groupby()</code>: <code>resample()</code> builds the full calendar grid first, then aggregates into it, rather than only ever seeing rows that already exist.</p>
+
+<h2>3 · Same aggfunc menu as groupby — but "empty" isn't always 0</h2>
+<p><code>resample()</code> is chained with the exact same aggregations as <code>groupby()</code>/Lesson 4 — <code>sum()</code>, <code>mean()</code>, <code>count()</code>, <code>.agg({...})</code> — but what an empty bucket becomes depends entirely on which one is chosen:</p>
+<pre><code>indexed[<span class="str">"amount"</span>].resample(<span class="str">"D"</span>).count()
+<span class="cm"># 2026-01-07    0    &lt;- count of zero rows is genuinely 0, no ambiguity</span>
+indexed[<span class="str">"amount"</span>].resample(<span class="str">"D"</span>).mean()
+<span class="cm"># 2026-01-07    NaN  &lt;- the mean of NOTHING isn't 0, it's undefined</span></code></pre>
+<div class="callout"><strong>Gotcha:</strong> <code>resample().sum()</code> quietly fills empty buckets with <code>0.0</code> — a real, defensible number for a revenue total. <code>resample().mean()</code> quietly fills them with <code>NaN</code> instead, because "the average of zero orders" has no sensible numeric answer. Same method chain shape, two different fill behaviors depending on what the aggregate itself means for an empty group — always check which aggfunc is in play before assuming what an empty period looks like in the output.</div>
+
+<h2>4 · Bigger buckets: "W" for week, and the single-week trap in this fixture</h2>
+<p>Swapping the offset alias changes only the bucket width, nothing else about the call shape:</p>
+<pre><code>indexed[<span class="str">"amount"</span>].resample(<span class="str">"W"</span>).sum()
+<span class="cm"># order_date
+# 2026-01-11    377.5
+# Freq: W-SUN, Name: amount, dtype: float64</span></code></pre>
+<p>Only one row comes back — not a bug, just this fixture's real shape: all four orders (Jan 5-10) fall inside a single Sunday-ending week, so there is only one bucket to report. <code>W</code> defaults to weeks ending Sunday (hence the label <code>2026-01-11</code>, the Sunday that closes out that week); <code>W-MON</code>, <code>W-TUE</code>, etc. move the week boundary if a report needs to start weeks on a different day. The general lesson: resample's bucket count depends on the data's actual date span relative to the bucket width, not on how many rows exist — a wider bucket than the data's range collapses everything into one period, same as a <code>GROUP BY</code> key with only one distinct value.</p>
+
+<h2>5 · Mixed columns: resample().agg({...}) for more than one aggregate</h2>
+<p>Like Lesson 14's multi-aggfunc <code>pivot_table</code>, <code>resample()</code> also accepts a per-column aggregation dict — useful when a numeric column needs summing while a text column just needs "whichever value showed up":</p>
+<pre><code>indexed.resample(<span class="str">"D"</span>).agg({<span class="str">"amount"</span>: <span class="str">"sum"</span>, <span class="str">"customer"</span>: <span class="str">"first"</span>})
+<span class="cm">#             amount customer
+# order_date
+# 2026-01-05   120.0       An
+# 2026-01-06    35.5     Binh
+# 2026-01-07     0.0      NaN   &lt;- no rows that day -- amount sums to 0, but there's no customer to report, so NaN
+# 2026-01-08     0.0      NaN
+# 2026-01-09   180.0     Binh
+# 2026-01-10    42.0       An</span></code></pre>
+<p>Worth noticing directly: the same empty bucket produces <code>0.0</code> in the <code>amount</code> column (a real sum) and <code>NaN</code> in the <code>customer</code> column (no row at all to take a "first" value from) — Section 3's per-aggfunc empty-bucket rule applies per column too, not just per whole call.</p>
+
+<h2>6 · asfreq(): the same grid-building step, no aggregation</h2>
+<p>When there's already at most one row per timestamp and the only goal is to expose the gaps (not aggregate anything), <code>asfreq()</code> does resample's grid-building half without an aggfunc:</p>
+<pre><code>indexed[<span class="str">"amount"</span>].asfreq(<span class="str">"D"</span>)
+<span class="cm"># 2026-01-07    NaN   &lt;- no aggregation happened -- there was simply no row, so NaN, not 0
+# 2026-01-08    NaN</span></code></pre>
+<p><code>asfreq("D")</code> is close to <code>resample("D").asfreq()</code> or, on data with no duplicate timestamps, to a plain <code>reindex()</code> against a generated daily date range — it reindexes onto the regular grid but never sums or counts, so a missing day is unambiguously <code>NaN</code>, never <code>0</code>. Reach for <code>resample()</code> the moment there's a real aggregation to run (including "first row wins" ties); reach for <code>asfreq()</code> only when the data is already one-row-per-timestamp and the gaps themselves are the whole point.</p>
+
+<div class="interview">
+<p><strong>Q: "You have a table of timestamped orders and need daily revenue, including days with zero orders. How do you build it?"</strong> A strong answer, out loud: <em>"First, order_date needs to be parsed to datetime64 and set as the index — resample() requires a DatetimeIndex, it won't work off a plain column. Then indexed['amount'].resample('D').sum() gives one row per calendar day between the first and last order, zero-filled automatically for any day with no orders — that's the key difference from groupby(df['order_date'].dt.date), which can only group rows that already exist, so it silently skips empty days entirely. One thing I'd flag: sum() zero-fills empty buckets, but mean() gives NaN for them instead, since the average of zero orders isn't a real number — so which aggfunc is running changes what 'empty' looks like in the output. If I needed weekly instead of daily, it's the same call with 'W' instead of 'D', just watch that a narrow date range can collapse into a single week bucket."</em> The signal: naming resample's DatetimeIndex requirement, the groupby contrast (skips vs. fills gaps), and the sum-vs-mean empty-bucket distinction unprompted.</p>
+</div>
+
+<h2>Try it — self-checking practice (~15-20 min)</h2>
+<p>Open <code>practice/38_resample.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/38_resample.py</code></pre>
+<p>Uses the same cleaned rows as Lessons 6-37 (An 120.0/01-05, An 42.0/01-10, Binh 35.5/01-06, Binh 180.0/01-09), set_index'd on <code>order_date</code>. Exercise 1 builds the daily <code>sum()</code> resample and checks the two zero-filled gap days; Exercise 2 is the daily <code>mean()</code> resample and checks a gap day comes back NaN instead of 0; Exercise 3 is the weekly <code>sum()</code> resample (single-bucket case); Exercise 4 is <code>resample("D").agg({...})</code> across both the numeric and text columns; Exercise 5 contrasts <code>asfreq("D")</code> against Exercise 1's sum on the same gap day.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="groupby() can only group rows that already exist in the data -- a calendar day with zero orders has no row to begin with, so it never appears in a groupby(...).dt.date result at all. resample() builds the full calendar grid of every period in the date's range FIRST, then aggregates into it, so empty periods still get their own output row.">
+    <p class="stem">Why does <code>groupby(df["order_date"].dt.date)["amount"].sum()</code> leave out days with zero orders, while <code>resample("D").sum()</code> does not?</p>
+    <button class="opt" data-ok>groupby groups only existing rows; resample builds every period</button>
+    <button class="opt">groupby is simply an older, now-deprecated version of resample</button>
+    <button class="opt">resample also silently drops any day with zero orders</button>
+  </div>
+  <div class="q" data-why="What an empty resampled bucket becomes depends on the aggregate itself: sum() of zero rows is a well-defined, real 0.0, so pandas fills it in directly. mean() of zero rows has no sensible numeric answer -- there is nothing to average -- so pandas leaves it as NaN instead. Same resample('D') call shape, different fill value per aggfunc.">
+    <p class="stem">On a day with zero orders, what do <code>resample("D").sum()</code> and <code>resample("D").mean()</code> each return for that day?</p>
+    <button class="opt" data-ok>sum gives 0.0; mean gives NaN, since averaging nothing is undefined</button>
+    <button class="opt">both give 0.0, treating an empty day the exact same way</button>
+    <button class="opt">both give NaN, since neither can compute over an empty day</button>
+  </div>
+  <div class="q" data-why="resample() (and asfreq()) require the object they're called on to already have a DatetimeIndex -- the row labels themselves must be datetime64 values, not a plain RangeIndex with a datetime column sitting alongside it. Lesson 33's set_index() on the already-parsed date column is the standard way to get there before calling resample().">
+    <p class="stem">What does <code>resample()</code> require of the Series/DataFrame it's called on?</p>
+    <button class="opt" data-ok>it must already have a DatetimeIndex, set first via set_index()</button>
+    <button class="opt">it must simply contain a column that's literally named "date"</button>
+    <button class="opt">nothing extra; it works fine on any plain RangeIndex table</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the pandas User Guide's <a href="https://pandas.pydata.org/docs/user_guide/timeseries.html#resampling">"Resampling"</a> section (~10 min) — covers the full offset-alias table (this lesson used <code>D</code> and <code>W</code>; the guide also covers <code>M</code>, <code>Q</code>, <code>Y</code>, and business-day variants), plus <code>resample().ffill()</code>/<code>.interpolate()</code> as gap-filling alternatives to a raw aggregate, not needed today.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>resample()</code>, <code>DatetimeIndex</code>, and <code>offset alias</code> are new today.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-38 comes back reported as shakiest, otherwise a fresh curriculum/glossary scan for the next genuinely-uncovered pattern — <code>stack()</code> as its own topic (named in passing back in Lessons 6 and 14 as unstack's inverse, but never taught directly) is a real candidate spotted during this round's scan.<br><br>
+💬 Anything unclear — the DatetimeIndex requirement, the sum-vs-mean empty-bucket difference, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

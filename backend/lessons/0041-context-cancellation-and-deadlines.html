@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 41 · context.Context: the cancellation signal riding along with every request</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 41 · ~20 min</p>
+<h1>context.Context: the cancellation signal riding along with every request</h1>
+<p class="byline">Nineteen of this course's own Go snippets — Lessons 9 through 40 — take a <code>ctx context.Context</code> as their first parameter, and three of them even call <code>ctx.Done()</code> or <code>ctx.Err()</code>. Not one lesson has ever said what a <code>context.Context</code> actually is. Today closes that gap.</p>
+
+<h2>1 · The question every one of those snippets begged</h2>
+<p>Look back at Lesson 27's <code>signal.NotifyContext</code>, Lesson 32's <code>ctx.Done()</code> inside a retry loop, or literally any handler signature in this course — they all thread a <code>ctx context.Context</code> through, first argument, every call. It was treated as boilerplate: a parameter you pass along without asking why. It isn't boilerplate. A <a href="https://pkg.go.dev/context"><code>context.Context</code></a> is Go's answer to one specific, very common problem: a single incoming HTTP request often triggers a whole tree of downstream work — a database query, an outbound HTTP call to another service, maybe both at once — and if the original caller gives up (closes the connection, or the request just times out), every one of those downstream calls is still sitting there working on behalf of nobody. A <dfn data-en="Go's standard mechanism for carrying a cancellation signal and/or a deadline through a call chain, so that every function on the chain can notice 'the original caller is gone' and stop what it's doing instead of finishing pointless work" data-vn="context.Context (giữ nguyên) — cơ chế chuẩn của Go để truyền tín hiệu hủy/deadline xuyên suốt chuỗi hàm gọi nhau, hàm nào cũng biết được lúc nào nên dừng">context.Context</dfn> is the value that carries that signal down the chain, so every function on it can check "should I still be doing this?" without each layer having to invent its own cancellation channel.</p>
+
+<div class="callout"><strong>The frontend equivalent you already own.</strong> This is the backend cousin of an <a href="https://developer.mozilla.org/en-US/docs/Web/API/AbortController"><code>AbortController</code></a> passed into <code>fetch()</code> — call <code>.abort()</code> and the in-flight request stops, instead of the browser quietly finishing a fetch nobody's waiting on anymore. A <code>context.Context</code> is that same idea, generalized to an entire call chain of Go functions instead of one <code>fetch()</code> call.</div>
+
+<h2>2 · What actually rides inside it</h2>
+<p>A <code>context.Context</code> carries up to two things, and request-handling code almost always uses one or the other (rarely both by hand at once):</p>
+<ul>
+<li><strong>A cancellation signal.</strong> <code>ctx.Done()</code> returns a channel that's closed the moment the context is cancelled — by an explicit call, a deadline expiring, or a parent context being cancelled. Code that might run for a while selects on it: <code>case &lt;-ctx.Done(): return ctx.Err()</code>, exactly the shape Lesson 32's backoff loop and Lesson 29's outbox relay both already used, one row above a real explanation of what it meant.</li>
+<li><strong>A deadline.</strong> <code>context.WithTimeout(parent, 10*time.Second)</code> (Lesson 27's shutdown sequence used exactly this) creates a context that cancels itself automatically once the duration elapses — no goroutine or timer needs to be written by hand to enforce it.</li>
+</ul>
+<p>The key mechanical fact: a context is <em>immutable and derived</em>. You never modify one — <code>context.WithTimeout</code>, <code>context.WithCancel</code>, and <code>signal.NotifyContext</code> (Lesson 27) all take a parent context and return a brand-new child. Cancelling a parent cancels every child derived from it, automatically, all the way down — that's the entire propagation mechanism, no framework required.</p>
+
+<pre><code><span class="cm">// fetchOrderSummary demonstrates the propagation: ctx arrives from the HTTP
+// handler already carrying the client's deadline. Deriving a *tighter* child
+// deadline for the DB call means a slow query can't outlive the time budget
+// the caller was willing to wait, even if the caller's own deadline is longer.</span>
+<span class="kw">func</span> fetchOrderSummary(ctx context.Context, db DB, orderID <span class="ty">int64</span>) (Summary, error) {
+    dbCtx, cancel := context.WithTimeout(ctx, <span class="kw">2</span>*time.Second)
+    <span class="kw">defer</span> cancel()
+
+    row := db.QueryRow(dbCtx, <span class="st">`SELECT total_cents, status FROM orders WHERE id = $1`</span>, orderID)
+    <span class="kw">var</span> s Summary
+    <span class="kw">if</span> err := row.Scan(&amp;s.TotalCents, &amp;s.Status); err != <span class="kw">nil</span> {
+        <span class="kw">if</span> ctx.Err() != <span class="kw">nil</span> {
+            <span class="cm">// the caller gave up (or the deadline passed) — don't wrap this as a
+            // DB error, it's a cancellation, and callers should tell the two apart</span>
+            <span class="kw">return</span> Summary{}, fmt.Errorf(<span class="st">"summary lookup abandoned: %w"</span>, ctx.Err())
+        }
+        <span class="kw">return</span> Summary{}, fmt.Errorf(<span class="st">"query order %d: %w"</span>, orderID, err)
+    }
+    <span class="kw">return</span> s, <span class="kw">nil</span>
+}</code></pre>
+
+<p>Note the <code>defer cancel()</code>: every <code>context.With*</code> call returns a cancel function, and it must always be called (even on the success path) once that context is no longer needed — skipping it leaks the small amount of state Go's runtime keeps to track the timer, one leak per call if this runs on every request.</p>
+
+<h2>3 · Why the database layer actually needs the ctx argument</h2>
+<p>pgx's <code>Pool.QueryRow(ctx, ...)</code>, <code>Exec(ctx, ...)</code>, and every other query method (already used, unexplained, in Lessons 33–40's own snippets) all take a context as their first argument for exactly this reason: if the HTTP client disconnects or the request's deadline passes while a query is running, pgx can use that same signal to abandon the query on the wire — cancelling the in-flight statement on the Postgres side too — instead of the connection sitting there computing a result nobody will ever read. This is a direct extension of Lesson 18's connection-pool story: a query that ignores cancellation doesn't just waste CPU, it holds a pooled connection open for the full query duration even after the caller is long gone, exactly the shape of pool exhaustion Lesson 18 described, just with an abandoned client instead of a bug as the cause.</p>
+
+<div class="cmp-wrap">
+<table class="cmp">
+<thead><tr><th>Without ctx propagation</th><th>With ctx propagation</th></tr></thead>
+<tbody>
+<tr><th>Client disconnects mid-request</th><td>Handler, DB query, and any outbound HTTP call keep running to completion anyway</td><td>Every layer's <code>ctx.Done()</code> fires; each one can abandon its work as soon as it checks</td></tr>
+<tr><th>Slow downstream call</th><td>Blocks for however long it takes, no matter what the caller was willing to wait</td><td>A derived deadline (Lesson 27/32's <code>WithTimeout</code>) cuts it off on schedule</td></tr>
+<tr><th>Pooled DB connection</th><td>Held for the query's full duration even after nobody needs the result (Lesson 18's exhaustion risk)</td><td>Freed as soon as cancellation propagates to the driver</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2>4 · The one rule almost everyone breaks once</h2>
+<p>A <code>context.Context</code> is for cancellation and deadlines, and for small pieces of request-scoped metadata a whole call chain needs to see — the correlation ID from Lesson 13 is the canonical example, attached once at the edge with <code>context.WithValue</code> and read by the logging middleware three layers down without every function in between needing it threaded as its own parameter. It is <em>not</em> a general-purpose way to sneak optional parameters past a function signature, and it is never a substitute for a normal argument something actually depends on to do its job — if a function can't run correctly without a value, that value belongs in the signature, not buried in a context lookup that only fails at runtime if it's missing.</p>
+
+<div class="interview">
+<p><strong>Q: "Why does almost every function in our Go services take a context.Context as its first parameter?"</strong> A strong answer, out loud: <em>"It carries the cancellation signal and any deadline down the whole call chain from wherever the request started, so a database query or an outbound HTTP call can notice the original caller is gone and stop instead of finishing pointless work. It's derived, not mutated — WithTimeout or WithCancel returns a child, and cancelling a parent cancels every child under it automatically. The one thing I'd watch for in review is someone using it to smuggle a required argument through WithValue instead of putting it in the signature — that's the misuse, not the mechanism."</em> The signal: naming propagation and derivation, not just "it's for timeouts."</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A context.Context carries a cancellation signal and/or deadline down a call chain, so every function on that chain can notice the original caller gave up and stop doing pointless work — the Go analogue of an AbortController passed into fetch().">
+    <p class="stem">What problem does context.Context actually solve for a chain of function calls?</p>
+    <button class="opt" data-ok>letting downstream work notice the caller gave up</button>
+    <button class="opt">letting two separate goroutines share one memory address</button>
+    <button class="opt">letting a struct implement more than one interface</button>
+    <button class="opt">letting a slow database query run somewhat faster</button>
+  </div>
+  <div class="q" data-why="context.WithTimeout, WithCancel, and similar functions never modify the parent context — they return a brand-new child context, and cancelling the parent automatically cancels every child derived from it, all the way down the chain.">
+    <p class="stem">What happens when you call context.WithTimeout on an existing context?</p>
+    <button class="opt" data-ok>it returns a new child, the parent stays unchanged</button>
+    <button class="opt">it edits the parent context's own deadline value directly</button>
+    <button class="opt">it deletes the parent context from the running program</button>
+    <button class="opt">it pauses every goroutine until that timeout has passed</button>
+  </div>
+  <div class="q" data-why="pgx query methods take a context so that if the caller's deadline passes or the client disconnects, the in-flight query can be abandoned on the wire and the pooled connection freed immediately, instead of holding that connection for the query's full duration on behalf of nobody, exactly the exhaustion risk Lesson 18 described.">
+    <p class="stem">Why do pgx's query methods take a ctx argument as their first parameter?</p>
+    <button class="opt" data-ok>so an abandoned query can free its pooled connection</button>
+    <button class="opt">so the query can automatically retry itself twice over</button>
+    <button class="opt">so pgx can pick which Postgres replica handles it</button>
+    <button class="opt">so the returned rows arrive already sorted by id</button>
+  </div>
+  <div class="q" data-why="context.WithValue is meant for small, request-scoped metadata a whole call chain needs to see, like a correlation ID — not for a value a function actually depends on to do its job. A required argument belongs in the function signature, where a missing value is a compile error, not a runtime surprise.">
+    <p class="stem">Why is context.WithValue the wrong place for an argument a function actually requires?</p>
+    <button class="opt" data-ok>a missing required value should fail to compile, not runtime</button>
+    <button class="opt">WithValue can only ever store a single string at once</button>
+    <button class="opt">values stored in a context expire after one second exactly</button>
+    <button class="opt">WithValue silently blocks whichever goroutine happens to call it first</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://go.dev/doc/effective_go#goroutines">Effective Go</a> is already RESOURCES.md's cited primary source for the goroutine mechanism (extended by Lesson 25); the standard library's own <a href="https://pkg.go.dev/context">context package documentation</a> is the direct arbiter for everything in this lesson — propagation rules, the <code>WithValue</code> guidance, and the exact semantics of <code>Done()</code>/<code>Err()</code>/<code>Deadline()</code>. Kleppmann's <a href="https://dataintensive.net">Designing Data-Intensive Applications</a>, already a standing citation (Lessons 6, 33, 37, 39, 40), is not the right source here — this is a Go-specific mechanism, not a general distributed-systems concept.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> open — still no reported quiz/lesson-completion outcome exists for any lesson after 40 rounds; distributed locks and blue-green/canary deploys remain the last named, confirmed out-of-scope-per-MISSION.md candidates if no fresh gap or user-chosen track surfaces first.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

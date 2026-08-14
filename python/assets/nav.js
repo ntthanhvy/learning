@@ -40,6 +40,8 @@
       file: "lessons/0016-fastapi-handlers-and-status-codes.html" },
     { n: 17, date: "2026-08-14", title: "pydantic models: validation, coercion & settings",
       file: "lessons/0017-pydantic-models-and-validation.html" },
+    { n: 18, date: "2026-08-15", title: "Request/response schemas: the type hints ARE the contract",
+      file: "lessons/0018-request-response-schemas.html" },
   ];
 
   const REFS = [

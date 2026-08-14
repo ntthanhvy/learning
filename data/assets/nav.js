@@ -80,6 +80,8 @@
       file: "lessons/0036-between-range-filtering.html" },
     { n: 37, date: "2026-08-14", title: "combine_first(): filling gaps in one Series from another",
       file: "lessons/0037-combine-first.html" },
+    { n: 38, date: "2026-08-15", title: "resample(): bucketing a datetime index into fixed periods",
+      file: "lessons/0038-resample.html" },
   ];
 
   const REFS = [

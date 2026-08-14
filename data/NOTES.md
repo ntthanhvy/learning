@@ -2044,3 +2044,114 @@
   candidate left dangling from today's content — Lesson 34's original
   three-candidate list is now fully spent across Lessons 35-37) if no
   drill-outcome signal surfaces by next generation.
+- 2026-08-15 generation (Lesson 38, headless GitHub Actions 06:00 run):
+  confirmed the idempotency check first — no `data/lessons/0038-*.html`
+  existed yet, `2026-08-15` was not already logged anywhere in
+  `assets/nav.js` or this file, and Lesson 38 wasn't in `assets/nav.js`
+  (highest was Lesson 37, dated 2026-08-14) — so this round proceeded.
+  `bin/query-progress data` was tried once from the repo root as
+  instructed and failed with a "requires approval" block, consistent
+  with every prior round back to 2026-07-16 — not retried; paced from
+  on-disk state alone (this file's history, `lessons/`,
+  `learning-records/`). Only one learning record exists
+  (`learning-records/0001-baseline-sql-strong-python-basic.md`, the
+  course-creation baseline) — still no `course_progress`/
+  `lesson_completed` signal, so no reported weak spot to target. Lesson
+  37's own teaser named no single dangling candidate ("a fresh scan...
+  no named candidate left dangling"), so this round re-scanned the
+  curriculum spine and glossary fresh: grepped `lessons/*.html` for
+  `pivot_table`, `MultiIndex`, `resample`, `stack(`, `pivot(`, and
+  `reindex` before picking. Found `pivot_table` (incl. multi-aggfunc/
+  MultiIndex-column form), `stack()`-as-concept, `MultiIndex`, and
+  `crosstab()` all already taught in real depth across Lessons 6, 14,
+  15, and 17 — genuinely covered, not just name-dropped, confirmed by
+  reading those sections directly rather than trusting the grep hit
+  alone. `resample()` came back with zero hits anywhere in `lessons/*.html`
+  — genuinely uncovered, and a natural next building block after Lesson
+  32's `.dt` accessor (which parsed `order_date` to datetime64 but never
+  covered time-bucketed aggregation) and a highly-tested interview
+  pattern in its own right (daily/weekly revenue rollups). Picked it over
+  `stack()` (named in passing in Lessons 6/14 as unstack's inverse, but
+  never taught on its own — noted as next round's candidate in this
+  lesson's own teaser) since `resample()` had zero prior mentions at all,
+  the stronger "genuinely dangling" signal. Lesson 38 ships `resample()`:
+  the core problem framing (`groupby(df["order_date"].dt.date)` silently
+  skips days with zero orders, since groupby can only group rows that
+  already exist), `resample()` requiring a `DatetimeIndex` (via
+  `set_index()`, Lesson 33) and building the full calendar grid before
+  aggregating so empty periods get real output rows, the `sum()`-gives-
+  0.0 vs `mean()`-gives-NaN empty-bucket distinction (same aggfunc-
+  dependent-fill shape as Lesson 6's `pivot_table` `fill_value`, but here
+  it's implicit per-aggfunc rather than a settable argument), weekly
+  (`"W"`) buckets and the single-bucket trap this fixture's narrow 6-day
+  span produces, `resample().agg({...})` for mixed per-column
+  aggregations (echoing Lesson 14's multi-aggfunc `pivot_table`), and
+  `asfreq()` as the grid-building step alone with no aggregation (gaps
+  always NaN, never 0). `uv run --with pandas` worked directly this round
+  (pandas installed via uv, numpy pulled in as a dependency): every
+  number was hand-verified in `.scratch/data-lesson38/explore.py` and
+  `explore2.py` (both deleted after) before writing a word of the lesson
+  — daily `resample("D").sum()` on the 4-row cleaned slice (An 120.0/
+  01-05, Binh 35.5/01-06, Binh 180.0/01-09, An 42.0/01-10) gives
+  `[120.0, 35.5, 0.0, 0.0, 180.0, 42.0]` across Jan 5-10 with Jan 7/8
+  zero-filled; the same range under `.mean()` gives `[120.0, 35.5, NaN,
+  NaN, 180.0, 42.0]`; weekly (`"W"`, Sunday-ending default) collapses the
+  whole span into one bucket totalling 377.5, dated 2026-01-11 (the
+  closing Sunday); `resample("D").agg({"amount": "sum", "customer":
+  "first"})` sums to the identical daily amounts while leaving `customer`
+  NaN on the two gap days (no row to take a "first" value from); and
+  `asfreq("D")` on the same daily grid leaves Jan 7/8 as NaN, contrasting
+  directly with the sum's 0.0 on those same two days — confirmed against
+  `groupby(clean["order_date"].dt.date)["amount"].sum()` separately,
+  which returns only 4 rows (Jan 7/8 entirely absent, not zero-filled),
+  the concrete evidence behind Section 1's framing. Kept the practice
+  file inline on the same cleaned `orders_raw.csv` slice as Lessons 6-37
+  (no new fixture needed — the existing 6-day span is naturally narrow
+  enough to demonstrate both the daily-gap and single-week-bucket
+  behaviors without any invented data). While first drafting Exercise 2
+  (daily mean), found it had no `...` blank at all — the resample call
+  was already fully spelled out, so the unsolved file would have printed
+  a false ✓ on that check with nothing to fix — caught this by reading
+  through the first full run of the shipped file line by line before
+  finalizing (all other exercises correctly showed ✗, this one alone
+  showed ✓ despite being unsolved) and fixed it by changing
+  `.resample("D").mean()` to `.resample("D").agg(...)`, moving the
+  fill-in-the-blank onto the aggfunc name itself; re-ran and confirmed
+  all 7 checks then showed ✗ together, no crash. The shipped (unsolved)
+  `practice/38_resample.py` was executed in
+  `.scratch/data-lesson38/practice/` and printed all 7 ✗ cleanly, then a
+  separately-saved solved copy (`.scratch/data-lesson38/practice/
+  38_solved.py`, not shipped, each `...` filled in by hand) printed all 7
+  ✓ against the same hand-verified numbers above. The shipped file was
+  also re-run a second time directly from its real `practice/` location
+  (`cd data && uv run --with pandas python3 practice/38_resample.py`) and
+  confirmed to print the identical all-✗ result with no crash.
+  `.scratch/data-lesson38/` was fully removed (`rm -rf`) after
+  verification, no approval needed this round. Added `resample()`,
+  `DatetimeIndex`, and `offset alias` to the glossary (checked for
+  collisions first — none; placed directly after the `combine_first()`
+  entry, in the order they're introduced in the lesson) and registered
+  Lesson 38 in `nav.js`. Quiz options were drafted and checked with a
+  Python regex/word-count script (extracts each `<div class="q">` block,
+  strips HTML tags, whitespace-splits) run via `uv run python3` (this
+  course's established convention since Lesson 26/27's finding that
+  plain `python3` needs approval while `uv run python3` doesn't) — the
+  first draft came out mismatched on all three questions (Q1 at 11/9/9,
+  Q2 at 11/12/10, Q3 at 9/8/9) and needed one rewrite + recount cycle per
+  question before a final independent recount, via the same script's
+  output plus a manual read-through as a second pass (this course's
+  established convention since Lesson 19), confirmed all three genuinely
+  level at 9/9/9, 11/11/11, and 10/10/10. `bin/record-progress data
+  lesson_generated --day 38 --lesson 0038-resample.html --detail
+  '{"by":"delegated-agent"}'` was run once from the repo root as
+  instructed and succeeded on the first try, no approval blocker this
+  round (`recorded: data/lesson_generated day=38 lesson=0038-
+  resample.html`) — the read path (`query-progress`) stayed blocked this
+  round while the write path (`record-progress`) worked, same asymmetry
+  as every prior round that tried both. This agent does not run `git
+  commit` — leaving working-tree changes uncommitted is this course's
+  established convention (confirmed by every prior entry in this file);
+  no commit was made this round either. Set the teaser going forward to
+  `stack()` as its own topic (named in passing in Lessons 6 and 14 as
+  unstack's inverse, but never taught directly — spotted during this
+  round's scan) if no drill-outcome signal surfaces by next generation.

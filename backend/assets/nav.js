@@ -86,6 +86,8 @@
       file: "lessons/0039-mvcc-how-postgres-does-isolation.html" },
     { n: 40, date: "2026-08-14", title: "Deadlocks: when two transactions wait on each other forever",
       file: "lessons/0040-deadlocks.html" },
+    { n: 41, date: "2026-08-15", title: "context.Context: the cancellation signal riding along with every request",
+      file: "lessons/0041-context-cancellation-and-deadlines.html" },
   ];
 
   const REFS = [

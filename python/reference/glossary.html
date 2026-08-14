@@ -193,6 +193,13 @@
   <tr><td>BaseSettings</td><td>giữ nguyên "BaseSettings" — model đọc giá trị field từ environment variable thay vì tham số constructor, vẫn validate/coerce như model thường</td><td>A <code>pydantic_settings.BaseSettings</code> subclass — a settings model whose field values are read from environment variables by default (matched to field names case-insensitively) instead of only from constructor arguments, with the same validation and coercion as any other pydantic model. A separate package from core pydantic, installed one-off via <code>--with pydantic-settings</code>.</td></tr>
 </table>
 
+<h2 id="day18">Day 18 — Request/response schemas: the type hints ARE the contract</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>schema</td><td>giữ nguyên "schema" — hình dạng request/response mà route cam kết, khai báo bằng pydantic model ngay trên signature, không cần viết spec riêng</td><td>The request-body and response-body shapes a route promises, expressed as pydantic models on a handler's parameters and its <code>response_model</code> — read directly from the signature by both FastAPI (to validate and serialize) and any human or tool consuming the API, with no separately maintained spec document to keep in sync.</td></tr>
+  <tr><td>response_model</td><td>giữ nguyên "response_model" — tham số trong route decorator khai báo model mà return value phải khớp trước khi thành JSON response, lọc field thừa + coerce output giống hệt input</td><td>A route-decorator argument (<code>response_model=...</code>) declaring the pydantic model a handler's return value is shaped into before it becomes the JSON response — validated and coerced exactly like a request body, and any field the handler returned that the model doesn't declare is silently filtered out of what the client actually receives.</td></tr>
+</table>
+
 <p class="next">💬 A term here still unclear? Ask your teacher — hỏi bằng tiếng Việt cũng được.</p>
 
 <script src="../assets/nav.js"></script>

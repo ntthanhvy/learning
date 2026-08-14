@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 18 · Request/response schemas: the type hints ARE the contract</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 18 · ~20 min · 15 Aug 2026</p>
+<h1>Request/response schemas: the type hints ARE the contract</h1>
+<p class="byline">Day 16's handlers took input as loose path/query parameters — an <code>int</code> here, a <code>str</code> there. Day 17 built the pydantic model that validates a whole shaped record at once, but only ever constructed one by hand, in plain Python. Today those two ideas merge: a pydantic model becomes a handler's parameter type for a JSON body, and a second model becomes its <dfn data-en="the FastAPI route-decorator argument (response_model=...) declaring the pydantic model a handler's return value must be shaped into before it's sent as JSON — filtering and coercing the output the same way a request body is filtered and coerced on the way in" data-vn="giữ nguyên &quot;response_model&quot; — tham số trong route decorator khai báo model mà return value phải khớp trước khi thành JSON response, lọc field thừa + coerce output giống hệt input">response_model</dfn>. Once both ends of a route are pydantic models, the handler's signature — its parameter types and its <code>response_model</code> — is a full, machine-checked description of the endpoint: a <strong><dfn data-en="the request-body and response-body shapes a route promises, expressed as pydantic models on a handler's parameters and response_model — read directly from the signature by both FastAPI (to validate/serialize) and any human or tool consuming the API, without a separately maintained spec" data-vn="giữ nguyên &quot;schema&quot; — hình dạng request/response mà route cam kết, khai báo bằng pydantic model ngay trên signature, không cần viết spec riêng">schema</dfn></strong>, with nothing else to keep in sync.</p>
+
+<div class="callout"><strong>Bridge from SQL:</strong> a request schema is an <code>INSERT</code> statement's column list with types and <code>CHECK</code> constraints — reject the row before it touches anything. A response schema is a <code>VIEW</code>'s declared output columns: it decides what a caller is allowed to see, even if the underlying object (like a query's full result row) carries more. Neither is optional the way an untyped API leaves both open to guesswork.</div>
+
+<h2>1 · A pydantic model as a handler's parameter: the request body</h2>
+<p>Day 16's <code>create_user(name: str)</code> only ever took one flat value from a query parameter. A real <code>POST</code> body is usually a whole record — exactly what Day 17's <code>BaseModel</code> already validates. Give a handler parameter a pydantic-model type hint, with no default, and FastAPI stops treating it as a query parameter and starts reading it from the request's JSON body instead:</p>
+<pre><code><span class="kw">from</span> fastapi <span class="kw">import</span> FastAPI
+<span class="kw">from</span> pydantic <span class="kw">import</span> BaseModel
+
+app = FastAPI()
+
+<span class="kw">class</span> ItemIn(BaseModel):
+    name: <span class="kw">str</span>
+    price: <span class="kw">float</span>
+
+<span class="kw">@app.post</span>(<span class="str">"/items"</span>)
+<span class="kw">def</span> create_item(item: ItemIn):
+    <span class="kw">return</span> {<span class="str">"name"</span>: item.name, <span class="str">"total"</span>: item.price}</code></pre>
+<p>Nothing here is a new mechanism — it's Day 16's "a type hint decides how a value is read" rule, plus Day 17's <code>BaseModel</code>, combined. A JSON body of <code>{"name": "pen", "price": "12.5"}</code> gets parsed and handed to <code>ItemIn</code>'s constructor before <code>create_item</code> ever runs, with the exact same coercion Day 17 showed (the string <code>"12.5"</code> becomes a real <code>float</code>). A body missing <code>price</code>, or with a <code>price</code> that can't coerce at all, never reaches your code: FastAPI catches the <code>ValidationError</code> itself and returns HTTP <code>422 Unprocessable Entity</code> with the same field-by-field detail Day 17's <code>ValidationError</code> message carried, automatically — no <code>try</code>/<code>except</code> written in the handler at all.</p>
+
+<h2>2 · <code>response_model</code>: the same enforcement, on the way out</h2>
+<p>A handler is still free to <code>return</code> a plain <code>dict</code>, an ORM row, or anything else JSON-serializable — but nothing stops it from leaking a field that shouldn't leave the server, like an internal cost or a password hash. <code>response_model</code> puts a second pydantic model on the outbound side, shaping (and filtering) whatever the handler returns:</p>
+<pre><code><span class="kw">class</span> ItemOut(BaseModel):
+    id: <span class="kw">int</span>
+    name: <span class="kw">str</span>
+    price: <span class="kw">float</span>
+
+_items = {}
+_next_id = <span class="kw">1</span>
+
+<span class="kw">@app.post</span>(<span class="str">"/items"</span>, response_model=ItemOut, status_code=<span class="kw">201</span>)
+<span class="kw">def</span> create_item(item: ItemIn):
+    <span class="kw">global</span> _next_id
+    new_id = _next_id
+    _next_id += <span class="kw">1</span>
+    _items[new_id] = item
+    <span class="kw">return</span> {<span class="str">"id"</span>: new_id, <span class="str">"name"</span>: item.name, <span class="str">"price"</span>: item.price, <span class="str">"secret_cost"</span>: <span class="kw">999</span>}</code></pre>
+<p>The handler's own <code>return</code> includes <code>secret_cost</code>, but the JSON a client actually receives is <code>{"id": 1, "name": "pen", "price": 12.5}</code> — confirmed by running this exact route through <code>TestClient</code>. <code>response_model=ItemOut</code> builds an <code>ItemOut</code> from whatever the handler returned, the same construction-time validation and coercion as any other <code>BaseModel</code>, and only fields <code>ItemOut</code> declares survive into the response. A returned value missing a field <code>ItemOut</code> requires is a server bug, not a client one — FastAPI raises its own error rather than shipping a response that breaks its declared shape, because <code>response_model</code> is a promise about every response, not just a filter applied when convenient.</p>
+
+<h2>3 · Two models, one route: request and response rarely match</h2>
+<p><code>ItemIn</code> and <code>ItemOut</code> are deliberately two different models sharing two fields, not one model reused twice — and that split is the normal shape of a real route, not a special case:</p>
+<pre><code><span class="kw">class</span> ItemIn(BaseModel):     <span class="kw"># what a client is allowed to send</span>
+    name: <span class="kw">str</span>
+    price: <span class="kw">float</span>
+
+<span class="kw">class</span> ItemOut(BaseModel):    <span class="kw"># what a client is allowed to see back</span>
+    id: <span class="kw">int</span>              <span class="kw"># server-assigned — a client never sends this</span>
+    name: <span class="kw">str</span>
+    price: <span class="kw">float</span></code></pre>
+<p><code>id</code> exists only in <code>ItemOut</code> because it's assigned by the server, after the fact — a client sending an <code>id</code> in the request body would be pointless (and <code>ItemIn</code> without that field simply ignores any extra key sent). The reverse gap matters just as much: if <code>ItemIn</code> grew a <code>password: str</code> field for some other endpoint, a handler that carelessly returned the whole model instead of building an explicit <code>ItemOut</code> would leak it straight into a response. Two schemas per route — one named <code>...In</code>, one named <code>...Out</code>, by convention rather than any language rule — is how a FastAPI codebase keeps "what a client may send" and "what a client may see" independently correct, even when most of their fields overlap.</p>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> a request/response schema validates and shapes exactly one JSON record per call — never a whole table; if a handler needs to hand back many rows built from a DataFrame, it converts each row to a plain dict first and lets a <code>list[ItemOut]</code> response model validate the list, one record at a time, the same single-record contract this lesson taught, just repeated.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/18_request_response_schemas.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run --with fastapi --with httpx python3 practice/18_request_response_schemas.py</code></pre>
+<p>Needs <code>fastapi</code> and <code>httpx</code>, installed one-off via <code>--with</code>, same as Day 16 — no <code>pydantic-settings</code> needed today since nothing here reads the environment. Exercises: defining an <code>ItemIn</code> request model, a <code>POST</code> handler that takes it as a body parameter, an <code>ItemOut</code> response model narrower than what the handler actually returns, wiring it up with <code>response_model=</code>, and confirming with <code>TestClient</code> that a missing field triggers <code>422</code> and an extra field never reaches the response JSON.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Giving a handler parameter a pydantic BaseModel type hint, with no default value, tells FastAPI to read and validate that parameter from the request's JSON body - not from a query string - exactly the way Day 16 already showed that a type hint decides how a value gets read, just applied to a whole model instead of one int or str.">
+    <p class="stem">What makes FastAPI read a handler parameter from the request's JSON body instead of the URL?</p>
+    <button class="opt" data-ok>giving that one parameter a pydantic BaseModel type hint, alone</button>
+    <button class="opt">writing that parameter's name inside the route's own URL string</button>
+    <button class="opt">adding a docstring above the handler naming its own field</button>
+  </div>
+  <div class="q" data-why="A request body that fails a BaseModel parameter's validation - a missing required field, or a value that can't coerce into the declared type - never reaches the handler at all. FastAPI catches the ValidationError itself and responds with HTTP 422, carrying the same field-by-field detail a raw ValidationError message shows, with no try/except written by hand.">
+    <p class="stem">What happens when a POST body fails a request-model's validation before the handler runs?</p>
+    <button class="opt" data-ok>FastAPI itself returns 422, naming the exact field that failed</button>
+    <button class="opt">the handler still runs, given a dict of raw values</button>
+    <button class="opt">the whole server crashes hard with an uncaught ValidationError traceback</button>
+  </div>
+  <div class="q" data-why="response_model builds its declared model from whatever the handler returned, and only the fields that model declares survive into the actual JSON response - so a handler that includes an extra field like secret_cost in its own return value still ships a response with that field silently stripped out, confirmed directly with TestClient in section 2.">
+    <p class="stem">If a handler's <code>return</code> includes a field its <code>response_model</code> doesn't declare, what reaches the client?</p>
+    <button class="opt" data-ok>nothing — that extra field just gets silently filtered from the response</button>
+    <button class="opt">the full dict, extra field included, exactly as the handler returned it</button>
+    <button class="opt">a 500 error, since response_model always rejects any unexpected field type here</button>
+  </div>
+  <div class="q" data-why="ItemOut carries id specifically because the server assigns that value after construction, once a new row exists - a client sending it in a request body would be meaningless, so it has no place in ItemIn at all. That's exactly why real routes use two separate schemas instead of reusing one model for both directions.">
+    <p class="stem">Why does <code>ItemOut</code> have an <code>id</code> field that <code>ItemIn</code> does not?</p>
+    <button class="opt" data-ok>id only gets assigned by the server, after the item exists</button>
+    <button class="opt">pydantic always adds its own id field automatically to every model</button>
+    <button class="opt">ItemIn is not actually allowed to declare more than two fields</button>
+  </div>
+  <div class="q" data-why="Using two separate schemas per route - one for what a client may send, one for what a client may see back - keeps those two concerns independently correct even when most fields overlap. A field only ever in the request model, like a password, can never accidentally leak through a response built from a distinct, deliberately narrower response model.">
+    <p class="stem">Why use two separate models per route instead of one model for both directions?</p>
+    <button class="opt" data-ok>it keeps a request-only field from ever leaking into a response</button>
+    <button class="opt">FastAPI raises an error whenever one model gets reused both ways</button>
+    <button class="opt">pydantic models are not allowed to share any field names ever</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official FastAPI tutorial's <a href="https://fastapi.tiangolo.com/tutorial/body/">Request Body</a> page and its <a href="https://fastapi.tiangolo.com/tutorial/response-model/">Response Model — Return Type</a> page, cited in RESOURCES.md as the spine for this whole phase.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day18">glossary</a> under Day 18.<br>
+Next up per PLAN.md's Phase 2b spine: dependency injection with <code>Depends()</code>, and structuring an app beyond one file.<br><br>
+💬 Anything unclear — request vs. response models, or how <code>response_model</code> decides what to filter? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

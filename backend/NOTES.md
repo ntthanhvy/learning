@@ -1900,3 +1900,106 @@
   out-of-scope-per-MISSION.md candidates if a fresh gap-finding pass is
   needed again next time; no other in-scope candidate surfaced from this
   round's re-read of Lesson 6 beyond the one just closed.
+- 2026-08-15 generation (Lesson 41, headless run): idempotency check first —
+  confirmed no `lessons/0041-*.html` file existed and no `2026-08-15` entry
+  existed yet in `nav.js` before writing anything (highest existing file was
+  0040, dated 2026-08-14). `date` confirmed today is 2026-08-15. Per this
+  round's own briefing, `bin/query-progress` was attempted exactly once and
+  blocked immediately by the sandbox's shell-operator/command approval gate
+  (no user present to approve in this headless run) — consistent with every
+  round since Lesson 9; not retried, per instruction. Pacing came from
+  `backend/learning-records/` (0001's baseline, 0002's concurrency-gap note,
+  both already fully reflected in prior lessons — same finding as every round
+  since Lesson 21) plus `lessons/`/`nav.js` file state and this log alone.
+  Lesson 40 left only the two standing out-of-scope-per-MISSION.md candidates
+  (distributed locks, blue-green/canary deploys) with no new in-scope
+  candidate, so this round used the established grep-MISSION/RESOURCES-against-
+  shipped-lessons method plus a close re-read: rather than re-reading one
+  specific prior lesson's prose for an unexplained aside (the method that
+  found eight straight gaps, Lessons 32-40), this round grepped every Go
+  snippet across all 40 lessons for parameter/API patterns used constantly but
+  never named as a concept. `context.Context` stood out immediately: 19 of the
+  40 lesson files (`grep -c "ctx" lessons/*.html`) use `ctx`/`context.Context`
+  in a Go snippet, including three explicit `ctx.Done()`/`ctx.Err()`
+  cancellation-channel calls (Lessons 27, 29, 32) and `context.WithTimeout` in
+  Lesson 27's own shutdown sequence — every one of those snippets threading it
+  through as unexplained boilerplate. Independently confirmed via grep across
+  all 40 lesson bodies and glossary.html before writing: no lesson ever defines
+  what a `context.Context` is, what it carries, or why it propagates; the
+  glossary's only near-miss is an unrelated existing entry, "context switch"
+  (a scheduling term from Lesson 25's concurrency vocabulary, nothing to do
+  with Go's `context` package) — confirming this is a genuine gap and, if
+  anything, a confusable-name risk on top of being unexplained. In scope under
+  MISSION criterion 3 ("reason about what happens at runtime: transactions,
+  N+1 queries, caching, background jobs, connection pools — and spot these
+  problems in existing code") — this is exactly a connection-pool/runtime
+  mechanism, a Go-specific standard-library concept, not infra, not
+  distributed-systems vocabulary, and not either of the two standing
+  out-of-scope candidates. Lesson 41 covers it: why every snippet threads
+  `ctx` through (the AbortController-for-fetch() analogy, bridging from a
+  frontend concept per this course's own stated bridging convention); the two
+  things a context actually carries (cancellation signal via `Done()`/`Err()`,
+  deadline via `WithTimeout`); the immutable-and-derived mechanic (`With*`
+  always returns a new child, cancelling a parent cancels every child); why
+  pgx query methods take `ctx` as their first argument, tied explicitly back
+  to Lesson 18's connection-pool-exhaustion risk (a query that ignores
+  cancellation holds a pooled connection open for nobody); a comparison table
+  contrasting behavior with and without propagation; and the one common
+  misuse — `WithValue` used to smuggle a required argument past a function
+  signature instead of a correlation ID (Lesson 13) or other genuinely
+  request-scoped metadata. The `fetchOrderSummary` Go snippet (minimal
+  stand-in `Row`/`DB` interface types, no real pgx/database dependency needed
+  since the lesson's point is the propagation pattern, not the driver) was
+  compile-checked clean with `go build -C` / `go vet -C` in a scratch module
+  (`.scratch/backend-lesson41/`, built binary removed after, directory left
+  with only `go.mod`/`main.go`, same end-state as every prior round) — no
+  approval blocker for either `-C`-style invocation this round, consistent
+  with every round since Lesson 13's finding. One markup bug was caught and
+  fixed before shipping: the callout div's closing tag was written as a stray
+  `</p>\n</div>` (a leftover `<p>`-wrapper habit) instead of the established
+  `<div class="callout">...</div>` convention with no inner `<p>` at all,
+  confirmed by re-checking Lessons 32's and 40's own callout markup — caught
+  by proofreading the raw file after writing it, the same catch method
+  Lessons 32/34/39/40's notes already flagged as necessary since a
+  structurally-valid-but-wrong tag won't be caught by tooling. Added
+  `context.Context` to the glossary (confirmed via grep beforehand it existed
+  nowhere in `lessons/*.html` or `glossary.html`, and is a distinct entry from
+  the existing unrelated `context switch` term) and registered Lesson 41 in
+  nav.js. Quiz options were drafted, then verified with `wc -w` per line via
+  individual `sed -n '<n>p' | sed -E 's/<[^>]+>//g' | wc -w` calls (a bare
+  `for` loop was not attempted, consistent with every round since Lesson 28's
+  finding that this sandbox rejects that pattern outright) — all four
+  questions needed at least one rewrite pass before landing on equal counts,
+  the same repeated pattern Lessons 28/33/37/40's notes already flagged (trust
+  the tool count after every edit, not a hand estimate of words added or
+  removed); final tallies, each re-verified after every edit and cross-checked
+  a second, independent way (printing the stripped option text and manually
+  counting it against the `wc -w` result): Q1 8/8/8/8, Q2 9/9/9/9, Q3 9/9/9/9,
+  Q4 10/10/10/10. Primary source: the Go standard library's own `context`
+  package documentation — a new citation for RESOURCES.md's Go-specific
+  sources, sitting alongside Effective Go's goroutines section (already cited,
+  extended by Lesson 25) rather than under the PostgreSQL Manual or Kleppmann,
+  since this is a Go mechanism, not a Postgres or general distributed-systems
+  one; Kleppmann was named in the lesson body specifically as the wrong source
+  to reach for here, for the same reason. `bin/record-progress backend
+  lesson_generated --day 41 --lesson 0041-context-cancellation-and-deadlines.html
+  --detail '{"by":"delegated-agent"}'` was run directly via its relative path
+  from the repo root as instructed and succeeded on the first try, no approval
+  blocker this round — consistent with every round since Lesson 32's finding
+  that the write path works reliably when invoked this way, even in the same
+  round where the read path (`bin/query-progress`) was blocked. This closes
+  the `context.Context` gap found by grepping Go snippet patterns across all
+  40 lessons rather than re-reading one prior lesson's prose closely — worth
+  noting as a second gap-finding method alongside the "re-read one lesson
+  closely" approach that found Lessons 32-40's gaps, useful when no single
+  lesson stands out as newly gap-productive; still no `lesson_completed`
+  record exists for any lesson after 41 rounds — the next session should keep
+  treating a completion/quiz-outcome signal, or a user-named track to deepen,
+  as higher priority than a 42nd topic picked blind. Distributed locks and
+  blue-green/canary deploys remain the last named, confirmed
+  out-of-scope-per-MISSION.md candidates if a fresh gap-finding pass is needed
+  again next time; other Go-snippet-pattern candidates worth checking first if
+  so: several lessons pass raw `*pgxpool.Pool`/`DB` interface values without
+  ever explaining what a driver/interface abstraction over a pool actually is
+  at that layer, noticed but not pursued this round since `context.Context`
+  was the clearer, more load-bearing gap (19 files vs. a handful).

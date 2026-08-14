@@ -1644,3 +1644,135 @@ fail *gracefully* so the learner sees which task failed.
   FastAPI handler *are* the contract — the third item, directly following
   today's pydantic-model foundation, already named in today's lesson's own
   closing line.
+- 2026-08-15 — **Day 18 generated**
+  (`lessons/0018-request-response-schemas.html`), the headless run's
+  eleventh Phase 2 lesson. Idempotency check confirmed on-disk before
+  writing anything: highest existing lesson file was `0017-…` dated
+  2026-08-14, no `0018-…` file existed, and no `2026-08-15` entry existed
+  yet in `assets/nav.js` — generation proceeded as Day 18, not a re-run.
+  Topic: request/response schemas — using a pydantic model as a FastAPI
+  handler's request-body parameter type, and a second pydantic model as its
+  `response_model`, so the handler's signature alone is a complete,
+  machine-checked description of what a route accepts and returns. This is
+  the third item of `PLAN.md`'s Phase 2b spine, directly after Day 17
+  completed the second (pydantic validation/coercion/settings), and named
+  explicitly both in Day 17's own closing line and in this file's own Day 17
+  next-day note. Taught: giving a handler parameter a pydantic `BaseModel`
+  type hint (no default) switches it from Day 16's query-parameter reading
+  to reading the request's JSON body instead — reusing Day 16's "a type
+  hint decides how a value is read" rule and Day 17's `BaseModel`
+  construction/coercion/`ValidationError` mechanics unchanged, just applied
+  to a whole record instead of one path/query value, and confirmed that a
+  body failing validation never reaches the handler at all, returning HTTP
+  422 automatically; `response_model=` as the same enforcement applied to a
+  handler's `return` value on the way out — built from whatever the handler
+  returned, with any field not declared on the response model silently
+  filtered before the client ever sees it, confirmed directly by running a
+  handler that deliberately returned an extra `secret_cost` field through
+  `TestClient` and observing it absent from the actual response JSON, not
+  just asserted from the docs; and why a real route almost always uses two
+  distinct schemas (an `...In` request model and an `...Out` response
+  model) rather than one model for both directions — server-assigned fields
+  like `id` belong only on the `Out` side, and fields that must never leak
+  back out (the lesson names a hypothetical `password` field on `ItemIn` as
+  the motivating case, not demonstrated as a real exercise) have no way to
+  leak through a deliberately narrower, separately declared response model.
+  Bridged from SQL per the baseline record: a request schema framed as an
+  `INSERT`'s column list with `CHECK` constraints rejecting a bad row before
+  it touches anything, a response schema framed as a `VIEW`'s declared
+  output columns deciding what a caller may see regardless of what the
+  underlying row actually carries.
+  Version/behavior confirmed before writing the lesson, in a scratch dir
+  (`.scratch/python-lesson18/`, created under the repo root's shared
+  `.scratch/` area per this run's own instructions, removed after use): a
+  script built a two-route FastAPI app mirroring section 2's exact example
+  (a `POST /items` handler returning a dict with an extra `secret_cost` key
+  alongside `response_model=ItemOut`) and ran it through `TestClient` —
+  confirmed `secret_cost` does not appear in the actual JSON response body,
+  confirmed the string `"12.5"` request-body value coerces to a real
+  `float` in the response, confirmed a POST body missing a required field
+  returns status `422` with FastAPI's own field-level detail rather than
+  reaching the handler, and confirmed `fastapi 0.141.1` / `pydantic 2.13.4`
+  — the identical versions Day 17 already logged, no drift since then.
+  Learning records: still only the Day 1 baseline record
+  (`learning-records/0001-baseline-reads-python-writes-little.md`) — no
+  completion/quiz record for any later day was found (same gap every Day
+  8–17 entry already flagged). Paced conservatively per that same
+  assumption and this run's own instruction to pace from file-state alone:
+  exactly the spine's named third item (request/response schemas via
+  request-body models and `response_model`) covered, no dependency
+  injection, multi-file app structuring, or `async`/`await` pulled forward
+  from later Phase 2b spine items, and every new mechanism tied back
+  explicitly to material already taught (Day 16's type-hint-driven
+  parameter reading, Day 17's `BaseModel`/coercion/`ValidationError`)
+  rather than introduced as unrelated new ground. Unverified against real
+  quiz/completion data, same caveat as every entry since Day 8.
+  No-pandas rule: zero pandas/NumPy API in the lesson body or practice file
+  (checked by grep for `pandas|numpy|dataframe`, case-insensitive, across
+  both new files — zero hits in the practice file, exactly one hit in the
+  lesson); exactly one contrast sentence, contrasting a schema's
+  single-record JSON contract against converting DataFrame rows to dicts
+  before a `list[...]` response model validates them, without demonstrating
+  any pandas API, placed once in its own callout after section 3 and
+  labeled in prose as the only such sentence, matching the hard-rule
+  section above.
+  Practice file `practice/18_request_response_schemas.py` (5 checks: an
+  `ItemIn` request model with coercion, a `POST /items` handler reading
+  that model as a body parameter and returning the stored record, that same
+  route returning `422` on a body missing a required field, an `ItemOut`
+  response model with a strict subset of fields, a second route wiring
+  `response_model=ItemOut` and confirming a returned `price` field never
+  reaches the response JSON, and a small `TestClient` helper reading a
+  parsed JSON response back) needed no on-disk fixtures — every exercise
+  operates on in-memory model construction and in-process `TestClient`
+  calls, matching Day 16's and Day 17's own practice-file shape. Uses
+  `--with fastapi --with httpx` (no `pydantic-settings`, unlike Day 17,
+  since nothing here reads the environment), confirmed sufficient by
+  running the shipped file with exactly that command. Verified in two
+  passes, both from a scratch copy (`.scratch/python-lesson18/`, removed
+  after use) and from the real `practice/` path with the documented
+  command: the shipped (unsolved) copy printed six clean ✗ lines with no
+  traceback each time — a plain `ItemIn`/`ItemOut` class with no
+  `BaseModel` parent, and route functions with no route decorator applied,
+  fail every check's `try`/`except` cleanly inside `check()` rather than
+  crashing the module — and a separately solved copy printed six ✓ and the
+  "All green" tally.
+  Glossary: added a Day 18 section to `reference/glossary.html` (`schema`,
+  `response_model`) after confirming via grep that neither term collided
+  with any existing entry across Days 1–17. Both also got matching `<dfn>`
+  markup at first use in the lesson body (confirmed by counting `<dfn
+  data-en` occurrences, 2 total), matching Day 11–17's density of
+  glossarying every newly introduced term inline rather than leaving any
+  undefined.
+  Quiz: 5 questions. Word counts were checked with a small Python script
+  (`uv run python3 …`, run from `.scratch/python-lesson18/`, removed after
+  use) that regex-splits the quiz block into its five question `<div>`s and
+  counts `.split()` words per `<button class="opt">` line, per this
+  course's established convention (loops/individual `wc -w` calls blocked
+  by this sandbox's approval gate). Mismatched on the first draft for all
+  five questions (Q1 9/10/11, Q2 9/12/8, Q3 12/12/9, Q4 12/10/11, Q5
+  11/12/12) — each went through two to four rewrite-and-recount rounds,
+  including a couple of overshoot/undershoot cycles on Q2's and Q3's
+  options, before landing on the target count for every question (Q1
+  10/10/10, Q2 10/10/10, Q3 12/12/12, Q4 11/11/11, Q5 11/11/11), then a
+  full final script run across all five questions' three options each (15
+  lines total) confirmed every one before shipping, per this file's
+  instruction to recount after any edit. Registered in `assets/nav.js` with
+  `date: "2026-08-15"`.
+  **DB access:** per this run's explicit instructions, `bin/query-progress`
+  was attempted once as instructed and failed immediately with a
+  permission/approval error, exactly the same failure mode logged on every
+  day since Day 8 — no retry attempted, and this run paced from on-disk
+  state alone (this file's own log, `python/lessons/`,
+  `python/learning-records/` — still only the Day 1 baseline record — and
+  `python/practice/`) instead, per this run's explicit instruction.
+  `bin/record-progress python lesson_generated --day 18 --lesson
+  0018-request-response-schemas.html --detail '{"by":"delegated-agent"}'`
+  was run once after shipping, per this run's instructions, and succeeded
+  — printed `recorded: python/lesson_generated day=18
+  lesson=0018-request-response-schemas.html` to stdout with no error.
+  **Next-day note:** per `PLAN.md`'s Phase 2b spine, the natural next-day
+  candidate is dependency injection with `Depends()`, and structuring an
+  app beyond one file — the fourth item, directly following today's
+  request/response-schema foundation, already named in today's lesson's own
+  closing line.

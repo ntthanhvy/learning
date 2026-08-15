@@ -2155,3 +2155,120 @@
   `stack()` as its own topic (named in passing in Lessons 6 and 14 as
   unstack's inverse, but never taught directly — spotted during this
   round's scan) if no drill-outcome signal surfaces by next generation.
+- 2026-08-16 generation (Lesson 39, delegated-agent run): confirmed the
+  idempotency check first — no `data/lessons/0039-*.html` existed yet
+  (glob check) and `2026-08-16` was not already registered in
+  `assets/nav.js` (highest entry was Lesson 38, dated 2026-08-15) — so
+  this round proceeded. `bin/query-progress data` was tried once from the
+  repo root as instructed and failed with a "requires approval" block,
+  consistent with every prior round back to 2026-07-16 — not retried;
+  paced from on-disk state alone. Only one learning record exists
+  (`learning-records/0001-baseline-sql-strong-python-basic.md`, the
+  course-creation baseline) — still no `course_progress`/
+  `lesson_completed` signal, so no reported weak spot to target. Lesson
+  38's own teaser named `stack()` explicitly as its own topic (mentioned
+  in passing in Lessons 6/14 as unstack's inverse, but never taught
+  directly — only `unstack()` itself got a full lesson, in Lesson 15) —
+  re-grepped `lessons/*.html` for `stack(` fresh before committing to it
+  and read every hit directly rather than trusting the grep count alone:
+  confirmed all real mentions are Lesson 14 §4 ("out of scope for today"
+  framing plus a one-paragraph mention of `wide.stack(level=0)` with no
+  worked output shown), Lesson 15's own byline referencing it as the
+  prior lesson's teaser, and Lesson 33 name-dropping it as how Lesson
+  14/15 built a MultiIndex — genuinely never taught as its own worked
+  lesson. Also grepped `melt\b` to confirm it wouldn't collide as the
+  "already covered" gap-closer instead — found `melt()` fully taught in
+  Lesson 6 (its own section) and deepened in Lesson 14 (multi-metric,
+  MultiIndex-column case), so `stack()` was confirmed the correct,
+  genuinely-uncovered pick over any alternative. Lesson 39 ships
+  `stack()`: rebuilding Lesson 15's `wide_by_date` via
+  `groupby().unstack(fill_value=0)` then reversing it with
+  `.stack()` to demonstrate the true round-trip-inverse relationship;
+  the SQL bridge via `UNPIVOT` (SQL Server/Snowflake) or a manual
+  per-column `UNION ALL` long rebuild; the shape contrast against
+  `melt()` (stack leaves the former columns as a row-index level,
+  melt always returns a flat ordinary column); and `stack(level=0)` on
+  Lesson 14's own two-aggfunc `pivot_table` MultiIndex-column example,
+  finally showing the output Lesson 14 described in words but never
+  displayed. `uv run --with pandas` worked directly this round (pandas
+  installed via uv, numpy pulled in as a dependency) — and surfaced a
+  real, hand-verified version finding along the way: `pandas.__version__`
+  on this environment is **3.0.5**, which ships the newer
+  `future_stack=True`-only `stack()` implementation where the legacy
+  `dropna=True` auto-drop-all-NaN-rows default no longer exists at all
+  (passing `dropna=` explicitly now raises `ValueError: dropna must be
+  unspecified`, confirmed by direct reproduction in
+  `.scratch/data-lesson39/explore2.py`, deleted after) — every number in
+  the lesson was hand-verified in `explore.py`/`explore2.py` (both
+  deleted after) before writing a word of the lesson text: `wide_by_date
+  = by_customer_date.unstack("order_date", fill_value=0)` reproduces
+  Lesson 15's own 2x4 grid exactly (An 120.0/0.0/0.0/42.0, Binh
+  0.0/35.5/180.0/0.0 across Jan 5/6/9/10); `wide_by_date.stack()`
+  round-trips back to the original long groupby Series value-for-value
+  (An/01-05 = 120.0, Binh/01-09 = 180.0 confirmed directly); unstacking
+  WITHOUT `fill_value` then re-stacking on this pandas version keeps all
+  8 rows including the genuinely-NaN never-ordered combos (An/01-06 and
+  Binh/01-05 etc. confirmed `NaN`, not dropped, not zero); and
+  `pivot_table(aggfunc=["sum","count"], fill_value=0).stack(level=0)`
+  produces a 2-level row MultiIndex (customer, sum/count) where An's sum
+  row totals 162.0 (120.0+0.0+0.0+42.0) and An's count row totals 2.0
+  (only Jan 5 and Jan 10 are real orders) — both hand-summed against the
+  clean 4-row fixture independently of the code before trusting the
+  script's output. Kept the practice file inline on the same cleaned
+  `orders_raw.csv` slice as Lessons 6-38 (no new fixture needed — the
+  existing customer/date shape is exactly what stack/unstack need to
+  demonstrate). While designing the practice file's Ellipsis-placeholder
+  family (Lessons 19-38 precedent), tested each of the three placeholder
+  positions individually in a standalone script before finalizing
+  (`by_customer_date.unstack(..., fill_value=0)`,
+  `wide_nan.stack(...)` as a bare positional arg, and
+  `pv.stack(level=...)` as an explicit kwarg) — confirmed all three raise
+  a clean `KeyError` (`'Level Ellipsis not found'` /
+  `'Requested level (Ellipsis) does not match index name...'`) with no
+  silent pass, a different (cleaner) shape than several past rounds'
+  Ellipsis-is-truthy/valid-index-label surprises, since `stack()`/
+  `unstack()`'s `level` parameter validates against real level
+  names/positions and Ellipsis matches none of them. The shipped
+  (unsolved) `practice/39_stack.py` was executed in
+  `.scratch/data-lesson39/run/` (mirroring the real `practice/`+`practice/
+  data/` layout after an initial path-mismatch false start was caught and
+  fixed) and printed all 9 ✗ cleanly with no crash, then a separately-saved
+  solved copy (`.scratch/data-lesson39/run/practice/39_solved.py`, not
+  shipped, each `...` filled in by hand) printed all 9 ✓ against the
+  same hand-verified numbers above. The shipped file was also re-run a
+  second time directly from its real `practice/` location (`cd data &&
+  uv run --with pandas python3 practice/39_stack.py`) and confirmed to
+  print the identical all-✗ result with no crash. `.scratch/
+  data-lesson39/` was fully removed (`rm -rf`) after verification, no
+  approval needed this round. The glossary already had a combined
+  `stack() / unstack()` entry (added in Lesson 14) — rather than
+  duplicate it, extended that existing row in place to add the
+  hand-verified pandas-3.0.5 dropna/future_stack finding, and registered
+  Lesson 39 in `nav.js`. Quiz options were drafted and checked with a
+  Python regex/word-count script (extracts each `<div class="q">` block,
+  strips HTML tags, whitespace-splits) run via `uv run python3` (this
+  course's established convention since Lesson 26/27's finding that
+  plain `python3` needs approval while `uv run python3` doesn't) — the
+  first draft came out mismatched on Q1 (8/7/6) and Q2 (12/7/10), Q3
+  already level at 9/9/9, and needed two rewrite + recount cycles on Q1
+  and Q2 before a final independent recount, via the same script's
+  output plus a second, fully independent pass — this round used
+  `Grep`-extracted button text plus manual word-by-word counting rather
+  than re-running the same script twice (a stricter reading of "two
+  independent verification passes" than some prior rounds' script+read-
+  through combo) — confirmed all three genuinely level at 7/7/7, 10/10/10,
+  and 9/9/9. `bin/record-progress data lesson_generated --day 39 --lesson
+  0039-stack.html --detail '{"by":"delegated-agent"}'` was run once from
+  the repo root as instructed and succeeded on the first try, no approval
+  blocker this round (`recorded: data/lesson_generated day=39
+  lesson=0039-stack.html`) — the read path (`query-progress`) stayed
+  blocked this round while the write path (`record-progress`) worked,
+  same asymmetry as every prior round that tried both. This agent does
+  not run `git commit` — leaving working-tree changes uncommitted is this
+  course's established convention (confirmed by every prior entry in this
+  file); no commit was made this round either. Set the teaser going
+  forward to `groupby().filter()` (zero hits anywhere in `lessons/*.html`
+  during this round's scan; not to be confused with Lesson 22's
+  `DataFrame.query()` or Lesson 29's `isin()`, which filter rows, not
+  whole groups — the natural SQL bridge to `HAVING`) if no drill-outcome
+  signal surfaces by next generation.

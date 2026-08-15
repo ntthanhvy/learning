@@ -82,6 +82,8 @@
       file: "lessons/0037-combine-first.html" },
     { n: 38, date: "2026-08-15", title: "resample(): bucketing a datetime index into fixed periods",
       file: "lessons/0038-resample.html" },
+    { n: 39, date: "2026-08-16", title: "stack(): pulling columns down into the row index",
+      file: "lessons/0039-stack.html" },
   ];
 
   const REFS = [

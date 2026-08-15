@@ -1776,3 +1776,134 @@ fail *gracefully* so the learner sees which task failed.
   app beyond one file — the fourth item, directly following today's
   request/response-schema foundation, already named in today's lesson's own
   closing line.
+
+- 2026-08-16 — **Day 19 generated**
+  (`lessons/0019-dependency-injection-and-app-structure.html`), the twelfth
+  Phase 2 lesson. Idempotency check confirmed on-disk before writing anything
+  (per this run's own instructions, not re-verified independently): highest
+  existing lesson file was `0018-…` dated 2026-08-15, no `0018`/`0019` file
+  collision, and no `2026-08-16` entry existed yet in `assets/nav.js`.
+  Topic: dependency injection with `Depends()`, and structuring a FastAPI app
+  beyond one file — exactly the fourth item of `PLAN.md`'s Phase 2b spine,
+  named explicitly both in Day 18's own closing line and in this file's own
+  Day 18 next-day note, directly after Day 18 completed the third item
+  (request/response schemas). Taught: a handler parameter defaulting to
+  `Depends(some_function)` makes FastAPI call that plain function first and
+  pass its return value in, reusing Day 4's "extract the repeated part into a
+  function" idiom but invoked by the framework instead of by hand, confirmed
+  by running one shared `get_query_params` dependency across two unrelated
+  routes (`/items`, `/users`) through `TestClient` and seeing both read query
+  params correctly; a dependency raising `HTTPException` (Day 16's exception
+  type, unchanged) blocks the request before the handler's own body runs at
+  all, confirmed by sending a bad `x-token` header and observing `401` with
+  the handler never reached — plus the sharper nuance that a *missing*
+  required header fails one layer earlier, at FastAPI's own parameter
+  validation, returning `422` rather than reaching the dependency's `raise`
+  at all; sub-dependencies (a dependency whose own parameter also defaults to
+  `Depends(...)`) resolve in order and are called exactly once per request
+  even when multiple things in the chain need them, confirmed by tracking
+  call order and call count with a shared list across a `get_db` →
+  `get_current_user` chain; and `APIRouter` as a stand-in for `FastAPI()` in
+  a separate route module, using the identical `@router.get(...)` decorator
+  shape, attached to the real app with `app.include_router()`, with an
+  optional `prefix=` prepended to every route on it — confirmed by building a
+  router with `prefix="/products"` and a route at `"/{product_id}"` and
+  observing it answer `GET /products/7` through `TestClient` once attached.
+  Bridged from SQL per the baseline record: a shared dependency framed as a
+  reusable view or CTE referenced from multiple queries — written once,
+  referenced by name everywhere it's needed, instead of re-derived inline in
+  every query (handler).
+  Version/behavior confirmed before writing the lesson, in a scratch dir
+  (`.scratch/python-lesson19/`, created under the repo root's shared
+  `.scratch/` area per this run's own instructions, removed after use, not
+  `/tmp`): two scripts (`probe.py`, `probe_router.py`) built the exact
+  examples above and ran them through `TestClient` — confirmed a shared
+  dependency is reused correctly across two different routes, confirmed an
+  `HTTPException` raised inside a dependency short-circuits the handler
+  (`401`) while a missing required header short-circuits one layer earlier
+  still (`422`), confirmed a sub-dependency chain resolves in declared order
+  (`get_db` before `get_current_user`) and that `get_db` is called exactly
+  once per request (call-count check, not just call-order), and confirmed
+  `APIRouter(prefix=...)` plus `app.include_router()` routes requests
+  correctly under that prefix — and confirmed `fastapi 0.141.1` / `pydantic
+  2.13.4`, the identical versions Days 17-18 already logged, no drift since
+  then.
+  Learning records: still only the Day 1 baseline record
+  (`learning-records/0001-baseline-reads-python-writes-little.md`) — no
+  completion/quiz record for any later day was found (same gap every Day
+  8–18 entry already flagged). Paced conservatively per that same assumption
+  and this run's own instruction to pace from file-state alone: exactly the
+  spine's named fourth item (dependency injection + multi-file structuring)
+  covered, no `async`/`await` pulled forward from the next spine item, and
+  every new mechanism tied back explicitly to material already taught (Day
+  4's function-extraction idiom, Day 16's `HTTPException` and
+  type-hint-driven parameter reading, Day 9's module/package layout).
+  Unverified against real quiz/completion data, same caveat as every entry
+  since Day 8.
+  No-pandas rule: zero pandas/NumPy API in the lesson body or practice file
+  (checked by grep for `pandas|numpy|dataframe`, case-insensitive, across
+  both new files — zero hits in the practice file, exactly one hit in the
+  lesson); exactly one contrast sentence, contrasting a `Depends()`-managed,
+  per-request database connection against a one-shot `pd.read_sql(...)` call
+  inside a plain script, without demonstrating any pandas API, placed once in
+  its own callout after section 4 and labeled in prose as the only such
+  sentence, matching the hard-rule section above.
+  Practice file `practice/19_dependency_injection_and_app_structure.py` (7
+  checks: a shared query-parameter dependency answering two different
+  routes, an auth-style dependency gating a route with `HTTPException`
+  correctly on both success and failure, a sub-dependency chain returning
+  the right shape and a call-count check confirming `get_db` runs exactly
+  once per request, and an `APIRouter` with a `prefix` reachable once
+  attached via `include_router()`) needed no on-disk fixtures — every
+  exercise operates on in-memory app construction and in-process `TestClient`
+  calls, matching Days 16–18's own practice-file shape. Uses `--with fastapi
+  --with httpx` only, same as Day 18 (no `pydantic-settings` needed). Verified
+  in two passes, both from a scratch copy (`.scratch/python-lesson19/`,
+  removed after use) and from the real `practice/` path with the documented
+  command: the shipped (unsolved) copy printed seven clean ✗ lines with no
+  traceback each time — TODO placeholders (`...` as parameter defaults and
+  function bodies) fail every check's `try`/`except` cleanly inside `check()`
+  rather than crashing the module at import time — and a separately solved
+  copy printed seven ✓ and the "All green" tally.
+  Glossary: added a Day 19 section to `reference/glossary.html` (`Depends()`,
+  `dependency`, `sub-dependency`, `APIRouter`) after confirming via grep that
+  none of the four collided with any existing entry across Days 1–18. All
+  four also got matching `<dfn>` markup at first use in the lesson body
+  (confirmed by counting `<dfn data-en` occurrences, 4 total, matching the
+  four glossary rows one-for-one), matching Day 11–18's density of
+  glossarying every newly introduced term inline rather than leaving any
+  undefined.
+  Quiz: 5 questions. Word counts were checked with a small Python script
+  (`uv run python3 …`, run from the repo root after the scratch dir was
+  already removed, since no fixture file was needed) that regex-splits the
+  quiz block into its five question `<div>`s and counts `.split()` words per
+  `<button class="opt">` line, per this course's established convention
+  (loops/individual `wc -w` calls blocked by this sandbox's approval gate).
+  Mismatched on the first draft for all five questions (Q1 11/11/11 was
+  actually the one exception at 10/11/11 counted before a first fix; Q2
+  12/10/10, Q3 10/10/12, Q4 11/11/8, Q5 11/9/10) — each went through one to
+  three rewrite-and-recount rounds, including catching that an em dash counts
+  as its own `.split()` token (Q2's first rewrite still overshot until the
+  dash was replaced with a comma), before landing on the target count for
+  every question (all five questions ended at 11/11/11 exactly), then a full
+  final script run across all five questions' three options each (15 lines
+  total) confirmed every one before shipping, per this file's instruction to
+  recount after any edit. Registered in `assets/nav.js` with
+  `date: "2026-08-16"`.
+  **DB access:** per this run's explicit instructions, `bin/query-progress`
+  was attempted once as instructed and required approval/permission this
+  sandbox would not grant non-interactively, exactly the same failure mode
+  logged on every day since Day 8 — no retry attempted, and this run paced
+  from on-disk state alone (this file's own log, `python/lessons/`,
+  `python/learning-records/` — still only the Day 1 baseline record — and
+  `python/practice/`) instead, per this run's explicit instruction.
+  `bin/record-progress python lesson_generated --day 19 --lesson
+  0019-dependency-injection-and-app-structure.html --detail
+  '{"by":"delegated-agent"}'` was run once after shipping, per this run's
+  instructions, and succeeded — printed `recorded: python/lesson_generated
+  day=19 lesson=0019-dependency-injection-and-app-structure.html` to stdout
+  with no error.
+  **Next-day note:** per `PLAN.md`'s Phase 2b spine, the natural next-day
+  candidate is `async`/`await` — what it buys, when it doesn't, and
+  blocking-call traps — the fifth item, directly following today's
+  dependency-injection and app-structure foundation.

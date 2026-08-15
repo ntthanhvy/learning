@@ -42,6 +42,8 @@
       file: "lessons/0017-pydantic-models-and-validation.html" },
     { n: 18, date: "2026-08-15", title: "Request/response schemas: the type hints ARE the contract",
       file: "lessons/0018-request-response-schemas.html" },
+    { n: 19, date: "2026-08-16", title: "Dependency injection with Depends() & structuring an app",
+      file: "lessons/0019-dependency-injection-and-app-structure.html" },
   ];
 
   const REFS = [

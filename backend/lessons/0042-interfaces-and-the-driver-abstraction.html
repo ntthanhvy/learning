@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 42 · Interfaces and the driver abstraction: what *pgxpool.Pool is actually standing in for</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 42 · ~20 min</p>
+<h1>Interfaces and the driver abstraction: what *pgxpool.Pool is actually standing in for</h1>
+<p class="byline">Lessons 18, 33–40, and last lesson's own snippet all pass a raw <code>*pgxpool.Pool</code> or a hand-named <code>DB</code> parameter into query functions, unexplained. Today: what a Go interface actually is, and why every one of those signatures is quietly an abstraction, not a concrete database.</p>
+
+<h2>1 · The parameter type nobody defined</h2>
+<p>Go back through this course's own snippets: Lesson 18's <code>func leaky(ctx context.Context, pool *pgxpool.Pool) error</code>, Lesson 41's <code>func fetchOrderSummary(ctx context.Context, db DB, orderID int64)</code>. One takes a concrete pointer type; the other takes something called <code>DB</code> that was never shown. Both are doing the same thing: naming <em>the shape of what they need</em>, not a specific database. That shape has a name in Go — a <dfn data-en="a named set of method signatures; any type that has all of those methods satisfies the interface automatically, with no explicit declaration linking the two" data-vn="interface (giữ nguyên) — tập hợp các method có tên, type nào có đủ các method đó thì tự động thỏa mãn interface, không cần khai báo nối hai bên">interface</dfn>. It's not a database, a struct, or a class — it's a list of methods. Any type possessing that exact method set satisfies the interface, full stop.</p>
+
+<div class="callout"><strong>The frontend equivalent you already own.</strong> This is the same instinct as coding a component against a <code>{ data, loading, error }</code> shape instead of a specific fetch library's response object — anything matching that shape works, whether it came from <code>fetch</code>, a mock in a test, or a different HTTP client entirely. A component that only reads <code>props.items.map(...)</code> doesn't care if <code>items</code> came from Redux, a REST call, or a hardcoded array in Storybook — it only cares that <code>.map</code> exists on it. A Go interface is that same "I only care about the shape" contract, enforced by the compiler instead of by convention.</div>
+
+<h2>2 · Implicit satisfaction: the part with no equivalent in most languages</h2>
+<p>In Java or C#, a class must write <code>implements Queryable</code> to satisfy an interface — the relationship is declared. Go interfaces are satisfied <em>implicitly</em>: if a type happens to have every method an interface requires, with matching signatures, it satisfies that interface automatically. Nothing links them by name; the compiler checks the method set structurally, wherever the interface is used.</p>
+
+<pre><code><span class="cm">// Row is a minimal stand-in for what pgx.Row / *sql.Row actually expose:</span>
+<span class="kw">type</span> Row <span class="kw">interface</span> {
+    Scan(dest ...any) <span class="kw">error</span>
+}
+
+<span class="cm">// Querier names the shape "something I can run a query against" —
+// not a concrete database at all.</span>
+<span class="kw">type</span> Querier <span class="kw">interface</span> {
+    QueryRow(ctx context.Context, sql <span class="kw">string</span>, args ...any) Row
+}
+
+<span class="cm">// fetchOrder depends only on Querier. It has no idea whether the real
+// type behind q is a live pgxpool.Pool, a single *pgx.Conn, a *pgx.Tx
+// mid-transaction, or a fake with no network at all.</span>
+<span class="kw">func</span> fetchOrder(ctx context.Context, q Querier, id <span class="ty">int64</span>) (Order, <span class="kw">error</span>) {
+    row := q.QueryRow(ctx, <span class="st">`SELECT id, total_cents FROM orders WHERE id = $1`</span>, id)
+    <span class="kw">var</span> o Order
+    <span class="kw">if</span> err := row.Scan(&amp;o.ID, &amp;o.TotalCents); err != <span class="kw">nil</span> {
+        <span class="kw">return</span> Order{}, fmt.Errorf(<span class="st">"fetch order %d: %w"</span>, id, err)
+    }
+    <span class="kw">return</span> o, <span class="kw">nil</span>
+}</code></pre>
+
+<p><code>*pgxpool.Pool</code> (Lesson 18) happens to have a <code>QueryRow</code> method with a matching signature, so it satisfies <code>Querier</code> — nobody had to write that down anywhere in pgx's source or this file. Lesson 41's unexplained <code>DB</code> parameter was exactly this pattern, one level removed: a small interface named for what the function needed, not for the concrete database behind it.</p>
+
+<h2>3 · Why bother: the fake that never touches a network</h2>
+<p>The payoff shows up the moment you need to test <code>fetchOrder</code> without a running Postgres instance. Because the function depends on the <code>Querier</code> shape and not on <code>*pgxpool.Pool</code> specifically, a test can hand it any other type with a matching <code>QueryRow</code> method — including one that returns canned data from memory:</p>
+
+<pre><code><span class="kw">type</span> fakeRow <span class="kw">struct</span> { id, total <span class="ty">int64</span> }
+
+<span class="kw">func</span> (r fakeRow) Scan(dest ...any) <span class="kw">error</span> {
+    *(dest[<span class="kw">0</span>].(*<span class="ty">int64</span>)) = r.id
+    *(dest[<span class="kw">1</span>].(*<span class="ty">int64</span>)) = r.total
+    <span class="kw">return</span> <span class="kw">nil</span>
+}
+
+<span class="kw">type</span> fakePool <span class="kw">struct</span>{}
+
+<span class="kw">func</span> (fakePool) QueryRow(ctx context.Context, sql <span class="kw">string</span>, args ...any) Row {
+    <span class="kw">return</span> fakeRow{id: <span class="kw">42</span>, total: <span class="kw">1999</span>}
+}
+
+<span class="cm">// fetchOrder(ctx, fakePool{}, 42) now runs in a unit test with zero
+// network calls and zero running database — same function, same code path.</span></code></pre>
+
+<p><code>fakePool</code> never declares any relationship to <code>Querier</code> or to <code>*pgxpool.Pool</code> — it satisfies the interface purely by having a method with the right name and signature. That's the entire reason query functions across this course take an interface parameter instead of <code>*pgxpool.Pool</code> directly: production code passes the real pool, a test passes a fake, and <code>fetchOrder</code> itself never changes.</p>
+
+<div class="cmp-wrap">
+<table class="cmp">
+<thead><tr><th>Parameter typed as *pgxpool.Pool</th><th>Parameter typed as an interface (Querier)</th></tr></thead>
+<tbody>
+<tr><th>Unit testing</th><td>Needs a real or heavily mocked pool just to call the function</td><td>A small fake type with one method is enough — no database, no network</td></tr>
+<tr><th>Calling from inside a transaction</th><td>Doesn't compile — a <code>*pgx.Tx</code> is not a <code>*pgxpool.Pool</code></td><td>Compiles unchanged — <code>*pgx.Tx</code> also has a matching <code>QueryRow</code> method</td></tr>
+<tr><th>What the function signature documents</th><td>"I need this exact concrete type"</td><td>"I need only these specific methods, from anything"</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2>4 · Where this stops paying off</h2>
+<p>This is not a call to wrap every parameter in an interface reflexively. If a function only ever runs against the real pool, is never unit-tested in isolation, and never needs to run inside a caller's transaction, a concrete <code>*pgxpool.Pool</code> parameter is simpler to read and just as correct — Lesson 18's own snippets do exactly that, for exhaustion-focused examples where swapping implementations was never the point. Reach for an interface parameter when a function's queries genuinely need to run against more than one thing in practice: the live pool in production, an in-progress <code>*pgx.Tx</code> from a caller composing a larger transaction, or a fake in a test. That is also the shape MISSION.md's "frameworks and ORMs" out-of-scope line is drawing a boundary around — this lesson is the plain interface mechanism underneath, not an introduction to any ORM's repository pattern built on top of it.</p>
+
+<div class="interview">
+<p><strong>Q: "Why would you take an interface instead of *pgxpool.Pool as a function's parameter type?"</strong> A strong answer, out loud: <em>"An interface names only the methods I actually call — QueryRow, say — so anything with a matching method set can be passed in: the real pool in production, a *pgx.Tx if this needs to run inside a caller's transaction, or a small fake in a unit test with no database at all. Go satisfies interfaces implicitly, so *pgxpool.Pool doesn't need to declare anything to qualify — it just needs the matching methods. I wouldn't do this everywhere, though — if a function only ever runs against the real pool and is never tested in isolation, a concrete pool parameter is simpler and just as correct."</em> The signal: naming implicit satisfaction and knowing when the abstraction isn't worth it, not just "interfaces are for testing."</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A Go interface is a named set of method signatures. Any type possessing every one of those methods, with matching signatures, satisfies the interface automatically — it is not a struct, a class, or a concrete database, and no explicit declaration links the two.">
+    <p class="stem">What is a Go interface actually made of?</p>
+    <button class="opt" data-ok>a named set of methods any matching type satisfies</button>
+    <button class="opt">a struct that always holds exactly one live connection</button>
+    <button class="opt">a comment describing roughly what one function should do</button>
+    <button class="opt">a compiler flag that turns off Go's type checks</button>
+  </div>
+  <div class="q" data-why="Go interfaces are satisfied implicitly: a type qualifies the moment its method set structurally matches an interface's required methods and signatures. There is no `implements` keyword and no explicit declaration linking a type to an interface anywhere in Go.">
+    <p class="stem">How does a Go type declare that it satisfies a given interface?</p>
+    <button class="opt" data-ok>nothing; Go matches method sets automatically, no declaration at all</button>
+    <button class="opt">nothing; Go only infers interfaces from a variable's chosen name</button>
+    <button class="opt">one line naming every method this type implements for it</button>
+    <button class="opt">one import of the interface's home package, nothing more needed</button>
+  </div>
+  <div class="q" data-why="Because fetchOrder depends only on the Querier interface's method set, a unit test can hand it any type with a matching QueryRow method — including a small in-memory fake returning canned data — with zero network calls and no running Postgres instance required.">
+    <p class="stem">What can replace the real pool in a test of a function typed against Querier?</p>
+    <button class="opt" data-ok>a small fake satisfying Querier, no real database involved</button>
+    <button class="opt">a second real Postgres database, reachable only in tests</button>
+    <button class="opt">a mocking framework generating pgxpool internals from a spec</button>
+    <button class="opt">a nightly copy of production data, restored from backup</button>
+  </div>
+  <div class="q" data-why="A *pgx.Tx exposes a matching QueryRow method, so it satisfies the same interface a *pgxpool.Pool does. A function parameter typed as that interface accepts either one unchanged — a concrete *pgxpool.Pool parameter would refuse a *pgx.Tx outright, since it isn't that exact type.">
+    <p class="stem">Why can a function typed against an interface run unchanged inside a caller's transaction?</p>
+    <button class="opt" data-ok>callers can pass a pool, a transaction, or a fake</button>
+    <button class="opt">callers must always pass back that same exact pool value</button>
+    <button class="opt">the driver stops needing any real network connection at all</button>
+    <button class="opt">every query now runs inside its own brand-new fresh transaction</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the Go standard library's own <a href="https://go.dev/doc/effective_go#interfaces_and_types">Effective Go — Interfaces and other types</a> section is the direct arbiter for implicit satisfaction and interface design conventions; already a standing citation for the goroutines section (Lesson 25) and the <code>context</code> package (Lesson 41), extended here to interfaces, the mechanism both of those are built on. Not a Kleppmann or PostgreSQL Manual topic — this is Go's own type system, not a database or distributed-systems concept.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> open — still no reported quiz/lesson-completion outcome exists for any lesson after 41 rounds; distributed locks and blue-green/canary deploys remain the last named, confirmed out-of-scope-per-MISSION.md candidates if no fresh gap or user-chosen track surfaces first.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

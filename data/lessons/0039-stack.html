@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 39 · stack(): pulling columns down into the row index</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 39 · ~20 min · 16 Aug 2026</p>
+<h1>stack(): pulling columns down into the row index</h1>
+<p class="byline">Lesson 38's teaser named <code>stack()</code> as its own topic — mentioned in passing back in Lessons 6 and 14 as <code>unstack()</code>'s inverse, but never taught directly (only <code>unstack()</code> itself got a full lesson, in Lesson 15). Today closes that gap from the other direction: start from a wide table, not a groupby, and watch <code>stack()</code> turn it long.</p>
+
+<h2>1 · What stack() does: columns become the innermost row-index level</h2>
+<p>Lesson 15 built a wide customer-by-date table with <code>unstack()</code>. Run it again here as today's starting point:</p>
+<pre><code>by_customer_date = clean.groupby([<span class="kw">"customer"</span>, <span class="kw">"order_date"</span>])[<span class="kw">"amount"</span>].sum()
+wide_by_date = by_customer_date.unstack(<span class="kw">"order_date"</span>, fill_value=<span class="kw">0</span>)
+<span class="cm">-- order_date  2026-01-05  2026-01-06  2026-01-09  2026-01-10
+-- customer
+-- An               120.0         0.0         0.0        42.0
+-- Binh               0.0        35.5       180.0         0.0</span></code></pre>
+<p><dfn data-en="a DataFrame method that moves the column labels down into the row index (or a new innermost level of an existing MultiIndex row index), turning a wide table long -- the exact inverse of unstack()" data-vn="giữ nguyên 'stack()' — kéo tên cột xuống thành 1 tầng mới trong row index, biến bảng wide thành long">stack()</dfn> undoes exactly this: it takes the column labels and moves them down to become the innermost level of the row index.</p>
+<pre><code>restacked = wide_by_date.stack()
+<span class="cm">-- customer  order_date
+-- An        2026-01-05    120.0
+--           2026-01-06      0.0
+--           2026-01-09      0.0
+--           2026-01-10     42.0
+-- Binh      2026-01-05      0.0
+--           2026-01-06     35.5
+--           2026-01-09    180.0
+--           2026-01-10      0.0
+-- dtype: float64</span></code></pre>
+<p><code>restacked</code> is exactly <code>by_customer_date</code> back again, value for value — <code>stack()</code> and <code>unstack()</code> are true inverses of each other on this round trip, the same "long ↔ wide" pair Lesson 15 described from the unstack side. Where <code>unstack()</code> read "spread a row-index level across new columns," <code>stack()</code> reads "collapse the columns back down into a row-index level" — same operation, opposite direction.</p>
+
+<h2>2 · The SQL bridge: this is UNPIVOT, or a manual long rebuild via UNION ALL</h2>
+<p>A SQL-comfortable way to picture <code>stack()</code>: it's what <code>UNPIVOT</code> does in databases that support it (SQL Server, Snowflake), or what a manual long rebuild does everywhere else — one <code>SELECT customer, '2026-01-05' AS order_date, "2026-01-05" AS amount FROM wide_table UNION ALL SELECT customer, '2026-01-06', "2026-01-06" FROM wide_table UNION ALL ...</code> per column, stacking every column's values underneath each other with the original column name carried along as a new value column. <code>stack()</code> does that same UNION-ALL-per-column rebuild in one call, and — unlike hand-writing it — never needs the column list typed out twice.</p>
+
+<h2>3 · Difference from melt(): index level vs. plain column</h2>
+<p>Lesson 6 taught <code>melt()</code> for the same wide-to-long direction. Both get to the same destination, but they don't leave the result in the same shape:</p>
+<pre><code>melted = wide_by_date.reset_index().melt(
+    id_vars=<span class="str">"customer"</span>, var_name=<span class="str">"order_date"</span>, value_name=<span class="str">"amount"</span>
+)
+<span class="cm">--   customer order_date  amount
+-- 0       An 2026-01-05   120.0
+-- 1     Binh 2026-01-05     0.0
+-- 2       An 2026-01-06     0.0
+-- ... (8 rows, plain flat columns, arbitrary row order)</span></code></pre>
+<p><code>melt()</code> hands back a flat DataFrame with <code>order_date</code> as an ordinary column — no index gymnastics needed, and the row order is whatever <code>melt()</code> chooses (column-major, not sorted by customer). <code>stack()</code> hands back a Series (or DataFrame, for MultiIndex columns — Section 4) with <code>order_date</code> sitting as a row-index <em>level</em> instead, sorted by the outer level first — usually followed by its own <code>reset_index()</code> to reach <code>melt()</code>'s flat shape. In practice: reach for <code>melt()</code> on an ordinary flat wide table (it's the more portable habit — works no matter how the wide table was built); reach for <code>stack()</code> when the table already has, or should keep, a meaningful row-index structure, since it preserves that structure natively instead of flattening it away.</p>
+
+<h2>4 · dropna behavior: this pandas version keeps every combination</h2>
+<p>Older pandas versions defaulted to silently dropping rows that <code>stack()</code> newly creates and that come out entirely NaN — a real gotcha the docs still warn about. The pandas version this course runs on (checked directly: <code>uv run --with pandas python3 -c "import pandas; print(pandas.__version__)"</code> reports <strong>3.0.5</strong>) uses the newer stacking implementation, where that auto-drop no longer happens at all — every row survives, NaN included:</p>
+<pre><code>wide_nan = by_customer_date.unstack(<span class="kw">"order_date"</span>)  <span class="cm"># no fill_value -- real NaN gaps</span>
+wide_nan.stack()
+<span class="cm">-- customer  order_date
+-- An        2026-01-05    120.0
+--           2026-01-06      NaN   &lt;- kept, not dropped
+--           2026-01-09      NaN
+--           2026-01-10     42.0
+-- Binh      2026-01-05      NaN
+--           2026-01-06     35.5
+--           2026-01-09    180.0
+--           2026-01-10      NaN
+-- dtype: float64</span></code></pre>
+<div class="callout"><strong>Version gotcha:</strong> if a tutorial, Stack Overflow answer, or interviewer's mental model says "<code>stack()</code> drops the all-NaN rows it creates by default" — that was true under the legacy implementation, and is exactly what <code>dropna=True</code> used to control. On current pandas, passing <code>dropna=</code> explicitly at all now raises a <code>ValueError</code> ("<em>dropna must be unspecified</em>") — the argument is being phased out because the new implementation never drops rows in the first place. Always check <code>pd.__version__</code> before trusting a remembered default; this is exactly the kind of version-drift trap interviewers like to probe ("does that still hold on the version you'd actually be running?").</div>
+
+<h2>5 · MultiIndex columns: stack(level=...) picks which level moves</h2>
+<p>Lesson 14's two-aggfunc <code>pivot_table</code> produced MultiIndex columns (one level for the aggfunc, one for the date) and used flatten-then-melt to reshape it. <code>stack(level=...)</code> is the native alternative Lesson 14 flagged but didn't demonstrate — it needs no flattening step, because it already understands MultiIndex columns:</p>
+<pre><code>pv = clean.pivot_table(
+    index=<span class="str">"customer"</span>, columns=<span class="str">"order_date"</span>, values=<span class="str">"amount"</span>,
+    aggfunc=[<span class="str">"sum"</span>, <span class="str">"count"</span>], fill_value=<span class="kw">0</span>,
+)
+<span class="cm">-- columns: MultiIndex [("sum", 2026-01-05), ("sum", 2026-01-06), ..., ("count", 2026-01-10)]</span>
+pv.stack(level=<span class="kw">0</span>)
+<span class="cm">-- order_date       2026-01-05  2026-01-06  2026-01-09  2026-01-10
+-- customer
+-- An        sum         120.0         0.0         0.0        42.0
+--           count         1.0         0.0         0.0         1.0
+-- Binh      sum           0.0        35.5       180.0         0.0
+--           count         0.0         1.0         1.0         0.0</span></code></pre>
+<p><code>level=0</code> names the outermost column level (the aggfunc name) to pull down; it lands as a new innermost row-index level right under <code>customer</code>, leaving <code>order_date</code> in place as the columns — the exact move Lesson 14 described in words ("<code>wide.stack(level=0)</code> pulls the aggfunc level directly down into the row index") without ever showing the output. Same trade-off as Section 3: no flatten-string step needed, but the aggfunc name is now an index level, not a plain column, so a <code>reset_index()</code> still usually follows.</p>
+
+<div class="interview">
+<p><strong>Q: "When would you reach for stack()/unstack() instead of melt()/pivot_table(), and what's a common mistake with stack()?"</strong> A strong answer, out loud: <em>"They solve the same long-vs-wide problem, but melt/pivot_table are the more general, portable habit — they work on any flat wide table and don't require me to think about index levels. stack/unstack are the right call when the table already has, or should keep, a meaningful MultiIndex — say, a groupby result I want to reshape without flattening column names into strings first, or a pivot_table with multiple aggfuncs where stack(level=0) pulls the aggfunc level down natively. The mistake I'd watch for: older pandas silently dropped newly-created all-NaN rows when stacking, controlled by a dropna argument — current pandas dropped that behavior entirely, so relying on a remembered default without checking pandas.__version__ against what's actually installed is a real way to get surprised in production, and it's also a good thing to flag out loud in an interview to show I know the API isn't static."</em> The signal: naming stack/unstack and melt/pivot_table as solving the same problem at different levels of index-awareness, not two unrelated tool families — and knowing to double-check version-dependent defaults rather than trusting memory.</p>
+</div>
+
+<h2>Try it — self-checking practice (~15-20 min)</h2>
+<p>Open <code>practice/39_stack.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/39_stack.py</code></pre>
+<p>Uses the same cleaned rows as Lessons 6-38 (An 120.0/01-05, An 42.0/01-10, Binh 35.5/01-06, Binh 180.0/01-09). Exercise 1 rebuilds Lesson 15's <code>wide_by_date</code> via <code>groupby().unstack(fill_value=0)</code>; Exercise 2 stacks it back and checks the round trip matches the original long groupby result; Exercise 3 stacks a <em>no-fill_value</em> version and checks the real NaN gaps survive (current-pandas behavior, Section 4); Exercise 4 builds the two-aggfunc <code>pivot_table</code> and checks <code>stack(level=0)</code> pulls the aggfunc level down correctly.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="stack() moves the column labels of a DataFrame (or Series with MultiIndex columns) down to become the innermost level of the row index -- the exact reverse of what unstack() does, which spreads a row-index level out into columns.">
+    <p class="stem">What does <code>stack()</code> do to a DataFrame's column labels?</p>
+    <button class="opt" data-ok>moves them down into a row-index level</button>
+    <button class="opt">deletes them and renumbers every column zero</button>
+    <button class="opt">sorts them alphabetically, moving nothing else around</button>
+  </div>
+  <div class="q" data-why="melt() always returns a flat DataFrame with the former column names landing in an ordinary column (var_name) -- no index restructuring at all. stack() instead moves former column names down into a level of the row index, which is why stack's output is typically followed by its own reset_index() to reach melt's flat shape.">
+    <p class="stem">How does <code>stack()</code>'s output shape differ from <code>melt()</code>'s?</p>
+    <button class="opt" data-ok>stack keeps former columns as an index level, not columns</button>
+    <button class="opt">stack and melt always return exactly the same shape too</button>
+    <button class="opt">melt can only run on a Series, never a table</button>
+  </div>
+  <div class="q" data-why="Older pandas defaulted to silently dropping newly-created all-NaN rows when stacking, a behavior the dropna argument used to control. Current pandas (3.0.5, the version this course runs on) uses a newer implementation that keeps every row, NaN included, and now raises a ValueError if dropna is passed explicitly at all -- trusting a remembered default without checking pandas.__version__ is the exact trap this section warns about.">
+    <p class="stem">On the pandas version this course runs, what happens to newly-created all-NaN rows after <code>stack()</code>?</p>
+    <button class="opt" data-ok>they are kept in the result, never silently dropped</button>
+    <button class="opt">they are always dropped, matching every past pandas version</button>
+    <button class="opt">stack() itself refuses to run whenever any NaN exists</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the pandas User Guide's <a href="https://pandas.pydata.org/docs/user_guide/reshaping.html#reshaping-by-stacking-and-unstacking">Reshaping by stacking and unstacking</a> section (~15 min, the same page Lessons 14/15 linked to from the unstack side) — read it from the stack side this time; the <a href="https://pandas.pydata.org/whatsnew/v2.1.0.html#new-implementation-of-dataframe-stack">pandas 2.1.0 release notes on the new stack() implementation</a> cover the dropna/future_stack version-drift point from Section 4 directly.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — the existing <code>stack() / unstack()</code> entry (added in Lesson 14) was extended today to mention the current-pandas dropna behavior.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-39 comes back reported as shakiest, otherwise <code>groupby().filter()</code> — a real gap found during this round's scan (zero hits anywhere in <code>lessons/*.html</code>; not to be confused with Lesson 22's <code>DataFrame.query()</code> or Lesson 29's <code>isin()</code>, which filter <em>rows</em>, not <em>whole groups</em>) and the natural SQL bridge to <code>HAVING</code>, keeping groups instead of rows based on a per-group condition.<br><br>
+💬 Anything unclear — the stack/unstack round trip, the melt contrast, or the pandas-version dropna gotcha? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

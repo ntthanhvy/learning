@@ -88,6 +88,8 @@
       file: "lessons/0040-deadlocks.html" },
     { n: 41, date: "2026-08-15", title: "context.Context: the cancellation signal riding along with every request",
       file: "lessons/0041-context-cancellation-and-deadlines.html" },
+    { n: 42, date: "2026-08-16", title: "Interfaces and the driver abstraction",
+      file: "lessons/0042-interfaces-and-the-driver-abstraction.html" },
   ];
 
   const REFS = [

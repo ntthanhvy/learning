@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 19 · Dependency injection with Depends() & structuring an app</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 19 · ~20 min · 16 Aug 2026</p>
+<h1>Dependency injection with <code>Depends()</code> & structuring an app</h1>
+<p class="byline">Every handler so far has been a self-contained function: Day 16 read path/query values straight off its parameters, Day 17 and 18 validated a whole body through a pydantic model. But real routes repeat work — reading the same query params, checking the same auth header, opening the same database connection — and copy-pasting that logic into every handler is exactly the kind of duplication Day 4's functions existed to kill. Today: <code><dfn data-en="a FastAPI parameter default (Depends(fn)) telling FastAPI to call fn itself before the handler runs, and pass whatever fn returns as that parameter's value - shared setup/checking logic extracted once and reused across any number of routes, instead of repeated inside every handler body" data-vn="giữ nguyên &quot;Depends&quot; — default value đặc biệt cho tham số, báo FastAPI tự gọi 1 hàm khác trước khi handler chạy, rồi truyền kết quả hàm đó vào làm giá trị tham số">Depends()</dfn></code>, which lets FastAPI call a plain function <em>for</em> a handler and hand it the result — and <code>APIRouter</code>, which lets those handlers live in more than one file as an app grows past a handful of routes.</p>
+
+<div class="callout"><strong>Bridge from SQL:</strong> a shared dependency is a reusable view or a common-table-expression referenced from several queries — write the "get the current user" logic once, and every query (handler) that needs it just references it, instead of re-deriving it inline each time.</div>
+
+<h2>1 · <code>Depends()</code>: FastAPI calls a function for you</h2>
+<p>A handler parameter whose default is <code>Depends(some_function)</code> tells FastAPI: before running this handler, call <code>some_function</code> — itself an ordinary function that can take its own path/query/body parameters exactly like a handler can — and pass whatever it <code>return</code>s as this parameter's value.</p>
+<pre><code><span class="kw">from</span> fastapi <span class="kw">import</span> FastAPI, Depends
+
+app = FastAPI()
+
+<span class="kw">def</span> get_query_params(limit: <span class="kw">int</span> = <span class="kw">10</span>, offset: <span class="kw">int</span> = <span class="kw">0</span>):
+    <span class="kw">return</span> {<span class="str">"limit"</span>: limit, <span class="str">"offset"</span>: offset}
+
+<span class="kw">@app.get</span>(<span class="str">"/items"</span>)
+<span class="kw">def</span> list_items(params: <span class="kw">dict</span> = Depends(get_query_params)):
+    <span class="kw">return</span> {<span class="str">"received"</span>: params}
+
+<span class="kw">@app.get</span>(<span class="str">"/users"</span>)
+<span class="kw">def</span> list_users(params: <span class="kw">dict</span> = Depends(get_query_params)):
+    <span class="kw">return</span> {<span class="str">"received"</span>: params}</code></pre>
+<p><code>get_query_params</code> is not decorated with <code>@app.get</code> — it is never itself a route, only a plain function FastAPI calls on a handler's behalf. Confirmed directly: calling <code>GET /items?limit=5&amp;offset=20</code> hands <code>list_items</code> a <code>params</code> of <code>{"limit": 5, "offset": 20}</code>, and calling <code>GET /users?limit=3</code> reuses the exact same function and returns <code>{"limit": 3, "offset": 0}</code> — one function, two unrelated routes, no copy-pasted parameter-reading code in either handler. This is Day 4's "extract the repeated part into a function" idiom, just invoked by FastAPI itself instead of called by hand.</p>
+
+<h2>2 · A <dfn data-en="an ordinary function called via Depends() rather than decorated as a route itself - it can take its own path/query/body parameters exactly like a handler can, and can raise HTTPException to block a request before the handler it feeds ever runs" data-vn="giữ nguyên &quot;dependency&quot; — hàm thường được gọi qua Depends(), có thể tự nhận tham số riêng giống 1 handler, và có thể raise HTTPException để chặn request trước khi handler thật sự chạy">dependency</dfn> can reject a request before the handler runs</h2>
+<p>A dependency function is not limited to reading and returning values — it can raise, and Day 16's <code>HTTPException</code> works exactly the same way here as inside a handler. That turns <code>Depends()</code> into a gate: auth checks, permission checks, anything that should block a request before a handler's own logic runs at all.</p>
+<pre><code><span class="kw">from</span> fastapi <span class="kw">import</span> Header, HTTPException
+
+<span class="kw">def</span> require_token(x_token: <span class="kw">str</span> = Header(...)):
+    <span class="kw">if</span> x_token != <span class="str">"secret"</span>:
+        <span class="kw">raise</span> HTTPException(status_code=<span class="kw">401</span>, detail=<span class="str">"bad token"</span>)
+    <span class="kw">return</span> x_token
+
+<span class="kw">@app.get</span>(<span class="str">"/secure"</span>)
+<span class="kw">def</span> secure_route(token: <span class="kw">str</span> = Depends(require_token)):
+    <span class="kw">return</span> {<span class="str">"token"</span>: token}</code></pre>
+<p>Confirmed with <code>TestClient</code>: a request carrying header <code>x-token: secret</code> reaches <code>secure_route</code> normally and returns <code>200</code>; a request with the wrong token gets <code>401</code> straight from <code>require_token</code>'s own <code>raise</code>, and <code>secure_route</code>'s body never executes at all; a request with <em>no</em> <code>x-token</code> header gets <code>422</code> instead — <code>Header(...)</code> is a required parameter on <code>require_token</code> itself, so a missing header fails FastAPI's own parameter validation (the same "required, no default" rule Day 16 taught) before <code>require_token</code>'s body ever runs, one layer earlier than the <code>401</code> it would otherwise raise.</p>
+
+<h2>3 · <dfn data-en="a dependency whose own parameter defaults to Depends(...) on another dependency, chaining them - FastAPI resolves the whole chain in order before the handler runs, and calls a shared dependency exactly once per incoming request no matter how many other dependencies in that chain need it" data-vn="giữ nguyên &quot;sub-dependency&quot; — 1 dependency mà tham số của nó cũng default = Depends(...) một dependency khác, tạo thành chuỗi; FastAPI resolve theo thứ tự và gọi mỗi dependency dùng chung đúng 1 lần mỗi request">Sub-dependencies</dfn>: a dependency can depend on another</h2>
+<p>A dependency function's own parameters can themselves default to <code>Depends(...)</code>, building a chain — commonly "get a database connection" feeding into "get the current user from that connection." FastAPI resolves the whole chain before your handler runs, and calls each shared dependency <strong>once per request</strong>, no matter how many other dependencies in the chain ask for it.</p>
+<pre><code><span class="kw">def</span> get_db():
+    <span class="kw">return</span> {<span class="str">"conn"</span>: <span class="str">"fake-db"</span>}   <span class="kw"># stand-in for a real DB connection</span>
+
+<span class="kw">def</span> get_current_user(db: <span class="kw">dict</span> = Depends(get_db)):
+    <span class="kw">return</span> {<span class="str">"user"</span>: <span class="str">"alice"</span>, <span class="str">"db"</span>: db}
+
+<span class="kw">@app.get</span>(<span class="str">"/whoami"</span>)
+<span class="kw">def</span> whoami(user: <span class="kw">dict</span> = Depends(get_current_user)):
+    <span class="kw">return</span> user</code></pre>
+<p>Confirmed by tracking call order with a shared list: for one request to <code>/whoami</code>, <code>get_db</code> runs first, then <code>get_current_user</code> — resolved in dependency order automatically, with no handler ever calling either function by name — and <code>get_db</code> ran exactly once per request even though it sits underneath another dependency, not once per thing that depends on it. That single-call-per-request guarantee is what makes "open one DB connection, reuse it for every dependency in this request" a safe pattern rather than one that silently opens several.</p>
+
+<h2>4 · <dfn data-en="a stand-in for FastAPI() that a separate route module defines its own routes on, using the identical @router.get(...)/@router.post(...) decorator shape as app itself - attached to the real app with app.include_router(router), with an optional prefix= prepended to every route defined on it" data-vn="giữ nguyên &quot;APIRouter&quot; — object thay thế cho FastAPI() trong 1 module route riêng, dùng cùng decorator @router.get/.post như app, gắn vào app thật bằng app.include_router(), có thể khai báo prefix chung">APIRouter</dfn>: splitting handlers across files</h2>
+<p>Every lesson so far put every route on one <code>app = FastAPI()</code> object in one file — fine for five routes, unworkable for fifty. <code>APIRouter</code> is a stand-in for <code>app</code> that a separate module can define its own routes on, later attached to the real app with <code>include_router()</code>:</p>
+<pre><code><span class="kw"># items.py — a route module, no FastAPI() instance of its own</span>
+<span class="kw">from</span> fastapi <span class="kw">import</span> APIRouter
+
+router = APIRouter(prefix=<span class="str">"/items"</span>, tags=[<span class="str">"items"</span>])
+
+<span class="kw">@router.get</span>(<span class="str">""</span>)
+<span class="kw">def</span> list_items():
+    ...
+
+<span class="kw">@router.get</span>(<span class="str">"/{item_id}"</span>)
+<span class="kw">def</span> get_item(item_id: <span class="kw">int</span>):
+    ...
+
+<span class="kw"># main.py — assembles the app from route modules</span>
+<span class="kw">from</span> fastapi <span class="kw">import</span> FastAPI
+<span class="kw">from</span> items <span class="kw">import</span> router <span class="kw">as</span> items_router
+
+app = FastAPI()
+app.include_router(items_router)</code></pre>
+<p><code>@router.get(...)</code> reads exactly like <code>@app.get(...)</code> — same decorator shape, same handler-writing rules from Day 16 onward — because <code>APIRouter</code> is deliberately built to feel identical to <code>FastAPI</code> for defining routes. <code>prefix="/items"</code> means every route on this router is defined relative to <code>/items</code> — a route declared at <code>""</code> answers <code>GET /items</code>, and one declared at <code>"/{item_id}"</code> answers <code>GET /items/42</code> — confirmed directly through <code>TestClient</code> against an app assembled with <code>include_router()</code>. This is Day 9's module/package lesson applied to a specific shape: one router module per resource (<code>items.py</code>, <code>users.py</code>, ...), each importable and attachable independently, instead of one file holding every route the service has.</p>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> a shared <code>Depends()</code> dependency that opens a database connection is unrelated to how a pandas script would load a table — <code>pd.read_sql(...)</code> is a one-shot call inside a script, not a per-request object a web framework manages and reuses; that lifecycle difference is the whole reason a backend service needs dependency injection at all.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/19_dependency_injection_and_app_structure.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run --with fastapi --with httpx python3 practice/19_dependency_injection_and_app_structure.py</code></pre>
+<p>Needs <code>fastapi</code> and <code>httpx</code>, installed one-off via <code>--with</code>, same as Days 16-18. Exercises: a shared query-parameter dependency reused across two routes, an auth-style dependency that raises <code>HTTPException</code> to block a request before the handler runs, a sub-dependency chain (one dependency depending on another) with a call-count check, and an <code>APIRouter</code> with a <code>prefix</code> attached to the app via <code>include_router()</code>.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Giving a handler parameter a default of Depends(some_function) tells FastAPI to call some_function itself before running the handler, and pass whatever it returns as that parameter's value - the same shared function can back any number of routes, since FastAPI does the calling rather than each handler calling it by hand.">
+    <p class="stem">What does giving a handler parameter a default of <code>Depends(some_function)</code> actually do?</p>
+    <button class="opt" data-ok>FastAPI calls that function first, and passes its return value in</button>
+    <button class="opt">it marks that parameter as fully optional with no real value</button>
+    <button class="opt">it renames the handler's own function to match the one given</button>
+  </div>
+  <div class="q" data-why="A dependency function can raise HTTPException exactly like a handler can, and doing so blocks the request before the handler's own body ever runs at all - confirmed directly, since a bad token sent to require_token returns 401 straight from its own raise, never reaching secure_route's body.">
+    <p class="stem">What happens when a dependency function itself raises <code>HTTPException</code>?</p>
+    <button class="opt" data-ok>the request is blocked, the handler's own body never runs</button>
+    <button class="opt">FastAPI silently ignores it and runs the handler anyway regardless</button>
+    <button class="opt">the whole server process crashes with an unhandled raw exception</button>
+  </div>
+  <div class="q" data-why="A dependency's own parameters can default to Depends(...) too, chaining dependencies together - and FastAPI calls a shared dependency only once per incoming request no matter how many other dependencies in that same chain ask for it, confirmed by tracking call order and call count directly with TestClient.">
+    <p class="stem">In a sub-dependency chain, how many times does a shared dependency run per request?</p>
+    <button class="opt" data-ok>exactly once, reused by every dependency that needs it that request</button>
+    <button class="opt">once for each separate dependency that happens to need it, always</button>
+    <button class="opt">zero times unless a handler calls that function by its name</button>
+  </div>
+  <div class="q" data-why="APIRouter is deliberately built to feel like FastAPI itself for defining routes - the same @router.get(...) decorator shape, same handler-writing rules from Day 16 onward - so a route module written against a router reads identically to one written directly against app, just attached later with include_router().">
+    <p class="stem">Why does writing routes on an <code>APIRouter</code> look almost identical to writing them on <code>app</code> directly?</p>
+    <button class="opt" data-ok>APIRouter offers the same decorator shape FastAPI itself uses for routes</button>
+    <button class="opt">APIRouter secretly is the exact same FastAPI object under one alias</button>
+    <button class="opt">app.include_router() silently rewrites every one of its route's own source code</button>
+  </div>
+  <div class="q" data-why="prefix='/items' on an APIRouter means every route defined on it is relative to /items - a route declared at the empty string answers GET /items, and one declared at /{item_id} answers GET /items/42 - confirmed directly through TestClient against an app assembled with include_router().">
+    <p class="stem">With <code>APIRouter(prefix="/items")</code>, what URL does a route declared at <code>"/{item_id}"</code> answer to?</p>
+    <button class="opt" data-ok>GET /items/42, since every route on it sits under that prefix</button>
+    <button class="opt">GET /item_id/42, since it always ignores the router's own configured prefix</button>
+    <button class="opt">GET /42/items, since FastAPI always reverses a router's own prefix order</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official FastAPI tutorial's <a href="https://fastapi.tiangolo.com/tutorial/dependencies/">Dependencies</a> section and its <a href="https://fastapi.tiangolo.com/tutorial/bigger-applications/">Bigger Applications - Multiple Files</a> page, cited in RESOURCES.md as the spine for this whole phase.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day19">glossary</a> under Day 19.<br>
+Next up per PLAN.md's Phase 2b spine: <code>async</code>/<code>await</code> — what it buys, when it doesn't, and blocking-call traps.<br><br>
+💬 Anything unclear — how <code>Depends()</code> resolves a chain, or when to reach for <code>APIRouter</code>? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

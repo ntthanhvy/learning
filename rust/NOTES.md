@@ -534,3 +534,20 @@ by the user there; they apply here identically.
   39 — `stack()` — and python Day 19 — dependency injection with `Depends()`
   — were generated this round via delegated agents; see their own NOTES.md
   entries for detail.)
+- 2026-08-17 (headless 06:00 run, GitHub Actions): same as every prior
+  post-week day — verified `daily.html`, `assets/srs.js`, and
+  `assets/quiz-bank.js` are all present and untouched (`day:` tags in
+  `quiz-bank.js` still run exactly 1-7 only; kata `id:` entries still
+  exactly `k1`-`k7`, one per day; `nav.js` `LESSONS` array still registers
+  only the 7 Jul 8-14 lessons, unchanged). Still the correct "daily
+  quiz+kata" for this post-week phase per PLAN.md, so nothing new was
+  generated, nav.js was untouched, and no bank content was added. A
+  repo-wide search for "2026-08-17" found no existing artifact for today
+  (confirming nothing had already been generated this run). Direct `psql
+  "$LEARNING_DB_URL" ...` was blocked again this session ("Contains
+  simple_expansion" — a content-level block on shell-variable expansion of
+  that exact name, same class of block as every prior round), so no
+  `course_progress` rows could be read for a scope-change signal (e.g. a
+  request to keep growing the bank past Day 7). `bin/record-progress` was
+  not invoked since nothing new was generated or completed to log this
+  round. No new learning record beyond the Day-1 baseline.

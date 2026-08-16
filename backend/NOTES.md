@@ -2094,3 +2094,111 @@
   candidate was named or noticed this round beyond the one just closed, so
   the next session should start a fresh grep-based or close-reread pass
   rather than reuse a leftover.
+- 2026-08-17 generation (Lesson 43, headless run): idempotency check first —
+  confirmed no `lessons/0043-*.html` file existed and no `2026-08-17` entry
+  existed yet in `nav.js` before writing anything (highest existing file was
+  0042, dated 2026-08-16); `date` confirmed today is 2026-08-17. Per this
+  round's own briefing, the Postgres progress DB (`psql`/`bin/query-progress`)
+  is unreachable in this sandbox and was not attempted — pacing came from
+  `backend/learning-records/` (still only the two files, both already fully
+  reflected in prior lessons, nothing new to act on) plus `lessons/`/`nav.js`
+  file state and this log alone. Lesson 42 left no new in-scope candidate
+  beyond the one it had just closed, explicitly calling for "a fresh
+  grep-based or close-reread pass" — this round ran a grep sweep across all
+  42 lesson bodies and `glossary.html` for several untaught candidates
+  (materialized view, read replica, JSONB/full-text search, EXPLAIN ANALYZE,
+  unit/integration testing) before choosing. `EXPLAIN`/query-plan material was
+  ruled out immediately as belonging to the Go week's own Days 5-6 scope per
+  MISSION.md's explicit "don't duplicate" constraint. Database views
+  (`CREATE VIEW`/`CREATE MATERIALIZED VIEW`) came back a genuine zero-hit
+  gap: the only prior "view" hits were Lesson 2's generic "the response is a
+  view, rebuilt per request" wording (a different sense of the word, not the
+  SQL feature) and unrelated `viewport` meta-tag matches — confirmed via grep
+  before writing that no lesson or glossary entry ever taught the SQL
+  `VIEW`/`MATERIALIZED VIEW` statements. In scope under MISSION criterion 1
+  (data modeling: "entities, relationships... and explain the trade-offs"),
+  not excluded by the Go-week boundary (which names constraints, indexes,
+  EXPLAIN, and transactions specifically, not views), and not
+  infra/NoSQL/distributed. Lesson 43 covers it: a view as a saved SELECT
+  query with zero storage of its own (re-runs the underlying query on every
+  read, so it can never go stale but also adds no speed), the two honest
+  reasons to use one (hiding a query's complexity behind a name; narrowing
+  what a caller can see without a second copy of the data, reusing Lesson
+  34's soft-delete filter as a worked example), the explicit myth-check that
+  wrapping a slow JOIN in `CREATE VIEW` does not itself speed anything up
+  (same query plan either way — Lesson 5's indexing lesson still has to do
+  the actual work), materialized views as the opposite trade (result written
+  to disk at refresh time, cheap table reads afterward, staleness risk named
+  explicitly as the same trade-off Lesson 9's caching lesson already taught),
+  `CREATE INDEX ... UNIQUE` plus `REFRESH MATERIALIZED VIEW CONCURRENTLY`
+  reusing Lesson 19's `CONCURRENTLY` naming, and why a refresh belongs in a
+  background job (Lesson 10's shape) rather than inline in a request. A
+  comparison table (reusing Lesson 25's `table.cmp`/`.cmp-wrap` component)
+  contrasts storage/freshness/read-cost/who-pays-the-query-cost between the
+  two forms. The `fetchOrderSummary`/`refreshOrderSummaries` Go snippet
+  (reusing Lesson 42's own minimal `Row`/`Querier` interface pair rather than
+  redefining it, since the point here is the query shape, not the interface
+  mechanism again) was compile-checked clean with `go build -C` / `go vet -C`
+  in a scratch module (`.scratch/backend-lesson43/`, built binary written to
+  `/tmp/lesson43bin` and not copied into the scratch dir — `rm -f` on that
+  `/tmp` path was blocked by this session's sandbox as outside the allowed
+  working directory, left in place per the harmless precedent many prior
+  rounds' notes already established; running the built binary directly also
+  hit the approval gate, consistent with Lesson 42's own finding, so
+  correctness rested on the clean `go vet`/`go build` pass rather than an
+  observed run; scratch dir itself left with only `go.mod`/`main.go`, same
+  end-state as most prior rounds) — no approval blocker for either `-C`-style
+  invocation this round, consistent with every round since Lesson 13's
+  finding. `refreshOrderSummaries` reuses `Querier.QueryRow` for a
+  no-result-set `REFRESH` statement purely for illustration; its own comment
+  says so directly and names `Exec` as what real pgx code would use instead,
+  so the simplification doesn't read as idiomatic advice. One proofreading
+  catch before shipping: the callout div (frontend-bridge paragraph) was
+  first drafted with a stray `</p></div>` even though the callout never
+  opened a `<p>` tag — the exact bug class Lessons 32/34/39/40/41's notes
+  already flagged — caught by grepping the raw shipped file for
+  `callout|interview` and inspecting the tag pair directly, not by tooling;
+  fixed to a bare `</div>`, matching every other callout in the course.
+  Added `view` and `materialized view` to the glossary (confirmed via grep
+  beforehand that neither existed anywhere in `lessons/*.html` or
+  `glossary.html` under those names) and registered Lesson 43 in nav.js.
+  Quiz options were drafted into a scratch file
+  (`.scratch/backend-lesson43/quiz.txt`, deleted after) and verified with
+  `wc -w` per option via individual `sed -n '<n>p' | sed 's/^.) //' | wc -w`
+  calls, one literal command per line (no loop/variable-expansion form
+  attempted, consistent with every round since Lesson 28's finding that this
+  sandbox rejects that pattern outright) — all four questions needed at
+  least one rewrite pass before landing on equal counts (Q1 was 10/9/8/9,
+  Q2 was 10/9/8/8, Q3 was 10/10/9/10, Q4 was 10/10/10/11), each fix
+  re-verified with `wc -w` immediately after editing rather than trusted by
+  eye, per every prior round's repeated finding that hand-estimating a
+  rewrite's word delta is unreliable; final tallies, independently
+  cross-checked a second time against the shipped file's actual
+  `<button class="opt">` text via Grep: Q1 9/9/9/9, Q2 9/9/9/9, Q3
+  10/10/10/10, Q4 10/10/10/10. Primary source: the PostgreSQL Manual's
+  `CREATE VIEW` page plus its Rules and Materialized Views chapter —
+  RESOURCES.md already cites the PostgreSQL Manual generally for "tables,
+  constraints, defaults, schemas" (already extended by Lessons 19, 21, 34,
+  38, and 39 into specific mechanisms); this lesson reads the same DDL
+  chapter into the `VIEW`/`MATERIALIZED VIEW` statements specifically, with
+  the `CREATE VIEW` page named as the one worth actually reading (short, and
+  settles the "does this store data" question in Postgres's own words).
+  `bin/record-progress backend lesson_generated --day 43 --lesson
+  0043-database-views-and-materialized-views.html --detail
+  '{"by":"headless-run"}'` will be attempted once via its relative path from
+  the repo root as instructed, per every round since Lesson 32's finding
+  that the write path works reliably when invoked this way even when DB
+  reads are blocked; if it fails this round that will be noted as blocked,
+  not retried. This closes the database-views gap found by grepping several
+  untaught candidates and ruling out EXPLAIN as Go-week territory; still no
+  `lesson_completed` record exists for any lesson after 43 rounds — the next
+  session should keep treating a completion/quiz-outcome signal, or a
+  user-named track to deepen, as higher priority than a 44th topic picked
+  blind. Distributed locks and blue-green/canary deploys remain the last
+  named, confirmed out-of-scope-per-MISSION.md candidates if a fresh
+  gap-finding pass is needed again next time; other untaught candidates
+  noticed but not pursued this round: read replicas (ruled out as brushing
+  MISSION.md's own replication-out-of-scope line), JSONB/full-text search,
+  and dedicated unit/integration-testing conventions (neither clearly tied
+  to an existing lesson's unexplained aside the way recent gaps have been,
+  worth a closer look next time no teaser is available).

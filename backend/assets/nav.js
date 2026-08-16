@@ -90,6 +90,8 @@
       file: "lessons/0041-context-cancellation-and-deadlines.html" },
     { n: 42, date: "2026-08-16", title: "Interfaces and the driver abstraction",
       file: "lessons/0042-interfaces-and-the-driver-abstraction.html" },
+    { n: 43, date: "2026-08-17", title: "Database views and materialized views",
+      file: "lessons/0043-database-views-and-materialized-views.html" },
   ];
 
   const REFS = [

@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 43 · Database views and materialized views: saving a query, not a table</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 43 · ~20 min</p>
+<h1>Database views and materialized views: saving a query, not a table</h1>
+<p class="byline">Lesson 2 called the schema "the truth, shared by every feature" and the JSON response "a view, rebuilt per request." Postgres has a literal feature with that exact name. Today: what a <code>VIEW</code> actually is, why it doesn't store anything, and the one case — a materialized view — where it does.</p>
+
+<h2>1 · A view is a saved query, not a copy of data</h2>
+<p>Lesson 36 (N+1) fixed a repeated join-per-row pattern with one real JOIN. Lesson 2 taught denormalization: deliberately storing a fact twice, as a trade-off you must justify. A <dfn data-en="a named, saved SELECT query stored in the database's schema; querying it re-runs the underlying SELECT every time, so it never goes stale, but it also adds no speed on its own" data-vn="view (giữ nguyên) — câu SELECT được lưu sẵn với 1 cái tên; query view là chạy lại SELECT gốc mỗi lần, không bao giờ cũ nhưng cũng không tự nhanh hơn">view</dfn> sits between those two: it's neither a copy nor a fix for slow joins — it's a name for a query.</p>
+
+<pre><code><span class="kw">CREATE</span> <span class="kw">VIEW</span> order_summaries <span class="kw">AS</span>
+<span class="kw">SELECT</span>
+  o.id <span class="kw">AS</span> order_id,
+  <span class="kw">COUNT</span>(oi.id) <span class="kw">AS</span> item_count,
+  <span class="kw">SUM</span>(oi.unit_price * oi.quantity) <span class="kw">AS</span> total_cents
+<span class="kw">FROM</span> orders o
+<span class="kw">JOIN</span> order_items oi <span class="kw">ON</span> oi.order_id = o.id
+<span class="kw">GROUP</span> <span class="kw">BY</span> o.id;</code></pre>
+
+<p>After that runs once, <code>SELECT * FROM order_summaries WHERE order_id = 42</code> works exactly like querying a table — but Postgres stores none of those rows anywhere. Every time the view is queried, it re-runs the JOIN and GROUP BY behind the name, against the current <code>orders</code>/<code>order_items</code> data, right then. A view holds zero storage of its own; drop the underlying tables and the view breaks, because there was never anything in it to keep.</p>
+
+<div class="callout"><strong>The frontend equivalent you already own.</strong> This is a saved query the same way a named, reusable SQL fragment or a derived Redux selector is a saved computation — <code>selectCartTotal(state)</code> doesn't store a total anywhere; it recomputes from the current store every time it's called. A Postgres view is that same "always recomputed, never stale, no cache" contract, just written once in SQL instead of once in JS and imported everywhere a component needs it.</div>
+
+<h2>2 · What a view is actually for</h2>
+<p>Two honest reasons to reach for one, neither about speed:</p>
+<ul>
+<li><strong>Hiding a query's complexity behind a name.</strong> Once <code>order_summaries</code> exists, every handler that needs an order's item count and total just selects from it — nobody re-derives the JOIN and GROUP BY in five different places, and nobody has to relearn the schema's join path to write a new report.</li>
+<li><strong>Narrowing what a caller can see, without a second copy of the data.</strong> A view can select a subset of columns or rows — <code>CREATE VIEW active_accounts AS SELECT id, email FROM accounts WHERE deleted_at IS NULL</code> reuses Lesson 34's soft-delete filter in one place, and a role granted access only to that view never sees a column it selects out, like <code>password_hash</code>.</li>
+</ul>
+<p>What a view does <em>not</em> do: make a slow JOIN fast. Wrapping a query in <code>CREATE VIEW</code> changes nothing about how Postgres executes it — the same query plan runs either way. If Lesson 5's indexing lesson would have helped the underlying JOIN, it still needs to; the view is a name, not a query optimizer.</p>
+
+<h2>3 · When "recomputed every time" is the wrong trade — materialized views</h2>
+<p>A view that scans and joins two large tables on every single read starts to cost real time once it's queried often. Postgres's second form trades the "always current" guarantee for speed by actually storing the result:</p>
+
+<pre><code><span class="kw">CREATE</span> <span class="kw">MATERIALIZED</span> <span class="kw">VIEW</span> order_summaries <span class="kw">AS</span>
+<span class="kw">SELECT</span> o.id <span class="kw">AS</span> order_id, <span class="kw">COUNT</span>(oi.id) <span class="kw">AS</span> item_count,
+  <span class="kw">SUM</span>(oi.unit_price * oi.quantity) <span class="kw">AS</span> total_cents
+<span class="kw">FROM</span> orders o <span class="kw">JOIN</span> order_items oi <span class="kw">ON</span> oi.order_id = o.id
+<span class="kw">GROUP</span> <span class="kw">BY</span> o.id;
+
+<span class="kw">CREATE</span> <span class="kw">UNIQUE</span> <span class="kw">INDEX</span> <span class="kw">ON</span> order_summaries (order_id);
+<span class="kw">REFRESH</span> <span class="kw">MATERIALIZED</span> <span class="kw">VIEW</span> <span class="kw">CONCURRENTLY</span> order_summaries;</code></pre>
+
+<p>A <dfn data-en="a view whose result is actually written to disk once, at creation or refresh time, and read back like a regular table on every query — fast to read, but only as current as its last REFRESH" data-vn="materialized view (giữ nguyên) — view có lưu kết quả xuống đĩa lúc tạo/refresh, đọc lại như bảng thường, nhanh nhưng chỉ mới tới lần REFRESH gần nhất">materialized view</dfn> is a plain view's opposite trade: the query runs once, its result is written to disk like a real table, and reads afterward are just table reads — no JOIN, no GROUP BY, every time. The cost moves from every read to whoever runs <code>REFRESH</code>, and the data between refreshes can be stale, the exact risk Lesson 9's caching lesson named for any cached value. <code>CONCURRENTLY</code> (a name Lesson 19 already used for index builds) lets reads keep hitting the old data while the refresh runs, instead of locking readers out — it requires the unique index shown above to work at all.</p>
+
+<div class="cmp-wrap">
+<table class="cmp">
+<thead><tr><th>Plain VIEW</th><th>MATERIALIZED VIEW</th></tr></thead>
+<tbody>
+<tr><th>Storage</th><td>None — a saved query, re-run every time</td><td>Actual rows on disk, written at refresh time</td></tr>
+<tr><th>Freshness</th><td>Always current, no staleness possible</td><td>Stale until the next REFRESH runs</td></tr>
+<tr><th>Read cost</th><td>Full underlying query, every single read</td><td>A plain table read, no recomputation</td></tr>
+<tr><th>Who pays the query cost</th><td>Every caller, on every read</td><td>Whoever triggers REFRESH, once per refresh</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>That freshness gap is why a refresh belongs in a background job (Lesson 10's shape) — a scheduled worker, or a job enqueued after the write that changed the underlying data — never inline inside the request that triggered the change, the same "don't make the client wait for work it didn't ask to wait for" reasoning Lesson 10 already established.</p>
+
+<pre><code><span class="cm">// Row/Querier mirror Lesson 42's minimal interface pair — the point here
+// is the query shape, not the interface mechanism again.
+</span><span class="kw">type</span> Row <span class="kw">interface</span> {
+    Scan(dest ...any) <span class="kw">error</span>
+}
+<span class="kw">type</span> Querier <span class="kw">interface</span> {
+    QueryRow(ctx context.Context, sql <span class="kw">string</span>, args ...any) Row
+}
+
+<span class="kw">type</span> OrderSummary <span class="kw">struct</span> {
+    OrderID, ItemCount, TotalCents <span class="ty">int64</span>
+}
+
+<span class="cm">// fetchOrderSummary queries the materialized view exactly like a table —
+// one row in, one row out, no JOIN or GROUP BY in this function at all.
+</span><span class="kw">func</span> fetchOrderSummary(ctx context.Context, q Querier, orderID <span class="ty">int64</span>) (OrderSummary, <span class="kw">error</span>) {
+    row := q.QueryRow(ctx,
+        <span class="st">`SELECT order_id, item_count, total_cents FROM order_summaries WHERE order_id = $1`</span>,
+        orderID)
+    <span class="kw">var</span> s OrderSummary
+    <span class="kw">if</span> err := row.Scan(&amp;s.OrderID, &amp;s.ItemCount, &amp;s.TotalCents); err != <span class="kw">nil</span> {
+        <span class="kw">return</span> OrderSummary{}, fmt.Errorf(<span class="st">"fetch order summary %d: %w"</span>, orderID, err)
+    }
+    <span class="kw">return</span> s, <span class="kw">nil</span>
+}
+
+<span class="cm">// refreshOrderSummaries runs in a background job (Lesson 10), never inline
+// in a request — CONCURRENTLY needs the unique index created above. It
+// reuses Querier's QueryRow only because REFRESH here returns no rows;
+// a real handler would use pgx's Exec for a statement with no result set.
+</span><span class="kw">func</span> refreshOrderSummaries(ctx context.Context, exec Querier) <span class="kw">error</span> {
+    _ = exec.QueryRow(ctx, <span class="st">`REFRESH MATERIALIZED VIEW CONCURRENTLY order_summaries`</span>)
+    <span class="kw">return</span> <span class="kw">nil</span>
+}</code></pre>
+
+<p><code>fetchOrderSummary</code> has no idea whether <code>order_summaries</code> is a table, a view, or a materialized view — the query text and the <code>Querier</code> interface look identical either way. That's the actual point of naming the query at all: callers depend on a name and a row shape, not on how the data behind it is produced.</p>
+
+<div class="interview">
+<p><strong>Q: "What's the difference between a view and a materialized view?"</strong> A strong answer, out loud: <em>"A plain view is just a saved SELECT — it stores nothing, so every read re-runs the underlying query and always sees current data, but it's exactly as slow as that query. A materialized view actually writes the result to disk at creation or refresh time, so reads are cheap table reads afterward, but the data is only as fresh as the last REFRESH — someone has to run that, usually a background job, not inline in a request. I'd reach for a materialized view specifically when a query is read often, expensive to compute, and okay being slightly stale — not as a default replacement for a plain view or an index."</em> The signal: naming the storage/freshness trade explicitly, not just "materialized views are the fast ones."</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A plain CREATE VIEW stores nothing at all — it names a SELECT query, and every read against the view re-runs that underlying query against current data, right then. It is not a table copy, a compiler setting, or a caching layer.">
+    <p class="stem">What does a plain (non-materialized) database view actually store?</p>
+    <button class="opt" data-ok>a saved SELECT query that runs fresh on read</button>
+    <button class="opt">a table copy synced hourly with a cron job</button>
+    <button class="opt">a compiler flag that fully disables all type checks</button>
+    <button class="opt">a cache layer sitting silently in front of Postgres</button>
+  </div>
+  <div class="q" data-why="A materialized view writes its query's result to disk once, at creation or REFRESH time. Reads afterward are cheap table reads with no recomputation, but the data can be stale until the next REFRESH runs — the same staleness risk any cache introduces.">
+    <p class="stem">What makes a materialized view different from a plain view?</p>
+    <button class="opt" data-ok>it stores its result and must be refreshed manually</button>
+    <button class="opt">it deletes the base tables it was created from</button>
+    <button class="opt">it blocks every other write until manually released here</button>
+    <button class="opt">it requires a wholly separate database engine besides Postgres</button>
+  </div>
+  <div class="q" data-why="Wrapping a query in CREATE VIEW changes nothing about how Postgres executes it underneath — the same query plan runs either way. A view names a query for reuse and access control; it does not itself make a slow JOIN or GROUP BY faster.">
+    <p class="stem">What does wrapping a slow JOIN in a plain CREATE VIEW do to its speed?</p>
+    <button class="opt" data-ok>it hides the JOIN so callers select one plain table</button>
+    <button class="opt">it removes the JOIN entirely by merging rows on disk</button>
+    <button class="opt">it caches the JOIN result forever, always ignoring future writes</button>
+    <button class="opt">it converts the JOIN into a single indexed foreign key</button>
+  </div>
+  <div class="q" data-why="A materialized view's REFRESH is exactly the kind of work Lesson 10 already named for background jobs: work triggered by a change but deliberately run outside any single request's response cycle, so no caller waits on it, and the refresh cost is paid once instead of by every subsequent reader.">
+    <p class="stem">Where should a materialized view's REFRESH actually run?</p>
+    <button class="opt" data-ok>run the refresh inside a background job, not a request</button>
+    <button class="opt">run the refresh inside a request that already needs it</button>
+    <button class="opt">run the refresh only once, right when the table changes</button>
+    <button class="opt">run the refresh from a browser tab left open always</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the <a href="https://www.postgresql.org/docs/current/sql-createview.html">PostgreSQL Manual's <code>CREATE VIEW</code></a> page, together with <a href="https://www.postgresql.org/docs/current/rules-materializedviews.html">Rules and Materialized Views</a> — RESOURCES.md already cites the PostgreSQL Manual generally for "tables, constraints, defaults, schemas" (already extended by Lessons 19, 21, 34, 38, and 39 into specific mechanisms); this lesson reads the DDL chapter into the <code>VIEW</code>/<code>MATERIALIZED VIEW</code> statements specifically. Recommended as the one to actually read: the <code>CREATE VIEW</code> page — short, and it settles the "does this store data" question the lesson opened with, in Postgres's own words rather than a paraphrase.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> open — still no reported quiz/lesson-completion outcome exists for any lesson after 42 rounds; distributed locks and blue-green/canary deploys remain the last named, confirmed out-of-scope-per-MISSION.md candidates if no fresh gap or user-chosen track surfaces first.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

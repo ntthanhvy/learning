@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 40 · groupby().filter(): keeping whole groups, not rows</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 40 · ~20 min · 17 Aug 2026</p>
+<h1>groupby().filter(): keeping whole groups, not rows</h1>
+<p class="byline">Lesson 39's teaser named <code>groupby().filter()</code> as a real gap — not to be confused with Lesson 22's <code>query()</code> or Lesson 29's <code>isin()</code>, which both filter individual <em>rows</em>. Today's tool filters whole <em>groups</em>: every row of a group is kept or dropped together, based on a condition computed over the group as a whole. This is pandas' answer to SQL's <code>HAVING</code>.</p>
+
+<h2>1 · The problem: WHERE can't ask a per-group question</h2>
+<p>Back on the raw, uncleaned <code>orders_raw.csv</code> (Lesson 2's fixture, before any cleaning), each customer has a different number of orders:</p>
+<pre><code>raw = pd.read_csv(<span class="str">"practice/data/orders_raw.csv"</span>)
+<span class="cm">--   order_id customer   amount  order_date
+--  0        1       An    120.0  2026-01-05
+--  1        2     Binh     35.5  2026-01-06
+--  2        3       An  unknown  2026-01-07
+--  3        4      Chi     99.9         NaN
+--  4        5     Binh    180.0  2026-01-09
+--  5        6       An     42.0  2026-01-10</span>
+raw.groupby(<span class="str">"customer"</span>).size()
+<span class="cm">-- customer
+-- An      3
+-- Binh    2
+-- Chi     1
+-- dtype: int64</span></code></pre>
+<p>Suppose the task is "only keep orders from customers who placed at least 2 orders" — drop Chi's single row entirely, keep every row belonging to An and Binh. A boolean mask (<code>raw[raw["amount"] &gt; 100]</code>, Lesson 1) can only test each row against itself; it has no way to ask "how many rows does <em>this row's group</em> have in total?" That's exactly the gap <dfn data-en="a DataFrame/SeriesGroupBy method that evaluates a function once per group and keeps every row of every group where that function returned a truthy result, dropping every row of every group where it did not -- rows are never split out of their group" data-vn="giữ nguyên 'groupby().filter()' — chạy 1 hàm cho mỗi nhóm, nhóm nào hàm trả True thì giữ NGUYÊN CẢ NHÓM, nhóm nào False thì bỏ NGUYÊN CẢ NHÓM; khác HAVING ở chỗ trả về hàng gốc chứ không phải bảng đã gộp">groupby().filter()</dfn> closes.</p>
+
+<h2>2 · groupby().filter(): a function per group, not per row</h2>
+<pre><code>by_count = raw.groupby(<span class="str">"customer"</span>).filter(<span class="kw">lambda</span> g: len(g) &gt;= <span class="kw">2</span>)
+<span class="cm">--   order_id customer   amount  order_date
+--  0        1       An    120.0  2026-01-05
+--  1        2     Binh     35.5  2026-01-06
+--  2        3       An  unknown  2026-01-07
+--  4        5     Binh    180.0  2026-01-09
+--  5        6       An     42.0  2026-01-10</span></code></pre>
+<p>Chi's row (<code>order_id 4</code>) is gone; every row belonging to An and Binh survives, including the messy ones (Lesson 3's <code>"unknown"</code> amount, the missing <code>order_date</code>) — <code>filter()</code> doesn't clean anything, it only decides which whole groups stay. The lambda receives <code>g</code>, a real DataFrame holding just that one group's rows, and its return value must be a single True/False: truthy keeps every row of that group, falsy drops every row of that group. Notice the result's index (<code>[0, 1, 2, 4, 5]</code>) still carries the original row positions, not a fresh <code>0..n-1</code> — same "call <code>reset_index()</code> yourself if you want one" convention as every other row-selecting operation this course has covered.</p>
+<p>The condition isn't limited to size — any per-group aggregate works, same as a <code>HAVING</code> clause can test any aggregate:</p>
+<pre><code>raw[<span class="str">"amount_num"</span>] = pd.to_numeric(raw[<span class="str">"amount"</span>], errors=<span class="str">"coerce"</span>)  <span class="cm"># "unknown" -> NaN</span>
+by_sum = raw.groupby(<span class="str">"customer"</span>).filter(<span class="kw">lambda</span> g: g[<span class="str">"amount_num"</span>].sum(skipna=<span class="kw">True</span>) &gt; <span class="kw">150</span>)
+<span class="cm">-- same 5 rows as by_count -- Chi's total is only 99.9, An's is 162.0, Binh's is 215.5</span></code></pre>
+
+<h2>3 · The SQL bridge: this is exactly HAVING</h2>
+<p>The name is deliberately parallel to how <code>WHERE</code> and <code>HAVING</code> divide labor in SQL: <code>WHERE</code> filters rows before grouping, <code>HAVING</code> filters whole groups after aggregating, using an aggregate in its condition. <code>groupby().filter()</code> plays exactly <code>HAVING</code>'s role:</p>
+<pre><code><span class="cm">-- SELECT * FROM orders o
+-- WHERE customer IN (
+--   SELECT customer FROM orders GROUP BY customer HAVING COUNT(*) >= 2
+-- );</span>
+raw.groupby(<span class="str">"customer"</span>).filter(<span class="kw">lambda</span> g: len(g) &gt;= <span class="kw">2</span>)</code></pre>
+<p>SQL has no single-clause way to say "give me back every original row of the groups that pass <code>HAVING</code>" — <code>HAVING</code> alone only shrinks the aggregated result to one row per surviving group, which is why the SQL above needs a subquery wrapped in <code>IN (...)</code> to get back to row-level output. <code>groupby().filter()</code> does that whole subquery-and-<code>IN</code> dance in one call.</p>
+
+<h2>4 · Contrast with agg(): one row per group vs. every original row</h2>
+<p>It's easy to reach for the wrong tool here, because both start with <code>groupby("customer")</code>. Lesson 4's <code>agg()</code> collapses each group down to one summary row:</p>
+<pre><code>raw.groupby(<span class="str">"customer"</span>)[<span class="str">"amount_num"</span>].sum()
+<span class="cm">-- customer
+-- An      162.0
+-- Binh    215.5
+-- Chi      99.9
+-- dtype: float64      <-- 3 rows: one per group, amounts only</span></code></pre>
+<p><code>filter()</code> never collapses anything — it hands back a subset of the <em>original</em> DataFrame, every column intact, at full row-level detail:</p>
+<pre><code>by_count.shape   <span class="cm"># (5, 4) -- still order_id, customer, amount, order_date</span></code></pre>
+<p>Rule of thumb: need a summary number per group → <code>agg()</code>. Need to keep (or drop) entire groups' worth of original rows, unsummarized → <code>filter()</code>. The two combine naturally in a chain too — filter first to drop small/thin groups, <em>then</em> aggregate the survivors, mirroring exactly how a real <code>HAVING</code> query is often followed by further row-level work downstream.</p>
+
+<div class="callout"><strong>Two other "filter"-shaped tools this course already covered, and how they differ:</strong> Lesson 22's <code>query()</code> and Lesson 29's <code>isin()</code> both test one row at a time against a condition — they can drop individual rows out of a group while leaving the rest of that same group in place. <code>groupby().filter()</code> can only make an all-or-nothing decision per <em>group</em> — it either keeps every row of a group or drops every row of that group, never a partial group.</div>
+
+<div class="interview">
+<p><strong>Q: "How would you find, say, customers with at least 3 orders, and return their original order rows — not just a count?"</strong> A strong answer, out loud: <em>"In SQL that's a HAVING clause, but HAVING alone only gives me back one summarized row per group — to get the original rows I'd need a subquery: `SELECT * FROM orders WHERE customer IN (SELECT customer FROM orders GROUP BY customer HAVING COUNT(*) >= 3)`. In pandas, `groupby('customer').filter(lambda g: len(g) >= 3)` does that in one call — it evaluates my condition once per group and keeps every row of every group that passes, at full original detail, no aggregation applied. That's different from `groupby().agg()`, which always collapses each group to a single summary row — if I called `agg()` here I'd lose the individual order rows entirely. And it's different from `query()` or `isin()`, which decide row by row and can split a group apart; `filter()`'s decision is all-or-nothing per whole group."</em> The signal: naming the SQL subquery pandas' one-liner replaces, and drawing the agg-vs-filter line precisely — collapse-to-summary vs. keep-original-detail-for-survivors.</p>
+</div>
+
+<h2>Try it — self-checking practice (~15-20 min)</h2>
+<p>Open <code>practice/40_groupby_filter.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/40_groupby_filter.py</code></pre>
+<p>Uses the raw, uncleaned <code>orders_raw.csv</code> (An x3 incl. one <code>"unknown"</code> amount, Binh x2, Chi x1). Exercise 1 filters to customers with 2+ orders (drops Chi's single row); Exercise 2 filters by a per-group sum threshold on the coerced numeric amount (same 5 rows survive, for a different reason); Exercise 3 contrasts <code>filter()</code>'s full-detail output shape against <code>agg()</code>'s one-row-per-group shape on the same grouping.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="groupby().filter() evaluates its function once per group and keeps every row of a group only if that function returns a truthy value for the WHOLE group -- it never keeps part of a group. That is exactly the SQL HAVING clause's job: filtering groups by an aggregate condition, as opposed to WHERE, which filters individual rows before any grouping happens.">
+    <p class="stem">Which SQL clause is <code>groupby().filter()</code> the closest match to?</p>
+    <button class="opt" data-ok>HAVING, filtering whole groups by an aggregate</button>
+    <button class="opt">WHERE, filtering individual rows before any grouping</button>
+    <button class="opt">ORDER BY, reordering rows inside each group</button>
+  </div>
+  <div class="q" data-why="agg() always collapses each group down to one summary row per group, losing the original row-level detail. filter() never summarizes at all -- it returns a subset of the ORIGINAL DataFrame, every column intact, at full row-level detail, for whichever groups passed the condition.">
+    <p class="stem">How does <code>groupby().filter()</code>'s output differ from <code>groupby().agg()</code>'s?</p>
+    <button class="opt" data-ok>filter keeps full rows; agg collapses each group</button>
+    <button class="opt">filter and agg always return identical row counts</button>
+    <button class="opt">agg can never accept a lambda as argument</button>
+  </div>
+  <div class="q" data-why="query() and isin() both test one row at a time, so they can drop individual rows out of a group while leaving other rows of that same group in place -- a partial-group result is possible. groupby().filter()'s decision is per whole group: the lambda runs once per group and either keeps every row of that group or drops every row of that group, never a partial group.">
+    <p class="stem">Why can't <code>query()</code> or <code>isin()</code> substitute for <code>groupby().filter()</code>?</p>
+    <button class="opt" data-ok>they decide row by row, can split a group</button>
+    <button class="opt">they only ever work on a Series, not DataFrame</button>
+    <button class="opt">they require every single column to already be numeric</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the pandas User Guide's <a href="https://pandas.pydata.org/docs/user_guide/groupby.html#filtration">"Filtration" section of the Group by guide</a> (~10 min, the same guide page Lesson 4 opened this course's groupby coverage from) — read it right after today's lesson while the <code>HAVING</code> parallel is fresh; the <a href="https://pandas.pydata.org/docs/getting_started/comparison/comparison_with_sql.html#top-n-rows-per-group">Comparison with SQL page</a> (Lesson 1's own bridge source) also has a short filter-vs-HAVING example worth a second look.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>groupby().filter()</code> was added today, placed right after the existing <code>resample()</code>/<code>DatetimeIndex</code>/<code>offset alias</code> entries.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-40 comes back reported as shakiest, otherwise a fresh scan of the curriculum spine and glossary for the next genuinely-uncovered pandas/NumPy pattern.<br><br>
+💬 Anything unclear — the filter/HAVING parallel, the filter-vs-agg contrast, or the all-or-nothing per-group rule? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

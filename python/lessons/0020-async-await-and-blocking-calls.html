@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 20 · async/await: what it buys, when it doesn't, and blocking-call traps</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 20 · ~20 min · 17 Aug 2026</p>
+<h1><code>async</code>/<code>await</code>: what it buys, when it doesn't, and blocking-call traps</h1>
+<p class="byline">Every handler from Day 16 onward has been a plain <code>def</code> — and that was never a problem, because FastAPI quietly runs plain <code>def</code> handlers in a background thread pool so one slow one doesn't stall the rest. Today's topic is the other option, <code>async def</code>, which handles the same "don't block everyone else" problem a completely different way: not by using more threads, but by giving up control at every <code><dfn data-en="the keyword placed before a call that can pause the current coroutine and let other coroutines run on the same thread while it waits - only legal inside an async def function, and only meaningful in front of something that is itself awaitable" data-vn="giữ nguyên &quot;await&quot; — từ khoá đặt trước 1 lời gọi có thể tạm dừng coroutine hiện tại, nhường chỗ cho coroutine khác chạy trên cùng 1 thread trong lúc chờ; chỉ hợp lệ trong hàm async def">await</dfn></code> so other work can run on the very same thread while it waits. That difference is the whole lesson — including the trap: sneak a normal blocking call into an <code>async def</code> function and that giving-up-control never happens, silently serializing every request behind it.</p>
+
+<div class="callout"><strong>Bridge from SQL:</strong> a plain <code>def</code> handler is a query run to completion by one worker connection while other connections wait their turn if the pool is full; <code>async def</code> is closer to how a single database connection can have several statements in flight, interleaved, because each one yields control back while waiting on I/O instead of occupying the connection the whole time.</div>
+
+<h2>1 · Two kinds of concurrency, not one</h2>
+<p>FastAPI supports both handler shapes side by side, and treats them differently: a plain <code>def</code> handler (every handler through Day 19) is automatically run in a worker thread from a background <dfn data-en="a pool of background worker threads FastAPI runs plain def handlers in automatically, so a slow plain def handler occupies one thread instead of blocking the whole event loop that every other request shares" data-vn="giữ nguyên &quot;thread pool&quot; — nhóm thread nền chạy sẵn, FastAPI tự đưa handler def thường vào đây, nên 1 handler chậm chỉ chiếm 1 thread, không chặn event loop dùng chung">thread pool</dfn>, so a slow one occupies its own thread while other requests keep moving on other threads. An <code>async def</code> handler instead runs on a single shared <dfn data-en="the single loop that drives every async def coroutine in the process, one step at a time, switching to a different coroutine whenever the current one hits an await on something not yet ready - concurrency from cooperative switching on one thread, not from separate threads" data-vn="giữ nguyên &quot;event loop&quot; — vòng lặp duy nhất điều phối mọi coroutine async def trong process, chạy từng đoạn một, chuyển sang coroutine khác mỗi khi cái hiện tại await một thứ chưa sẵn sàng — concurrency nhờ nhường lượt trên 1 thread, không phải nhiều thread">event loop</dfn>: only one piece of Python code actually executes at any instant, and concurrency comes from each <code>async def</code> function — a <dfn data-en="the object an async def function call actually produces - not a running function yet, just a paused, resumable unit of work that the event loop drives forward by resuming it past each await, one step at a time, until it returns" data-vn="giữ nguyên &quot;coroutine&quot; — object mà 1 lời gọi hàm async def thực sự tạo ra; chưa chạy ngay, chỉ là 1 đơn vị công việc tạm dừng được, event loop chạy tiếp nó qua từng await cho tới khi return">coroutine</dfn> — voluntarily pausing at each <code>await</code> so the loop can run someone else's code while the first one's I/O is still pending.</p>
+<pre><code><span class="kw">import</span> time
+<span class="kw">from</span> fastapi <span class="kw">import</span> FastAPI
+
+app = FastAPI()
+
+<span class="kw">@app.get</span>(<span class="str">"/plain"</span>)
+<span class="kw">def</span> plain_route():             <span class="kw"># plain def -> FastAPI's thread pool</span>
+    time.sleep(<span class="kw">0.05</span>)         <span class="kw"># blocks its own thread only</span>
+    <span class="kw">return</span> {<span class="str">"ok"</span>: <span class="kw">True</span>}
+
+<span class="kw">@app.get</span>(<span class="str">"/async"</span>)
+<span class="kw">async</span> <span class="kw">def</span> async_route():        <span class="kw"># async def -> the shared event loop</span>
+    <span class="kw">await</span> asyncio.sleep(<span class="kw">0.05</span>)  <span class="kw"># yields control while waiting</span>
+    <span class="kw">return</span> {<span class="str">"ok"</span>: <span class="kw">True</span>}</code></pre>
+<p>Confirmed directly by firing five concurrent requests at each route with <code>httpx.AsyncClient</code> and <code>asyncio.gather</code>: five <code>/async</code> requests using <code>await asyncio.sleep(0.05)</code> came back in <strong>~0.05s total</strong>, all interleaved on the one event loop; five <code>/plain</code> requests using the ordinary blocking <code>time.sleep(0.05)</code> also came back in <strong>~0.05s total</strong> — the thread pool ran them on separate threads at the same time. Both shapes gave real concurrency here. The difference shows up in section 3.</p>
+
+<h2>2 · What <code>await</code> actually does</h2>
+<p>An <code>async def</code> function does not run when you call it — calling it just builds a coroutine object, a paused unit of work. It only starts advancing when something <code>await</code>s it (or FastAPI itself does, for a route). Inside the function body, every <code>await some_call()</code> is a checkpoint: if <code>some_call()</code> has to wait on something external — a network response, a timer, a database round trip — the coroutine pauses there, and the event loop is free to advance any other coroutine that is ready to make progress, resuming this one later exactly where it left off.</p>
+<pre><code><span class="kw">async</span> <span class="kw">def</span> fetch_two_things():
+    a = <span class="kw">await</span> call_one()   <span class="kw"># pauses here if call_one() is waiting on I/O</span>
+    b = <span class="kw">await</span> call_two()   <span class="kw"># then pauses here</span>
+    <span class="kw">return</span> a, b</code></pre>
+<p>This is exactly Day 5's generator idea, one level up: a generator's <code>yield</code> pauses a function and hands control back to whatever called <code>next()</code> on it; <code>await</code> pauses a coroutine and hands control back to the event loop driving it. Neither is free-floating parallelism — nothing here spawns a new OS thread or process. It's cooperative: each coroutine has to explicitly give control back via <code>await</code>, and a coroutine that never does so runs to completion uninterrupted, holding the entire event loop hostage the whole time. That's the trap.</p>
+
+<h2>3 · The blocking-call trap</h2>
+<p>Put a plain, <dfn data-en="a call (time.sleep(), a synchronous DB driver, plain requests.get()) that occupies its thread until it finishes and never awaits anything - harmless inside a plain def handler, but silently serializes every other in-flight request when placed inside async def, since it never yields control back to the event loop" data-vn="giữ nguyên &quot;blocking call&quot; — lời gọi chiếm thread cho tới khi xong, không bao giờ await; đặt trong def thường thì vô hại, đặt trong async def thì khiến mọi request khác bị đứng chờ vì không nhường control lại cho event loop">blocking call</dfn> — <code>time.sleep()</code>, a synchronous database driver, an old-style <code>requests.get()</code> — inside an <code>async def</code> function, and nothing raises an error. It just silently defeats the entire point: a blocking call never <code>await</code>s anything, so it never yields control back to the loop. Every other coroutine, on every other in-flight request, sits frozen until it finishes.</p>
+<pre><code><span class="kw">@app.get</span>(<span class="str">"/async-trap"</span>)
+<span class="kw">async</span> <span class="kw">def</span> async_trap():
+    time.sleep(<span class="kw">0.05</span>)             <span class="kw"># blocking call inside async def - never yields!</span>
+    <span class="kw">return</span> {<span class="str">"ok"</span>: <span class="kw">True</span>}</code></pre>
+<p>Confirmed with the same five-concurrent-requests measurement as section 1: five requests to a <code>/plain</code>-style route with <code>time.sleep(0.05)</code> took <strong>~0.05s total</strong> (thread pool, genuinely concurrent); five requests to this <code>async def</code> version with the identical <code>time.sleep(0.05)</code> inside it took <strong>~0.25s total</strong> — 5 &times; 0.05s, fully serialized, one request finishing before the next even starts. Same call, same duration, radically different outcome, purely because of which handler shape it landed in. The fix is either: don't write <code>async def</code> for a handler whose real work is blocking (a plain <code>def</code> gets it the thread pool for free), or use the actually-async version of that call (<code>await asyncio.sleep(...)</code>, an async database driver, <code>httpx.AsyncClient</code> instead of <code>requests</code>).</p>
+
+<h2>4 · When <code>async def</code> is worth reaching for</h2>
+<p><code>async def</code> pays off specifically when a handler spends most of its time waiting on I/O — an external API call, a database query, another microservice — and there could be many such requests in flight at once: the event loop keeps making progress on other requests during every wait, all on one thread, with none of a thread pool's per-thread memory overhead. It buys nothing for CPU-bound work (parsing a huge file, heavy computation) — nothing is waiting there to yield control during, so an <code>async def</code> doing that work blocks the loop exactly like section 3's trap, for the same reason. <dfn data-en="fires several awaitable coroutines off concurrently and collects every result, instead of awaiting them one after another - total time tracks the slowest single call rather than their sum, the concrete payoff of async def for I/O-bound fan-out work" data-vn="giữ nguyên &quot;asyncio.gather()&quot; — chạy nhiều awaitable cùng lúc thay vì await tuần tự từng cái, tổng thời gian gần bằng call chậm nhất thay vì cộng dồn — lợi ích cụ thể của async def cho việc gọi nhiều I/O song song"><code>asyncio.gather()</code></dfn> is the tool for firing several awaitable calls off at once and collecting every result, instead of awaiting them one after another:</p>
+<pre><code><span class="kw">async</span> <span class="kw">def</span> get_all_prices(item_ids: <span class="kw">list</span>[<span class="kw">int</span>]) -> <span class="kw">list</span>[<span class="kw">float</span>]:
+    <span class="kw">return</span> <span class="kw">await</span> asyncio.gather(*[fetch_price(i) <span class="kw">for</span> i <span class="kw">in</span> item_ids])</code></pre>
+<p>Confirmed directly: four calls to a small <code>fetch(n)</code> coroutine, each internally doing <code>await asyncio.sleep(0.03)</code>, run one <code>await</code> at a time in a plain loop take ~4 &times; 0.03s = 0.12s total; the same four calls wrapped in one <code>asyncio.gather(...)</code> call take ~0.03s total — all four in flight together, the slowest one setting the total instead of the sum.</p>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> pandas operations are synchronous and CPU/memory-bound by design — there's no <code>await</code> anywhere in a pandas pipeline, and no benefit from one; <code>async def</code> is a backend-service concern for handling many concurrent I/O-bound requests, a different problem than transforming one already-loaded table.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/20_async_await_and_blocking_calls.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run --with fastapi --with httpx python3 practice/20_async_await_and_blocking_calls.py</code></pre>
+<p>Needs <code>fastapi</code> and <code>httpx</code>, installed one-off via <code>--with</code>, same as Days 16-19. Exercises: a plain <code>async def</code> route using <code>await asyncio.sleep(...)</code>, timing five concurrent requests to that route to confirm they overlap, a deliberately broken <code>async def</code> route using blocking <code>time.sleep(...)</code> to confirm the same five requests serialize instead, and an <code>asyncio.gather()</code> call collecting several coroutine results concurrently instead of one <code>await</code> at a time.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="An async def function call does not run the body - it builds a coroutine, a paused unit of work that only advances once something awaits it (or FastAPI does, for a route). This is why calling an async def function on its own line with no await produces a coroutine object, not a result.">
+    <p class="stem">What does calling an <code>async def</code> function actually produce, before anything <code>await</code>s it?</p>
+    <button class="opt" data-ok>a coroutine object: a paused, not-yet-run unit of work</button>
+    <button class="opt">the function's full return value, already computed and ready</button>
+    <button class="opt">a brand new background thread, started up right now</button>
+  </div>
+  <div class="q" data-why="await is a checkpoint inside an async def function: if the awaited call is waiting on something external, the coroutine pauses there and the event loop advances a different coroutine that is ready to make progress, resuming this one later exactly where it paused.">
+    <p class="stem">What happens at an <code>await</code> when the awaited call is waiting on I/O?</p>
+    <button class="opt" data-ok>this coroutine pauses, letting the event loop advance another</button>
+    <button class="opt">the whole Python process halts completely until it returns</button>
+    <button class="opt">a fresh OS thread spins up to run it</button>
+  </div>
+  <div class="q" data-why="A blocking call like time.sleep() inside an async def function never awaits anything, so it never yields control back to the event loop - every other in-flight coroutine sits frozen until it finishes, confirmed directly by timing five concurrent requests: ~0.25s total instead of the ~0.05s a genuinely concurrent version gets.">
+    <p class="stem">Why does a blocking call like <code>time.sleep()</code> inside <code>async def</code> serialize concurrent requests?</p>
+    <button class="opt" data-ok>it never awaits, so it never yields control back</button>
+    <button class="opt">FastAPI detects it and silently queues every request instead</button>
+    <button class="opt">time.sleep() always raises inside any async def function body</button>
+  </div>
+  <div class="q" data-why="A plain def handler is automatically run in FastAPI's background thread pool, so a slow one occupies its own thread while other requests keep moving on other threads - a real, working form of concurrency that needs no async/await at all, confirmed by timing five concurrent time.sleep()-based plain routes at ~0.05s total.">
+    <p class="stem">How does FastAPI give a plain (non-<code>async</code>) <code>def</code> handler concurrency?</p>
+    <button class="opt" data-ok>it runs plain def handlers in its own thread pool</button>
+    <button class="opt">it silently rewrites every plain def into an async def</button>
+    <button class="opt">it cannot - a plain def always blocks every request</button>
+  </div>
+  <div class="q" data-why="asyncio.gather() fires every given awaitable off at once instead of awaiting them one after another, so the total time tracks the slowest single call rather than their sum - confirmed directly: four 0.03s coroutines awaited one at a time took ~0.12s total, the same four wrapped in one gather() call took ~0.03s total.">
+    <p class="stem">Why does wrapping several <code>await</code> calls in one <code>asyncio.gather(...)</code> finish faster than awaiting them one by one?</p>
+    <button class="opt" data-ok>gather fires them all at once, not one by one</button>
+    <button class="opt">gather secretly skips running most of the given coroutines anyway</button>
+    <button class="opt">gather always moves the whole workload onto a new thread</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> FastAPI's own <a href="https://fastapi.tiangolo.com/async/">"Concurrency and async / await"</a> page — written specifically to explain this exact plain-<code>def</code>-vs-<code>async def</code> choice for handlers, cited in RESOURCES.md as the spine for this whole phase.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day20">glossary</a> under Day 20.<br>
+Next up per PLAN.md's Phase 2b spine: talking to PostgreSQL from Python, and where the <code>backend/</code> course's concepts land.<br><br>
+💬 Anything unclear — why a blocking call inside <code>async def</code> is silent instead of an error, or when to pick <code>async def</code> over plain <code>def</code>? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

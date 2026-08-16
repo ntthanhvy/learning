@@ -84,6 +84,8 @@
       file: "lessons/0038-resample.html" },
     { n: 39, date: "2026-08-16", title: "stack(): pulling columns down into the row index",
       file: "lessons/0039-stack.html" },
+    { n: 40, date: "2026-08-17", title: "groupby().filter(): keeping whole groups, not rows",
+      file: "lessons/0040-groupby-filter.html" },
   ];
 
   const REFS = [

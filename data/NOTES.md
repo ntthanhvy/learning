@@ -2272,3 +2272,85 @@
   `DataFrame.query()` or Lesson 29's `isin()`, which filter rows, not
   whole groups — the natural SQL bridge to `HAVING`) if no drill-outcome
   signal surfaces by next generation.
+- 2026-08-17 generation (Lesson 40, headless run): a Postgres progress DB
+  is normally consulted first but was unreachable in this sandbox (psql/
+  DB read commands blocked) — fell back to `assets/nav.js` +
+  `learning-records/` per the run's own instructions. Only one learning
+  record exists (`learning-records/0001-baseline-sql-strong-python-basic.md`,
+  the course-creation baseline, treated as baseline context only, no
+  reported struggle) — no `course_progress`/`lesson_completed` signal, so
+  no reported weak spot to target. `nav.js`'s last entry was Lesson 39,
+  dated 2026-08-16, no `data/lessons/0040-*.html` existed yet — so this
+  round proceeded. Lesson 39's own teaser named `groupby().filter()`
+  explicitly (zero hits anywhere in `lessons/*.html` during that round's
+  scan; not Lesson 22's `query()` or Lesson 29's `isin()`, which filter
+  rows, not whole groups) — re-grepped `lessons/*.html` and
+  `reference/glossary.html` fresh before committing and confirmed it was
+  still genuinely uncovered (only Lesson 39's own teaser sentence
+  mentioned it), so Lesson 40 ships it as planned: the "WHERE can't ask a
+  per-group question" framing, `groupby().filter(lambda g: ...)` keeping
+  every row of groups that pass a per-group condition (count and sum
+  variants), the SQL `HAVING` bridge (spelling out the `WHERE ... IN
+  (SELECT ... GROUP BY ... HAVING ...)` subquery pandas' one-liner
+  replaces), a direct shape contrast against Lesson 4's `agg()`
+  (full-detail row subset vs. one-row-per-group summary), and a callout
+  distinguishing `filter()`'s all-or-nothing-per-group decision from
+  Lesson 22's `query()`/Lesson 29's `isin()`, which can split a group
+  apart row by row. Used the RAW, uncleaned `orders_raw.csv` (An x3, Binh
+  x2, Chi x1) rather than the pre-cleaned 4-row slice Lessons 6-39 share —
+  hand-verified first in `.scratch/data-lesson40/explore.py` that the
+  cleaned slice doesn't work for this topic (An and Binh both already
+  have exactly 2 orders each post-cleaning, so a count/sum filter can't
+  discriminate between them), then confirmed in `explore2.py` that the
+  raw fixture's natural per-customer counts (3/2/1) and totals
+  (162.0/215.5/99.9, via `pd.to_numeric(..., errors="coerce")` on the one
+  non-numeric `"unknown"` amount) give a real, discriminating split: both
+  `count >= 2` and `sum > 150` drop exactly Chi's single row (order_id 4)
+  and keep all 5 An/Binh rows — deliberately chosen so two different
+  conditions converge on the same answer for a clean "same result, two
+  routes" teaching moment. `uv run --with pandas` worked directly this
+  round (pandas 3.0.5): every number above was hand-verified in
+  `.scratch/data-lesson40/explore.py`/`explore2.py`/`explore3.py` (all
+  deleted after) before writing a word of the lesson, including confirming
+  `filter()`'s result index preserves original row positions (`[0, 1, 2,
+  4, 5]`, not reset) and that a `transform("size")`-based boolean mask
+  produces an identical DataFrame to `filter()`'s (`.equals()` check),
+  used to justify the "same subquery pandas replaces" framing precisely.
+  The shipped (unsolved) `practice/40_groupby_filter.py` was executed in
+  `.scratch/data-lesson40/run/` (mirroring the real `practice/`+`practice/
+  data/` layout) and printed all 7 ✗ cleanly with no crash on the first
+  attempt — no Ellipsis-placeholder gotcha hit this round, since all three
+  `...` positions (inside a `>=`/`>` comparison, and as a bare column-key
+  argument to `[...]`) reliably raise before any check runs, the same safe
+  shapes several recent rounds converged on — then a separately-saved
+  solved copy (`.scratch/data-lesson40/run/practice/40_solved.py`, not
+  shipped, each `...` filled in by hand) printed all 7 ✓ against the same
+  hand-verified numbers above. The shipped file was also re-run a second
+  time directly from its real `practice/` location (`cd data && uv run
+  --with pandas python3 practice/40_groupby_filter.py`) and confirmed to
+  print the identical all-✗ result with no crash. `.scratch/
+  data-lesson40/` was fully removed (`rm -rf`) after verification, no
+  approval needed this round. Added `groupby().filter()` to the glossary
+  (checked for a collision first — none; placed directly after the
+  existing `resample()`/`DatetimeIndex`/`offset alias` entries, in
+  generation order) and registered Lesson 40 in `nav.js`. Quiz options
+  were drafted and checked with a Python regex/word-count script (extracts
+  each `<div class="q">` block, strips HTML tags, whitespace-splits) run
+  via `uv run python3` (this course's established convention since Lesson
+  26/27's finding that plain `python3` needs approval while `uv run
+  python3` doesn't) — the first two drafts both came out mismatched (Q1 at
+  9/10/9, Q2 at 12/8/9, Q3 at 11/10/8 on the first pass; Q1 at 7/8/7, Q3 at
+  9/8/8 on the second) and needed two full rewrite + recount cycles before
+  a final independent recount confirmed all three genuinely level at
+  7/7/7, 8/8/8, and 9/9/9. `bin/record-progress data lesson_generated
+  --day 40 --lesson 0040-groupby-filter.html --detail
+  '{"by":"headless-run"}'` was run once from the repo root as instructed
+  and succeeded on the first try, no approval blocker this round
+  (`recorded: data/lesson_generated day=40 lesson=0040-groupby-filter.html`).
+  This agent does not run `git commit` — leaving working-tree changes
+  uncommitted is this course's established convention (confirmed by every
+  prior entry in this file); no commit was made this round either. Set the
+  teaser going forward to a fresh scan of the curriculum spine/glossary
+  for the next genuinely-uncovered pandas/NumPy pattern (no named
+  candidate left dangling from today's content) if no drill-outcome signal
+  surfaces by next generation.

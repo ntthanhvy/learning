@@ -44,6 +44,8 @@
       file: "lessons/0018-request-response-schemas.html" },
     { n: 19, date: "2026-08-16", title: "Dependency injection with Depends() & structuring an app",
       file: "lessons/0019-dependency-injection-and-app-structure.html" },
+    { n: 20, date: "2026-08-17", title: "async/await: what it buys, when it doesn't, and blocking-call traps",
+      file: "lessons/0020-async-await-and-blocking-calls.html" },
   ];
 
   const REFS = [

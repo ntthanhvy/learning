@@ -92,6 +92,8 @@
       file: "lessons/0042-interfaces-and-the-driver-abstraction.html" },
     { n: 43, date: "2026-08-17", title: "Database views and materialized views",
       file: "lessons/0043-database-views-and-materialized-views.html" },
+    { n: 44, date: "2026-08-18", title: "JSONB: when one column is allowed to be a schema of its own",
+      file: "lessons/0044-jsonb-semi-structured-columns.html" },
   ];
 
   const REFS = [

@@ -2202,3 +2202,91 @@
   and dedicated unit/integration-testing conventions (neither clearly tied
   to an existing lesson's unexplained aside the way recent gaps have been,
   worth a closer look next time no teaser is available).
+- 2026-08-18 generation (Lesson 44, headless delegated-agent run): idempotency
+  check first — confirmed no `lessons/0044-*.html` file existed and no
+  `2026-08-18` entry existed yet in `nav.js`/this log before writing anything
+  (highest existing file was 0043, dated 2026-08-17); this was already
+  independently confirmed by the orchestrating session before delegating, and
+  re-verified here via `Glob`/`Grep` rather than re-trusted blindly. Per the
+  orchestrating session's own briefing, direct DB reads (`psql`, `bin/
+  query-progress`) were confirmed blocked in this sandboxed session before
+  this round started, so no retry beyond a mental note was spent on them —
+  still no `lesson_completed` record exists for any of Lessons 1-43. Lesson 43
+  left two named, not-yet-pursued candidates in its own closing note:
+  JSONB/full-text search, and dedicated unit/integration-testing conventions.
+  Re-confirmed both via `Grep` before choosing: "JSONB"/"jsonb" had zero hits
+  anywhere in `lessons/*.html` or `glossary.html`; unit/integration testing
+  had exactly one incidental hit (Lesson 42's own "unit test" framing for why
+  an interface parameter is testable) and no dedicated lesson — both
+  genuinely open, but JSONB was chosen as squarely in-scope under MISSION
+  criterion 1 ("entities, relationships, constraints... explain the
+  trade-offs") and a direct continuation of the Lesson 2/34/38/43 schema-design
+  throughline, whereas a testing-conventions lesson would risk drifting toward
+  the Go week's own practice-heavy territory MISSION.md's constraints section
+  says this course explicitly doesn't duplicate. Lesson 44 covers it: JSONB
+  explicitly framed as NOT a loophole around Lesson 2's "tables are not JSON"
+  opening rule — fields every row shares still become real columns; JSONB is
+  for the part that genuinely varies row to row (product attributes, a raw
+  webhook payload reusing Lesson 30's own example) or would need a migration
+  (Lesson 19) per new field; the `jsonb` vs. plain `json` distinction (parsed
+  binary enabling `->>`/`@>` operators and GIN indexing, vs. re-parsed text
+  with nothing indexable) with the Postgres docs' own "preferred for almost
+  all applications" recommendation; the honest cost named explicitly — nothing
+  inside a JSONB value is enforced by Postgres (no type check, no NOT NULL, no
+  foreign key per Lesson 38), so shape validation moves entirely into
+  application code, the same "who validates this" question Lesson 17 raised
+  for request bodies generally; a comparison table (reusing Lesson 25's
+  `table.cmp`/`.cmp-wrap` component) contrasting real columns against JSONB
+  across enforcement/known-shape/variable-shape/querying; and an explicit
+  JSONB-vs-join-table decision rule (wide variation + rarely queried by inner
+  key favors JSONB; frequent filtering/joining on one specific key favors a
+  join table) so the lesson doesn't read as "JSONB is just more flexible."
+  The `fetchProduct`/`screenSizeInches` Go snippet (reusing Lesson 42's own
+  minimal `Row`/`Querier` interface pair rather than redefining it, same reuse
+  choice Lesson 43 made) was compile-checked clean with `go build -C` /
+  `go vet -C` in a scratch module (`.scratch/backend-lesson44/`, built binary
+  written to `/tmp/lesson44bin` and not copied into the scratch dir — a `rm -f`
+  on that `/tmp` path was denied by this session's bash-permission gate,
+  left in place per the harmless precedent many prior rounds' notes already
+  established; scratch dir itself left with only `go.mod`/`main.go`, same
+  end-state as most prior rounds) — no approval blocker for either `-C`-style
+  invocation this round, consistent with every round since Lesson 13's
+  finding. One proofreading catch before shipping: the callout div
+  (frontend-bridge paragraph) was first drafted with a stray `</p></div>`
+  even though the callout never opened a `<p>` tag — the exact bug class
+  Lessons 32/34/39/40/41/43's notes already flagged — caught by re-reading
+  the raw shipped file directly, not by tooling; fixed to a bare `</div>`,
+  matching every other callout in the course. Added `JSONB` to the glossary
+  (confirmed via grep beforehand it existed nowhere in `lessons/*.html` or
+  `glossary.html`) and registered Lesson 44 in nav.js. Quiz options were
+  drafted, then verified by hand-counting words per option against `Grep`
+  output (this session's bash access was intermittently denied outright
+  mid-round on some compound commands — a new wrinkle beyond the usual
+  variable-expansion/loop blocks prior rounds documented, so `wc -w`/`sed`
+  piping could not be relied on throughout; fell back to counting each
+  option's words directly against the shipped text) — all four questions
+  needed at least one rewrite pass before landing on equal counts, several
+  needing two or three successive small adjustments after a first fix over-
+  or under-shot the target by one word, the same repeated failure mode
+  nearly every prior round's notes have flagged; final tallies, each
+  recounted after every edit: Q1 8/8/8/8, Q2 9/9/9/9, Q3 9/9/9/9, Q4
+  10/10/10/10. Primary source: the PostgreSQL Manual's JSON Types page plus
+  its JSON Functions and Operators reference — RESOURCES.md already cites
+  the PostgreSQL Manual generally for "tables, constraints, defaults,
+  schemas" (already extended by Lessons 19, 21, 34, 38, 39, and 43 into
+  specific mechanisms); this lesson reads the same manual into its dedicated
+  JSON chapter. `bin/record-progress backend lesson_generated --day 44
+  --lesson 0044-jsonb-semi-structured-columns.html --detail
+  '{"by":"delegated-agent"}'` was run directly via its relative path from the
+  repo root as instructed and succeeded on the first try, no approval blocker
+  this round — consistent with every round since Lesson 32's finding that the
+  write path works reliably when invoked this way, even in a round where bash
+  access was otherwise intermittently denied for other commands. This closes
+  the JSONB gap Lesson 43's own log named but left unpursued; dedicated
+  unit/integration-testing conventions remain the other named, still-open
+  candidate from that same note, alongside the standing
+  out-of-scope-per-MISSION.md distributed-locks/blue-green-deploys pair.
+  Still no `lesson_completed` record exists for any lesson after 44 rounds —
+  the next session should keep treating a completion/quiz-outcome signal, or
+  a user-named track to deepen, as higher priority than a 45th topic picked
+  blind.

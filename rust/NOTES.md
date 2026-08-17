@@ -551,3 +551,21 @@ by the user there; they apply here identically.
   request to keep growing the bank past Day 7). `bin/record-progress` was
   not invoked since nothing new was generated or completed to log this
   round. No new learning record beyond the Day-1 baseline.
+- 2026-08-18 (headless 06:00 run, GitHub Actions): same as every prior
+  post-week day — verified `daily.html` and `assets/srs.js` are present,
+  `assets/quiz-bank.js` still has exactly 8 `id: "k` matches (the 7 real
+  kata entries `k1`-`k7` plus the commented-out example line) with `day:`
+  tags running 1-7 only, and `assets/nav.js`'s `LESSONS` array still
+  registers only the 7 Jul 8-14 lessons (`day: 1`-`day: 7`), unchanged.
+  Still the correct "daily quiz+kata" for this post-week phase per
+  PLAN.md, so nothing new was generated. A repo-wide search for
+  "2026-08-18" found no existing artifact for today before this check.
+  Direct `psql "$LEARNING_DB_URL" ...` was blocked again this session
+  ("Contains simple_expansion" — same content-level block on that exact
+  variable name as every prior round), so no `course_progress` rows
+  could be read for a scope-change signal. `bin/record-progress` was not
+  invoked since nothing new was generated or completed to log this
+  round. No new learning record beyond the Day-1 baseline. (Go skipped
+  again per its own window close, now twenty-nine days past it; backend
+  Lesson 44, data Lesson 41, and python Day 21 were generated this round
+  via delegated agents — see their own NOTES.md entries for detail.)

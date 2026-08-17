@@ -220,6 +220,15 @@
   <tr><td>asyncio.gather()</td><td>giữ nguyên "asyncio.gather()" — chạy nhiều awaitable cùng lúc thay vì await tuần tự từng cái, tổng thời gian gần bằng call chậm nhất thay vì tổng cộng dồn</td><td>Fires several awaitable coroutines off concurrently and collects every result, instead of <code>await</code>ing them one after another. Total time tracks the slowest single call rather than their sum — the concrete payoff of <code>async def</code> for I/O-bound fan-out work.</td></tr>
 </table>
 
+<h2 id="day21">Day 21 — Talking to PostgreSQL from Python</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>DB-API</td><td>giữ nguyên "DB-API" — chuẩn chung mọi driver Python theo, gồm connection và cursor</td><td>The standard shape every Python database driver exposes — a connection object representing one open link to the database, and a cursor pulled from it that actually runs SQL and holds the result rows. Used with <code>.execute(sql, params)</code> then <code>.fetchone()</code>/<code>.fetchall()</code>; <code>psycopg</code> (PostgreSQL) and the stdlib's own <code>sqlite3</code> both follow it.</td></tr>
+  <tr><td>cursor</td><td>giữ nguyên "cursor" — lấy ra từ connection, thực sự gửi SQL và giữ kết quả</td><td>The object pulled from an open DB-API connection that actually sends SQL to the server and holds the resulting rows. <code>cur.execute(sql, params)</code> runs a query; <code>cur.fetchone()</code>/<code>cur.fetchall()</code> read rows back out of it afterward.</td></tr>
+  <tr><td>placeholder</td><td>giữ nguyên "placeholder" — dấu %s (hoặc ?) trong SQL, đi kèm tuple giá trị riêng, chặn SQL injection</td><td>A marker inside a SQL string passed to <code>cursor.execute()</code> (<code>%s</code> in psycopg, <code>?</code> in sqlite3), paired with a separate values tuple. The driver sends the query text and the values to the server as two separate pieces, so a value can never be interpreted as new SQL syntax — the actual mechanism that stops SQL injection.</td></tr>
+  <tr><td>connection pool</td><td>giữ nguyên "connection pool" — tập hợp connection mở sẵn, tái sử dụng thay vì mở connection mới mỗi request</td><td>A small set of already-open database connections, created once at startup (<code>psycopg_pool.ConnectionPool</code>) and handed out per request instead of opening a fresh, slow TCP connection every time. The production-grade version of a single <code>Depends()</code>-managed connection.</td></tr>
+</table>
+
 <p class="next">💬 A term here still unclear? Ask your teacher — hỏi bằng tiếng Việt cũng được.</p>
 
 <script src="../assets/nav.js"></script>

@@ -46,6 +46,8 @@
       file: "lessons/0019-dependency-injection-and-app-structure.html" },
     { n: 20, date: "2026-08-17", title: "async/await: what it buys, when it doesn't, and blocking-call traps",
       file: "lessons/0020-async-await-and-blocking-calls.html" },
+    { n: 21, date: "2026-08-18", title: "Talking to PostgreSQL from Python",
+      file: "lessons/0021-talking-to-postgresql.html" },
   ];
 
   const REFS = [

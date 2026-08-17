@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 41 · astype(): converting a column's dtype on purpose</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 41 · ~20 min · 18 Aug 2026</p>
+<h1>astype(): converting a column's dtype on purpose</h1>
+<p class="byline">Lesson 40's teaser named no single dangling candidate, so this round is a fresh scan against the curriculum spine and glossary. <code>astype()</code> itself turned up: it has been used quietly inside code examples since Lesson 7 (<code>.astype(int)</code> on a rank) and Lesson 25 (<code>.astype("category")</code>), but never taught as its own tool — what it actually does, when it raises instead of coercing, and how it differs from Lesson 3's <code>errors="coerce"</code> functions. Today closes that gap directly.</p>
+
+<h2>1 · The problem: df.dtypes only shows you the type — it doesn't change it</h2>
+<p>Lesson 2 taught reading <code>df.dtypes</code> as the first-look ritual's second line. On the raw, uncleaned fixture:</p>
+<pre><code>raw = pd.read_csv(<span class="str">"practice/data/orders_raw.csv"</span>)
+raw.dtypes
+<span class="cm">-- order_id      int64
+-- customer        str
+-- amount          str   &lt;- has a non-numeric "unknown" value, Lesson 2's own example
+-- order_date      str
+-- dtype: object</span></code></pre>
+<p><code>amount</code> reads as text because of the one <code>"unknown"</code> row (Lesson 2's classic "one bad cell taints the whole column" finding). <code>df.dtypes</code> only reports that fact — it doesn't fix anything. <dfn data-en="a Series/DataFrame method that converts a column (or several columns, given a dict) to a specified dtype, RAISING an error the moment any value can't be represented in the target type -- the general-purpose, no-safety-net dtype converter, as opposed to pd.to_numeric()/pd.to_datetime(errors=\"coerce\"), which turn unconvertible values into NaN instead" data-vn="giữ nguyên 'astype()' — ép kiểu cả cột sang dtype chỉ định, LỖI NGAY nếu có giá trị không ép được, khác với to_numeric()/to_datetime(errors='coerce') là biến giá trị lỗi thành NaN thay vì crash">astype()</dfn> is the general-purpose tool that actually performs a conversion:</p>
+<pre><code>raw[<span class="str">"order_id"</span>].astype(<span class="str">"int32"</span>).dtype
+<span class="cm">-- dtype('int32')   &lt;- narrower int type, same values</span>
+raw[<span class="str">"order_id"</span>].astype(<span class="kw">str</span>).tolist()
+<span class="cm">-- ['1', '2', '3', '4', '5', '6']   &lt;- numbers, now as text</span></code></pre>
+
+<h2>2 · astype() raises on bad data — it does not coerce</h2>
+<p>This is the one fact that separates <code>astype()</code> from Lesson 3's cleaning tools. Try it directly on the messy <code>amount</code> column:</p>
+<pre><code>raw[<span class="str">"amount"</span>].astype(<span class="kw">float</span>)
+<span class="cm">-- ValueError: could not convert string to float: 'unknown'</span></code></pre>
+<p>No silent fallback, no partial result — the whole call fails the instant it hits one value it can't represent in the target dtype. That's the opposite of Lesson 2/3's <code>pd.to_numeric(raw["amount"], errors="coerce")</code>, which turns <code>"unknown"</code> into <code>NaN</code> and keeps every other value. Rule of thumb: reach for <code>to_numeric()</code>/<code>to_datetime()</code> with <code>errors="coerce"</code> when a column is genuinely messy and some values are expected to fail; reach for <code>astype()</code> when the column is already clean and a failure would mean something is actually wrong — the crash is a feature, not a bug, in that case.</p>
+<div class="callout"><strong>Gotcha:</strong> <code>astype(int)</code> on a column containing <code>NaN</code> always raises, even if every other value is a perfectly good whole number — a plain <code>int64</code> column has no way to represent a missing value at all:
+<pre><code>pd.Series([<span class="kw">1.0</span>, <span class="kw">2.0</span>, <span class="kw">None</span>]).astype(<span class="kw">int</span>)
+<span class="cm">-- IntCastingNaNError: Cannot convert non-finite values (NA or inf) to integer</span></code></pre>
+The fix is <code>astype("Int64")</code> (capital <code>I</code>) instead of <code>astype(int)</code> (lowercase built-in) — pandas' own nullable integer dtype, which reserves a real <code>&lt;NA&gt;</code> marker instead of demanding every value be finite:
+<pre><code>pd.Series([<span class="kw">1.0</span>, <span class="kw">2.0</span>, <span class="kw">None</span>]).astype(<span class="str">"Int64"</span>)
+<span class="cm">-- 0       1
+-- 1       2
+-- 2    &lt;NA&gt;
+-- dtype: Int64</span></code></pre>
+</div>
+
+<h2>3 · Converting several columns at once, and revisiting category</h2>
+<p>A dict maps column name to target dtype, converting more than one column in a single call — the same shape as Lesson 4's named-aggregation dict, just for types instead of aggregations:</p>
+<pre><code>raw.astype({<span class="str">"order_id"</span>: <span class="str">"int32"</span>, <span class="str">"customer"</span>: <span class="str">"category"</span>}).dtypes
+<span class="cm">-- order_id      int32
+-- customer   category
+-- amount          str
+-- order_date      str
+-- dtype: object</span></code></pre>
+<p>Lesson 25's <code>astype("category")</code> is a special case of exactly this: a memory-shrinking dtype conversion for a low-cardinality text column, not a numeric one. It follows the same raise-on-failure rule too — a column converted onto a fixed, explicit <code>CategoricalDtype</code> that's missing one of the real values in the data does something different again: it doesn't raise, it silently turns that value into <code>NaN</code> (Lesson 25 covered this gotcha directly; worth remembering it's the one common exception to today's "astype raises" rule).</p>
+
+<h2>4 · The SQL bridge: CAST, minus the silent truncation</h2>
+<p>Every SQL dialect has some spelling of <code>CAST(col AS type)</code> or <code>col::type</code> — <code>astype()</code> is that, applied to a whole pandas column at once:</p>
+<pre><code><span class="cm">-- SELECT CAST(order_id AS SMALLINT) FROM orders;</span>
+raw[<span class="str">"order_id"</span>].astype(<span class="str">"int32"</span>)
+
+<span class="cm">-- SELECT amount::TEXT FROM orders;</span>
+raw[<span class="str">"amount"</span>].astype(<span class="kw">str</span>)</code></pre>
+<p>The behavior split lines up cleanly too: Postgres' plain <code>CAST</code> raises on a genuinely unconvertible value, same as <code>astype()</code>; <code>TRY_CAST</code> (or <code>::type</code> wrapped in error handling in some engines) returns <code>NULL</code> instead of raising, same as <code>pd.to_numeric(..., errors="coerce")</code>. Same two-tool split, same two SQL/pandas pairs.</p>
+
+<div class="interview">
+<p><strong>Q: "A column comes in from a CSV as text but should be numeric. Walk me through cleaning it."</strong> A strong answer, out loud: <em>"First I'd check df.dtypes and look at a sample — if it's read as text/object, something in that column doesn't look numeric to pandas' inference. If I expect the column to be fully clean, astype(float) is the direct tool — it converts in one call and raises immediately if any value can't be represented, which is actually useful: the crash tells me my assumption about the data was wrong. If I expect some genuinely messy values, pd.to_numeric(col, errors='coerce') is the safer choice — same conversion, but unconvertible values become NaN instead of blowing up the whole pipeline, and then I'd check isna().sum() afterward to see how many rows that affected. One gotcha I'd flag either way: astype(int) specifically fails on any NaN in the column, even if the rest is clean integers, because plain int64 can't represent a missing value — the fix there is astype('Int64'), pandas' nullable integer type, if the NaNs are expected to stay."</em> The signal: naming both tools and the deliberate choice between them (raise vs. coerce), not just reaching for whichever one comes to mind first.</p>
+</div>
+
+<h2>Try it — self-checking practice (~15-20 min)</h2>
+<p>Open <code>practice/41_astype.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/41_astype.py</code></pre>
+<p>Uses the raw, uncleaned <code>orders_raw.csv</code> (same fixture as Lesson 40). Exercise 1 converts <code>order_id</code> to <code>int32</code>; Exercise 2 confirms <code>astype(float)</code> raises on the messy <code>amount</code> column while <code>pd.to_numeric(..., errors="coerce")</code> survives it; Exercise 3 converts the coerced <code>amount</code> Series (real fractional values, unlike <code>order_id</code>) to nullable <code>"Float64"</code> (its one real NaN preserved as <code>&lt;NA&gt;</code>, not a crash); Exercise 4 uses the dict form to convert two columns (<code>order_id</code>, <code>customer</code>) in a single call.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="astype() converts a column to a target dtype and raises the instant it hits any value it can't represent -- there is no partial result and no silent fallback. pd.to_numeric()/pd.to_datetime() with errors='coerce' do the opposite: unconvertible values become NaN/NaT and every other value still converts, so the call always succeeds.">
+    <p class="stem">What's the key behavioral difference between <code>astype(float)</code> and <code>pd.to_numeric(col, errors="coerce")</code> on a messy column?</p>
+    <button class="opt" data-ok>astype raises on failure, to_numeric coerces it to NaN</button>
+    <button class="opt">they are simply two spellings of one identical operation</button>
+    <button class="opt">to_numeric always raises, astype quietly coerces the bad values</button>
+  </div>
+  <div class="q" data-why="Plain int64 (and Python's built-in int) has no bit pattern reserved for a missing value -- every slot must hold a real finite integer, so astype(int) raises IntCastingNaNError the moment it meets a NaN, even if every other value in the column is a clean whole number. astype('Int64'), pandas' own nullable integer dtype (capital I), reserves a genuine <NA> marker instead, so it succeeds on the exact same data.">
+    <p class="stem">Why does <code>pd.Series([1.0, 2.0, None]).astype(int)</code> raise, while <code>.astype("Int64")</code> on the same Series succeeds?</p>
+    <button class="opt" data-ok>plain int64 can't hold NaN; nullable Int64 can hold it</button>
+    <button class="opt">int64 and Int64 are simply two names for one dtype</button>
+    <button class="opt">None only ever breaks astype when values are already floats</button>
+  </div>
+  <div class="q" data-why="astype({...}) takes a dict mapping column name to target dtype and converts every listed column in a single call -- the same dict-argument shape Lesson 4's named aggregation and Lesson 38's resample().agg({...}) already used, just carrying dtypes instead of aggregation functions this time.">
+    <p class="stem">What does <code>df.astype({"order_id": "int32", "customer": "category"})</code> do?</p>
+    <button class="opt" data-ok>converts both listed columns to their given dtypes at once</button>
+    <button class="opt">converts every column in df to the first dtype listed</button>
+    <button class="opt">renames the order_id and customer columns to entirely new labels</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the pandas User Guide's <a href="https://pandas.pydata.org/docs/user_guide/basics.html#dtypes">"dtypes" section of the Essential Basic Functionality guide</a> (~10 min) — covers the full <code>astype()</code> conversion table and the nullable dtypes (<code>Int64</code>, <code>Float64</code>, <code>boolean</code>) in more depth than today's lesson needed; the <a href="https://pandas.pydata.org/docs/user_guide/integer_na.html">"Nullable integer data type"</a> page is worth a second look if <code>Int64</code>'s <code>&lt;NA&gt;</code> behavior is still unclear.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>astype()</code> and nullable <code>Int64</code>/<code>Float64</code> were added today, placed right after the existing <code>groupby().filter()</code> entry.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-41 comes back reported as shakiest, otherwise a fresh curriculum/glossary scan for the next genuinely-uncovered pattern — <code>str.extract()</code>/regex-based string extraction (Lesson 10's <code>.str</code> accessor never went past <code>contains</code>/<code>upper</code>/<code>lower</code>/<code>startswith</code>/<code>split</code>) is a real candidate spotted during this round's scan.<br><br>
+💬 Anything unclear — the raise-vs-coerce split, the <code>Int64</code> nullable-integer fix, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

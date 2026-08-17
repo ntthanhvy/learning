@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 21 · Talking to PostgreSQL from Python</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 21 · ~20 min · 18 Aug 2026</p>
+<h1>Talking to PostgreSQL from Python</h1>
+<p class="byline">Day 19's <code>get_db()</code> dependency returned a fake <code>{"conn": "fake-db"}</code> stand-in, on purpose — the real thing needed Day 20's <code>async</code>/<code>await</code> underneath it first. Today <code>get_db()</code> becomes real: a <dfn data-en="the standard shape every Python database driver exposes - a connection object representing one open link to the database, and a cursor object pulled from it that actually runs SQL and holds the result rows, used with .execute(sql, params) and then .fetchone()/.fetchall()" data-vn="giữ nguyên &quot;DB-API&quot; — chuẩn chung mọi driver Python theo, gồm connection (1 kết nối mở tới DB) và cursor (chạy SQL, giữ kết quả), dùng qua .execute(sql, params) rồi .fetchone()/.fetchall()">DB-API</dfn> connection and cursor talking to a real PostgreSQL server through <a href="https://www.psycopg.org/psycopg3/"><code>psycopg</code></a>, wired into FastAPI the exact way Day 19 already showed — one dependency, resolved once per request, that every handler needing the database can share.</p>
+
+<div class="callout"><strong>Bridge from SQL:</strong> you already know the language spoken over this connection — <code>SELECT</code>/<code>INSERT</code>/<code>WHERE</code> haven't changed. What's new is the Python side of the wire: opening the connection, sending a query with placeholders instead of pasted-in values, and pulling rows back out as Python tuples or dicts.</div>
+
+<h2>1 · Connecting and running a query</h2>
+<p><code>psycopg.connect(...)</code> opens one connection to a running PostgreSQL server; a <dfn data-en="the object pulled from an open DB-API connection that actually sends SQL to the server and holds the resulting rows - .execute(sql, params) runs a query, and .fetchone()/.fetchall() reads rows back out of it afterward" data-vn="giữ nguyên &quot;cursor&quot; — object lấy ra từ connection đang mở, thực sự gửi SQL lên server và giữ kết quả; .execute(sql, params) chạy query, .fetchone()/.fetchall() đọc row ra sau đó">cursor</dfn> pulled from that connection is what actually sends SQL and reads rows back:</p>
+<pre><code><span class="kw">import</span> psycopg
+
+<span class="kw">with</span> psycopg.connect(<span class="str">"postgresql://user:pw@localhost/mydb"</span>) <span class="kw">as</span> conn:
+    <span class="kw">with</span> conn.cursor() <span class="kw">as</span> cur:
+        cur.execute(<span class="str">"SELECT id, name FROM users WHERE id = %s"</span>, (<span class="kw">7</span>,))
+        row = cur.fetchone()          <span class="kw"># one tuple, or None</span>
+        <span class="kw">print</span>(row)                     <span class="kw"># (7, 'alice')</span></code></pre>
+<p>Both <code>with</code> blocks are Day 6's context manager, doing exactly what it always does: the cursor closes when its block ends, and the connection closes — releasing the network socket — when its own block ends, guaranteed even if <code>execute()</code> raises partway through. <code>fetchone()</code> reads a single row (or <code>None</code> if there isn't one); <code>fetchall()</code> reads every remaining row as a list of tuples. Nothing here is a new idea — it's Day 6's file-handle pattern, aimed at a network connection instead of a file on disk.</p>
+
+<h2>2 · Placeholders, not string-building — this is where injection lives</h2>
+<p>The <code>%s</code> in <code>cur.execute("... WHERE id = %s", (7,))</code> is a <dfn data-en="a %s marker inside a SQL string passed to cursor.execute(), paired with a separate values tuple - the driver sends the query text and the values to the server as two separate pieces, so a value can never be interpreted as new SQL syntax no matter what characters it contains" data-vn="giữ nguyên &quot;placeholder&quot; — dấu %s trong chuỗi SQL truyền cho cursor.execute(), đi kèm 1 tuple giá trị riêng; driver gửi câu SQL và giá trị lên server thành 2 phần tách biệt, nên giá trị không bao giờ bị hiểu thành cú pháp SQL mới">placeholder</dfn>, not Python string formatting — <code>execute()</code> sends the query text and the values tuple to the server as two separate pieces, so a value can never be interpreted as SQL syntax, no matter what characters it contains. This is exactly the defense the <code>backend/</code> course's own <a href="../../backend/lessons/0017-sql-injection-and-input-validation.html">SQL injection lesson</a> names abstractly (parameterized queries over pasted-in values) — today is where that concept lands in actual Python code, not new theory.</p>
+<pre><code><span class="kw"># DANGEROUS - never do this: builds SQL out of untrusted input</span>
+cur.execute(<span class="str">f"SELECT * FROM users WHERE name = '{name}'"</span>)
+
+<span class="kw"># SAFE - the placeholder, always</span>
+cur.execute(<span class="str">"SELECT * FROM users WHERE name = %s"</span>, (name,))</code></pre>
+<p>Confirmed directly against a real table: passing <code>name = "x' OR '1'='1"</code> through the f-string version rewrites the query into matching every row; the same value through the placeholder version is sent as one literal string to compare against <code>name</code>, matching zero rows — the input never touches the query's grammar. The rule from the earlier line: the SQL string passed to <code>execute()</code> is written once, by you, and never contains anything read from a request.</p>
+
+<h2>3 · A connection as a <code>Depends()</code> dependency</h2>
+<p>Day 19's <code>get_db()</code> returned <code>{"conn": "fake-db"}</code> specifically so today could swap in the real thing without changing anything else about how handlers use it — same <code>Depends(get_db)</code> call, same one-per-request guarantee:</p>
+<pre><code><span class="kw">from</span> fastapi <span class="kw">import</span> FastAPI, Depends
+<span class="kw">import</span> psycopg
+
+app = FastAPI()
+
+<span class="kw">def</span> get_db():
+    <span class="kw">with</span> psycopg.connect(<span class="str">"postgresql://user:pw@localhost/mydb"</span>) <span class="kw">as</span> conn:
+        <span class="kw">yield</span> conn              <span class="kw"># handler runs here, using conn</span>
+                                <span class="kw"># conn closes when the request ends</span>
+
+<span class="kw">@app.get</span>(<span class="str">"/users/{user_id}"</span>)
+<span class="kw">def</span> get_user(user_id: <span class="kw">int</span>, conn = Depends(get_db)):
+    <span class="kw">with</span> conn.cursor() <span class="kw">as</span> cur:
+        cur.execute(<span class="str">"SELECT id, name FROM users WHERE id = %s"</span>, (user_id,))
+        row = cur.fetchone()
+        <span class="kw">return</span> {<span class="str">"id"</span>: row[<span class="kw">0</span>], <span class="str">"name"</span>: row[<span class="kw">1</span>]}</code></pre>
+<p>A <code>yield</code>-based dependency is Day 11's pytest fixture idea again, one layer down: the code before <code>yield</code> is setup (open the connection), <code>get_user</code> runs while paused at <code>yield</code>, and the code after <code>yield</code> — here, the <code>with</code> block simply ending — is teardown (close the connection), guaranteed to run after the handler finishes, success or exception. Every handler needing the database just adds <code>conn = Depends(get_db)</code>; none of them opens a connection by hand.</p>
+
+<h2>4 · Real production code uses a pool, and goes async</h2>
+<p>Opening a fresh TCP connection to PostgreSQL on every single request is slow and wastes server resources — real services keep a <dfn data-en="a small set of already-open database connections, created once at startup and handed out per request instead of opening a fresh, slow TCP connection every time - the production-grade version of a single Depends()-managed connection" data-vn="giữ nguyên &quot;connection pool&quot; — tập hợp connection mở sẵn, tạo 1 lần lúc khởi động, phát ra dùng theo từng request thay vì mở connection mới mỗi lần">connection pool</dfn> of already-open connections ready and hand one out per request instead, exactly the resource-reuse idea Day 19's callout named without building it. <code>psycopg_pool.ConnectionPool</code> does this: created once at startup, its <code>.connection()</code> gives out an existing connection instead of opening a new socket each time. And since a query is pure I/O — the exact case Day 20 said <code>async def</code> pays off for — <code>psycopg</code> ships an async-native pair, <code>AsyncConnection</code> and <code>AsyncConnectionPool</code>, so a query <code>await</code>s the network round trip instead of blocking the whole event loop while PostgreSQL thinks:</p>
+<pre><code><span class="kw">import</span> psycopg
+
+<span class="kw">async</span> <span class="kw">def</span> get_user_async(user_id: <span class="kw">int</span>):
+    <span class="kw">async</span> <span class="kw">with</span> <span class="kw">await</span> psycopg.AsyncConnection.connect(<span class="str">"postgresql://..."</span>) <span class="kw">as</span> conn:
+        <span class="kw">async</span> <span class="kw">with</span> conn.cursor() <span class="kw">as</span> cur:
+            <span class="kw">await</span> cur.execute(<span class="str">"SELECT id, name FROM users WHERE id = %s"</span>, (user_id,))
+            <span class="kw">return</span> <span class="kw">await</span> cur.fetchone()</code></pre>
+<p><code>async with</code> is <code>with</code> for an object whose <code>__aenter__</code>/<code>__aexit__</code> need to <code>await</code> something (opening or closing the connection is itself I/O); otherwise every idea here is identical to section 1 — connect, get a cursor, execute with placeholders, fetch rows — just each blocking step replaced by its awaitable twin, exactly Day 20 section 3's fix for the blocking-call trap applied to a real driver instead of <code>time.sleep()</code>.</p>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> <code>pd.read_sql("SELECT ...", conn)</code> takes a connection exactly like today's and returns a whole DataFrame in one call — convenient for a one-shot analysis script, but it opens and holds one connection for the life of that script; a backend service instead needs many short-lived queries sharing a pool across concurrent requests, which is what today's dependency and pool solve.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/21_talking_to_postgresql.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/21_talking_to_postgresql.py</code></pre>
+<p>No running PostgreSQL server and no <code>--with</code> needed today — the exercises use the standard library's own <code>sqlite3</code> module, which follows the identical DB-API shape as <code>psycopg</code> (<code>connect()</code>, <code>cursor()</code>, <code>execute(sql, params)</code>, <code>fetchone()</code>/<code>fetchall()</code>, <code>%s</code>-vs-<code>?</code> placeholders being the one real syntax difference) against a throwaway in-memory database, so every TODO is real, runnable DB-API code without needing a live Postgres install in this sandbox. Exercises: connecting and running a parameterized <code>SELECT</code>, proving a placeholder query is immune to a classic injection string that an f-string version isn't, a <code>yield</code>-based dependency function opening then closing a connection around a piece of work, and reading multiple rows back with <code>fetchall()</code>.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="cursor.execute(sql, params) sends the SQL text and the values as two separate pieces to the server, so a value can never be interpreted as new SQL syntax regardless of its contents - confirmed directly by passing an injection-style string through both an f-string query (rewrites the query) and a placeholder query (matches zero rows, treated as one literal value).">
+    <p class="stem">Why does a <code>%s</code> placeholder in <code>cursor.execute(sql, params)</code> stop SQL injection?</p>
+    <button class="opt" data-ok>the SQL text and values are sent separately</button>
+    <button class="opt">psycopg secretly deletes every quote character it finds</button>
+    <button class="opt">PostgreSQL always rejects any query holding user input</button>
+  </div>
+  <div class="q" data-why="fetchone() reads a single row back from the cursor (or None if there isn't one), while fetchall() reads every remaining row as a list of tuples - both pull rows the query already ran and the server already returned, they don't run any query themselves.">
+    <p class="stem">What is the difference between <code>cur.fetchone()</code> and <code>cur.fetchall()</code>?</p>
+    <button class="opt" data-ok>fetchone reads one row, fetchall reads every remaining row</button>
+    <button class="opt">fetchone always fails loudly, while fetchall always succeeds silently</button>
+    <button class="opt">fetchall only ever works with sqlite3, never with psycopg</button>
+  </div>
+  <div class="q" data-why="A yield-based get_db() dependency splits into setup before yield (open the connection) and teardown after yield (close it), guaranteed to run once the handler using it finishes, success or exception - the same fixture-shaped guarantee Day 11's pytest fixtures and Day 6's context managers already established.">
+    <p class="stem">In a <code>yield</code>-based <code>get_db()</code> dependency, what happens to the code written after the <code>yield</code>?</p>
+    <button class="opt" data-ok>it runs as teardown once the handler finishes using it</button>
+    <button class="opt">it runs immediately, well before the handler even starts running</button>
+    <button class="opt">it never runs unless the handler itself raises an exception</button>
+  </div>
+  <div class="q" data-why="Opening a fresh connection per request is slow and wastes resources, so a real service keeps a small set of already-open connections ready via psycopg_pool.ConnectionPool and hands one out per request instead of opening a new socket each time - the concrete reason a pool exists rather than one plain connect() call per handler.">
+    <p class="stem">Why does a real service use a connection pool instead of calling <code>connect()</code> fresh on every request?</p>
+    <button class="opt" data-ok>opening a new connection per request is slow and wasteful</button>
+    <button class="opt">PostgreSQL itself will only ever accept exactly one connection, period</button>
+    <button class="opt">psycopg refuses to ever run more than one query, ever</button>
+  </div>
+  <div class="q" data-why="A query is pure I/O - waiting on a network round trip to PostgreSQL - the exact case Day 20 said async def pays off for, since the event loop can advance other in-flight requests during that wait instead of one thread sitting idle for it.">
+    <p class="stem">Per Day 20's framing, why does an <code>await cur.execute(...)</code> database query suit <code>async def</code> well?</p>
+    <button class="opt" data-ok>it is I/O-bound, so the event loop can advance others</button>
+    <button class="opt">async def makes every single query run measurably faster always</button>
+    <button class="opt">PostgreSQL refuses any connection opened from a plain def handler</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> psycopg's own <a href="https://www.psycopg.org/psycopg3/docs/basic/usage.html">"Basic module usage"</a> page for the DB-API shape used in section 1, and its <a href="https://www.psycopg.org/psycopg3/docs/advanced/async.html">"Asynchronous operations"</a> page for section 4 — both official docs for the driver this lesson uses. (Not yet in RESOURCES.md; worth adding under a new "Knowledge — backend" entry alongside FastAPI and pydantic.)</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day21">glossary</a> under Day 21.<br>
+Next up per PLAN.md's Phase 2b spine: testing endpoints with <code>httpx</code>; errors, middleware, and a deployable shape.<br><br>
+💬 Anything unclear — why placeholders and not string formatting, or how a pool differs from one plain connection? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

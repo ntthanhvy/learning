@@ -2354,3 +2354,86 @@
   for the next genuinely-uncovered pandas/NumPy pattern (no named
   candidate left dangling from today's content) if no drill-outcome signal
   surfaces by next generation.
+- 2026-08-18 generation (Lesson 41, headless 06:00 run): idempotency was
+  pre-confirmed by the orchestrating session (no `data/lessons/0041-*.html`,
+  no 2026-08-18 entry anywhere) — proceeded directly to Lesson 41. Direct
+  Postgres reads (`psql "$LEARNING_DB_URL" ...`, `bin/query-progress`) were
+  confirmed blocked in this sandboxed session (one retry only, not looped,
+  per the run's own instructions) — still no `course_progress` rows
+  readable and no `lesson_completed` record beyond the Lesson 1 baseline,
+  so no reported weak spot to target. Lesson 40's own teaser named no
+  single dangling candidate ("a fresh scan of the curriculum spine/glossary
+  for the next genuinely-uncovered pattern"), so this round ran that scan
+  via a sub-agent checking ten candidate topics against every lesson body
+  and the glossary: `first()`/`last()` groupby aggs, `agg()` with a list of
+  functions, `astype()`, `merge_asof()`, `.T`/transpose, `as_index=False`,
+  `how="cross"` merges, multi-output `.agg()` (already covered, Lesson 4),
+  `str.extract()`, and `pd.to_numeric()`/`pd.to_datetime()` as their own
+  topic. `astype()` came back the strongest candidate: used incidentally
+  since Lesson 7 (`.astype(int)` on a rank) and Lesson 25
+  (`.astype("category")`), but never taught as its own general-purpose
+  tool — a clean, natural-difficulty gap ties to Lesson 2's dtype
+  inspection, Lesson 3's `errors="coerce"` cleaning functions, and Lesson
+  25's category dtype without repeating any of them. Lesson 41 ships:
+  `astype()` as the general dtype converter that RAISES on any
+  unconvertible value (contrasted directly against `to_numeric`/
+  `to_datetime`'s `errors="coerce"`, which silently produces NaN/NaT
+  instead), the `astype(int)`-on-NaN `IntCastingNaNError` gotcha and its
+  fix (`astype("Int64")`, pandas' nullable integer dtype, capital I), the
+  dict form for converting multiple columns in one call (revisiting Lesson
+  25's category dtype as a special case of this same tool), and the SQL
+  bridge (`CAST`/`::type` for the raising form, `TRY_CAST` for the
+  coercing form). `uv run --with pandas` worked directly this round
+  (pandas 3.0.5, confirmed via `uv run --with pandas python3 -c
+  "import pandas; print(pandas.__version__)"`): every number was hand-
+  verified in `.scratch/data-lesson41/explore.py`/`explore2.py`/
+  `explore3.py` (all deleted after) before writing the lesson text,
+  including a real bug caught mid-round — the first draft of Exercise 3
+  planned to convert the coerced `amount` Series to nullable `"Int64"`,
+  copying the lesson's own `1.0, 2.0, None` toy example, but `amount`'s
+  real values are fractional (120.0, 35.5, etc.) and `astype("Int64")` on
+  genuinely fractional floats raises `TypeError: cannot safely cast
+  non-equivalent float64 to int64` — caught by actually running the solved
+  practice file, not just by reasoning about it. Fixed by switching
+  Exercise 3 to nullable `"Float64"` instead (verified: preserves the one
+  real NaN as `<NA>`, dtype `Float64`), which also makes a more honest
+  teaching point — the nullable-dtype idea generalizes past just integers.
+  The shipped (unsolved) `practice/41_astype.py` was executed directly in
+  `practice/` (pre-existing fixture, no copy needed) and initially showed 2
+  false ✓s on unsolved code: `astype(...)` with a literal Ellipsis argument
+  raises `TypeError: Cannot interpret 'Ellipsis' as a data type`, which was
+  being caught by an overly broad `except (ValueError, TypeError)` in the
+  Exercise 2 "raised" check (making it pass by accident) and by a
+  `pd.Series(dtype="Int64")` exception fallback in Exercise 3 that
+  coincidentally already had the target dtype (making that check pass too,
+  same class of gotcha as Lessons 19-21's Ellipsis-is-truthy family, but a
+  new variant — an Ellipsis-triggered exception being caught by a *correct*
+  except clause meant for a different real failure). Fixed by hardcoding
+  the demonstrative `raw["amount"].astype(float)` call in Exercise 2 (not
+  a fill-in-the-blank — it's fixed code proving the raise behavior) and
+  changing the Exercise 3 fallback to `pd.Series(dtype=object)`; re-ran and
+  confirmed all 7 real fill-in-the-blank checks print ✗ (plus the one
+  fixed demonstrative check correctly printing ✓, since it isn't a
+  placeholder), no crash. A solved copy (`.scratch/data-lesson41/
+  solved.py`, deleted after — plain `rm -rf` on the whole `.scratch/
+  data-lesson41/` worked fine this round, no approval needed) printed all
+  8 ✓ against the same hand-verified values. Added `astype()` and
+  `nullable Int64 / Float64` to the glossary (checked for collisions
+  first — none; placed directly after the existing `groupby().filter()`
+  entry) and registered Lesson 41 in `nav.js`. Quiz options were drafted
+  and checked with a `uv run python3` regex/word-count script (extracts
+  each `<div class="q">` block, strips tags, whitespace-splits — this
+  course's established convention since Lessons 26/27) — all three
+  questions needed two to three rewrite passes before landing level (Q1
+  9/9/9, Q2 10/10/10, Q3 10/10/10), each pass re-verified by re-running the
+  script rather than eyeballing, per Lesson 19/22's standing warning that a
+  single pass isn't infallible. `bin/record-progress data lesson_generated
+  --day 41 --lesson 0041-astype.html --detail '{"by":"launchd"}'` was run
+  once from the repo root as instructed — outcome noted in the report back
+  to the orchestrating session. This agent does not run `git commit` —
+  leaving working-tree changes uncommitted remains this course's
+  established convention. Set the teaser going forward to
+  `str.extract()`/regex-based string extraction (Lesson 10's `.str`
+  accessor never went past `contains`/`upper`/`lower`/`startswith`/
+  `split`) if no drill-outcome signal surfaces by next generation —
+  confirmed genuinely uncovered by this round's own ten-topic scan.

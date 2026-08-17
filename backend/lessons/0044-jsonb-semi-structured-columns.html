@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 44 · JSONB: when one column is allowed to be a schema of its own</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 44 · ~20 min</p>
+<h1>JSONB: when one column is allowed to be a schema of its own</h1>
+<p class="byline">Lesson 2 opened this course with a rule: tables are not JSON, break the blob into columns and rows. That rule still holds — but Postgres also ships a column type that stores JSON directly. Today: what <code>JSONB</code> actually is, why it isn't a loophole around Lesson 2, and the one honest reason to reach for it.</p>
+
+<h2>1 · Not a loophole — a different problem</h2>
+<p>Lesson 2's rule was about data with a known, fixed shape: an order has a total, a status, a customer id — every order has the same fields, so they become columns, and normalization (Lesson 2 again) keeps each fact in one place. A <dfn data-en="a Postgres column type storing JSON in a parsed, indexable binary form rather than plain text — queryable by key/path, unlike a text column that happens to hold JSON-shaped text" data-vn="JSONB (giữ nguyên) — kiểu cột Postgres lưu JSON dạng nhị phân đã parse sẵn, query được theo key/path, khác text column chỉ tình cờ chứa chuỗi giống JSON">JSONB</dfn> column exists for the opposite case: data whose shape genuinely varies row to row, or changes often enough that a migration (Lesson 19) for every new field would be constant churn — a product's attributes (a shirt has size and color, a laptop has RAM and screen size), a webhook's raw payload (Lesson 30), or a user's arbitrary settings blob.</p>
+
+<pre><code><span class="kw">CREATE</span> <span class="kw">TABLE</span> products (
+  id            <span class="ty">bigserial</span> <span class="kw">PRIMARY KEY</span>,
+  name          <span class="ty">text</span> <span class="kw">NOT NULL</span>,
+  price_cents   <span class="ty">integer</span> <span class="kw">NOT NULL</span>,
+  attributes    <span class="ty">jsonb</span> <span class="kw">NOT NULL</span> <span class="kw">DEFAULT</span> <span class="st">'{}'</span>
+);
+
+<span class="kw">INSERT</span> <span class="kw">INTO</span> products (name, price_cents, attributes) <span class="kw">VALUES</span>
+  (<span class="st">'T-Shirt'</span>, <span class="kw">1999</span>, <span class="st">'{"size": "M", "color": "blue"}'</span>),
+  (<span class="st">'Laptop'</span>,  <span class="kw">129999</span>, <span class="st">'{"ram_gb": 16, "screen_in": 14}'</span>);</code></pre>
+
+<p><code>name</code> and <code>price_cents</code> stay real columns — every product has both, and Lesson 2's reasoning still wins there. Only the genuinely variable part moves into <code>attributes</code>. That split, not an all-or-nothing choice, is the actual skill this lesson teaches.</p>
+
+<div class="callout"><strong>The frontend equivalent you already own.</strong> This is the same instinct as a TypeScript interface with a few required fields plus one <code>metadata: Record&lt;string, unknown&gt;</code> catch-all — the fields every consumer relies on stay typed and named, and the genuinely-varies-per-item data goes in the escape hatch instead of forcing every possible field to exist on every object. JSONB is that escape hatch, enforced by the database instead of a type checker.</div>
+
+<h2>2 · JSONB vs. a plain text column: it's actually queryable</h2>
+<p>Postgres has two JSON types: <code>json</code> stores the exact text you sent, byte for byte; <code>jsonb</code> parses it into a binary form on write. That parse cost buys real capability — <code>jsonb</code> supports operators that reach inside the value without pulling the whole blob into application code and parsing it there:</p>
+
+<pre><code><span class="cm">-- ->> gets a top-level key as text</span>
+<span class="kw">SELECT</span> name <span class="kw">FROM</span> products <span class="kw">WHERE</span> attributes ->> <span class="st">'color'</span> = <span class="st">'blue'</span>;
+
+<span class="cm">-- @> checks "does this JSONB contain this JSONB" -- the operator a GIN index speeds up</span>
+<span class="kw">SELECT</span> name <span class="kw">FROM</span> products <span class="kw">WHERE</span> attributes @&gt; <span class="st">'{"size": "M"}'</span>;
+
+<span class="cm">-- an index on the whole column, so @> queries don't scan every row</span>
+<span class="kw">CREATE</span> <span class="kw">INDEX</span> <span class="kw">ON</span> products <span class="kw">USING</span> GIN (attributes);</code></pre>
+
+<p>Almost nobody reaches for plain <code>json</code> in new code for exactly this reason: it re-parses the text on every single access, and nothing inside it can be indexed the way <code>@&gt;</code> above can. <code>jsonb</code> is the default any current guide recommends unless byte-for-byte input preservation is the actual requirement (rare — auditing raw webhook payloads is one of the few real cases).</p>
+
+<h2>3 · What you give up: everything Lesson 2's structure bought you</h2>
+<p>A JSONB column has no schema Postgres enforces. Nothing stops one row's <code>attributes</code> from having <code>"ram_gb": 16</code> as a number and another's from having <code>"ram_gb": "16GB"</code> as a string in the same column — a foreign key (Lesson 38), a <code>NOT NULL</code>, a <code>CHECK</code> constraint, none of that reaches inside a JSONB value. A <code>CHECK (attributes ? 'sku')</code> can require a key to exist, but it can't require a specific type or range the way a real column's constraint can. This is the actual trade, stated plainly rather than left implicit: JSONB moves shape enforcement out of the database and into application code, the same "who validates this" question Lesson 17 raised for request bodies — except here the untrusted-shape risk is now sitting in the database itself, not just at the API boundary.</p>
+
+<div class="cmp-wrap">
+<table class="cmp">
+<thead><tr><th>Real columns</th><th>JSONB column</th></tr></thead>
+<tbody>
+<tr><th>Shape enforcement</th><td>Postgres enforces types, NOT NULL, CHECK, foreign keys</td><td>Nothing enforced inside the value — any shape can be written</td></tr>
+<tr><th>When the shape is known and shared</th><td>The right default — every row has the same fields</td><td>Forces every consumer to defensively check for missing/wrong-typed keys</td></tr>
+<tr><th>When the shape genuinely varies per row</th><td>Needs a migration per new field, or a sparse table of unused columns</td><td>New fields need no migration at all</td></tr>
+<tr><th>Querying/filtering by a field</th><td>A plain indexed WHERE, no operators to learn</td><td>Needs -&gt;&gt;/@&gt; operators and usually a GIN index to stay fast</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>The rule of thumb: if you can name the field and every row needs it, it's a column — Lesson 2's rule hasn't changed. Reach for JSONB only for the part that's genuinely per-row-variable, and only after checking whether a join table (also Lesson 2) fits better — a <code>product_attributes</code> table with <code>product_id, key, value</code> rows is fully queryable and indexable with plain SQL, at the cost of being more verbose to read and write than one JSONB blob. JSONB wins when the variation is wide (many different keys across rows) and rarely needs to be queried by individual key; a join table wins when a specific key needs to be filtered, joined, or aggregated on often.</p>
+
+<pre><code><span class="cm">// ProductAttrs is deliberately untyped at the Go layer — attributes vary
+// per row, so there's no single struct that fits every product. Callers
+// look up only the keys they care about and handle a missing/wrong-typed
+// key explicitly, the same defensive shape Lesson 17 taught for any
+// untrusted input.
+</span><span class="kw">type</span> ProductAttrs <span class="kw">map</span>[<span class="ty">string</span>]<span class="kw">any</span>
+
+<span class="kw">type</span> Product <span class="kw">struct</span> {
+    ID         <span class="ty">int64</span>
+    Name       <span class="ty">string</span>
+    PriceCents <span class="ty">int64</span>
+    Attrs      ProductAttrs
+}
+
+<span class="cm">// fetchProduct scans the jsonb column straight into a Go map -- pgx/
+// encoding/json both do this unmarshal automatically for a []byte/map
+// destination, no manual parsing step needed.
+</span><span class="kw">func</span> fetchProduct(ctx context.Context, q Querier, id <span class="ty">int64</span>) (Product, <span class="kw">error</span>) {
+    row := q.QueryRow(ctx,
+        <span class="st">`SELECT id, name, price_cents, attributes FROM products WHERE id = $1`</span>, id)
+    <span class="kw">var</span> p Product
+    <span class="kw">if</span> err := row.Scan(&amp;p.ID, &amp;p.Name, &amp;p.PriceCents, &amp;p.Attrs); err != <span class="kw">nil</span> {
+        <span class="kw">return</span> Product{}, fmt.Errorf(<span class="st">"fetch product %d: %w"</span>, id, err)
+    }
+    <span class="kw">return</span> p, <span class="kw">nil</span>
+}
+
+<span class="cm">// screenSizeInches reads one specific key defensively -- exactly what
+// "nothing enforced inside the value" (section 3) means in application code.
+</span><span class="kw">func</span> screenSizeInches(p Product) (<span class="ty">float64</span>, <span class="kw">bool</span>) {
+    v, ok := p.Attrs[<span class="st">"screen_in"</span>]
+    <span class="kw">if</span> !ok {
+        <span class="kw">return</span> <span class="kw">0</span>, <span class="kw">false</span>
+    }
+    f, ok := v.(<span class="ty">float64</span>) <span class="cm">// encoding/json decodes every JSON number as float64
+</span>    <span class="kw">return</span> f, ok
+}</code></pre>
+
+<div class="interview">
+<p><strong>Q: "When would you use a JSONB column instead of normal columns?"</strong> A strong answer, out loud: <em>"When the shape genuinely varies per row and doesn't share a fixed set of fields — product attributes across totally different categories, or a raw webhook payload I want to keep intact. If every row has the same fields, those stay real columns with real constraints; JSONB gives up type checking, NOT NULL, and foreign keys inside the value, so I'm choosing to push that validation into application code. I'd also check whether a join table fits better first — JSONB wins when I rarely need to filter by a specific inner key, a join table wins when I do."</em> The signal: naming the enforcement trade-off explicitly, not just "JSONB is flexible."</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Lesson 2's rule still applies to any field every row shares — those stay real columns with real constraints. JSONB is for the part that genuinely varies row to row, not a blanket replacement for normal schema design.">
+    <p class="stem">Per this lesson, when should a field become a real column instead of living inside JSONB?</p>
+    <button class="opt" data-ok>whenever every row needs that same exact field</button>
+    <button class="opt">whenever the table already has ten total columns</button>
+    <button class="opt">whenever the framework auto-generates the needed migration file</button>
+    <button class="opt">whenever a query reads that field more often</button>
+  </div>
+  <div class="q" data-why="jsonb parses the value into a binary form on write, which is what enables operators like ->> and @> to query inside it directly, plus GIN indexing. Plain json stores the exact input text and re-parses it on every access, with nothing inside it indexable.">
+    <p class="stem">Why does jsonb support indexed queries into its keys while plain json does not?</p>
+    <button class="opt" data-ok>jsonb parses into binary on write, enabling indexed lookups</button>
+    <button class="opt">jsonb secretly duplicates every value into new normal columns</button>
+    <button class="opt">jsonb rejects any row whose keys aren't indexed already</button>
+    <button class="opt">jsonb always stores each key in its own row</button>
+  </div>
+  <div class="q" data-why="Nothing inside a JSONB value is enforced by Postgres -- not a type, not NOT NULL, not a foreign key. That validation moves entirely into application code, the exact trade section 3 names as the actual cost of choosing JSONB.">
+    <p class="stem">What does a JSONB column give up compared to real, typed columns?</p>
+    <button class="opt" data-ok>Postgres enforces nothing about the shape inside the value</button>
+    <button class="opt">Postgres refuses to store more than one JSON key</button>
+    <button class="opt">Postgres blocks every index from being created on it</button>
+    <button class="opt">Postgres silently converts every key's value to plain text</button>
+  </div>
+  <div class="q" data-why="JSONB fits best when the variation across rows is wide and individual inner keys are rarely queried on their own. A join table (product_id, key, value rows) stays fully queryable and indexable by any specific key with plain SQL, at the cost of being more verbose than one JSONB blob.">
+    <p class="stem">When does a join table fit better than a JSONB column for varying attributes?</p>
+    <button class="opt" data-ok>when a specific inner key needs frequent filtering or joins</button>
+    <button class="opt">when the attributes never change after each row is made</button>
+    <button class="opt">when every row happens to share the exact same keys</button>
+    <button class="opt">when the table is not expected to grow past ten</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the <a href="https://www.postgresql.org/docs/current/datatype-json.html">PostgreSQL Manual's JSON Types</a> page, together with its <a href="https://www.postgresql.org/docs/current/functions-json.html">JSON Functions and Operators</a> reference for <code>-&gt;&gt;</code>/<code>@&gt;</code> and the rest — RESOURCES.md already cites the PostgreSQL Manual generally for "tables, constraints, defaults, schemas" (already extended by Lessons 19, 21, 34, 38, 39, and 43 into specific mechanisms); this lesson reads the same manual into its dedicated JSON chapter, which states outright that <code>jsonb</code> is preferred for "almost all applications" over plain <code>json</code>.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> open — still no reported quiz/lesson-completion outcome exists for any lesson after 43 rounds; distributed locks and blue-green/canary deploys remain the last named, confirmed out-of-scope-per-MISSION.md candidates if no fresh gap or user-chosen track surfaces first.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

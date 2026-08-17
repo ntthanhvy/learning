@@ -86,6 +86,8 @@
       file: "lessons/0039-stack.html" },
     { n: 40, date: "2026-08-17", title: "groupby().filter(): keeping whole groups, not rows",
       file: "lessons/0040-groupby-filter.html" },
+    { n: 41, date: "2026-08-18", title: "astype(): converting a column's dtype on purpose",
+      file: "lessons/0041-astype.html" },
   ];
 
   const REFS = [

@@ -88,6 +88,8 @@
       file: "lessons/0040-groupby-filter.html" },
     { n: 41, date: "2026-08-18", title: "astype(): converting a column's dtype on purpose",
       file: "lessons/0041-astype.html" },
+    { n: 42, date: "2026-08-19", title: "str.extract(): pulling structured pieces out of text",
+      file: "lessons/0042-str-extract.html" },
   ];
 
   const REFS = [

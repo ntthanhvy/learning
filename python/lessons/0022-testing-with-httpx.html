@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 22 · Testing endpoints with httpx</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 22 · ~20 min · 19 Aug 2026</p>
+<h1>Testing endpoints with <code>httpx</code></h1>
+<p class="byline">Every FastAPI practice file since Day 16 has quietly built a <code>TestClient</code> and called it from inside a lambda — that machinery was never explained, just used. Today it gets a name and a real treatment: <code>fastapi.testclient.TestClient</code> is a thin wrapper around <a href="https://www.python-httpx.org/"><code>httpx</code></a>, the same library Day 20 used to drive concurrent requests, aimed here at writing <code>test_*</code> functions that call routes in-process — no running server, no network — and <code>assert</code> on the status code and JSON body exactly the way Day 11's <code>pytest</code> already taught.</p>
+
+<div class="callout"><strong>Bridge from SQL:</strong> this is the same discipline as a query-result assertion suite run after a schema migration — "hit this endpoint with this input, the response must be exactly this status and this body, every time." <code>TestClient</code> just gives Python handlers the same repeatable check a saved <code>SELECT</code> + expected-rows comparison gives a schema change.</div>
+
+<h2>1 · <code>TestClient</code> is <code>httpx</code>, talking to your app without a network</h2>
+<p>A real client sends bytes over a socket to a running server. <code>TestClient(app)</code> skips the socket entirely — it hands each request straight to <code>app</code> in the same process via a <dfn data-en="the interface FastAPI (and any ASGI web framework) exposes for handling one request - a plain Python callable, not a network socket, so a test client can call it directly in-process with no server running and no real network involved" data-vn="giữ nguyên &quot;ASGI&quot; — interface mà FastAPI (và mọi framework ASGI) expose để xử lý 1 request, chỉ là 1 callable Python thường, nên test client gọi thẳng trong cùng process, không cần server chạy thật, không qua network">ASGI</dfn> interface FastAPI already speaks, and gets the response straight back, no bytes serialized in between:</p>
+<pre><code><span class="kw">from</span> fastapi <span class="kw">import</span> FastAPI
+<span class="kw">from</span> fastapi.testclient <span class="kw">import</span> TestClient
+
+app = FastAPI()
+
+<span class="kw">@app.get</span>(<span class="str">"/users/{user_id}"</span>)
+<span class="kw">def</span> get_user(user_id: <span class="kw">int</span>):
+    <span class="kw">return</span> {<span class="str">"user_id"</span>: user_id, <span class="str">"name"</span>: <span class="str">"an"</span>}
+
+client = TestClient(app)
+response = client.get(<span class="str">"/users/1"</span>)
+<span class="kw">print</span>(response.status_code)   <span class="kw"># 200</span>
+<span class="kw">print</span>(response.json())        <span class="kw"># {'user_id': 1, 'name': 'an'}</span></code></pre>
+<p><code>TestClient</code> is literally built on <code>httpx.Client</code> — same <code>.get()</code>/<code>.post()</code>/<code>.status_code</code>/<code>.json()</code> shape Day 16 through 21's practice files already called without a second thought, and the exact same <code>httpx</code> package Day 20 used for <code>AsyncClient</code> against a live event loop. Nothing about the request/response vocabulary is new today — what's new is turning those calls into named, repeatable <code>assert</code>-backed tests instead of one-off checks.</p>
+
+<h2>2 · A <code>test_*</code> function, the Day 11 shape aimed at a route</h2>
+<p>Day 11 established the whole convention: any function named <code>test_*</code>, in a file named <code>test_*</code>, is a test <code>pytest</code> finds and runs, and a plain <code>assert</code> inside it is the entire mechanism. An endpoint test is that same function, just calling <code>client.get(...)</code>/<code>client.post(...)</code> instead of a plain function directly:</p>
+<pre><code><span class="cm"># test_users.py</span>
+<span class="kw">from</span> fastapi.testclient <span class="kw">import</span> TestClient
+<span class="kw">from</span> myapp <span class="kw">import</span> app
+
+client = TestClient(app)
+
+<span class="kw">def</span> test_get_user_returns_200_and_the_right_body():
+    response = client.get(<span class="str">"/users/1"</span>)
+    <span class="kw">assert</span> response.status_code == <span class="kw">200</span>
+    <span class="kw">assert</span> response.json() == {<span class="str">"user_id"</span>: <span class="kw">1</span>, <span class="str">"name"</span>: <span class="str">"an"</span>}
+
+<span class="kw">def</span> test_get_missing_user_returns_404():
+    response = client.get(<span class="str">"/users/999"</span>)
+    <span class="kw">assert</span> response.status_code == <span class="kw">404</span></code></pre>
+<p>Building <code>client = TestClient(app)</code> once, module-level, and reusing it across every <code>test_*</code> function is the standard shape — it costs nothing per call (no real connection ever opens) and matches every practice file since Day 16 already doing exactly this, just without a name for it. Run with the same command Day 11 taught: <code>uv run --with pytest --with fastapi --with httpx pytest test_users.py -v</code>.</p>
+
+<h2>3 · Asserting the shape of a response, not just one field</h2>
+<p>A route test is only as good as what it checks. Checking <em>only</em> <code>status_code</code> misses a handler that returns 200 with the wrong body; checking the whole body with <code>==</code> is strict but brittle the moment a new optional field is added. Both are legitimate choices depending on what's being tested — status code plus a couple of specific keys is the common middle ground:</p>
+<pre><code><span class="kw">def</span> test_create_user_returns_201_with_a_new_id():
+    response = client.post(<span class="str">"/users"</span>, json={<span class="str">"name"</span>: <span class="str">"chi"</span>})
+    body = response.json()
+    <span class="kw">assert</span> response.status_code == <span class="kw">201</span>
+    <span class="kw">assert</span> body[<span class="str">"name"</span>] == <span class="str">"chi"</span>
+    <span class="kw">assert</span> <span class="str">"user_id"</span> <span class="kw">in</span> body</code></pre>
+<p><code>client.post(path, json=...)</code> is Day 18's request body all over again — <code>json=</code> serializes the dict and sets the right content-type header, the exact same thing a real client does, just without a socket. And Day 17's pydantic validation still runs on every test call: POST a body missing a required field and the response really is a <code>422</code>, the same status code a live client would get — <code>TestClient</code> exercises the real handler and the real validation, not a mock of either.</p>
+
+<h2>4 · Recognition: errors, middleware, and going live are the same app, seen from outside</h2>
+<p>Three ideas this course won't build today but that a deployable FastAPI app needs, briefly named so they're recognizable later: an <dfn data-en="a function decorated with @app.exception_handler(SomeException) that converts a specific raised exception into a chosen JSON response and status code across every route at once, instead of each handler catching it individually" data-vn="giữ nguyên &quot;exception handler&quot; — hàm gắn @app.exception_handler(SomeException), tự động chuyển 1 loại exception cụ thể thành JSON response + status code cho mọi route cùng lúc, thay vì từng handler tự catch riêng">exception handler</dfn> (<code>@app.exception_handler(SomeException)</code>) turns a raised exception into a chosen JSON response for every route at once, instead of every handler catching it individually — testable the same way as any other route, by asserting the status code an endpoint returns when it deliberately raises that exception; <dfn data-en="a function wrapping every request/response passing through the app, run before the handler and after it - used for cross-cutting concerns like logging every request or adding a header to every response, without touching each handler" data-vn="giữ nguyên &quot;middleware&quot; — hàm bọc quanh mọi request/response đi qua app, chạy trước và sau handler, dùng cho việc chung như log mọi request hay thêm header vào mọi response mà không sửa từng handler">middleware</dfn> (<code>@app.middleware("http")</code>) wraps every request/response passing through the app for cross-cutting work — logging, timing, adding a header — without touching each handler; and a <dfn data-en="the standard way a production ASGI app like FastAPI is actually run - not the dev-only `uv run` reload server, but an ASGI server process (uvicorn/gunicorn) started with a fixed worker count, no source-reload, and typically behind a reverse proxy" data-vn="giữ nguyên &quot;ASGI server&quot; — cách chạy app FastAPI thật ở production, không phải dev server tự reload, mà 1 process ASGI server (uvicorn/gunicorn) chạy với số worker cố định, không tự reload code, thường có reverse proxy phía trước">ASGI server</dfn> like <code>uvicorn</code> is what actually runs the app in production, started once with a fixed worker count rather than the auto-reloading dev command. None of this changes how a route is tested — <code>TestClient</code> exercises exception handlers and middleware exactly like it exercises a plain handler, because both run as part of the same ASGI call it's already driving.</p>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> testing a pandas pipeline means asserting on a DataFrame's shape or values after a transform runs — no client, no status code, no request at all; <code>TestClient</code> is specifically for the request/response contract of a running service, a different thing to verify than "did this transform produce the right table."</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/22_testing_with_httpx.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run --with fastapi --with httpx python3 practice/22_testing_with_httpx.py</code></pre>
+<p>Needs <code>fastapi</code> + <code>httpx</code> — installed one-off via <code>--with</code>, same as Days 16-20. Exercises: writing <code>test_*</code>-shaped functions with <code>assert</code> against a small in-file app's routes, checking both status code and JSON body together, exercising a 404/422 error path, and confirming a route wrapped by an exception handler still returns the chosen status code through <code>TestClient</code> exactly like a live client would see.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="TestClient wraps httpx and hands each request straight to the FastAPI app in-process via the ASGI interface it already speaks, with no socket and no server process involved - the same in-process call every practice file since Day 16 has already been making.">
+    <p class="stem">Why does <code>TestClient(app).get("/users/1")</code> not need a running server?</p>
+    <button class="opt" data-ok>it calls the app directly over the ASGI interface</button>
+    <button class="opt">FastAPI silently starts a real server in a thread</button>
+    <button class="opt">status codes are always faked and never really computed</button>
+  </div>
+  <div class="q" data-why="An endpoint test is Day 11's exact test_* + assert shape, just calling client.get()/client.post() instead of a plain function directly - pytest finds and runs it the same way regardless of what's inside the assert.">
+    <p class="stem">What makes a function testing an endpoint a valid <code>pytest</code> test, per Day 11's convention?</p>
+    <button class="opt" data-ok>its name starts with test_ and it uses assert</button>
+    <button class="opt">it must subclass TestClient, since nothing else works ever</button>
+    <button class="opt">it has to be the file's very first function</button>
+  </div>
+  <div class="q" data-why="client.post(path, json=...) serializes the dict and sets the right content-type header exactly like a real client would, and the handler's real pydantic validation still runs - a missing required field really does come back as a 422, not a mocked stand-in.">
+    <p class="stem">When <code>client.post("/users", json={...})</code> is missing a field pydantic requires, what does <code>TestClient</code> return?</p>
+    <button class="opt" data-ok>a real 422, the same validation a client gets</button>
+    <button class="opt">a silent 200, since tests always skip real validation</button>
+    <button class="opt">a Python exception that crashes the whole test file</button>
+  </div>
+  <div class="q" data-why="An exception handler (@app.exception_handler(SomeException)) converts a specific raised exception into a chosen JSON response and status code for every route at once, instead of each handler catching that exception on its own.">
+    <p class="stem">What does an <code>@app.exception_handler(SomeException)</code> function do?</p>
+    <button class="opt" data-ok>turns a raised exception into one chosen response, app-wide</button>
+    <button class="opt">stops that exception from ever being raised at all</button>
+    <button class="opt">only runs during tests, never during a real request</button>
+  </div>
+  <div class="q" data-why="Middleware and exception handlers both run as part of the same ASGI call TestClient is already driving through the app, so TestClient exercises them exactly like it exercises a plain handler - no separate setup needed to test either.">
+    <p class="stem">Does <code>TestClient</code> exercise middleware and exception handlers, or only plain route handlers?</p>
+    <button class="opt" data-ok>both, since they run in the same ASGI call</button>
+    <button class="opt">only plain handlers, since middleware needs a real server</button>
+    <button class="opt">neither, both instead need a separate mocking library entirely</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> FastAPI's own <a href="https://fastapi.tiangolo.com/tutorial/testing/">"Testing"</a> tutorial page for <code>TestClient</code> and the <code>test_*</code> shape used in sections 1-3, and <a href="https://www.python-httpx.org/">httpx's docs</a> for the client it wraps. (Not yet in <code>RESOURCES.md</code>; worth adding alongside FastAPI and pydantic under "Knowledge — backend.")</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day22">glossary</a> under Day 22.<br>
+Phase 2b's named spine is now complete (HTTP handlers through today's endpoint testing) — per <code>PLAN.md</code>'s own closing line, the next session should revisit the plan before picking Day 23's topic.<br><br>
+💬 Anything unclear — what <code>TestClient</code> actually skips versus a real client, or where middleware fits in? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

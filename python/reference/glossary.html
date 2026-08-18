@@ -229,6 +229,15 @@
   <tr><td>connection pool</td><td>giữ nguyên "connection pool" — tập hợp connection mở sẵn, tái sử dụng thay vì mở connection mới mỗi request</td><td>A small set of already-open database connections, created once at startup (<code>psycopg_pool.ConnectionPool</code>) and handed out per request instead of opening a fresh, slow TCP connection every time. The production-grade version of a single <code>Depends()</code>-managed connection.</td></tr>
 </table>
 
+<h2 id="day22">Day 22 — Testing endpoints with httpx</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>ASGI</td><td>giữ nguyên "ASGI" — interface mà FastAPI expose để xử lý 1 request, chỉ là 1 callable Python thường, không cần server chạy thật</td><td>The interface FastAPI (and any ASGI web framework) exposes for handling one request — a plain Python callable, not a network socket, so a test client can call it directly in-process with no server running and no real network involved.</td></tr>
+  <tr><td>exception handler</td><td>giữ nguyên "exception handler" — hàm gắn @app.exception_handler(SomeException), tự động chuyển 1 loại exception cụ thể thành JSON response cho mọi route cùng lúc</td><td>A function decorated with <code>@app.exception_handler(SomeException)</code> that converts a specific raised exception into a chosen JSON response and status code across every route at once, instead of each handler catching it individually.</td></tr>
+  <tr><td>middleware</td><td>giữ nguyên "middleware" — hàm bọc quanh mọi request/response đi qua app, chạy trước và sau handler, dùng cho việc chung như log request</td><td>A function wrapping every request/response passing through the app, run before the handler and after it — used for cross-cutting concerns like logging every request or adding a header to every response, without touching each handler.</td></tr>
+  <tr><td>ASGI server</td><td>giữ nguyên "ASGI server" — cách chạy app FastAPI thật ở production (uvicorn/gunicorn), không phải dev server tự reload</td><td>The standard way a production ASGI app like FastAPI is actually run — not the dev-only auto-reload server, but an ASGI server process (<code>uvicorn</code>/<code>gunicorn</code>) started with a fixed worker count, no source-reload, typically behind a reverse proxy.</td></tr>
+</table>
+
 <p class="next">💬 A term here still unclear? Ask your teacher — hỏi bằng tiếng Việt cũng được.</p>
 
 <script src="../assets/nav.js"></script>

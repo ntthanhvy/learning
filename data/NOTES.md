@@ -2437,3 +2437,91 @@
   accessor never went past `contains`/`upper`/`lower`/`startswith`/
   `split`) if no drill-outcome signal surfaces by next generation —
   confirmed genuinely uncovered by this round's own ten-topic scan.
+- 2026-08-19 generation (Lesson 42, headless delegated-agent run):
+  idempotency was pre-confirmed by the orchestrating session (no
+  `data/lessons/0042-*.html`, no 2026-08-19 entry anywhere) — proceeded
+  directly to Lesson 42. The Neon progress DB was unreachable this session
+  (no `db.env`, `psql` reads blocked) — not retried, per this round's own
+  instructions; fell back to `assets/nav.js` + `learning-records/` +
+  `NOTES.md`'s own log for pace, same fallback every prior round has used.
+  `learning-records/` still holds only the single Lesson-1 baseline file
+  (course-creation context, no reported struggle) — no drill-outcome
+  signal to target. Lesson 41's own teaser named `str.extract()` /
+  regex-based string extraction explicitly (Lesson 10's `.str` accessor
+  never went past `contains`/`upper`/`lower`/`startswith`/`split`) —
+  re-grepped `lessons/*.html` and `reference/glossary.html` fresh before
+  committing (`grep -rn "extract"`) and found only Lesson 41's own teaser
+  sentence mentioning it, confirming it was still genuinely uncovered, so
+  Lesson 42 ships it as planned. Since neither existing fixture
+  (`orders_raw.csv`, `customers.csv`) has any text worth extracting from
+  (no embedded codes/compound fields), followed the precedent set by
+  Lessons 30/34/35/37 of constructing a small inline `pd.DataFrame`
+  instead of adding a new CSV — an `order_code` column shaped like
+  `"NA-0231"` (region prefix + sequence number) in the same
+  customer/order-domain vocabulary as every prior lesson, plus one
+  deliberately non-matching value (`"bad-code"`) to demonstrate the
+  no-raise-on-no-match behavior. `uv run --with pandas` worked directly
+  this round (pandas 3.0.5, confirmed via `uv run --with pandas python3
+  -c "import pandas; print(pandas.__version__)"`): every behavior was
+  hand-verified in `.scratch/data-lesson42/explore.py` (deleted after)
+  before writing a word of the lesson — confirmed the Series-vs-DataFrame
+  shape rule (one group + `expand=False` → `Series`; two+ groups, or the
+  `expand=True` default even with one group → `DataFrame`, columns `0`/`1`
+  unless named), confirmed named groups (`(?P<region>...)`) label the
+  result columns directly with no `rename()` needed, confirmed the one
+  non-matching row becomes `NaN` in every captured column with no raise
+  (contrasted directly against Lesson 41's `astype()`, which raises
+  instead), and confirmed assigning the extracted column back and grouping
+  by it drops the `NaN` group silently, the same rule any `groupby()` key
+  already follows. Lesson 42 ships: the two-facts-in-one-string framing,
+  the shape rule, named groups, the no-raise gotcha as a callout
+  explicitly contrasted against Lesson 41's raise-on-failure `astype()`,
+  and the SQL bridge (`substring()`/`regexp_match()` needing multiple
+  calls or array-indexing vs. `str.extract()`'s one multi-column call).
+  The shipped (unsolved) `practice/42_str_extract.py` was executed both
+  from a mirrored `.scratch/data-lesson42/run/practice/` layout and
+  directly from its real `practice/` location (`cd data && uv run --with
+  pandas python3 practice/42_str_extract.py`) — both runs printed an
+  identical result with no crash: 2 checks true (the two "is a Series" /
+  "is a DataFrame with the right columns" structural checks, which the
+  `except Exception` fallback values happen to already satisfy) and 5 ✗.
+  Specifically checked the Ellipsis-placeholder positions against this
+  course's repeated Ellipsis-is-truthy false-positive bug class before
+  trusting that result: `str.extract(..., expand=...)` raises a real
+  `ValueError: expand must be True or False` (Ellipsis is neither `True`
+  nor `False`), `parts[...]` raises `KeyError: Ellipsis`, and
+  `orders.groupby(...)` raises `TypeError: 'ellipsis' object is not
+  callable` — all three caught cleanly by their `except Exception`
+  fallbacks with no silent false-✓, a different (safe) shape from the
+  family of past-round gotchas, verified directly rather than assumed. A
+  separately-saved solved copy (`.scratch/data-lesson42/run/practice/
+  42_solved.py`, not shipped, each `...` filled in by hand) printed all 7
+  ✓ against the same hand-verified numbers above. `.scratch/
+  data-lesson42/` was fully removed (`rm -rf`) after verification, no
+  approval needed this round. Added `str.extract()` to the glossary
+  (checked for a collision first — none; placed directly after the
+  existing `nullable Int64 / Float64` entry) and registered Lesson 42 in
+  `nav.js`. Quiz options were drafted and checked with a Python regex/
+  word-count script (isolates each `<div class="q">` block by its own
+  start offset rather than one greedy multi-question regex, after an
+  initial version of the script mis-split all three questions into one
+  combined match — caught and fixed before trusting any count) run via
+  `uv run python3` (this course's established convention since Lessons
+  26/27) — the first draft came out mismatched on Q1 (6/8/8) and Q3
+  (11/6/11), Q2 already level at 8/8/9 needing one more small fix, and
+  took three rewrite + recount cycles before landing all three level (Q1
+  8/8/8, Q2 8/8/8, Q3 9/9/9) — confirmed with a second, fully independent
+  manual word-by-word count via `Grep`-extracted button text (not a
+  second run of the same script), per Lesson 19/39's standing warning
+  that a single verification pass isn't infallible. `bin/record-progress
+  data lesson_generated --day 42 --lesson 0042-str-extract.html --detail
+  '{"by":"delegated-agent"}'` was run once from the repo root as
+  instructed — outcome noted in the report back to the orchestrating
+  session. This agent does not run `git commit` — leaving working-tree
+  changes uncommitted remains this course's established convention. Set
+  the teaser going forward to a fresh curriculum/glossary scan for the
+  next genuinely-uncovered pandas/NumPy pattern (no single named candidate
+  left dangling from today's content — `str.extractall()` and
+  `str.findall()` were name-dropped in today's "Go deeper" link as
+  out-of-scope cousins, both real candidates for a future scan) if no
+  drill-outcome signal surfaces by next generation.

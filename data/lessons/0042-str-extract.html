@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 42 · str.extract(): pulling structured pieces out of text</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 42 · ~20 min · 19 Aug 2026</p>
+<h1>str.extract(): pulling structured pieces out of text</h1>
+<p class="byline">Lesson 41's teaser named this gap directly: Lesson 10's <code>.str</code> accessor covered <code>contains</code>/<code>upper</code>/<code>lower</code>/<code>startswith</code>/<code>split</code>, but never regex-based extraction — pulling a sub-piece out of a text column into its own real column. Today closes that gap with the tool interviewers reach for whenever a "clean" column turns out to be several fields jammed into one string.</p>
+
+<h2>1 · The problem: one column, several facts glued together</h2>
+<p>Order codes like <code>"NA-0231"</code> pack two facts into one string: a region code and a sequence number. <code>.str.contains()</code> from Lesson 10 can only tell you a pattern exists somewhere in the string — it can't hand you the matched piece back as usable data:</p>
+<pre><code>orders = pd.DataFrame({
+    <span class="str">"order_id"</span>: [<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>, <span class="num">4</span>, <span class="num">5</span>, <span class="num">6</span>],
+    <span class="str">"customer"</span>: [<span class="str">"An"</span>, <span class="str">"Binh"</span>, <span class="str">"An"</span>, <span class="str">"Chi"</span>, <span class="str">"Binh"</span>, <span class="str">"An"</span>],
+    <span class="str">"order_code"</span>: [<span class="str">"NA-0231"</span>, <span class="str">"EU-0089"</span>, <span class="str">"NA-0245"</span>, <span class="str">"AP-0012"</span>, <span class="str">"EU-0104"</span>, <span class="str">"bad-code"</span>],
+})
+orders[<span class="str">"order_code"</span>].str.contains(<span class="str">r"[A-Z]{2}-"</span>)
+<span class="cm">-- 0     True
+-- 1     True
+-- 2     True
+-- 3     True
+-- 4     True
+-- 5    False
+-- dtype: bool   &lt;- confirms a match exists, but never hands back "NA" or "0231"</span></code></pre>
+<p><dfn data-en="a Series.str method that applies a regular expression with capture groups to every value in a text column and returns the captured group(s) as new column(s) -- a DataFrame if there is more than one group (or the default expand=True), a Series if there is exactly one group and expand=False; a row that doesn't match the pattern at all becomes NaN, it never raises" data-vn="giữ nguyên 'str.extract()' — dùng regex có capture group để tách 1 cột chữ thành (các) cột mới; hàng không khớp thì thành NaN, KHÔNG lỗi">str.extract()</dfn> is the tool that solves exactly this: give it a regex with parenthesized capture groups, and it returns the captured pieces as real columns.</p>
+
+<h2>2 · One group, two groups, and the DataFrame-vs-Series shape rule</h2>
+<pre><code><span class="cm"># one capture group, expand=False -&gt; a Series</span>
+orders[<span class="str">"order_code"</span>].str.extract(<span class="str">r"([A-Z]{2})-\d+"</span>, expand=<span class="kw">False</span>)
+<span class="cm">-- 0     NA
+-- 1     EU
+-- 2     NA
+-- 3     AP
+-- 4     EU
+-- 5    NaN
+-- Name: order_code, dtype: str</span>
+
+<span class="cm"># two capture groups -&gt; always a DataFrame, one column per group</span>
+orders[<span class="str">"order_code"</span>].str.extract(<span class="str">r"([A-Z]{2})-(\d+)"</span>)
+<span class="cm">--     0     1
+-- 0  NA  0231
+-- 1  EU  0089
+-- 2  NA  0245
+-- 3  AP  0012
+-- 4  EU  0104
+-- 5 NaN   NaN</span></code></pre>
+<p>The shape rule: <strong>one</strong> capture group with <code>expand=False</code> returns a <code>Series</code>; <strong>any other case</strong> — two or more groups, or the default <code>expand=True</code> even with one group — returns a <code>DataFrame</code>, one column per group. The columns are unnamed (<code>0</code>, <code>1</code>, …) unless the regex names them.</p>
+<p>Named groups fix the unnamed-column problem directly — <code>(?P&lt;name&gt;...)</code> instead of a bare <code>(...)</code> makes the extracted column's name useful right away, no <code>rename()</code> needed:</p>
+<pre><code>orders[<span class="str">"order_code"</span>].str.extract(<span class="str">r"(?P&lt;region&gt;[A-Z]{2})-(?P&lt;seq&gt;\d+)"</span>)
+<span class="cm">--   region   seq
+-- 0     NA  0231
+-- 1     EU  0089
+-- 2     NA  0245
+-- 3     AP  0012
+-- 4     EU  0104
+-- 5    NaN   NaN</span></code></pre>
+
+<div class="callout"><strong>Gotcha:</strong> row 5's <code>"bad-code"</code> doesn't match the pattern at all — <code>str.extract()</code> puts <code>NaN</code> in every captured column for that row instead of raising. This is the opposite failure behavior from Lesson 41's <code>astype()</code>, which raises the instant one value can't convert. <code>str.extract()</code> behaves like <code>errors="coerce"</code> always — a non-match is just a missing value, and the rest of the column still comes back. There is no "strict" mode; if a row silently not matching would be a real bug, check for it explicitly: <code>extracted["region"].isna().sum()</code>.</div>
+
+<h2>3 · Using the extracted column: it's a real column now</h2>
+<p>Once extracted, the piece can be assigned back and used exactly like any other column — including inside <code>groupby()</code> (Lesson 4), which quietly drops the <code>NaN</code> group the same way it always drops missing group keys:</p>
+<pre><code>orders[<span class="str">"region"</span>] = orders[<span class="str">"order_code"</span>].str.extract(<span class="str">r"([A-Z]{2})-\d+"</span>, expand=<span class="kw">False</span>)
+orders.groupby(<span class="str">"region"</span>)[<span class="str">"order_id"</span>].count()
+<span class="cm">-- region
+-- AP    1
+-- EU    2
+-- NA    2
+-- Name: order_id, dtype: int64   &lt;- row 5's NaN region silently excluded, same rule as any groupby key</span></code></pre>
+
+<h2>4 · The SQL bridge: no single equivalent, that's the point</h2>
+<p>Postgres has the pieces but not one clean built-in call: <code>substring(col from '[A-Z]{2}')</code> for a single capture, or <code>regexp_match(col, '...')</code> returning an array you then have to index into. <code>str.extract()</code> is the one-call, multi-column version of stitching those together — extract every group at once, get real columns back, no follow-up array indexing:</p>
+<pre><code><span class="cm">-- SELECT substring(order_code from '[A-Z]{2}') AS region FROM orders;
+-- (a second substring() call needed for the sequence number)</span>
+orders[<span class="str">"order_code"</span>].str.extract(<span class="str">r"(?P&lt;region&gt;[A-Z]{2})-(?P&lt;seq&gt;\d+)"</span>)
+<span class="cm">-- both pieces, one call</span></code></pre>
+
+<div class="interview">
+<p><strong>Q: "You've got a column like order_code with a region prefix and a sequence number jammed together. How do you split it?"</strong> A strong answer, out loud: <em>"str.extract() with a regex that has one capture group per piece I want — parentheses around each part I care about, named groups with (?P&lt;name&gt;...) so the resulting columns come back already labeled instead of 0, 1, 2. One capture group with expand=False gives me back a Series; more than one group always gives a DataFrame, one column per group. The part I'd flag unprompted: a row that doesn't match the pattern at all doesn't raise, it just becomes NaN in every captured column — same coercing behavior as to_numeric with errors='coerce', not astype's raise-on-failure. So right after extracting I'd check isna().sum() on the result to see how many rows silently didn't match, because that's easy to miss if you're not looking for it."</em> The signal: naming the shape rule (Series vs. DataFrame), named groups, and the silent-NaN-on-no-match behavior without being prompted for any of the three.</p>
+</div>
+
+<h2>Try it — self-checking practice (~15-20 min)</h2>
+<p>Open <code>practice/42_str_extract.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/42_str_extract.py</code></pre>
+<p>Uses a small inline <code>order_code</code> DataFrame (same customer/order domain as Lessons 6-41, no new CSV needed). Exercise 1 extracts the region prefix as a Series with <code>expand=False</code>; Exercise 2 extracts both region and sequence number as named columns in one call; Exercise 3 confirms the one non-matching row (<code>"bad-code"</code>) becomes <code>NaN</code> rather than raising; Exercise 4 assigns the extracted region back onto the DataFrame and counts orders per region with <code>groupby()</code>.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="One capture group combined with expand=False returns a Series -- every other case (two or more groups, or the default expand=True even with a single group) returns a DataFrame with one column per capture group. Naming the groups with (?P<name>...) just labels those columns; it doesn't change whether the result is a Series or a DataFrame.">
+    <p class="stem">When does <code>str.extract()</code> return a <code>Series</code> instead of a <code>DataFrame</code>?</p>
+    <button class="opt" data-ok>exactly one capture group, when called with expand=False</button>
+    <button class="opt">whenever the regex uses named groups, like (?P&lt;name&gt;...)</button>
+    <button class="opt">always, it returns a DataFrame with no exceptions</button>
+  </div>
+  <div class="q" data-why="str.extract() never raises on a non-matching row -- it fills every captured column with NaN for that row and keeps going, the same coercing behavior as pd.to_numeric(errors='coerce'). This is the opposite of Lesson 41's astype(), which raises the instant one value fails to convert; there is no strict/raising mode for extract(), so checking isna().sum() afterward is the way to catch silent non-matches.">
+    <p class="stem">A row's text doesn't match the regex passed to <code>str.extract()</code> at all. What happens to that row?</p>
+    <button class="opt" data-ok>its captured column(s) become NaN, no error raised</button>
+    <button class="opt">the whole str.extract() call raises a ValueError immediately</button>
+    <button class="opt">that row is silently dropped from the result</button>
+  </div>
+  <div class="q" data-why="(?P<name>...) is a named capture group -- it captures the matched text exactly like a plain (...) group, but also labels the resulting extract() column with that name instead of a positional integer (0, 1, 2...), so no separate rename() call is needed afterward.">
+    <p class="stem">What does wrapping a regex capture group as <code>(?P&lt;region&gt;...)</code> instead of plain <code>(...)</code> change?</p>
+    <button class="opt" data-ok>the resulting column is named "region", not an integer</button>
+    <button class="opt">it makes that one capture group match case-insensitively instead</button>
+    <button class="opt">it makes str.extract() raise instead of quietly returning NaN</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the pandas User Guide's <a href="https://pandas.pydata.org/docs/user_guide/text.html#extracting-substrings">"Extracting substrings" section of Working with text data</a> (~10 min) — covers <code>str.extract()</code> alongside its cousins <code>str.extractall()</code> (every match per row, not just the first) and <code>str.findall()</code>, both out of scope for today but worth knowing exist.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>str.extract()</code> was added today, placed right after the existing <code>nullable Int64 / Float64</code> entry.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-42 comes back reported as shakiest, otherwise a fresh curriculum/glossary scan for the next genuinely-uncovered pattern.<br><br>
+💬 Anything unclear — the Series-vs-DataFrame shape rule, named groups, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

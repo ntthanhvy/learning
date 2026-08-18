@@ -94,6 +94,8 @@
       file: "lessons/0043-database-views-and-materialized-views.html" },
     { n: 44, date: "2026-08-18", title: "JSONB: when one column is allowed to be a schema of its own",
       file: "lessons/0044-jsonb-semi-structured-columns.html" },
+    { n: 45, date: "2026-08-19", title: "Unit vs. integration tests: where the line actually is",
+      file: "lessons/0045-unit-vs-integration-tests.html" },
   ];
 
   const REFS = [

@@ -2290,3 +2290,102 @@
   the next session should keep treating a completion/quiz-outcome signal, or
   a user-named track to deepen, as higher priority than a 45th topic picked
   blind.
+- 2026-08-19 generation (Lesson 45, headless delegated-agent run): idempotency
+  check first — the orchestrating session had already confirmed no
+  `lessons/0045-*.html` file existed and no `2026-08-19` entry existed yet in
+  `nav.js` before delegating, re-verified here via `Glob`/`Grep` rather than
+  re-trusted blindly (highest existing file was 0044, dated 2026-08-18). The
+  Neon progress DB was confirmed unreachable this session before the round
+  started (no `~/.config/learning/db.env`, `psql` reads blocked) — per the
+  orchestrating session's own briefing, no read attempt was spent confirming
+  this again; still no `lesson_completed` record exists for any of Lessons
+  1-44, so pacing came from `backend/learning-records/` (still only the two
+  files, both already fully reflected in prior lessons, nothing new to act
+  on) plus `lessons/`/`nav.js` file state and this log's own entries alone.
+  Lesson 44 left exactly one named, not-yet-pursued in-scope candidate:
+  dedicated unit/integration-testing conventions (the other candidate named
+  alongside it, JSONB, was closed by Lesson 44 itself). Re-confirmed via grep
+  before writing that no dedicated testing lesson existed — the only prior
+  hits were Lesson 36's incidental "passes every test written against a
+  handful of fixture rows" aside and Lesson 42's own "unit test" framing for
+  why an interface parameter is testable, neither a dedicated lesson. Chose
+  it over re-running a fresh gap-finding pass from scratch, per the task's own
+  reasonable-strong-candidate framing, while deliberately scoping it away from
+  MISSION.md's explicit "don't duplicate the Go week's practice-heavy tracks"
+  constraint and the frameworks/ORMs out-of-scope line: this lesson teaches
+  the unit-vs-integration *decision* (which kind of backend logic needs which
+  kind of test, and why) rather than Go's `testing` package syntax, test
+  runners, or any specific mocking library — deliberately named as the
+  boundary in the lesson's own section 4. Lesson 45 covers it: why the
+  frontend habit of one testing shape per component doesn't map cleanly onto
+  backend code, which splits into I/O-free decision logic and
+  correctness-lives-in-SQL logic; a worked `SuspendDelinquentAccount`/
+  `AccountStore`/`fakeAccountStore` example reusing Lesson 42's own interface
+  shape to draw the unit/integration line instead of the pool-vs-transaction
+  line Lesson 42 drew; the concrete rule (does the correctness question live
+  inside SQL, a constraint, or a transaction boundary — if so a fake cannot
+  verify it, full stop); `pgAccountStore.Suspend` as the integration-test
+  target, with the roll-back-instead-of-commit transaction wrapper named as
+  the standard trick for keeping integration tests independent; a
+  unit-vs-integration comparison table (reusing Lesson 25's
+  `table.cmp`/`.cmp-wrap` component); and the two-directional mistake named
+  explicitly (mocking the database for everything hides real SQL bugs behind
+  an unverified assumption that the mock behaves like Postgres; running
+  everything against a real database turns cheap logic checks into slow ones
+  for no correctness benefit). Explicit tie-backs: Lesson 42 (the interface/
+  fake mechanism reused, not re-taught), Lesson 6 (transactions, for the
+  rollback-per-test trick), Lesson 37 (isolation-level surprises as one thing
+  only a real database can catch), Lesson 38 (constraint firing as another).
+  The `SuspendDelinquentAccount`/`AccountStore`/`fakeAccountStore`/
+  `pgAccountStore` Go snippet was compile-checked clean with `go build -C` /
+  `go vet -C` in a scratch module (`.scratch/backend-lesson45/`, built binary
+  written to `/tmp/lesson45bin` and not copied into the scratch dir — `rm -f`
+  on that `/tmp` path was blocked by this session's sandbox as outside the
+  allowed working directory, left in place per the harmless precedent many
+  prior rounds' notes already established; the scratch directory itself was
+  deleted entirely afterward, same choice Lessons 30/33/34/38 made). Proofread
+  the raw shipped file directly for the stray-`</p>`-in-a-callout-or-interview-
+  div bug class nearly every recent round's notes have flagged — both the
+  callout div (section 1) and the interview div both close with a bare
+  `</div>`, no stray `<p>` wrapper, matching Lesson 42's own convention; also
+  ran a tag-balance check (div/table/tr/td/th/pre/p open vs. close counts) as
+  an additional structural check beyond the visual proofread, all balanced
+  (8/8 div, 1/1 table, 5/5 tr, 6/6 th, 8/8 td, 2/2 pre, 17/17 p), and confirmed
+  all four quiz `data-why` attributes close cleanly with no stray tag.  Added
+  `unit test` and `integration test` to the glossary (confirmed via grep
+  beforehand that neither existed anywhere in `lessons/*.html` or
+  `glossary.html`) and registered Lesson 45 in nav.js. Quiz options were
+  drafted, then verified with `wc -w` per option via individual `sed -n
+  '<n>p' | sed -E 's/<[^>]+>//g' | wc -w` calls (a `python3` word-count script
+  was tried first and required approval with none available in this headless
+  run — the same class of block prior rounds have documented for novel
+  interpreter invocations — so verification fell back to the sandbox's
+  established working method instead of retrying); by-hand word counts were
+  drafted first and then independently re-verified against the tool's count
+  per line, which caught one hand-counting mistake the eyeball missed (Q3's
+  third option was hand-counted as 10 but the tool measured 11, fixed and
+  reconfirmed) — the exact "trust the tool count, not the eyeball" lesson
+  nearly every prior round's notes have already flagged, reinforced again
+  here; final tallies, each confirmed by the tool after every edit: Q1
+  10/10/10/10, Q2 10/10/10/10, Q3 10/10/10/10, Q4 10/10/10/10. No new
+  RESOURCES.md source was added — its own "Gaps" section already flags no
+  vetted testing-specific source exists yet for this course, so the lesson
+  cites Lesson 42's own Effective Go interface citation as its load-bearing
+  source instead, the same no-new-permanent-citation choice Lessons 28/32
+  made for a topic RESOURCES.md doesn't yet cover. `bin/record-progress
+  backend lesson_generated --day 45 --lesson
+  0045-unit-vs-integration-tests.html --detail '{"by":"delegated-agent"}'`
+  was run directly via its relative path from the repo root as instructed
+  and succeeded on the first try, no approval blocker this round —
+  consistent with every round since Lesson 32's finding that the write path
+  works reliably when invoked this way, even in a round where the read path
+  (the Neon DB itself) was confirmed unreachable beforehand. This closes the
+  unit/integration-testing-conventions gap Lesson 43/44's own log named but
+  left unpursued; distributed locks and blue-green/canary deploys remain the
+  last named, confirmed out-of-scope-per-MISSION.md candidates if a fresh
+  gap-finding pass is needed next time — no other in-scope candidate was
+  named or noticed this round beyond the one just closed. Still no
+  `lesson_completed` record exists for any lesson after 45 rounds — the next
+  session should keep treating a completion/quiz-outcome signal, or a
+  user-named track to deepen, as higher priority than a 46th topic picked
+  blind.

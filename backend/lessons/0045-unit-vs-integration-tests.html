@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 45 · Unit vs. integration tests: where the line actually is</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 45 · ~20 min</p>
+<h1>Unit vs. integration tests: where the line actually is</h1>
+<p class="byline">Lesson 42 built a <code>Querier</code> interface and a fake so a query function could run in a test with zero network calls — but never said which of your functions deserve that treatment versus a real database. Today: the actual line between a unit test and an integration test on the backend, and why frontend testing habits don't transfer cleanly across it.</p>
+
+<h2>1 · The frontend habit that doesn't map cleanly</h2>
+<p>Frontend testing mostly asks one question: does this component render the right thing for these props? The unit is the component; a fake API response is just a JSON fixture, and almost every test looks the same shape. Backend code splits into two genuinely different kinds of logic, and treating them the same way is the actual mistake — not "not writing tests," which Lesson 1 already assumed the reader wouldn't need convincing about.</p>
+<p>Some backend code is a decision with no I/O in it at all: is this account eligible for suspension, does this discount apply, is this the terminal state for an order. Other backend code's entire job <em>is</em> talking to Postgres correctly: does this query return the right rows, does this constraint actually reject what it should, does this transaction actually roll back on error. A <dfn data-en="a fast, isolated test exercising one function or a small group of functions with no real database, network call, or filesystem access — dependencies are replaced by fakes" data-vn="unit test (giữ nguyên) — test nhanh, cô lập, không đụng DB/network thật, dependency được thay bằng fake">unit test</dfn> is the right tool for the first kind; it is structurally the wrong tool for the second, no matter how cleverly the fake is written.</p>
+
+<div class="callout"><strong>The frontend equivalent you already own.</strong> This is the same split as testing a pure <code>formatCurrency(cents)</code> helper with Jest versus testing that a Cypress flow actually submits a form and updates a real page — one needs no browser at all, the other needs the real thing or nothing meaningful is verified. Backend code has the identical split; it's just less visible because "the real thing" is a database instead of a rendered DOM.</div>
+
+<h2>2 · The concrete line: does correctness live inside SQL?</h2>
+<p>Lesson 45's version of the question Lesson 42 left open: give <code>SuspendDelinquentAccount</code> below an <code>AccountStore</code> interface exactly like Lesson 42's <code>Querier</code>. Its own logic — the 30-day eligibility rule — has no SQL in it at all, so a fake satisfying the interface is not a shortcut, it's the correct test for that logic specifically.</p>
+
+<pre><code><span class="cm">// AccountStore names only the methods the business logic actually needs --
+// the same Lesson 42 interface shape, here used to draw the unit/
+// integration boundary instead of the pool-vs-transaction one.
+</span><span class="kw">type</span> AccountStore <span class="kw">interface</span> {
+    Suspend(ctx context.Context, accountID <span class="ty">int64</span>) <span class="kw">error</span>
+}
+
+<span class="kw">var</span> ErrAlreadySuspended = errors.New(<span class="st">"account already suspended"</span>)
+
+<span class="cm">// SuspendDelinquentAccount is the business logic under test: real logic
+// worth a fast unit test, with no SQL of its own.
+</span><span class="kw">func</span> SuspendDelinquentAccount(ctx context.Context, store AccountStore, accountID <span class="ty">int64</span>, overdueDays <span class="ty">int</span>) <span class="kw">error</span> {
+    <span class="kw">if</span> overdueDays &lt; <span class="kw">30</span> {
+        <span class="kw">return</span> fmt.Errorf(<span class="st">"account %d not yet eligible: %d days overdue"</span>, accountID, overdueDays)
+    }
+    <span class="kw">if</span> err := store.Suspend(ctx, accountID); err != <span class="kw">nil</span> {
+        <span class="kw">return</span> fmt.Errorf(<span class="st">"suspend account %d: %w"</span>, accountID, err)
+    }
+    <span class="kw">return</span> <span class="kw">nil</span>
+}
+
+<span class="cm">// fakeAccountStore is the in-memory double a unit test hands
+// SuspendDelinquentAccount -- no network, no real database, per Lesson 42.
+</span><span class="kw">type</span> fakeAccountStore <span class="kw">struct</span> {
+    suspended <span class="kw">map</span>[<span class="ty">int64</span>]<span class="ty">bool</span>
+}
+
+<span class="kw">func</span> (f *fakeAccountStore) Suspend(ctx context.Context, accountID <span class="ty">int64</span>) <span class="kw">error</span> {
+    <span class="kw">if</span> f.suspended[accountID] {
+        <span class="kw">return</span> ErrAlreadySuspended
+    }
+    f.suspended[accountID] = <span class="kw">true</span>
+    <span class="kw">return</span> <span class="kw">nil</span>
+}</code></pre>
+
+<p>A unit test of <code>SuspendDelinquentAccount</code> catches a wrong eligibility cutoff (29 vs. 30 days) instantly, on every commit, with no database running. But it proves nothing about whether the real <code>Suspend</code> implementation's SQL actually works — that method's whole job is the SQL, and a fake can't verify SQL, only agree to return whatever the test told it to return. That's the line: if the correctness question is "did I write the right SQL / does this constraint fire / does this transaction commit atomically (Lesson 6)," a fake can only hide the answer, not test it.</p>
+
+<h2>3 · Integration tests: a real database, on purpose</h2>
+<p>An <dfn data-en="a test that exercises real code against a real dependency (most often a real database) instead of a fake, to verify the parts a unit test's fake cannot — actual SQL, actual constraints, actual driver behavior" data-vn="integration test (giữ nguyên) — test chạy với dependency thật (thường là DB thật) thay vì fake, để verify phần mà unit test không kiểm tra được">integration test</dfn> runs the real <code>pgAccountStore.Suspend</code> against a real Postgres instance — not production, a disposable test database — and checks the row actually changed. It's slower (a real connection, Lesson 18's pool machinery, a real round trip) and needs infrastructure a pure unit test doesn't, but it's the only test that can catch a typo'd column name, a constraint (Lesson 38) firing when it shouldn't, or an isolation-level surprise (Lesson 37) — none of which a fake, however carefully written, has any way to know about.</p>
+
+<pre><code><span class="kw">type</span> Querier <span class="kw">interface</span> {
+    Exec(ctx context.Context, sql <span class="ty">string</span>, args ...<span class="ty">any</span>) <span class="kw">error</span>
+}
+
+<span class="kw">type</span> pgAccountStore <span class="kw">struct</span> {
+    db Querier
+}
+
+<span class="cm">// Suspend's entire job IS the SQL -- exactly the part a fake cannot verify.
+</span><span class="kw">func</span> (s *pgAccountStore) Suspend(ctx context.Context, accountID <span class="ty">int64</span>) <span class="kw">error</span> {
+    <span class="kw">return</span> s.db.Exec(ctx, <span class="st">`UPDATE accounts SET status = 'suspended' WHERE id = $1`</span>, accountID)
+}</code></pre>
+
+<p>The standard trick for keeping these fast and independent: wrap each integration test in a real transaction (Lesson 6) and roll it back at the end instead of committing — the test writes real rows through real SQL, sees real constraint behavior, and leaves the database exactly as it found it, so a second test run never trips over leftover data from the first. Only the outer test process ever calls <code>ROLLBACK</code> instead of <code>COMMIT</code>; the code under test has no idea it's being tested at all.</p>
+
+<div class="cmp-wrap">
+<table class="cmp">
+<thead><tr><th>Unit test</th><th>Integration test</th></tr></thead>
+<tbody>
+<tr><th>What it needs</th><td>Nothing but the process itself — a fake satisfies the interface</td><td>A real (test) Postgres instance, a real connection</td></tr>
+<tr><th>Speed</th><td>Milliseconds, runs on every save</td><td>Seconds, usually runs in CI or on demand</td></tr>
+<tr><th>What it actually proves</th><td>The decision logic is correct, given whatever the fake returns</td><td>The SQL, constraints, and driver calls are correct against a real engine</td></tr>
+<tr><th>What it cannot catch</th><td>A wrong query, a missing constraint, a transaction bug</td><td>Nothing structurally — but a wrong eligibility rule still needs a unit test to isolate cheaply</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2>4 · The ratio, and the mistake to avoid</h2>
+<p>Real backend code is usually mostly decisions with a thin data-access layer underneath — so most tests should be unit tests against fakes, with a smaller number of integration tests specifically targeting the query/constraint/transaction layer where correctness genuinely depends on the real engine. The mistake in both directions is real: unit-testing everything with a mocked database (Lesson 42's fake stops being a testing shortcut and starts silently asserting "my mock behaves like Postgres," which nobody verified), or integration-testing everything against a real database (every eligibility-rule test now needs a live Postgres connection, turning a millisecond check into a multi-second one for logic that never touched SQL). Neither extreme is really about correctness — it's about which line a piece of code sits on, decided once per function, not once per test suite.</p>
+
+<div class="interview">
+<p><strong>Q: "How do you decide whether a piece of backend code needs a unit test or an integration test?"</strong> A strong answer, out loud: <em>"I look at where the correctness question actually lives. If it's a decision — is this account eligible, does this discount apply — a unit test against a fake dependency is faster and just as trustworthy, because the fake only needs to satisfy an interface, not behave like Postgres. If the function's whole job is the SQL itself — a query, a constraint, a transaction boundary — a fake can't verify that at all, so it needs an integration test against a real, disposable test database, usually wrapped in a transaction that gets rolled back instead of committed so tests stay independent. Most of a codebase is the first kind, with integration tests concentrated on the data-access layer specifically."</em> The signal: naming what a fake cannot prove, not just "unit tests are fast, integration tests are slow."</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A unit test's fake only returns whatever the test told it to return -- it cannot verify that real SQL, a real constraint, or a real transaction actually behaves correctly, since none of that logic ever runs inside the fake at all.">
+    <p class="stem">Why can't a unit test with a fake dependency verify that a SQL query is correct?</p>
+    <button class="opt" data-ok>the fake never runs any real SQL against a database</button>
+    <button class="opt">unit tests are not allowed to call any interface method</button>
+    <button class="opt">Go blocks any SQL string from compiling inside test files</button>
+    <button class="opt">fakes always return a fixed database connection error on purpose</button>
+  </div>
+  <div class="q" data-why="Business logic with no SQL of its own -- an eligibility rule, a discount decision -- is exactly what a unit test against a fake is built for: fast, no database needed, and the fake only needs to satisfy the interface's method set, not behave like Postgres.">
+    <p class="stem">What kind of backend code is the best fit for a fast unit test against a fake?</p>
+    <button class="opt" data-ok>a decision with no database query inside its own logic</button>
+    <button class="opt">a function whose entire job is a single SQL statement</button>
+    <button class="opt">any function that currently takes a *pgxpool.Pool as a parameter</button>
+    <button class="opt">a migration script that alters a live production table today</button>
+  </div>
+  <div class="q" data-why="Wrapping each integration test in a real transaction and rolling it back instead of committing lets the test exercise real SQL and real constraint behavior while leaving the database exactly as it found it, so later test runs never trip over leftover rows from an earlier one.">
+    <p class="stem">Why do integration tests commonly wrap each test in a rolled-back transaction?</p>
+    <button class="opt" data-ok>real writes happen, but nothing persists for the next test</button>
+    <button class="opt">Postgres refuses to run any query outside of a transaction</button>
+    <button class="opt">a rollback makes the test run against a fake pool</button>
+    <button class="opt">rolling back is required before any SELECT statement can execute</button>
+  </div>
+  <div class="q" data-why="Testing every function -- including pure decision logic with no SQL -- against a real database turns fast, dependency-free checks into slow ones for no correctness benefit, since a fake would have caught the same bug in that logic just as reliably.">
+    <p class="stem">What goes wrong if every backend test runs against a real integration database?</p>
+    <button class="opt" data-ok>logic needing no database runs slower for zero real benefit</button>
+    <button class="opt">Postgres permanently rejects all connections after too many repeated runs</button>
+    <button class="opt">every fake dependency in the whole codebase stops compiling correctly</button>
+    <button class="opt">unit tests and integration tests become impossible to tell apart</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> Kleppmann's <em>Designing Data-Intensive Applications</em> doesn't dedicate a chapter to testing directly, so this lesson leans on a narrower, already-load-bearing source instead — the reasoning built on Lesson 42's own Effective Go interface citation, applied to the test-double question specifically; RESOURCES.md's "Gaps" section already flags that this course has no single vetted testing-specific source yet, so none is added as a new permanent entry, consistent with how Lessons 28/32 handled a topic with no existing RESOURCES.md citation to extend.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> open — still no reported quiz/lesson-completion outcome exists for any lesson after 45 rounds; distributed locks and blue-green/canary deploys remain the last named, confirmed out-of-scope-per-MISSION.md candidates if no fresh gap or user-chosen track surfaces first.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

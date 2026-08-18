@@ -349,3 +349,19 @@
   lessons), nothing new to generate there either. (Note: this file has
   no entries between 2026-08-09 and 2026-08-14 — a pre-existing gap in
   this log from before this session, left as-is per the no-rewrite rule.)
+- 2026-08-19 (headless 06:00 run, GitHub Actions): skipped again per the
+  same rule — the course window closed 2026-07-20, now thirty days past
+  it. Day 13 (`0014-concurrency-capstone.html`) re-confirmed present on
+  disk and registered in `assets/nav.js` — moot either way. This
+  session's `~/.config/learning/db.env` does not exist in this checkout
+  and any command referencing `LEARNING_DB_URL` requires interactive
+  approval unavailable in this headless session — moot for this course
+  since it's a pure skip regardless of DB state; `bin/record-progress`
+  (write) confirmed working via a direct relative-path invocation.
+  Backend lesson 45, data lesson 42, and python Day 22 were generated
+  this round via delegated agents (see their own NOTES.md entries for
+  detail); rust's post-week daily quiz+kata infra was re-verified
+  unchanged (8 `id: "k` matches in `quiz-bank.js` — the 7 real kata
+  `k1`-`k7` plus the commented example — `day:` tags still run 1-7 only,
+  `nav.js` `LESSONS` still registers only the 7 Jul 8-14 lessons),
+  nothing new to generate there either.

@@ -48,6 +48,8 @@
       file: "lessons/0020-async-await-and-blocking-calls.html" },
     { n: 21, date: "2026-08-18", title: "Talking to PostgreSQL from Python",
       file: "lessons/0021-talking-to-postgresql.html" },
+    { n: 22, date: "2026-08-19", title: "Testing endpoints with httpx",
+      file: "lessons/0022-testing-with-httpx.html" },
   ];
 
   const REFS = [

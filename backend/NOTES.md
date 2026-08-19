@@ -2389,3 +2389,96 @@
   session should keep treating a completion/quiz-outcome signal, or a
   user-named track to deepen, as higher priority than a 46th topic picked
   blind.
+- 2026-08-20 generation (Lesson 46, headless GitHub Actions run): idempotency
+  check first — confirmed no `lessons/0046-*.html` file existed and no
+  `2026-08-20` entry existed yet in this log before writing anything (highest
+  existing file was 0045, dated 2026-08-19). Per this round's own briefing,
+  `course_progress` is not reliably reachable in this sandboxed session and
+  direct `psql "$LEARNING_DB_URL" ...` (or any command containing shell-variable
+  expansion) is hard-blocked by this session's static analysis — neither was
+  attempted; pacing instead came entirely from `backend/learning-records/`
+  (both files re-read in full: 0001's baseline frontend-mindset note and
+  0002's concurrency-vocabulary gap "behind Go week," both already fully
+  reflected in prior lessons — Lesson 25 covers 0002's gap directly, so
+  nothing new to act on from either record) plus the last several entries of
+  this log's own running history. Lesson 45 left only the two standing
+  out-of-scope-per-MISSION.md candidates (distributed locks, blue-green/canary
+  deploys) with no new in-scope candidate, so this round ran a fresh grep
+  sweep across all 45 lesson bodies and `glossary.html` for several untaught
+  candidates (health checks — already covered, Lessons 13/20/27; composite
+  indexes — named explicitly in Lesson 5's own text as Go-week Day 5-6
+  territory, ruled out; bulk insert/COPY — zero hits but a narrow mechanism,
+  not a strong candidate; event sourcing — zero hits) before finding a
+  stronger, previously-named-but-unexplained gap: "audit trail" appears in
+  three prior lessons (14's PR-review callout, 20's synthesis lesson naming it
+  as a review lens, 34's soft-delete lesson leaning on it to justify keeping a
+  row) but no lesson, and no glossary entry, ever explained what one actually
+  is or how to build it — confirmed via grep across all 45 lesson bodies and
+  `glossary.html` before writing that "audit log"/"audit_log" had zero hits
+  anywhere. In scope under MISSION criterion 1 (data modeling: "entities,
+  relationships, constraints") and criterion 3 (runtime reasoning), not
+  infra/NoSQL/distributed — the same "named but deferred" gap shape that
+  found eight-plus prior gaps (Lessons 32-43). Lesson 46 covers it: why a
+  current-state table (an `accounts.status` column) only ever answers "what's
+  true now," tied explicitly to Lesson 39's MVCC lesson (old row versions
+  exist briefly for in-flight transactions, then VACUUM reclaims them — no
+  permanent history survives an UPDATE); why `updated_at` and Lesson 13's
+  structured logging both look like they'd cover this but don't (overwritten
+  in place vs. rotated/unscoped-per-entity, respectively); a minimal
+  `audit_log` table (`actor_id`, `action`, `entity_type`, `entity_id`, a
+  JSONB `change` column reusing Lesson 44's own fixed-vs-variable-fields rule,
+  `reason`, `created_at`), indexed on `(entity_type, entity_id, created_at)`;
+  writing the audit insert in the SAME transaction as the state change it
+  records, framed explicitly as Lesson 6's atomicity problem applied to "what
+  happened" instead of just "what changed" and tied to Lesson 29's outbox
+  dual-write material; a `suspendAccount` Go snippet extending Lesson 45's own
+  `SuspendDelinquentAccount` example to write both the state change and the
+  audit row, reusing Lesson 42's minimal `Querier` interface shape; a
+  decision rule for what actually needs one (reusing Lesson 34's own
+  soft-delete decision-question shape: does something outside the table
+  legitimately need the history, or is "what's true now" the whole answer
+  here too — money, permissions, and support-reconstructable changes as the
+  recurring real candidates, not a blanket default); a three-way comparison
+  table (reusing Lesson 25's `table.cmp`/`.cmp-wrap` component) contrasting
+  `updated_at`, application logs, and an audit log; and the append-only
+  property named as what makes the log trustworthy at all (an editable row
+  could no longer be trusted as history), including why it's a separate table
+  rather than a mutable "history" JSONB column bolted onto the entity itself.
+  The `Querier`/`ActorContext`/`suspendAccount` Go snippet was compile-checked
+  clean with `go build -C` / `go vet -C` in a scratch module
+  (`.scratch/backend-lesson46/`, deleted entirely after, same as Lessons 30/
+  33/34/39's precedent) — no approval blocker for either `-C`-style invocation
+  this round. Added `audit log / audit trail` to the glossary (confirmed via
+  grep beforehand it existed nowhere in `lessons/*.html` or `glossary.html`)
+  and registered Lesson 46 in nav.js. Quiz options were drafted, then
+  verified with `wc -w` per option via individual `sed -n '<n>p' | wc -w`
+  calls, one literal command per line (no loop/variable-expansion form
+  attempted — confirmed again this round that a bare `for` loop is
+  hard-blocked by this sandbox's static analysis, consistent with every round
+  since Lesson 28's finding) — all four questions needed at least one rewrite
+  pass before landing on equal counts, each re-verified after every edit and
+  cross-checked a second, independent way (re-extracting the full shipped
+  option list via `grep -o` and re-running `wc -w` per line a second time
+  rather than trusting the first pass): Q1 9/9/9/9, Q2 10/10/10/10, Q3
+  10/10/10/10, Q4 9/9/9/9. Primary source: the PostgreSQL Manual's Data
+  Definition chapter — RESOURCES.md already cites it generally for "tables,
+  constraints, defaults, schemas" (already extended by Lessons 19, 21, 34,
+  38, 39, and 43 into specific mechanisms); Kleppmann's DDIA ch. 11 named as
+  the secondary source, extending the same standing citation Lesson 29's
+  outbox material already used. `bin/record-progress backend lesson_generated
+  --day 46 --lesson 0046-audit-logging-recording-what-happened.html --detail
+  '{"by":"github-actions"}'` was run directly via its relative path from the
+  repo root as instructed and succeeded on the first try, no approval blocker
+  this round — consistent with every round since Lesson 32's finding that the
+  write path works reliably when invoked this way, even though the DB-read
+  side (`course_progress` via `psql`) remains unreachable in this sandboxed
+  session as flagged at the start of this round. This closes the audit-log
+  gap found by grepping "audit trail" mentions across Lessons 14/20/34 rather
+  than re-scanning MISSION.md or reusing the distributed-locks/blue-green
+  leftovers; still no `lesson_completed` record exists for any lesson after
+  46 rounds — the next session should keep treating a completion/quiz-outcome
+  signal, or a user-named track to deepen, as higher priority than a 47th
+  topic picked blind. No other in-scope candidate was named or noticed this
+  round beyond the one just closed; distributed locks and blue-green/canary
+  deploys remain the standing out-of-scope-per-MISSION.md candidates if a
+  fresh gap-finding pass is needed again next time.

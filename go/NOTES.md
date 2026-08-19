@@ -365,3 +365,17 @@
   `k1`-`k7` plus the commented example — `day:` tags still run 1-7 only,
   `nav.js` `LESSONS` still registers only the 7 Jul 8-14 lessons),
   nothing new to generate there either.
+- 2026-08-20 (headless 06:00 run, GitHub Actions): skipped again per the
+  same rule — the course window closed 2026-07-20, now thirty-one days
+  past it. Day 13 (`0014-concurrency-capstone.html`) re-confirmed present
+  on disk and registered in `assets/nav.js` — moot either way. This
+  session's sandbox again rejected any command referencing
+  `LEARNING_DB_URL` outright ("Contains simple_expansion" — a static,
+  content-level block on that variable name and on any `$VAR`-style shell
+  expansion in a Bash command generally, confirmed this round by a plain
+  `for` loop over five course names also tripping the same error) — moot
+  for this course since it's a pure skip regardless of DB state. Backend,
+  data, and python lessons were generated this round via delegated
+  agents (see their own NOTES.md entries for detail); rust's post-week
+  daily quiz+kata infra was re-verified unchanged, nothing new to
+  generate there either.

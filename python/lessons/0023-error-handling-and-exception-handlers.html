@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 23 · Error handling: custom exceptions, exception handlers &amp; a consistent error shape</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 23 · ~20 min · 20 Aug 2026</p>
+<h1>Error handling: custom exceptions, exception handlers &amp; a consistent error shape</h1>
+<p class="byline">Day 22 named <code>@app.exception_handler(SomeException)</code> in one recognition-level paragraph and moved on — today it gets the worked lesson it was owed. <code>PLAN.md</code>'s Phase 2b spine closed with "testing endpoints with <code>httpx</code>; errors, middleware, and a deployable shape"; Day 22 shipped the testing half and named the other three without building any of them. Errors is the one worth a full lesson on its own — middleware and the ASGI-server "deployable shape" stay recognition-level, already covered. Today: <strong>Day 8's custom exception classes, caught app-wide instead of route-by-route, plus overriding pydantic's default 422 shape</strong> — the two pieces every real FastAPI service needs and this course hasn't built yet.</p>
+
+<div class="callout"><strong>Bridge from SQL:</strong> this is a <code>CHECK</code> constraint's error message, standardized. A failed constraint always reports the same shape — which table, which rule, why — regardless of which query tripped it. An app-wide exception handler is that same discipline for HTTP errors: every route that raises <code>OutOfStock</code> gets back the identical JSON shape, instead of each handler inventing its own error body.</p></div>
+
+<h2>1 · The problem: <code>HTTPException</code> everywhere means repeating yourself everywhere</h2>
+<p>Day 16 taught <code>raise HTTPException(status_code=404, detail="user not found")</code> — correct, and still the right tool for a one-off "this specific request is bad." But once several routes need the same domain rule, that pattern repeats the same status code and message logic in every handler that needs it:</p>
+<pre><code><span class="kw">from</span> fastapi <span class="kw">import</span> FastAPI, HTTPException
+
+app = FastAPI()
+_stock = {<span class="str">"widget"</span>: <span class="kw">0</span>, <span class="str">"gadget"</span>: <span class="kw">5</span>}
+
+<span class="kw">@app.post</span>(<span class="str">"/orders/{item}"</span>)
+<span class="kw">def</span> place_order(item: <span class="kw">str</span>):
+    <span class="kw">if</span> _stock.get(item, <span class="kw">0</span>) &lt;= <span class="kw">0</span>:
+        <span class="kw">raise</span> HTTPException(status_code=<span class="kw">409</span>, detail=<span class="str">f"{item} is out of stock"</span>)
+    _stock[item] -= <span class="kw">1</span>
+    <span class="kw">return</span> {<span class="str">"item"</span>: item, <span class="str">"remaining"</span>: _stock[item]}</code></pre>
+<p>Fine for one route. But "out of stock" is a rule the *business* owns, not this one handler — a second route that also touches stock would need to copy that exact <code>if</code>/<code>raise</code> pair, and any drift between the two copies (a typo'd message, a different status code) becomes a real bug. The fix is to raise something that names the rule once, and teach the app how to turn it into a response once.</p>
+
+<h2>2 · A custom exception, raised where the rule lives</h2>
+<p>Day 8 already taught this shape: subclass <code>Exception</code>, give the failure a name, carry the data a caller needs to explain it:</p>
+<pre><code><span class="kw">class</span> OutOfStock(Exception):
+    <span class="kw">def</span> __init__(self, item: <span class="kw">str</span>):
+        self.item = item</code></pre>
+<p>Nothing new here — this is the exact <code>InvalidSalesRow</code> pattern from Day 8, reused unchanged. What's different from Day 8 is <em>where it gets caught</em>. A plain script catches a custom exception with a local <code>except InvalidSalesRow:</code> right where the call happens. A FastAPI app instead registers one function, once, that catches it for every route in the whole app:</p>
+<pre><code><span class="kw">from</span> fastapi <span class="kw">import</span> Request
+<span class="kw">from</span> fastapi.responses <span class="kw">import</span> JSONResponse
+
+<span class="kw">@app.exception_handler</span>(OutOfStock)
+<span class="kw">def</span> handle_out_of_stock(request: Request, exc: OutOfStock):
+    <span class="kw">return</span> JSONResponse(
+        status_code=<span class="kw">409</span>,
+        content={<span class="str">"error"</span>: <span class="str">"out_of_stock"</span>, <span class="str">"item"</span>: exc.item},
+    )
+
+<span class="kw">@app.post</span>(<span class="str">"/orders/{item}"</span>)
+<span class="kw">def</span> place_order(item: <span class="kw">str</span>):
+    <span class="kw">if</span> _stock.get(item, <span class="kw">0</span>) &lt;= <span class="kw">0</span>:
+        <span class="kw">raise</span> OutOfStock(item)
+    _stock[item] -= <span class="kw">1</span>
+    <span class="kw">return</span> {<span class="str">"item"</span>: item, <span class="str">"remaining"</span>: _stock[item]}</code></pre>
+<p>The handler now just <code>raise</code>s a plain, named exception — Day 8's <code>raise</code>, once again unchanged — and every ounce of "what status code, what body" logic lives in exactly one place: <code>handle_out_of_stock</code>. A second route that can also run out of stock raises the same <code>OutOfStock(item)</code> and gets the identical response, with zero copy-pasted <code>if</code>/<code>raise</code> logic. This is the mechanism Day 22 named but never built — <code>@app.exception_handler(ExcType)</code> registers a function FastAPI calls automatically whenever <code>ExcType</code> (or a subclass of it) escapes a handler uncaught, converting it into the <code>JSONResponse</code> that function returns.</p>
+
+<h2>3 · Overriding pydantic's default 422: <code>RequestValidationError</code></h2>
+<p>Day 17 showed pydantic rejecting bad input with a <code>ValidationError</code>; wired into FastAPI, a failed request body validation actually raises a related type, <dfn data-en="the exception FastAPI itself raises (a FastAPI-specific wrapper around pydantic's ValidationError) when a request's body, path, or query parameters fail model validation - it is what produces the framework's default 422 response, and can be caught with its own @app.exception_handler like any other exception type" data-vn="giữ nguyên &quot;RequestValidationError&quot; — exception FastAPI tự raise (bọc quanh ValidationError của pydantic) khi request body/path/query không validate được, tạo ra response 422 mặc định, bắt được bằng @app.exception_handler như exception bình thường"><code>RequestValidationError</code></dfn>, and returns FastAPI's own default 422 body — a fairly verbose, deeply nested structure listing every failing field. That default is fine to start, but a real API often wants its error responses in <em>one</em> consistent shape, matching whatever <code>handle_out_of_stock</code> above already returns for business errors:</p>
+<pre><code><span class="kw">from</span> fastapi.exceptions <span class="kw">import</span> RequestValidationError
+
+<span class="kw">@app.exception_handler</span>(RequestValidationError)
+<span class="kw">def</span> handle_validation_error(request: Request, exc: RequestValidationError):
+    <span class="kw">first</span> = exc.errors()[<span class="kw">0</span>]
+    <span class="kw">return</span> JSONResponse(
+        status_code=<span class="kw">422</span>,
+        content={<span class="str">"error"</span>: <span class="str">"validation_failed"</span>, <span class="str">"field"</span>: first[<span class="str">"loc"</span>][-<span class="kw">1</span>], <span class="str">"message"</span>: first[<span class="str">"msg"</span>]},
+    )</code></pre>
+<p><code>@app.exception_handler</code> isn't limited to custom exception classes — it registers on <em>any</em> exception type, including ones FastAPI itself raises internally. <code>exc.errors()</code> is a list of every field that failed, each a dict with <code>"loc"</code> (a path to the field, e.g. <code>("body", "email")</code>) and <code>"msg"</code> (why); this handler picks just the first failure and reshapes it to match <code>handle_out_of_stock</code>'s own <code>{"error": ..., ...}</code> shape — same idea as building one row-shape dataclass in Day 7 instead of passing around raw dicts of varying keys, applied to error responses instead of data.</p>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> a pipeline validating a DataFrame's columns (dtype checks, null checks) raises or logs inline where the check runs — there's no app-wide handler to register, because there's no series of independent HTTP requests hitting the same rule from different routes; that's specifically a web-service problem, not a data-transform one.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/23_error_handling_and_exception_handlers.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run --with fastapi --with httpx python3 practice/23_error_handling_and_exception_handlers.py</code></pre>
+<p>Needs <code>fastapi</code> and <code>httpx</code>, installed one-off via <code>--with</code>, same as Days 16-22. Exercises: defining a custom exception carrying data about the failure, writing an <code>@app.exception_handler</code> function that turns it into a chosen status code and JSON body, confirming a route that raises it never crashes into a raw 500, and writing a <code>RequestValidationError</code> handler that reshapes FastAPI's default 422 body into a smaller, consistent shape.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A custom exception like OutOfStock is Day 8's subclass-Exception pattern, raised the identical way with raise. What's new today is where it's caught: not a local except clause, but one @app.exception_handler function registered for the whole app.">
+    <p class="stem">What does defining <code>class OutOfStock(Exception): ...</code> reuse from Day 8?</p>
+    <button class="opt" data-ok>the subclass-Exception pattern, raised exactly the same way</button>
+    <button class="opt">a brand new class only FastAPI apps define</button>
+    <button class="opt">the HTTPException type, imported straight from fastapi itself</button>
+  </div>
+  <div class="q" data-why="Registering @app.exception_handler(OutOfStock) once means every route that raises OutOfStock(item) gets the identical status code and JSON body back, with no repeated if/raise HTTPException(...) logic copy-pasted into each route that needs the same rule.">
+    <p class="stem">Why register <code>@app.exception_handler(OutOfStock)</code> once instead of a local <code>if</code>/<code>raise HTTPException</code> in every route?</p>
+    <button class="opt" data-ok>one place owns the rule instead of repeating it everywhere</button>
+    <button class="opt">HTTPException can never be raised inside any route handler ever</button>
+    <button class="opt">exception handlers always run faster than a plain if statement</button>
+  </div>
+  <div class="q" data-why="RequestValidationError is what FastAPI raises internally when pydantic rejects a request body - registering a handler for it overrides FastAPI's own default, fairly verbose 422 body with whatever shape the handler function returns instead.">
+    <p class="stem">What does registering <code>@app.exception_handler(RequestValidationError)</code> change?</p>
+    <button class="opt" data-ok>the JSON body that FastAPI's own default 422 response returns</button>
+    <button class="opt">whether pydantic still validates the request body itself at all</button>
+    <button class="opt">the status code, which can no longer ever stay 422</button>
+  </div>
+  <div class="q" data-why="exc.errors() returns a list of every field that failed validation, each entry a dict with a 'loc' path to the field and a 'msg' explaining why - picking one entry and reshaping it is exactly how handle_validation_error builds its smaller, consistent body.">
+    <p class="stem">What does <code>exc.errors()</code> return inside a <code>RequestValidationError</code> handler?</p>
+    <button class="opt" data-ok>a list of every failing field, with a location and message</button>
+    <button class="opt">a single string naming only the very first field that failed</button>
+    <button class="opt">nothing useful at all, since the request body is already gone</button>
+  </div>
+  <div class="q" data-why="@app.exception_handler registers on any exception type escaping a route uncaught, not only custom classes defined in this app's own code - RequestValidationError is a type FastAPI itself raises internally, and it can be handled the identical way as OutOfStock.">
+    <p class="stem">Can <code>@app.exception_handler</code> register a handler for <code>RequestValidationError</code>, a type FastAPI itself raises?</p>
+    <button class="opt" data-ok>yes, any exception type at all, escaping any route</button>
+    <button class="opt">no, only on exception classes this app itself defines</button>
+    <button class="opt">no, only on HTTPException and its own direct subclasses</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> FastAPI's own <a href="https://fastapi.tiangolo.com/tutorial/handling-errors/">"Handling Errors"</a> tutorial page for custom exceptions, <code>@app.exception_handler</code>, and overriding the default validation handler — cited in <code>RESOURCES.md</code> under "Knowledge — backend" alongside the rest of the FastAPI tutorial spine.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day23">glossary</a> under Day 23.<br>
+Phase 2b's spine is now fully built out (handlers through today's error handling); middleware and the ASGI-server "deployable shape" remain recognition-level from Day 22, by design — a natural next-session question is whether to build one of those next, or turn toward consolidation/interview-prep given <code>RESOURCES.md</code>'s own open gap there.<br><br>
+💬 Anything unclear — why a custom exception beats repeated <code>HTTPException</code> calls, or how <code>RequestValidationError</code> fits with pydantic? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

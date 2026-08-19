@@ -50,6 +50,8 @@
       file: "lessons/0021-talking-to-postgresql.html" },
     { n: 22, date: "2026-08-19", title: "Testing endpoints with httpx",
       file: "lessons/0022-testing-with-httpx.html" },
+    { n: 23, date: "2026-08-20", title: "Error handling: custom exceptions, exception handlers & a consistent error shape",
+      file: "lessons/0023-error-handling-and-exception-handlers.html" },
   ];
 
   const REFS = [

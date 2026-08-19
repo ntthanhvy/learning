@@ -90,6 +90,8 @@
       file: "lessons/0041-astype.html" },
     { n: 42, date: "2026-08-19", title: "str.extract(): pulling structured pieces out of text",
       file: "lessons/0042-str-extract.html" },
+    { n: 43, date: "2026-08-20", title: "str.extractall(): every match, not just the first",
+      file: "lessons/0043-str-extractall.html" },
   ];
 
   const REFS = [

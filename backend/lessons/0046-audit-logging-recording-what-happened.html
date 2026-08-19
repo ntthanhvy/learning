@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 46 · Audit logging: recording what happened, not just what's true now</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 46 · ~20 min</p>
+<h1>Audit logging: recording what happened, not just what's true now</h1>
+<p class="byline">"Audit trail" has come up three times already — Lesson 14's PR review flagged a missing one, Lesson 20 named it as a review lens, Lesson 34's soft-delete lesson leaned on it to justify keeping a row — but no lesson ever explained what one actually is or how to build it. Today: the difference between a table and an audit log, why "just check <code>updated_at</code>" isn't enough, and a minimal, real pattern for recording who changed what and why.</p>
+
+<h2>1 · A table only remembers the present</h2>
+<p>An <code>accounts</code> row with a <code>status</code> column tells you exactly one thing: what the status is <em>right now</em>. Lesson 39's MVCC lesson explained that Postgres keeps old row versions around briefly for in-flight transactions — but <a href="../lessons/0039-mvcc-how-postgres-does-isolation.html">VACUUM</a> cleans those up once nothing needs them. Once a row is updated, the fact that it used to say something else is gone. There's no column recording that suspension happened, who did it, or why — only that it's suspended now.</p>
+<p>That's fine for most columns. It stops being fine the moment someone asks a question a plain table structurally cannot answer: "who suspended this account, and when?" "did the discount get changed after the order shipped?" "prove this refund was actually authorized." A <dfn data-en="an append-only record of actions taken in a system — who did what, to which entity, when, and often why — kept separately from the entity's own current-state table" data-vn="audit log / audit trail (giữ nguyên) — bảng ghi lại các hành động đã xảy ra: ai làm gì, trên entity nào, lúc nào, tại sao — tách riêng khỏi bảng lưu trạng thái hiện tại">audit log</dfn> exists because the current-state table was never designed to answer "what happened," only "what's true."</p>
+
+<div class="callout"><strong>The frontend equivalent you already own.</strong> This is the same split as Redux DevTools' action list versus the current store state: the store tells you what's true right now, the action log tells you the sequence of dispatches that got it there — and you reach for the action log specifically when "what's true" doesn't explain "how did it get this way." An audit log is that action list, persisted server-side instead of thrown away on page refresh.</div>
+
+<h2>2 · Not the same thing as <code>updated_at</code>, and not the same thing as logging</h2>
+<p>Two things that look like they'd cover this don't. An <code>updated_at timestamptz</code> column (common on most tables already) only ever holds the <em>last</em> change — a second update overwrites the first's timestamp with no trace either happened, and it never says who or what changed, only when. Lesson 13's structured logging is closer but still the wrong tool by default: application logs are optimized for debugging and typically rotate or expire (Lesson 13 never promised permanence), aren't scoped per-entity, and mix operational noise ("connection pool at 80%") in with the one line that actually matters for an audit question. An audit log is <em>deliberately</em> narrower and longer-lived than either: one row per meaningful state change, kept as long as the business or legal requirement demands, queryable by entity rather than by grepping timestamps.</p>
+
+<pre><code><span class="kw">CREATE</span> <span class="kw">TABLE</span> audit_log (
+  id            <span class="ty">bigserial</span> <span class="kw">PRIMARY KEY</span>,
+  actor_id      <span class="ty">bigint</span> <span class="kw">NOT NULL</span> <span class="kw">REFERENCES</span> accounts(id),
+  action        <span class="ty">text</span> <span class="kw">NOT NULL</span>,        <span class="cm">-- e.g. 'account.suspend'
+</span>  entity_type   <span class="ty">text</span> <span class="kw">NOT NULL</span>,        <span class="cm">-- e.g. 'account'
+</span>  entity_id     <span class="ty">bigint</span> <span class="kw">NOT NULL</span>,
+  change        <span class="ty">jsonb</span> <span class="kw">NOT NULL</span>,        <span class="cm">-- what actually changed
+</span>  reason        <span class="ty">text</span>,                  <span class="cm">-- optional, but valuable when present
+</span>  created_at    <span class="ty">timestamptz</span> <span class="kw">NOT NULL</span> <span class="kw">DEFAULT</span> now()
+);
+
+<span class="kw">CREATE</span> <span class="kw">INDEX</span> <span class="kw">ON</span> audit_log (entity_type, entity_id, created_at);</code></pre>
+
+<p><code>change</code> is deliberately <a href="../lessons/0044-jsonb-semi-structured-columns.html">JSONB</a>, not more columns — Lesson 44's own rule applies directly: every audit row has the same handful of fixed fields (<code>actor_id</code>, <code>action</code>, <code>entity_type</code>, <code>entity_id</code>), so those stay real typed columns, but what actually changed varies action to action (a suspension changes <code>status</code>; a discount edit changes <code>percent_off</code>) and nobody wants a new migration every time a new field becomes auditable.</p>
+
+<h2>3 · Writing the audit row in the same transaction as the change</h2>
+<p>The insert has to happen atomically with the change it's recording, or it isn't trustworthy — a state change that succeeds while its audit row fails to write (a crash between the two statements, exactly Lesson 6's atomicity problem) leaves an unexplained gap in the trail, which defeats the entire point. Wrapping both statements in one transaction (Lesson 6) fixes it the same way it fixed the outbox pattern's dual-write problem in Lesson 29 — the state change and the record of the state change either both commit or neither does.</p>
+
+<pre><code><span class="kw">type</span> Querier <span class="kw">interface</span> {
+    Exec(ctx context.Context, sql <span class="ty">string</span>, args ...<span class="ty">any</span>) <span class="kw">error</span>
+}
+
+<span class="cm">// ActorContext names who is making this change and why -- an audit row
+// with no actor is close to useless, so it's a required parameter, not
+// an optional extra bolted on later.
+</span><span class="kw">type</span> ActorContext <span class="kw">struct</span> {
+    ActorID <span class="ty">int64</span>
+    Reason  <span class="ty">string</span>
+}
+
+<span class="cm">// suspendAccount is Lesson 45's SuspendDelinquentAccount, extended to
+// write an audit_log row in the SAME transaction as the state change --
+// Lesson 6's atomicity, applied to "what happened" instead of just
+// "what changed".
+</span><span class="kw">func</span> suspendAccount(ctx context.Context, db Querier, actor ActorContext, accountID <span class="ty">int64</span>) <span class="kw">error</span> {
+    <span class="kw">if</span> err := db.Exec(ctx,
+        <span class="st">`UPDATE accounts SET status = 'suspended' WHERE id = $1`</span>, accountID); err != <span class="kw">nil</span> {
+        <span class="kw">return</span> fmt.Errorf(<span class="st">"suspend account %d: %w"</span>, accountID, err)
+    }
+
+    change, err := json.Marshal(<span class="kw">map</span>[<span class="ty">string</span>]<span class="ty">string</span>{<span class="st">"status"</span>: <span class="st">"suspended"</span>})
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        <span class="kw">return</span> fmt.Errorf(<span class="st">"marshal audit change: %w"</span>, err)
+    }
+
+    <span class="kw">if</span> err := db.Exec(ctx,
+        <span class="st">`INSERT INTO audit_log (actor_id, action, entity_type, entity_id, change, reason)
+		 VALUES ($1, $2, $3, $4, $5, $6)`</span>,
+        actor.ActorID, <span class="st">"account.suspend"</span>, <span class="st">"account"</span>, accountID, change, actor.Reason,
+    ); err != <span class="kw">nil</span> {
+        <span class="kw">return</span> fmt.Errorf(<span class="st">"write audit log for account %d: %w"</span>, accountID, err)
+    }
+    <span class="kw">return</span> <span class="kw">nil</span>
+}</code></pre>
+
+<p>In real code, <code>db</code> here would be a transaction handle (a <code>pgx.Tx</code>, not a bare pool) so both <code>Exec</code> calls are guaranteed atomic — the snippet keeps the same minimal <code>Querier</code> interface shape Lesson 42 used, since the point here is the two-writes-together pattern, not the transaction plumbing itself.</p>
+
+<h2>4 · What actually belongs in one, and what doesn't</h2>
+<p>Not every table needs this. The deciding question is the same shape Lesson 34 already used for soft delete: does something outside the current-state table — a support ticket, a compliance requirement, a "who approved this" question — legitimately need the history to exist, or is "what's true now" actually the whole answer here too? A user's UI theme preference doesn't need an audit trail; a balance change, a permission grant, or anything Lesson 12's authorization lesson gates almost always does. Money movements, permission and role changes, and anything a support agent might need to reconstruct ("why does this account say suspended?") are the recurring real-world candidates — not "every table, just in case."</p>
+
+<div class="cmp-wrap">
+<table class="cmp">
+<thead><tr><th><code>updated_at</code> column</th><th>Application log (Lesson 13)</th><th>Audit log</th></tr></thead>
+<tbody>
+<tr><th>What it keeps</th><td>Only the most recent change's timestamp</td><td>Every operational event, rotated/expired over time</td><td>Every meaningful state change, kept as long as required</td></tr>
+<tr><th>Says who changed it</th><td>No — timestamp only</td><td>Sometimes, mixed with unrelated log lines</td><td>Yes — actor is a required field</td></tr>
+<tr><th>Queryable per entity</th><td>N/A — one value per row</td><td>Awkward — needs log search/grep</td><td>Yes — indexed by entity_type + entity_id</td></tr>
+<tr><th>Survives the next update</th><td>No — overwritten in place</td><td>Until the log rotates out</td><td>Yes — append-only by design</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>The append-only property is what makes an audit log trustworthy: rows are only ever inserted, never updated or deleted by normal application code — if a row could be edited after the fact, it would stop proving anything. That's also why it's a separate table rather than a "history" JSONB column bolted onto <code>accounts</code> itself: a new row per change keeps every past version intact, where a single mutable column would just repeat the <code>updated_at</code> problem with extra steps.</p>
+
+<div class="interview">
+<p><strong>Q: "How would you add an audit trail for account status changes?"</strong> A strong answer, out loud: <em>"A separate, append-only <code>audit_log</code> table — actor id, action, entity type and id, a JSONB column for what actually changed since that varies per action, and a timestamp. I'd write the audit row in the same transaction as the state change itself, so the two can't drift apart if something fails between them — the same atomicity problem Lesson 6 covers and the outbox pattern solves for events. I wouldn't add this to every table; it's for changes someone might later need to explain — money, permissions, anything support or compliance could ask about — not a blanket default."</em> The signal: naming atomicity and append-only explicitly, not just "add a log table."</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="An updated_at column is overwritten in place on every change, so it only ever holds the most recent timestamp -- it never records who changed the row, why, or that any earlier change happened at all.">
+    <p class="stem">Why doesn't an <code>updated_at</code> column serve as an audit trail?</p>
+    <button class="opt" data-ok>it gets overwritten and only keeps the latest timestamp</button>
+    <button class="opt">Postgres actually blocks that column from ever being indexed</button>
+    <button class="opt">timestamptz columns cannot store a value in the past</button>
+    <button class="opt">it silently duplicates itself into a second hidden table</button>
+  </div>
+  <div class="q" data-why="If the state-change write and the audit-log write are two separate, unguarded statements, a crash between them leaves the state changed with no record of it -- exactly Lesson 6's atomicity problem, applied to the audit row instead of a business row.">
+    <p class="stem">Why should the audit-log insert run in the same transaction as the change it records?</p>
+    <button class="opt" data-ok>a crash between two unguarded writes leaves an unexplained gap</button>
+    <button class="opt">Postgres requires every single insert to happen inside a transaction</button>
+    <button class="opt">JSONB columns can only be written inside a transaction block</button>
+    <button class="opt">separate transactions always run in some totally random, unordered sequence</button>
+  </div>
+  <div class="q" data-why="The change column varies by action -- a suspension changes status, a discount edit changes percent_off -- while actor_id, action, entity_type, and entity_id stay the same fixed shape on every row. That's exactly Lesson 44's JSONB rule: fixed shared fields stay real columns, genuinely per-row-variable data goes in JSONB.">
+    <p class="stem">Per Lesson 44's rule, why does an audit log's <code>change</code> column use JSONB instead of more fixed columns?</p>
+    <button class="opt" data-ok>what changed varies by action, unlike the row's other fields</button>
+    <button class="opt">Postgres simply cannot index a bigint column more than once</button>
+    <button class="opt">JSONB columns write measurably faster than any other Postgres type</button>
+    <button class="opt">fixed columns cannot store more than one value per row</button>
+  </div>
+  <div class="q" data-why="If application code could update or delete an existing audit row, it would stop proving anything -- an attacker or a bug could quietly rewrite history. Append-only, insert-only rows are what make the log trustworthy as a record of what actually happened.">
+    <p class="stem">Why is an audit log normally append-only, with no updates or deletes from application code?</p>
+    <button class="opt" data-ok>an editable row could no longer be trusted as history</button>
+    <button class="opt">Postgres physically cannot run UPDATE on a bigserial column</button>
+    <button class="opt">append-only tables always end up using less disk space</button>
+    <button class="opt">JSONB values become unreadable after a single UPDATE call</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the <a href="https://www.postgresql.org/docs/current/ddl.html">PostgreSQL Manual's Data Definition chapter</a> — RESOURCES.md already cites it generally for "tables, constraints, defaults, schemas" (already extended by Lessons 19, 21, 34, 38, 39, and 43 into specific mechanisms); this lesson applies the same table-design reasoning to an append-only, entity-indexed log table rather than a new Postgres feature. Kleppmann's <em>Designing Data-Intensive Applications</em> ch. 11 is a secondary read for the deeper idea an audit log is one instance of — treating a sequence of events, not just current state, as the primary record — already a standing citation via Lesson 29's outbox-pattern material.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> open — still no reported quiz/lesson-completion outcome exists for any lesson after 46 rounds; distributed locks and blue-green/canary deploys remain the last named, confirmed out-of-scope-per-MISSION.md candidates if no fresh gap or user-chosen track surfaces first.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

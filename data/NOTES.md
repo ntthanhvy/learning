@@ -2525,3 +2525,78 @@
   `str.findall()` were name-dropped in today's "Go deeper" link as
   out-of-scope cousins, both real candidates for a future scan) if no
   drill-outcome signal surfaces by next generation.
+- 2026-08-20 generation (Lesson 43, headless GitHub Actions run): idempotency
+  was self-confirmed this round (globbed `data/lessons/` for `0043-*.html` —
+  none found; grepped `NOTES.md` for a `2026-08-20` entry — none found) before
+  proceeding. Direct `psql "$LEARNING_DB_URL" ...` reads were not attempted at
+  all this round per the run's own instructions (any command containing
+  shell-variable expansion is hard-blocked by this session's Bash tool static
+  analysis, not merely gated behind interactive approval) — fell back to
+  `learning-records/` (still only the Lesson-1 baseline, course-creation
+  context, no reported struggle) plus `NOTES.md`'s own tail for pace, same
+  fallback every prior round has used. Lesson 42's own teaser named
+  `str.extractall()`/`str.findall()` explicitly as out-of-scope cousins
+  spotted during that round's own "Go deeper" link — re-confirmed via grep
+  that neither appeared anywhere in `lessons/*.html` or
+  `reference/glossary.html` before today (only inside Lesson 42's own "Go
+  deeper" paragraph), so Lesson 43 ships `str.extractall()` as planned:
+  contrasted directly against Lesson 42's `str.extract()` (first-match-only,
+  by design) via a new inline `notes` fixture (order_id/customer/notes,
+  same domain as Lessons 6-42, no CSV touched) with a variable number of tag
+  matches per row, the two-level MultiIndex result shape (original row
+  position, match number starting at 0), the zero-match-row gotcha (a row
+  with no matches is absent from the result entirely, not a NaN row — the
+  opposite of `str.extract()`'s non-match behavior), recovering a correct
+  per-row count via `groupby(level=0).size()` + `.index.map(...).fillna(0)`
+  (tying back to Lesson 33's index-alignment idea and Lesson 41's
+  `astype(int)`), and `str.findall()` as the lighter list-per-row sibling.
+  SQL bridge: Postgres' `regexp_matches(col, pattern, 'g')` used inside a
+  `LATERAL` join, named as more ceremony than one `extractall()` call. `uv
+  run --with pandas` worked directly this round (pandas 3.0.5, confirmed via
+  `pd.__version__`): every behavior was hand-verified in a scratch script
+  before writing a word of the lesson — confirmed `extractall()`'s exact
+  MultiIndex shape and values (6 total matches across 3 matching rows: row 0
+  urgent+gift, row 1 bulk, row 2 urgent+fragile+gift; row 3 "no tags here"
+  absent entirely), confirmed `groupby(level=0).size()` gives exactly 3
+  entries (row 3 has none), confirmed `.index.map(...).fillna(0).astype(int)`
+  correctly recovers `[2, 1, 3, 0]` (row 3's true zero, not a missing group),
+  and confirmed `str.findall()` returns `[]` for row 3 (never NaN, never
+  dropped) versus `["urgent", "fragile", "gift"]` for row 2. The shipped
+  (unsolved) `practice/43_str_extractall.py` was copied into
+  `.scratch/data-lesson43/` (mirroring the precedent of not running unverified
+  code directly against the shipped file first) and executed there — printed
+  all 7 ✗ with no crash on the first try, no Ellipsis-is-truthy false-positive
+  this round (each `...` placeholder sits where an unsolved Ellipsis reaches a
+  real pandas call and raises: `str.extractall(...)` raises `TypeError`,
+  `groupby(level=...)` raises `TypeError` on a literal Ellipsis level,
+  `.astype(...)` raises `TypeError: Cannot interpret 'Ellipsis' as a data
+  type`, `str.findall(...)` raises `TypeError` — none of the four fall into
+  the "Ellipsis is truthy/valid-argument" trap documented in Lessons
+  19-21/41). A solved copy (`.scratch/data-lesson43/solved.py`, not shipped)
+  then printed all 7 ✓ against the same hand-verified values above; both
+  scratch files and the now-empty `.scratch/data-lesson43/` directory were
+  removed with `rm -rf` after verification, no approval needed this round.
+  Added `str.extractall()` to the glossary (checked for a collision first —
+  none; placed directly after the existing `str.extract()` entry) and
+  registered Lesson 43 in `nav.js`. Quiz options were drafted and checked
+  with a Python regex/word-count script run via `uv run python3` (this
+  course's established convention since Lessons 26/27) — the first draft came
+  out mismatched on all three questions (Q1 10/8/9, Q2 13/12/10, Q3 9/9/7);
+  two further edit + recount passes landed all three level (Q1 9/9/9, Q2
+  10/10/10, Q3 9/9/9), each pass re-verified by re-running the script rather
+  than eyeballing, per Lesson 19/39's standing warning that a single
+  verification pass isn't infallible. `bin/record-progress data
+  lesson_generated --day 43 --lesson 0043-str-extractall.html --detail
+  '{"by":"github-actions"}'` was run once from the repo root as a literal
+  relative-path command with no shell-variable expansion in what was typed —
+  it succeeded on the first try (`recorded: data/lesson_generated day=43
+  lesson=0043-str-extractall.html`), confirming the write path continues to
+  work even when the read path (`psql "$LEARNING_DB_URL" ...`) is
+  categorically unavailable in this sandboxed session, same asymmetry
+  documented in most prior rounds. This agent does not run `git commit` —
+  leaving working-tree changes uncommitted remains this course's established
+  convention. Set the teaser going forward to `str.findall()` taught as its
+  own topic in more depth (today only contrasted it briefly against
+  `extractall()`), or otherwise a fresh curriculum/glossary scan for the next
+  genuinely-uncovered pandas/NumPy pattern, if no drill-outcome signal
+  surfaces by next generation.

@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 43 · str.extractall(): every match, not just the first</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 43 · ~20 min · 20 Aug 2026</p>
+<h1>str.extractall(): every match, not just the first</h1>
+<p class="byline">Lesson 42's own "Go deeper" link name-dropped two cousins of <code>str.extract()</code> as out of scope: <code>str.extractall()</code> (every match per row, not just the first) and <code>str.findall()</code>. Today closes the first of those two gaps — the tool for when a single cell can hold a variable number of matches, like tags jammed into one free-text field.</p>
+
+<h2>1 · The problem: str.extract() only ever gives you the first match</h2>
+<p>Lesson 42's <code>str.extract()</code> was built for "one column, several facts glued together" — a fixed number of pieces per row. But some columns hold a variable number of matches per row, and <code>str.extract()</code> quietly keeps only the first one:</p>
+<pre><code>orders = pd.DataFrame({
+    <span class="str">"order_id"</span>: [<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>, <span class="num">4</span>],
+    <span class="str">"customer"</span>: [<span class="str">"An"</span>, <span class="str">"Binh"</span>, <span class="str">"An"</span>, <span class="str">"Chi"</span>],
+    <span class="str">"notes"</span>: [
+        <span class="str">"tags: urgent, gift"</span>,
+        <span class="str">"tags: bulk"</span>,
+        <span class="str">"tags: urgent, fragile, gift"</span>,
+        <span class="str">"no tags here"</span>,
+    ],
+})
+orders[<span class="str">"notes"</span>].str.extract(<span class="str">r"(?P&lt;tag&gt;urgent|gift|bulk|fragile)"</span>)
+<span class="cm">--      tag
+-- 0  urgent
+-- 1    bulk
+-- 2  urgent   &lt;- row 2 actually has THREE tags; only the first survived
+-- 3     NaN</span></code></pre>
+<p>Row 2's <code>"fragile"</code> and <code>"gift"</code> vanished with no warning — <code>str.extract()</code> is fundamentally a one-match-per-row tool, by design (that's what makes the DataFrame-of-columns shape work). <dfn data-en="a Series.str method that, unlike str.extract(), finds and returns EVERY match of a regex in each row's text, not just the first -- the result is always a DataFrame with a MultiIndex (original row position, match number starting at 0), and a row with zero matches is dropped from the result entirely rather than appearing as a NaN row" data-vn="giữ nguyên 'str.extractall()' — khác str.extract(), lấy TẤT CẢ các lần khớp trong mỗi hàng chứ không chỉ lần đầu; kết quả luôn là DataFrame với MultiIndex (vị trí hàng gốc, số thứ tự lần khớp); hàng không khớp lần nào thì BỊ LOẠI khỏi kết quả, không phải NaN">str.extractall()</dfn> is the tool for exactly this shape: every match, per row, as its own result row.</p>
+
+<h2>2 · The MultiIndex: (original row, match number)</h2>
+<pre><code>orders[<span class="str">"notes"</span>].str.extractall(<span class="str">r"(?P&lt;tag&gt;urgent|gift|bulk|fragile)"</span>)
+<span class="cm">--              tag
+--   match
+-- 0 0       urgent
+--   1         gift
+-- 1 0         bulk
+-- 2 0       urgent
+--   1      fragile
+--   2         gift
+-- (row 3, "no tags here", is absent entirely -- zero matches, zero result rows)</span></code></pre>
+<p>The result is always a <code>DataFrame</code> (never a Series, even with one capture group), indexed by a two-level <code>MultiIndex</code> (Lesson 14): the outer level is the original row's position, the inner level (named <code>"match"</code>) numbers each match within that row starting at 0. Six matches across three matching rows become six result rows — this reshapes long, the same direction as Lesson 6's <code>melt()</code>, just driven by regex matches inside a cell instead of by column names.</p>
+<div class="callout"><strong>Gotcha:</strong> a row with zero matches doesn't appear in the result at all — not as a row of <code>NaN</code>, the way <code>str.extract()</code> handles a non-match. Row 3 ("no tags here") is simply missing from the output above. Counting matches per <em>original</em> row therefore needs an explicit group-and-count step (next section) — a naive <code>len(result) / len(orders)</code> silently under-counts rows with zero matches as if they didn't exist.</div>
+
+<h2>3 · Counting matches per row: groupby on index level 0</h2>
+<p>The outer MultiIndex level is exactly the original row position, so grouping by it with <code>groupby(level=0)</code> answers "how many matches did each row get" — and reindexing that count back onto the original DataFrame (Lesson 33's <code>set_index</code>/<code>.loc</code> alignment idea) correctly gives row 3 a real <code>0</code>, not a missing group:</p>
+<pre><code>matches = orders[<span class="str">"notes"</span>].str.extractall(<span class="str">r"(?P&lt;tag&gt;urgent|gift|bulk|fragile)"</span>)
+tag_count = matches.groupby(level=<span class="num">0</span>).size()
+orders[<span class="str">"tag_count"</span>] = orders.index.map(tag_count).fillna(<span class="num">0</span>).astype(<span class="kw">int</span>)
+orders[[<span class="str">"order_id"</span>, <span class="str">"notes"</span>, <span class="str">"tag_count"</span>]]
+<span class="cm">--    order_id                         notes  tag_count
+-- 0         1            tags: urgent, gift          2
+-- 1         2                    tags: bulk          1
+-- 2         3   tags: urgent, fragile, gift          3
+-- 3         4                  no tags here          0   &lt;- correctly 0, not dropped</span></code></pre>
+<p><code>.index.map(tag_count)</code> looks up each of <code>orders</code>' own row labels in the <code>tag_count</code> Series (indexed by that same row-label level); a row with no matches has no entry to find, so <code>map()</code> returns <code>NaN</code> there — <code>.fillna(0)</code> turns "no entry found" into the correct real zero before the final <code>astype(int)</code> (Lesson 41).</p>
+
+<h2>4 · str.findall(): the lighter-weight sibling</h2>
+<p><code>str.findall()</code> answers a similar question with a different shape: one list per row (Python's built-in <code>list</code>, not a reshaped DataFrame), empty when there's no match — closer in spirit to Lesson 19's <code>explode()</code> starting shape than to <code>extractall()</code>'s long MultiIndex table:</p>
+<pre><code>orders[<span class="str">"notes"</span>].str.findall(<span class="str">r"urgent|gift|bulk|fragile"</span>)
+<span class="cm">-- 0             [urgent, gift]
+-- 1                     [bulk]
+-- 2    [urgent, fragile, gift]
+-- 3                         []   &lt;- empty list, not NaN and not dropped
+-- Name: notes, dtype: object</span></code></pre>
+<p>Rule of thumb: reach for <code>findall()</code> when the matches are staying together as one Python list per row (e.g. about to <code>explode()</code> them); reach for <code>extractall()</code> when the shape you actually want is a proper reshaped table — a real row per match, ready for <code>groupby()</code>/<code>merge()</code>/counting without an extra <code>explode()</code> step first. <code>findall()</code> also never names its matches (no <code>(?P&lt;name&gt;...)</code> column labeling); <code>extractall()</code> keeps that <code>str.extract()</code> feature.</p>
+
+<h2>5 · The SQL bridge: unnesting a regex, not a value</h2>
+<p>Lesson 19 bridged plain <code>explode()</code> (unnesting an actual list column) to Postgres' <code>UNNEST()</code>. <code>str.extractall()</code> is the same unnesting idea, but the "list" is implicit — every regex match inside a text cell, rather than an already-materialized array column:</p>
+<pre><code><span class="cm">-- Postgres has no single built-in for this shape; the closest is
+-- regexp_matches(col, pattern, 'g') used inside a LATERAL join,
+-- which itself returns a set (one row per match) that needs unnesting:
+-- SELECT o.order_id, m.tag
+-- FROM orders o, LATERAL regexp_matches(o.notes, '...', 'g') AS m(tag);</span>
+orders[<span class="str">"notes"</span>].str.extractall(<span class="str">r"(?P&lt;tag&gt;urgent|gift|bulk|fragile)"</span>)
+<span class="cm">-- one call, same reshaped-long result</span></code></pre>
+
+<div class="interview">
+<p><strong>Q: "A free-text column can contain zero, one, or several tags per row. How do you pull them out as structured data?"</strong> A strong answer, out loud: <em>"str.extract() is out immediately — it only ever keeps the first match per row, so any row with two or more tags silently loses the rest with no warning. str.extractall() is the right tool: it returns every match as its own row, indexed by a MultiIndex of the original row position and a match number starting at 0. The gotcha I'd flag unprompted: a row with zero matches isn't in the result at all, not even as a NaN row — so counting matches per original row needs groupby(level=0).size(), then mapping that back onto the original index and filling missing entries with 0, or rows with no matches silently disappear from the count instead of correctly reading as zero. If I just need the matches as a Python list per row rather than a reshaped table — say, right before an explode() — str.findall() is the lighter option, since it returns an empty list instead of dropping the row."</em> The signal: naming the MultiIndex shape, the zero-match-row gotcha, and the explicit findall() alternative without being prompted for any of the three.</p>
+</div>
+
+<h2>Try it — self-checking practice (~15-20 min)</h2>
+<p>Open <code>practice/43_str_extractall.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/43_str_extractall.py</code></pre>
+<p>Uses a small inline <code>notes</code> DataFrame (same customer/order domain as Lessons 6-42, no new CSV needed). Exercise 1 runs <code>str.extractall()</code> and confirms the MultiIndex shape (6 total matches across 3 matching rows); Exercise 2 counts matches per original row with <code>groupby(level=0).size()</code>; Exercise 3 maps that count back onto the original DataFrame, confirming the zero-match row correctly reads <code>0</code> rather than being missing; Exercise 4 compares against <code>str.findall()</code>'s list-per-row shape on the same data.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="str.extract() is fixed at one match per row by design (that's what lets its result be flat columns) -- it silently keeps only the first match and drops the rest with no warning and no error. str.extractall() is the tool built for a variable number of matches per row: it returns every match as its own row.">
+    <p class="stem">A row's text contains three matches of a regex pattern. What does <code>str.extract()</code> return for that row?</p>
+    <button class="opt" data-ok>only the first match, the other two silently dropped</button>
+    <button class="opt">all three matches, packed into one comma-joined output string</button>
+    <button class="opt">a ValueError, since more than one match is ambiguous</button>
+  </div>
+  <div class="q" data-why="A row with zero regex matches produces zero rows in str.extractall()'s result -- it is not represented as a NaN row the way a non-matching row is in str.extract(). This means len(result) alone undercounts rows with no matches as if they were never part of the data at all; recovering a correct per-row count (including true zeros) needs an explicit groupby(level=0).size() followed by reindexing/filling the missing rows back in.">
+    <p class="stem">A row has zero matches for the pattern passed to <code>str.extractall()</code>. What happens to that row in the result?</p>
+    <button class="opt" data-ok>absent from the result entirely, not even one NaN row</button>
+    <button class="opt">one result row, with NaN filling every captured column instead</button>
+    <button class="opt">the whole extractall() call raises since one row didn't match</button>
+  </div>
+  <div class="q" data-why="str.extractall() reshapes into a real DataFrame with a MultiIndex (original row position, match number), naming captured groups as columns via (?P<name>...) just like str.extract() -- suited to further groupby()/merge() work on individual matches. str.findall() instead returns one Python list per row (empty when there's no match, never NaN, never dropped), a lighter shape suited to cases like exploding the list afterward rather than treating each match as its own table row directly.">
+    <p class="stem">What's the key structural difference between <code>str.extractall()</code> and <code>str.findall()</code>?</p>
+    <button class="opt" data-ok>extractall reshapes to a MultiIndex table; findall returns lists</button>
+    <button class="opt">findall reshapes to a MultiIndex table; extractall returns lists</button>
+    <button class="opt">they return the exact same shape, just named differently</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the pandas User Guide's <a href="https://pandas.pydata.org/docs/user_guide/text.html#extracting-substrings">"Extracting substrings" section of Working with text data</a> (~10 min) — the same page Lesson 42 linked, this time focused on the <code>extractall()</code> examples and its MultiIndex result shape further down the page.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>str.extractall()</code> was added today, placed right after the existing <code>str.extract()</code> entry.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-43 comes back reported as shakiest, otherwise <code>str.findall()</code> taught as its own topic in more depth, or a fresh curriculum/glossary scan for the next genuinely-uncovered pattern.<br><br>
+💬 Anything unclear — the MultiIndex shape, the zero-match-row gotcha, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -96,6 +96,8 @@
       file: "lessons/0044-jsonb-semi-structured-columns.html" },
     { n: 45, date: "2026-08-19", title: "Unit vs. integration tests: where the line actually is",
       file: "lessons/0045-unit-vs-integration-tests.html" },
+    { n: 46, date: "2026-08-20", title: "Audit logging: recording what happened, not just what's true now",
+      file: "lessons/0046-audit-logging-recording-what-happened.html" },
   ];
 
   const REFS = [

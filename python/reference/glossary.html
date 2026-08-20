@@ -244,6 +244,13 @@
   <tr><td>RequestValidationError</td><td>giữ nguyên "RequestValidationError" — exception FastAPI tự raise khi request body/path/query không validate được, tạo ra response 422 mặc định</td><td>The exception FastAPI itself raises (a FastAPI-specific wrapper around pydantic's <code>ValidationError</code>) when a request's body, path, or query parameters fail model validation — it is what produces the framework's default 422 response, and can be caught with its own <code>@app.exception_handler</code> like any other exception type.</td></tr>
 </table>
 
+<h2 id="day24">Day 24 — ASGI middleware: wrapping every request/response</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>call_next</td><td>giữ nguyên "call_next" — tham số thứ 2 của mọi hàm @app.middleware("http"), phải await để chạy phần app còn lại và lấy Response thật về</td><td>The second parameter every <code>@app.middleware("http")</code> function receives — an <code>async</code> callable representing everything downstream of the middleware (routing, dependencies, the matching route handler), which must be <code>await</code>ed to actually run that work and get back the real <code>Response</code> object.</td></tr>
+  <tr><td>BaseHTTPMiddleware</td><td>giữ nguyên "BaseHTTPMiddleware" — cách viết middleware bằng class thay vì decorator, import từ starlette.middleware.base, dùng call_next y hệt bản decorator</td><td>The class-based alternative to <code>@app.middleware("http")</code>, imported from <code>starlette.middleware.base</code> (the ASGI toolkit FastAPI is built on) — subclassed with an <code>async dispatch(request, call_next)</code> method using the identical <code>call_next</code> shape as the decorator form, useful mainly when a middleware needs constructor arguments or several apps need to share one middleware class.</td></tr>
+</table>
+
 <p class="next">💬 A term here still unclear? Ask your teacher — hỏi bằng tiếng Việt cũng được.</p>
 
 <script src="../assets/nav.js"></script>

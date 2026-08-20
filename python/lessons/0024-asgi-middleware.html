@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 24 · ASGI middleware: wrapping every request/response</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 24 · ~20 min · 21 Aug 2026</p>
+<h1>ASGI middleware: wrapping every request/response</h1>
+<p class="byline">Day 22 named <code>middleware</code> in one recognition-level sentence and moved on — never built, never run. Today it gets the worked lesson: a function that wraps <em>every</em> request/response passing through the app, running code before the route handler and again after it returns — with a concrete, load-bearing example (request timing + structured logging) and the one real gotcha worth naming up front: middleware sits <strong>outside</strong> Day 23's exception handlers in FastAPI's stack, so it can't assume its own <code>try</code>/<code>except</code> will ever see a handled exception.</p>
+
+<div class="callout"><strong>Bridge from SQL:</strong> a database trigger that fires on every table's <code>INSERT</code>/<code>UPDATE</code> — auditing who changed what, when — without touching any single table's own definition. Middleware is that same idea moved to HTTP: one function wired in once, seeing every request and every response the app produces, with no route handler aware it's even running.</p></div>
+
+<h2>1 · What middleware actually is</h2>
+<p>Every lesson since Day 16 has written a route handler as a plain function: FastAPI calls it, the function returns a value, FastAPI turns that into a response. <code>middleware</code> (named already, recognition-only, back in Day 22's glossary) sits one layer further out: it wraps <em>every</em> route the app has, running before the matching handler starts and after it finishes — the same shape as Day 6's <code>with</code> block (setup, then the wrapped work, then guaranteed cleanup), except the "wrapped work" here is however FastAPI resolves the whole rest of the request, handler included.</p>
+<p>Nothing about a route handler changes to support this. A handler written exactly like Day 16's still just reads its parameters and returns a value — middleware is bolted on separately, once, and applies to routes that already existed before it was added and any written afterward.</p>
+
+<h2>2 · <code>@app.middleware("http")</code> and <code>call_next</code></h2>
+<p>FastAPI's simplest way to add middleware is a decorator on an <code>async def</code> function taking two parameters: the incoming <code>Request</code>, and a callable named <dfn data-en="the second parameter every @app.middleware(&quot;http&quot;) function receives - an async callable representing everything downstream of the middleware (routing, dependencies, the matching route handler), which must be awaited to actually run that work and get back the real Response object" data-vn="giữ nguyên &quot;call_next&quot; — tham số thứ 2 của mọi hàm @app.middleware(&quot;http&quot;), 1 callable async đại diện cho mọi thứ nằm sau middleware (routing, dependencies, route handler thật), phải await để chạy phần đó và lấy Response thật về"><code>call_next</code></dfn> that represents "everything downstream" — routing, dependencies, the matching handler, all of it:</p>
+<pre><code><span class="kw">import</span> time
+<span class="kw">from</span> fastapi <span class="kw">import</span> FastAPI, Request
+
+app = FastAPI()
+
+<span class="kw">@app.middleware</span>(<span class="str">"http"</span>)
+<span class="kw">async def</span> add_timing_header(request: Request, call_next):
+    start = time.perf_counter()
+    response = <span class="kw">await</span> call_next(request)          <span class="kw"># everything downstream runs here</span>
+    duration_ms = (time.perf_counter() - start) * <span class="kw">1000</span>
+    response.headers[<span class="str">"X-Process-Time-ms"</span>] = <span class="kw">str</span>(<span class="kw">round</span>(duration_ms, <span class="kw">1</span>))
+    <span class="kw">return</span> response
+
+<span class="kw">@app.get</span>(<span class="str">"/items/{item_id}"</span>)
+<span class="kw">def</span> get_item(item_id: <span class="kw">int</span>):
+    <span class="kw">return</span> {<span class="str">"item_id"</span>: item_id}</code></pre>
+<p>Reading top to bottom: everything before <code>await call_next(request)</code> runs <em>before</em> the route handler — here, recording a start time. <code>await call_next(request)</code> is the handoff: it runs the rest of FastAPI's request handling (routing, any <code>Depends()</code> from Day 19, the handler itself) and returns the real <code>Response</code> object once all of that is done. Everything after that line runs <em>after</em> the handler returns but before the client actually receives the response — here, computing elapsed time and stamping it onto a response header. Confirmed directly: a plain <code>GET /items/7</code> through <code>TestClient</code> comes back with an <code>X-Process-Time-ms</code> header attached, even though <code>get_item</code> itself never mentions timing or headers at all.</p>
+<p><code>call_next</code> must be <code>await</code>ed — this is Day 20's checkpoint idea applied to middleware itself: the middleware function pauses at that line, hands control to the rest of the app, and resumes exactly where it left off once a response comes back, the same pause-and-resume relationship <code>await</code> always has.</p>
+
+<h2>3 · A concrete example: timing + structured logging</h2>
+<p>Stamping a header is a toy. A middleware most real services actually run logs one structured line per request — method, path, status code, duration — the same shape a production log aggregator expects, built once and applying to every route the app will ever grow:</p>
+<pre><code><span class="kw">import</span> logging, time
+<span class="kw">from</span> fastapi <span class="kw">import</span> FastAPI, Request
+
+logger = logging.getLogger(<span class="str">"requests"</span>)
+app = FastAPI()
+
+<span class="kw">@app.middleware</span>(<span class="str">"http"</span>)
+<span class="kw">async def</span> log_requests(request: Request, call_next):
+    start = time.perf_counter()
+    response = <span class="kw">await</span> call_next(request)
+    duration_ms = (time.perf_counter() - start) * <span class="kw">1000</span>
+    logger.info(
+        <span class="str">"request handled"</span>,
+        extra={
+            <span class="str">"method"</span>: request.method,
+            <span class="str">"path"</span>: request.url.path,
+            <span class="str">"status_code"</span>: response.status_code,
+            <span class="str">"duration_ms"</span>: <span class="kw">round</span>(duration_ms, <span class="kw">1</span>),
+        },
+    )
+    <span class="kw">return</span> response</code></pre>
+<p>This is Day 15's <code>logging</code> module and its <code>extra=</code> structured-fields pattern, unchanged — the only new piece is <em>where</em> the log call lives: one middleware function instead of a line inside every single handler. Every route the app has, present and future, gets a request-handled log line with zero changes to any handler's own code, the same "write it once, every caller benefits" idea Day 19's <code>Depends()</code> already established for shared setup — middleware is that same idea for wrapping, not just providing a value.</p>
+<p><dfn data-en="the class-based alternative to @app.middleware(&quot;http&quot;), imported from starlette.middleware.base (the ASGI toolkit FastAPI is built on) - subclassed with an async dispatch(request, call_next) method using the identical call_next shape as the decorator form, useful mainly when a middleware needs constructor arguments or several apps need to share one middleware class" data-vn="giữ nguyên &quot;BaseHTTPMiddleware&quot; — cách viết middleware bằng class thay vì decorator, import từ starlette.middleware.base, override method dispatch(request, call_next) với call_next y hệt bản decorator, hữu ích khi middleware cần tham số constructor riêng hoặc nhiều app dùng chung 1 class middleware"><code>BaseHTTPMiddleware</code></dfn> (from <code>starlette.middleware.base</code>, the ASGI toolkit FastAPI is built on) is the class-based alternative to <code>@app.middleware("http")</code> — same <code>call_next</code> shape, wrapped in a class instead of a decorated function, useful mainly when a middleware needs constructor arguments or several apps need to share one middleware class. This course sticks to the decorator form, since it covers everything today's example needs.</p>
+
+<h2>4 · The gotcha: middleware runs outside Day 23's exception handlers</h2>
+<p>Day 23 taught <code>@app.exception_handler(SomeException)</code>: register it once, and any route that raises <code>SomeException</code> gets converted into a chosen response before that exception ever reaches a caller. The gotcha: <strong>an exception handler resolves the exception before middleware's own <code>call_next()</code> returns</strong> — so by the time middleware sees anything, it only ever sees a finished <code>Response</code>, never the exception itself.</p>
+<pre><code><span class="kw">class</span> OutOfStock(Exception):
+    ...
+
+<span class="kw">@app.exception_handler</span>(OutOfStock)
+<span class="kw">def</span> handle_out_of_stock(request, exc):
+    <span class="kw">from</span> fastapi.responses <span class="kw">import</span> JSONResponse
+    <span class="kw">return</span> JSONResponse(status_code=<span class="kw">409</span>, content={<span class="str">"error"</span>: <span class="str">"out_of_stock"</span>})
+
+<span class="kw">@app.middleware</span>(<span class="str">"http"</span>)
+<span class="kw">async def</span> log_requests(request: Request, call_next):
+    <span class="kw">try</span>:
+        response = <span class="kw">await</span> call_next(request)
+    <span class="kw">except</span> Exception:
+        <span class="kw"># never runs for OutOfStock - the handler already resolved it</span>
+        logger.error(<span class="str">"unhandled exception"</span>)
+        <span class="kw">raise</span>
+    logger.info(<span class="str">"request handled"</span>, extra={<span class="str">"status_code"</span>: response.status_code})
+    <span class="kw">return</span> response</code></pre>
+<p>Confirmed directly with <code>TestClient</code> against this exact shape: a route raising <code>OutOfStock</code> makes <code>call_next()</code> return normally with <code>response.status_code == 409</code> — the <code>except Exception:</code> branch never fires, because <code>OutOfStock</code> never escapes as far as middleware; Day 23's handler already turned it into a response one layer further in. Only a <em>truly</em> unhandled exception — one with no registered <code>@app.exception_handler</code> anywhere — actually propagates out of <code>call_next()</code> as a real exception middleware's <code>try</code>/<code>except</code> can catch.</p>
+<p>The practical rule: middleware that wants to log the request's <strong>final</strong> status code should read <code>response.status_code</code> unconditionally after <code>await call_next(request)</code>, exactly like section 3's example already does — not assume a <code>try</code>/<code>except</code> around <code>call_next()</code> will ever see the business exceptions Day 23 taught handlers for. That <code>try</code>/<code>except</code> still has a real job (catching the rare exception nobody registered a handler for, to log it before FastAPI's own default 500 response goes out), just not the job of observing every error path.</p>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> a pandas pipeline has no request/response cycle to wrap — timing or logging a transform step means calling <code>time.perf_counter()</code> around that one call directly in the script, not registering anything app-wide; middleware is specifically a web-service answer to "run this for every request," which a one-shot script has no equivalent of.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/24_asgi_middleware.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run --with fastapi --with httpx python3 practice/24_asgi_middleware.py</code></pre>
+<p>Needs <code>fastapi</code> and <code>httpx</code>, installed one-off via <code>--with</code>, same as Days 16-23. Exercises: a timing middleware that stamps an <code>X-Process-Time-ms</code> header via <code>call_next</code>, a structured-logging middleware appending one record per request to a shared list (confirmed against a route whose exception has a registered <code>@app.exception_handler</code> — <code>call_next()</code> just returns, no exception to catch), and a second, guarded middleware whose own <code>try</code>/<code>except</code> around <code>call_next()</code> is what's actually needed to log anything at all for a route with <em>no</em> handler registered, where <code>call_next()</code> genuinely raises.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Middleware wraps every route the app has - code before await call_next(request) runs before the matching handler, and code after that line runs after the handler returns, with no route handler itself needing any changes to be wrapped this way.">
+    <p class="stem">What does <code>@app.middleware("http")</code> actually wrap?</p>
+    <button class="opt" data-ok>every route the app has, both before and after handlers</button>
+    <button class="opt">only routes that explicitly opt in with their own decorator</button>
+    <button class="opt">only the very first request the app will ever receive</button>
+  </div>
+  <div class="q" data-why="await call_next(request) is the handoff point - it runs the rest of FastAPI's request handling (routing, dependencies, the matching handler) and returns the real Response once all of that finishes, the same pause-and-resume relationship Day 20's await always has.">
+    <p class="stem">What does <code>await call_next(request)</code> do inside a middleware function?</p>
+    <button class="opt" data-ok>runs the rest of the app, then returns the response</button>
+    <button class="opt">skips the matching route handler entirely on this one request</button>
+    <button class="opt">sends the request straight out to a real network socket</button>
+  </div>
+  <div class="q" data-why="An exception handler registered with @app.exception_handler resolves a matching exception into a finished Response before call_next() returns to middleware - so middleware's own try/except around call_next() never actually sees that exception, only the response it turned into.">
+    <p class="stem">If a route raises an exception with a registered <code>@app.exception_handler</code>, what does middleware's own <code>try</code>/<code>except</code> around <code>call_next()</code> see?</p>
+    <button class="opt" data-ok>nothing at all — call_next() returns a normal, finished response</button>
+    <button class="opt">the exact same exception, caught the instant it gets raised</button>
+    <button class="opt">a network timeout, since the handler runs on its thread</button>
+  </div>
+  <div class="q" data-why="Since a handled exception never propagates to middleware as an exception at all, middleware that wants to log the true final status code must read response.status_code unconditionally after call_next() returns, exactly like section 3's logging example - not rely on catching an exception middleware will often never see.">
+    <p class="stem">To reliably log a request's final status code, what should middleware read?</p>
+    <button class="opt" data-ok>response.status_code, read right there after call_next() returns, every single time</button>
+    <button class="opt">only whatever a bare try/except around call_next() manages to catch</button>
+    <button class="opt">the handler's own return value, read before call_next() ever runs</button>
+  </div>
+  <div class="q" data-why="Logging one structured line per request inside middleware reuses Day 15's logging module and its extra= structured-fields pattern unchanged - the only new piece is where the call lives: one middleware function instead of a line duplicated inside every handler, the same write-once idea Day 19's Depends() already established for shared setup.">
+    <p class="stem">What does a request-logging middleware reuse from Day 15?</p>
+    <button class="opt" data-ok>the logging module and its own familiar extra= structured-fields pattern</button>
+    <button class="opt">nothing at all, since middleware needs an entirely new library</button>
+    <button class="opt">only the print()-based debug style Day 15 already left behind</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> FastAPI's own <a href="https://fastapi.tiangolo.com/tutorial/middleware/">"Middleware"</a> tutorial page for <code>@app.middleware("http")</code> and <code>call_next</code>, cited in <code>RESOURCES.md</code> under "Knowledge — backend" alongside the rest of the FastAPI tutorial spine.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day24">glossary</a> under Day 24.<br>
+With middleware now built out, the last recognition-level piece Day 22 named and never covered is a deployable shape — running a FastAPI app for real with <code>uvicorn</code>/<code>gunicorn</code>, plus env-based configuration — a natural Day 25 candidate.<br><br>
+💬 Anything unclear — why middleware can't catch a handled exception, or when to reach for <code>BaseHTTPMiddleware</code> instead? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -610,3 +610,23 @@ by the user there; they apply here identically.
   again per its own window close, now thirty-one days past it; backend,
   data, and python lessons were generated this round via delegated
   agents — see their own NOTES.md entries for detail.)
+- 2026-08-21 (headless 06:00 run, GitHub Actions): same as every prior
+  post-week day — verified `daily.html`, `assets/srs.js`, and
+  `assets/quiz-bank.js` are all present and untouched (8 `id: "k` matches
+  in `quiz-bank.js` — the 7 real kata entries `k1`-`k7` plus the
+  commented-out example line — `day:` tags running 1-7 only across 49
+  occurrences; `nav.js` `LESSONS` array still registers exactly 7
+  lessons, days 1-7 only, unchanged). Still the correct "daily quiz+kata"
+  for this post-week phase per PLAN.md, so nothing new was generated.
+  This session again hit the same two classes of block as every prior
+  round: direct `psql "$LEARNING_DB_URL" ...` (and even a plain `for`
+  loop over an unrelated `$d` variable) triggered a content-level
+  "Contains simple_expansion" block, and a script-file wrapper around the
+  same query hit a generic "requires approval" gate with no user present
+  — so no `course_progress` rows could be read for a scope-change signal
+  (e.g. a request to keep growing the bank past Day 7). `bin/record-progress`
+  was not invoked since nothing new was generated or completed to log
+  this round. No new learning record beyond the Day-1 baseline. (Go
+  skipped again per its own window close, now thirty-two days past it;
+  backend, data, and python lessons were generated this round via
+  delegated agents — see their own NOTES.md entries for detail.)

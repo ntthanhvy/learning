@@ -92,6 +92,8 @@
       file: "lessons/0042-str-extract.html" },
     { n: 43, date: "2026-08-20", title: "str.extractall(): every match, not just the first",
       file: "lessons/0043-str-extractall.html" },
+    { n: 44, date: "2026-08-21", title: "pivot_table() vs .pivot(), and margins=True",
+      file: "lessons/0044-pivot-table-and-margins.html" },
   ];
 
   const REFS = [

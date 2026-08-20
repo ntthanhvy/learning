@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 47 · Health checks: why checking the DB in the wrong one causes cascading restarts</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 47 · ~20 min</p>
+<h1>Health checks: why checking the DB in the wrong one causes cascading restarts</h1>
+<p class="byline">Lesson 13 introduced liveness and readiness in one paragraph, with two small handlers, and moved on. That was enough to define the words — it was never enough to explain why getting them backwards is one of the most common ways a small database blip turns into a full outage. Today: the one mistake that causes it, worked all the way through.</p>
+
+<h2>1 · Two different questions, asked by two different endpoints</h2>
+<p>Lesson 13 already named the split: a <dfn data-en="an endpoint answering only whether the process itself is alive and should keep running — no dependency checks, since a dependency being down is not a reason to kill and restart the process" data-vn="liveness check — process còn sống không, không check dependency">liveness check</dfn> answers "is this process alive and not deadlocked," and a <dfn data-en="an endpoint answering whether this specific instance can currently serve real traffic, by checking the dependencies a real request would need — used by a load balancer to temporarily stop routing to an unready instance without restarting it" data-vn="readiness check — instance này serve request được chưa">readiness check</dfn> answers "can this instance serve real traffic right now." What that lesson didn't dwell on is <em>why</em> the split matters, or what happens when a team implements both endpoints correctly by name but puts the wrong logic in each one.</p>
+<p>Liveness should be nearly free to answer — return 200, done, no I/O. It exists to catch one specific failure: the process is still running as an OS process, but something inside it has wedged (a deadlock, an infinite loop holding every worker) so it can no longer make progress on anything, ever, without outside help. The only fix for that is a restart, so liveness failing should trigger one.</p>
+<p>Readiness is allowed to be expensive-ish and specific: ping the database with a short timeout, check that a required downstream service responds, whatever "can I actually do my job" means for this service. It exists to catch a completely different failure: the process is fine, but one of its dependencies currently isn't — so this instance should be pulled out of rotation temporarily, not killed.</p>
+
+<h2>2 · The mistake: one handler, one meaning, used for both</h2>
+<p>The failure this lesson is really about starts from something that looks harmless: reusing the readiness logic — "ping the DB" — as the liveness check too, either by literally wiring the same handler to both endpoints, or by writing a liveness handler that "just to be safe" also checks the database. It reads as extra caution. It is the opposite.</p>
+<p>Whatever process supervisor is polling these endpoints — a load balancer's health-check config, a container orchestrator, an old-school process manager like systemd or a hand-rolled watchdog script — treats a liveness failure the same way no matter which product it is: kill the process, start a new one. That response is correct for a deadlocked process. It is the worst possible response to "the database had a two-second blip," and a liveness check that pings the database cannot tell those two situations apart.</p>
+
+<div class="callout"><strong>The frontend equivalent you already own.</strong> Think of a React error boundary that's scoped too broadly — one flaky child component throwing during render takes down the entire page instead of just that widget, because the boundary was placed one level too high. A liveness check that includes a DB ping has the same shape: a failure that should be scoped to "this one dependency is unavailable" instead gets treated as "this whole process must die," because the check was written one layer too broad.</div>
+
+<h2>3 · Walking through the blip</h2>
+<p>Say a fleet of 10 instances sits behind a load balancer, all pointed at one Postgres primary, and liveness on every instance pings that database. Postgres has a two-second hiccup — a long-running migration takes a lock, a failover briefly promotes a replica, anything Lesson 28's circuit-breaker lesson would call a transient dependency failure.</p>
+<ol>
+<li>All 10 instances poll the database at roughly the same interval, so all 10 liveness checks time out at roughly the same moment — not one instance, all of them, because they share the one thing that just broke.</li>
+<li>The supervisor sees 10 simultaneous liveness failures and does exactly what liveness failing means: kill and restart all 10 processes, roughly together.</li>
+<li>Every restarted process reconnects to Postgres on startup — reopening its connection pool from zero (Lesson 18's pool-sizing lesson covers what a pool actually costs to establish: a TCP handshake plus authentication per connection, not a cheap operation). Ten processes doing that within the same few seconds is a burst of new-connection load landing on a database that had, at most, a two-second problem to begin with.</li>
+<li>That reconnect burst is real additional load on top of whatever caused the original blip — it can extend an outage that would otherwise have cleared in two seconds into one that takes much longer, purely because the fleet's own recovery behavior became the second failure.</li>
+</ol>
+<p>Every step after step 1 was avoidable. Nothing about "the database was briefly unavailable" required killing a single process — every one of those 10 processes was alive, healthy, and would have recovered on its own the moment Postgres answered again. The only thing that needed to happen was the load balancer routing around them for two seconds, which is exactly what readiness — not liveness — is for.</p>
+
+<div class="cmp-wrap">
+<table class="cmp">
+<thead><tr><th></th><th>Liveness</th><th>Readiness</th></tr></thead>
+<tbody>
+<tr><th>Question it answers</th><td>Is this process alive and unstuck?</td><td>Can this instance serve traffic right now?</td></tr>
+<tr><th>Checks dependencies (DB, etc.)</th><td>No — never</td><td>Yes — with a short timeout</td></tr>
+<tr><th>Cost to answer</th><td>Near-zero, in-process only</td><td>One network round trip, bounded</td></tr>
+<tr><th>Consumer's reaction to failure</th><td>Kill the process, start a new one</td><td>Stop routing traffic to it</td></tr>
+<tr><th>Effect on the process itself</th><td>Destroyed and replaced</td><td>Left running, untouched</td></tr>
+<tr><th>Right response to "DB is down"</th><td>Never — DB isn't a liveness concern</td><td>Fail readiness; recovers automatically once DB returns</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2>4 · The fix is which endpoint fails, not new logic</h2>
+<p>Getting this right doesn't require inventing anything — it requires putting the database ping behind the correct endpoint and leaving the other one trivial. This is generic across whatever polls it: any <dfn data-en="an HTTP endpoint a process supervisor or load balancer polls on a fixed interval to decide whether a running instance should keep receiving traffic, keep running, or both" data-vn="health check endpoint — endpoint để hệ thống ngoài (LB, process supervisor) tự động hỏi định kỳ xem instance còn ổn không">health check endpoint</dfn> works the same way whether the thing polling it is a cloud load balancer, a container orchestrator, or a homegrown supervisor script — the endpoint design doesn't change, only the caller's name does.</p>
+<pre><code><span class="kw">func</span> (h *Health) livenessHandler(w http.ResponseWriter, r *http.Request) {
+    <span class="cm">// No I/O, no dependency checks. If this process can run this
+</span>    <span class="cm">// handler at all, it is alive -- that's the entire question.
+</span>    w.WriteHeader(http.StatusOK)
+}
+
+<span class="kw">func</span> (h *Health) readinessHandler(w http.ResponseWriter, r *http.Request) {
+    <span class="cm">// A short, bounded check of what a real request would need.
+</span>    <span class="cm">// A timeout here means "not ready," never "kill me".
+</span>    ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+    <span class="kw">defer</span> cancel()
+
+    <span class="kw">if</span> err := h.db.PingContext(ctx); err != <span class="kw">nil</span> {
+        http.Error(w, <span class="st">"database unreachable"</span>, http.StatusServiceUnavailable)
+        <span class="kw">return</span> <span class="cm">// pulled from rotation -- process keeps running
+</span>    }
+    w.WriteHeader(http.StatusOK)
+}
+
+<span class="kw">func</span> main() {
+    h := &Health{db: db} <span class="cm">// db is a *sql.DB or pgxpool.Pool, opened at startup
+</span>    mux := http.NewServeMux()
+    mux.HandleFunc(<span class="st">"/healthz"</span>, h.livenessHandler)  <span class="cm">// process-alive only
+</span>    mux.HandleFunc(<span class="st">"/readyz"</span>, h.readinessHandler)  <span class="cm">// dependency-aware
+</span>    <span class="cm">// ...register the real application routes on mux too...
+</span>}</code></pre>
+<p>Two details worth naming explicitly. First, the timeout on the readiness DB check has to be short and bounded — an unbounded <code>Ping</code> would just hang the readiness check itself, defeating the point, which is why <code>context.WithTimeout</code> is doing real work here and not decoration. Second, a failing readiness check is expected to flip back to healthy on its own with zero intervention the moment the dependency recovers — no restart, no redeploy, nothing to clean up — which is exactly the property Lesson 27's graceful-shutdown lesson relied on from the other direction: readiness is the same lever a shutting-down process flips first to stop receiving new work, before it ever touches liveness.</p>
+
+<div class="interview">
+<p><strong>Q: "A teammate wants to add a database ping to the liveness endpoint 'to be extra safe.' What do you say?"</strong> A strong answer, out loud: <em>"I'd push back. Liveness failing means 'kill and restart this process' to whatever's polling it — that's the right response to a deadlock, but it's the wrong response to the database having a blip, because every instance in the fleet shares that same database and would fail liveness at the same moment. You'd get a fleet-wide simultaneous restart over a problem that had nothing to do with any individual process being broken, and the restart itself adds a burst of reconnection load right when the database can least afford it — turning a two-second blip into a longer outage. The database check belongs on readiness: it pulls the instance out of the load balancer's rotation without killing it, and it recovers on its own the moment the database answers again."</em> The signal: naming the simultaneous-failure mechanism and the reconnect-load consequence, not just reciting "liveness shouldn't check dependencies" as a rule with no reason behind it.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A liveness check exists to catch a process that is truly stuck (deadlocked, wedged) with no way to recover except a restart. A database outage isn't that -- the process is fine and will recover on its own once the dependency returns, so a restart fixes nothing and only adds load.">
+    <p class="stem">Why is a database outage the wrong reason to fail a liveness check?</p>
+    <button class="opt">Liveness checks are technically not permitted to reach a database</button>
+    <button class="opt" data-ok>Restarting a healthy process fixes nothing and adds reconnect load</button>
+    <button class="opt">Load balancers silently ignore any liveness check that ever fails</button>
+    <button class="opt">Database outages are always resolved within a single second flat</button>
+  </div>
+  <div class="q" data-why="Every instance in the fleet talks to the same database, so a shared-dependency blip trips every instance's liveness check at roughly the same moment -- not because each process broke independently, but because they all depend on the one thing that did.">
+    <p class="stem">Why does a shared database blip cause EVERY instance to fail liveness at once, not just one?</p>
+    <button class="opt">The load balancer always restarts every instance together on purpose</button>
+    <button class="opt" data-ok>Every instance depends on that one same database that broke</button>
+    <button class="opt">Liveness checks are always scheduled to run at one moment</button>
+    <button class="opt">Postgres always broadcasts a shutdown signal to every connected client</button>
+  </div>
+  <div class="q" data-why="Each restarted process reopens its connection pool from zero on startup, and doing that across many instances within the same few seconds is a real burst of new-connection load landing on a database that may have only needed two seconds to recover on its own.">
+    <p class="stem">Why does a fleet-wide restart make a brief database blip worse instead of fixing it?</p>
+    <button class="opt">Restarted processes always request twice as many total rows</button>
+    <button class="opt">Restarting a process permanently deletes that whole instance's database</button>
+    <button class="opt" data-ok>Every restarted instance reopens its connection pool at once</button>
+    <button class="opt">Load balancers stop sending health checks during any restart</button>
+  </div>
+  <div class="q" data-why="A failing readiness check pulls the instance out of the load balancer's rotation without touching the process itself -- no restart, no lost in-flight work beyond what's already routed elsewhere. The instance keeps running and automatically rejoins rotation once its dependency check passes again.">
+    <p class="stem">What happens to a healthy process whose readiness check starts failing?</p>
+    <button class="opt">Nothing at all changes; readiness failures are silently ignored here</button>
+    <button class="opt">It gets restarted immediately, the exact same as liveness failing</button>
+    <button class="opt" data-ok>It's pulled from routing, keeps running, and can later rejoin</button>
+    <button class="opt">It permanently loses its slot to a brand new instance</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> The Twelve-Factor App's Disposability section (12factor.net/disposability) — the same standing reference Lesson 27's graceful-shutdown lesson drew on, since fast, safe startup/shutdown and honest health signaling are two sides of the same disposability property. MDN's HTTP Guide (RESOURCES.md's arbiter for HTTP semantics) is the source for <code>503 Service Unavailable</code> being the correct status for a temporarily-unready instance, as used in this lesson's readiness handler.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> open — still no reported quiz/lesson-completion outcome exists for any lesson after 47 rounds; distributed locks and blue-green/canary deploys remain the last named, confirmed out-of-scope-per-MISSION.md candidates if no fresh gap or user-chosen track surfaces first.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

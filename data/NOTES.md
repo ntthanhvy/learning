@@ -2600,3 +2600,104 @@
   `extractall()`), or otherwise a fresh curriculum/glossary scan for the next
   genuinely-uncovered pandas/NumPy pattern, if no drill-outcome signal
   surfaces by next generation.
+- 2026-08-21 generation (Lesson 44, headless run): idempotency was
+  self-confirmed this round (globbed `data/lessons/` for `0044-*.html` — none
+  found; grepped `NOTES.md` for a `2026-08-21` entry — none found) before
+  proceeding. Direct `psql "$LEARNING_DB_URL" -c "select 1"` was attempted
+  once as instructed and was hard-blocked by this session's Bash tool static
+  analysis (shell-variable expansion of that exact name, same class of block
+  as effectively every prior round) — not retried. `bin/query-progress data`
+  was also attempted once and required interactive approval unavailable in
+  this headless session — not retried either, so still no readable
+  `course_progress` rows and no reported drill-outcome signal beyond the
+  Lesson 1 baseline. Today's topic was fixed in advance by the run's own
+  instructions rather than picked from a teaser or fresh scan:
+  `pivot_table()`'s built-in aggregation contrasted against plain `.pivot()`,
+  plus `margins=True`. One real surprise while reading source material first
+  (per this round's own instructions, before writing anything): Lesson 6
+  (2026-07-14) already reached for `pivot_table()`, not plain `.pivot()`, as
+  its very first reshape tool — `pivot_table` was already a glossary entry,
+  and grepping every lesson body confirmed `.pivot(` (the plain method) had
+  literally never appeared anywhere before today, only inside Lesson
+  17/crosstab's link text. So Lesson 44 isn't "pivot_table introduced for the
+  first time" (Lesson 6 already covers that ground) — it's framed instead as
+  "the OTHER pivot method, met for the first time, and why Lesson 6 quietly
+  skipped it": `.pivot()` has no `aggfunc` at all and raises `ValueError:
+  Index contains duplicate entries, cannot reshape` the moment an
+  index/columns pair collides, `pivot_table()` is introduced as the version
+  that handles that collision via `aggfunc` (default `"mean"`, called out
+  explicitly as an easy-to-miss gotcha since Lesson 6's own examples always
+  passed `aggfunc="sum"` without explaining why), and `margins=True` is
+  taught as new content (never appeared in any lesson body or the glossary
+  before today, confirmed by grep). New inline `orders` fixture (order_id
+  1-5, An/Binh/customer domain, same style as Lessons 11/19/21) with a
+  deliberate duplicate: An placed two orders on the same `2026-01-05` date —
+  `orders_raw.csv`'s existing clean slice has no real duplicate customer/date
+  pair (confirmed while re-reading Lesson 6's own fixture description), so
+  editing the shared CSV would have risked every earlier lesson's hand-traced
+  values, same reasoning Lesson 11 documented first. `uv run --with pandas`
+  worked directly this round (pandas 3.0.5, confirmed via `pd.__version__`):
+  every number was hand-verified in `.scratch/data-lesson44/explore.py`
+  (deleted after) before writing a word of the lesson — `.pivot()` on the
+  duplicate data raises exactly `ValueError: Index contains duplicate
+  entries, cannot reshape`; `pivot_table()` with no `aggfunc` gives An's
+  2026-01-05 cell as `90.0` (mean of 120.0 and 60.0); with `aggfunc="sum"` it
+  gives `180.0` instead; `margins=True` gives An's row total `222.0`, Binh's
+  `215.5`, and the grand-total corner `437.5`, matching
+  `orders["amount"].sum()` exactly. The shipped (unsolved)
+  `practice/44_pivot_table_and_margins.py` was executed in
+  `.scratch/data-lesson44/` and caught two real bugs before shipping, both
+  new variants of gotchas this course's own NOTES.md has flagged before but
+  hadn't hit in exactly this shape: (1) Exercise 1's first draft wrapped
+  `orders.pivot(index=..., ...)` in `except ValueError`, but an unsolved
+  Ellipsis in ANY `.pivot()` argument position raises `KeyError: Ellipsis`
+  (pandas tries to use the literal `Ellipsis` object as a column-selection
+  key before ever reaching its own duplicate-key check), not `ValueError` —
+  the narrow `except ValueError` let that `KeyError` escape uncaught and
+  crash the whole script, so it was rewritten to catch any `Exception`,
+  record `type(e)`, and have the check assert `pivot_error_type is
+  ValueError` specifically (a genuinely solved Exercise 1 needs the REAL
+  duplicate-key error, not just any error); (2) Exercise 4's first draft put
+  the placeholder on `margins=...`, but Ellipsis is truthy so `margins=...`
+  behaves exactly like `margins=True` — the by-now-familiar
+  Ellipsis-is-truthy trap from Lessons 19-21, silently passing both Exercise
+  4 checks while still unsolved. Fixed by moving the placeholder to
+  `margins_name=...` instead, which pandas validates as a required string and
+  raises `ValueError: margins_name argument must be a string` on an unsolved
+  Ellipsis — confirmed with a standalone throwaway script before editing the
+  shipped file. Re-ran after both fixes and confirmed all 6 checks print ✗
+  with no crash on the unsolved file, then a solved copy
+  (`.scratch/data-lesson44/solved.py`, not shipped) printed all 6 ✓ against
+  the same hand-verified values above; both scratch files and the
+  `.scratch/data-lesson44/` directory were removed with `rm -rf` after
+  verification, no approval needed this round (this round's actual scratch
+  work happened under the repo's own `.scratch/` since `/tmp` directory
+  creation was blocked outright by this session's sandbox as outside the
+  allowed working directory — a new restriction not hit by name in prior
+  entries, though the effect — falling back to `.scratch/`  — matches
+  existing precedent). Added `.pivot()` and `margins=True` to the glossary as
+  two separate rows (placed directly after the existing `pivot_table` entry,
+  matching the "combined vs. separate entries" precedent case-by-case rather
+  than a fixed rule) and registered Lesson 44 in `nav.js`. Quiz options were
+  drafted and checked with a Python word-count script run via `uv run
+  python3` (this course's established convention since Lessons 26/27,
+  confirmed working again this round) — the first draft came out mismatched
+  on all three questions (Q1 11/9/8, Q2 11/11/9, Q3 9/9/10); four further
+  edit + recount passes were needed before all three landed level (Q1
+  10/10/10, Q2 10/10/10, Q3 9/9/9), each pass re-verified by re-running the
+  script rather than eyeballing, per Lesson 19/22's standing warning that a
+  single verification pass isn't infallible — this round needed more passes
+  than most, worth noting as a reminder the warning stays relevant. `bin/
+  record-progress data lesson_generated --day 44 --lesson
+  0044-pivot-table-and-margins.html --detail '{"by":"headless-agent"}'` was
+  run once from the repo root as instructed and succeeded on the first try
+  (`recorded: data/lesson_generated day=44
+  lesson=0044-pivot-table-and-margins.html`), confirming the write path
+  continues to work even when the read path stays categorically blocked, same
+  asymmetry documented in most prior rounds. This agent does not run `git
+  commit` — leaving working-tree changes uncommitted remains this course's
+  established convention. Set the teaser going forward to `str.findall()`
+  taught as its own topic in more depth (Lesson 43's own teaser, still not
+  actually done), or otherwise a fresh curriculum/glossary scan for the next
+  genuinely-uncovered pandas/NumPy pattern, if no drill-outcome signal
+  surfaces by next generation.

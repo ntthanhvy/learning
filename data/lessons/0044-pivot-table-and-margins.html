@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 44 · pivot_table() vs .pivot(), and margins=True</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 44 · ~20 min · 21 Aug 2026</p>
+<h1>pivot_table() vs .pivot(): the duplicate-key gotcha, plus margins=True</h1>
+<p class="byline">Lesson 6 already reached straight for <code>pivot_table()</code> to build a wide report, and it just worked. Today explains <em>why</em> that was the right instinct rather than luck: pandas actually has a second, stricter pivot method — <code>.pivot()</code> — that Lesson 6 skipped past on purpose. Today meets it, watches it crash on real data, and comes back to <code>pivot_table()</code> with a clearer picture of what it's buying you — plus one feature Lesson 6 never used: <code>margins=True</code>.</p>
+
+<h2>Recap, in one line</h2>
+<p>Lesson 6: <code>pivot_table(index=, columns=, values=, aggfunc=)</code> reshapes long data wide, one row per <code>index</code> value, one column per distinct <code>columns</code> value. Today's question: what happens when more than one row shares the same <code>index</code>/<code>columns</code> pair — and what a plain <code>.pivot()</code> does differently.</p>
+
+<h2>1 · .pivot(): pivot_table's stricter, aggregation-free sibling</h2>
+<p>pandas actually ships two pivot methods. <dfn data-en="a pandas DataFrame method that reshapes long data into wide, exactly like pivot_table's index/columns/values, but with NO aggfunc argument at all -- it assumes each index/columns pair maps to exactly one row and raises ValueError if that assumption is false" data-vn="giữ nguyên '.pivot()' — dàn bảng long thành wide, KHÔNG có aggfunc, yêu cầu mỗi cặp index/columns chỉ có đúng 1 hàng">.pivot()</dfn> is the plain one: same <code>index=</code>/<code>columns=</code>/<code>values=</code> shape as <code>pivot_table</code>, but no <code>aggfunc</code> argument at all — because it assumes there's nothing to aggregate. Every <code>index</code>/<code>columns</code> combination is assumed to map to exactly one row already:</p>
+<pre><code>orders = pd.DataFrame({
+    <span class="str">"order_id"</span>: [<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>, <span class="num">4</span>, <span class="num">5</span>],
+    <span class="str">"customer"</span>: [<span class="str">"An"</span>, <span class="str">"Binh"</span>, <span class="str">"An"</span>, <span class="str">"Binh"</span>, <span class="str">"An"</span>],
+    <span class="str">"order_date"</span>: [<span class="str">"2026-01-05"</span>, <span class="str">"2026-01-06"</span>, <span class="str">"2026-01-05"</span>, <span class="str">"2026-01-06"</span>, <span class="str">"2026-01-10"</span>],
+    <span class="str">"amount"</span>: [<span class="num">120.0</span>, <span class="num">35.5</span>, <span class="num">60.0</span>, <span class="num">180.0</span>, <span class="num">42.0</span>],
+})
+orders.pivot(index=<span class="str">"customer"</span>, columns=<span class="str">"order_date"</span>, values=<span class="str">"amount"</span>)
+<span class="cm">-- ValueError: Index contains duplicate entries, cannot reshape</span></code></pre>
+<p>An placed <em>two</em> orders on <code>2026-01-05</code> (order_id 1 and 3 — a re-submitted or corrected order, the kind of thing that happens constantly in real order data). <code>.pivot()</code> has no way to decide what a single An/<code>2026-01-05</code> cell should hold when two rows want to fill it, so it refuses outright rather than silently pick one. This is exactly the row Lesson 6's clean 4-row slice never had — every customer/date pair there was already unique, which is why <code>.pivot()</code> would have worked fine on it too, and why Lesson 6 never had to explain the difference.</p>
+<div class="callout"><strong>Gotcha:</strong> <code>.pivot()</code>'s error only fires at reshape time, on the FULL combination of <code>index</code> + <code>columns</code> — it says nothing about which rows collided or what values were involved. In a real pipeline this shows up as a crash several steps downstream of wherever the actual duplicate got introduced (a re-run, a late correction row, a join that fanned out) — the traceback points at the pivot call, not the cause.</p></div>
+
+<h2>2 · pivot_table(): the same reshape, but aggfunc decides the collision</h2>
+<p>This is the one difference that matters: <code>pivot_table()</code> takes everything <code>.pivot()</code> takes, plus <code>aggfunc</code> — and when two or more rows land on the same cell, it runs <code>aggfunc</code> over all of them instead of raising. Same duplicate data, no crash:</p>
+<pre><code>orders.pivot_table(index=<span class="str">"customer"</span>, columns=<span class="str">"order_date"</span>, values=<span class="str">"amount"</span>, fill_value=<span class="num">0</span>)
+<span class="cm">-- order_date  2026-01-05  2026-01-06  2026-01-10
+-- customer
+-- An                90.0        0.00        42.0   &lt;- mean(120.0, 60.0), the DEFAULT aggfunc
+-- Binh               0.0      107.75         0.0</span>
+
+orders.pivot_table(index=<span class="str">"customer"</span>, columns=<span class="str">"order_date"</span>, values=<span class="str">"amount"</span>, aggfunc=<span class="str">"sum"</span>, fill_value=<span class="num">0</span>)
+<span class="cm">-- order_date  2026-01-05  2026-01-06  2026-01-10
+-- customer
+-- An               180.0         0.0        42.0   &lt;- sum(120.0, 60.0) instead
+-- Binh               0.0       215.5         0.0</span></code></pre>
+<p>Notice the first call didn't pass <code>aggfunc</code> at all — <code>pivot_table</code>'s default is <code>aggfunc="mean"</code>, silently. An's <code>2026-01-05</code> cell became <code>90.0</code>, the average of <code>120.0</code> and <code>60.0</code>, not an error and not either original value. That default is easy to miss precisely because nothing crashes: the output looks completely reasonable, and unless the numbers are checked against a known total, an accidental mean-instead-of-sum bug can ship silently. Lesson 6's own examples always passed <code>aggfunc="sum"</code> explicitly for exactly this reason — worth calling out now that the reason is visible.</p>
+<div class="callout"><strong>Rule of thumb for interviews:</strong> "does every index/columns pair already map to one row?" — if yes, <code>.pivot()</code> is a fine, slightly stricter choice (it documents that assumption and enforces it). If that's ever in doubt — real order data, event logs, anything from a source that can retry or correct itself — reach for <code>pivot_table()</code> and pass <code>aggfunc</code> explicitly rather than trusting the mean default.</div>
+
+<h2>3 · margins=True: row and column subtotals, for free</h2>
+<p><code>pivot_table</code> has one more argument <code>.pivot()</code> doesn't: <dfn data-en="a pivot_table() keyword that adds one extra row and one extra column to the output, each holding aggfunc applied across that whole row/column -- the pandas equivalent of SQL's GROUP BY ROLLUP or a spreadsheet's grand-total row/column" data-vn="giữ nguyên 'margins=True' — thêm 1 hàng + 1 cột tổng cộng (subtotal) vào kết quả pivot_table, đặt tên bằng margins_name">margins=True</dfn>. It adds one extra row and one extra column, each holding <code>aggfunc</code> run across that whole row or column — a grand-total row and column, computed with the same aggregation as everything else:</p>
+<pre><code>orders.pivot_table(
+    index=<span class="str">"customer"</span>, columns=<span class="str">"order_date"</span>, values=<span class="str">"amount"</span>,
+    aggfunc=<span class="str">"sum"</span>, fill_value=<span class="num">0</span>, margins=<span class="kw">True</span>, margins_name=<span class="str">"All"</span>,
+)
+<span class="cm">-- order_date  2026-01-05  2026-01-06  2026-01-10    All
+-- customer
+-- An               180.0         0.0        42.0  222.0   &lt;- An's row total
+-- Binh               0.0       215.5         0.0  215.5   &lt;- Binh's row total
+-- All              180.0       215.5        42.0  437.5   &lt;- column totals, and the grand total</span></code></pre>
+<p><code>margins_name="All"</code> (default is literally the string <code>"All"</code> already, named here for clarity) labels that extra row/column — pick something that can't collide with a real <code>customer</code> or <code>order_date</code> value. The bottom-right corner (<code>437.5</code>) is the grand total either way you'd sum it: down An's row, or across the <code>All</code> column — both reach the same number, which is a good sanity check that nothing else went wrong.</p>
+<div class="callout"><strong>SQL bridge:</strong> <code>margins=True</code> is pandas' answer to <code>GROUP BY ROLLUP(...)</code> or a <code>UNION ALL</code> with a subtotal query bolted on — both real SQL patterns for "grand total row/column alongside the detail," both noticeably more ceremony than one keyword argument. There's no SQL keyword that adds a margin to a pivoted <em>report</em> shape directly, since SQL has no pivot primitive of its own either (Lesson 6's opening point).</div>
+
+<h2>4 · Putting it together: pivot_table is pivot + collision handling + optional totals</h2>
+<p>One sentence worth having ready for an interview: <code>pivot_table</code> is what <code>.pivot()</code> would be if it also handled duplicate keys (via <code>aggfunc</code>, default <code>mean</code>) and could add grand-total rows/columns on request (<code>margins=True</code>). Reaching for <code>pivot_table</code> by default — the way Lesson 6 quietly already did — is the safer habit; knowing <code>.pivot()</code> exists, what it assumes, and exactly which error it throws when that assumption breaks is what separates "used pivot_table once" from "understands why."</p>
+
+<div class="interview">
+<p><strong>Q: "What's the difference between .pivot() and pivot_table(), and when would .pivot() actually fail?"</strong> A strong answer, out loud: <em>".pivot() assumes every index/columns combination already maps to exactly one row — it has no aggfunc at all. If two rows share the same index/columns pair, .pivot() raises ValueError: Index contains duplicate entries, rather than guessing which one to keep. pivot_table() is the more general version: same index/columns/values shape, but it adds an aggfunc — mean by default, so I always pass aggfunc explicitly rather than trust that default — that runs over however many rows land on each cell, so duplicates get aggregated instead of crashing. pivot_table() also supports margins=True, which adds a grand-total row and column computed with that same aggfunc, without a separate groupby step. In practice I default to pivot_table() any time the source data could plausibly have a repeat key — re-submitted orders, retried events — and only reach for plain .pivot() when I specifically want that duplicate-key assumption enforced as a check."</em> The signal: naming the exact ValueError, naming the mean default as a real gotcha (not just "it aggregates"), and framing margins=True as a grand total, not a new concept.</p>
+</div>
+
+<h2>Try it — self-checking practice (~15-20 min)</h2>
+<p>Open <code>practice/44_pivot_table_and_margins.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/44_pivot_table_and_margins.py</code></pre>
+<p>Uses a small inline orders DataFrame (same customer/order domain as Lessons 6-43) with a deliberate duplicate customer/date pair, so <code>.pivot()</code> has something real to fail on. Exercise 1 confirms <code>.pivot()</code> raises <code>ValueError</code> on the duplicate; Exercise 2 builds the same reshape with <code>pivot_table(aggfunc="sum")</code> and confirms it does not raise; Exercise 3 confirms the default <code>aggfunc="mean"</code> gives a different (averaged) value than the explicit <code>"sum"</code> did; Exercise 4 adds <code>margins=True</code> and confirms the grand-total cell matches the sum of every order's amount.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why=".pivot() has no aggfunc argument at all -- it assumes every index/columns pair already maps to exactly one row, and raises ValueError: Index contains duplicate entries the moment that assumption is false, rather than silently picking one row or guessing how to combine them.">
+    <p class="stem">Two rows share the same <code>index</code>/<code>columns</code> pair. What does plain <code>.pivot()</code> do?</p>
+    <button class="opt" data-ok>raises a ValueError, since it can't combine the two rows</button>
+    <button class="opt">keeps only the first row, silently drops the other one</button>
+    <button class="opt">averages the two rows automatically, the same way pivot_table does</button>
+  </div>
+  <div class="q" data-why="pivot_table's aggfunc defaults to 'mean' when not passed explicitly -- an easy detail to miss precisely because nothing crashes and the output still looks like a normal report, which is why passing aggfunc explicitly (e.g. 'sum') is the safer habit for real data.">
+    <p class="stem">Called with no <code>aggfunc=</code> argument at all, what does <code>pivot_table()</code> use by default?</p>
+    <button class="opt" data-ok>"mean", the average of the rows landing on that cell</button>
+    <button class="opt">"sum", the total of all rows landing on that cell</button>
+    <button class="opt">it raises, same as .pivot(), since aggfunc is required here</button>
+  </div>
+  <div class="q" data-why="margins=True adds one extra row and one extra column, each computed with the SAME aggfunc as the rest of the table -- a grand-total row/column, the pandas equivalent of SQL's GROUP BY ROLLUP, not a separate groupby call.">
+    <p class="stem">What does <code>margins=True</code> add to a <code>pivot_table()</code> result?</p>
+    <button class="opt" data-ok>one extra row and column holding aggfunc's grand totals</button>
+    <button class="opt">a new boolean column flagging which cells got aggregated</button>
+    <button class="opt">nothing visible -- only changes the result's internal sort</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the pandas User Guide's <a href="https://pandas.pydata.org/docs/user_guide/reshaping.html#pivot-tables">"Pivot tables" section of Reshaping and pivot tables</a> (~10 min) — the same page Lesson 6 linked, this time focused on the <code>pivot()</code> vs <code>pivot_table()</code> contrast and the <code>margins</code> parameter further down the page.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>.pivot()</code> and <code>margins=True</code> were added today, placed right after the existing <code>pivot_table</code> entry.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-44 comes back reported as shakiest, otherwise <code>str.findall()</code> taught as its own topic in more depth (Lesson 43's own teaser), or a fresh curriculum/glossary scan for the next genuinely-uncovered pattern.<br><br>
+💬 Anything unclear — the ValueError message, the mean-default gotcha, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

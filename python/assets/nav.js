@@ -52,6 +52,8 @@
       file: "lessons/0022-testing-with-httpx.html" },
     { n: 23, date: "2026-08-20", title: "Error handling: custom exceptions, exception handlers & a consistent error shape",
       file: "lessons/0023-error-handling-and-exception-handlers.html" },
+    { n: 24, date: "2026-08-21", title: "ASGI middleware: wrapping every request/response",
+      file: "lessons/0024-asgi-middleware.html" },
   ];
 
   const REFS = [

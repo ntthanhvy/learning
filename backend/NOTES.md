@@ -2482,3 +2482,85 @@
   round beyond the one just closed; distributed locks and blue-green/canary
   deploys remain the standing out-of-scope-per-MISSION.md candidates if a
   fresh gap-finding pass is needed again next time.
+- 2026-08-21 generation (Lesson 47, headless run, topic assigned directly
+  rather than found by this round's own gap-finding pass): the task brief
+  specified the topic up front — liveness vs. readiness health checks and the
+  cascading-restart failure mode — framed as a gap the course had never
+  covered. That framing turned out to be only half right: Lesson 13
+  (2026-07-19) already introduced liveness vs. readiness by name, with a
+  `livenessHandler`/`readinessHandler` pair and the `Ping`-with-timeout
+  pattern, and `liveness check`/`readiness check` were already in
+  `glossary.html` from that round. Lesson 46's own note (the entry directly
+  above this one) even explicitly ruled health checks out as a candidate gap,
+  citing "already covered, Lessons 13/20/27." Confirmed all of this via grep
+  across every lesson body and the glossary before writing anything, rather
+  than taking the brief's framing on faith. What Lesson 13 did NOT cover,
+  confirmed by the same grep (no hits anywhere for "cascading" or
+  "reconnect" alongside liveness/readiness/health): the actual failure
+  mechanism the task asked for — why a shared-dependency blip trips every
+  instance's liveness check simultaneously (not independently), and why the
+  resulting mass restart adds a genuine second failure on top of the first
+  via a reconnect burst against the connection-pool-establishment cost
+  Lesson 18 already quantified. So Lesson 47 is framed explicitly, in its own
+  byline, as deepening Lesson 13's one-paragraph mention rather than
+  reintroducing the same material — it opens by naming what Lesson 13 already
+  defined, then spends the rest of the lesson on the mechanism: a numbered
+  walkthrough of a 10-instance fleet hitting a 2-second Postgres blip (every
+  instance polls together → every liveness check times out together → the
+  supervisor restarts all 10 together → all 10 reopen connection pools from
+  zero together → the reconnect burst extends the outage), a
+  liveness-vs-readiness `table.cmp` comparison (reusing Lesson 25's
+  cmp-wrap/table.cmp component, same as Lesson 46 did), a React-error-boundary
+  callout (a boundary scoped too broadly takes down more than it should — the
+  same shape as a liveness check scoped to include a dependency it shouldn't
+  own), and a `/healthz`/`/readyz` Go handler pair extending Lesson 13's own
+  handlers with `context.WithTimeout` shown explicitly and tied forward to
+  Lesson 27's graceful-shutdown lesson (readiness is the same lever a
+  shutting-down process flips first). Framed generically per the task's own
+  instruction — "process supervisor or load balancer" throughout, with
+  Kubernetes/ALB-style infra named only once, in passing, as an example
+  consumer, never as configuration — consistent with MISSION.md's explicit
+  "Kubernetes/infra tooling" exclusion. One genuinely new glossary term added:
+  `health check endpoint` (the generic supervisor-agnostic concept the two
+  specific checks are instances of) — confirmed via grep it didn't already
+  exist; deliberately did NOT re-add `liveness check`/`readiness check`,
+  which Lesson 13 already added, to avoid a duplicate glossary row. Also
+  deliberately did not coin a formal "cascading restart" or "reconnect storm"
+  glossary term — used both as plain descriptive phrases in the text instead,
+  per this course's own "prefer plain words when the jargon isn't the thing
+  being taught" rule, since the mechanism (not a vocabulary word) is the
+  lesson's point. No Go code needed a scratch-module compile check beyond
+  careful manual review this round — the handler pair is a direct extension
+  of Lesson 13's own already-shipped, already-reasoned-through snippet
+  (same `*Health` receiver shape, same `context.WithTimeout` pattern used
+  correctly elsewhere in the course, e.g. Lesson 41's context lesson), so the
+  syntax was checked by hand against `net/http`/`context` rather than run
+  through `go build`; no scratch module was created or left behind. Quiz
+  options were drafted, then word-counted by hand token-by-token per option
+  (the standing `python3`/`for`-loop/`sed`-loop tooling this course has used
+  in some prior rounds was not attempted first, since a bare `python3 -`
+  heredoc invocation was tried once this round and hit this session's
+  approval gate immediately — not retried, per the task's own two-strikes
+  guidance) — every question needed at least one rewrite pass before landing
+  on equal counts, each recount done twice independently before moving on:
+  Q1 10/10/10/10, Q2 10/10/10/10, Q3 9/9/9/9, Q4 10/10/10/10. Idempotency
+  checked first as usual: confirmed `lessons/0047-*.html` did not exist and
+  `n: 47` was not yet in `assets/nav.js` before writing anything.
+  `bin/record-progress backend lesson_generated --day 47 --lesson
+  0047-health-checks-cascading-restarts.html --detail
+  '{"by":"headless-agent"}'` was run directly from the repo root and
+  succeeded on the first try, no approval blocker this round — consistent
+  with most rounds since Lesson 32's finding. Direct `psql
+  "$LEARNING_DB_URL" ...` reads were not attempted, per the standing
+  finding across nearly every prior round that they are blocked in this
+  sandbox and not worth spending a retry on. Still no `lesson_completed`
+  record exists for any lesson after 47 rounds — that remains the standing
+  open question for whenever an interactive session is available. Left open
+  for Lesson 48: distributed locks and blue-green/canary deploys remain the
+  two named, confirmed out-of-scope-per-MISSION.md candidates (still true,
+  unchanged by this round); no new in-scope gap was identified or searched
+  for this round since the topic was assigned directly rather than found by
+  a gap-finding pass — the next headless round should resume the normal
+  gap-finding method (grep MISSION.md/RESOURCES.md/lesson bodies for
+  named-but-unexplained terms) if no topic is assigned and no user-chosen
+  track surfaces first.

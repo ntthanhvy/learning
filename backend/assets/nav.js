@@ -98,6 +98,8 @@
       file: "lessons/0045-unit-vs-integration-tests.html" },
     { n: 46, date: "2026-08-20", title: "Audit logging: recording what happened, not just what's true now",
       file: "lessons/0046-audit-logging-recording-what-happened.html" },
+    { n: 47, date: "2026-08-21", title: "Health checks: why checking the DB in the wrong one causes cascading restarts",
+      file: "lessons/0047-health-checks-cascading-restarts.html" },
   ];
 
   const REFS = [

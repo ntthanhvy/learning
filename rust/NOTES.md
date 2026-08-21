@@ -630,3 +630,18 @@ by the user there; they apply here identically.
   skipped again per its own window close, now thirty-two days past it;
   backend, data, and python lessons were generated this round via
   delegated agents — see their own NOTES.md entries for detail.)
+- 2026-08-22 (headless 06:00 run, GitHub Actions): same as every prior
+  post-week day — verified `daily.html`, `assets/srs.js`, and
+  `assets/quiz-bank.js` are all present and untouched (8 `id: "k` matches
+  in `quiz-bank.js` — the 7 real kata entries `k1`-`k7` plus the
+  commented-out example line — `day:` tags in `quiz-bank.js` running 1-7
+  only; `nav.js` `LESSONS` array still registers exactly 7 lessons, days
+  1-7 only, unchanged). Still the correct "daily quiz+kata" for this
+  post-week phase per PLAN.md, so nothing new was generated. A repo-wide
+  search for "2026-08-22" found no existing artifact for today before this
+  check. Direct `psql "$LEARNING_DB_URL" ...` was blocked again this
+  session ("Contains simple_expansion" — the same content-level block on
+  that exact variable name as every prior round, tried once per the
+  established finding), so no `course_progress` rows could be read for a
+  scope-change signal (e.g. a request to keep growing the bank past Day
+  7). No new learning record beyond the Day-1 baseline.

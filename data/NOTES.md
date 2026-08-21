@@ -2701,3 +2701,103 @@
   actually done), or otherwise a fresh curriculum/glossary scan for the next
   genuinely-uncovered pandas/NumPy pattern, if no drill-outcome signal
   surfaces by next generation.
+- 2026-08-22 generation (Lesson 45, headless run): idempotency was
+  self-confirmed first — globbed `data/lessons/` for `0045-*.html` (none
+  found) and grepped this file for a `2026-08-22` entry (none found), plus
+  confirmed `assets/nav.js`'s last registered lesson was still 44 (dated
+  2026-08-21) — so this round proceeded. `bin/query-progress data` was
+  attempted once as instructed and required interactive approval unavailable
+  in this headless session (blocked, same class of block as effectively
+  every prior round) — not retried; direct `psql "$LEARNING_DB_URL"` was not
+  separately attempted this round given that established pattern — still no
+  readable `course_progress` rows and no `lesson_completed`/quiz/kata outcome
+  record beyond the Lesson 1 baseline, so no reported weak spot to target.
+  Lesson 44's own teaser named `str.findall()` "taught as its own topic in
+  more depth" as the first option — checked this against Lesson 43's actual
+  content first, since the teaser flagged it as "still not actually done":
+  Lesson 43 Section 4 already gives `str.findall()` a real worked example, a
+  rule-of-thumb contrast against `extractall()`, and a mention inside the
+  glossary's `str.extractall()` entry — treating it as a full standalone
+  lesson topic would mostly repeat that section with little new content, so
+  this round instead took the teaser's stated fallback: a fresh
+  curriculum/glossary scan. Grepped `lessons/*.html` and
+  `reference/glossary.html` for a batch of common pandas methods not yet
+  confirmed taught (`describe(`, `.corr(`, `reindex(`, `convert_dtypes(`,
+  `.at[`/`.iat[`, `ffill(`/`bfill(`/`interpolate(`) — both `.at[`/`.iat[` and
+  `ffill()`/`bfill()` came back genuinely uncovered (each appeared only
+  inside Lesson 34's/38's own prose as passing mentions, never taught).
+  Picked `ffill()`/`bfill()` over `.at[]`/`.iat[]`: it's a direct, natural
+  sequel to Lesson 3's missing-data lesson (which explicitly taught drop/
+  fill-constant/flag but never "carry the nearest real value" as a fourth
+  option), it's high-frequency for time-series-shaped interview data, and it
+  extends this course's "trusts row order only" family (Lessons 7/11/13/23)
+  with a concrete new groupby-boundary-bleed gotcha, a stronger interview
+  hook than `.at[]`/`.iat[]`'s narrower "same as `.loc`/`.iloc` but faster"
+  pitch — left `.at[]`/`.iat[]` as the explicit next-in-line teaser instead
+  of dropping it. `uv run --with pandas` worked directly this round (pandas
+  3.0.5, confirmed via `pd.__version__`) — first hand-verified every claim in
+  `.scratch/data-lesson45/explore.py` (deleted after) before writing a word
+  of the lesson: on the real `orders_raw.csv` clean 4-row slice with Binh's
+  first amount (01-06) deliberately blanked, plain ungrouped `ffill()` WRONGLY
+  carries An's `42.0` into Binh's row, while `groupby("customer").ffill()`
+  correctly leaves it `NaN`; also confirmed a leading-NaN `ffill()` and a
+  trailing-NaN `bfill()` both silently stay NaN (no raise); confirmed
+  `ffill(limit=1)` stops after the first of three consecutive gaps; and
+  confirmed a genuine outdated-folklore gap worth flagging in the lesson text
+  (same pattern as Lessons 25/26/29's own corrections) — the classic
+  `fillna(method="ffill")` spelling is fully removed on current pandas, now
+  raising `TypeError`, not just a deprecation warning. Designing the practice
+  file hit two variants of the by-now-expected Ellipsis-placeholder family:
+  `series.iloc[...]` does NOT raise (Ellipsis is a valid whole-Series
+  indexer, same family as Lesson 20's `.loc[...]`/Lesson 25's
+  `memory_usage(deep=True)[...]` findings) — the first-draft Exercise 3 used
+  exactly this unsafe spot and was redesigned before shipping to instead put
+  the placeholder inside the Series' own list literal
+  (`pd.Series([10.0, ..., 30.0, None])`), confirmed safe since a bare
+  Ellipsis list element just becomes the literal Python object `Ellipsis`
+  sitting in an object-dtype Series, which correctly fails the
+  `== 30.0`-style check rather than silently passing anything; separately
+  confirmed `bfill(limit=...)`/`ffill(limit=...)` DO raise `ValueError`
+  (`"Limit must be an integer"`), safe as-is. Also caught and fixed a real
+  false-positive before shipping (same class of bug as Lessons 20/30's own
+  catches): Exercise 3's second check ("trailing NaN stays NaN") originally
+  passed even fully unsolved, since index 3 of the fixture Series is `None`
+  regardless of whether index 1 got solved — fixed by folding the Exercise 3
+  "pulls 30.0 backward" condition into that same check so it only passes once
+  both are genuinely true. The shipped (unsolved)
+  `practice/45_ffill_and_bfill.py` was executed in
+  `.scratch/data-lesson45/practice/` (fixture CSV copied alongside) and
+  printed all 6 ✗ with no crash and no false positives after the above fix,
+  then a solved copy (`.scratch/data-lesson45/practice/45_solved.py`, not
+  shipped) printed all 6 ✓ against the same hand-verified numbers above. The
+  shipped file was also re-run a second time directly from its real
+  `practice/` location (`cd data && uv run --with pandas python3
+  practice/45_ffill_and_bfill.py`) and confirmed to print the identical
+  all-✗ result with no crash. `.scratch/data-lesson45/` was fully removed
+  (`rm -rf`) after verification, no approval needed this round. Added
+  `ffill() / bfill()` to the glossary as one combined entry (placed directly
+  after the existing `fillna` entry, same "combined vs. separate" precedent
+  as `stack()/unstack()`) and registered Lesson 45 in `nav.js`. Quiz options
+  were drafted and checked with a Python regex/word-count script run via
+  `uv run python3` (this course's established convention) — the first draft
+  came out mismatched on all three questions (Q1 9/8/9, Q2 9/4/10, Q3
+  10/8/8); needed four total rewrite + recount cycles (Q2 alone took three
+  passes, including one pass that made a mismatch WORSE by eyeballing instead
+  of re-running the script — a concrete fresh instance of Lesson 19/22's
+  standing warning that a single "checked" pass isn't reliable) before a
+  final independent recount confirmed all three genuinely level at 9/9/9,
+  9/9/9, and 9/9/9. `bin/record-progress data lesson_generated --lesson
+  0045-ffill-and-bfill.html --detail '{"by":"headless-run"}'` was run once
+  from the repo root as instructed (without an explicit `--day` flag this
+  round, unlike some earlier invocations) and succeeded on the first try
+  (`recorded: data/lesson_generated day=∅ lesson=0045-ffill-and-bfill.html`
+  — the `day` field printed empty since it wasn't passed, but the
+  `lesson_generated` event itself recorded fine), no approval blocker this
+  round — confirming the write path continues to work even when the read
+  path (`bin/query-progress`) stays categorically blocked, same asymmetry
+  documented in most prior rounds. This agent does not run `git commit` —
+  leaving working-tree changes uncommitted remains this course's established
+  convention. Set the teaser going forward to `.at[]`/`.iat[]` (fast
+  single-scalar access vs. `.loc`/`.iloc`, deferred this round in favor of
+  `ffill()`/`bfill()`, re-confirmed genuinely uncovered by this round's own
+  grep) if no drill-outcome signal surfaces by next generation.

@@ -54,6 +54,8 @@
       file: "lessons/0023-error-handling-and-exception-handlers.html" },
     { n: 24, date: "2026-08-21", title: "ASGI middleware: wrapping every request/response",
       file: "lessons/0024-asgi-middleware.html" },
+    { n: 25, date: "2026-08-22", title: "Deploying with uvicorn: workers, reload & env-based config",
+      file: "lessons/0025-deploying-with-uvicorn.html" },
   ];
 
   const REFS = [

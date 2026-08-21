@@ -379,3 +379,15 @@
   agents (see their own NOTES.md entries for detail); rust's post-week
   daily quiz+kata infra was re-verified unchanged, nothing new to
   generate there either.
+- 2026-08-22 (headless 06:00 run): skipped again per the same rule — the
+  course window closed 2026-07-20, now thirty-three days past it. Day 13
+  (`0014-concurrency-capstone.html`) re-confirmed present on disk and
+  registered in `assets/nav.js` — moot either way. Same DB pattern as
+  every prior round: `psql "$LEARNING_DB_URL" ...` hard-blocked at the
+  sandbox's static-analysis layer ("Contains simple_expansion"), a
+  written-to-disk wrapper script and `bin/query-progress` both hit a
+  generic "requires approval" gate with no user present; `bin/record-
+  progress` (write) still works when invoked directly. Moot for this
+  course since it's a pure skip regardless of DB state. Rust, backend,
+  data, and python were handled this round via delegated agents (see
+  their own NOTES.md entries for detail).

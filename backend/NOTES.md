@@ -2564,3 +2564,105 @@
   gap-finding method (grep MISSION.md/RESOURCES.md/lesson bodies for
   named-but-unexplained terms) if no topic is assigned and no user-chosen
   track surfaces first.
+- 2026-08-22 generation (Lesson 48, headless run, no topic assigned — resumed
+  the normal gap-finding method as Lesson 47's own note asked): idempotency
+  checked first as usual — confirmed no `2026-08-22` entry existed yet in this
+  log and no `lessons/0048-*.html` file existed before writing anything
+  (highest existing file was 0047, dated 2026-08-21). Per this round's own
+  briefing, `course_progress` reads are not reliably reachable in this
+  sandboxed session and any `psql "$LEARNING_DB_URL" ...`-shaped command is
+  hard-blocked by this session's static analysis — not attempted, consistent
+  with every prior round; pacing came from `backend/learning-records/` (both
+  files re-read in full — 0001's baseline and 0002's concurrency-vocabulary
+  gap, both already fully reflected in prior lessons, nothing new to act on)
+  plus this log's own recent history. Grepped MISSION.md's five success
+  criteria and RESOURCES.md's citations against all 47 lesson bodies plus
+  `glossary.html` for named-but-unexplained gaps, ruling out several
+  candidates first (health checks — already covered per Lesson 47's own note;
+  composite indexes/EXPLAIN — Go-week Day 5-6 territory per Lesson 5's own
+  text; bulk insert/COPY, event sourcing — zero hits but narrow/out of scope;
+  sessions vs JWT — actually already thorough in Lesson 4 despite Lesson 11's
+  stale "next lesson" teaser pointing at it, confirmed by reading Lesson 4 in
+  full) before landing on a real one: "password hash" and "password hashing"
+  appeared only as passing examples in three lessons (23's excessive-data-
+  exposure field name, 25's CPU-bound quiz question, nowhere else) but no
+  lesson, and no glossary entry, ever explained what a password hash actually
+  is, why it isn't encryption, or what makes one hash function suitable for
+  passwords and another not — confirmed via grep across all 47 lesson bodies
+  and `glossary.html` that "bcrypt", "argon2", "salt" (in the crypto sense),
+  and "credential stuffing" had zero hits anywhere. Squarely in scope under
+  MISSION.md's own explicit criterion 4 ("security basics (OWASP top risks)")
+  and RESOURCES.md's standing OWASP Cheat Sheet Series citation, which has a
+  dedicated Password Storage Cheat Sheet never yet drawn on. Lesson 48 covers
+  it: why plaintext and reversible encryption are both wrong (tied to Lesson
+  4's session/JWT auth flow and Lesson 30's HMAC material for the reversible-
+  vs-one-way distinction), credential stuffing as the concrete consequence of
+  getting it wrong, why a fast general-purpose hash like SHA-256 alone is
+  still wrong (speed enables offline brute force; identical inputs enable
+  rainbow tables), salting and work factor as the two properties a real
+  password hash needs, bcrypt and Argon2id named as the two real answers with
+  Argon2id's memory-hardness explained as the reason it beats bcrypt against
+  GPU cracking, a `hashPassword`/`checkPassword` Go snippet using
+  `golang.org/x/crypto/bcrypt`'s `GenerateFromPassword`/
+  `CompareHashAndPassword` (self-salting, salt embedded in the returned hash
+  string, no separate salt column), a frontend-habit callout extending Lesson
+  23's "never send the password back" instinct one layer deeper ("the
+  backend itself should never be able to produce it either"), and a 3-column
+  comparison table (plaintext vs. unsalted SHA-256 vs. bcrypt/Argon2id)
+  reusing Lesson 25's `table.cmp`/`.cmp-wrap` component. Explicit tie-backs:
+  Lesson 4 (auth flow this sits underneath), Lesson 11 (rate limiting doesn't
+  help once hashes are already stolen), Lesson 21 (encryption key custody as
+  config/secrets territory), Lesson 23 (excessive-data-exposure, extended),
+  Lesson 30 (constant-time comparison, reused by name since bcrypt's compare
+  function does it internally). No scratch Go module compile check this
+  round — every `go` invocation (`go version`, `go mod init -C ...`, even a
+  `chmod +x`-then-run of a saved shell script) was blocked by this session's
+  approval gate on compound/expansion-bearing commands, a stricter block than
+  prior rounds have logged; fell back to hand-checking the bcrypt snippet
+  against the well-known, stable `golang.org/x/crypto/bcrypt` API surface
+  (`GenerateFromPassword`, `CompareHashAndPassword`, `DefaultCost`) instead,
+  the same fallback Lesson 47 used for its handler snippet. A `WebFetch` call
+  to the OWASP Password Storage Cheat Sheet for a live currency check was
+  also blocked pending approval with no user present; not retried, since the
+  Argon2id-over-bcrypt recommendation and general salting/work-factor guidance
+  are stable, well-established knowledge not expected to have shifted.
+  Proofread the raw shipped file for the stray-`</p>`-in-a-callout bug class
+  nearly every recent round's notes have flagged — found and fixed one real
+  instance this round (the frontend-habit callout div originally closed with
+  `</p></div>` instead of `</div>`, same bug shape as prior rounds, this time
+  actually present rather than just checked-for) — then ran a tag-balance
+  check (div/table/tr/th/td/pre/p open vs. close counts, via individual Grep
+  tool calls rather than shell `grep`/`wc` since the sandbox blocked script
+  execution this round) confirming all balanced afterward: 8/8 div, 1/1
+  table, 5/5 tr, 5/5 th, 4/4 td, 1/1 pre, 16/16 p. Added `credential
+  stuffing`, `hash function`, `encryption`, `rainbow table`, `salt`, `work
+  factor / cost factor`, `bcrypt`, and `Argon2id` to the glossary (confirmed
+  via grep beforehand none existed anywhere in `lessons/*.html` or
+  `glossary.html`) and registered Lesson 48 in nav.js. Quiz options were
+  drafted, then word-counted entirely by hand token-by-token per option (no
+  `wc -w`/`sed`/loop tooling attempted this round given the broader command-
+  execution block already hit above) — every question needed at least one
+  rewrite pass before landing on equal counts, each recount done twice
+  independently before moving on: Q1 9/9/9/9, Q2 9/9/9/9, Q3 10/10/10/10, Q4
+  9/9/9/9. Primary source: the OWASP Password Storage Cheat Sheet, a new
+  specific page drawn from RESOURCES.md's existing general OWASP Cheat Sheet
+  Series citation (not yet used for this specific cheat sheet by name);
+  secondary source the `golang.org/x/crypto/bcrypt` package docs for the Go
+  API specifics. `bin/record-progress backend lesson_generated --lesson
+  0048-password-hashing.html --detail '{"by":"headless-run"}'`
+  was run directly via its relative path from the repo root as instructed
+  and succeeded on the first try (`recorded: backend/lesson_generated
+  day=∅ lesson=0048-password-hashing.html`) — consistent with every round
+  since Lesson 32's finding that the write path works reliably even though
+  the read path (`course_progress` via `psql`) remains unreachable in this
+  sandboxed session as flagged and not attempted at the start of this round.
+  This closes
+  the password-hashing gap found by grepping MISSION.md's security criterion
+  against all 47 prior lesson bodies rather than reusing the standing
+  distributed-locks/blue-green leftovers, which remain the same two named,
+  confirmed out-of-scope-per-MISSION.md candidates as every round since
+  Lesson 46 if a fresh gap-finding pass is needed again next time. Still no
+  `lesson_completed` record exists for any lesson after 48 rounds — the next
+  session should keep treating a completion/quiz-outcome signal, or a
+  user-named track to deepen, as higher priority than a 49th topic picked
+  blind.

@@ -94,6 +94,8 @@
       file: "lessons/0043-str-extractall.html" },
     { n: 44, date: "2026-08-21", title: "pivot_table() vs .pivot(), and margins=True",
       file: "lessons/0044-pivot-table-and-margins.html" },
+    { n: 45, date: "2026-08-22", title: "ffill() and bfill(): carrying a value across a gap",
+      file: "lessons/0045-ffill-and-bfill.html" },
   ];
 
   const REFS = [

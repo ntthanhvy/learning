@@ -100,6 +100,8 @@
       file: "lessons/0046-audit-logging-recording-what-happened.html" },
     { n: 47, date: "2026-08-21", title: "Health checks: why checking the DB in the wrong one causes cascading restarts",
       file: "lessons/0047-health-checks-cascading-restarts.html" },
+    { n: 48, date: "2026-08-22", title: "Password hashing: storing a secret you should never be able to read back",
+      file: "lessons/0048-password-hashing.html" },
   ];
 
   const REFS = [

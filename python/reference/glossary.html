@@ -251,6 +251,13 @@
   <tr><td>BaseHTTPMiddleware</td><td>giữ nguyên "BaseHTTPMiddleware" — cách viết middleware bằng class thay vì decorator, import từ starlette.middleware.base, dùng call_next y hệt bản decorator</td><td>The class-based alternative to <code>@app.middleware("http")</code>, imported from <code>starlette.middleware.base</code> (the ASGI toolkit FastAPI is built on) — subclassed with an <code>async dispatch(request, call_next)</code> method using the identical <code>call_next</code> shape as the decorator form, useful mainly when a middleware needs constructor arguments or several apps need to share one middleware class.</td></tr>
 </table>
 
+<h2 id="day25">Day 25 — Deploying with uvicorn: workers, reload &amp; env-based config</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>--reload</td><td>giữ nguyên "--reload" — flag của uvicorn, theo dõi file source, tự restart process khi có thay đổi, chỉ dùng lúc dev, không dùng chung được với --workers</td><td>A uvicorn CLI flag that watches source files on disk and restarts the single running process automatically whenever one changes — convenient for development, and explicitly incompatible with <code>--workers</code>, since restarting several worker processes on every keystroke would defeat the purpose of having several.</td></tr>
+  <tr><td>--workers</td><td>giữ nguyên "--workers" — flag của uvicorn, số process độc lập chạy song song, mỗi process 1 bản copy đầy đủ của app, cho phép N request chạy đồng thời trên N core CPU</td><td>A uvicorn CLI flag setting the number of independent worker processes, each running a full copy of the app — the mechanism that lets N requests run on N separate CPU cores at the same instant, unrelated to and not fixed by writing more <code>await</code> inside a handler.</td></tr>
+</table>
+
 <p class="next">💬 A term here still unclear? Ask your teacher — hỏi bằng tiếng Việt cũng được.</p>
 
 <script src="../assets/nav.js"></script>

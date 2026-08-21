@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 45 · ffill() and bfill(): carrying a value across a gap</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 45 · ~20 min · 22 Aug 2026</p>
+<h1>ffill() and bfill(): carrying a value across a gap</h1>
+<p class="byline">Lesson 3 taught three moves for missing data: drop, fill with a constant/median, or flag. Today adds a fourth fill strategy Lesson 3 deliberately left out — filling a gap with the <em>nearest real value in row order</em> instead of a computed constant. It's the move interviewers expect for time-series-shaped gaps (a sensor reading, a daily balance, a status column) where "the last known value" is a far more honest guess than a median ever is.</p>
+
+<h2>Recap, in one line</h2>
+<p>Lesson 3's <code>fillna(value)</code> always uses the <em>same</em> value for every gap, computed once up front (a median, a zero, a string). Today's tools instead look at each gap's <em>neighbors in the current row order</em> and copy one of those — a fundamentally different kind of fill, and one that inherits the same "trusts row order only" warning this course has given <code>cumsum()</code>, <code>shift()</code>, and <code>rolling()</code> before.</p>
+
+<h2>1 · ffill(): carry the last known value forward</h2>
+<p><dfn data-en="a Series/DataFrame method filling each missing value with the nearest NON-missing value ABOVE it in the current row order -- short for 'forward fill'; a gap with no earlier value at all (a leading NaN) stays NaN, since there is nothing above it to carry" data-vn="giữ nguyên 'ffill()' — điền chỗ thiếu bằng giá trị THẬT gần nhất phía TRÊN theo thứ tự hàng hiện tại; NaN ở đầu (không có gì phía trên) thì vẫn giữ nguyên NaN">ffill()</dfn> replaces each <code>NaN</code> with the closest real value sitting above it:</p>
+<pre><code>s = pd.Series([<span class="num">120.0</span>, <span class="kw">None</span>, <span class="num">35.5</span>, <span class="kw">None</span>, <span class="num">180.0</span>])
+s.ffill()
+<span class="cm">-- 0    120.0
+-- 1    120.0   &lt;- carried down from row 0
+-- 2     35.5
+-- 3     35.5   &lt;- carried down from row 2
+-- 4    180.0</span></code></pre>
+<p>Each fill is a genuinely different number depending on where the gap sits — nothing like <code>fillna(median)</code>'s one constant everywhere. That's the entire pitch: for a "status as of now" or "last known reading" column, the truth actually <em>is</em> whatever the last real observation was, and a flat median would be a worse guess, not a safer one.</p>
+
+<h2>2 · bfill(): carry the next known value backward</h2>
+<p><dfn data-en="a Series/DataFrame method filling each missing value with the nearest NON-missing value BELOW it in the current row order -- short for 'backward fill'; the mirror image of ffill(), so a gap with no later value (a trailing NaN) stays NaN" data-vn="giữ nguyên 'bfill()' — điền chỗ thiếu bằng giá trị THẬT gần nhất phía DƯỚI, ngược hướng với ffill()">bfill()</dfn> is the mirror image — it looks downward instead of upward:</p>
+<pre><code>s.bfill()
+<span class="cm">-- 0    120.0
+-- 1     35.5   &lt;- pulled up from row 2
+-- 2     35.5
+-- 3    180.0   &lt;- pulled up from row 4
+-- 4    180.0</span></code></pre>
+<p>Row 1 differs between the two calls (<code>120.0</code> via <code>ffill</code> vs <code>35.5</code> via <code>bfill</code>) — same gap, opposite direction, genuinely different answer. Neither is "more correct" in the abstract; the choice depends on what the gap actually means (was this value not yet recorded, or did recording stop?).</p>
+
+<div class="callout"><strong>Gotcha — an edge gap stays NaN, no error:</strong> <code>ffill()</code> can't fill a leading <code>NaN</code> (nothing above it); <code>bfill()</code> can't fill a trailing one (nothing below it) — both silently leave that value as <code>NaN</code> rather than raising:
+<pre><code>pd.Series([<span class="kw">None</span>, <span class="num">10.0</span>, <span class="kw">None</span>, <span class="num">20.0</span>]).ffill()
+<span class="cm">-- 0     NaN   &lt;- still NaN, nothing above row 0 to carry
+-- 1    10.0
+-- 2    10.0
+-- 3    20.0</span></code></pre>
+Always check <code>.isna().sum()</code> after an ffill/bfill pass — a table that starts (or ends) with a real gap won't be fully filled, and nothing announces that.</div>
+
+<h2>3 · The groupby gotcha: ffill() bleeds across group boundaries</h2>
+<p>Like <code>cumsum()</code>, <code>shift()</code>, and <code>rolling()</code> before it, plain <code>ffill()</code> only looks at physical row position — it has no idea one customer's rows just ended and another's just began. Run it on the whole table ungrouped, and a value can leak from the wrong customer entirely:</p>
+<pre><code><span class="cm">-- clean, sorted by customer then order_date -- Binh's FIRST row is missing:
+--   customer order_date  amount
+-- 0       An 2026-01-05   120.0
+-- 1       An 2026-01-10    42.0
+-- 2     Binh 2026-01-06     NaN   &lt;- Binh's own first value, genuinely unknown
+-- 3     Binh 2026-01-09   180.0</span>
+clean[<span class="str">"amount"</span>].ffill()
+<span class="cm">-- 0    120.0
+-- 1     42.0
+-- 2     42.0   &lt;- WRONG: An's amount, not Binh's -- no error, just quietly wrong
+-- 3    180.0</span>
+
+clean.groupby(<span class="str">"customer"</span>)[<span class="str">"amount"</span>].ffill()
+<span class="cm">-- 0    120.0
+-- 1     42.0
+-- 2      NaN   &lt;- correct: Binh has no earlier row of her own to carry from
+-- 3    180.0</span></code></pre>
+<p>The fix is the same shape as every prior lesson in this "trusts row order only" family: sort correctly first, then chain <code>groupby(key)</code> before the fill so each group's gaps only ever look at that same group's own rows.</p>
+
+<div class="interview">
+<p><strong>Q: "A time-ordered column has some missing values. When would you reach for ffill() instead of Lesson 3's median fill?"</strong> A strong answer, out loud: <em>"It depends what 'missing' means for that column. A median fill assumes the true value is somewhere near the column's typical value, which is reasonable for something like a one-off missing order amount. But for a 'status as of right now' or 'last sensor reading' kind of column, the honest guess isn't the median — it's whatever the last real observation was, which is exactly what ffill() gives you. The two gotchas I'd flag unprompted: an edge gap with nothing to carry from stays NaN silently, so I always check isna().sum() after; and ffill() only looks at physical row position, so on a multi-entity table I have to sort correctly and chain groupby() first, or a value can quietly bleed from the wrong group with no error at all."</em> The signal: naming the row-order dependency and the groupby fix without being prompted, the same reflex this course has built for cumsum()/shift()/rolling().</p>
+</div>
+
+<h2>4 · limit=, and the retired fillna(method=) spelling</h2>
+<p><code>limit=</code> caps how many consecutive gaps a single real value is allowed to fill, so a fill doesn't quietly paper over an unreasonably long stretch of missing data:</p>
+<pre><code>pd.Series([<span class="num">1.0</span>, <span class="kw">None</span>, <span class="kw">None</span>, <span class="kw">None</span>, <span class="num">5.0</span>]).ffill()
+<span class="cm">-- [1.0, 1.0, 1.0, 1.0, 5.0]   &lt;- one real value propped up 3 rows</span>
+pd.Series([<span class="num">1.0</span>, <span class="kw">None</span>, <span class="kw">None</span>, <span class="kw">None</span>, <span class="num">5.0</span>]).ffill(limit=<span class="num">1</span>)
+<span class="cm">-- [1.0, 1.0, NaN, NaN, 5.0]   &lt;- only the FIRST gap gets filled, the rest stay NaN</span></code></pre>
+<p>One outdated spelling worth flagging directly, confirmed on this course's actually-installed pandas 3.0.5: older tutorials/Stack Overflow answers write <code>fillna(method="ffill")</code>. That keyword-argument form has been fully removed — it now raises <code>TypeError: NDFrame.fillna() got an unexpected keyword argument 'method'</code>, not a deprecation warning. <code>.ffill()</code>/<code>.bfill()</code> as their own methods (used throughout this lesson) are the only current spelling.</p>
+
+<h2>5 · The SQL bridge</h2>
+<p>Plain SQL has no single built-in for "carry the last non-null value forward" — it needs a window function reaching back through prior rows:</p>
+<pre><code><span class="cm">-- Postgres/most engines: no direct LAG(), need the LAST non-null via a
+-- window frame trick (a "last value ignore nulls" pattern):
+-- SELECT *,
+--   COALESCE(amount, MAX(amount) OVER (
+--     PARTITION BY customer ORDER BY order_date
+--     ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+--   )) AS amount_ffill
+-- FROM orders;
+-- (works here only because amount is never NaN-and-also-zero in a way
+--  that would confuse the aggregate -- real ffill SQL patterns get messier)</span>
+clean.groupby(<span class="str">"customer"</span>)[<span class="str">"amount"</span>].ffill()
+<span class="cm">-- one call, same intent, no window-frame gymnastics</span></code></pre>
+<p>This is a case where pandas is genuinely more concise than SQL, not just a different spelling of the same idea — worth naming directly if it comes up.</p>
+
+<h2>Try it — self-checking practice (~15-20 min)</h2>
+<p>Open <code>practice/45_ffill_and_bfill.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/45_ffill_and_bfill.py</code></pre>
+<p>Uses the real <code>orders_raw.csv</code> clean 4-row slice (Lessons 6-44's fixture) with a value deliberately blanked at a customer boundary (Binh's first row). Exercise 1 runs plain <code>ffill()</code> and confirms it wrongly carries An's value into Binh's row; Exercise 2 runs the grouped version and confirms Binh's row correctly stays <code>NaN</code>; Exercise 3 checks <code>bfill()</code>'s opposite direction; Exercise 4 checks <code>limit=1</code> stopping a fill after one row.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="ffill() only looks at physical row position in the current order -- it has no concept of a customer/group boundary. Run ungrouped on a multi-customer table sorted by customer, and a value can silently carry across from the END of one customer's rows into the START of the next, with no error or warning of any kind.">
+    <p class="stem">A table sorted by customer then date has plain (ungrouped) <code>ffill()</code> run on it. What can go wrong?</p>
+    <button class="opt" data-ok>a value can silently carry across a customer boundary</button>
+    <button class="opt">pandas raises an error the moment a customer changes</button>
+    <button class="opt">every remaining NaN becomes exactly zero, not a value</button>
+  </div>
+  <div class="q" data-why="ffill() only ever looks upward at earlier rows for a real value to copy -- a leading NaN with nothing above it has no candidate to carry from, so it stays NaN rather than raising or guessing. The mirror case (a trailing NaN with bfill()) behaves the same way in the opposite direction.">
+    <p class="stem">A Series starts with <code>NaN</code> as its very first value. What does <code>.ffill()</code> do to that first row?</p>
+    <button class="opt" data-ok>stays NaN, since no row above it to copy</button>
+    <button class="opt">raises a ValueError, since the true value is undefined</button>
+    <button class="opt">gets filled from the Series' very last row instead</button>
+  </div>
+  <div class="q" data-why="Lesson 3's fillna(value) always uses one constant computed up front (a median, a zero) for every gap, regardless of position. ffill()/bfill() instead look at each gap's own neighbors in the current row order and copy a real, different value per gap -- appropriate when the honest guess is 'whatever was last/next observed,' not a single typical value.">
+    <p class="stem">How does <code>ffill()</code> fundamentally differ from Lesson 3's <code>fillna(median)</code>?</p>
+    <button class="opt" data-ok>it copies a real neighboring value, not one constant</button>
+    <button class="opt">it deletes the whole row instead of filling it</button>
+    <button class="opt">it only ever works on numeric columns, never text</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the pandas User Guide's <a href="https://pandas.pydata.org/docs/user_guide/missing_data.html#filling-with-a-pandasobject">"Filling with a PandasObject"</a> section of Working with missing data (~10 min) — the same page Lesson 3 linked, this time focused further down on <code>ffill()</code>/<code>bfill()</code>/<code>limit=</code>.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>ffill()</code> and <code>bfill()</code> were added today, placed right after Lesson 3's <code>fillna</code> entry.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-45 comes back reported as shakiest, otherwise <code>.at[]</code>/<code>.iat[]</code> (fast single-scalar access, contrasted with <code>.loc</code>/<code>.iloc</code>) or a fresh curriculum/glossary scan for the next genuinely-uncovered pattern.<br><br>
+💬 Anything unclear — the groupby gotcha, the edge-gap NaN case, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -56,6 +56,8 @@
       file: "lessons/0024-asgi-middleware.html" },
     { n: 25, date: "2026-08-22", title: "Deploying with uvicorn: workers, reload & env-based config",
       file: "lessons/0025-deploying-with-uvicorn.html" },
+    { n: 26, date: "2026-08-23", title: "Capstone: a small FastAPI + pydantic service, end to end",
+      file: "lessons/0026-fastapi-capstone.html" },
   ];
 
   const REFS = [

@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 46 · .at[] and .iat[]: fast single-scalar access</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 46 · ~20 min · 23 Aug 2026</p>
+<h1>.at[] and .iat[]: fast single-scalar access</h1>
+<p class="byline"><code>.loc[]</code> and <code>.iloc[]</code> (used constantly since Lesson 1) can pull out a whole row, a whole column, or a rectangular block of both. Today's two methods do only ONE job — get or set exactly one cell — and trade away every one of those other abilities for real speed and a narrower, more honest contract.</p>
+
+<h2>Recap, in one line</h2>
+<p><code>.loc[row_label, col_label]</code> and <code>.iloc[row_pos, col_pos]</code> both accept a single label/position OR a list/slice of them, so pandas has to check which shape you gave it every time, even when you only ever wanted one cell. <code>.at[]</code>/<code>.iat[]</code> skip that check entirely by refusing anything but a single scalar.</p>
+
+<h2>1 · .at[]: one cell, by label</h2>
+<p><dfn data-en="a DataFrame/Series accessor for getting or setting exactly ONE cell by row label and column label -- .loc[]'s narrower, faster sibling; raises immediately if given anything but a single scalar row/column pair" data-vn="giữ nguyên '.at[]' — lấy/gán ĐÚNG 1 ô theo nhãn hàng và nhãn cột, phiên bản hẹp và nhanh hơn của .loc[]; đưa vào bất cứ thứ gì khác 1 cặp nhãn đơn là lỗi ngay">.at[]</dfn> reads or writes a single cell, addressed the same way <code>.loc[]</code> addresses one:</p>
+<pre><code><span class="cm">--   order_id customer  amount order_date
+-- 0        1       An   120.0 2026-01-05
+-- 1        6       An    42.0 2026-01-10
+-- 2        2     Binh    35.5 2026-01-06
+-- 3        5     Binh   180.0 2026-01-09</span>
+clean.at[<span class="num">1</span>, <span class="str">"amount"</span>]
+<span class="cm">-- 42.0 -- identical result to clean.loc[1, "amount"]</span>
+
+clean.at[<span class="num">0</span>, <span class="str">"amount"</span>] = <span class="num">999.0</span>
+<span class="cm">-- sets exactly that one cell, same effect as clean.loc[0, "amount"] = 999.0</span></code></pre>
+<p>Every value <code>.at[]</code> produces is one <code>.loc[]</code> would also produce — nothing new to learn about the <em>result</em>. The difference is entirely in what it's willing to accept as an <em>argument</em>.</p>
+
+<h2>2 · .iat[]: one cell, by position</h2>
+<p><dfn data-en="the positional twin of .at[] -- gets or sets exactly ONE cell by integer row position and integer column position, ignoring labels entirely, same restriction as .iloc[] but narrowed to a single cell" data-vn="giữ nguyên '.iat[]' — bản dùng VỊ TRÍ (số nguyên) của '.at[]', giống '.iloc[]' nhưng chỉ cho đúng 1 ô, bỏ qua nhãn hoàn toàn">.iat[]</dfn> is <code>.at[]</code>'s positional twin, the same relationship <code>.iloc[]</code> has to <code>.loc[]</code>:</p>
+<pre><code>clean.iat[<span class="num">1</span>, <span class="num">2</span>]
+<span class="cm">-- 42.0 -- row position 1, column position 2 ("amount") -- ignores the label entirely
+-- identical result to clean.iloc[1, 2]</span>
+
+clean.iat[-<span class="num">1</span>, -<span class="num">1</span>]
+<span class="cm">-- 2026-01-09 -- negative positions work exactly like .iloc[], counting from the end</span></code></pre>
+
+<h2>3 · The one real restriction: scalar only, no exceptions</h2>
+<p>This is the entire trade — try to hand <code>.at[]</code>/<code>.iat[]</code> anything but a single label/position pair and it refuses, loudly, rather than silently doing something close enough:</p>
+<pre><code>clean.at[<span class="num">1</span>, [<span class="str">"amount"</span>, <span class="str">"customer"</span>]]
+<span class="cm">-- InvalidIndexError: ['amount', 'customer']
+-- .loc[] would have happily returned a 2-value row slice here -- .at[] won't</span></code></pre>
+<p>No row slices, no column lists, no boolean masks, no <code>:</code> — if the answer isn't exactly one cell, <code>.at[]</code>/<code>.iat[]</code> are the wrong tool, full stop. That narrowness is the whole point: it's a promise to both pandas and the next reader of the code that this line touches exactly one value.</p>
+
+<div class="callout"><strong>Gotcha — a missing label still raises, just like .loc[]:</strong> <code>.at[]</code> is not more forgiving than <code>.loc[]</code> about label lookups — reading a label that doesn't exist raises the same <code>KeyError</code> either way:
+<pre><code>clean.at[<span class="num">999</span>, <span class="str">"amount"</span>]
+<span class="cm">-- KeyError: 999   (clean.loc[999, "amount"] raises the identical KeyError)</span></code></pre>
+And on the <em>write</em> side, both behave identically too — assigning to a row label that doesn't exist yet creates a brand-new row, padding every other column with <code>NaN</code>, for both <code>.at[]</code> and <code>.loc[]</code> alike. Nothing about that behavior changes between them; only the accepted <em>shape</em> of the argument differs.</div>
+
+<h2>4 · Why bother: speed on a single-cell hot path</h2>
+<p>Hand-timed on this course's own 4-row fixture, 20,000 repeated lookups of the same cell: <code>.at[]</code> took about <strong>1.3x less time</strong> than the equivalent <code>.loc[]</code> call. That gap is real but modest on a table this small — the honest reason to reach for <code>.at[]</code>/<code>.iat[]</code> isn't "always use it," it's a targeted swap on a genuine hot path: single-cell lookups repeated many times inside a loop (rare in idiomatic pandas, but it happens — e.g. building up a result cell-by-cell after a vectorized approach hits a real dead end) is where the per-call overhead <code>.loc[]</code>/<code>.iloc[]</code> pay for shape-checking actually adds up.</p>
+<p>A realistic single-cell pattern that reads naturally with <code>.at[]</code>: pairing it with Lesson 20's <code>idxmax()</code> to pull one specific value once the row label is already known —</p>
+<pre><code>top_idx = clean.groupby(<span class="str">"customer"</span>)[<span class="str">"amount"</span>].idxmax()
+<span class="cm">-- An -> 0, Binh -> 3   (the row LABEL holding each customer's max, from Lesson 20)</span>
+clean.at[top_idx[<span class="str">"An"</span>], <span class="str">"amount"</span>]
+<span class="cm">-- 120.0 -- one cell, by the label idxmax() already found</span></code></pre>
+
+<div class="interview">
+<p><strong>Q: "When would you use .at[] instead of .loc[]?"</strong> A strong answer, out loud: <em>"They return identical results for a single-cell lookup — .at[] and .iat[] are strictly narrower versions of .loc[] and .iloc[], accepting only one row label/position and one column label/position, nothing list- or slice-shaped. That narrowness buys two things: a real but modest speed edge on repeated single-cell access, since pandas skips the shape-checking .loc[]/.iloc[] do on every call; and a clearer signal in the code itself that this line touches exactly one value, not a range. I wouldn't reach for it by default — .loc[]/.iloc[] read fine for one-off lookups — but I'd use it in a tight loop over individual cells, or anywhere I want the type system-adjacent guarantee that a typo can't accidentally turn into a silent multi-cell operation."</em> The signal: naming both the real (but bounded) speed reason and the narrower-contract reason, not just parroting "it's faster."</p>
+</div>
+
+<h2>5 · The SQL bridge</h2>
+<p>SQL has no real equivalent distinction here — a scalar subquery like <code>SELECT amount FROM orders WHERE order_id = 6</code> always returns exactly one value by construction (or errors if it matches more than one row); there's no separate "fast single-value" syntax versus a general row/range query the way pandas splits <code>.at[]</code> from <code>.loc[]</code>. This distinction is pandas-specific plumbing, not a transferable SQL concept — worth naming as exactly that if it comes up.</p>
+
+<h2>Try it — self-checking practice (~15-20 min)</h2>
+<p>Open <code>practice/46_at_and_iat.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/46_at_and_iat.py</code></pre>
+<p>Uses the real <code>orders_raw.csv</code> clean 4-row slice (Lessons 6-45's fixture). Exercise 1 reads one cell with <code>.at[]</code> by label; Exercise 2 reads one cell with <code>.iat[]</code> by position; Exercise 3 sets one cell with <code>.at[]</code> and confirms the rest of the table is untouched; Exercise 4 chains <code>groupby().idxmax()</code> (Lesson 20) into a single <code>.at[]</code> lookup, the realistic "already know the label, want the value" pattern from Section 4.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why=".at[]/.iat[] return exactly what .loc[]/.iloc[] would for the same single-cell lookup -- there is no result-shape or value difference between them. The only real difference is which ARGUMENT shapes each one accepts: .at[]/.iat[] refuse anything but one row + one column, while .loc[]/.iloc[] also accept lists, slices, and boolean masks.">
+    <p class="stem">For a genuine single-cell lookup, how does the VALUE returned by <code>.at[]</code> differ from the value <code>.loc[]</code> would return for that same cell?</p>
+    <button class="opt" data-ok>no difference -- both return the identical scalar value</button>
+    <button class="opt">.at[] returns the value wrapped inside a one-item Series</button>
+    <button class="opt">.at[] rounds any numeric value for a faster display</button>
+  </div>
+  <div class="q" data-why=".at[]/.iat[] are strictly narrower than .loc[]/.iloc[] -- they accept only a single row label/position plus a single column label/position, nothing list- or slice-shaped. Passing a list of column names, like .loc[] would happily accept, raises InvalidIndexError immediately instead of returning a partial row.">
+    <p class="stem">What happens when you pass a LIST of column names to <code>.at[]</code> instead of one column?</p>
+    <button class="opt" data-ok>it raises InvalidIndexError right away, with no result</button>
+    <button class="opt">it silently returns only the first listed column</button>
+    <button class="opt">it returns every listed column, same as .loc[]</button>
+  </div>
+  <div class="q" data-why="Reading a row label that does not exist raises an identical KeyError under both .at[] and .loc[] -- .at[]'s narrower contract is only about the SHAPE of the argument (scalar-only), not about being more lenient on missing labels. Both accessors also share identical write-side behavior: assigning to a brand-new label creates a new row under either one.">
+    <p class="stem">Reading <code>clean.at[999, "amount"]</code> where row label 999 does not exist. What happens?</p>
+    <button class="opt" data-ok>raises KeyError, same as .loc[999, "amount"] would</button>
+    <button class="opt">returns NaN silently, no error at all</button>
+    <button class="opt">returns 0.0 as a safe default value</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the pandas User Guide's <a href="https://pandas.pydata.org/docs/user_guide/indexing.html#fast-scalar-value-getting-and-setting">"Fast scalar value getting and setting"</a> section of Indexing and selecting data (~5 min) — the official framing of exactly this speed/contract trade-off.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>.at[]</code> and <code>.iat[]</code> were added today, placed right after Lesson 20's <code>idxmax()/idxmin()</code> entry.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-46 comes back reported as shakiest, otherwise a fresh curriculum/glossary scan for the next genuinely-uncovered pattern.<br><br>
+💬 Anything unclear — the InvalidIndexError gotcha, the speed trade-off, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

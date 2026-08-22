@@ -96,6 +96,8 @@
       file: "lessons/0044-pivot-table-and-margins.html" },
     { n: 45, date: "2026-08-22", title: "ffill() and bfill(): carrying a value across a gap",
       file: "lessons/0045-ffill-and-bfill.html" },
+    { n: 46, date: "2026-08-23", title: ".at[] and .iat[]: fast single-scalar access",
+      file: "lessons/0046-at-and-iat.html" },
   ];
 
   const REFS = [

@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 26 · Capstone: a small FastAPI + pydantic service, end to end</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 26 · ~20 min · 23 Aug 2026</p>
+<h1>Capstone: a small FastAPI + pydantic service, end to end</h1>
+<p class="byline">Day 25 closed the last named item of <code>PLAN.md</code>'s Phase 2b spine — handlers, pydantic, schemas, dependency injection, async, PostgreSQL, testing, errors, middleware, and deployment each got their own lesson across Days 16–25. Today doesn't add a new mechanism. It wires several of those lessons into <strong>one small, real service</strong> — a tiny task API — the same "spend everything already taught in one place" move Day 7's ETL <dfn data-en="a lesson that deliberately teaches no new mechanism, instead combining several already-taught mechanisms into one working, tangible artifact" data-vn="giữ nguyên &quot;capstone&quot; — bài không dạy kỹ thuật mới, mà ghép nhiều kỹ thuật đã học thành 1 sản phẩm chạy được, có ý nghĩa">capstone</dfn> made for Phase 1's language material.</p>
+
+<div class="callout"><strong>Bridge from SQL:</strong> a small service like today's is the same shape as a stored procedure plus its input/output contracts plus its constraint checks plus its own regression tests, all living in one place instead of scattered across a schema file, a few `CHECK`s, and a separate test script.</div>
+
+<h2>1 · The service: a tiny task list, in five pieces</h2>
+<p>Today's app is a task list with two routes: create a task, read one back by id. Small on purpose — the point is to see every piece land in a real, runnable file, not to build something elaborate. Five pieces, each a direct reuse of an earlier lesson:</p>
+<ul>
+<li><strong>Day 17 — pydantic request model.</strong> <code>TaskIn(BaseModel)</code> with a <code>title: str</code> and a <code>done: bool = False</code> default, plus a <code>@field_validator("title")</code> rejecting a blank string — the exact custom-validator shape Day 17 taught, applied to a new field.</li>
+<li><strong>Day 18 — pydantic response model.</strong> <code>TaskOut(BaseModel)</code> with <code>id</code>, <code>title</code>, <code>done</code>, attached to the route as <code>response_model=TaskOut</code> — the type hint <em>is</em> the contract, same as Day 18's own framing.</li>
+<li><strong>Day 23 — a custom exception and its handler.</strong> <code>class TaskNotFound(Exception)</code> plus <code>@app.exception_handler(TaskNotFound)</code>, returning a consistent <code>{"error": "task_not_found", "id": ...}</code> shape — Day 23's exact pattern, not a fresh one.</li>
+<li><strong>Day 19 — a dependency.</strong> <code>get_task_or_404(task_id: int)</code>, used as <code>task: dict = Depends(get_task_or_404)</code> on the read route — looks the task up once, raises <code>TaskNotFound</code> if it's missing, and the route body never has to check for that case itself.</li>
+<li><strong>Day 20 — a real <code>await</code> checkpoint.</strong> The create route is <code>async def</code> and does <code>await asyncio.sleep(0)</code> before writing the record — standing in for the real <code>await</code> a database insert would need, so the route is genuinely async, not <code>async def</code> in name only.</li>
+</ul>
+<p>Here is the whole thing, in the order above:</p>
+<pre><code><span class="kw">from</span> fastapi <span class="kw">import</span> Depends, FastAPI
+<span class="kw">from</span> fastapi.responses <span class="kw">import</span> JSONResponse
+<span class="kw">from</span> pydantic <span class="kw">import</span> BaseModel, field_validator
+<span class="kw">import</span> asyncio
+
+app = FastAPI()
+_DB: <span class="kw">dict</span>[<span class="kw">int</span>, <span class="kw">dict</span>] = {}
+_NEXT_ID = <span class="kw">1</span>
+
+<span class="kw">class</span> TaskIn(BaseModel):
+    title: <span class="kw">str</span>
+    done: <span class="kw">bool</span> = <span class="kw">False</span>
+
+    <span class="kw">@</span>field_validator(<span class="str">"title"</span>)
+    <span class="kw">@</span>classmethod
+    <span class="kw">def</span> title_not_blank(cls, v: <span class="kw">str</span>) -&gt; <span class="kw">str</span>:
+        <span class="kw">if not</span> v.strip():
+            <span class="kw">raise</span> ValueError(<span class="str">"title must not be blank"</span>)
+        <span class="kw">return</span> v
+
+<span class="kw">class</span> TaskOut(BaseModel):
+    id: <span class="kw">int</span>
+    title: <span class="kw">str</span>
+    done: <span class="kw">bool</span>
+
+<span class="kw">class</span> TaskNotFound(Exception):
+    <span class="kw">def</span> __init__(self, task_id: <span class="kw">int</span>):
+        self.task_id = task_id
+
+<span class="kw">@</span>app.exception_handler(TaskNotFound)
+<span class="kw">async def</span> task_not_found_handler(request, exc: TaskNotFound):
+    <span class="kw">return</span> JSONResponse(status_code=<span class="kw">404</span>, content={<span class="str">"error"</span>: <span class="str">"task_not_found"</span>, <span class="str">"id"</span>: exc.task_id})
+
+<span class="kw">def</span> get_task_or_404(task_id: <span class="kw">int</span>) -&gt; <span class="kw">dict</span>:
+    <span class="kw">if</span> task_id <span class="kw">not in</span> _DB:
+        <span class="kw">raise</span> TaskNotFound(task_id)
+    <span class="kw">return</span> _DB[task_id]
+
+<span class="kw">@</span>app.post(<span class="str">"/tasks"</span>, response_model=TaskOut, status_code=<span class="kw">201</span>)
+<span class="kw">async def</span> create_task(task: TaskIn):
+    <span class="kw">global</span> _NEXT_ID
+    <span class="kw">await</span> asyncio.sleep(<span class="kw">0</span>)
+    record = {<span class="str">"id"</span>: _NEXT_ID, <span class="str">"title"</span>: task.title, <span class="str">"done"</span>: task.done}
+    _DB[_NEXT_ID] = record
+    _NEXT_ID += <span class="kw">1</span>
+    <span class="kw">return</span> record
+
+<span class="kw">@</span>app.get(<span class="str">"/tasks/{task_id}"</span>, response_model=TaskOut)
+<span class="kw">async def</span> read_task(task: <span class="kw">dict</span> = Depends(get_task_or_404)):
+    <span class="kw">return</span> task</code></pre>
+<p>36 lines, and every one of them is a mechanism from a lesson already taught. Nothing here is new syntax — today's win is seeing them compose without friction.</p>
+
+<h2>2 · Day 22's testing pattern, aimed at all of it at once</h2>
+<p>Day 22 tested one route at a time via <code>TestClient</code>. Today's tests exercise the whole flow — create, then read the created thing back, then hit the failure path:</p>
+<pre><code><span class="kw">from</span> fastapi.testclient <span class="kw">import</span> TestClient
+client = TestClient(app)
+
+r = client.post(<span class="str">"/tasks"</span>, json={<span class="str">"title"</span>: <span class="str">"write lesson"</span>})
+<span class="kw">assert</span> r.status_code == <span class="kw">201</span>
+task_id = r.json()[<span class="str">"id"</span>]
+
+r2 = client.get(<span class="kw">f</span><span class="str">"/tasks/{task_id}"</span>)
+<span class="kw">assert</span> r2.status_code == <span class="kw">200</span> <span class="kw">and</span> r2.json()[<span class="str">"title"</span>] == <span class="str">"write lesson"</span>
+
+r3 = client.get(<span class="str">"/tasks/999999"</span>)
+<span class="kw">assert</span> r3.status_code == <span class="kw">404</span> <span class="kw">and</span> r3.json()[<span class="str">"error"</span>] == <span class="str">"task_not_found"</span></code></pre>
+<p>Confirmed directly in-process against this exact app: <code>POST /tasks</code> with a real title returns <code>201</code> with a body matching <code>TaskOut</code>'s three fields; a blank title (<code>"   "</code>) is rejected with pydantic's <code>422</code>, no route code needed to check for it; a missing id returns the custom <code>404</code> shape from section 1's handler, not FastAPI's default error page. No real socket opens anywhere — the identical in-process discipline every FastAPI practice file has used since Day 16.</p>
+
+<h2>3 · What "wired together" actually bought</h2>
+<p>Notice what each route body does <em>not</em> contain: no manual type-checking of <code>task.title</code> (pydantic did it before the function ran), no <code>if task_id not in _DB: return error</code> repeated in every route that needs a task (the dependency did it once), no bare dict shape hoping the client sends the right keys back (<code>response_model</code> enforces the shape on the way out too). Each lesson from Days 17–20 removed one specific category of hand-written code from the route bodies — today is the first time all of those removals are visible stacked on top of each other in one file.</p>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> none of today's five pieces has a pandas equivalent to contrast against — pydantic validation, dependency injection, and exception handlers are service-shape concerns a one-shot data pipeline never has, since nothing is waiting to accept a next request. This is the same point Day 25's own closing callout made about deployability, one layer up.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/26_fastapi_capstone.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run --with fastapi --with httpx python3 practice/26_fastapi_capstone.py</code></pre>
+<p>Needs <code>fastapi</code> and <code>httpx</code>, installed one-off via <code>--with</code>, same as every FastAPI practice file since Day 16. Exercises: fill in <code>TaskIn</code> (Day 17's fields + validator), <code>TaskOut</code> (Day 18's response shape), the <code>TaskNotFound</code> exception handler (Day 23's shape), and the <code>get_task_or_404</code> dependency (Day 19's shape) — the routes and tests around them are already written, so every TODO is one of the five pieces from section 1.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="response_model=TaskOut is the pydantic model the return value is shaped into before becoming JSON - Day 18's own definition, reused unchanged today on the create and read routes.">
+    <p class="stem">In <code>@app.post("/tasks", response_model=TaskOut, ...)</code>, what does <code>response_model</code> do?</p>
+    <button class="opt" data-ok>shapes and validates the return value before it becomes JSON now</button>
+    <button class="opt">renames the route path shown in the auto-generated docs page now</button>
+    <button class="opt">picks which HTTP method the decorated function accepts right here now</button>
+  </div>
+  <div class="q" data-why="A field_validator that raises ValueError on a blank title makes pydantic reject the request before the route body ever runs, returning FastAPI's standard 422 response - the same mechanism Day 17 taught, now applied to a blank string instead of a numeric field.">
+    <p class="stem">What happens when <code>POST /tasks</code> is sent a title of <code>"   "</code> (all spaces)?</p>
+    <button class="opt" data-ok>pydantic rejects it before the route runs, returning a 422</button>
+    <button class="opt">the route runs, then a database constraint blocks the insert</button>
+    <button class="opt">FastAPI silently trims it to an empty string and continues</button>
+  </div>
+  <div class="q" data-why="Depends(get_task_or_404) calls that function first, and if it raises TaskNotFound, the registered @app.exception_handler(TaskNotFound) converts that straight into a 404 response before the route body ever executes - Day 19's dependency shape feeding Day 23's handler shape.">
+    <p class="stem">When <code>get_task_or_404</code> raises <code>TaskNotFound</code> for a missing id, why does the client see a 404 instead of a crash?</p>
+    <button class="opt" data-ok>the registered exception handler converts it to a 404 response</button>
+    <button class="opt">FastAPI always converts any raised exception into a plain 404</button>
+    <button class="opt">TestClient itself catches every exception and retries the call again</button>
+  </div>
+  <div class="q" data-why="Depends(get_task_or_404) runs the dependency once before the route body, and the route only ever sees an already-found task dict - it never needs its own 'if task_id not in _DB' check, since the dependency already handled the missing case by raising.">
+    <p class="stem">Why doesn't <code>read_task</code>'s own body ever check whether the task exists?</p>
+    <button class="opt" data-ok>the Depends() dependency already handled that before the body ran</button>
+    <button class="opt">FastAPI routes cannot contain even a single if-statement inside them</button>
+    <button class="opt">missing tasks are impossible once TaskOut has been defined once</button>
+  </div>
+  <div class="q" data-why="Today deliberately introduces no new mechanism - it combines Day 17's validation, Day 18's response_model, Day 19's Depends(), Day 20's await, and Day 23's exception handler into one small working service, the same move Day 7 made for Phase 1's language material.">
+    <p class="stem">What new Python or FastAPI mechanism does today's lesson introduce?</p>
+    <button class="opt" data-ok>none — it just combines five already-taught mechanisms into one service</button>
+    <button class="opt">a brand-new pydantic field type not covered in any earlier lesson</button>
+    <button class="opt">a second, competing way to register FastAPI's own exception handlers now</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> FastAPI's own <a href="https://fastapi.tiangolo.com/tutorial/bigger-applications/">"Bigger Applications - Multiple Files"</a> tutorial page, cited in <code>RESOURCES.md</code> under "Knowledge — backend" alongside the rest of the FastAPI tutorial spine — the natural next read once a service like today's needs to grow past one file.</p>
+
+<p class="next">New term today is in the <a href="../reference/glossary.html#day26">glossary</a> under Day 26.<br>
+With every named item of PLAN.md's Phase 2a and 2b spines now covered end to end, and this capstone showing them working together in one file, the next lesson revisits <code>PLAN.md</code> itself to pick Phase 3's direction.<br><br>
+💬 Anything unclear — why the dependency runs before the exception handler, or how pydantic's validator ordering works? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

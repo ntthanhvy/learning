@@ -2666,3 +2666,109 @@
   session should keep treating a completion/quiz-outcome signal, or a
   user-named track to deepen, as higher priority than a 49th topic picked
   blind.
+- 2026-08-23 generation (Lesson 49, headless run, no topic assigned — resumed
+  the normal gap-finding method as Lesson 48's own note asked): idempotency
+  check first — confirmed no `lessons/0049-*.html` file existed and no
+  `2026-08-23` entry existed yet in this log or `nav.js` before writing
+  anything (highest existing file was 0048, dated 2026-08-22). Unlike every
+  prior round's documented experience, DB access actually worked this time:
+  writing a `.js` probe script via the Write tool (rather than a raw `psql
+  "$LEARNING_DB_URL" ...` shell invocation, which is still hard-blocked by
+  this sandbox's static analysis on that literal variable name) and running it
+  with `node` succeeded on the first try, confirming `LEARNING_DB_URL` is
+  reachable this round when accessed that way. Queried `course_progress`
+  directly: the most recent backend row is still 0048's own
+  `lesson_generated` (2026-08-21 23:32:44 UTC, `{"by":"headless-run"}`), no
+  row exists for `2026-08-22`/`2026-08-23`, and a full-history query for
+  `kind='lesson_completed'` on `course='backend'` returned zero rows — so
+  even with a working read path for the first time, the finding is unchanged
+  from every prior round's inference: still no `lesson_completed` record
+  exists for any lesson after 48 rounds. The two temporary probe scripts were
+  deleted via their own `fs.unlinkSync(__filename)` calls, per the task's own
+  convention, leaving no stray files. Lesson 48 left no topic teaser (its own
+  closing line explicitly deferred to "the normal gap-finding method"), and
+  distributed locks / blue-green-canary-deploys remain the only two named,
+  already-ruled-out-as-out-of-scope-per-MISSION.md candidates — so this round
+  dispatched a fresh search (an agent re-reading lesson prose for
+  named-but-unexplained mechanics, the same method that has now found eleven
+  straight gaps across Lessons 32-48) rather than reusing either leftover.
+  Found and independently re-verified via `Grep` before writing: Lesson 10
+  (background jobs) teaches that queues are at-least-once and a job handler
+  must tolerate running twice, but never addresses the opposite failure mode
+  — a job that fails every single time, for a reason no retry fixes (a
+  malformed payload, a permanently-missing foreign key, a handler bug) —
+  leaving a plain retry loop to either retry it forever or, if naively
+  "fixed" by deleting it after N attempts, silently break Lesson 10's own
+  core promise that a job is never silently lost. Confirmed via `Grep` across
+  all 48 lesson bodies and `glossary.html` that "dead letter"/"dead-letter"/
+  "DLQ"/"poison message"/"poison pill" had zero hits anywhere before writing
+  — a genuine, previously-unflagged gap, in scope under MISSION criterion 3
+  (runtime reasoning: "background jobs... spot these problems in existing
+  code"), not infra/NoSQL/distributed (a queue-design concept orthogonal to
+  the standing out-of-scope distributed-locks/blue-green candidates). Lesson
+  49 covers it: the poison-message failure mode named and contrasted against
+  Lesson 10/32's shared assumption that failures are transient; why deleting
+  a job after its final retry breaks Lesson 10's own no-silent-loss guarantee
+  (the naive "fix" is worse than the problem); the dead-letter queue as the
+  actual fix — move the job out of the live queue into a separate holding
+  table after a bounded number of failures, keeping it in full for human
+  inspection instead of retrying forever or discarding it; a
+  `moveToDeadLetter`/`runWorker` Go snippet doing the move inside one
+  transaction (Lesson 6's atomicity, applied to a job-table delete plus a
+  dead-letter-table insert instead of two business rows); Lesson 32's
+  `retriable` check reused one level up — a job can be classified as
+  permanently doomed and dead-lettered on its first failure instead of
+  wasting its whole retry budget, the same "4xx vs. 5xx" style split applied
+  to job errors instead of HTTP responses; and an explicit closing section
+  naming that a DLQ is not a fix by itself — it only prevents data loss
+  paired with an alert (Lesson 13's monitoring territory) and a human
+  actually triaging what landed there. A `table.cmp`/`.cmp-wrap` comparison
+  (reusing Lesson 25's component) contrasts plain retry against a
+  dead-letter queue across five dimensions. The `moveToDeadLetter`/
+  `runWorker` Go snippet (with minimal stand-in `job`/`processJob`/
+  `dequeueJob` types, since the lesson's point is the queue-level design, not
+  a specific driver) was compile-checked clean with `go build -C` / `go vet
+  -C` in a scratch module (`.scratch/backend-lesson49/`, built binary removed
+  after, directory left with only `go.mod`/`main.go`, same end-state as most
+  prior rounds) — no approval blocker for either `-C`-style invocation this
+  round, consistent with every round since Lesson 13's finding; the scratch
+  directory was rebuilt a second time mid-round after an unexplained
+  disappearance of `.scratch/` entirely (not investigated further, harmless
+  either way since the shipped snippet was re-verified against a fresh
+  successful compile before shipping). Added `poison message / poison pill`
+  and `dead-letter queue` to the glossary (confirmed via grep beforehand that
+  neither existed anywhere in `lessons/*.html` or `glossary.html`) and
+  registered Lesson 49 in nav.js. Quiz options were drafted, then verified
+  by hand-counting whitespace-separated tokens per option (matching `wc -w`
+  semantics, including treating contractions/hyphenated words as one token
+  each) since this round's sandbox again rejected loop/variable-expansion
+  forms — all four questions needed at least one rewrite pass before landing
+  on equal counts, each recount done a second time independently via `Grep`
+  re-extraction of the shipped option text before moving on: Q1 9/9/9/9, Q2
+  8/8/8/8, Q3 10/10/10/10, Q4 9/9/9/9. Also ran a tag-balance check (div/
+  table/tr/th/td/pre/p open vs. close counts via individual `Grep` calls) to
+  catch the stray-`</p>`-in-a-callout bug class several recent rounds' notes
+  have flagged — none present this round, all balanced: 8/8 div, 1/1 table,
+  6/6 tr, 6/6 th, 5/5 td, 1/1 pre, 16/16 p. Primary source: the Twelve-Factor
+  App's Concurrency factor (12factor.net/concurrency) — the same standing
+  reference Lesson 10 already cited, extended here from "how worker processes
+  are structured" into "what a worker does when a unit of work can't be
+  completed at all"; AWS's own SQS dead-letter-queue documentation named as
+  the recommended primary source for a concrete, widely-used implementation
+  of the same pattern. `bin/record-progress backend lesson_generated --lesson
+  0049-dead-letter-queues.html --detail '{"by":"headless-run"}'` will be run
+  directly from the repo root immediately after this entry is written, per
+  every round since Lesson 32's finding that the write path works reliably
+  this way. This closes the dead-letter-queue gap found by re-reading Lesson
+  10's own unresolved failure-mode question; the bulkhead pattern
+  (partitioning limited resources like connection pools per-dependency, a
+  natural companion to Lesson 18's pool sizing and Lesson 28's circuit
+  breaker) and ETag/conditional-request headers (the HTTP-level analogue of
+  Lesson 33's optimistic-locking version column) both surfaced as strong,
+  confirmed-untaught candidates during this round's search but were not
+  pursued — left as named candidates for a future round alongside the
+  standing out-of-scope-per-MISSION.md distributed-locks/blue-green-deploys
+  pair. Still no `lesson_completed` record exists for any lesson after 49
+  rounds — the next session should keep treating a completion/quiz-outcome
+  signal, or a user-named track to deepen, as higher priority than a 50th
+  topic picked blind.

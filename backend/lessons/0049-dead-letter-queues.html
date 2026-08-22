@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 49 · Dead-letter queues: what happens to a job that never succeeds</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 49 · ~20 min</p>
+<h1>Dead-letter queues: what happens to a job that never succeeds</h1>
+<p class="byline">Lesson 10 taught that jobs get retried, so they must be safe to run twice. It never asked the other question: what if a job keeps failing no matter how many times it's retried? Today: the failure mode a plain retry loop can't fix on its own, and the queue-level fix for it.</p>
+
+<h2>1 · Retries assume the failure is temporary</h2>
+<p>Lesson 10's worker loop and Lesson 32's backoff both share the same quiet assumption: if a job fails, trying again will eventually work, because the failure was transient — a dependency blipped, a network call timed out. Most failures really are like that. Some aren't. A job can fail for a reason that no amount of retrying fixes: a corrupted or malformed payload that the handler can never parse, a permanently-invalid foreign key the row it references was hard-deleted, a bug in the handler itself that throws on every single attempt. This is a <dfn data-en="a queued job that fails every time it's processed, for a reason no retry can fix, so it keeps consuming worker attempts indefinitely instead of ever completing" data-vn="poison message / poison pill (giữ nguyên) — job lúc nào cũng fail, retry bao nhiêu lần cũng vậy">poison message</dfn>: a job that fails every time, forever.</p>
+<p>Left alone, a plain retry loop treats a poison message exactly like a transient one — it just keeps trying. Depending on how the queue is built, that produces one of two bad outcomes: the same job is dequeued and retried forever, burning worker time on work that will never succeed, or — worse in a queue that processes jobs roughly in order — that one broken job sits at the front and blocks every job queued behind it from ever being tried.</p>
+<div class="callout"><strong>Frontend-habit trap:</strong> this is the backend version of an infinite retry loop in a <code>useEffect</code> that never gives up on a failed fetch — except here the "loop" is a whole worker process, and the "blocked UI" is every other job waiting in line behind it.</div>
+
+<h2>2 · The fix: stop retrying after N attempts, but don't lose the job</h2>
+<p>The naive fix — just give up and delete the job after a few failures — trades one problem for a worse one: Lesson 10's whole point was that a job must never be silently dropped. Deleting a failed job after its last retry is exactly the silent drop Lesson 10 built the entire queue-based design to avoid.</p>
+<p>The actual fix keeps Lesson 10's "never silently lose it" promise while still refusing to retry forever: after a bounded number of failed attempts, move the job out of the live queue into a separate holding table — a <dfn data-en="a separate queue or table that holds jobs which failed repeatedly and were pulled out of the live queue after exhausting their retry budget, kept for inspection instead of being silently dropped or retried forever" data-vn="dead-letter queue (giữ nguyên, viết tắt DLQ) — hàng đợi riêng chứa các job đã fail hết số lần retry cho phép, giữ lại để xem chứ không xóa">dead-letter queue</dfn> (DLQ) — instead of leaving it to retry indefinitely or deleting it outright. The job still exists, in full, with its payload and its last error, waiting for a human to look at it. It's off the live queue, so it can no longer block or waste attempts on work behind it, but nothing about it was thrown away.</p>
+
+<pre><code><span class="cm">// moveToDeadLetter copies a permanently-failed job into a separate holding
+// table for manual inspection, then removes it from the live queue so it
+// stops blocking work behind it -- same transaction, so neither write can
+// happen without the other (Lesson 6's atomicity, applied here).</span>
+<span class="kw">func</span> moveToDeadLetter(ctx context.Context, db *sql.DB, j job, lastErr <span class="kw">error</span>) <span class="kw">error</span> {
+    tx, err := db.BeginTx(ctx, <span class="kw">nil</span>)
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        <span class="kw">return</span> err
+    }
+    <span class="kw">defer</span> tx.Rollback() <span class="cm">// no-op if Commit already ran</span>
+
+    _, err = tx.ExecContext(ctx,
+        <span class="str">`INSERT INTO dead_letter_jobs (id, kind, payload, attempts, last_error, failed_at)
+         VALUES ($1, $2, $3, $4, $5, now())`</span>,
+        j.ID, j.Kind, j.Payload, j.Attempts, lastErr.Error(),
+    )
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        <span class="kw">return</span> err
+    }
+    _, err = tx.ExecContext(ctx, <span class="str">`DELETE FROM jobs WHERE id = $1`</span>, j.ID)
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        <span class="kw">return</span> err
+    }
+    <span class="kw">return</span> tx.Commit()
+}
+
+<span class="cm">// runWorker processes jobs, retrying failures up to MaxAttempts before
+// routing a permanently-failing job to the dead-letter table instead of
+// leaving it to retry forever and block the jobs behind it.</span>
+<span class="kw">func</span> runWorker(ctx context.Context, db *sql.DB) {
+    <span class="kw">for</span> {
+        j, ok := dequeueJob(ctx, db)
+        <span class="kw">if</span> !ok {
+            time.Sleep(time.Second)
+            <span class="kw">continue</span>
+        }
+
+        err := processJob(ctx, j)
+        <span class="kw">if</span> err == <span class="kw">nil</span> {
+            <span class="kw">continue</span> <span class="cm">// success; real code marks it done here</span>
+        }
+
+        j.Attempts++
+        <span class="kw">if</span> j.Attempts &gt;= j.MaxAttempts {
+            <span class="kw">if</span> dlErr := moveToDeadLetter(ctx, db, j, err); dlErr != <span class="kw">nil</span> {
+                log.Printf(<span class="str">"dead-letter move failed for job %d: %v"</span>, j.ID, dlErr)
+            }
+            <span class="kw">continue</span>
+        }
+        <span class="cm">// real code re-enqueues with backoff here -- Lesson 32's territory,</span>
+        <span class="cm">// not repeated here since the retry-spacing decision was already taught</span>
+    }
+}</code></pre>
+
+<h2>3 · Choosing "retry again" vs. "dead-letter it" reuses a rule you already have</h2>
+<p>Lesson 32 already drew the line this decision needs: its <code>retriable</code> check separated failures worth retrying (a 5xx, a network blip) from ones that aren't (a 4xx — the request itself was wrong, and retrying repeats the identical mistake). The same split applies here, one level up: a job attempt count reaching its max isn't the only reason to dead-letter something. If <code>processJob</code> can classify its own error the way Lesson 32's HTTP client could — "this is structurally wrong and will never succeed, no matter how many times I try" — a poison message can be dead-lettered on the <em>first</em> failure instead of wasting its whole retry budget finding out the slow way. Both routes end in the same place: the DLQ, not silent deletion.</p>
+
+<h2>4 · A DLQ is not a fix by itself — it's a place to notice the problem</h2>
+<p>Moving a job to a dead-letter table doesn't repair whatever was wrong with it. If nothing ever reads that table, dead-lettering a job is just a slower, more polite way of losing it — the jobs pile up, unseen, and the underlying bug (the bad payload, the missing foreign key, the handler crash) never gets fixed. A dead-letter queue only pays off paired with two things: an alert when a row lands in it (Lesson 13's monitoring territory — "is this happening now," not just "what happened"), and someone actually looking at the payload and the stored error to decide whether to fix and re-enqueue the job or discard it for good. The table is a queue for human attention, not a second automatic retry mechanism.</p>
+
+<div class="cmp-wrap">
+<table class="cmp">
+<thead><tr><th></th><th>Plain retry (Lesson 10/32)</th><th>Dead-letter queue</th></tr></thead>
+<tbody>
+<tr><th>Assumes the failure is</th><td>Transient — will likely clear up</td><td>Possibly permanent — may never clear up</td></tr>
+<tr><th>What happens after max attempts</th><td>Nothing built-in — risks retrying forever</td><td>Job is moved out of the live queue</td></tr>
+<tr><th>Is the job lost?</th><td>No, if retried; yes, if deleted on give-up</td><td>No — kept in full for inspection</td></tr>
+<tr><th>Blocks jobs behind it?</th><td>Can, in an ordered queue</td><td>No — removed from the live queue</td></tr>
+<tr><th>Needs a human eventually?</th><td>No, if it succeeds on retry</td><td>Yes — someone has to triage it</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="interview">
+<p><strong>Q: "Your job queue has one job that's been failing for an hour and blocking everything behind it. What went wrong, and how would you prevent it?"</strong> A strong answer, out loud: <em>"The queue is treating a permanent failure the same way it treats a transient one — retrying forever instead of recognizing this job will never succeed. I'd cap the retry attempts, and once a job exhausts them, move it into a separate dead-letter table in the same transaction as removing it from the live queue, rather than deleting it outright — that keeps Lesson 10's 'never silently lose a job' guarantee while stopping it from blocking work behind it. That table needs an alert wired to it, though — a DLQ that nobody watches just delays the data loss instead of preventing it."</em> The signal: naming that a DLQ preserves the job rather than discarding it, and that it only works paired with someone actually watching it.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A poison message fails for a reason no retry can fix -- a malformed payload, a bug in the handler, a reference to a row that no longer exists -- so retrying it endlessly wastes worker time and, in an ordered queue, can block every job queued behind it.">
+    <p class="stem">What is a "poison message" in a job queue?</p>
+    <button class="opt" data-ok>a job that fails every single time it's attempted</button>
+    <button class="opt">a job whose payload always contains a security vulnerability</button>
+    <button class="opt">a job that runs successfully but far too slowly</button>
+    <button class="opt">a job that a worker refuses to ever dequeue</button>
+  </div>
+  <div class="q" data-why="Lesson 10's entire queue design exists to guarantee a job is never silently lost. Deleting a job after it exhausts its retries breaks that exact guarantee -- the dead-letter queue is what lets a worker stop retrying without also losing the job.">
+    <p class="stem">Why is deleting a job after its final failed retry the wrong fix?</p>
+    <button class="opt" data-ok>it silently loses the job the queue protects</button>
+    <button class="opt">it silently retries the exact same job forever</button>
+    <button class="opt">it silently duplicates the job onto two workers</button>
+    <button class="opt">it silently resets the job's whole retry budget</button>
+  </div>
+  <div class="q" data-why="Moving a job to the dead-letter table in the same transaction as removing it from the live jobs table means both writes commit together or neither does -- the same atomicity guarantee Lesson 6 taught, applied here so a crash mid-move can't leave the job in neither table, or in both.">
+    <p class="stem">Why does moving a job to the dead-letter table use one transaction for both the insert and the delete?</p>
+    <button class="opt" data-ok>so the job can't ever vanish or duplicate mid-move here</button>
+    <button class="opt">so the dead-letter table always stays a bit smaller overall</button>
+    <button class="opt">so the original job's attempt counter resets back to zero</button>
+    <button class="opt">so the worker process restarts immediately right after moving it</button>
+  </div>
+  <div class="q" data-why="A dead-letter queue only prevents data loss if a human eventually looks at what landed in it and fixes the underlying cause -- without an alert and a triage step, jobs simply pile up there unseen, which is a slower version of losing them, not a real fix.">
+    <p class="stem">Why isn't moving a job to a dead-letter queue a complete fix by itself?</p>
+    <button class="opt" data-ok>nothing improves unless a human eventually reviews the row</button>
+    <button class="opt">nothing prevents that same job from re-entering the queue</button>
+    <button class="opt">nothing stops a dead-letter table from accepting duplicate rows</button>
+    <button class="opt">nothing keeps a dead-letter table's payload column fully readable</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the Twelve-Factor App's <a href="https://12factor.net/concurrency">Concurrency</a> factor — the same standing reference Lesson 10 already cited for the worker-process model — extended here into what a worker does when a unit of work can't be completed at all, not just how work processes are structured. AWS's own SQS documentation on <a href="https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-dead-letter-queues.html">dead-letter queues</a> is worth reading directly as a primary source: it's a concrete, widely-used implementation of exactly this pattern, with the same "separate queue, bounded retries, no automatic reprocessing" shape taught above.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> open — the bulkhead pattern (partitioning limited resources like connection pools per-dependency, so one failing dependency can't starve unrelated requests) is a confirmed-untaught candidate from this round's search, a natural companion to Lesson 18's pool sizing and Lesson 28's circuit breaker, if no user-chosen track surfaces first. Distributed locks and blue-green/canary deploys remain the standing out-of-scope-per-MISSION.md candidates.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

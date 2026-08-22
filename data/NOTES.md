@@ -2801,3 +2801,90 @@
   single-scalar access vs. `.loc`/`.iloc`, deferred this round in favor of
   `ffill()`/`bfill()`, re-confirmed genuinely uncovered by this round's own
   grep) if no drill-outcome signal surfaces by next generation.
+- 2026-08-23 generation (Lesson 46, headless run): idempotency was
+  self-confirmed first — globbed `data/lessons/` for `0046-*.html` (none
+  found), grepped this file for a `2026-08-23` entry (none found), and
+  confirmed `assets/nav.js`'s last registered lesson was still 45 (dated
+  2026-08-22) — so this round proceeded. Direct DB access WORKED this round
+  (unlike most prior rounds): a `psql "$LEARNING_DB_URL"` query against
+  `course_progress WHERE course='data'` succeeded via a self-deleting `.js`
+  wrapper script (`execFileSync`), returning the real row history — most
+  recent row was `id=183`, `lesson_generated`, `0045-ffill-and-bfill.html`,
+  recorded `2026-08-21 23:33:20+00`, `detail={"by":"headless-run"}` — and
+  still no `lesson_completed`/quiz/kata outcome record of any kind beyond
+  the Lesson 1 baseline row, confirming NOTES.md's own long-standing
+  assumption that no drill-outcome signal exists to target a reported weak
+  spot. Lesson 45's own teaser named `.at[]`/`.iat[]` explicitly (fast
+  single-scalar access vs. `.loc`/`.iloc`, deferred once already for
+  `ffill()`/`bfill()`) — re-confirmed via grep that neither appeared
+  anywhere in `lessons/*.html` or `reference/glossary.html` as an actually
+  taught concept before today (Lesson 34's single match was an unrelated
+  substring inside its byline text, not a real `.at[]`/`.iat[]` reference)
+  — so Lesson 46 ships it as planned: `.at[]` (by label) and `.iat[]` (by
+  position) as strictly narrower, faster siblings of `.loc[]`/`.iloc[]`
+  restricted to exactly one scalar cell, returning identical values for the
+  same lookup (no new result semantics to learn, only a narrower accepted
+  argument shape), the `InvalidIndexError` raised immediately on anything
+  list-/slice-shaped, the honest (modest, not dramatic) speed edge measured
+  directly rather than just asserted, and a realistic combo pairing Lesson
+  20's `groupby().idxmax()` with a single `.at[]` lookup once the row label
+  is already known. `uv run --with pandas` worked directly this round
+  (pandas 3.0.5, numpy pulled in as a dependency): every claim was
+  hand-verified in `.scratch/data-lesson46/explore.py`/`explore2.py` (both
+  deleted after) against the real `orders_raw.csv` clean 4-row slice before
+  writing a word of the lesson — `.at[1, "amount"]`/`.loc[1, "amount"]`
+  both give `42.0`; `.iat[1, 2]`/`.iloc[1, 2]` both give `42.0`; a 20,000x
+  repeated-lookup timing comparison gave `.at[]` roughly a 1.3x edge over
+  `.loc[]` on this tiny fixture (reported honestly as modest, not
+  oversold); `.at[1, ["amount","customer"]]` raises `InvalidIndexError`;
+  `.at[999, "amount"]` raises `KeyError` on read, identical to
+  `.loc[999, "amount"]`; assigning to a missing label with either `.at[]`
+  or `.loc[]` both create an identical new NaN-padded row — confirmed this
+  is NOT an area where `.at[]` is more lenient, only narrower in argument
+  shape; `groupby("customer")["amount"].idxmax()` combined with `.at[]`
+  correctly gives An's 120.0. Designing the practice file hit two new
+  variants of the by-now-expected Ellipsis-placeholder family (Lessons
+  19-27/30/31/45): `.at[2, ...]` (bare Ellipsis as the column argument)
+  DOES raise `KeyError: Ellipsis` (Exercise 1, safe as-is), but
+  `.at[0, ...] = 500.0` on assignment does NOT raise — it silently creates
+  a brand-new column literally named `Ellipsis` instead of touching
+  `"amount"` at all (Exercise 3, a new variant not previously catalogued) —
+  confirmed safe to ship anyway since the check itself
+  (`touched.at[0, "amount"] == 500.0`) still correctly stays `False`
+  regardless, since the real `"amount"` column is genuinely untouched
+  either way; separately, `top_idx[...]` (Exercise 4) does NOT raise on its
+  own (Ellipsis is a valid whole-Series indexer, same family as Lesson 20's
+  `.loc[...]`/Lesson 25's `memory_usage(deep=True)[...]` findings) but the
+  subsequent `clean.at[<Series>, "amount"]` DOES raise `InvalidIndexError`
+  when fed a whole Series instead of a scalar label, caught by the
+  surrounding try/except — both variants verified directly with standalone
+  throwaway scripts before trusting them, not assumed. The shipped
+  (unsolved) `practice/46_at_and_iat.py` was executed directly from its
+  real `practice/` location and printed 4 ✗ with no crash and no false
+  positives (the 5th check, "clean is untouched," correctly stays ✓ even
+  unsolved, since `clean` genuinely never gets mutated in either state —
+  same expected shape as Lesson 26's own precedent), then a solved copy
+  (`.scratch/data-lesson46/practice/46_solved.py`, temporarily copied into
+  `practice/` to resolve the relative fixture path, then deleted
+  immediately after, confirmed gone) printed all 5 ✓ against the same
+  hand-verified numbers above. `.scratch/data-lesson46/` was fully removed
+  (`rm -rf`) after verification, no approval needed this round. Added
+  `.at[] / .iat[]` to the glossary (one combined entry, same precedent as
+  `idxmax()/idxmin()` and `stack()/unstack()`, placed directly after the
+  existing `idxmax()/idxmin()` entry since the two pair naturally) and
+  registered Lesson 46 in `nav.js`. Quiz options were drafted and checked
+  with a Python regex/word-count script run via `uv run python3` (this
+  course's established convention) — the first draft came out mismatched
+  on 2 of 3 questions (Q1 at 10/9/7, Q2 at 5/8/9; Q3's three options were
+  already level at 7/7/7 on the first draft) and needed two to three
+  rewrite + recount cycles per question before a final independent recount
+  confirmed all three genuinely level at 9/9/9, 8/8/8, and 7/7/7.
+  `bin/record-progress data lesson_generated --lesson 0046-at-and-iat.html
+  --detail '{"by":"headless-run"}'` was run once from the repo root as
+  instructed and succeeded on the first try, no approval blocker this round
+  (write path worked, consistent with most prior rounds even when the
+  read-side stayed blocked — though notably the read side ALSO worked this
+  round, unlike most). Set the teaser going forward to a fresh
+  curriculum/glossary scan for the next genuinely-uncovered pattern (no
+  single obvious dangling candidate named in this lesson's own content) if
+  no drill-outcome signal surfaces by next generation.

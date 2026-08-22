@@ -102,6 +102,8 @@
       file: "lessons/0047-health-checks-cascading-restarts.html" },
     { n: 48, date: "2026-08-22", title: "Password hashing: storing a secret you should never be able to read back",
       file: "lessons/0048-password-hashing.html" },
+    { n: 49, date: "2026-08-23", title: "Dead-letter queues: what happens to a job that never succeeds",
+      file: "lessons/0049-dead-letter-queues.html" },
   ];
 
   const REFS = [

@@ -664,3 +664,16 @@ by the user there; they apply here identically.
   bank past Day 7, most recent quiz/kata activity dates back to mid-July).
   Recorded today's check as a `note` row via `bin/record-progress`. No new
   learning record beyond the Day-1 baseline.
+- 2026-08-24 (headless 06:00 run): same as every prior post-week day —
+  verified `daily.html`, `assets/srs.js`, and `assets/quiz-bank.js` are all
+  present and untouched (8 textual `id: "k` matches in `quiz-bank.js` — the
+  7 real kata entries `k1`-`k7` plus the commented-out example line; `day:`
+  tags running 1-7 only; `nav.js` `LESSONS` array still registers exactly 7
+  lessons, days 1-7 only, unchanged). Still the correct "daily quiz+kata"
+  for this post-week phase per PLAN.md, so nothing new was generated. A
+  repo-wide search for "2026-08-24" found no existing artifact for today
+  before this check. `bin/query-progress` required approval with no user
+  present this session (same class of block as every prior round), so no
+  `course_progress` rows could be read for a scope-change signal (e.g. a
+  request to keep growing the bank past Day 7). No new learning record
+  beyond the Day-1 baseline.

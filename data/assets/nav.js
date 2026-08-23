@@ -98,6 +98,8 @@
       file: "lessons/0045-ffill-and-bfill.html" },
     { n: 46, date: "2026-08-23", title: ".at[] and .iat[]: fast single-scalar access",
       file: "lessons/0046-at-and-iat.html" },
+    { n: 47, date: "2026-08-24", title: "reindex(): forcing a chosen label set",
+      file: "lessons/0047-reindex.html" },
   ];
 
   const REFS = [

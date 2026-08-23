@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 27 · itertools: chaining, grouping & combining without hand-rolled loops</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 27 · ~20 min · 24 Aug 2026</p>
+<h1>itertools: chaining, grouping &amp; combining without hand-rolled loops</h1>
+<p class="byline">Day 26 closed the FastAPI + pydantic capstone, and both of <code>PLAN.md</code>'s Phase 2 spines (2a and 2b) are now fully covered. Rather than guess at an unnamed Phase 3 direction, today fills a real, still-open gap named twice already: <code>RESOURCES.md</code> lists <code>itertools</code> alongside <code>collections</code> as one of "the two stdlib modules that replace most hand-written data-munging loops," and Day 5's own closing line pointed here next — but no lesson ever actually taught it. <code>collections</code> (<code>defaultdict</code>, <code>Counter</code>) got its lesson on Day 3; today <code>itertools</code> gets its turn.</p>
+
+<div class="callout"><strong>Bridge from SQL:</strong> <code>itertools.chain</code> is <code>UNION ALL</code> for Python iterables — stack several sources into one stream without copying them into a new table first. <code>itertools.groupby</code> is a poor man's <code>GROUP BY</code> that only works correctly on already-sorted input, unlike SQL's own <code>GROUP BY</code>, which sorts (or hashes) for you invisibly.</div>
+
+<h2>1 · The module: importable functions that return iterators</h2>
+<p>Day 5 taught what an <dfn data-en="an object you can loop over with for; anything supporting iter(), including list, dict, set, str, range, and a generator" data-vn="giữ nguyên 'iterable' — cái gì for được, gọi iter() được">iterable</dfn> and a <dfn data-en="the object returned by calling a generator function; itself an iterator, produces values lazily one step at a time" data-vn="giữ nguyên 'generator' — object trả về khi gọi generator function, tự nó là iterator">generator</dfn> are, and how to write one by hand with <code>yield</code>. <dfn data-en="a standard-library module of ready-made generator functions for combining and slicing iterables, so the same handful of loop shapes never need hand-writing again" data-vn="giữ nguyên 'itertools' — module chuẩn thư viện gồm các hàm sinh generator có sẵn để nối/gộp/cắt iterable">itertools</dfn> is a standard-library module of ready-made generator functions for the handful of iterable-combining jobs that come up constantly — so instead of writing a new <code>while</code> loop with its own <code>yield</code> every time, one call does the job, lazily, exactly like a hand-written generator would:</p>
+<pre><code><span class="kw">from</span> itertools <span class="kw">import</span> chain, groupby, islice
+
+nums = [<span class="kw">1</span>, <span class="kw">2</span>, <span class="kw">3</span>]
+letters = [<span class="str">"a"</span>, <span class="str">"b"</span>]
+<span class="kw">for</span> item <span class="kw">in</span> chain(nums, letters):
+    <span class="kw">print</span>(item)          <span class="cm"># 1 2 3 a b — nums then letters, no new list built</span></code></pre>
+<p>Every function in this module returns something you loop over once — nothing is a list, and nothing is computed until something actually pulls a value from it. That's Day 5's <dfn data-en="computing a value only when it's actually requested, rather than up front" data-vn="giữ nguyên 'lazy' — chỉ tính khi thật sự cần, không tính trước">lazy evaluation</dfn> again, applied to combining iterables instead of transforming a single one.</p>
+
+<h2>2 · <code>chain</code>: several iterables, one pass, in order</h2>
+<p><dfn data-en="itertools.chain(*iterables) visits each given iterable's items in turn, lazily, as if they were one single iterable, with no new combined list ever built" data-vn="giữ nguyên 'chain' — nối nhiều iterable thành 1 luồng duy nhất, lười, không tạo list gộp mới">itertools.chain(*iterables)</dfn> stitches any number of iterables end to end into one stream, without concatenating them into a new list first:</p>
+<pre><code>jan_sales = [<span class="str">"Hanoi,120"</span>, <span class="str">"HCMC,80"</span>]
+feb_sales = [<span class="str">"Hanoi,45"</span>, <span class="str">"Danang,200"</span>]
+
+<span class="kw">for</span> line <span class="kw">in</span> chain(jan_sales, feb_sales):
+    <span class="kw">print</span>(line)          <span class="cm"># all four lines, jan_sales first, no jan_sales + feb_sales copy made</span></code></pre>
+<p><code>jan_sales + feb_sales</code> would work too here — but that builds a brand-new list holding every element twice over (once in each source, once in the copy). <code>chain</code> never builds that copy; it just visits one source's iterator, then the next's, entirely lazily. The gap widens with Day 6's file objects: <code>chain(open("jan.csv"), open("feb.csv"))</code> streams two files as if they were one, at constant memory, exactly like Day 5's single-generator pipelines already did for one file.</p>
+
+<h2>3 · <code>groupby</code>: consecutive runs of a shared key — sorted input required</h2>
+<p>Day 3's <code>defaultdict(list)</code> groups rows by key regardless of input order, because it scans the whole dict for each key on every lookup, wherever that key last appeared. <dfn data-en="itertools.groupby(iterable, key=...) groups only consecutive items sharing a key computed by key=, requiring the input already be sorted by that same key, unlike a dict-based grouping" data-vn="giữ nguyên 'groupby' — gộp các item LIÊN TIẾP có cùng key, bắt buộc input đã sort sẵn theo key đó">itertools.groupby(iterable, key=...)</dfn> is different and narrower: it only groups <em>consecutive</em> items sharing a key, which makes it useless on unsorted data — but very cheap on data that's already sorted (e.g. rows read in order from a database <code>ORDER BY</code>):</p>
+<pre><code>rows = [
+    {<span class="str">"city"</span>: <span class="str">"Hanoi"</span>, <span class="str">"amount"</span>: <span class="kw">120</span>},
+    {<span class="str">"city"</span>: <span class="str">"Hanoi"</span>, <span class="str">"amount"</span>: <span class="kw">45</span>},
+    {<span class="str">"city"</span>: <span class="str">"HCMC"</span>, <span class="str">"amount"</span>: <span class="kw">80</span>},
+]
+<span class="kw">for</span> city, group <span class="kw">in</span> groupby(rows, key=<span class="kw">lambda</span> r: r[<span class="str">"city"</span>]):
+    <span class="kw">print</span>(city, [r[<span class="str">"amount"</span>] <span class="kw">for</span> r <span class="kw">in</span> group])
+    <span class="cm"># Hanoi [120, 45]</span>
+    <span class="cm"># HCMC [80]</span></code></pre>
+<p>Two gotchas that trip up first use, both confirmed by running the exact code above: first, <code>key=</code> here is Day 4's own <code>key=</code> argument — a function called once per item to compute the value grouped by, same idea as <code>sorted(key=...)</code>, just feeding <code>groupby</code> instead. Second — and this is the one that actually bites — swap the row order so a second <code>"Hanoi"</code> row comes after an <code>"HCMC"</code> row, and <code>groupby</code> silently produces <em>two separate</em> <code>"Hanoi"</code> groups instead of one, because it only merges runs that are already next to each other. <code>groupby</code> never sorts for you; call <code>sorted(rows, key=lambda r: r["city"])</code> first if the input isn't already grouped, or reach back for Day 3's <code>defaultdict</code> instead, which has no such requirement.</p>
+
+<h2>4 · <code>islice</code> and <code>product</code>: slicing an iterator, and every combination</h2>
+<p>Day 2's slicing (<code>seq[2:5]</code>) only works on a real sequence — a <code>list</code>, not a generator, since slicing needs to jump straight to an index and a generator has no indexes, only a "give me the next one" protocol. <dfn data-en="itertools.islice(iterable, stop) pulls a limited number of items lazily out of any iterable, including a generator, that ordinary slicing syntax cannot be applied to" data-vn="giữ nguyên 'islice' — cắt lấy 1 số lượng item từ iterable/generator, lười, dùng khi không slice [:] trực tiếp được">itertools.islice(iterable, stop)</dfn> (or <code>(start, stop, step)</code>) is the generator-safe equivalent — it still only pulls as many items as needed, never materializing the rest:</p>
+<pre><code><span class="kw">def</span> counter():
+    n = <span class="kw">0</span>
+    <span class="kw">while</span> <span class="kw">True</span>:
+        <span class="kw">yield</span> n
+        n += <span class="kw">1</span>
+
+first_five = <span class="kw">list</span>(islice(counter(), <span class="kw">5</span>))   <span class="cm"># [0, 1, 2, 3, 4] — counter() never actually ends</span></code></pre>
+<p><code>counter()</code> is Day 5's kind of generator: infinite, and never finishes on its own. Slicing it with <code>[:5]</code> isn't legal — there's no way to index a generator — but <code>islice(counter(), 5)</code> pulls exactly five values and stops, exactly the SQL <code>LIMIT 5</code> idea applied to a Python iterator instead of a result set.</p>
+<p><dfn data-en="itertools.product(*iterables) yields every combination pairing one item from each given iterable, the same shape as a nested for-loop or a SQL CROSS JOIN" data-vn="giữ nguyên 'product' — sinh mọi tổ hợp lấy 1 phần tử từ mỗi iterable, giống CROSS JOIN">itertools.product(*iterables)</dfn> is the other direction — every combination of one item from each iterable, the same shape as a SQL <code>CROSS JOIN</code>:</p>
+<pre><code><span class="kw">from</span> itertools <span class="kw">import</span> product
+sizes = [<span class="str">"S"</span>, <span class="str">"M"</span>, <span class="str">"L"</span>]
+colors = [<span class="str">"red"</span>, <span class="str">"blue"</span>]
+<span class="kw">list</span>(product(sizes, colors))
+<span class="cm"># [('S','red'), ('S','blue'), ('M','red'), ('M','blue'), ('L','red'), ('L','blue')]</span></code></pre>
+<p>Same result as a nested <code>for size in sizes: for color in colors: ...</code> loop building tuples — <code>product</code> just names that exact pattern so it doesn't need reinventing at two levels of nesting, or three, or four.</p>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> a pandas pipeline reaches for <code>pd.concat()</code> where this lesson uses <code>chain</code>, and <code>df.groupby()</code> where this lesson uses <code>itertools.groupby</code> — but pandas's version sorts/hashes for you and works on unsorted input, unlike the stdlib version taught here. Not demonstrated here; that's <code>data/</code>'s job, and this is the only sentence in this lesson that names it.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/27_itertools.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/27_itertools.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: chain two lists of raw sale lines into one pass with <code>chain</code>, group pre-sorted rows by city with <code>groupby</code> (and see what breaks when the input isn't sorted), pull the first four values off an infinite generator with <code>islice</code>, and build every size/color combination with <code>product</code>.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="chain(a, b) visits each source iterable's own items in turn, lazily, without ever building a new combined list the way a + b would - the exact point of section 2's jan_sales/feb_sales example.">
+    <p class="stem">What does <code>itertools.chain(jan_sales, feb_sales)</code> actually do?</p>
+    <button class="opt" data-ok>streams both iterables in order, lazily, with no combined list built</button>
+    <button class="opt">builds one brand-new list holding both iterables merged fully together now</button>
+    <button class="opt">sorts both iterables together into one single ascending merged list now</button>
+  </div>
+  <div class="q" data-why="groupby only merges items that are already adjacent and share the same key - it never sorts first, so a repeated key separated by a different key in between produces two separate groups instead of one, exactly section 3's flagged gotcha.">
+    <p class="stem">Why can <code>itertools.groupby</code> silently produce two separate groups for the same key?</p>
+    <button class="opt" data-ok>it only merges consecutive items and never sorts the input first</button>
+    <button class="opt">groupby always sorts the input first but still merges mismatched keys</button>
+    <button class="opt">groupby always caps every group at a hard limit of two</button>
+  </div>
+  <div class="q" data-why="A generator has no index to jump to, so ordinary slicing syntax seq[:5] is not legal on it - islice(iterable, 5) is the generator-safe equivalent, pulling exactly five values and stopping, the exact distinction section 4 draws from Day 2's sequence slicing.">
+    <p class="stem">Why does section 4 use <code>islice(counter(), 5)</code> instead of plain slicing like <code>counter()[:5]</code>?</p>
+    <button class="opt" data-ok>a generator has no index to slice by, unlike a real sequence</button>
+    <button class="opt">plain slicing only works on strings, never on any list at all</button>
+    <button class="opt">islice is simply a faster version of the exact same slice syntax</button>
+  </div>
+  <div class="q" data-why="product(sizes, colors) is the same shape as a nested for-loop building one tuple per combination of one item from each iterable - the exact SQL CROSS JOIN parallel section 4 draws.">
+    <p class="stem">What does <code>itertools.product(sizes, colors)</code> compute?</p>
+    <button class="opt" data-ok>every combination pairing one item from each of the two lists</button>
+    <button class="opt">only the pairs where both list positions happen to match up</button>
+    <button class="opt">just the total count of all combinations, never the combinations themselves</button>
+  </div>
+  <div class="q" data-why="RESOURCES.md names itertools alongside collections as the two stdlib modules that replace most hand-written data-munging loops, and collections already got its own lesson on Day 3 - today closes that named, still-open gap rather than inventing an unnamed Phase 3 topic.">
+    <p class="stem">Why does today's lesson cover <code>itertools</code> specifically, at this point in the course?</p>
+    <button class="opt" data-ok>RESOURCES.md named it as a still-open gap after Day 3's collections</button>
+    <button class="opt">PLAN.md's Phase 2b spine names it as its own separate item</button>
+    <button class="opt">FastAPI's own request validation depends fully on itertools running internally always</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the <a href="https://docs.python.org/3/library/itertools.html">official <code>itertools</code> docs</a>, cited in <code>RESOURCES.md</code> under "Knowledge — the language" — its "Itertools Recipes" section at the bottom is lesson-grade on its own once <code>chain</code>/<code>groupby</code>/<code>islice</code>/<code>product</code> feel comfortable.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day27">glossary</a> under Day 27.<br>
+With both Phase 2a and Phase 2b's named spines complete and this stdlib gap now closed, the next lesson revisits <code>PLAN.md</code> for Phase 3's direction, or picks up <code>RESOURCES.md</code>'s remaining open gap (a FastAPI project-layout reference beyond the official docs, and a chosen source for Python-specific interview prep).<br><br>
+💬 Anything unclear — why <code>groupby</code> needs sorted input, or when <code>chain</code> beats a plain <code>+</code>? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

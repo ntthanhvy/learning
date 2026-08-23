@@ -104,6 +104,8 @@
       file: "lessons/0048-password-hashing.html" },
     { n: 49, date: "2026-08-23", title: "Dead-letter queues: what happens to a job that never succeeds",
       file: "lessons/0049-dead-letter-queues.html" },
+    { n: 50, date: "2026-08-24", title: "The bulkhead pattern: giving each dependency its own lifeboat",
+      file: "lessons/0050-bulkhead-pattern.html" },
   ];
 
   const REFS = [

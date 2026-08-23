@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 47 · reindex(): forcing a chosen label set</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 47 · ~20 min · 24 Aug 2026</p>
+<h1>reindex(): forcing a chosen label set</h1>
+<p class="byline">Lesson 32 flagged, in passing, that a real weekday revenue report "would reindex against an explicit Monday-through-Sunday list" before presenting it — and then moved on without ever showing how. Lesson 46's own teaser named no single dangling candidate, so today's fresh scan picked up that loose thread: <code>reindex()</code>, the tool for forcing a Series or DataFrame onto EXACTLY the labels you name, filling in whatever's missing and dropping whatever isn't asked for.</p>
+
+<h2>Recap, in one line</h2>
+<p><code>.loc[]</code> (Lesson 1 onward) looks up labels you give it and raises <code>KeyError</code> the moment one isn't there. <code>reindex()</code> is built for exactly that missing-label case: instead of raising, it returns your object reshaped onto the label list you asked for, real data lined up where it already matches and everywhere else quietly <code>NaN</code> (or a value you choose).</p>
+
+<h2>1 · The problem reindex() solves: a result missing rows that should exist</h2>
+<p>Same weekday revenue from Lesson 32 — only 4 of the 7 weekdays actually had an order, so the plain <code>groupby()</code> result silently has only 4 rows, sorted alphabetically:</p>
+<pre><code>by_day = clean.groupby(clean[<span class="str">"order_date"</span>].dt.day_name())[<span class="str">"amount"</span>].sum()
+<span class="cm">-- order_date
+-- Friday      180.0
+-- Monday      120.0
+-- Saturday     42.0
+-- Tuesday      35.5
+-- Name: amount, dtype: float64   -- only days that HAD an order show up at all</span></code></pre>
+<p>Wednesday, Thursday, and Sunday aren't wrong here — they're simply not present. A <code>groupby()</code> can only report on data that exists; a day with zero orders leaves no row for it to compute at all. That's a different failure shape from a wrong value: there is no row to be wrong, the row is just missing.</p>
+
+<h2>2 · reindex(): specify the full label set you actually want</h2>
+<p><dfn data-en="a Series/DataFrame method returning the object reshaped onto EXACTLY the given label list -- labels that already exist keep their real value, labels that don't exist are added as NaN (or a chosen fill_value), and existing labels NOT in the list are dropped; unlike .loc[], it never raises for a missing label" data-vn="giữ nguyên 'reindex()' — ép Series/DataFrame theo ĐÚNG danh sách nhãn đưa vào: nhãn đã có thì giữ giá trị thật, nhãn chưa có thì thêm vào là NaN (hoặc giá trị fill_value tự chọn), nhãn cũ không nằm trong danh sách thì bị loại; khác .loc[], reindex() không bao giờ báo lỗi vì thiếu nhãn">reindex()</dfn> takes the label list you actually want and forces the result onto it:</p>
+<pre><code>weekday_order = [<span class="str">"Monday"</span>, <span class="str">"Tuesday"</span>, <span class="str">"Wednesday"</span>, <span class="str">"Thursday"</span>,
+                 <span class="str">"Friday"</span>, <span class="str">"Saturday"</span>, <span class="str">"Sunday"</span>]
+by_day.reindex(weekday_order)
+<span class="cm">-- order_date
+-- Monday       120.0
+-- Tuesday       35.5
+-- Wednesday      NaN   -- no orders that day -- reindex() ADDS this row
+-- Thursday       NaN
+-- Friday       180.0
+-- Saturday      42.0
+-- Sunday         NaN
+-- Name: amount, dtype: float64</span></code></pre>
+<p>Lesson 32's own dangling fix, finally done: the result is now in true calendar order, with the missing weekdays represented rather than silently absent.</p>
+
+<h2>3 · fill_value: choosing what "missing" becomes</h2>
+<p>A missing day of revenue is more honestly <code>0.0</code> than <code>NaN</code> — nobody bought anything, the true number is known, it's zero. <code>fill_value=</code> makes that explicit instead of leaving <code>NaN</code> to mean two different things ("unknown" and "genuinely zero") at once:</p>
+<pre><code>by_day.reindex(weekday_order, fill_value=<span class="num">0</span>)
+<span class="cm">-- Monday       120.0
+-- Tuesday       35.5
+-- Wednesday      0.0   -- explicit real zero now, not NaN
+-- Thursday       0.0
+-- Friday       180.0
+-- Saturday      42.0
+-- Sunday         0.0</span></code></pre>
+<p>Whether to reach for <code>fill_value=0</code> or leave it as <code>NaN</code> is a judgment call about what "missing" means in context (Section 4 shows a case where <code>NaN</code> is the honest answer instead).</p>
+
+<div class="callout"><strong>Gotcha — reindex() requires the axis' labels to be UNIQUE, or it raises:</strong> The weekday example works because <code>groupby()</code> collapsed each weekday down to one row — "Monday" appears exactly once in the result's index. Try the same move on <code>clean</code> set_index'd directly on <code>"customer"</code> (two rows are literally labeled "An", two are labeled "Binh") and it refuses outright rather than guessing which row you meant:
+<pre><code>clean.set_index(<span class="str">"customer"</span>).reindex([<span class="str">"An"</span>, <span class="str">"Binh"</span>, <span class="str">"Danh"</span>])
+<span class="cm">-- ValueError: cannot reindex on an axis with duplicate labels</span></code></pre>
+Group-and-aggregate FIRST (so each label appears exactly once), then <code>reindex()</code> the result — the same order this lesson's own weekday example already used.</div>
+
+<h2>4 · A genuinely-missing entity: NaN is the honest answer, not 0</h2>
+<p>Reindexing a per-customer total onto every known customer name (including one who placed zero orders in this fixture, <code>"Danh"</code>) is a different situation from the weekday case — here, leaving it <code>NaN</code> is the correct call, not a compromise:</p>
+<pre><code>totals = clean.groupby(<span class="str">"customer"</span>)[<span class="str">"amount"</span>].sum()
+totals.reindex([<span class="str">"An"</span>, <span class="str">"Binh"</span>, <span class="str">"Danh"</span>])
+<span class="cm">-- An      162.0
+-- Binh    215.5
+-- Danh      NaN   -- unknown whether Danh bought nothing or just hasn't ordered yet</span></code></pre>
+<p>Filling Danh in as <code>0.0</code> would be actively misleading here: it asserts "we know Danh spent nothing," when the truth is "we have no data on Danh in this table at all." The weekday case and the customer case look identical mechanically — both are <code>reindex()</code> onto a superset of labels — but the right <code>fill_value</code> choice depends entirely on what a missing label actually means for that specific column, a judgment call worth naming out loud in an interview rather than defaulting to one habit.</p>
+
+<h2>5 · reindex() on columns: adding one that doesn't exist</h2>
+<p><code>reindex()</code> isn't limited to row labels — <code>columns=</code> does the identical job across the other axis, and a genuinely absent column doesn't raise either, joining this course's "no crash, quietly wrong" family (Lessons 19, 30, 43):</p>
+<pre><code>clean.reindex(columns=[<span class="str">"order_id"</span>, <span class="str">"customer"</span>, <span class="str">"amount"</span>, <span class="str">"region"</span>])
+<span class="cm">--   order_id customer  amount  region
+-- 0        1       An   120.0     NaN   -- "region" isn't a real column -- added as all-NaN
+-- 1        6       An    42.0     NaN
+-- 2        2     Binh    35.5     NaN
+-- 3        5     Binh   180.0     NaN</span></code></pre>
+<p>A typo'd column name here doesn't raise <code>KeyError</code> the way <code>clean[["region"]]</code> would — it silently manufactures a brand-new all-<code>NaN</code> column instead. Worth an <code>.isna().all()</code> gut-check on any column that arrived via <code>reindex(columns=...)</code> before trusting it.</p>
+
+<div class="interview">
+<p><strong>Q: "How would you fill in the gaps in a groupby result — say, days with zero activity that don't show up at all?"</strong> A strong answer, out loud: <em>"A plain groupby only produces rows for keys that actually exist in the data — a day with no orders leaves no row, not a zero row. reindex() fixes that: I'd reindex the result onto the full label set I actually want — every calendar day, every known customer, whatever the complete set should be — and pandas fills in real values where they exist and NaN everywhere else. Then I'd think about fill_value: is a missing label a genuine zero, like a day with no sales, or a genuine unknown, like a customer I have no data on at all? Those need different fill values, and defaulting to 0 everywhere can quietly assert something false. I'd also flag that reindex() needs unique labels on that axis — it raises ValueError on a duplicate-label index rather than guessing which row to use, so I'd aggregate down to one row per key first if the raw table doesn't already have that."</em> The signal: naming the missing-vs-wrong distinction, the fill_value judgment call, and the duplicate-label gotcha unprompted.</p>
+</div>
+
+<h2>6 · The SQL bridge</h2>
+<p><code>reindex()</code>'s closest SQL relative is a <code>LEFT JOIN</code> against a fully-populated calendar/dimension table — <code>SELECT cal.weekday, COALESCE(SUM(o.amount), 0) FROM calendar_weekdays cal LEFT JOIN orders o ON cal.weekday = day_name(o.order_date) GROUP BY cal.weekday</code> guarantees every weekday appears, filling non-matches with <code>COALESCE</code>'s default — the same two-step shape as <code>reindex(fill_value=...)</code>, just spelled with a join instead of a standalone table method.</p>
+
+<h2>Try it — self-checking practice (~15-20 min)</h2>
+<p>Open <code>practice/47_reindex.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/47_reindex.py</code></pre>
+<p>Uses the real <code>orders_raw.csv</code> clean 4-row slice (Lessons 6-46's fixture). Exercise 1 reindexes weekday revenue onto the full Monday-Sunday order with <code>fill_value=0</code> (Section 3); Exercise 2 reindexes per-customer totals onto every known customer with no fill value, leaving a genuinely unknown customer as <code>NaN</code> (Section 4); Exercise 3 confirms <code>reindex()</code> raises on a duplicate-label axis (Section 3's gotcha); Exercise 4 reindexes in a column that doesn't exist (Section 5); Exercise 5 contrasts <code>.loc[]</code>'s <code>KeyError</code> against <code>reindex()</code>'s silent fill on the identical missing labels.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="reindex() is built specifically to handle labels that are not present in the current data -- it fills each missing label with NaN (or a chosen fill_value) rather than raising. .loc[] does the opposite: given a label list containing even one label that is not present in the index, it raises KeyError immediately with no partial result at all.">
+    <p class="stem">A label list contains one label not currently present in a Series' index. What is the key difference between <code>.loc[label_list]</code> and <code>.reindex(label_list)</code> here?</p>
+    <button class="opt" data-ok>.loc[] raises KeyError; reindex() fills it with NaN instead</button>
+    <button class="opt">.loc[] fills with NaN; reindex() raises a KeyError instead</button>
+    <button class="opt">both raise the identical KeyError in this exact case</button>
+  </div>
+  <div class="q" data-why="reindex() assumes each label on the target axis appears exactly once, so it can unambiguously line up old values with new positions. When a label appears more than once (e.g. a raw orders table set_index'd directly on a repeating customer name), reindex() cannot decide which duplicate row the new position should pull from, so it raises ValueError rather than guessing -- the fix is to aggregate down to one row per label first.">
+    <p class="stem">Calling <code>reindex()</code> on an axis where a label appears more than once (a genuine duplicate, like two rows both labeled "An") does what?</p>
+    <button class="opt" data-ok>raises ValueError -- that axis needs unique labels only</button>
+    <button class="opt">silently keeps only the very first duplicate row found</button>
+    <button class="opt">silently keeps only the very last duplicate row found</button>
+  </div>
+  <div class="q" data-why="Choosing fill_value is a judgment call about what a missing label actually means, not a fixed rule. A day with zero sales is a genuine, known zero -- fill_value=0 is the honest value. A customer with no row at all in the table has genuinely unknown status -- leaving it as the reindex() default NaN correctly signals 'no data,' where a fill_value=0 would falsely assert 'known to have spent nothing.'">
+    <p class="stem">Reindexing per-customer revenue onto every known customer name, one of whom placed no orders at all in the table. Why might leaving that customer as NaN be MORE correct than filling it with 0?</p>
+    <button class="opt" data-ok>0 falsely claims known zero spend, not unknown data</button>
+    <button class="opt">NaN always sorts before 0 in a pandas display</button>
+    <button class="opt">reindex() cannot ever accept 0 as a fill_value here</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the pandas User Guide's <a href="https://pandas.pydata.org/docs/user_guide/basics.html#reindexing-and-altering-labels">"Reindexing and altering labels"</a> section of Essential basic functionality (~5 min) — the official reference on <code>reindex()</code>, including <code>method=</code> (e.g. <code>ffill</code>) for reindexing onto a denser index, briefly touched on but not needed for today's examples.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>reindex()</code> was added today, placed right after Lesson 33's <code>set_index()</code> entry.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-47 comes back reported as shakiest, otherwise a fresh curriculum/glossary scan for the next genuinely-uncovered pattern (<code>describe()</code>, <code>.corr()</code>, and <code>convert_dtypes()</code> all came back uncovered in today's scan too, real candidates for a future round).<br><br>
+💬 Anything unclear — the duplicate-label ValueError, the fill_value judgment call, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

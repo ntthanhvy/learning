@@ -2888,3 +2888,115 @@
   curriculum/glossary scan for the next genuinely-uncovered pattern (no
   single obvious dangling candidate named in this lesson's own content) if
   no drill-outcome signal surfaces by next generation.
+- 2026-08-24 generation (Lesson 47, headless GitHub Actions run): idempotency
+  was self-confirmed first — globbed `data/lessons/` for `0047-*.html` (none
+  found), grepped this file for a `2026-08-24` entry (none found), and
+  grepped `assets/nav.js` for `n: 47`/`2026-08-24` (neither found, highest
+  registered lesson was still 46, dated 2026-08-23) — so this round
+  proceeded. `bin/query-progress data` was attempted once as instructed and
+  required interactive approval unavailable in this headless session
+  (blocked, same class of block as effectively every prior round) — not
+  retried; still no readable `course_progress` rows and no
+  `lesson_completed`/quiz/kata outcome record beyond the Lesson 1 baseline,
+  so no reported weak spot to target. Lesson 46's own teaser named no single
+  dangling candidate ("a fresh curriculum/glossary scan... no single
+  obvious dangling candidate"), so this round re-scanned fresh: grepped
+  `lessons/*.html` and `reference/glossary.html` for a batch of common
+  pandas methods (`describe(`, `.corr(`, `reindex(`, `convert_dtypes(`,
+  `cumcount`, `interpolate(`, `.xs(`, `droplevel`, `json_normalize`,
+  `sample(`). `describe()`, `.corr()`, `convert_dtypes()`, `.xs()`,
+  `droplevel()`, and `interpolate()` all came back with zero hits anywhere.
+  `reindex()` and `cumcount()` each had exactly one passing mention (Lesson
+  32's prose: "a real report would reindex against an explicit
+  Monday-through-Sunday list before presenting it," never actually shown;
+  Lesson 28's `groupby().cumcount()` used inline for visit-numbering with no
+  standalone explanation or glossary entry for either). Cross-checked
+  against this file's own history: `reindex` was first flagged as a
+  candidate back on 2026-08-14 (before Lesson 38) but `resample()` was
+  picked that round instead, and Lesson 45's 2026-08-22 round re-confirmed
+  it uncovered again without picking it — so this is the third round in a
+  row surfacing the same gap. Picked `reindex()` over `cumcount()`: it
+  directly resolves Lesson 32's own named-but-undone gotcha, it composes
+  naturally with five prior lessons at once (Lesson 1's `.loc[]` contrast,
+  Lesson 4's `groupby()`, Lesson 32's weekday grouping, Lesson 33's
+  `set_index()`, and Lesson 43's reindex-mention for the zero-match-count
+  fix), and it carries a genuinely new, previously uncatalogued gotcha
+  (duplicate-label axis raising `ValueError`) with real interview weight —
+  a stronger pick than `cumcount()`'s narrower "named shortcut for a
+  running count" pitch. Left `cumcount()` as an explicit next-in-line
+  candidate in the teaser rather than dropping it. `uv run --with pandas`
+  worked directly this round (pandas 3.0.5, confirmed via `pd.__version__`):
+  every claim was hand-verified in `.scratch/data-lesson47/explore.py`
+  (deleted after) against the real `orders_raw.csv` clean 4-row slice before
+  writing a word of the lesson — `by_day.reindex(weekday_order)` correctly
+  produces all 7 weekdays in true Mon-Sun order with NaN on the 3 no-order
+  days (Wed/Thu/Sun); `fill_value=0` turns those into real `0.0`;
+  `totals_by_cust.reindex(["An","Binh","Danh"])` on the UNIQUE
+  groupby-summed index correctly gives An `162.0`, Binh `215.5`, Danh `NaN`;
+  the genuine new finding this round — reindexing `clean.set_index(
+  "customer")` directly (two rows literally labeled "An", two labeled
+  "Binh," a real duplicate-label axis, not contrived) raises exactly
+  `ValueError: cannot reindex on an axis with duplicate labels`, confirmed
+  by running it, not assumed going in — this became Section 3's callout and
+  Exercise 3; `clean.reindex(columns=[...])` with a genuinely absent
+  "region" column silently adds it as all-NaN, no error, joining the
+  "no crash, quietly wrong" family (Lessons 19/30/43); `.loc[weekday_order]`
+  on the same partial weekday index raises `KeyError` naming the exact
+  missing labels, confirmed as the direct contrast case for Section 1/
+  Exercise 5. Also explored (not shipped, correctly out of today's scope)
+  `reindex(method="ffill")` against a denser `pd.date_range` grid, which
+  needs the source pre-sorted by index or fills incorrectly — filed as a
+  "Go deeper" mention only, not a full section, to keep today's lesson
+  focused on the two-lesson-old dangling gotcha rather than sprawling into
+  `resample()`-adjacent territory Lesson 38 already covers. Designing the
+  practice file surfaced two Ellipsis-placeholder checks specific to this
+  topic, both confirmed with standalone throwaway calls before trusting
+  them: `reindex(weekday_order, fill_value=...)` (Exercise 1) DOES raise —
+  pandas' internal `fill_value` promotion path explicitly rejects a
+  non-scalar with `ValueError: fill_value must be a scalar`, a new variant
+  not previously catalogued in this course's running Ellipsis-safety list;
+  `totals_by_cust.reindex(...)` (Exercise 2, bare Ellipsis as the whole
+  positional target-labels argument) also DOES raise, `TypeError: object of
+  type 'ellipsis' has no len()`, since pandas tries to measure the target's
+  length before ever reaching its own validation — both variants are safe
+  as shipped, neither falls into the by-now-familiar "Ellipsis is
+  truthy/valid-argument" trap from Lessons 19-21/41/44/45. The shipped
+  (unsolved) `practice/47_reindex.py` was executed directly from its real
+  `practice/` location and printed exactly the 5 expected ✗ (Exercise 1's 3
+  checks, Exercise 2's 2 checks) with no crash, while Exercise 3/4/5 —
+  whose bodies are pre-written, not placeholder-gated — correctly stayed ✓
+  even unsolved, same expected shape as Lesson 46's own precedent. A solved
+  copy (`.scratch/data-lesson47/practice/47_reindex.py` plus a temporary
+  `practice/47_solved_TEST.py`, both deleted after) then printed all 9 ✓
+  against the same hand-verified numbers above; `.scratch/data-lesson47/`
+  and the temporary solved test file were both removed after verification,
+  no approval needed this round. Added `reindex()` to the glossary (checked
+  for a collision first — the one grep hit on "reindex" was Lesson 43's own
+  `str.extractall()` entry using the word in passing prose, not an existing
+  `reindex()` row; genuinely new) placed directly after the existing
+  `set_index()` entry, since the two pair naturally (set_index building the
+  index, reindex reshaping onto a chosen version of it), and registered
+  Lesson 47 in `nav.js`. Quiz options were drafted and checked with a Python
+  regex/word-count script (isolating each `<div class="q">` block by its
+  own start offset, this course's established approach since Lesson 42)
+  run via `uv run python3` — the first draft came out mismatched on all
+  three questions (Q1 10/8/9, Q2 11/8/8, Q3 12/9/10); two rewrite + recount
+  cycles landed all three level (Q1 9/9/9, Q2 9/9/9, Q3 9/9/9), then
+  independently re-verified with a second, fully separate method (manual
+  word-by-word counting of the raw `Grep`-extracted button text, not a
+  second run of the same script), per Lesson 19/39/45's standing warning
+  that a single verification pass isn't reliable — both methods agreed on
+  9/9/9 for all three questions. `bin/query-progress data` and
+  `bin/record-progress data lesson_generated --day 47 --lesson
+  0047-reindex.html --detail '{"by":"github-actions"}'` were both attempted
+  once each exactly as instructed; both required interactive approval
+  unavailable in this headless session (the write path failing this round
+  is the less common outcome per this file's own history, but not
+  unprecedented) — neither was retried, noted here and moved on. This agent
+  does not run `git commit` — leaving working-tree changes uncommitted
+  remains this course's established convention. Set the teaser going
+  forward to `cumcount()` taught as its own topic (currently only an inline
+  mention in Lesson 28 with no standalone explanation or glossary entry),
+  or otherwise a fresh curriculum/glossary scan for the next
+  genuinely-uncovered pattern, if no drill-obtained signal surfaces by next
+  generation.

@@ -2772,3 +2772,95 @@
   rounds — the next session should keep treating a completion/quiz-outcome
   signal, or a user-named track to deepen, as higher priority than a 50th
   topic picked blind.
+- 2026-08-24 generation (Lesson 50, headless run, no topic assigned —
+  followed Lesson 49's own teaser rather than a fresh gap-finding pass):
+  idempotency check first — read `assets/nav.js` and confirmed the highest
+  registered entry was `n: 49`, dated 2026-08-23, with no `n: 50` or
+  `date: "2026-08-24"` row present, and no `lessons/0050-*.html` file existed
+  before writing anything. `bin/query-progress` was attempted once as
+  instructed and was blocked requiring approval immediately, consistent with
+  every round for the past month per this log's own history — not retried;
+  proceeded on `backend/learning-records/` (both files re-read in full,
+  nothing new to act on beyond what prior rounds already absorbed) plus this
+  log's own recent history, since no `lesson_completed` record has ever
+  surfaced for any lesson. Lesson 49's own closing teaser named two
+  candidates rather than leaving the topic open: the bulkhead pattern and
+  ETag/conditional-request headers. Verified both via `Grep` (case-insensitive,
+  whole-workspace) before choosing: "bulkhead" and "ETag"/"conditional
+  request"/"If-None-Match"/"If-Match" had zero hits anywhere in `lessons/*.html`
+  or `glossary.html` — both genuinely untaught, confirming Lesson 49's search
+  was accurate. Picked the bulkhead pattern over ETag/conditional-requests
+  because it chains more directly off Lesson 49's own subject matter
+  (queue/worker reliability) and ties concretely to two already-taught,
+  heavily-used lessons — Lesson 18's connection-pool sizing and Lesson 28's
+  circuit breaker — rather than opening a new HTTP-caching sub-thread;
+  ETag/conditional requests is named explicitly as next lesson's teaser
+  instead of dropped. Lesson 50 covers: the failure mode first (one slow
+  dependency filling a single shared pool and starving requests that never
+  even call it), the bulkhead fix (partition the shared resource into a fixed
+  slice per dependency instead of growing the shared pool, Lesson 18's own
+  sizing math applied per-dependency instead of once globally), a minimal Go
+  `Pool`/`Bulkhead` implementation (`NewBulkhead`/`Call`, map of named
+  partitions, `ErrPoolFull` returned immediately rather than blocking), an
+  explicit three-way `table.cmp` contrasting the bulkhead against Lesson 11's
+  rate limiter and Lesson 28's circuit breaker (each protects a different
+  boundary: callee vs. caller vs. a caller's other dependencies), and a
+  closing section naming the trade-off explicitly — a partition's protection
+  comes precisely from being a hard wall that cannot lend spare capacity to a
+  saturated neighbor, so sizing partitions is a real trade-off, not a free
+  safety net. The `Pool`/`Bulkhead`/`NewBulkhead`/`Call` Go snippet (minimal
+  stand-in types, since the lesson's point is the partitioning design, not a
+  specific driver) was compile-checked clean with `go build -C` and
+  `go vet -C` in a scratch module (`.scratch/backend-lesson50/`, created
+  fresh this round since no prior `.scratch/` directory existed on disk at
+  the start of this session; binary output was written to `/tmp` and left
+  there, outside the repo's writable-file allowlist, harmless; scratch
+  directory itself left with only `go.mod`/`main.go`, same end-state as
+  established precedent) — no approval blocker for either `-C`-style
+  invocation this round, consistent with every round since Lesson 13's
+  finding. Added one new glossary term, `bulkhead pattern` (confirmed via
+  Grep beforehand it existed nowhere in `lessons/*.html` or `glossary.html`)
+  and registered Lesson 50 in `nav.js`. Quiz options were drafted, then
+  word-counted by hand (whitespace-separated tokens, matching `wc -w`
+  semantics) via `Grep`-extracted option text rather than shell `wc`/loop
+  tooling (not attempted this round given the standing approval-gate finding
+  on compound/expansion-bearing commands) — all four questions needed at
+  least one rewrite pass before landing on equal counts, with Q1 needing two
+  successive rewrite passes after the first rewrite attempt still undercounted
+  one option: final counts Q1 8/8/8/8, Q2 8/8/8/8, Q3 8/8/8/8, Q4 8/8/8/8,
+  each re-verified a second, independent time via a fresh `Grep` re-extraction
+  and a fresh token-by-token recount before shipping. Also ran a tag-balance
+  check (div/table/tr/th/td/pre/p open vs. close counts via individual `Grep`
+  calls) to catch the stray-`</p>`-in-a-callout bug class several recent
+  rounds' notes have flagged — found and fixed one real instance this round
+  (the frontend-habit callout div in section 1 originally closed with
+  `</p></div>` instead of `</div>`, the same bug shape Lesson 48's round
+  found and fixed, this time introduced fresh during drafting rather than
+  inherited): all balanced after the fix — 8/8 div, 1/1 table, 5/5 tr, 5/5 th,
+  4/4 td, 1/1 pre, 19/19 p (counting `<p>` and `<p class="...">` together).
+  Primary source: Michael Nygard's *Release It!*, the book that named the
+  bulkhead pattern and that Lesson 28's circuit-breaker material already
+  traced back to via Martin Fowler's write-up — extending a citation chain
+  already established rather than introducing an unrelated one; Netflix's
+  Hystrix engineering-blog material named as a concrete real-world
+  implementation example. `bin/record-progress backend lesson_generated
+  --day 50 --lesson 0050-bulkhead-pattern.html --detail
+  '{"by":"github-actions"}'` was attempted directly from the repo root as
+  instructed and was blocked requiring approval this round — a change from
+  every round since Lesson 32's finding that the write path worked reliably;
+  not retried, per the task's own instruction not to retry a second time.
+  Direct `psql`/DB-read attempts were not made, consistent with the standing
+  finding that they are unreachable in this sandbox except via the one-off
+  `node`-script workaround Lesson 49's round discovered (not re-attempted
+  this round since the query-progress block already answered the "is there a
+  completion signal" question in the negative by omission). Still no
+  `lesson_completed` record exists for any lesson after 50 rounds — the next
+  session should keep treating a completion/quiz-outcome signal, or a
+  user-named track to deepen, as higher priority than a 51st topic picked
+  blind. This closes both candidates named across Lessons 47-49's rounds:
+  distributed locks and blue-green/canary deploys remain the only two named,
+  already-ruled-out-as-out-of-scope-per-MISSION.md candidates if a fresh
+  gap-finding pass is needed next time, alongside ETag/conditional-request
+  headers (confirmed untaught this round, deliberately deferred rather than
+  covered) as the one concrete, in-scope, ready-to-pick-up candidate left
+  open, set as this lesson's own closing teaser.

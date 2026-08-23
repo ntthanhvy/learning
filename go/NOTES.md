@@ -391,3 +391,15 @@
   course since it's a pure skip regardless of DB state. Rust, backend,
   data, and python were handled this round via delegated agents (see
   their own NOTES.md entries for detail).
+- 2026-08-24 (headless 06:00 run): skipped again per the same rule — the
+  course window closed 2026-07-20, now thirty-five days past it. Day 13
+  (`0014-concurrency-capstone.html`) re-confirmed present on disk and
+  registered in `assets/nav.js` — moot either way. `bin/query-progress`
+  required approval with no user present (same class of block as every
+  prior round); moot for this course since it's a pure skip regardless of
+  DB state. Backend lesson 50, data lesson 47, and python Day 27 were
+  generated this round via delegated agents (see their own NOTES.md
+  entries for detail); rust's post-week daily quiz+kata infra was
+  re-verified unchanged (8 `id: "k` matches in `quiz-bank.js` — the 7 real
+  kata `k1`-`k7` plus the commented example — `day:` tags still run 1-7
+  only, `nav.js` `LESSONS` still registers only the 7 Jul 8-14 lessons).

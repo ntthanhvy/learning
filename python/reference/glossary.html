@@ -264,6 +264,16 @@
   <tr><td>capstone</td><td>giữ nguyên "capstone" — bài không dạy kỹ thuật mới, mà ghép nhiều kỹ thuật đã học thành 1 sản phẩm chạy được, có ý nghĩa</td><td>A lesson that deliberately teaches no new mechanism, instead combining several already-taught mechanisms into one working, tangible artifact — Day 7 did this for Phase 1's language material (an ETL script); Day 26 does it for Phase 2b's backend material (a small FastAPI service).</td></tr>
 </table>
 
+<h2 id="day27">Day 27 — itertools: chaining, grouping &amp; combining without hand-rolled loops</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>itertools</td><td>giữ nguyên "itertools" — module chuẩn thư viện gồm các hàm sinh generator có sẵn để nối/gộp/cắt iterable</td><td>A standard-library module of ready-made generator functions for the handful of iterable-combining and -slicing jobs that come up constantly in data handling, so the same loop shapes never need hand-writing with <code>yield</code> again. Named alongside <code>collections</code> in <code>RESOURCES.md</code> as one of the two stdlib modules that replace most hand-written data-munging loops.</td></tr>
+  <tr><td>chain</td><td>giữ nguyên "chain" — nối nhiều iterable thành 1 luồng duy nhất, lười, không tạo list gộp mới</td><td><code>itertools.chain(*iterables)</code> visits each given iterable's items in turn, lazily, as if they were one single iterable — no new combined list is ever built, unlike <code>list_a + list_b</code>.</td></tr>
+  <tr><td>groupby</td><td>giữ nguyên "groupby" — gộp các item LIÊN TIẾP có cùng key, bắt buộc input đã sort sẵn theo key đó</td><td><code>itertools.groupby(iterable, key=...)</code> groups only <em>consecutive</em> items sharing a key computed by <code>key=</code>, and requires the input already be sorted by that same key — it silently produces extra groups instead of merging on unsorted input, unlike a <code>dict</code>-based grouping (Day 3), which needs no such requirement.</td></tr>
+  <tr><td>islice</td><td>giữ nguyên "islice" — cắt lấy 1 số lượng item từ iterable/generator, lười, dùng khi không slice [:] trực tiếp được</td><td><code>itertools.islice(iterable, stop)</code> (or <code>(start, stop, step)</code>) pulls a limited number of items lazily out of any iterable, including a generator — the generator-safe equivalent of Day 2's <code>seq[:n]</code> slicing, which only works on a real, indexable sequence.</td></tr>
+  <tr><td>product</td><td>giữ nguyên "product" — sinh mọi tổ hợp lấy 1 phần tử từ mỗi iterable, giống CROSS JOIN</td><td><code>itertools.product(*iterables)</code> yields every combination pairing one item from each given iterable, in the same shape as a nested <code>for</code> loop or a SQL <code>CROSS JOIN</code> — one call replacing however many levels of nested loop the number of iterables would otherwise need.</td></tr>
+</table>
+
 <p class="next">💬 A term here still unclear? Ask your teacher — hỏi bằng tiếng Việt cũng được.</p>
 
 <script src="../assets/nav.js"></script>

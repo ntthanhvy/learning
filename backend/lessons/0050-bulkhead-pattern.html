@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 50 · The bulkhead pattern: giving each dependency its own lifeboat</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 50 · ~25 min</p>
+<h1>The bulkhead pattern: giving each dependency its own lifeboat</h1>
+<p class="byline">Lesson 49's closing teaser named two untaught candidates: the bulkhead pattern and ETag/conditional-request headers. Today, the first one — why a single shared connection pool lets one slow dependency starve every request, even the ones that never touch it, and the fix that gives each dependency its own fixed slice instead.</p>
+
+<h2>1 · One pool, shared by every dependency, is a single point of failure</h2>
+<p>Lesson 18 sized a connection pool as if a service only ever talked to one database. Real services rarely do: the same handler process might hold a pool of connections to the primary Postgres database, another pool for calls to a shipping service, and a third for a slow reporting service used by one internal dashboard. If all three share one general-purpose pool — one <code>http.Client</code>, one worker-goroutine limit, one set of database connections — a problem with just the slowest one can consume the entire shared pool, leaving nothing for the other two.</p>
+<p>Concretely: say the reporting service starts responding in 10 seconds instead of 100ms. Every request that happens to trigger a reporting call now holds a pool slot for 10 seconds instead of releasing it almost immediately. If report calls arrive steadily, the shared pool fills up entirely with slots waiting on the one slow dependency — and a completely unrelated request that only needed the fast primary database now waits behind them too, because it drew from the same limited pool. One dependency's slowness becomes every dependency's outage, even the healthy ones.</p>
+<div class="callout"><strong>Frontend-habit trap:</strong> this is the backend cousin of one slow, unrelated <code>fetch()</code> call starving a browser's per-host connection limit so every other request queues behind it — except a browser's fix (HTTP/2 multiplexing, more connections) is invisible infrastructure, while a backend service has to build the partitioning itself.</div>
+
+<h2>2 · The fix: partition the shared resource, don't just grow it</h2>
+<p>The instinctive fix — make the pool bigger — doesn't solve this; Lesson 18 already established that pool size is bounded by what the database and the machine can actually support, and a bigger shared pool still lets one dependency's slow calls eventually consume all of it, just after a longer delay. The actual fix is to stop sharing the pool at all: give each dependency its own fixed-size slice of capacity, walled off from the others, so exhausting one dependency's slice can never touch what's reserved for the rest.</p>
+<p>This is the <dfn data-en="a resilience pattern that partitions a shared, limited resource (a connection pool, a worker-goroutine limit, a thread pool) into separate, fixed-size slices per dependency, so that one dependency saturating its own slice cannot consume capacity reserved for calls to any other dependency" data-vn="bulkhead pattern (giữ nguyên) — chia nhỏ 1 resource dùng chung (pool, worker...) thành từng phần riêng cho mỗi dependency, 1 phần bị đầy không ảnh hưởng phần khác">bulkhead pattern</dfn>: named after a ship's bulkheads, the internal walls that divide a hull into separate watertight compartments so a single hull breach floods only one compartment instead of sinking the whole ship. Applied to a backend service, each compartment is a fixed slice of some limited resource — most often a connection pool or a bounded number of concurrent goroutines — dedicated to exactly one dependency. A leak or a slowdown in one compartment can fill that compartment, but the walls mean it physically cannot spread into the capacity reserved for any other dependency.</p>
+
+<h2>3 · A minimal Go implementation</h2>
+<p>The mechanism is smaller than it sounds: a map from dependency name to its own small pool, and a lookup before every call.</p>
+<pre><code><span class="kw">type</span> Pool <span class="kw">struct</span> {
+    maxConns <span class="kw">int</span>
+    inUse    <span class="kw">int</span>
+    mu       sync.Mutex
+}
+
+<span class="kw">var</span> ErrPoolFull = errors.New(<span class="str">"bulkhead full: no capacity for this dependency"</span>)
+
+<span class="kw">func</span> (p *Pool) Acquire() (<span class="kw">func</span>(), <span class="kw">error</span>) {
+    p.mu.Lock()
+    <span class="kw">defer</span> p.mu.Unlock()
+    <span class="kw">if</span> p.inUse &gt;= p.maxConns {
+        <span class="kw">return</span> <span class="kw">nil</span>, ErrPoolFull
+    }
+    p.inUse++
+    <span class="kw">return</span> <span class="kw">func</span>() {
+        p.mu.Lock()
+        p.inUse--
+        p.mu.Unlock()
+    }, <span class="kw">nil</span>
+}
+
+<span class="cm">// Bulkhead partitions a shared resource into fixed, independent slices per
+// dependency, so exhausting one slice can never touch capacity reserved
+// for calls to any other dependency.</span>
+<span class="kw">type</span> Bulkhead <span class="kw">struct</span> {
+    pools <span class="kw">map</span>[<span class="kw">string</span>]*Pool
+}
+
+<span class="kw">func</span> NewBulkhead(limits <span class="kw">map</span>[<span class="kw">string</span>]<span class="kw">int</span>) *Bulkhead {
+    pools := <span class="kw">make</span>(<span class="kw">map</span>[<span class="kw">string</span>]*Pool, <span class="kw">len</span>(limits))
+    <span class="kw">for</span> name, limit := <span class="kw">range</span> limits {
+        pools[name] = &Pool{maxConns: limit}
+    }
+    <span class="kw">return</span> &Bulkhead{pools: pools}
+}
+
+<span class="cm">// Call runs fn using only the named partition's own capacity -- a
+// dependency with no slot free fails immediately with ErrPoolFull instead
+// of competing with every other dependency for a shared pool.</span>
+<span class="kw">func</span> (b *Bulkhead) Call(dependency <span class="kw">string</span>, fn <span class="kw">func</span>() <span class="kw">error</span>) <span class="kw">error</span> {
+    pool, ok := b.pools[dependency]
+    <span class="kw">if</span> !ok {
+        <span class="kw">return</span> fmt.Errorf(<span class="str">"no bulkhead partition configured for %q"</span>, dependency)
+    }
+    release, err := pool.Acquire()
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        <span class="kw">return</span> err <span class="cm">// this dependency's own slice is full -- others are untouched</span>
+    }
+    <span class="kw">defer</span> release()
+    <span class="kw">return</span> fn()
+}</code></pre>
+<p>Setting it up names each dependency's own fixed budget up front: <code>NewBulkhead(map[string]int{"inventory": 8, "shipping": 4, "reports": 2})</code>. A reporting call that finds its 2-slot partition full returns <code>ErrPoolFull</code> immediately — it never even looks at whether the inventory or shipping partitions have room, because it isn't allowed to use them. Sizing each partition follows the same reasoning Lesson 18 taught for a single pool — how much concurrent work does this specific dependency actually need — just applied per-dependency instead of once for everything.</p>
+
+<h2>4 · Bulkhead, circuit breaker, and rate limiter protect three different things</h2>
+<p>All three of Lessons 11, 28, and today's bulkhead reject calls under some condition, which makes them easy to blur together in an interview answer — but each defends a different boundary:</p>
+<div class="cmp-wrap">
+<table class="cmp">
+<thead><tr><th></th><th>Rate limiter (L11)</th><th>Circuit breaker (L28)</th><th>Bulkhead (today)</th></tr></thead>
+<tbody>
+<tr><th>Protects</th><td>the callee, from too many callers</td><td>the caller, from a failing callee</td><td>other dependencies, from one saturated one</td></tr>
+<tr><th>Triggered by</th><td>request volume crossing a cap</td><td>consecutive failures crossing a threshold</td><td>this dependency's own slice being full</td></tr>
+<tr><th>Reacts to</th><td>how much traffic is arriving</td><td>whether calls are failing</td><td>whether calls are slow or stuck, failing or not</td></tr>
+<tr><th>Failure stays contained to</th><td>the caller sending too much</td><td>calls to the one bad dependency</td><td>one partition of a shared resource</td></tr>
+</tbody>
+</table>
+</div>
+<p>They compose rather than compete: a bulkhead can give the reporting dependency its own 2-connection partition, and a circuit breaker can additionally wrap calls inside that partition so that once the reporting service starts failing outright (not just running slow), it stops even attempting the call. The bulkhead limits how much of the shared resource one dependency's problem can occupy; the circuit breaker limits how long callers keep trying a dependency that's already shown it's broken. Neither replaces the other — a bulkhead alone still lets a slow-but-not-failing dependency hold its whole partition's connections indefinitely, and a circuit breaker alone still shares one pool across every dependency until it trips.</p>
+
+<h2>5 · Partitioning has a cost: idle capacity that can't be borrowed</h2>
+<p>A bulkhead's protection is also its trade-off. The reporting dependency's 2-connection partition sits unused most of the day — but even while the inventory partition is fully saturated and rejecting calls, those 2 reporting slots cannot be lent to inventory, because the whole point of the wall is that it doesn't flex. That's correct behavior, not a bug: the instant partitions can borrow from each other under pressure, the wall stops being a wall, and the exact cascading failure this pattern exists to prevent becomes possible again. Sizing partitions is therefore a real trade-off, not a free safety net — a partition sized too small rejects legitimate calls to a perfectly healthy dependency during a normal traffic spike, while a partition sized too generously gives back some of the isolation the pattern is for. The right size comes from the same measurement Lesson 18 already taught: watch actual concurrent usage per dependency, not a guess.</p>
+
+<div class="interview">
+<p><strong>Q: "One of your service's downstream dependencies started responding slowly, and now your whole API is timing out — even endpoints that never call that dependency. Why, and how would you prevent it?"</strong> A strong answer, out loud: <em>"That's the signature of a shared resource pool with no isolation between dependencies — every call, regardless of which dependency it hits, draws from the same connection pool or goroutine limit, so the slow dependency's calls sit holding slots for the full timeout duration and starve everyone else out of the same pool. I'd apply the bulkhead pattern: give each dependency its own fixed-size partition of the pool, sized to what that dependency actually needs, so one dependency saturating its own slice can never touch capacity reserved for the others. I'd also wrap the slow dependency's calls in a circuit breaker inside its own partition, since a bulkhead alone doesn't stop a dependency that's slow but not yet failing from holding its whole partition indefinitely."</em> The signal: naming the shared-pool-starves-everyone mechanism specifically, and that a bulkhead and a circuit breaker solve different halves of the same incident.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Without partitioning, every dependency draws from the same shared pool, so a slow or stuck dependency's calls hold pool slots for the full duration of their wait, eventually consuming every slot -- leaving nothing available for calls to healthy, unrelated dependencies that happen to share that same pool.">
+    <p class="stem">Why can one slow dependency cause requests that never call it to time out?</p>
+    <button class="opt" data-ok>they all draw from that same shared pool</button>
+    <button class="opt">Postgres silently locks every single unrelated data table</button>
+    <button class="opt">the load balancer stops routing to every instance</button>
+    <button class="opt">the slow dependency corrupts every other response body</button>
+  </div>
+  <div class="q" data-why="The bulkhead pattern partitions a shared resource into separate fixed-size slices, one per dependency, so that one dependency completely saturating its own slice cannot touch or consume capacity reserved for calls to any other dependency.">
+    <p class="stem">What does the bulkhead pattern actually do?</p>
+    <button class="opt" data-ok>gives each dependency its own fixed pool slice</button>
+    <button class="opt">doubles the total pool size for every dependency</button>
+    <button class="opt">retries every single failed dependency call automatically forever</button>
+    <button class="opt">caches every dependency response for a set duration</button>
+  </div>
+  <div class="q" data-why="A rate limiter protects the callee from receiving too much traffic; a circuit breaker protects the caller from a dependency that has already shown it is failing outright. A bulkhead protects a caller's other dependencies from one dependency saturating a resource they would otherwise all share.">
+    <p class="stem">How does a bulkhead differ from a circuit breaker?</p>
+    <button class="opt" data-ok>a bulkhead isolates resource capacity by dependency name</button>
+    <button class="opt">a bulkhead only activates once traffic volume spikes</button>
+    <button class="opt">a bulkhead permanently blocks a failed dependency forever</button>
+    <button class="opt">a bulkhead automatically retries with slowly growing backoff</button>
+  </div>
+  <div class="q" data-why="A partition's whole protective value comes from being a hard wall: capacity reserved for one dependency can never flex over to cover another dependency under pressure, even while that other partition sits idle. Letting partitions borrow from each other reopens the exact cross-dependency starvation the pattern exists to prevent.">
+    <p class="stem">Why can't an idle dependency's partition lend its spare capacity to a saturated one?</p>
+    <button class="opt" data-ok>borrowing would recreate the very starvation being prevented</button>
+    <button class="opt">Postgres itself forbids resizing a pool at runtime</button>
+    <button class="opt">each partition uses a completely different programming language</button>
+    <button class="opt">lending capacity always requires a full service restart</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> Michael Nygard's <em>Release It!</em> is the book that named and popularized the bulkhead pattern for software (the same book Lesson 28's circuit-breaker material already traced back to via Martin Fowler's write-up) — read its bulkhead chapter directly for the ship-hull framing and worked failure scenarios this lesson compresses. Netflix's engineering blog on <a href="https://netflixtechblog.com/tagged/hystrix">Hystrix</a>, their now-archived but widely-referenced resilience library, is a concrete, widely-cited real-world implementation of bulkheads (thread-pool and semaphore isolation) paired with circuit breakers exactly as described in section 4 above.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> open — ETag/conditional-request headers (the HTTP-level analogue of Lesson 33's optimistic-locking version column, letting a client say "only send this if it changed") remains the other named, confirmed-untaught candidate from Lesson 49's search, a natural next step if no user-chosen track surfaces first. Distributed locks and blue-green/canary deploys remain the standing out-of-scope-per-MISSION.md candidates.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -2864,3 +2864,74 @@
   headers (confirmed untaught this round, deliberately deferred rather than
   covered) as the one concrete, in-scope, ready-to-pick-up candidate left
   open, set as this lesson's own closing teaser.
+- 2026-08-25 generation (Lesson 51, headless run): idempotency check first —
+  confirmed `lessons/0051-*.html` did not exist and no `n: 51`/
+  `date: "2026-08-25"` entry was in nav.js before writing anything (highest
+  prior lesson was 50, dated 2026-08-24). Direct `psql "$LEARNING_DB_URL"
+  ...` and `bin/query-progress` reads were expected to be blocked per this
+  round's own briefing (one via a hard content-level block on shell-variable
+  expansion, one via a permission-approval gate with no user present) and
+  were not spent more than one attempt on — still no `lesson_completed`/
+  quiz/kata outcome record exists for any lesson after 50 rounds, so there
+  was no reported weak spot to target. Topic was pre-chosen and re-confirmed
+  genuinely uncovered before writing: Lesson 49 first named ETag/conditional-
+  request headers as an untaught candidate, Lesson 50 re-confirmed via grep
+  it had zero hits anywhere in `lessons/*.html` or `reference/glossary.html`
+  and re-named it as its own closing teaser — this round grepped the same
+  terms again immediately before writing and got the same empty result,
+  confirming the gap was still open. Lesson 51 covers it: ETag as a
+  fingerprint of a resource's exact current state, `If-None-Match` on GET
+  answering "you already have the latest" with a bodyless `304 Not
+  Modified` (explicitly tied back to Lesson 9's `Cache-Control` — TTL-based
+  trust vs. an explicit re-ask that can come back empty), `If-Match` on
+  PUT/PATCH/DELETE rejecting a write against a stale version with `412
+  Precondition Failed`, and a side-by-side comparison table naming `If-Match`
+  as the same optimistic-concurrency idea as Lesson 33's version-column
+  pattern, just moved from an app-level `WHERE version = $seen` clause to an
+  HTTP-native mechanism any client can use without knowing the schema.
+  The two Go snippets (`etag`, a SHA-256-based fingerprint function, plus
+  `getOrderHandler`/`patchOrderHandler` implementing the conditional-GET and
+  conditional-write flows) were compile-checked clean with `go build -C` /
+  `go vet -C` in a scratch module (`.scratch/backend-lesson51/`, both
+  commands produced no output/errors; the built binary was written to
+  `/tmp` rather than the scratch dir, so only `go.mod`/`main.go` remain
+  there) — no approval blocker for either `-C`-style invocation this round,
+  consistent with every round since Lesson 13's finding; a bare `for`-loop
+  shell construct did hit an approval gate mid-tag-count-check and was
+  replaced with individual per-tag `grep -c` invocations instead, and `awk`
+  was also gated, worked around with `sed -n '<n>p' | wc -w` per line (same
+  workaround Lesson 27 already found). Tag-balance check (open vs. close
+  counts) passed clean on the shipped file: div 8/8, table 1/1, tr 5/5, th
+  5/5, td 4/4, pre 4/4, p 21/21. Quiz options were drafted, then verified
+  with `wc -w` per option (not eyeballed) — the first draft had one
+  mismatched option in three of four questions (Q2 was 7/7/7/8, Q3 was
+  9/7/9/8, Q4 was 8/6/8/8; Q1 was correct at 7/7/7/7 on the first draft),
+  fixed by rewording the short/long options, then re-verified completely
+  independently a second time using Grep `-o` token extraction over the
+  full option list rather than re-running the same `wc -w` commands — both
+  methods agreed on final tallies Q1 7/7/7/7, Q2 7/7/7/7, Q3 9/9/9/9, Q4
+  8/8/8/8. Added `ETag`, `If-None-Match`, `304 Not Modified`, `If-Match`,
+  and `412 Precondition Failed` to the glossary — grepped `cache`/`caching`
+  first and found Lesson 9 already has full entries for `cache`,
+  `cache-aside`, `cache hit/miss`, `TTL`, `invalidate cache`, and
+  `Cache-Control`, so the lesson links to that existing vocabulary (the
+  `Cache-Control` dfn tag) instead of duplicating it, and only the five
+  genuinely new conditional-request terms were added; confirmed via grep
+  afterward that each of the five appears exactly once in glossary.html.
+  Registered Lesson 51 in nav.js. `bin/record-progress backend
+  lesson_generated --day 51 --lesson
+  0051-etags-and-conditional-requests.html --detail
+  '{"by":"github-actions"}'` was run once directly from the repo root and
+  succeeded immediately, no approval blocker this round. Primary source:
+  MDN's dedicated HTTP conditional-requests guide, extending RESOURCES.md's
+  already-standing "MDN HTTP Guide... the arbiter" citation into a section
+  not yet cited, with RFC 9110 §13 named as the underlying spec. This
+  closes out both named candidates from Lesson 49's search (bulkhead,
+  ETags/conditional requests) — no confirmed next gap is queued. Teaser set
+  for Lesson 52: distributed locks (still the standing out-of-scope-per-
+  MISSION.md candidate unless narrowed to vocabulary level, per Lessons
+  47-49) or, as a fresher alternative worth considering first, a synthesis
+  lesson revisiting an earlier feature design through the caching- and
+  concurrency-control lenses Lessons 9, 33, and 51 together now provide —
+  the same "review one feature through several already-taught lenses" shape
+  Lesson 20 used successfully once before.

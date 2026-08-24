@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 48 · cumcount(): a running position within each group</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 48 · ~20 min · 25 Aug 2026</p>
+<h1>cumcount(): a running position within each group</h1>
+<p class="byline">Lesson 47's own closing teaser named this directly: <code>cumcount()</code>, used inline back in Lesson 28 to number each customer's visits ("<code>clean.groupby("customer").cumcount() + 1</code>") with no standalone explanation and no glossary entry of its own. Today it gets the proper treatment — what it actually counts, and the two methods it's most often confused with.</p>
+
+<h2>Recap, in one line</h2>
+<p>Lesson 7's <code>rank()</code> orders rows within a group <em>by value</em> — biggest amount first, or smallest, your choice. <code>cumcount()</code> ignores value entirely: it just counts off rows within each group in whatever order they currently are, 0, 1, 2, 3&hellip; — a running position, not a ranking.</p>
+
+<h2>1 · cumcount(): 0-indexed row position within each group</h2>
+<p>Same clean 4-row <code>orders_raw.csv</code> slice Lessons 6-47 have used, sorted by customer then order date:</p>
+<pre><code>clean
+<span class="cm">--   order_id customer  amount order_date
+-- 0        1       An   120.0 2026-01-05  (Monday)
+-- 1        6       An    42.0 2026-01-10  (Saturday)
+-- 2        2     Binh    35.5 2026-01-06  (Tuesday)
+-- 3        5     Binh   180.0 2026-01-09  (Friday)</span></code></pre>
+<p><dfn data-en="a GroupBy method (not available on a plain Series/DataFrame -- only after groupby()) returning, for each row, the 0-indexed running position of that row within its own group, counted in whatever order the rows currently are -- unrelated to any column's value" data-vn="giữ nguyên 'cumcount()' — đếm SỐ THỨ TỰ (bắt đầu từ 0) của từng dòng trong nhóm của nó, theo đúng thứ tự dòng hiện có, KHÔNG liên quan tới giá trị cột nào">cumcount()</dfn> chained after <code>groupby()</code> (Lesson 4) gives each row its running position, starting at 0, within its own group:</p>
+<pre><code>clean.groupby(<span class="str">"customer"</span>).cumcount()
+<span class="cm">-- 0    0   -- An's 1st row
+-- 1    1   -- An's 2nd row
+-- 2    0   -- Binh's 1st row
+-- 3    1   -- Binh's 2nd row
+-- dtype: int64</span></code></pre>
+<p>An restarts at 0, Binh restarts at 0 — the count is per-group, same split-apply-combine shape every <code>groupby()</code> chain in this course has used. In practice the human-friendly, 1-indexed version is more common, exactly Lesson 28's line:</p>
+<pre><code>clean[<span class="str">"visit_num"</span>] = clean.groupby(<span class="str">"customer"</span>).cumcount() + <span class="num">1</span>
+<span class="cm">-- An's two rows: visit_num 1, 2
+-- Binh's two rows: visit_num 1, 2</span></code></pre>
+<p><code>cumcount()</code> takes no column argument at all — unlike <code>cumsum()</code> or <code>rank()</code>, which act on a named column's values, <code>cumcount()</code> only cares which group a row belongs to and where it sits in the current row order. It exists only on a <code>GroupBy</code> object: calling it on a plain Series or DataFrame (no <code>groupby()</code> first) raises <code>AttributeError</code> — confirmed directly, there is no ungrouped "running position" concept for it to count against.</p>
+
+<h2>2 · cumcount() vs rank(): position vs value</h2>
+<p>Lesson 7's <code>rank()</code> and today's <code>cumcount()</code> both produce one number per row, per group — easy to conflate, but they answer different questions. <code>rank()</code> orders by a column's <em>value</em>; <code>cumcount()</code> orders by <em>row position</em>, ignoring value completely:</p>
+<pre><code>clean[<span class="str">"amount_rank"</span>] = clean.groupby(<span class="str">"customer"</span>)[<span class="str">"amount"</span>].rank(method=<span class="str">"first"</span>)
+clean[<span class="str">"visit_num"</span>]  = clean.groupby(<span class="str">"customer"</span>).cumcount() + <span class="num">1</span>
+<span class="cm">--   customer  amount  amount_rank  visit_num
+-- 0       An   120.0          2.0          1   -- An's 1st VISIT, but 2nd by AMOUNT (42 &lt; 120)
+-- 1       An    42.0          1.0          2   -- An's 2nd visit, but the CHEAPER order
+-- 2     Binh    35.5          1.0          1
+-- 3     Binh   180.0          2.0          2</span></code></pre>
+<p>An's row order (by date) and amount order disagree: the 120.0 order happened first chronologically (<code>visit_num</code> 1) but ranks 2nd by size (<code>amount_rank</code> 2.0, since 42.0 is smaller). <code>cumcount()</code> would give the identical <code>0, 1, 0, 1</code> no matter what the <code>amount</code> column contained, or even if there were no numeric column at all — it only ever looks at position. The SQL bridge: <code>cumcount()</code> is <code>ROW_NUMBER() OVER (PARTITION BY customer ORDER BY &lt;current row order&gt;) - 1</code> — a <code>ROW_NUMBER()</code>, not a <code>RANK()</code>, and 0-indexed rather than SQL's 1-indexed default.</p>
+
+<h2>3 · cumcount() vs nunique(): per-row position vs per-group distinct count</h2>
+<p>Lesson 19's <code>nunique()</code> is the other easy mix-up — both are "count"-flavored and both chain after <code>groupby()</code>, but one returns a value <em>per row</em> and the other collapses to one value <em>per group</em>. A small inline table makes the gap concrete (An placed 3 orders, two of them for the identical amount &mdash; not present in the shared fixture, so built inline the same way Lesson 19's tagged-orders example was):</p>
+<pre><code>demo = pd.DataFrame({
+    <span class="str">"customer"</span>: [<span class="str">"An"</span>, <span class="str">"An"</span>, <span class="str">"An"</span>, <span class="str">"Binh"</span>],
+    <span class="str">"amount"</span>:   [<span class="num">50.0</span>, <span class="num">50.0</span>, <span class="num">75.0</span>, <span class="num">30.0</span>],
+})
+demo[<span class="str">"visit_num"</span>] = demo.groupby(<span class="str">"customer"</span>).cumcount() + <span class="num">1</span>   <span class="cm"># per-ROW</span>
+demo.groupby(<span class="str">"customer"</span>)[<span class="str">"amount"</span>].nunique()                          <span class="cm"># per-GROUP</span>
+<span class="cm">--   customer  amount  visit_num
+-- 0       An    50.0          1
+-- 1       An    50.0          2
+-- 2       An    75.0          3
+-- 3     Binh    30.0          1
+--
+-- customer
+-- An      2   -- only 2 DISTINCT amounts among An's 3 rows (the two 50.0s collapse)
+-- Binh    1</span></code></pre>
+<p>An's <code>cumcount()</code> correctly climbs to 3 — three real rows, three real visits, duplicate amount or not. An's <code>nunique()</code> says 2 — it never asked "how many rows," it asked "how many different values," and the repeated <code>50.0</code> only counts once. One row exists for every visit regardless of duplication; <code>nunique()</code> actively throws duplication away. Confusing the two would misreport "how many times has this customer ordered" as "how many different amounts has this customer paid" — a real interview gotcha, not a pedantic distinction.</p>
+
+<h2>4 · ascending=False: counting down instead of up</h2>
+<p><code>cumcount(ascending=False)</code> flips the direction — instead of "how many rows came before this one," it answers "how many rows come after this one," in the same group, same current order:</p>
+<pre><code>clean.groupby(<span class="str">"customer"</span>).cumcount(ascending=<span class="kw">False</span>)
+<span class="cm">-- 0    1   -- An's 1st row: 1 more An row still to come
+-- 1    0   -- An's 2nd row: 0 more An rows after it (last one)
+-- 2    1   -- Binh's 1st row
+-- 3    0   -- Binh's 2nd row (last one)</span></code></pre>
+<p>The last row of each group is always <code>0</code> under <code>ascending=False</code> — a quick way to flag "is this the final row in its group" (<code>== 0</code>) without a separate <code>groupby().tail(1)</code> lookup.</p>
+
+<div class="callout"><strong>A named idiom: top N per group via sort + cumcount().</strong> Lesson 7 solved "top N per group" with <code>rank() &lt;= N</code>. <code>sort_values()</code> then <code>cumcount()</code> reaches the identical rows a second way — sort each group into the order you want first, then keep the rows whose running position is below the cutoff:
+<pre><code>by_amount_desc = clean.sort_values([<span class="str">"customer"</span>, <span class="str">"amount"</span>], ascending=[<span class="kw">True</span>, <span class="kw">False</span>])
+by_amount_desc[<span class="str">"rank_by_amount"</span>] = by_amount_desc.groupby(<span class="str">"customer"</span>).cumcount()
+top2 = by_amount_desc[by_amount_desc[<span class="str">"rank_by_amount"</span>] < <span class="num">2</span>]  <span class="cm"># keep positions 0 and 1 -- the top 2</span></code></pre>
+This is exactly Lesson 7's <code>sort_values().groupby().head(N)</code> alternative, just spelled with an explicit position column kept as data instead of discarded — reach for this variant when the position number itself is useful downstream (e.g. showing "your #1 and #2 orders"), and <code>.groupby().head(N)</code> when only the rows matter.</div>
+
+<div class="interview">
+<p><strong>Q: "How would you number each customer's orders in the order they were placed, and how is that different from ranking them by amount?"</strong> A strong answer, out loud: <em>"I'd groupby customer and use cumcount() — it gives each row a 0-indexed running position within its group, based purely on current row order, so I'd add 1 for a human-friendly 'visit number.' That's different from rank(): rank() orders by a column's VALUE, so the biggest or smallest amount gets rank 1 regardless of when it happened, where cumcount() only cares about row position and never looks at amount at all — a customer's first visit chronologically could easily be their most expensive or least expensive order, cumcount() and amount_rank can disagree completely. It's also not nunique(): cumcount() gives one number per ROW, growing with every row in the group even if values repeat; nunique() collapses to one number per GROUP, counting only distinct values. The SQL bridge for cumcount() itself is ROW_NUMBER() OVER (PARTITION BY customer ORDER BY <row order>) - 1 — a ROW_NUMBER(), 0-indexed instead of SQL's default 1-indexed."</em> The signal: distinguishing position-based from value-based numbering unprompted, and correctly placing cumcount() as a ROW_NUMBER() cousin, not a RANK() cousin.</p>
+</div>
+
+<h2>5 · The SQL bridge</h2>
+<p><code>cumcount()</code>'s direct SQL equivalent is <code>ROW_NUMBER() OVER (PARTITION BY customer ORDER BY <em>&lt;current row order&gt;</em>) - 1</code> — the <code>- 1</code> only because SQL's <code>ROW_NUMBER()</code> starts at 1 and pandas' <code>cumcount()</code> starts at 0 (the <code>+ 1</code> pattern from Section 1 exists purely to bridge that gap back). Note the parallel to Lesson 7's tie-breaking distinction: <code>cumcount()</code> is always the <code>"first"</code>/<code>ROW_NUMBER()</code> flavor — position-based, never ties, never repeats a number within a group — there is no <code>RANK()</code>/<code>DENSE_RANK()</code> equivalent of <code>cumcount()</code>, because it was never ordering by value to begin with.</p>
+
+<h2>Try it — self-checking practice (~15 min)</h2>
+<p>Open <code>practice/48_cumcount.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/48_cumcount.py</code></pre>
+<p>Uses the real <code>orders_raw.csv</code> clean 4-row slice (Lessons 6-47's fixture) plus one small inline table for the <code>nunique()</code> contrast, same pattern as Lesson 19. Exercise 1 numbers each customer's visits with <code>cumcount() + 1</code> (Section 1); Exercise 2 contrasts <code>cumcount()</code> against <code>rank()</code> on the same rows (Section 2); Exercise 3 contrasts <code>cumcount()</code> against <code>nunique()</code> on the inline duplicate-amount table (Section 3); Exercise 4 uses <code>cumcount(ascending=False)</code> to flag each group's last row (Section 4); Exercise 5 confirms <code>cumcount()</code> raises <code>AttributeError</code> when called without <code>groupby()</code> first (Section 1's closing note).</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="cumcount() only ever looks at which group a row belongs to and where it currently sits in row order -- it takes no column argument and never inspects any value. rank() is the opposite: it orders rows within a group specifically by a named column's value.">
+    <p class="stem">What does <code>groupby("customer").cumcount()</code> base its numbering on?</p>
+    <button class="opt" data-ok>the row's running position within its own group</button>
+    <button class="opt">the sorted value of the amount column alone</button>
+    <button class="opt">alphabetical order of the customer's own name field</button>
+  </div>
+  <div class="q" data-why="cumcount() is 0-indexed by design, restarting at 0 for the first row of every new group -- the +1 pattern exists specifically to convert it into the more human-friendly 1-indexed count shown in Section 1.">
+    <p class="stem">What number does <code>cumcount()</code> assign to the FIRST row of each group?</p>
+    <button class="opt" data-ok>zero -- cumcount() is always strictly 0-indexed here</button>
+    <button class="opt">one -- cumcount() always starts counting from one</button>
+    <button class="opt">the group's total row count, not a position</button>
+  </div>
+  <div class="q" data-why="cumcount() returns one number per ROW, incrementing for every row in the group regardless of whether values repeat. nunique() instead collapses to one number per GROUP, counting only how many DISTINCT values appear -- a repeated value is only counted once.">
+    <p class="stem">A customer places 3 orders, two of them for the identical amount. How do <code>cumcount()</code> and <code>nunique()</code> on that group differ?</p>
+    <button class="opt" data-ok>cumcount() reaches 3, but nunique() reports only 2</button>
+    <button class="opt">both report 3, since they count rows identically</button>
+    <button class="opt">both report 2, since duplicates get dropped first</button>
+  </div>
+  <div class="q" data-why="cumcount() has no notion of ordering by value -- it purely counts row position, so it is always the ROW_NUMBER() flavor: unique, never-repeating numbers within a group. RANK()/DENSE_RANK() exist specifically to handle value ties, which cumcount() never evaluates at all.">
+    <p class="stem">Why is <code>cumcount()</code>'s SQL equivalent always <code>ROW_NUMBER()</code>, never <code>RANK()</code> or <code>DENSE_RANK()</code>?</p>
+    <button class="opt" data-ok>it never orders by value, so ties cannot occur</button>
+    <button class="opt">pandas simply has not implemented a RANK() flavor yet</button>
+    <button class="opt">RANK() and DENSE_RANK() only ever work on numeric columns</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official pandas <a href="https://pandas.pydata.org/docs/reference/api/pandas.core.groupby.DataFrameGroupBy.cumcount.html">DataFrameGroupBy.cumcount</a> API reference page (~5 min) — the authoritative signature, including the <code>ascending=</code> argument covered in Section 4 today.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>cumcount()</code> was added today, placed right after Lesson 19's <code>nunique()</code> entry.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-48 comes back reported as shakiest, otherwise a fresh curriculum/glossary scan for the next genuinely-uncovered pattern (<code>describe()</code>, <code>.corr()</code>, <code>convert_dtypes()</code>, <code>.xs()</code>, <code>droplevel()</code>, and <code>interpolate()</code> all came back uncovered as of Lesson 47's scan too — <code>describe()</code> stands out as the strongest single candidate, since it is the most interview-common of that list and still has zero mentions anywhere in the course).<br><br>
+💬 Anything unclear — the cumcount() vs rank() distinction, the cumcount() vs nunique() distinction, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

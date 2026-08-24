@@ -3000,3 +3000,109 @@
   or otherwise a fresh curriculum/glossary scan for the next
   genuinely-uncovered pattern, if no drill-obtained signal surfaces by next
   generation.
+
+- 2026-08-25 generation (Lesson 48, headless GitHub Actions run): idempotency
+  was self-confirmed first — globbed `data/lessons/` for `0048-*.html` (none
+  found), grepped this file for a `2026-08-25` entry (none found), and
+  grepped `assets/nav.js` for `n: 48`/`2026-08-25` (neither found, highest
+  registered lesson was still 47, dated 2026-08-24) — so this round
+  proceeded. `bin/query-progress data` was attempted once as instructed
+  (`timeout 15 bin/query-progress data ...`) and was blocked by the sandbox's
+  permission-approval gate with no user present to approve it, same class of
+  block as effectively every prior round — not retried; still no readable
+  `course_progress` rows and no `lesson_completed`/quiz/kata outcome record
+  beyond the Lesson 1 baseline, so no reported weak spot to target. Topic was
+  pre-chosen going in per Lesson 47's own teaser: `cumcount()` taught as its
+  own topic, since Lesson 28 used `groupby().cumcount()` inline for
+  visit-numbering with no standalone explanation or glossary entry. Re-grepped
+  before committing to it: only Lesson 28's inline usage and Lesson 47's own
+  teaser/this-file's history mentioned the word anywhere — genuinely
+  uncovered as a topic, confirmed. `uv run --with pandas` worked directly
+  this round (pandas 3.0.5, confirmed via `pd.__version__`); every claim was
+  hand-verified in `.scratch/data-lesson48/explore.py` (deleted after) against
+  the real `orders_raw.csv` clean 4-row slice before writing a word of the
+  lesson — `clean.groupby("customer").cumcount()` gives An `[0, 1]` and Binh
+  `[0, 1]`, confirmed 0-indexed and per-group-restarting; `+ 1` correctly
+  reproduces Lesson 28's human-friendly numbering; chaining
+  `rank(method="first")` on `amount` next to `cumcount()+1` on the same rows
+  showed the intended real disagreement (An's chronologically-first row,
+  `visit_num` 1, is the LARGER amount 120.0 vs 42.0, so `amount_rank` puts it
+  at 2.0, not 1 — a genuine value-vs-position mismatch on the real fixture,
+  not contrived); `cumcount(ascending=False)` gives An `[1, 0]` and Binh
+  `[1, 0]`, confirmed the last row of every group is exactly 0; both
+  `Series.cumcount()` and ungrouped `DataFrame.cumcount()` raise
+  `AttributeError` as expected, confirmed by running them, not assumed. The
+  real `orders_raw.csv` fixture has no repeated `amount` within a customer,
+  so the `nunique()` contrast (Section 3) needed a small inline demo table —
+  same established precedent as Lesson 19's tagged-orders inline table and
+  Lesson 11's inline "double-submitted export" table, not a break from
+  fixture-reuse discipline — hand-verified separately in
+  `.scratch/data-lesson48/explore2.py` (also deleted after): a 3-row
+  "An" group with two rows of `amount=50.0` and one of `75.0` gives
+  `cumcount()+1` reaching 3 (real row count) while `nunique()` on `amount`
+  reports only 2 (the repeated 50.0 collapses) — both directions confirmed
+  correct before writing Section 3. Designing the practice file surfaced a
+  genuine new Ellipsis-safety finding for this course's running list: the
+  originally-planned Exercise 4 placeholder, `cumcount(ascending=...)`, does
+  **NOT** raise — pandas evaluates `bool(...)` as truthy internally and the
+  call silently succeeds with `ascending=True`-like behavior (in fact
+  identical to the ascending=True already-tested case), confirmed directly by
+  running it standalone before trusting it; redesigning the exercise so the
+  Ellipsis sits inside a `<` comparison instead (`cumcount(ascending=False) <
+  ...`) DOES correctly raise `TypeError: '<' not supported between instances
+  of 'int' and 'ellipsis'`, confirmed the fix works before shipping it — also
+  discovered along the way that `cumcount(ascending=False) == ...` does NOT
+  raise either (Ellipsis is comparable, silently evaluates to `False`
+  everywhere, no error), so `==` was avoided in favor of `<` for that
+  placeholder; a second, unrelated pitfall was caught in the same pass — the
+  bare `except: ... = pd.Series(dtype=bool)` fallback pattern used elsewhere
+  in this file, when applied to a boolean column, broadcasts `NaN` into every
+  row on assignment, and `bool(NaN)` is `True` in Python, so a "some rows
+  should read False" check would have silently passed by accident on the
+  unsolved file; fixed by using an explicit `[False] * len(clean)` fallback
+  instead, confirmed by re-running the unsolved file and observing both the
+  True-check and the False-check on Exercise 4 report ✗ as they should, not
+  one spurious ✓. The shipped (unsolved) `practice/48_cumcount.py` was
+  executed directly from its real `practice/` location and printed exactly
+  the 5 expected ✗ (Exercise 1's 2 checks, Exercise 2's 2 checks, Exercise 4's
+  1 check) with no crash, while Exercise 3 and 5 — whose bodies are
+  pre-written, not placeholder-gated — correctly stayed ✓ even unsolved, same
+  expected shape as Lessons 46/47's own precedent. A solved copy
+  (`.scratch/data-lesson48/practice/48_cumcount.py`, deleted after) then
+  printed all 9 ✓ against the same hand-verified numbers above, run directly
+  since the fixture path is relative to the invoking `cwd` (`data/`), not the
+  script's own location, so no separate `_TEST`-in-`practice/` copy was
+  needed this round. Added `cumcount()` to the glossary (checked for a
+  collision first — grepped `reference/glossary.html` for `cumcount`, no
+  existing row) placed directly after Lesson 19's `nunique()` entry, since
+  Section 3 draws that exact contrast, and registered Lesson 48 in `nav.js`.
+  Quiz options were drafted and checked with a Python regex/word-count script
+  isolating each `<div class="q">` block (this course's established approach
+  since Lesson 42), run via `uv run python3` — the first draft came out
+  mismatched on all four questions (Q1 8/7/6, Q2 7/8/8, Q3 8/8/9, Q4
+  14/9/8); three rewrite + recount cycles landed all four level (Q1 9/9/9 →
+  8/8/8, Q2 8/8/8, Q3 8/8/8, Q4 9/9/9 after trimming the worst outlier down
+  from 11-13 words); then independently re-verified with a second, fully
+  separate method (manual word-by-word counting of the raw `Grep`-extracted
+  button lines, not a second run of the same script), per this file's
+  standing warning that a single verification pass isn't reliable — both
+  methods agreed on 8/8/8, 8/8/8, 8/8/8, 9/9/9 for the four questions.
+  `bin/query-progress data` was attempted once exactly as instructed and
+  blocked as noted above; `bin/record-progress data lesson_generated --day 48
+  --lesson 0048-cumcount.html --detail '{"by":"github-actions"}'` was also
+  attempted once exactly as instructed and this round it **succeeded**
+  (`recorded: data/lesson_generated day=48 lesson=0048-cumcount.html`) — the
+  less common outcome per this file's own history, but not unprecedented
+  (Lesson 46's round also succeeded). This agent does not run `git commit` —
+  leaving working-tree changes uncommitted remains this course's established
+  convention. `.scratch/data-lesson48/` was fully removable this round (plain
+  `rm -rf`, no approval needed). Set the teaser going forward to `describe()`
+  as the strongest single next candidate — re-grepped the full curriculum for
+  the batch of methods Lesson 47 flagged as uncovered (`describe(`, `.corr(`,
+  `convert_dtypes(`, `.xs(`, `droplevel`, `interpolate(`) and all six are
+  still genuinely zero-hit as real coverage (the sole `interpolate(` hit,
+  Lesson 38, is an explicit "not needed today" aside, not actual teaching);
+  `describe()` is named as the strongest pick since it's the single most
+  interview-common method of that list and still totally uncovered, but any
+  of the six remain valid fallback candidates if a drill-obtained weak spot
+  doesn't surface first.

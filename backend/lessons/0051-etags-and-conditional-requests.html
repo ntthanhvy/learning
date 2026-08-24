@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 51 · ETags and conditional requests: a fingerprint for "did this change?"</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 51 · ~25 min</p>
+<h1>ETags and conditional requests: a fingerprint for "did this change?"</h1>
+<p class="byline">Lesson 50's closing teaser named this as the last standing candidate from Lesson 49's search: ETag/conditional-request headers. Today — the one HTTP header that answers two different questions at once: "is my cached copy still good?" on <code>GET</code>, and "is the version I'm about to overwrite still current?" on <code>PUT</code>/<code>PATCH</code>/<code>DELETE</code>.</p>
+
+<h2>1 · A fingerprint of a resource's current state</h2>
+<p>An <dfn data-en="an HTTP response header holding an opaque identifier for the exact current state of a resource -- any change to the resource produces a different ETag" data-vn="ETag (giữ nguyên) — chuỗi định danh trạng thái hiện tại của resource, đổi nội dung là đổi ETag">ETag</dfn> ("entity tag") is a short, opaque string a server attaches to a response identifying exactly which version of that resource this is. It is usually a hash of the response body or a version number, and the server is free to choose the format — clients must never try to parse it, only compare it for equality.</p>
+<pre><code>GET /orders/482 HTTP/1.1
+
+HTTP/1.1 200 OK
+ETag: "a1b2c3d4"
+Content-Type: application/json
+
+{"id":482,"status":"packed","total_cents":4599}</code></pre>
+<p>That's the whole mechanism at its core: a fingerprint of "this resource, right now." Anything that changes the resource's content must change its ETag. Two requests that get back the same ETag are guaranteed to have seen the same state; two different ETags mean the state differs somehow, though not necessarily how.</p>
+<div class="callout"><strong>Frontend habit:</strong> this is the backend-native version of a frontend cache key or a React Query/SWR <code>staleTime</code> check — except instead of the client guessing how long data stays fresh, the server states a precise fingerprint and the client asks it directly.</div>
+
+<h2>2 · GET + If-None-Match: "only send the body if it changed"</h2>
+<p>Once a client has an ETag from a previous response, it can send it back on the next <code>GET</code> using the <dfn data-en="a conditional-request header sent on GET, asking the server to return the full response only if the resource's current ETag differs from the one supplied" data-vn="If-None-Match (giữ nguyên) — header gửi kèm GET, mang ETag cũ; server trả 304 nếu chưa đổi, trả full body nếu đã đổi">If-None-Match</dfn> header. The server recomputes the resource's current ETag and compares it to the one the client sent:</p>
+<pre><code>GET /orders/482 HTTP/1.1
+If-None-Match: "a1b2c3d4"
+
+HTTP/1.1 304 Not Modified
+ETag: "a1b2c3d4"</code></pre>
+<p>If the ETags match, the resource hasn't changed since the client last saw it — the server replies <dfn data-en="an HTTP status meaning the resource matches the client's cached copy exactly, so the server sends this status and no response body at all, saving the bandwidth and work of re-sending unchanged data" data-vn="304 Not Modified (giữ nguyên) — nghĩa là data chưa đổi, server không gửi lại body, tiết kiệm băng thông">304 Not Modified</dfn> with no body at all — the client already has the current data, it just keeps using its cached copy. If the resource has changed, the ETags won't match, and the server responds normally with <code>200 OK</code> and the full new body plus a new ETag. This directly extends Lesson 9's caching lesson: <code>Cache-Control</code> tells a client how long it may trust a cached copy without asking; ETag + <code>If-None-Match</code> is for when that trust period is up but re-downloading the whole body anyway would be wasteful — the client still asks, but the answer can be "nothing to send."</p>
+
+<h2>3 · PUT/PATCH/DELETE + If-Match: "only write if it's still the version I saw"</h2>
+<p>The second half of conditional requests protects writes instead of reads, using a companion header:</p>
+<pre><code>PATCH /orders/482 HTTP/1.1
+If-Match: "a1b2c3d4"
+Content-Type: application/json
+
+{"status":"shipped"}</code></pre>
+<p><dfn data-en="a conditional-request header sent on a write (PUT/PATCH/DELETE), asking the server to reject the write with 412 unless the resource's current ETag exactly matches the one supplied, proving the caller last read the current version" data-vn="If-Match (giữ nguyên) — header gửi kèm PUT/PATCH/DELETE, mang ETag đã đọc; server từ chối ghi (412) nếu ETag hiện tại khác">If-Match</dfn> tells the server: only perform this write if the resource's current ETag is exactly this value. If someone else has updated the order since the client last fetched it, the current ETag has moved on, the comparison fails, and the server rejects the write with <dfn data-en="an HTTP status meaning a conditional write's If-Match precondition failed -- the resource has changed since the client last read it, so the write was rejected instead of silently overwriting the newer version" data-vn="412 Precondition Failed (giữ nguyên) — nghĩa là write bị từ chối vì resource đã đổi kể từ lần đọc cuối, tránh ghi đè mất dữ liệu">412 Precondition Failed</dfn> instead of silently overwriting a version the client never actually saw.</p>
+<p>This should feel familiar: it is the exact lost-update problem Lesson 33 solved with a <code>version</code> integer column and a <code>WHERE ... AND version = $seen</code> clause. <code>If-Match</code> is the same optimistic-concurrency idea moved up one layer, expressed in HTTP instead of SQL:</p>
+<div class="cmp-wrap">
+<table class="cmp">
+<thead><tr><th></th><th>Version column (Lesson 33)</th><th>ETag + If-Match (today)</th></tr></thead>
+<tbody>
+<tr><th>Fingerprint lives in</th><td>a <code>version</code> column in the row</td><td>an <code>ETag</code> response header</td></tr>
+<tr><th>Client proves it saw</th><td>a specific <code>version</code> value</td><td>a specific <code>ETag</code> value</td></tr>
+<tr><th>Check happens in</th><td>the <code>UPDATE</code>'s <code>WHERE</code> clause</td><td>the handler, before touching the DB</td></tr>
+<tr><th>Conflict signal</th><td><code>0</code> rows updated</td><td><code>412 Precondition Failed</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>Same problem, same no-locking-on-read strategy, same "reject a stale write instead of silently losing an update" outcome — just moved from an app-level column check to an HTTP-native mechanism that any client, not just this one codebase, can rely on without knowing the schema has a <code>version</code> column at all.</p>
+
+<h2>4 · A minimal Go implementation</h2>
+<p>An ETag is only trustworthy if it's derived from the same data the client is comparing against — a hash of the current row is the simplest honest source, though reusing an existing <code>version</code> or <code>updated_at</code> column works too and avoids hashing on every request.</p>
+<pre><code><span class="kw">type</span> Order <span class="kw">struct</span> {
+    ID         <span class="kw">int</span>
+    Status     <span class="kw">string</span>
+    TotalCents <span class="kw">int</span>
+}
+
+<span class="cm">// etag derives a fingerprint from the fields that define this resource's
+// current state -- any change to Status or TotalCents changes the hash.</span>
+<span class="kw">func</span> etag(o Order) <span class="kw">string</span> {
+    sum := sha256.Sum256([]<span class="kw">byte</span>(fmt.Sprintf(<span class="str">"%d:%s:%d"</span>, o.ID, o.Status, o.TotalCents)))
+    <span class="kw">return</span> fmt.Sprintf(<span class="str">`"%x"`</span>, sum[:<span class="kw">8</span>])
+}
+
+<span class="cm">// getOrderHandler answers a conditional GET: if the client's If-None-Match
+// already matches the current ETag, it gets 304 and no body at all.</span>
+<span class="kw">func</span> getOrderHandler(w http.ResponseWriter, r *http.Request, o Order) {
+    tag := etag(o)
+    w.Header().Set(<span class="str">"ETag"</span>, tag)
+    <span class="kw">if</span> r.Header.Get(<span class="str">"If-None-Match"</span>) == tag {
+        w.WriteHeader(http.StatusNotModified) <span class="cm">// 304, no body</span>
+        <span class="kw">return</span>
+    }
+    w.Header().Set(<span class="str">"Content-Type"</span>, <span class="str">"application/json"</span>)
+    json.NewEncoder(w).Encode(o)
+}
+
+<span class="cm">// patchOrderHandler answers a conditional write: If-Match must equal the
+// current ETag, or the write is rejected with 412 before touching the DB.</span>
+<span class="kw">func</span> patchOrderHandler(w http.ResponseWriter, r *http.Request, current Order, newStatus <span class="kw">string</span>) {
+    <span class="kw">if</span> want := r.Header.Get(<span class="str">"If-Match"</span>); want != <span class="str">""</span> && want != etag(current) {
+        http.Error(w, <span class="str">"order changed since you last read it"</span>, http.StatusPreconditionFailed) <span class="cm">// 412</span>
+        <span class="kw">return</span>
+    }
+    current.Status = newStatus
+    <span class="cm">// ... persist current, same shape as Lesson 33's version-column UPDATE</span>
+    w.Header().Set(<span class="str">"ETag"</span>, etag(current))
+    json.NewEncoder(w).Encode(current)
+}</code></pre>
+<p>Notice <code>patchOrderHandler</code> checks <code>If-Match</code> before doing any database write — the same "fail the precondition before the side effect runs" shape as Lesson 33's <code>WHERE version = $seen</code>, just checked in application code instead of the SQL <code>WHERE</code> clause. A real implementation would still want the actual persistence step to be atomic (a transaction, or the same version-column <code>WHERE</code> guard underneath), since two concurrent requests could both pass this check a moment apart — the HTTP-level check narrows the window, it doesn't replace a DB-level guarantee for cases where that race actually matters.</p>
+
+<h2>5 · Where each one actually pays off</h2>
+<p><code>If-None-Match</code> is a bandwidth and latency optimization: an API polled every few seconds (a dashboard, a mobile app checking for updates) can send the last-seen ETag and get back a tiny <code>304</code> instead of the same multi-KB JSON body over and over, exactly the "don't resend if nothing changed" instinct behind Lesson 9's caching lesson. <code>If-Match</code> is a correctness guarantee: any client editing a resource that might be edited by someone else concurrently — a shared document, an admin panel, an order two support agents might both touch — should read the ETag first and send it back on the write, turning a possible silent lost update into an explicit, handleable <code>412</code>.</p>
+
+<div class="interview">
+<p><strong>Q: "What's the difference between If-None-Match and If-Match, and when would you use each?"</strong> A strong answer, out loud: <em>"Both compare a client-supplied ETag against the resource's current one, but they're used on opposite operations for opposite reasons. If-None-Match goes on a GET — it's a bandwidth optimization, the server returns 304 with no body when the client's cached copy is already current. If-Match goes on a write, PUT or PATCH or DELETE — it's a correctness guarantee, the server returns 412 and refuses the write if the resource changed since the client last read it, so you can't silently overwrite someone else's update. It's the same problem Lesson 33's version column solves at the database layer, just expressed as an HTTP-native mechanism instead of an app-level WHERE clause."</em> The signal: naming both directions correctly and connecting If-Match back to optimistic concurrency rather than describing it as just another caching header.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="An ETag is a fingerprint of a resource's exact current state, usually a hash or version marker -- any change to the resource's content changes its ETag, and two matching ETags mean two requests saw the same state.">
+    <p class="stem">What does an ETag actually represent?</p>
+    <button class="opt" data-ok>a fingerprint of the resource's current state</button>
+    <button class="opt">a permanent unique ID assigned at creation</button>
+    <button class="opt">the exact timestamp the server booted up</button>
+    <button class="opt">a random token refreshed every single request</button>
+  </div>
+  <div class="q" data-why="If-None-Match is sent on a GET; when it matches the resource's current ETag, the server replies 304 Not Modified with no body, since the client's cached copy is already current -- saving the bandwidth of resending unchanged data.">
+    <p class="stem">What happens when If-None-Match matches the current ETag?</p>
+    <button class="opt" data-ok>server replies 304 with no response body</button>
+    <button class="opt">server deletes the resource from the database</button>
+    <button class="opt">server replies 412 and rejects the request</button>
+    <button class="opt">server resends the full body once more</button>
+  </div>
+  <div class="q" data-why="If-Match is sent on a write (PUT/PATCH/DELETE); if the resource's current ETag no longer matches what the client supplied, the write is rejected with 412 Precondition Failed instead of silently overwriting a version the client never actually saw.">
+    <p class="stem">Why does a PATCH with If-Match get rejected with 412?</p>
+    <button class="opt" data-ok>the resource changed since the client last read it</button>
+    <button class="opt">the request body itself contained syntactically invalid malformed JSON</button>
+    <button class="opt">the client forgot to include an auth token header</button>
+    <button class="opt">the server's connection pool ran completely out of room</button>
+  </div>
+  <div class="q" data-why="Both mechanisms compare an ETag the client last saw against the resource's current one, using a WHERE clause and version number versus an HTTP header and precondition check -- same optimistic-concurrency strategy, applied at two different layers of the stack.">
+    <p class="stem">How does If-Match relate to Lesson 33's version column?</p>
+    <button class="opt" data-ok>same optimistic-concurrency idea, expressed at the HTTP layer</button>
+    <button class="opt">completely unrelated mechanisms that solve two different problems</button>
+    <button class="opt">If-Match replaces the need for any database transaction</button>
+    <button class="opt">version columns only matter for read-heavy dashboard queries</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Conditional_requests">MDN's HTTP conditional requests guide</a> — RESOURCES.md already names MDN's HTTP Guide as "the arbiter" for any HTTP semantics question, and this page is its dedicated treatment of ETag, If-Match, If-None-Match, 304, and 412 together, extending that same standing source into a section not yet cited. For the formal wire-level semantics, RFC 9110 §13 (HTTP Semantics — Conditional Requests) is the specification these headers are defined in.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> open — this closes out both candidates Lesson 49's search surfaced (bulkhead, ETags). No confirmed next gap is named yet; a natural next candidate is distributed locks (standing out-of-scope-per-MISSION.md unless narrowed to vocabulary level) or a synthesis lesson revisiting an earlier feature design through the caching/concurrency lenses ETags and Lesson 33 both taught.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

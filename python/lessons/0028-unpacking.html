@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 28 · Unpacking: naming the pieces instead of indexing for them</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 28 · ~20 min · 25 Aug 2026</p>
+<h1>Unpacking: naming the pieces instead of indexing for them</h1>
+<p class="byline">Two lessons back-to-back made the same promise and neither kept it: Day 2's slicing section wrote <code>header, *rows = [...]</code> and called it "preview only — unpacking is Day 4," and Day 3's <code>zip(names, ages)</code> section said "unpacking it fully is Day 4." Day 4 arrived and taught functions, <code>key=</code>, and <code>lambda</code> instead — no unpacking anywhere in it. Today finally delivers on both promises, and closes the last unstarted item on <code>MISSION.md</code>'s own idiom checklist ("comprehensions, unpacking, <code>sorted(key=…)</code>, <code>dict</code>/<code>set</code> … <code>collections</code> … <code>itertools</code>") — every other item on that list already has its lesson.</p>
+
+<div class="callout"><strong>Bridge from SQL:</strong> a SQL query with three selected columns is fetched into three named variables all at once — <code>city, amount, date = cursor.fetchone()</code> — no manual indexing into a row tuple by position needed. <dfn data-en="assigning the elements of a sequence to several names at once in a single statement, by position, instead of indexing into the sequence one name at a time" data-vn="giữ nguyên 'unpacking' — gán nhiều tên cùng lúc từ 1 sequence, theo vị trí, thay vì index từng cái">Unpacking</dfn> is that same "several names, one assignment" move, generalized to any Python sequence.</div>
+
+<h2>1 · The basic move: names on the left, a sequence on the right</h2>
+<p>A <code>tuple</code> or <code>list</code> can be assigned to several names at once, matched by position, instead of pulling each element out by index one at a time:</p>
+<pre><code>point = (<span class="kw">3</span>, <span class="kw">4</span>)
+x, y = point                <span class="cm"># x = 3, y = 4 — one statement, two names bound</span>
+
+<span class="cm"># the equivalent written the long way, by index:</span>
+x = point[<span class="kw">0</span>]
+y = point[<span class="kw">1</span>]</code></pre>
+<p>The number of names on the left must match the number of items on the right exactly, or Python raises <code>ValueError</code> rather than silently dropping or padding anything:</p>
+<pre><code>x, y, z = (<span class="kw">3</span>, <span class="kw">4</span>)      <span class="cm"># ValueError: not enough values to unpack (expected 3, got 2)</span>
+x, y = (<span class="kw">3</span>, <span class="kw">4</span>, <span class="kw">5</span>)      <span class="cm"># ValueError: too many values to unpack (expected 2)</span></code></pre>
+<p>This already explains something seen since Day 3 without a name for it: <code>for name, age in zip(names, ages):</code> unpacks each <code>(name, age)</code> tuple <code>zip</code> produces into two names, once per loop iteration — the exact mechanism this section just introduced, already in daily use for three lessons. Day 3's dict comprehension (<code>{n: a for n, a in zip(names, ages)}</code>) unpacks the same way, inside the comprehension's own <code>for</code> clause. Day 4's <code>sorted(city_counts.items(), key=lambda pair: pair[1])</code> reached into a <code>(city, count)</code> tuple with <code>pair[1]</code> indexing instead, because a <code>lambda</code>'s parameter list has no <code>for</code> clause to unpack inside — indexing was the only option available there.</p>
+
+<h2>2 · <code>for</code> loops unpack every iteration, automatically</h2>
+<p>Section 1's <code>zip</code> callback generalizes: any <code>for</code> loop whose loop variable is written as several comma-separated names, not one, unpacks each item on every pass:</p>
+<pre><code>rows = [(<span class="str">"Hanoi"</span>, <span class="kw">120</span>), (<span class="str">"HCMC"</span>, <span class="kw">80</span>), (<span class="str">"Danang"</span>, <span class="kw">200</span>)]
+<span class="kw">for</span> city, amount <span class="kw">in</span> rows:
+    <span class="kw">print</span>(city, amount)     <span class="cm"># unpacks each (city, amount) tuple fresh, once per iteration</span>
+
+<span class="cm"># a dict's .items() gives (key, value) pairs — the single most common case</span>
+prices = {<span class="str">"apple"</span>: <span class="kw">3</span>, <span class="str">"pear"</span>: <span class="kw">5</span>}
+<span class="kw">for</span> fruit, price <span class="kw">in</span> prices.items():
+    <span class="kw">print</span>(fruit, price)</code></pre>
+<p>Nothing new is happening mechanically here versus section 1 — <code>for city, amount in rows</code> runs section 1's exact tuple-unpacking assignment once per row, silently, which is precisely what every <code>for name, age in zip(...)</code> loop since Day 3 has already been doing.</p>
+
+<h2>3 · <dfn data-en="a single name prefixed with * in an unpacking assignment, which collects however many leftover items remain into a list, relaxing unpacking's usual exact-count requirement" data-vn="giữ nguyên 'star-unpacking' — dấu * gom hết phần còn lại thành 1 list">Star-unpacking</dfn>: <code>*rest</code> collects "everything else" into a list</h2>
+<p>Plain unpacking demands an exact count match. A single name prefixed with <code>*</code> relaxes that — it collects however many leftover items remain into a <code>list</code>, so the count no longer has to match exactly:</p>
+<pre><code>header, *rows = [<span class="str">"id,name"</span>, <span class="str">"1,An"</span>, <span class="str">"2,Binh"</span>, <span class="str">"3,Chi"</span>]
+<span class="cm"># header = "id,name"
+</span><span class="cm"># rows   = ["1,An", "2,Binh", "3,Chi"]   — a list, even though only 1 item is "left over" isn't required</span>
+
+first, *middle, last = [<span class="kw">10</span>, <span class="kw">20</span>, <span class="kw">30</span>, <span class="kw">40</span>, <span class="kw">50</span>]
+<span class="cm"># first = 10, middle = [20, 30, 40], last = 50 — * can sit anywhere, not just first or last</span></code></pre>
+<p>This is Day 2's own preview example, unblocked at last: <code>header, *rows</code> peels the header row off a CSV-shaped list and collects every remaining line into <code>rows</code>, in one line, with no slicing or index arithmetic. Exactly one <code>*name</code> is allowed per unpacking assignment — Python has no way to know how to split leftovers between two star-names — but that one star can appear in any position, not only the last.</p>
+<p>This is the same star seen before, in a different position. Day 4 taught <code>def f(*args)</code> collecting extra positional <em>call</em> arguments into a tuple named <code>args</code> — star meaning "collect the rest" in a function <em>definition</em>. Today's <code>*rest</code> in an assignment is that identical idea, one position over: star still means "collect the rest," just gathering leftover <em>unpacking targets</em> into a list instead of leftover call arguments into a tuple.</p>
+<pre><code><span class="cm"># Day 4's *args — collects extra call arguments, in a function definition:</span>
+<span class="kw">def</span> f(*args):
+    <span class="kw">return</span> args           <span class="cm"># f(1, 2, 3) -> (1, 2, 3), a tuple</span>
+
+<span class="cm"># today's *rest — collects extra unpacking targets, in an assignment:</span>
+first, *rest = [<span class="kw">1</span>, <span class="kw">2</span>, <span class="kw">3</span>]     <span class="cm"># rest = [2, 3], a list</span></code></pre>
+
+<h2>4 · The <dfn data-en="a, b = b, a — swapping the objects two names point at in one line, with no temporary third variable, possible because Python fully builds the right-hand side into one tuple before any left-side assignment happens" data-vn="giữ nguyên 'swap idiom' — a, b = b, a, đổi 2 object cho nhau không cần biến tạm">swap idiom</dfn>, and unpacking a function's return value</h2>
+<p>Unpacking makes swapping two names' objects a single line, with no temporary third name needed:</p>
+<pre><code>a, b = <span class="kw">1</span>, <span class="kw">2</span>
+a, b = b, a          <span class="cm"># a = 2, b = 1 — the whole right side is built as one tuple FIRST, then unpacked</span>
+
+<span class="cm"># the equivalent every other mainstream language needs a temp variable for:</span>
+temp = a
+a = b
+b = temp</code></pre>
+<p>The reason this works and isn't a race between overwriting <code>a</code> too early: Python fully evaluates the entire right-hand side into a tuple <em>before</em> any assignment on the left happens — <code>b, a</code> is built as <code>(2, 1)</code> first, in full, then unpacked into <code>a</code> and <code>b</code> only after. Same rule as section 1, just with the right side written directly as a comma-separated tuple instead of a variable already holding one.</p>
+<p>A function that <code>return</code>s several comma-separated values is really returning one tuple — the exact object section 1 already knows how to unpack, right at the call site, with no intermediate variable holding the whole tuple at all:</p>
+<pre><code><span class="kw">def</span> min_max(values):
+    <span class="kw">return</span> <span class="kw">min</span>(values), <span class="kw">max</span>(values)   <span class="cm"># one tuple returned: (min, max)</span>
+
+lowest, highest = min_max([<span class="kw">120</span>, <span class="kw">80</span>, <span class="kw">200</span>, <span class="kw">45</span>])
+<span class="cm"># lowest = 45, highest = 200 — unpacked directly from the call, no min_max(...)[0] indexing needed</span></code></pre>
+<p><code>min(values), max(values)</code> after <code>return</code> is just two expressions separated by a comma — Python packs them into a tuple automatically, the same implicit tuple-building the swap idiom's right-hand side just relied on. Calling <code>min_max(...)</code> without unpacking gives back that one <code>(45, 200)</code> tuple whole; writing <code>lowest, highest = min_max(...)</code> unpacks it immediately, reading exactly like "this function gives me two things, name them both."</p>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> <code>df.shape</code> returns a <code>(rows, cols)</code> tuple that gets unpacked the exact same way — <code>n_rows, n_cols = df.shape</code> — once <code>data/</code> introduces DataFrames. Not demonstrated here; that's <code>data/</code>'s job, and this is the only sentence in this lesson that names it.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/28_unpacking.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/28_unpacking.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: basic two-name tuple unpacking, star-unpacking a header off a list of rows, the no-temp swap idiom, unpacking a <code>for</code> loop over <code>(name, score)</code> pairs, and unpacking a function's returned <code>(min, max)</code> tuple directly at the call site.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Unpacking demands an exact count match between the names on the left and the items on the right - too few or too many names both raise ValueError immediately, rather than silently dropping or padding, exactly section 1's x, y, z = (3, 4) example.">
+    <p class="stem">What happens when <code>x, y, z = (3, 4)</code> runs?</p>
+    <button class="opt" data-ok>raises ValueError since three names but only two items exist</button>
+    <button class="opt">binds z to None automatically since one value was missing</button>
+    <button class="opt">silently binds only x and y, leaving z fully undefined</button>
+  </div>
+  <div class="q" data-why="for city, amount in rows runs section 1's tuple-unpacking assignment once per row automatically - the exact mechanism every for name, age in zip(...) loop since Day 3 has silently relied on already, named explicitly for the first time today.">
+    <p class="stem">What is <code>for city, amount in rows:</code> actually doing each pass?</p>
+    <button class="opt" data-ok>unpacking each row's tuple into city and amount by position</button>
+    <button class="opt">calling a hidden city() and amount() function on each row</button>
+    <button class="opt">comparing city against amount to decide the loop's own order</button>
+  </div>
+  <div class="q" data-why="A single *name in an unpacking assignment collects however many leftover items remain into a list, relaxing the exact-count rule from section 1 - exactly section 3's header, *rows example peeling one row off many.">
+    <p class="stem">What does <code>*rows</code> collect in <code>header, *rows = [...]</code>?</p>
+    <button class="opt" data-ok>every remaining item after header, gathered into one list</button>
+    <button class="opt">only the second item, discarding every item after that</button>
+    <button class="opt">a single tuple holding literally every original item unchanged</button>
+  </div>
+  <div class="q" data-why="Python builds the entire right-hand side into one tuple first, in full, before any left-side assignment happens - so a, b = b, a reads the old a and old b together before either name is rebound, which is exactly why no temporary third variable is ever needed.">
+    <p class="stem">Why does <code>a, b = b, a</code> correctly swap both names with no temp variable?</p>
+    <button class="opt" data-ok>the whole right side builds as one tuple before any rebinding</button>
+    <button class="opt">Python secretly creates a hidden extra temp variable behind the scenes</button>
+    <button class="opt">assignment always happens right to left instead of left to right</button>
+  </div>
+  <div class="q" data-why="return min(values), max(values) packs both values into one tuple automatically via the comma, the same implicit tuple-building the swap idiom's right-hand side relies on - lowest, highest = min_max(...) then unpacks that one returned tuple directly at the call site, no indexing needed.">
+    <p class="stem">In <code>lowest, highest = min_max([...])</code>, what is <code>min_max</code> actually returning?</p>
+    <button class="opt" data-ok>one single tuple holding both values, unpacked right at the call</button>
+    <button class="opt">two entirely separate values sent back on two totally separate lines</button>
+    <button class="opt">a plain dict mapping the string lowest to the string highest</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> Trey Hunner's blog (cited in <code>RESOURCES.md</code> for exactly this — "careful, beginner-aware writing on comprehensions, unpacking, and looping idioms"), especially his posts on tuple unpacking and the star operator; the <a href="https://docs.python.org/3/tutorial/datastructures.html#tuples-and-sequences">Python Tutorial's own section on tuples and sequences</a> covers the same mechanics formally, including the exact <code>ValueError</code> wording used above.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day28">glossary</a> under Day 28.<br>
+With <code>MISSION.md</code>'s idiom checklist now fully covered (comprehensions, unpacking, <code>sorted(key=…)</code>, <code>dict</code>/<code>set</code>, <code>collections</code>, <code>itertools</code>), the next lesson should either adopt a source for Python-specific interview prep, find a FastAPI project-layout reference — both still open per <code>RESOURCES.md</code>'s Gaps section — or re-scan <code>MISSION.md</code>/<code>PLAN.md</code> once more before picking an unnamed Phase 3 direction.<br><br>
+💬 Anything unclear — the swap idiom, <code>*rest</code>, or unpacking a function's return value? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

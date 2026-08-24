@@ -100,6 +100,8 @@
       file: "lessons/0046-at-and-iat.html" },
     { n: 47, date: "2026-08-24", title: "reindex(): forcing a chosen label set",
       file: "lessons/0047-reindex.html" },
+    { n: 48, date: "2026-08-25", title: "cumcount(): a running position within each group",
+      file: "lessons/0048-cumcount.html" },
   ];
 
   const REFS = [

@@ -60,6 +60,8 @@
       file: "lessons/0026-fastapi-capstone.html" },
     { n: 27, date: "2026-08-24", title: "itertools: chaining, grouping & combining without hand-rolled loops",
       file: "lessons/0027-itertools.html" },
+    { n: 28, date: "2026-08-25", title: "Unpacking: naming the pieces instead of indexing for them",
+      file: "lessons/0028-unpacking.html" },
   ];
 
   const REFS = [

@@ -62,6 +62,8 @@
       file: "lessons/0027-itertools.html" },
     { n: 28, date: "2026-08-25", title: "Unpacking: naming the pieces instead of indexing for them",
       file: "lessons/0028-unpacking.html" },
+    { n: 29, date: "2026-08-26", title: "Writing your own context manager",
+      file: "lessons/0029-writing-context-managers.html" },
   ];
 
   const REFS = [

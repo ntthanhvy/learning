@@ -3102,4 +3102,173 @@ fail *gracefully* so the learner sees which task failed.
   rule — Day 29 should either find and adopt such a source, or re-scan
   `MISSION.md`/`PLAN.md` once more for another named-but-untaught mechanism
   before falling back to an unnamed Phase 3 direction.
+- 2026-08-26 — **Day 29 generated**
+  (`lessons/0029-writing-context-managers.html`), an automated headless
+  daily-generation run. Idempotency: confirmed before writing anything that
+  no `python/lessons/0029-*.html` (or higher-numbered) file existed and no
+  `2026-08-26` entry existed anywhere in this file or `assets/nav.js` —
+  highest existing lesson on disk was `0028-unpacking.html` dated
+  2026-08-25, so generation proceeded as Day 29, not a re-run.
+  **DB access:** per this run's explicit instructions, `LEARNING_DB_URL`
+  reads were skipped entirely (hard-blocked in this sandbox, already
+  confirmed prior to this session) — paced entirely from on-disk state
+  (this file's own log, `python/lessons/`, `python/assets/nav.js`,
+  `python/learning-records/` — still only the Day 1 baseline record, no
+  completion/quiz record for any day 2-28).
+  Topic selection: Day 28's own next-day note offered two paths — find and
+  adopt a genuine primary source for Python interview prep, or re-scan
+  `MISSION.md`/`PLAN.md` for another named-but-untaught mechanism before
+  falling back to an unnamed Phase 3 direction. The first path was
+  attempted genuinely, not skipped: `WebSearch`/`WebFetch` were invoked
+  directly and via a dedicated research subagent to find a real, citable
+  interview-prep source, matching the quality bar of `RESOURCES.md`'s
+  existing entries (official docs or a named, credible author/site, never
+  an SEO listicle). Both tools returned a hard permission denial
+  ("Claude requested permissions to use WebSearch, but you haven't granted
+  it yet") at the top level and inside the subagent alike — no live web
+  access was available this run, so that path was abandoned rather than
+  risk shipping a fabricated or stale-memory URL as a cited "primary
+  source," which would violate this course's own citation rule worse than
+  not adding one yet.
+  Fell through to the second path: re-grepped every lesson body (`0001`
+  through `0028`) for named-but-undelivered mechanisms from
+  `MISSION.md`/`PLAN.md` and found one concrete, textually-grounded gap —
+  Day 6's own lesson prose (`lessons/0006-files-formats-and-with.html`,
+  section 4) explicitly says "You won't write `__enter__`/`__exit__`
+  yourself yet — that's a later lesson on writing your own classes," a
+  promise no lesson since had delivered on (grepped
+  `__enter__|__exit__|contextmanager` across all of `python/lessons/`;
+  every hit besides Day 6 itself was an incidental "always runs" callback
+  — Day 8's `finally`, Day 11's fixture teardown — never the mechanism
+  itself). This is the same "twice-promised, never-delivered" shape Day
+  28's own unpacking pick used, not an invented topic — grounded in this
+  course's own text, language-level (the object-model protocol behind
+  `with`, not a library), and backed by `RESOURCES.md`'s already-cited
+  Data model reference (`docs.python.org/3/reference/datamodel.html`),
+  which formally documents `__enter__`/`__exit__`. Also confirmed via grep
+  that `@property`, `@classmethod`/`@staticmethod` as their own mechanism,
+  `enum.Enum`, and `functools.lru_cache`/`reduce`/`partial` are likewise
+  untaught, but none of those is named explicitly anywhere in
+  `MISSION.md`/`PLAN.md` the way context managers were named (twice) and
+  unpacking was (twice) — picking one of those instead would have been
+  "inventing a topic with no textual basis," which this run's instructions
+  explicitly forbid, so context managers was the only defensible pick.
+  Topic: writing a context manager — both the class form (`__enter__`/
+  `__exit__` on a plain class) and the `contextlib.contextmanager`
+  generator-based shortcut. Taught: the `with` desugaring recap from Day 6
+  section 4, now completed rather than left as recognition-only; a
+  `Timer` class implementing both dunder methods, with the single most
+  emphasized rule being `__exit__`'s return-value contract — a truthy
+  return suppresses an in-flight exception, `False`/`None` lets it
+  propagate, and a context manager that swallows everything by accident is
+  a bug, not a feature; `contextlib.contextmanager` as Day 5's `yield`
+  mechanism reused to skip the class boilerplate, with the
+  before-`yield`/after-`yield` split mapped explicitly onto
+  `__enter__`/`__exit__` and the teardown code's `finally` requirement tied
+  back to Day 6's original handle-leak motivation; and a `transaction(log)`
+  example (BEGIN/COMMIT/ROLLBACK) wiring in Day 8's narrow-catch-and-
+  re-raise habit inside a generator instead of a plain function. Bridged
+  from SQL per the baseline record: a transaction block (`BEGIN`/`COMMIT`/
+  `ROLLBACK`, one guaranteed outcome) introduced before any Python in the
+  top callout, not from a pandas or other "Python-adjacent" analogy — the
+  same transaction shape also became section 4's worked example, not just
+  the opening bridge.
+  Learning records: still only the Day 1 baseline
+  (`learning-records/0001-baseline-reads-python-writes-little.md`) — no
+  completion/quiz record for any later day was found (same gap every Day
+  8-28 entry has flagged). Paced conservatively per that same assumption:
+  two forms taught (class-based, generator-based), each tied back to
+  already-taught material (Day 5 `yield`, Day 6 `with`/`__enter__`/
+  `__exit__`, Day 8 `try`/`except`/`raise`, Day 11 fixture teardown) rather
+  than introduced as unrelated new ground, and no additional contextlib
+  helpers (`ExitStack`, `suppress`, `closing`, `nullcontext`) pulled in
+  beyond the two named forms and the one deliberate-suppression exercise.
+  No-pandas rule: zero pandas/NumPy/DataFrame hits in the practice file
+  (grepped case-insensitively — zero hits, standard library only, only
+  `contextlib.contextmanager` imported); exactly one hit in the lesson —
+  one contrast sentence/callout (titled "Where pandas goes from here")
+  naming `pd.option_context(...)` as itself a context manager, without
+  demonstrating any pandas API, placed once after section 4/the interview
+  callout and labeled in prose as the only such sentence, matching the
+  hard-rule section above.
+  Practice file `practice/29_writing_context_managers.py` (7 checks across
+  5 exercises: a class-based `LoggingCM` logging enter/exit in order,
+  confirming `__exit__` still runs when the `with`-block raises, a
+  `@contextmanager`-based generator equivalent, the `transaction()`
+  commit/rollback pattern in both the success and failure paths, and a
+  `Suppress(exc_type)` class whose `__exit__` deliberately suppresses only
+  a matching exception type) needed no on-disk fixtures — every exercise
+  runs against small in-memory logs and exceptions. Followed this course's
+  now-standard defensive pattern against the Ellipsis-at-module-level bug
+  family flagged repeatedly since Days 11/12/17/28: `LoggingCM`'s class
+  line and `Suppress`'s class line are both left fully definable (concrete
+  base classes, no bare `...` anywhere in a class header or decorator
+  position), with every unsolved `...` placeholder living strictly inside a
+  method or function body instead, so an unsolved `logging_cm`/
+  `transaction` function simply returns `None` (undecorated in effect)
+  rather than crashing at import/decoration time. Verified in a scratch dir
+  (`.scratch_py29_verify/`, created under the repo root and removed after
+  use, per every prior day's `/tmp`-is-out-of-bounds precedent): the
+  shipped (unsolved) copy, run via plain `uv run python3` (no `--with`
+  needed), both from the scratch copy and from its real `practice/` path
+  with the documented command, printed seven clean ✗/✓ lines with no
+  traceback each time — six ✗ and, correctly, one ✓ (Ex 5b passes even
+  unsolved, since an unsolved `Suppress.__exit__` returns `None`/falsy,
+  which correctly lets the non-matching `ValueError` propagate — confirmed
+  to be the exercise's intended distinguishing behavior against Ex 5a, not
+  a bug); a separately solved copy (every `...` filled in directly in the
+  scratch copy) printed all seven ✓ and the "All green" tally. No bugs
+  found during verification — both passes succeeded on the first attempt,
+  and no unhandled traceback appeared at any point.
+  Glossary: added a Day 29 section to `reference/glossary.html`
+  (`contextlib.contextmanager`, `exception suppression`) after confirming
+  via grep that neither term collided with any Day 1-28 entry — deliberately
+  did **not** re-glossary `__enter__`/`__exit__`/`context manager`/`with
+  statement`, all already defined under Day 6, and reused those existing
+  terms as plain `<code>` in today's prose instead, per this course's own
+  no-duplicate-glossary-row convention. The 2 new `<dfn data-en` tags in
+  the lesson body match the 2 new glossary rows exactly (confirmed by
+  count).
+  Quiz: 5 questions. First draft had one markup slip caught during
+  verification — Q4's opening `<div class="q" data-why="...">` had a stray
+  line break landing the closing `>` on its own line, valid HTML but
+  inconsistent with every other question in this and every prior lesson,
+  fixed to a single-line tag to match convention. Word counts were checked
+  with a small Python script (regex-splitting the quiz block into its five
+  question `<div>`s and counting `.split()` words per `<button class="opt">`
+  line, run from a scratch dir via `uv run python3`) and mismatched on the
+  first draft for three of five questions (Q1 7/9/7, Q3 10/11/8, Q4 9/8/10)
+  — Q2 and Q5 were already equal on the first draft (9/9/9 and 10/10/10).
+  Each mismatched question went through one to two rewrite-and-recount
+  rounds, re-running the script after every edit rather than trusting a
+  manual count, until every option matched (Q1 9/9/9, Q3 10/10/10, Q4
+  9/9/9), then — per this run's explicit instruction to re-verify with a
+  second independent method after any rewrite — a second, differently
+  written script (document-order `<button class="opt">` extraction grouped
+  in threes, instead of the first script's per-question regex split) was
+  run against the final file and independently confirmed all 15 options
+  (5 questions × 3 options) land on their target counts (9/9/9, 9/9/9,
+  10/10/10, 9/9/9, 10/10/10) before shipping. Registered in `assets/nav.js`
+  with `date: "2026-08-26"`.
+  `bin/record-progress python lesson_generated --day 29 --lesson
+  0029-writing-context-managers.html --detail '{"by":"github-actions"}'`
+  was run once after shipping and **succeeded**: `recorded:
+  python/lesson_generated day=29 lesson=0029-writing-context-managers.html`.
+  **Next-day note:** `RESOURCES.md`'s "Gaps" section (Python interview
+  prep, a FastAPI project-layout reference beyond the official docs) is
+  now the clearest remaining lead, but both require genuine live web
+  research to resolve responsibly — this run confirmed `WebSearch`/
+  `WebFetch` are denied by a permission gate in this sandbox (not merely
+  rate-limited or flaky), a more specific finding than prior days' vaguer
+  "DB access blocked" notes, and about a different pair of tools than any
+  prior day tested. Day 30 should retry web access first (permissions may
+  be granted differently in a future run); if still blocked, a further
+  `MISSION.md`/`PLAN.md` re-scan may need to look at less obviously-named
+  candidates — `MISSION.md` alludes to "Python's object model" broadly but
+  does not name `@property`/operator-overloading/`__repr__`/`__eq__` as
+  explicitly as it named unpacking or (via Day 6's own deferral) context
+  managers, so picking one of those next would need a clearer textual
+  hook than this run found for them — or fall back to an unnamed Phase 3
+  direction. Still no `lesson_completed`/quiz/kata outcome record exists
+  for ANY day after 29 rounds — no reported weak spot to target.
 

@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 29 · Writing your own context manager</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 29 · ~20 min · 26 Aug 2026</p>
+<h1>Writing your own context manager</h1>
+<p class="byline">Day 6 named the protocol behind <code>with</code> — <code>__enter__</code> and <code>__exit__</code> — then stopped short on purpose: <em>"You won't write <code>__enter__</code>/<code>__exit__</code> yourself yet — that's a later lesson."</em> This is that lesson. By the end you can write a class that works after <code>with</code>, and the much shorter generator-based shortcut for the common case.</p>
+
+<div class="callout"><strong>Bridge from SQL:</strong> a transaction block — <code>BEGIN</code>, your statements, then <code>COMMIT</code> on success or <code>ROLLBACK</code> on failure, guaranteed one or the other — is the same shape as today's lesson: fixed setup, fixed cleanup, cleanup runs no matter how the middle part ends. Today builds that guarantee as a reusable Python object instead of relying on the database driver to give it to you.</p>
+
+<h2>1 · Recap: what <code>with</code> actually calls</h2>
+<p>Day 6 section 4 showed the desugaring of <code>with</code> without asking you to write either half:</p>
+<pre><code><span class="kw">with</span> resource() <span class="kw">as</span> r:
+    ...
+<span class="cm"># is roughly:</span>
+r = resource().__enter__()
+<span class="kw">try</span>:
+    ...
+<span class="kw">finally</span>:
+    resource().__exit__(exc_type, exc_value, traceback)</code></pre>
+<p>Any object with both methods works after <code>with</code> — nothing about <code>with</code> is special-cased to files. <code>__enter__(self)</code> runs first and its return value is what <code>as name</code> binds; <code>__exit__(self, exc_type, exc_value, traceback)</code> runs last, unconditionally, and receives details about an in-flight exception if the block raised one (all three arguments are <code>None</code> if it didn't).</p>
+
+<h2>2 · Writing the class form</h2>
+<p>A minimal timer that logs how long its block took, whether or not the block raised, built from nothing more than a class with two methods:</p>
+<pre><code><span class="kw">import</span> time
+
+<span class="kw">class</span> Timer:
+    <span class="kw">def</span> __enter__(self):
+        self.start = time.perf_counter()
+        <span class="kw">return</span> self                      <span class="cm"># binds to `as t` — often self, not required to be</span>
+
+    <span class="kw">def</span> __exit__(self, exc_type, exc_value, tb):
+        self.elapsed = time.perf_counter() - self.start
+        <span class="kw">print</span>(<span class="str">f"took {self.elapsed:.3f}s"</span>)
+        <span class="kw">return</span> <span class="kw">False</span>                       <span class="cm"># False = don't swallow an exception; re-raise it</span>
+
+<span class="kw">with</span> Timer() <span class="kw">as</span> t:
+    <span class="kw">do_work</span>()
+<span class="cm"># "took 0.002s" prints even if do_work() raised — __exit__ still ran</span></code></pre>
+<p><code>__exit__</code>'s return value matters and is easy to miss: if it returns a <em>truthy</em> value, Python treats the exception as <dfn data-en="an __exit__ method returning a truthy value tells Python the exception was handled — it does not propagate past the with block, and surrounding code continues as if nothing raised" data-vn="giữ nguyên 'exception suppression' — __exit__ trả về truthy thì exception bị nuốt, không propagate tiếp">suppressed</dfn> — the <code>with</code> block's surrounding code continues as if nothing raised. Returning <code>False</code> (or nothing at all, since a bare <code>return</code> or falling off the end both give <code>None</code>) lets the exception propagate normally, which is what you want almost always. A context manager that silently eats every exception it sees is a bug, not a feature — this is the single most important rule in this lesson.</p>
+
+<h2>3 · The generator shortcut: <code>@contextmanager</code></h2>
+<p>Writing a full class for a simple setup/teardown pair is more ceremony than the job needs. The standard library's <dfn data-en="a decorator from contextlib that turns a generator function into a context manager usable after with — code before yield becomes __enter__'s setup, and code after yield (inside a finally) becomes __exit__'s teardown" data-vn="giữ nguyên '@contextmanager' — decorator biến generator function thành context manager, không cần viết class">contextlib.contextmanager</dfn> decorator turns a <code>yield</code>-based generator function — the exact mechanism Day 5 already taught — into a context manager, with everything before <code>yield</code> as setup and everything after as teardown:</p>
+<pre><code><span class="kw">from</span> contextlib <span class="kw">import</span> contextmanager
+<span class="kw">import</span> time
+
+<span class="kw">@contextmanager</span>
+<span class="kw">def</span> timer():
+    start = time.perf_counter()
+    <span class="kw">try</span>:
+        <span class="kw">yield</span> start                          <span class="cm"># whatever is yielded is what `as` binds</span>
+    <span class="kw">finally</span>:
+        <span class="kw">print</span>(<span class="str">f"took {time.perf_counter() - start:.3f}s"</span>)
+
+<span class="kw">with</span> timer() <span class="kw">as</span> start_time:
+    <span class="kw">do_work</span>()
+<span class="cm"># the finally block runs on the way out, exception or not — same guarantee, far less code</span></code></pre>
+<p>The mapping onto the class form from section 2: code before <code>yield</code> is <code>__enter__</code>, the yielded value is what <code>__enter__</code> would have returned, and code after <code>yield</code> — inside a <code>finally</code>, exactly like a pytest fixture's teardown (Day 11) — is <code>__exit__</code>. If the <code>with</code> block raises, the exception surfaces at the <code>yield</code> line itself inside the generator, which is precisely why the <code>finally</code> here is not optional: without it, an exception in the block would skip the cleanup code entirely, the identical leak Day 6 opened with.</p>
+
+<h2>4 · A real example: a database-style transaction</h2>
+<p>The transaction shape named in this lesson's opening bridge, written as one reusable <code>@contextmanager</code> function:</p>
+<pre><code><span class="kw">from</span> contextlib <span class="kw">import</span> contextmanager
+
+<span class="kw">@contextmanager</span>
+<span class="kw">def</span> transaction(log):
+    log.append(<span class="str">"BEGIN"</span>)
+    <span class="kw">try</span>:
+        <span class="kw">yield</span>
+        log.append(<span class="str">"COMMIT"</span>)                <span class="cm"># only reached if the block didn't raise</span>
+    <span class="kw">except</span> Exception:
+        log.append(<span class="str">"ROLLBACK"</span>)
+        <span class="kw">raise</span>                             <span class="cm"># re-raise — the caller still needs to know it failed</span>
+
+log = []
+<span class="kw">with</span> transaction(log):
+    log.append(<span class="str">"INSERT"</span>)
+<span class="cm"># log == ["BEGIN", "INSERT", "COMMIT"]</span></code></pre>
+<p>The line right after <code>yield</code> only runs if the <code>with</code> block completed without raising — an exception jumps straight from the failing statement inside the block to the <code>except</code> clause wrapped around <code>yield</code>, skipping the commit line entirely. This is Day 8's <code>try</code>/<code>except</code>/<code>raise</code> material applied inside a generator instead of a plain function, catching narrowly and re-raising rather than swallowing, exactly the habit Day 8 emphasized most.</p>
+
+<div class="interview">
+<p><strong>Q: "How would you write a context manager in Python?"</strong> A strong answer, out loud: <em>"Two ways. A class with <code>__enter__</code> and <code>__exit__</code> — <code>__enter__</code> does setup and returns whatever <code>as name</code> should bind to, <code>__exit__</code> does teardown and gets the exception info if the block raised. Or, for the common case, <code>contextlib.contextmanager</code> on a generator function — code before <code>yield</code> is setup, code after <code>yield</code> inside a <code>finally</code> is teardown. The detail people miss: <code>__exit__</code> returning a truthy value swallows the exception instead of letting it propagate, so unless you deliberately want to suppress something, always return <code>False</code> or nothing."</em> The signal: naming both forms, and knowing the swallow-exception gotcha — the exact thing section 2 flagged as the most missable line in this whole lesson.</p>
+</div>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> <code>pd.option_context(...)</code> is itself a context manager — used with <code>with</code> to temporarily change a display option and restore it automatically afterward. Not demonstrated here; that's <code>data/</code>'s job, and this is the only sentence in this lesson that names it.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/29_writing_context_managers.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/29_writing_context_managers.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: a class-based context manager tracking enter/exit calls in a log list, confirming <code>__exit__</code> still runs when the block raises, a <code>@contextmanager</code>-based generator equivalent of the same log-tracking job, the transaction commit/rollback pattern from section 4, and a context manager whose <code>__exit__</code> deliberately suppresses one named exception type.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Any object with both __enter__ and __exit__ works after with — the protocol is not special-cased to files or any built-in type, exactly as Day 6 section 4 first showed via open()'s own __enter__/__exit__.">
+    <p class="stem">What makes an object usable after <code>with</code>?</p>
+    <button class="opt" data-ok>defining both an __enter__ method and an __exit__ method</button>
+    <button class="opt">being a plain file object that open already returns</button>
+    <button class="opt">inheriting from some special built-in ContextManager base class type</button>
+  </div>
+  <div class="q" data-why="__exit__ receives exc_type, exc_value, and traceback describing any in-flight exception (all None if the block didn't raise), and its return value decides whether that exception is swallowed (truthy) or left to propagate (falsy) — returning False or nothing is almost always correct.">
+    <p class="stem">What does a truthy return value from <code>__exit__</code> do to a raised exception?</p>
+    <button class="opt" data-ok>it swallows the exception instead of letting it propagate</button>
+    <button class="opt">it converts the exception into a plain warning message</button>
+    <button class="opt">it immediately re-raises the same exception one more time</button>
+  </div>
+  <div class="q" data-why="With @contextmanager, code before yield runs as setup (matching __enter__), the yielded value is what `as name` binds, and code after yield — inside a finally — runs as teardown (matching __exit__), the direct generator-based shortcut for the class form in section 2.">
+    <p class="stem">In a <code>@contextmanager</code> generator function, what does the code after <code>yield</code> correspond to?</p>
+    <button class="opt" data-ok>the __exit__ half — teardown code, guaranteed via a finally</button>
+    <button class="opt">the __enter__ half — setup that runs before the block</button>
+    <button class="opt">dead code that Python quietly skips over completely every time</button>
+  </div>
+  <div class="q" data-why="Without the finally in section 3's @contextmanager example, an exception raised inside the with block would propagate straight out of the yield line and skip every line after it — the exact same handle-leak failure mode Day 6 opened with, just inside a generator instead of a plain function.">
+    <p class="stem">Why must a <code>@contextmanager</code> generator's teardown code sit inside a <code>finally</code>?</p>
+    <button class="opt" data-ok>otherwise an exception in the block skips teardown code</button>
+    <button class="opt">contextmanager syntax simply always requires a plain finally block</button>
+    <button class="opt">it silently speeds up how the generator itself runs</button>
+  </div>
+  <div class="q" data-why="Section 4's transaction() only appends COMMIT on the line immediately after yield, which only executes if the with block completed with no exception — a raise inside the block jumps straight to the except clause wrapping yield instead, appending ROLLBACK and re-raising, so COMMIT is skipped precisely when it should be.">
+    <p class="stem">In section 4's <code>transaction()</code>, when does the code appending <code>"COMMIT"</code> run?</p>
+    <button class="opt" data-ok>only if the with block finished without raising an exception</button>
+    <button class="opt">always, every single time, regardless of any exception at all</button>
+    <button class="opt">only before the with block itself has even started running</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the <a href="https://docs.python.org/3/library/contextlib.html">contextlib</a> standard-library docs (the <code>@contextmanager</code> section especially) and the <a href="https://docs.python.org/3/reference/datamodel.html#context-managers">Language Reference's Data model section on context managers</a> (cited in <code>RESOURCES.md</code> for exactly this kind of "why does it behave like that" question) — both cover today's two forms formally, including the exact swallow-exception rule from section 2.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day29">glossary</a> under Day 29.<br>
+This closes the "writing a context manager class" gap Day 6 explicitly deferred here, and — with <code>MISSION.md</code>'s idiom checklist and both Phase 2a/2b spines all complete — leaves <code>RESOURCES.md</code>'s remaining Gaps (a chosen Python interview-prep source, a FastAPI project-layout reference) as the most concrete still-open items for the next session to pursue with real web access.<br><br>
+💬 Anything unclear — the swallow-exception rule, <code>@contextmanager</code>, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

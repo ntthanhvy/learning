@@ -282,6 +282,13 @@
   <tr><td>swap idiom</td><td>giữ nguyên "swap idiom" — <code>a, b = b, a</code>, đổi 2 object cho nhau không cần biến tạm</td><td><code>a, b = b, a</code> swaps the objects two names point at in one line, with no temporary third variable — possible because Python fully builds the entire right-hand side into one tuple before any left-side assignment happens, so the old <code>a</code> and old <code>b</code> are both read before either name is rebound.</td></tr>
 </table>
 
+<h2 id="day29">Day 29 — Writing your own context manager</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>contextlib.contextmanager</td><td>giữ nguyên "@contextmanager" — decorator biến generator function thành context manager, không cần viết class</td><td>A decorator from the standard-library <code>contextlib</code> module that turns a <code>yield</code>-based generator function into a context manager usable after <code>with</code> — code before <code>yield</code> becomes <code>__enter__</code>'s setup, the yielded value is what <code>as name</code> binds, and code after <code>yield</code> (inside a <code>finally</code>) becomes <code>__exit__</code>'s teardown. The shortcut form for the common case, over writing a full class with <code>__enter__</code>/<code>__exit__</code> by hand.</td></tr>
+  <tr><td>exception suppression</td><td>giữ nguyên "exception suppression" — __exit__ trả về truthy thì exception bị nuốt, không propagate tiếp</td><td>What happens when a context manager's <code>__exit__</code> method returns a truthy value while the <code>with</code> block it wraps is raising an exception: Python treats the exception as handled and does not let it propagate further, so code after the <code>with</code> block runs as if nothing had raised. Returning <code>False</code> or nothing (the default) instead lets the exception propagate normally — the behavior wanted almost always, since silently swallowing every exception is a bug, not a feature.</td></tr>
+</table>
+
 <p class="next">💬 A term here still unclear? Ask your teacher — hỏi bằng tiếng Việt cũng được.</p>
 
 <script src="../assets/nav.js"></script>

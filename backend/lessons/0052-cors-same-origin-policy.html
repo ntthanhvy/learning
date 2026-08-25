@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 52 · CORS: why the browser blocks your own fetch()</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 52 · ~20 min</p>
+<h1>CORS: why the browser blocks your own fetch()</h1>
+<p class="byline">You've hit a CORS error in DevTools more times than any other error in this course's scope — and probably "fixed" it by copy-pasting a header without knowing what it actually grants. Today: what the browser is protecting, who CORS is really for, and why it isn't the security feature most frontend devs assume it is.</p>
+
+<h2>1 · The rule that was already there: same-origin policy</h2>
+<p>Before CORS exists at all, browsers enforce something older and stricter: the <dfn data-en="a browser security rule that JavaScript on one origin (scheme + host + port) cannot read the response of a request to a different origin, unless that origin explicitly opts in" data-vn="same-origin policy (giữ nguyên) — JS ở origin này mặc định không được đọc response từ origin khác">same-origin policy</dfn>. An <dfn data-en="the scheme, host, and port of a URL together -- https://app.example.com:443 and http://app.example.com are different origins even though the host looks the same" data-vn="origin (giữ nguyên) — scheme + host + port, đủ một trong ba khác là khác origin">origin</dfn> is the scheme + host + port together, so <code>https://app.example.com</code> and <code>https://api.example.com</code> are different origins (different host), and <code>https://app.example.com</code> and <code>http://app.example.com</code> are different origins too (different scheme). By default, JavaScript running on one origin cannot read the response body of a request it makes to a different origin — the request can still go out and the browser will happily attach cookies to it, but the page's own JavaScript is blocked from reading what came back.</p>
+<div class="callout"><strong>The distinction that trips people up:</strong> same-origin policy is enforced entirely by the browser, purely on the read side. Lesson 22's CSRF lesson already showed the other half of this: the browser attaches cookies and fires the request regardless of origin — that part was never blocked. Same-origin policy is what stops the attacker's own JavaScript from reading the response to that forged request. The two lessons are about opposite ends of the same request.</div>
+
+<h2>2 · CORS: the server's permission slip to relax that rule</h2>
+<p><dfn data-en="Cross-Origin Resource Sharing: a set of HTTP response headers a server sends to tell browsers which other origins' JavaScript is allowed to read this response, relaxing the same-origin policy on a per-origin, per-response basis" data-vn="CORS (giữ nguyên) — server dùng response header để cho phép JS từ origin khác đọc response của mình">CORS</dfn> exists because same-origin policy, left alone, would break every legitimate case of one origin's frontend calling another origin's API — exactly your day job, where <code>app.example.com</code> calls <code>api.example.com</code>. CORS is the mechanism for the server to say, in the response itself, "this specific other origin is allowed to read this." The browser sends the request either way; CORS headers only control whether the calling page's JavaScript is allowed to see what came back.</p>
+<pre><code>GET /orders HTTP/1.1
+Host: api.example.com
+Origin: https://app.example.com
+
+HTTP/1.1 200 OK
+Access-Control-Allow-Origin: https://app.example.com
+Content-Type: application/json
+
+[{"id":482,"status":"packed"}]</code></pre>
+<p>The browser sends <code>Origin</code> automatically on every cross-origin request — the page's JavaScript never sets it and cannot override it. The server reads that header, decides whether to trust it, and answers with <dfn data-en="the CORS response header naming which origin (or * for any) is permitted to read this response's body from JavaScript" data-vn="Access-Control-Allow-Origin (giữ nguyên) — header trả lời origin nào được phép đọc response">Access-Control-Allow-Origin</dfn>. If that header is missing, or names a different origin than the one that asked, the browser discards the response before the calling JavaScript ever sees it — the <code>fetch()</code> promise rejects, and DevTools prints the CORS error you've seen.</p>
+
+<h2>3 · The interview trap: CORS protects the client, not the server</h2>
+<p>This is the single most common misconception, and it's worth stating as bluntly as the mechanism deserves: <strong>CORS is not a server-side access control.</strong> It adds no protection against a non-browser caller at all — <code>curl</code>, a backend service, Postman, or an attacker's own script talking directly to your API never sends a real browser's enforcement layer along with it; they can read any response regardless of what <code>Access-Control-Allow-Origin</code> says, because CORS is enforced by browsers, not by your server. Your server was always the one deciding whether to answer a request in the first place — that's authentication (Lesson 4) and authorization (Lesson 12), the mechanisms that actually decide who is allowed to act. CORS headers only ever answer a narrower, additional question: <em>which browser-hosted frontends are allowed to read this response</em>. Getting CORS permissive (or even wide open with <code>*</code>) doesn't hand out any capability an authenticated, authorized request didn't already have — it only changes which websites' own JavaScript is allowed to see the result.</p>
+<div class="callout"><strong>Frontend habit this retrains:</strong> "just add <code>Access-Control-Allow-Origin: *</code> to make the error go away" treats CORS as a bug to silence. Treat it instead as a real question your server is answering out loud: which other frontends should be allowed to read this data through a user's browser. Silencing the error without answering the question just picks the widest possible answer by default.</div>
+
+<h2>4 · Simple requests vs. preflight</h2>
+<p>Not every cross-origin request works the same way. A <dfn data-en="a cross-origin request simple enough (GET/HEAD/POST, only a small allowlist of headers, one of three plain content types) that the browser sends it directly and checks Access-Control-Allow-Origin on the real response" data-vn="simple request (giữ nguyên) — request cross-origin đơn giản, browser gửi thẳng rồi mới kiểm tra CORS trên response thật">simple request</dfn> — a plain <code>GET</code>, or a <code>POST</code> with only a plain content type like <code>text/plain</code> or form-encoded data, and no custom headers — goes out immediately, and the browser checks the CORS headers on the real response. But a request using <code>PATCH</code>/<code>DELETE</code>, a custom header like <code>Authorization</code>, or <code>Content-Type: application/json</code> (the normal shape of an API call from this course) triggers a <dfn data-en="an automatic OPTIONS request the browser sends before the real cross-origin request, asking the server whether the actual method/headers/origin combination will be allowed, before sending the real request with its real side effects" data-vn="preflight request (giữ nguyên) — request OPTIONS browser tự gửi trước để hỏi xin phép, trước khi gửi request thật">preflight request</dfn> first — the browser sends an <code>OPTIONS</code> request asking permission before sending the real one:</p>
+<pre><code>OPTIONS /orders/482 HTTP/1.1
+Origin: https://app.example.com
+Access-Control-Request-Method: PATCH
+Access-Control-Request-Headers: content-type, authorization
+
+HTTP/1.1 204 No Content
+Access-Control-Allow-Origin: https://app.example.com
+Access-Control-Allow-Methods: GET, POST, PATCH, DELETE
+Access-Control-Allow-Headers: Content-Type, Authorization</code></pre>
+<p>The point of the preflight is to ask <em>before</em> any side effect runs — the browser wants to know the server will accept this method/header/origin combination before it risks firing a real <code>PATCH</code> that changes data. Only if the preflight comes back with matching allowances does the browser send the actual request. This is why an endpoint using JSON bodies and an <code>Authorization</code> header — nearly everything built in this course from Lesson 3 onward — costs an extra round trip per unique method/origin combination the browser hasn't recently cached, not per request.</p>
+
+<h2>5 · Credentials: the one place <code>*</code> stops working</h2>
+<p>A cross-origin request only auto-attaches cookies if the calling JavaScript explicitly opts in (<code>fetch(url, { credentials: "include" })</code>), and if it does, the server must respond with <code>Access-Control-Allow-Credentials: true</code> plus a literal, specific origin in <code>Access-Control-Allow-Origin</code> — the wildcard <code>*</code> is rejected outright by the spec the moment credentials are involved. This isn't an arbitrary restriction: <code>*</code> paired with "also send my cookies" would mean any website on the internet could make the victim's browser send an authenticated, cookie-bearing request and read the answer — reintroducing exactly the credential-leaking risk same-origin policy exists to prevent. Ties directly back to Lesson 4's session cookies and Lesson 22's CSRF material: CORS's credentialed mode is the read-side counterpart to what SameSite defends on the write side.</p>
+
+<h2>6 · A minimal Go implementation</h2>
+<p>The CORS contract is entirely response headers plus one intercepted method — no new state, no database, just deciding what to set before the real handler runs (or, for <code>OPTIONS</code>, instead of it):</p>
+<pre><code><span class="cm">// allowedOrigins is the explicit allowlist of origins permitted to read
+// responses from this API via a browser -- never "*" when credentials
+// (cookies) are involved, since the two are mutually exclusive by spec.</span>
+<span class="kw">var</span> allowedOrigins = <span class="kw">map</span>[<span class="kw">string</span>]<span class="kw">bool</span>{
+    <span class="str">"https://app.example.com"</span>: <span class="kw">true</span>,
+}
+
+<span class="cm">// corsMiddleware inspects the Origin header the browser sends automatically
+// on every cross-origin request, and if it's on the allowlist, echoes it
+// back in Access-Control-Allow-Origin plus the other CORS response headers.
+// A preflight OPTIONS request is answered here directly, never reaching the
+// real handler.</span>
+<span class="kw">func</span> corsMiddleware(next http.Handler) http.Handler {
+    <span class="kw">return</span> http.HandlerFunc(<span class="kw">func</span>(w http.ResponseWriter, r *http.Request) {
+        origin := r.Header.Get(<span class="str">"Origin"</span>)
+        <span class="kw">if</span> allowedOrigins[origin] {
+            w.Header().Set(<span class="str">"Access-Control-Allow-Origin"</span>, origin)
+            w.Header().Set(<span class="str">"Access-Control-Allow-Credentials"</span>, <span class="str">"true"</span>)
+            w.Header().Set(<span class="str">"Vary"</span>, <span class="str">"Origin"</span>)
+        }
+
+        <span class="kw">if</span> r.Method == http.MethodOptions {
+            w.Header().Set(<span class="str">"Access-Control-Allow-Methods"</span>, <span class="str">"GET, POST, PATCH, DELETE"</span>)
+            w.Header().Set(<span class="str">"Access-Control-Allow-Headers"</span>, <span class="str">"Content-Type, Authorization"</span>)
+            w.WriteHeader(http.StatusNoContent) <span class="cm">// 204, preflight carries no body</span>
+            <span class="kw">return</span>
+        }
+
+        next.ServeHTTP(w, r)
+    })
+}</code></pre>
+<p>Two details worth naming: the origin is echoed back from the allowlist rather than hardcoded, because <code>Access-Control-Allow-Origin</code> can only ever hold one origin (or <code>*</code>) — supporting several real origins means checking the incoming <code>Origin</code> against a list and reflecting the match, exactly like this. And <code>Vary: Origin</code> matters the moment any caching layer (a CDN, a reverse proxy) sits in front of this handler — without it, a cache could serve one origin's allowed response to a different origin that should have been rejected.</p>
+
+<div class="interview">
+<p><strong>Q: "Is CORS a security feature? What does it actually protect against?"</strong> A strong answer, out loud: <em>"CORS doesn't protect the server — a non-browser client can ignore it entirely and read any response your server sends, since it's enforced by the browser, not the API. What it protects is the user: it stops a malicious website's JavaScript from using the victim's browser to read data from another site the victim happens to be logged into. The request still goes out either way — that's the same thing CSRF exploits — CORS is specifically about whether the calling page is allowed to read the answer. So authentication and authorization are still what decide whether a request is allowed to act at all; CORS only decides which other frontends are allowed to see the result through a browser."</em> The signal: not confusing CORS with an access-control mechanism, and correctly separating "the request fired" from "the response was readable."</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Same-origin policy is a browser rule blocking JavaScript from reading a cross-origin response by default; it says nothing about the request being sent, which the browser fires regardless of origin.">
+    <p class="stem">What does the same-origin policy actually block by default?</p>
+    <button class="opt" data-ok>your own JavaScript reading a cross-origin response's body</button>
+    <button class="opt">the browser sending any cross-origin request at all</button>
+    <button class="opt">a server accepting requests from new IP addresses</button>
+    <button class="opt">cookies being created on any domain at all</button>
+  </div>
+  <div class="q" data-why="A non-browser client like curl has no same-origin policy or CORS enforcement layer at all -- CORS headers are read and enforced by browsers, so any direct API caller can read any response regardless of what Access-Control-Allow-Origin says.">
+    <p class="stem">Why can a tool like curl read an API response CORS would block a browser page from reading?</p>
+    <button class="opt" data-ok>CORS rules are enforced by browsers, not the server</button>
+    <button class="opt">curl automatically sends along a valid CORS bypass header</button>
+    <button class="opt">the server always treats every curl request as same-origin</button>
+    <button class="opt">curl requests never send an Origin header at all</button>
+  </div>
+  <div class="q" data-why="A preflight OPTIONS request asks the server for permission before the real request runs, specifically so a side-effecting method like PATCH or DELETE never fires until the browser confirms the origin, method, and headers will actually be allowed.">
+    <p class="stem">Why does the browser send a preflight OPTIONS request before a cross-origin PATCH?</p>
+    <button class="opt" data-ok>to confirm permission before risking a real side effect</button>
+    <button class="opt">to cache the full response body for later reuse</button>
+    <button class="opt">to double check the currently logged-in user's own session</button>
+    <button class="opt">because every PATCH request gets rejected without one present</button>
+  </div>
+  <div class="q" data-why="The CORS spec rejects the wildcard the instant credentials are involved, because a wildcard plus cookie-sending would let any site on the internet make the victim's authenticated browser leak private data back to it -- exactly the risk same-origin policy exists to prevent.">
+    <p class="stem">Why does Access-Control-Allow-Origin: * stop working once a request includes credentials?</p>
+    <button class="opt" data-ok>any site could then read another's authenticated data</button>
+    <button class="opt">wildcards are simply not valid HTTP header syntax</button>
+    <button class="opt">browsers always cache wildcard responses far too aggressively</button>
+    <button class="opt">credentials always require a completely different HTTP method</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/CORS">MDN's CORS guide</a> — RESOURCES.md already names MDN's HTTP Guide as "the arbiter" for any HTTP semantics question, and this page is its dedicated treatment of origins, preflight, and every CORS header used here, extending that same standing source into a section not yet cited. For the formal same-origin-policy definition preflight relies on, the WHATWG Fetch Standard's CORS protocol section is the underlying spec.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> open — distributed locks remain the standing out-of-scope-per-MISSION.md candidate (Lessons 47-49) unless narrowed to vocabulary level, and a synthesis lesson revisiting an earlier feature design through the caching- and concurrency-control lenses Lessons 9, 33, and 51 provide remains a fresh, ready-to-pick-up alternative if no sharper gap surfaces first.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

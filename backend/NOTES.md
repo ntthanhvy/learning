@@ -2935,3 +2935,102 @@
   concurrency-control lenses Lessons 9, 33, and 51 together now provide —
   the same "review one feature through several already-taught lenses" shape
   Lesson 20 used successfully once before.
+- 2026-08-26 generation (Lesson 52, headless GitHub Actions run): idempotency
+  check first - confirmed no `lessons/0052-*.html` file existed and no `n:
+  52`/`date: "2026-08-26"` entry was in `nav.js` before writing anything
+  (highest prior lesson was 51, dated 2026-08-25). Per this round's briefing,
+  DB-read attempts (the `bin/record-progress backend note` probe, direct
+  `psql`) were skipped entirely rather than re-confirmed - treated as
+  reliably blocked per the last several rounds' findings; still no
+  `lesson_completed`/quiz/kata outcome record exists for any lesson after 51
+  rounds, so there was no reported weak spot to target. Lesson 51's own
+  teaser offered two options - distributed locks, or a synthesis lesson
+  through Lessons 9/33/51's caching-and-concurrency lenses - but explicitly
+  flagged the synthesis lesson as "a fresher alternative worth considering
+  first." Before committing to either, ran this course's established
+  gap-finding sanity check (grep for other untaught candidates) rather than
+  assuming nothing sharper existed: confirmed via Grep that "distributed
+  lock" only ever appears inside prior lessons' own closing-teaser sentences
+  (never taught as its own topic), and separately grepped a batch of other
+  OWASP/HTTP-adjacent candidates (clickjacking, CSP/security headers, brute
+  force, session fixation, least privilege, API gateway, MFA/2FA, secret
+  rotation) - all came back empty but unremarkable (mostly infra-adjacent or
+  already tangential to MISSION.md's scope). One candidate stood out as a
+  genuine, sharper, previously-unflagged gap: CORS. A grep for "CORS",
+  "Access-Control-Allow", "preflight", and "same-origin"/"cross-origin"
+  across all 51 lesson bodies, `glossary.html`, and this NOTES.md log itself
+  came back completely empty - never taught, never even named in passing,
+  despite RESOURCES.md's own MDN HTTP Guide citation explicitly listing
+  "caching, CORS" as things that source covers. Chose CORS over both of
+  Lesson 51's named options: it's squarely in scope (an HTTP-semantics/
+  API-design topic, MDN already a standing cited source), directly practical
+  for a frontend-heavy dev (this user has certainly hit real CORS errors in
+  DevTools, unlike distributed locks which they likely haven't), and a
+  sharper, more concrete gap than either named alternative - the synthesis
+  lesson remains a good idea but isn't more urgent than a completely
+  untaught, high-frequency real-world topic surfacing on a fresh check, and
+  distributed locks are still out-of-scope per MISSION.md's own "distributed
+  systems beyond vocabulary level" exclusion. Lesson 52 covers it: the
+  same-origin policy as the older, stricter rule CORS exists to relax (a
+  browser rule blocking JavaScript from reading a cross-origin response, not
+  blocking the request itself - explicitly contrasted against Lesson 22's
+  CSRF lesson, which is about the opposite half of the same request: the
+  browser fires a cross-origin request with cookies attached regardless of
+  origin, same-origin policy is what stops the response from being read),
+  CORS as the server's opt-in permission slip via Access-Control-Allow-Origin
+  rather than a server-side access control (the interview-trap section
+  stated bluntly: a non-browser caller like curl ignores CORS entirely and
+  can read any response, since it's enforced by browsers, not servers -
+  authentication/authorization, Lessons 4/12, are what actually gate a
+  request), simple requests vs. preflighted OPTIONS requests and why a
+  JSON-body/Authorization-header API call (the norm since Lesson 3) always
+  preflights, and why Access-Control-Allow-Origin: * is rejected outright the
+  instant credentials are involved (tied back explicitly to Lesson 4's
+  session cookies and Lesson 22's SameSite/CSRF material as the read-side
+  counterpart of that same credential-leaking risk). The corsMiddleware Go
+  snippet (an allowedOrigins map, origin-echoing rather than hardcoding, a
+  Vary: Origin header, and preflight OPTIONS handling short-circuiting before
+  the real handler) was compile-checked clean with `go build -C` / `go vet
+  -C` in a scratch module (`.scratch/backend-lesson52/`, built binary written
+  to `/tmp` - `rm -f` on that `/tmp` path was blocked by this session's
+  sandbox as outside the allowed working directory, left in place per the
+  harmless precedent established since Lesson 27; scratch dir itself left
+  with only `go.mod`/`main.go`) - no approval blocker for either `-C`-style
+  invocation this round. Added `origin`, `same-origin policy`, `CORS`,
+  `Access-Control-Allow-Origin`, `simple request`, and `preflight request` to
+  the glossary (confirmed via grep beforehand that none of the six existed
+  anywhere in `lessons/*.html` or `glossary.html`) and registered Lesson 52
+  in `nav.js`. Quiz options were drafted, then verified with `wc -w` per
+  option via individual `sed -n '<n>p' | sed -E 's/<[^>]+>//g' | wc -w` calls
+  (loop/variable-expansion forms were blocked outright by this session's
+  sandbox on the first attempt, consistent with every round since Lesson
+  28's finding) - all four questions needed at least one rewrite pass before
+  landing on equal counts, with Q1 and Q4 each needing two successive
+  rewrite passes after a first fix still undershot or overshot by one word
+  (the same hand-counting-is-unreliable failure mode this log has flagged
+  repeatedly); final tallies, each confirmed by the `wc -w` tool rather than
+  eyeballed: Q1 8/8/8/8, Q2 9/9/9/9, Q3 9/9/9/9, Q4 8/8/8/8. Ran a
+  tag-balance check (div/table/pre/p open vs. close counts via individual
+  `Grep` calls) to catch the stray-tag bug class several recent rounds'
+  notes have flagged - none present this round, all balanced: div 8/8, pre
+  3/3, p 19/19 (no `table.cmp` comparison table used this round, since no
+  natural three-way or side-by-side contrast fit the material as cleanly as
+  prior lessons' comparison tables did). Primary source: MDN's dedicated CORS
+  guide, extending RESOURCES.md's already-standing "MDN HTTP Guide... the
+  arbiter" citation into a section not yet cited (RESOURCES.md's own text
+  already named "CORS" as part of what that source covers, making this the
+  citation finally catching up to that mention), with the WHATWG Fetch
+  Standard named as the underlying spec for the formal same-origin/CORS
+  protocol definition. `bin/record-progress backend lesson_generated --day
+  52 --lesson 0052-cors-same-origin-policy.html --detail
+  '{"by":"github-actions"}'` was run directly via its relative path from the
+  repo root as instructed and succeeded immediately, no approval blocker
+  this round. This closes the CORS gap found by a fresh sanity-check grep
+  rather than either option Lesson 51's own teaser named; the synthesis
+  lesson through Lessons 9/33/51 and distributed locks (still
+  out-of-scope-per-MISSION.md unless narrowed to vocabulary level) both
+  remain open, ready-to-pick-up candidates for Lesson 53 if no sharper gap
+  surfaces first. Still no `lesson_completed`/quiz/kata outcome record
+  exists for any lesson after 52 rounds - the next session should keep
+  treating a completion/quiz-outcome signal, or a user-named track to
+  deepen, as higher priority than a 53rd topic picked blind.

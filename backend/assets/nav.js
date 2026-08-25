@@ -108,6 +108,8 @@
       file: "lessons/0050-bulkhead-pattern.html" },
     { n: 51, date: "2026-08-25", title: "ETags and conditional requests: a fingerprint for \"did this change?\"",
       file: "lessons/0051-etags-and-conditional-requests.html" },
+    { n: 52, date: "2026-08-26", title: "CORS: why the browser blocks your own fetch()",
+      file: "lessons/0052-cors-same-origin-policy.html" },
   ];
 
   const REFS = [

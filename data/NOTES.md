@@ -3106,3 +3106,89 @@
   interview-common method of that list and still totally uncovered, but any
   of the six remain valid fallback candidates if a drill-obtained weak spot
   doesn't surface first.
+- 2026-08-26 generation (Lesson 49, headless GitHub Actions run): idempotency
+  was self-confirmed first — globbed `data/lessons/` for `0049-*.html` (none
+  found), grepped `assets/nav.js` for `n: 49`/`2026-08-26` (neither found,
+  highest registered lesson was still 48, dated 2026-08-25) — so this round
+  proceeded. `LEARNING_DB_URL` reads were skipped outright per this round's
+  own instructions (confirmed hard-blocked this session already) — not
+  attempted at all, still no readable `course_progress` rows and no
+  `lesson_completed`/quiz/kata outcome record beyond the Lesson 1 baseline,
+  so no reported weak spot to target. Lesson 48's own teaser named
+  `describe()` explicitly as the strongest next candidate (most
+  interview-common of a six-method batch Lesson 47 flagged, still totally
+  uncovered) — re-grepped fresh before committing: `describe(`/`.describe`
+  never appears anywhere in `lessons/*.html` or `reference/glossary.html` as
+  real teaching, only inside Lesson 47's own scan-list mention and Lesson
+  48's own teaser sentence — genuinely uncovered, confirmed, teaser was not
+  stale. Lesson 49 ships `describe()` as planned: framed as the natural
+  fourth move after Lesson 2's `.info()`/`.dtypes`/`.head()` trio (what do the
+  VALUES actually look like, not just the shape/dtypes), the numeric-column
+  five-number-plus summary, then the lesson's real teaching hook — a genuine
+  new "no crash, quietly wrong" gotcha discovered while hand-verifying:
+  `describe()` on a str-dtype column (the raw, uncoerced `orders_raw.csv`
+  `amount` column, blocked from auto-numeric-detection by the literal
+  `"unknown"` value) silently swaps its ENTIRE output shape from
+  mean/std/percentiles to count/unique/top/freq, no error or warning at all —
+  joining the same family already flagged for `reindex()` (Lesson 47) and
+  `str.extract()` (Lesson 42). Also taught: `include="all"` widening past the
+  numeric-only default (dropping `customer` silently otherwise), and
+  `describe()` chaining after `groupby()` exactly like `agg()` does, one block
+  per group. `uv run --with pandas` worked directly this round (pandas
+  3.0.5, confirmed via `pd.__version__`): every number was hand-verified in
+  `.scratch/data-lesson49/explore.py` (deleted after) against the real
+  `orders_raw.csv` fixture before writing a word of the lesson — clean
+  4-row `amount` describe() gives mean 94.375, std ~68.79, median (50%) 81.0,
+  min 35.5, max 180.0; raw (uncoerced) `amount` as a str column describes as
+  count 6/unique 6/top "120.0"/freq 1; `clean.describe(include="all")`
+  correctly includes `customer` (count 4/unique 2/top "An"/freq 2) and gives
+  `order_date` a mean timestamp but no std; grouped
+  `groupby("customer")["amount"].describe()` gives An mean 81.0, Binh mean
+  107.75, matching every prior lesson's same hand-verified numbers exactly.
+  Designing the practice file hit two real instances of this course's
+  running Ellipsis-is-truthy/doesn't-raise family: a bare
+  `described_series[...]` does NOT raise on its own (Ellipsis is a valid
+  whole-Series indexer, same finding as Lessons 20/25/45/46) — confirmed
+  directly with a standalone probe before trusting it, then fixed by
+  wrapping each such placeholder in `int(...)`/`float(...)` instead
+  (`int(raw_amount_described[...])`, `float(amount_described[...])`,
+  `float(grouped_described.loc[..., "mean"])`), which forces pandas to
+  reject the returned multi-element Series with a real `TypeError` on that
+  same line rather than relying on the outer `check()` function's try/except
+  as a silent safety net — confirmed each fix actually raises with a
+  standalone probe script before shipping, not assumed. The shipped
+  (unsolved) `practice/49_describe.py` was executed in a mirrored
+  `.scratch/data-lesson49/run/practice/` layout (fixture CSVs copied
+  alongside) and printed all 5 expected ✗ with no crash and no false
+  positives, then a solved copy (`.scratch/data-lesson49/run/practice/
+  49_solved.py`, not shipped) printed all 5 ✓ against the exact hand-verified
+  numbers above; the shipped file was also re-run a second time directly
+  from its real `practice/` location (`cd data && uv run --with pandas
+  python3 practice/49_describe.py`) and confirmed identical output. The
+  entire `.scratch/data-lesson49/` directory was fully removed (`rm -rf`)
+  after verification, no approval needed this round. Added `describe()` to
+  the glossary (checked for a collision first — no existing row) placed
+  directly after the existing `margins=True` entry, and registered Lesson 49
+  in `nav.js`. Quiz options were drafted and checked with a Python
+  regex/word-count script isolating each `<div class="q">` block by its own
+  start offset (this course's established approach since Lesson 42), run via
+  `uv run python3` — the first draft came out mismatched on three of four
+  questions (Q1 10/9/8, Q2 9/10/11, Q4 10/8/9; Q3's three short code-snippet
+  options were already level at 1/1/1 on the first draft, same precedent as
+  Lessons 13/18); three rewrite + recount cycles landed all four level (Q1
+  8/8/8, Q2 9/9/9, Q3 1/1/1, Q4 8/8/8), then independently re-verified with a
+  second, fully separate method (manual word-by-word counting done by hand,
+  not a second run of the same script), per this file's standing warning
+  that a single verification pass isn't reliable — both methods agreed on
+  all four counts. `bin/record-progress data lesson_generated --day 49
+  --lesson 0049-describe.html --detail '{"by":"github-actions"}'` was run
+  once from the repo root as instructed and succeeded on the first try
+  (`recorded: data/lesson_generated day=49 lesson=0049-describe.html`), no
+  approval blocker this round. This agent does not run `git commit` —
+  leaving working-tree changes uncommitted remains this course's established
+  convention. Set the teaser going forward to a fresh scan of the remaining
+  Lesson-47-flagged batch (`.corr()`, `convert_dtypes()`, `.xs()`,
+  `droplevel()` all still genuinely uncovered and never picked up since that
+  scan; `interpolate()`'s sole hit, Lesson 38, remains only a "not needed
+  today" aside, not real teaching) if no drill-outcome signal surfaces by
+  next generation.

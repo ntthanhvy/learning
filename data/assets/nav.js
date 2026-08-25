@@ -102,6 +102,8 @@
       file: "lessons/0047-reindex.html" },
     { n: 48, date: "2026-08-25", title: "cumcount(): a running position within each group",
       file: "lessons/0048-cumcount.html" },
+    { n: 49, date: "2026-08-26", title: "describe(): the fast summary-stats sanity check",
+      file: "lessons/0049-describe.html" },
   ];
 
   const REFS = [

@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 49 · describe(): the fast summary-stats sanity check</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 49 · ~20 min · 26 Aug 2026</p>
+<h1>describe(): the fast summary-stats sanity check</h1>
+<p class="byline">Lesson 48's own closing teaser named this directly as the strongest next candidate: the single most interview-common pandas method still totally uncovered by this course. Lesson 2 already taught <code>.info()</code>/<code>.dtypes</code>/<code>.head()</code> as the first-look trio when a file lands on your desk — <code>describe()</code> is the missing fourth move: one call answering "what do the actual VALUES look like."</p>
+
+<h2>Recap, in one line</h2>
+<p>Lesson 2's <code>.info()</code> tells you the shape and dtypes; Lesson 2's <code>.head()</code> shows a handful of raw rows. Neither tells you whether <code>amount</code> ranges from 10 to 100 or from -500 to a million. <code>describe()</code> is the one call that answers that — a full five-number-plus summary of every numeric column, computed in one line instead of five separate <code>.mean()</code>/<code>.std()</code>/<code>.min()</code>/<code>.max()</code> calls.</p>
+
+<h2>1 · describe() on a numeric column: the SQL <code>GROUP BY</code>-free summary</h2>
+<p>The real clean 4-row <code>orders_raw.csv</code> slice Lessons 6-48 have used:</p>
+<pre><code>clean
+<span class="cm">--   order_id customer  amount order_date
+-- 0        1       An   120.0 2026-01-05
+-- 1        6       An    42.0 2026-01-10
+-- 2        2     Binh    35.5 2026-01-06
+-- 3        5     Binh   180.0 2026-01-09</span></code></pre>
+<p><dfn data-en="a Series/DataFrame method computing a fixed set of summary statistics (count, mean, std, min, the 25/50/75 percentiles, and max for a numeric column) in one call, instead of chaining several separate aggregation calls together" data-vn="giữ nguyên 'describe()' — tính một loạt thống kê tóm tắt (count, mean, std, min, các mốc phần trăm 25/50/75, max) cho cột số CHỈ TRONG MỘT LẦN GỌI, thay vì gọi rời từng hàm">describe()</dfn> on the <code>amount</code> column returns all of this at once:</p>
+<pre><code>clean[<span class="str">"amount"</span>].describe()
+<span class="cm">-- count      4.000000
+-- mean      94.375000
+-- std       68.793623
+-- min       35.500000
+-- 25%       40.375000
+-- 50%       81.000000
+-- 75%      135.000000
+-- max      180.000000
+-- Name: amount, dtype: float64</span></code></pre>
+<p>The <code>50%</code> row is the <dfn data-en="the same 'sorted-order middle value' concept as Lesson 3's median fill value, spelled here as one row of describe()'s own table instead of a separate .median() call" data-vn="'50%' trong describe() chính là median — giá trị giữa khi sắp xếp, y hệt khái niệm Lesson 3 đã học, chỉ khác là nằm sẵn trong bảng describe() thay vì gọi .median() riêng">median</dfn> — the exact same "sorted-order middle value" concept Lesson 3 introduced as a safer fill value than the mean, just appearing here as one row of the table instead of a standalone call. The SQL bridge: this is what would otherwise be a single query stacking <code>COUNT</code>, <code>AVG</code>, <code>STDDEV</code>, <code>MIN</code>, <code>MAX</code>, and <code>PERCENTILE_CONT(0.25/0.5/0.75)</code> side by side — <code>describe()</code> is that whole query pre-written.</p>
+
+<h2>2 · The gotcha: describe() on a str column silently changes shape</h2>
+<p>Here's the trap this lesson leads with. Loading <code>orders_raw.csv</code> <em>raw</em>, before any <code>pd.to_numeric()</code> coercion (Lesson 3), the literal text value <code>"unknown"</code> in row 2 blocks pandas from auto-detecting <code>amount</code> as numeric — it loads as a plain text (<code>str</code>) column:</p>
+<pre><code>raw = pd.read_csv(<span class="str">"orders_raw.csv"</span>)
+raw[<span class="str">"amount"</span>].dtype              <span class="cm"># str -- NOT float64, "unknown" blocked it</span>
+raw[<span class="str">"amount"</span>].describe()
+<span class="cm">-- count         6
+-- unique        6
+-- top       120.0
+-- freq          1
+-- Name: amount, dtype: object</span></code></pre>
+<p>No error. No warning. <code>describe()</code> silently swaps its ENTIRE output shape: instead of <code>mean</code>/<code>std</code>/percentiles, a text column gets <code>count</code>/<code>unique</code>/<code>top</code>/<code>freq</code> — a categorical summary, treating every distinct string (including the numeric-looking ones) as just another label. This is Lesson 2's own dtype-checking discipline paying off directly: <code>describe()</code> is not a dtype-agnostic magic box, it's dtype-<em>aware</em>, and it never tells you which mode it used — you have to already know the column's dtype going in, exactly why Lesson 2 taught checking <code>.dtypes</code>/<code>.info()</code> first. Join the "no crash, quietly wrong" family already flagged for <code>reindex()</code> (Lesson 47) and <code>str.extract()</code> (Lesson 42): the output still LOOKS like a normal describe() table, just answering an entirely different question than the one you probably meant to ask.</p>
+
+<h2>3 · include="all": widening past "numeric columns only"</h2>
+<p>Plain <code>DataFrame.describe()</code> (no column selected) defaults to numeric columns ONLY — any text column, like a clean, correctly-typed <code>customer</code> column, is silently dropped from the result, not an error:</p>
+<pre><code>clean.describe()
+<span class="cm">-- (only order_id and amount columns appear -- customer and order_date silently excluded
+--  from the numeric-only default; order_date is its own special case, shown next)</span></code></pre>
+<p><code>include="all"</code> widens it to summarize every column regardless of dtype — numeric columns still get their <code>mean</code>/<code>std</code>/percentiles, and non-numeric columns like <code>customer</code> get <code>unique</code>/<code>top</code>/<code>freq</code> in the SAME table, with <code>NaN</code> filling whichever cells don't apply to a given column's dtype:</p>
+<pre><code>clean.describe(include=<span class="str">"all"</span>)
+<span class="cm">--         order_id customer      amount           order_date
+-- count   4.000000        4    4.000000                    4
+-- unique       NaN        2         NaN                  NaN
+-- top          NaN       An         NaN                  NaN
+-- freq         NaN        2         NaN                  NaN
+-- mean    3.500000      NaN   94.375000  2026-01-07 12:00:00
+-- ...</span></code></pre>
+<p>Note <code>order_date</code>, a real <code>datetime64</code> column: it gets a <code>mean</code> (the average timestamp) and percentiles, but no <code>std</code> — pandas computes a "typical" datetime differently than a typical duration, a genuinely different summary shape than either the numeric or the pure-text case.</p>
+
+<h2>4 · describe() after groupby(): one block per group</h2>
+<p><code>describe()</code> chains after <code>groupby()</code> exactly the way <code>agg()</code> does (Lesson 4) — instead of one describe() table for the whole column, you get one full row of stats <em>per group</em>:</p>
+<pre><code>clean.groupby(<span class="str">"customer"</span>)[<span class="str">"amount"</span>].describe()
+<span class="cm">--           count    mean         std   min     25%     50%      75%    max
+-- customer
+-- An          2.0   81.00   55.154329  42.0  61.500   81.00  100.500  120.0
+-- Binh        2.0  107.75  102.176930  35.5  71.625  107.75  143.875  180.0</span></code></pre>
+<p>This is the fastest way to eyeball "does every customer's spending look reasonable" in one call, rather than a separate <code>.agg(["count","mean","std","min","max"])</code> spelled out by hand — and it's the natural first move before reaching for Lesson 16's <code>transform()</code> or Lesson 30's per-row broadcasting once something in the summary looks off.</p>
+
+<div class="interview">
+<p><strong>Q: "A teammate hands you a new CSV. What's the very first pandas call you run, and why?"</strong> A strong answer, out loud: <em>"info() and dtypes first, to confirm every column parsed as the type I expect — then describe() immediately after, since it's the fastest sanity check on the actual VALUES: are there negative amounts that shouldn't exist, is the max absurdly large, does the count match the row count I expect. The trap I watch for is describe() on a column that LOOKS numeric but loaded as text — a single bad string like 'unknown' silently flips describe()'s whole output from mean/std/percentiles to count/unique/top/freq, no error at all, so the summary table itself can look completely normal while quietly answering the wrong question. That's exactly why I check dtypes before I trust a describe() table."</em> The signal: naming describe() as dtype-<em>aware</em>, not dtype-agnostic, and tying it back to the load-and-inspect habit rather than treating it as a standalone party trick.</p>
+</div>
+
+<h2>5 · The SQL bridge</h2>
+<p><code>describe()</code> on a numeric column is a single query stacking <code>COUNT(col)</code>, <code>AVG(col)</code>, <code>STDDEV(col)</code>, <code>MIN(col)</code>, <code>MAX(col)</code>, and <code>PERCENTILE_CONT(0.25/0.5/0.75) WITHIN GROUP (ORDER BY col)</code> as separate output columns of one row — SQL has no single built-in keyword that produces all of it at once. <code>describe()</code> on a text column is closer to <code>SELECT COUNT(*), COUNT(DISTINCT col), MODE() WITHIN GROUP (ORDER BY col)</code> plus that mode's own frequency — a genuinely different query, which is exactly why pandas silently switches shape depending on dtype: it's really running one of two different summary queries under one shared method name.</p>
+
+<h2>Try it — self-checking practice (~15 min)</h2>
+<p>Open <code>practice/49_describe.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/49_describe.py</code></pre>
+<p>Uses the real <code>orders_raw.csv</code> fixture, both raw and cleaned. Exercise 1 confirms describe()'s categorical shape on the still-text raw <code>amount</code> column (Section 2); Exercise 2 pulls the mean and median off the clean numeric column's describe() table (Section 1); Exercise 3 widens a DataFrame-level describe() with <code>include="all"</code> to include the <code>customer</code> column (Section 3); Exercise 4 pulls one customer's mean out of a grouped describe() table (Section 4).</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="describe() on a numeric column returns all of these together in one call -- count, mean, std, min, the 25/50/75 percentiles, and max -- rather than any single one of them alone.">
+    <p class="stem">What does <code>describe()</code> return for a properly-typed NUMERIC column?</p>
+    <button class="opt" data-ok>count, mean, std, min, quartiles, and max together</button>
+    <button class="opt">only the count of the column's non-null rows</button>
+    <button class="opt">only the single largest and smallest value found</button>
+  </div>
+  <div class="q" data-why="describe() is dtype-aware: on a text (str/object) column it silently switches its ENTIRE output shape to count/unique/top/freq -- a categorical summary -- rather than raising or computing a numeric-style mean, which text has no valid definition for.">
+    <p class="stem">What does <code>describe()</code> return for a TEXT (str) column instead?</p>
+    <button class="opt" data-ok>count, unique, top, and freq, never any numeric stats</button>
+    <button class="opt">the identical mean and std a numeric column shows</button>
+    <button class="opt">a raised TypeError, since text has no valid mean</button>
+  </div>
+  <div class="q" data-why="Plain DataFrame.describe() defaults to numeric columns only, silently dropping text columns from the result. include=&quot;all&quot; is the specific keyword that widens the summary to cover every column regardless of dtype, filling NaN wherever a stat doesn't apply.">
+    <p class="stem">Which call makes <code>describe()</code> summarize EVERY column, numeric or not?</p>
+    <button class="opt" data-ok>describe(include="all")</button>
+    <button class="opt">describe(columns="all")</button>
+    <button class="opt">describe(dtype="all")</button>
+  </div>
+  <div class="q" data-why="describe() chains after groupby() exactly like agg() does (Lesson 4): instead of one summary for the whole column, it produces one full describe() row of stats for EACH group, keeping every group's numbers separate rather than collapsing them together.">
+    <p class="stem">What happens when you chain <code>describe()</code> after <code>groupby("customer")["amount"]</code>?</p>
+    <button class="opt" data-ok>one full describe() block per group, not combined</button>
+    <button class="opt">a single describe() block averaged across all groups</button>
+    <button class="opt">a TypeError, since describe() can't follow groupby() ever</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official pandas <a href="https://pandas.pydata.org/docs/getting_started/comparison/comparison_with_sql.html">Comparison with SQL</a> guide (~5 min) — see its own summary-statistics section for the direct <code>describe()</code>-to-SQL-aggregate mapping used in Section 5 above.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>describe()</code> was added today, placed right after Lesson 44's <code>margins=True</code> entry.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-49 comes back reported as shakiest, otherwise a fresh curriculum/glossary scan for the next genuinely-uncovered pattern (<code>.corr()</code>, <code>convert_dtypes()</code>, <code>.xs()</code>, and <code>droplevel()</code> all came back uncovered as of Lesson 47's scan and were never picked up since — the sole <code>interpolate()</code> hit, Lesson 38, is still only a "not needed today" aside, not real teaching).<br><br>
+💬 Anything unclear — the numeric-vs-text describe() shape switch, include="all", or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

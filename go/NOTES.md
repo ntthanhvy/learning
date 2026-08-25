@@ -423,3 +423,17 @@
   conditional requests), data lesson 48 (`cumcount()`), and python Day 28
   (tuple/star unpacking) were generated this round via delegated agents —
   see their own NOTES.md entries for detail.
+- 2026-08-26 (headless 06:00 run): skipped again per the same rule — the
+  course window closed 2026-07-20, now thirty-seven days past it. Day 13
+  (`0014-concurrency-capstone.html`) re-confirmed present on disk and
+  registered in `assets/nav.js` — moot either way. This session's sandbox
+  again hard-blocked any command referencing `LEARNING_DB_URL` outright
+  ("Contains simple_expansion"), and separately gated `bin/query-progress`
+  behind interactive approval with no user present, tried twice — moot
+  for this course since it's a pure skip regardless of DB state. Backend,
+  data, and python lessons were generated this round via delegated
+  agents — see their own NOTES.md entries for detail; rust's post-week
+  daily quiz+kata infra was re-verified unchanged (8 `id: "k` matches in
+  `quiz-bank.js` — the 7 real kata entries `k1`-`k7` plus the commented
+  example — `day:` tags still run 1-7 only, `nav.js` `LESSONS` still
+  registers only the 7 Jul 8-14 lessons).

@@ -104,6 +104,8 @@
       file: "lessons/0048-cumcount.html" },
     { n: 49, date: "2026-08-26", title: "describe(): the fast summary-stats sanity check",
       file: "lessons/0049-describe.html" },
+    { n: 50, date: "2026-08-27", title: "corr(): does this actually move with that?",
+      file: "lessons/0050-corr.html" },
   ];
 
   const REFS = [

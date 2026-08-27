@@ -707,3 +707,21 @@ by the user there; they apply here identically.
   (Go skipped again per its own window close, now thirty-seven days past
   it; backend, data, and python lessons were generated this round via
   delegated agents — see their own NOTES.md entries for detail.)
+- 2026-08-27 (headless 06:00 run): same as every prior post-week day —
+  verified `daily.html`, `assets/srs.js`, and `assets/quiz-bank.js` are all
+  present and untouched (8 textual `id: "k` matches in `quiz-bank.js` — the
+  7 real kata entries `k1`-`k7` plus the commented-out example line; `day:`
+  tags running 1-7 only; `nav.js` `LESSONS` array still registers exactly 7
+  lessons, days 1-7 only, unchanged). Still the correct "daily quiz+kata"
+  for this post-week phase per PLAN.md, so nothing new was generated, no
+  bank content was added. This session's sandbox again hard-blocked direct
+  `psql "$LEARNING_DB_URL" ...` reads ("Contains simple_expansion") and
+  `bin/query-progress` hit the usual generic "requires approval" gate with
+  no user present — so no `course_progress` rows could be read for a
+  scope-change signal. No new learning record beyond the Day-1 baseline.
+  (Go skipped again per its own window close, now thirty-eight days past
+  it; backend lesson 53 — file uploads/presigned URLs — data lesson 50 —
+  `.corr()` — and python Day 30 — object model dunders/`@property` — were
+  generated this round via delegated agents, each confirmed to have written
+  only within its own course directory — see their own NOTES.md entries for
+  detail.)

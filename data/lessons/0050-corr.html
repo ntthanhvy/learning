@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 50 · corr(): does this actually move with that?</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 50 · ~20 min · 27 Aug 2026</p>
+<h1>corr(): does this actually move with that?</h1>
+<p class="byline">Lesson 49's own closing teaser named this batch again: <code>.corr()</code>, <code>convert_dtypes()</code>, <code>.xs()</code>, and <code>droplevel()</code> have sat uncovered since Lesson 47 first flagged them. Of the four, <code>.corr()</code> is the sharpest pick — it's one of the most common "walk me through this" interview questions once a table is clean: not just summarizing one column (Lesson 49's <code>describe()</code>), but asking whether two columns move together at all.</p>
+
+<h2>Recap, in one line</h2>
+<p><code>describe()</code> (Lesson 49) summarizes ONE column at a time — its own mean, spread, range. <dfn data-en="a Series/DataFrame method measuring how strongly two numeric columns move together on a -1 to 1 scale — the default Pearson version specifically measures LINEAR association, not causation and not any other kind of relationship" data-vn="giữ nguyên 'corr()' — đo mức độ 2 cột SỐ di chuyển cùng nhau, thang từ -1 đến 1; mặc định là Pearson, chỉ đo quan hệ TUYẾN TÍNH, không phải nhân quả và không bắt được các dạng quan hệ khác">corr()</dfn> is the natural next question: does column A move together with column B — and by how much?</p>
+
+<h2>1 · corr() between two Series: a single number from -1 to 1</h2>
+<p>A small inline table today — five sales reps, their call volume, and how many deals each closed (not touching the shared <code>orders_raw.csv</code> fixture, same precedent as Lesson 19's tagged-orders table and Lesson 11's inline "double-submitted export" table):</p>
+<pre><code>demo = pd.DataFrame({
+    <span class="str">"rep"</span>:             [<span class="str">"Mai"</span>, <span class="str">"Long"</span>, <span class="str">"Chi"</span>, <span class="str">"Huy"</span>, <span class="str">"Trang"</span>],
+    <span class="str">"calls_made"</span>:      [10, 25, 15, 40, 30],
+    <span class="str">"deals_closed"</span>:    [2, 6, 3, 9, 7],
+    <span class="str">"office_size_sqm"</span>: [12, 30, 15, 8, 45],
+})</code></pre>
+<p>One Series against another:</p>
+<pre><code>demo[<span class="str">"calls_made"</span>].corr(demo[<span class="str">"deals_closed"</span>])
+<span class="cm">-- 0.9958962509386671</span></code></pre>
+<p>Close to <code>1.0</code> means the two columns rise and fall together almost in lockstep — more calls, more deals, nearly every time in this data. A result near <code>0</code> means no consistent linear relationship at all; near <code>-1</code> means they move in opposite directions (one rises as the other falls). <code>corr()</code> with itself is always <code>1.0</code> exactly (a column is perfectly, linearly related to itself) — a quick sanity check when a real result looks suspiciously high.</p>
+
+<h2>2 · The gotcha: a real number even between two things that shouldn't relate</h2>
+<p>The trap: <code>corr()</code> never tells you a number is <em>meaningless</em> — it just computes one, every time, whether or not the relationship makes any real-world sense:</p>
+<pre><code>demo[<span class="str">"calls_made"</span>].corr(demo[<span class="str">"office_size_sqm"</span>])
+<span class="cm">-- 0.17095081120783429</span></code></pre>
+<p>A rep's office floor space has no real reason to track how many calls they make — and the number reflects that (close to <code>0</code>, weak). But it's not <em>exactly</em> <code>0</code>, and with only 5 rows a stronger-looking coincidental number is easy to get by chance. This is the core interview trap with correlation: a strong <code>corr()</code> number is a hint to go investigate, never proof of a real relationship — the well-known "correlation is not causation" line has a concrete pandas face: the method computes the same linear-association number for two columns that are causally related, two that are coincidentally related, and two that are related only because a third factor drives them both. <code>corr()</code> can't distinguish any of those cases; only domain reasoning can.</p>
+<p>A second, sharper version of the same "no error, just a number" gotcha shows up on the real <code>orders_raw.csv</code> fixture — <code>order_id</code> against <code>amount</code> on the clean 4-row slice Lessons 6-49 have used:</p>
+<pre><code>clean[<span class="str">"amount"</span>].corr(clean[<span class="str">"order_id"</span>])
+<span class="cm">-- 0.04427167913261477</span></code></pre>
+<p><code>order_id</code> is an arbitrary row label with no real-world meaning — correlating anything against it is a nonsense question — yet <code>corr()</code> answers it anyway, silently, with a small real float instead of refusing. Nothing about the syntax or the output shape warns that the question itself doesn't make sense; the same "no crash, quietly wrong" family already flagged for <code>describe()</code> (Lesson 49), <code>reindex()</code> (Lesson 47), and <code>str.extract()</code> (Lesson 42) — except here it's not a wrong dtype tripping the trap, it's asking <code>corr()</code> a question it was never able to say no to.</p>
+
+<h2>3 · Whole-DataFrame corr(): a full matrix, and a real crash to know about</h2>
+<p>Calling <code>corr()</code> on the whole demo DataFrame (no column selected) computes every pairwise combination at once — a correlation MATRIX, symmetric across its diagonal of 1.0s:</p>
+<pre><code>demo[[<span class="str">"calls_made"</span>, <span class="str">"deals_closed"</span>, <span class="str">"office_size_sqm"</span>]].corr()
+<span class="cm">--                  calls_made  deals_closed  office_size_sqm
+-- calls_made         1.000000      0.995896         0.170951
+-- deals_closed       0.995896      1.000000         0.238001
+-- office_size_sqm    0.170951      0.238001         1.000000</span></code></pre>
+<p>Unlike <code>describe()</code>, which silently changes shape rather than erroring on a non-numeric column, whole-DataFrame <code>corr()</code> genuinely raises when a non-numeric column is present and not excluded:</p>
+<pre><code>clean.corr()
+<span class="cm">-- ValueError: could not convert string to float: 'An'</span></code></pre>
+<p><code>clean</code> still carries the text <code>customer</code> column and the datetime <code>order_date</code> column — neither has a linear-correlation number, and current pandas refuses to guess. <code>numeric_only=True</code> is the fix, narrowing to numeric columns only before computing, the same instinct as Lesson 25's <code>select_dtypes()</code>:</p>
+<pre><code>clean.corr(numeric_only=<span class="kw">True</span>)
+<span class="cm">--           order_id    amount
+-- order_id  1.000000  0.044272
+-- amount    0.044272  1.000000</span></code></pre>
+
+<h2>4 · Missing values: pairwise, not all-or-nothing</h2>
+<p>A NaN in one column doesn't disqualify the whole comparison — <code>corr()</code> drops only the ROW where either of the two compared columns is missing, then computes on whatever rows remain (pandas calls this pairwise deletion):</p>
+<pre><code><span class="cm"># demo with row 2's deals_closed set to NaN</span>
+demo[<span class="str">"calls_made"</span>].corr(demo[<span class="str">"deals_closed"</span>])
+<span class="cm">-- 0.9964037900472442   -- computed from the 4 remaining complete rows</span></code></pre>
+<p>That matches calling <code>.dropna()</code> on just those two columns first and then correlating the leftover 4 rows by hand — confirming <code>corr()</code>'s default NaN handling is exactly pairwise dropna, not a silent zero-fill and not a full-table dropna that would also throw away rows where <em>other</em>, unrelated columns are missing.</p>
+
+<h2>5 · The SQL bridge</h2>
+<p><code>corr()</code> is SQL's own <code>CORR(x, y)</code> aggregate function (or <code>CORR(x, y) OVER (PARTITION BY ...)</code> as a window), standard in Postgres and most warehouses — same Pearson linear-correlation definition, same -1-to-1 scale, same requirement that both inputs are numeric. The whole-DataFrame matrix version has no single-query SQL equivalent — it's really N² separate <code>CORR(colA, colB)</code> calls, one per column pair, which is exactly why <code>corr()</code> as a DataFrame method (compute every pair at once) is a genuine convenience pandas offers over hand-writing that in SQL.</p>
+
+<div class="interview">
+<p><strong>Q: "You run corr() and get 0.93 between marketing spend and revenue. What do you tell the team?"</strong> A strong answer, out loud: <em>"That corr() only measures LINEAR association between those two columns — it's a real signal worth investigating, not proof spend caused the revenue. It could be reversed (more expected revenue leads to more approved spend), or a third factor could drive both (a seasonal launch pushes both up together), or with a small sample it could just be coincidence — corr() computes the same kind of number in all of those cases, it can't tell them apart. I'd treat 0.93 as a reason to dig into the mechanism, not as a conclusion by itself — same instinct as double-checking a column's actual dtype before trusting describe(), corr() needs the same 'what question did I actually just ask' check before trusting the number."</em> The signal: naming linear-only, non-causal, and sample-size caveats without being asked, not just repeating "correlation isn't causation" as a slogan.</p>
+</div>
+
+<h2>Try it — self-checking practice (~15 min)</h2>
+<p>Open <code>practice/50_corr.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/50_corr.py</code></pre>
+<p>Uses a small inline reps table (calls/deals/office size) plus the real <code>orders_raw.csv</code> fixture. Exercise 1 correlates two genuinely related columns (Section 1); Exercise 2 correlates two unrelated columns to see a near-zero result (Section 2); Exercise 3 reproduces the whole-DataFrame crash on mixed dtypes and fixes it with <code>numeric_only=True</code> (Section 3); Exercise 4 checks pairwise NaN handling against a manual dropna (Section 4).</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="corr() (Pearson, the default) produces a single number from -1 to 1 measuring linear association between two numeric columns: near 1 means they rise and fall together, near -1 means they move in opposite directions, near 0 means no consistent linear relationship.">
+    <p class="stem">What does <code>Series.corr()</code> return when comparing two numeric columns?</p>
+    <button class="opt" data-ok>a single number from -1 to 1, the linear association strength</button>
+    <button class="opt">a single number from 0 to 100, the count of shared</button>
+    <button class="opt">a full boolean mask marking which rows move together at all</button>
+  </div>
+  <div class="q" data-why="corr() never validates whether a comparison is meaningful -- it computes the same kind of linear-association number for a genuinely causal pair, a coincidental pair, and a pair related only through a third factor. A high number is a hint to investigate further, never proof of causation.">
+    <p class="stem">A teammate finds a high <code>corr()</code> value between two columns. What should they conclude?</p>
+    <button class="opt" data-ok>a hint worth investigating, never proof one causes the other</button>
+    <button class="opt">solid proof the first column directly causes the second, always</button>
+    <button class="opt">nothing useful, since corr() never runs on real business data</button>
+  </div>
+  <div class="q" data-why="Whole-DataFrame corr() genuinely raises ValueError on a non-numeric column present and not excluded -- a real crash, unlike describe()'s silent shape-switch on the same kind of mixed-dtype table. numeric_only=True is the specific keyword that narrows the computation to numeric columns first, the same instinct as select_dtypes().">
+    <p class="stem">Calling <code>.corr()</code> on a whole DataFrame containing a text column raises <code>ValueError</code>. Which keyword fixes it?</p>
+    <button class="opt" data-ok>corr(numeric_only=True)</button>
+    <button class="opt">corr(include="number")</button>
+    <button class="opt">corr(dtype="numeric")</button>
+  </div>
+  <div class="q" data-why="corr()'s default NaN handling is pairwise deletion: for each pair of columns being compared, only the rows where BOTH values are present are used, computed independently per pair -- not a single all-or-nothing dropna applied to the whole table before any correlation runs.">
+    <p class="stem">When one row has a missing value in a column being correlated, what does <code>corr()</code> do by default?</p>
+    <button class="opt" data-ok>drops that row only for that pair, other pairs stay intact</button>
+    <button class="opt">drops that row from every column pair in the whole table</button>
+    <button class="opt">silently treats the missing value as zero, never drops the row</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official pandas <a href="https://pandas.pydata.org/docs/user_guide/index.html">User Guide</a> (~5 min) — its "Computational tools" page documents <code>corr()</code>'s <code>method=</code> options (Pearson/Kendall/Spearman) and <code>numeric_only=</code> in full.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>corr()</code> was added today, placed right after Lesson 49's <code>describe()</code> entry.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-50 comes back reported as shakiest, otherwise the remaining Lesson-47-flagged batch (<code>convert_dtypes()</code>, <code>.xs()</code>, and <code>droplevel()</code> are all still genuinely uncovered — <code>convert_dtypes()</code> is the strongest single next candidate, since MultiIndex-specific <code>.xs()</code>/<code>droplevel()</code> likely pair better taught together once a MultiIndex-heavy lesson is due).<br><br>
+💬 Anything unclear — the linear-only/non-causal nature of corr(), numeric_only=True, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

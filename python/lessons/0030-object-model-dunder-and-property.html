@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 30 · Making your own objects behave like built-ins</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 30 · ~20 min · 27 Aug 2026</p>
+<h1>Making your own objects behave like built-ins</h1>
+<p class="byline">Day 7 showed that <code>@dataclass</code> generates a readable <code>__repr__</code> and a field-by-field <code>__eq__</code> "for free," without explaining how. Today opens that box: the special methods (<em>dunder</em> methods, for the double underscores on both sides) that decide what <code>print(obj)</code> shows, what <code>==</code> and <code>&lt;</code> do to your own objects, and <code>@property</code> — a way to make a method read like a plain attribute.</p>
+
+<div class="callout"><strong>Bridge from SQL:</strong> a table's column order and a defined <code>ORDER BY</code> clause don't happen by accident — someone decided how rows print and how they sort. Python objects are the same: unless you say otherwise, printing a plain object shows its memory address, and <code>&lt;</code> between two of them raises <code>TypeError</code>. The dunder methods below are how you tell Python "here is what printing and comparing this thing should mean" — the same decision a schema or a query's <code>ORDER BY</code> makes for a table.</p>
+
+<h2>1 · The problem, live</h2>
+<p>A plain class with no special methods at all:</p>
+<pre><code><span class="kw">class</span> Money:
+    <span class="kw">def</span> __init__(self, cents):
+        self.cents = cents
+
+m = Money(<span class="num">500</span>)
+<span class="kw">print</span>(m)                 <span class="cm"># &lt;__main__.Money object at 0x7f2a1c0a5d90&gt; — useless for debugging</span>
+Money(<span class="num">500</span>) == Money(<span class="num">500</span>)  <span class="cm"># False — compares identity (Day 1's `is`), not the cents value</span>
+Money(<span class="num">500</span>) &lt; Money(<span class="num">900</span>)   <span class="cm"># TypeError: '&lt;' not supported between instances of 'Money'</span></code></pre>
+<p>Nothing is broken — Python simply has no idea what "printing" or "less than" should mean for a <code>Money</code>, so it falls back to identity for <code>==</code> (Day 1's <code>is</code> comparison in disguise) and refuses to guess for <code>&lt;</code>. A <dfn data-en="a method whose name starts and ends with double underscores (e.g. __init__, __repr__, __eq__) — Python calls these automatically for built-in syntax like print(), ==, <, or len(), instead of them being called by name directly" data-vn="giữ nguyên 'dunder method' — method tên có __ hai đầu, Python tự gọi khi dùng cú pháp built-in như print(), ==, <">dunder method</dfn> (short for "double underscore") is how you fill that gap: define one with the right name, and Python calls it automatically whenever the matching syntax is used — you never call <code>__repr__()</code> or <code>__eq__()</code> by name yourself.</p>
+
+<h2>2 · <code>__repr__</code>: what printing means</h2>
+<p><code>__init__</code> is already a dunder method — the one Day 1 and Day 4 use constantly, called automatically when a class is invoked as <code>Money(500)</code>. <code>__repr__</code> works the same way, called automatically by <code>print()</code>, by <code>repr()</code>, and whenever a REPL echoes a value back without an explicit <code>print</code>:</p>
+<pre><code><span class="kw">class</span> Money:
+    <span class="kw">def</span> __init__(self, cents):
+        self.cents = cents
+
+    <span class="kw">def</span> __repr__(self):
+        <span class="kw">return</span> <span class="str">f"Money({self.cents!r})"</span>   <span class="cm"># convention: valid Python that could rebuild the object</span>
+
+<span class="kw">print</span>(Money(<span class="num">500</span>))       <span class="cm"># Money(500) — not a memory address</span></code></pre>
+<p>The docs' convention (cited below) is that <code>__repr__</code> should look like a valid Python expression that could recreate the object — <code>Money(500)</code>, not a vague description — which is exactly the shape <code>@dataclass</code> auto-generates for you on Day 7. Writing it by hand on a plain class is what a dataclass was quietly doing all along.</p>
+
+<h2>3 · <code>__eq__</code> and <code>__lt__</code>: what comparison means</h2>
+<p>Each comparison operator has its own dunder method — <code>==</code> calls <code>__eq__</code>, <code>&lt;</code> calls <code>__lt__</code>, and there are four more (<code>__le__</code>, <code>__ne__</code>, <code>__gt__</code>, <code>__ge__</code>) covering the rest. Defining <code>__eq__</code> and <code>__lt__</code> compares by value instead of identity:</p>
+<pre><code><span class="kw">class</span> Money:
+    <span class="kw">def</span> __init__(self, cents):
+        self.cents = cents
+
+    <span class="kw">def</span> __repr__(self):
+        <span class="kw">return</span> <span class="str">f"Money({self.cents!r})"</span>
+
+    <span class="kw">def</span> __eq__(self, other):
+        <span class="kw">if</span> <span class="kw">not</span> isinstance(other, Money):
+            <span class="kw">return</span> NotImplemented       <span class="cm"># let Python try the other side, or fall back to False</span>
+        <span class="kw">return</span> self.cents == other.cents
+
+    <span class="kw">def</span> __lt__(self, other):
+        <span class="kw">if</span> <span class="kw">not</span> isinstance(other, Money):
+            <span class="kw">return</span> NotImplemented
+        <span class="kw">return</span> self.cents &lt; other.cents
+
+Money(<span class="num">500</span>) == Money(<span class="num">500</span>)   <span class="cm"># True now — compares .cents, not identity</span>
+<span class="kw">sorted</span>([Money(<span class="num">900</span>), Money(<span class="num">100</span>)])  <span class="cm"># [Money(100), Money(900)] — sorted() only needs __lt__</span></code></pre>
+<p><code>isinstance(other, Money)</code> guards against comparing a <code>Money</code> to something unrelated, like an <code>int</code>. Returning the special value <code>NotImplemented</code> (not the exception <code>NotImplementedError</code> — a common mix-up) rather than <code>False</code> tells Python "I don't know how to compare these two — try the other object's method, or give up gracefully," instead of silently guessing wrong. The payoff: Day 4's <code>sorted(rows, key=...)</code> works on a list of <code>Money</code> with no <code>key=</code> at all once <code>__lt__</code> exists, because <code>sorted()</code> itself is built on repeatedly calling <code>&lt;</code>.</p>
+
+<h2>4 · Operator overloading beyond comparison</h2>
+<p>The same mechanism extends to arithmetic — <code>+</code> calls <code>__add__</code>, <code>-</code> calls <code>__sub__</code>, and so on. This is <dfn data-en="defining a dunder method like __add__ or __eq__ on your own class so a built-in operator (+, ==, <, etc.) works on instances of it, the same operator syntax already used for built-in types, not new syntax invented for the class" data-vn="giữ nguyên 'operator overloading' — định nghĩa dunder method để toán tử built-in (+, ==, <...) hoạt động trên object tự viết">operator overloading</dfn> — reusing an existing operator's syntax for a new type, rather than inventing a new method name like <code>.add()</code>:</p>
+<pre><code><span class="kw">class</span> Money:
+    <span class="cm"># ... __init__, __repr__, __eq__, __lt__ from above ...</span>
+
+    <span class="kw">def</span> __add__(self, other):
+        <span class="kw">return</span> Money(self.cents + other.cents)
+
+Money(<span class="num">500</span>) + Money(<span class="num">300</span>)   <span class="cm"># Money(800) — + now means "combine two Money amounts"</span></code></pre>
+<p>The same caution SQL operator overloading never needs applies here: only overload an operator when its built-in meaning genuinely fits — <code>+</code> on two amounts of money is obvious, but overloading <code>+</code> to mean something unrelated (like merging two unrelated records) makes code that lies about what it does. When in doubt, a plainly named method reads better than a clever operator.</p>
+
+<h2>5 · <code>@property</code>: a method that reads like an attribute</h2>
+<p>A <dfn data-en="a built-in decorator that turns a method into something accessed with no parentheses, like a plain attribute — the method's return value is computed fresh on each access, unlike a stored attribute value" data-vn="giữ nguyên '@property' — decorator biến method thành đọc như attribute thường, không cần dấu ()">property</dfn> is a method accessed without parentheses, computed fresh every time it's read:</p>
+<pre><code><span class="kw">class</span> Money:
+    <span class="kw">def</span> __init__(self, cents):
+        self.cents = cents
+
+    <span class="kw">@property</span>
+    <span class="kw">def</span> dollars(self):
+        <span class="kw">return</span> self.cents / <span class="num">100</span>
+
+m = Money(<span class="num">550</span>)
+m.dollars              <span class="cm"># 5.5 — read like a plain attribute, no m.dollars()</span></code></pre>
+<p>Without <code>@property</code>, <code>dollars</code> would be an ordinary method requiring <code>m.dollars()</code> — and Day 27's <code>itertools</code> functions, for contrast, are plain callables for exactly that reason, no properties involved. <code>@property</code> is worth reaching for when a value is fully derived from other attributes already stored (here, <code>dollars</code> from <code>cents</code>) — it guarantees <code>dollars</code> can never drift out of sync with <code>cents</code>, because nothing is stored twice.</p>
+<p>A property can also guard writes with a paired setter, using the same name decorated with <code>@dollars.setter</code>:</p>
+<pre><code><span class="kw">class</span> Money:
+    <span class="kw">def</span> __init__(self, cents):
+        self.cents = cents
+
+    <span class="kw">@property</span>
+    <span class="kw">def</span> dollars(self):
+        <span class="kw">return</span> self.cents / <span class="num">100</span>
+
+    <span class="kw">@dollars.setter</span>
+    <span class="kw">def</span> dollars(self, value):
+        <span class="kw">if</span> value &lt; <span class="num">0</span>:
+            <span class="kw">raise</span> ValueError(<span class="str">"dollars can't be negative"</span>)
+        self.cents = <span class="kw">round</span>(value * <span class="num">100</span>)
+
+m.dollars = <span class="num">12.50</span>       <span class="cm"># runs the setter — validates, then updates self.cents</span>
+m.dollars = -<span class="num">3</span>          <span class="cm"># ValueError — Day 8's raise, triggered through plain attribute-assignment syntax</span></code></pre>
+<p>This is the same validate-on-write idea Day 17's pydantic validators enforce on a whole model — <code>@property</code> is the plain-Python version of that same instinct, scoped to one derived attribute on a hand-written class instead of a whole request body.</p>
+
+<div class="interview">
+<p><strong>Q: "How do you make a custom class printable and comparable in Python?"</strong> A strong answer, out loud: <em>"Define <code>__repr__</code> for how it prints — convention says it should look like valid Python that could rebuild the object. For comparison, <code>__eq__</code> for <code>==</code> and <code>__lt__</code> for <code>&lt;</code>, each checking <code>isinstance</code> on the other side and returning <code>NotImplemented</code>, not <code>False</code>, for a type it doesn't know how to compare against. Once <code>__lt__</code> exists, <code>sorted()</code> works with no <code>key=</code> needed, because <code>sorted()</code> is built on repeated <code>&lt;</code> calls. And <code>@dataclass</code> generates exactly these two methods for you automatically — which is what it was doing under the hood the whole time."</em> The signal: naming <code>NotImplemented</code> specifically, not just <code>False</code> — the detail most answers miss.</p>
+</div>
+
+<div class="callout"><strong>Where pandas/NumPy go from here:</strong> <code>DataFrame.__eq__</code> and friends are exactly this same mechanism, overloaded to return an elementwise boolean array instead of one <code>True</code>/<code>False</code> — that's why <code>df == 0</code> gives you a mask, not a single answer. Not demonstrated here; that's <code>data/</code>'s job, and this is the only sentence in this lesson that names it.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/30_object_model_dunder_and_property.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/30_object_model_dunder_and_property.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: writing <code>__repr__</code> for a small <code>Point</code> class, <code>__eq__</code> and <code>__lt__</code> for a <code>Version</code> class (then sorting a list of them with plain <code>sorted()</code>, no <code>key=</code>), confirming a mismatched-type comparison returns <code>NotImplemented</code> rather than raising or guessing, an <code>__add__</code> overload on a <code>Vector</code> class, and a <code>@property</code>/setter pair on a <code>Temperature</code> class that validates on write.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Python calls __repr__ automatically for print(), repr(), and bare REPL echoes — it is never called by name directly, exactly like __init__ being called automatically by Class(...) syntax rather than by name.">
+    <p class="stem">When does Python call a class's <code>__repr__</code> method?</p>
+    <button class="opt" data-ok>automatically, whenever print() or repr() runs on it now</button>
+    <button class="opt">only when repr() gets explicitly typed out by name</button>
+    <button class="opt">never — it silently exists purely for documentation only</button>
+  </div>
+  <div class="q" data-why="Without __eq__, == falls back to identity comparison (Day 1's is) — two separately constructed objects with equal field values compare unequal unless __eq__ is defined to compare by value instead.">
+    <p class="stem">Without a custom <code>__eq__</code>, what does <code>==</code> compare on a plain class?</p>
+    <button class="opt" data-ok>identity — whether both names point to one same object</button>
+    <button class="opt">every single field value, compared one by one in turn</button>
+    <button class="opt">the class name string alone, ignoring any field at all</button>
+  </div>
+  <div class="q" data-why="sorted() is built on repeated < comparisons between elements, which calls __lt__ — once a class defines __lt__, sorted() works on instances of it directly with no key= function needed at all.">
+    <p class="stem">Once a class defines <code>__lt__</code>, what can <code>sorted()</code> do with a list of its instances?</p>
+    <button class="opt" data-ok>sort them directly now, no key= function required at all</button>
+    <button class="opt">nothing new — key= is still required exactly as before</button>
+    <button class="opt">only sort them if __eq__ is also defined beforehand too</button>
+  </div>
+  <div class="q" data-why="Returning NotImplemented (not False, and not raising NotImplementedError) tells Python this method doesn't know how to compare against that other type, so Python can try the other object's reflected method or fall back gracefully, instead of silently reporting a wrong answer.">
+    <p class="stem">Why return <code>NotImplemented</code> instead of <code>False</code> from <code>__eq__</code> for an unrelated type?</p>
+    <button class="opt" data-ok>it lets Python try the other side instead of guessing wrong</button>
+    <button class="opt">NotImplemented and False always behave completely identically to each other anyway</button>
+    <button class="opt">it silently raises a fatal error the caller must then catch</button>
+  </div>
+  <div class="q" data-why="@property lets a method be read like a plain attribute (m.dollars, no parentheses), recomputing its value fresh from other stored attributes on every access rather than storing a second, separately-updated copy that could drift out of sync.">
+    <p class="stem">What does <code>@property</code> let a method do?</p>
+    <button class="opt" data-ok>be read with plain attribute syntax, with no parentheses needed</button>
+    <button class="opt">run automatically once only, right when the class is defined</button>
+    <button class="opt">skip needing any self parameter at all in its definition</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the <a href="https://docs.python.org/3/reference/datamodel.html#special-method-names">Python Language Reference's Data model — Special method names</a> (already cited in <code>RESOURCES.md</code> for "why does it behave like that" questions) covers every dunder method named today plus the ones left untaught here (<code>__hash__</code>, <code>__add__</code>'s siblings, reflected methods), and the standard-library <a href="https://docs.python.org/3/library/functions.html#property"><code>property</code></a> docs cover the setter/deleter forms in full.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day30">glossary</a> under Day 30.<br>
+This is the "Python's object model" thread <code>MISSION.md</code> named broadly and Day 29 flagged as the clearest remaining gap — dunder methods and <code>@property</code> explain what <code>@dataclass</code> (Day 7) and pydantic (Day 17) were quietly generating all along.<br><br>
+💬 Anything unclear — <code>NotImplemented</code>, <code>@property</code> setters, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

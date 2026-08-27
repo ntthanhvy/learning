@@ -3192,3 +3192,107 @@
   scan; `interpolate()`'s sole hit, Lesson 38, remains only a "not needed
   today" aside, not real teaching) if no drill-outcome signal surfaces by
   next generation.
+- 2026-08-27 generation (Lesson 50, headless GitHub Actions run): idempotency
+  was self-confirmed first — globbed `data/lessons/` for `0050-*.html` (none
+  found), grepped `assets/nav.js` for `n: 50`/`2026-08-27` (neither found,
+  highest registered lesson was still 49, dated 2026-08-26) — so this round
+  proceeded. `bin/query-progress data` was attempted once as instructed and
+  blocked by the sandbox's generic permission-approval gate with no user
+  present, the same class of block as effectively every prior round — not
+  retried; still no readable `course_progress` rows and no
+  `lesson_completed`/quiz/kata outcome record beyond the Lesson 1 baseline, so
+  no reported weak spot to target. Topic was pre-chosen per Lesson 49's own
+  teaser: the remaining Lesson-47-flagged batch (`.corr()`,
+  `convert_dtypes()`, `.xs()`, `droplevel()`). Re-grepped fresh before
+  committing rather than trusting the old note: all four still had zero real
+  teaching hits across `lessons/*.html`/`NOTES.md`/`reference/glossary.html`
+  — every hit found was only a closing-paragraph teaser sentence in Lessons
+  47-49 themselves, confirmed by reading each hit's surrounding context, not
+  assumed from the grep count alone. `.corr()` was picked as the sharpest of
+  the four: highest interview relevance (a very common "does X track Y"
+  follow-up once a table is clean), and a natural next step after Lesson 49's
+  single-column `describe()` — this lesson asks about TWO columns instead of
+  one. `uv run --with pandas` worked directly this round (pandas 3.0.5,
+  confirmed via `pd.__version__`). The real `orders_raw.csv` clean 4-row
+  slice only has one truly numeric column (`amount`) plus the meaningless
+  `order_id` row label, not enough for a meaningful two-column corr() teaching
+  example, so a small inline "sales reps" table (`calls_made`/`deals_closed`/
+  `office_size_sqm`) was built instead — same precedent as Lesson 19's
+  tagged-orders table and Lesson 11's inline "double-submitted export" table,
+  not a break from fixture-reuse discipline. Every number was hand-verified in
+  a scratch script before writing a word of the lesson: `calls_made` vs
+  `deals_closed` (genuinely related by design) gives corr() 0.9958962509386671;
+  `calls_made` vs the unrelated decoy `office_size_sqm` gives only
+  0.17095081120783429, confirming a real "weak but not exactly zero, don't
+  over-read a small-N coincidence" teaching point; on the real fixture,
+  `clean["amount"].corr(clean["order_id"])` gives 0.04427167913261477 (near-
+  zero, correlating against an arbitrary row label is a nonsense question
+  corr() answers anyway without complaint — the lesson's "no crash, quietly
+  wrong" hook, joining the family already flagged for `describe()`,
+  `reindex()`, and `str.extract()`). A genuine new finding, confirmed by
+  actually running it rather than assumed: whole-DataFrame `clean.corr()`
+  (mixed dtypes: text `customer`, datetime `order_date`) DOES raise
+  `ValueError: could not convert string to float` in current pandas — unlike
+  `describe()`'s silent shape-switch on the same kind of mixed-dtype table,
+  this is a real crash, not a quiet wrong answer; `numeric_only=True` fixes it
+  and reproduces the 0.044272 value inside a full order_id/amount matrix.
+  Also hand-verified: `method="spearman"` raises `ModuleNotFoundError: No
+  module named 'scipy'` under this course's `uv run --with pandas` invocation
+  (scipy isn't installed) — so Spearman/Kendall were mentioned only as
+  vocabulary in the "Go deeper" pointer, not demoed as runnable code, to avoid
+  shipping an example that can't actually run in this course's own environment.
+  NaN pairwise-deletion behavior was verified two ways: `corr()` on a table
+  with one NaN inserted into `deals_closed` (0.9964037900472442) was checked
+  against a manual `dropna(subset=[...])` then `corr()` on the same 4
+  surviving rows — both methods agreed exactly, confirming pairwise deletion
+  is per-column-pair, not a whole-table dropna. Designing the practice file
+  surfaced a genuine new instance of this course's running Ellipsis-is-
+  truthy/doesn't-raise family: `clean.corr(numeric_only=...)` does NOT raise
+  on its own — `bool(...)` is `True` in Python, so pandas silently treats the
+  unfilled placeholder as `numeric_only=True` and the exercise would have
+  shipped as an accidental freebie ✓ — confirmed directly by running it
+  standalone before trusting it, exactly the same shape as Lesson 48's
+  `cumcount(ascending=...)` finding. Fixed by assigning the placeholder to its
+  own `use_numeric_only = ...` variable and asserting `use_numeric_only is
+  True` before the real call, forcing a real `AssertionError` on the unsolved
+  file instead of relying on accidental truthiness; confirmed the fix actually
+  raises with a standalone probe before shipping. `demo[...]` (Ellipsis as a
+  DataFrame column selector, not a whole-Series indexer) was also checked
+  directly and confirmed it DOES raise `KeyError: Ellipsis` on its own, so
+  Exercises 1/2/4's placeholders needed no extra guarding. The shipped
+  (unsolved) `practice/50_corr.py` was executed in a mirrored
+  `.scratch/data-lesson50/run/practice/` layout (fixture CSVs copied
+  alongside) and printed all 5 expected ✗ with no crash; a solved copy
+  (`.scratch/data-lesson50/run/practice/50_solved.py`, not shipped) then
+  printed all 5 ✓ against the exact hand-verified numbers above; the shipped
+  file was also re-run a second time directly from its real `practice/`
+  location (`cd data && uv run --with pandas python3 practice/50_corr.py`)
+  and confirmed identical ✗ output. The entire `.scratch/data-lesson50/`
+  directory was fully removed (`rm -rf`) after verification, no approval
+  needed this round. Added `corr()` to the glossary (checked for a collision
+  first — grepped for `corr()`/correlation, no existing row) placed directly
+  after Lesson 49's `describe()` entry, and registered Lesson 50 in `nav.js`.
+  Quiz options were drafted and checked with a Python regex/word-count script
+  isolating each `<div class="q">` block by its own start offset (this
+  course's established approach since Lesson 42), run via `uv run python3` —
+  the first draft came out mismatched on three of four questions (Q1
+  10/11/9, Q2 11/10/11, Q4 12/11/10; Q3's three short code-snippet options
+  were already level at 1/1/1 on the first draft, same precedent as Lessons
+  13/18/49); several rewrite + recount cycles landed all four level (Q1
+  11/11/11, Q2 10/10/10, Q3 1/1/1, Q4 11/11/11), then independently
+  re-verified with a second, fully separate method (manual word-by-word
+  counting done by hand from the shipped HTML, not a second run of the same
+  script), per this file's standing warning that a single verification pass
+  isn't reliable — both methods agreed on all four counts.
+  `bin/record-progress data lesson_generated --day 50 --lesson 0050-corr.html
+  --detail '{"by":"github-actions"}'` was run once from the repo root as
+  instructed and succeeded on the first try (`recorded: data/lesson_generated
+  day=50 lesson=0050-corr.html`), no approval blocker this round. This agent
+  does not run `git commit` — leaving working-tree changes uncommitted
+  remains this course's established convention. Set the teaser going forward
+  to the remaining batch narrowed further: `convert_dtypes()` as the
+  strongest single next candidate (still genuinely uncovered, broadly
+  applicable to any DataFrame), while `.xs()` and `droplevel()` are both
+  MultiIndex-specific and likely pair better taught together in one lesson
+  once a MultiIndex-heavy topic is due, rather than split across two
+  standalone rounds.

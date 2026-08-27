@@ -3271,4 +3271,145 @@ fail *gracefully* so the learner sees which task failed.
   hook than this run found for them — or fall back to an unnamed Phase 3
   direction. Still no `lesson_completed`/quiz/kata outcome record exists
   for ANY day after 29 rounds — no reported weak spot to target.
+- 2026-08-27 — **Day 30 generated**
+  (`lessons/0030-object-model-dunder-and-property.html`), an automated
+  headless daily-generation run. Idempotency: confirmed before writing
+  anything that no `python/lessons/0030-*.html` (or higher-numbered) file
+  existed and no `2026-08-27` entry existed anywhere in this file or
+  `assets/nav.js` — highest existing lesson on disk was
+  `0029-writing-context-managers.html` dated 2026-08-26, so generation
+  proceeded as Day 30, not a re-run.
+  Topic selection: Day 29's own next-day note named the candidate directly
+  — Python's object model: operator overloading, `__repr__`/`__eq__`/
+  `__lt__`, and `@property`/data descriptors — and flagged that
+  `MISSION.md` names "Python's object model" broadly (success criterion:
+  "Explain Python's object model out loud... why `b = a` aliases, why a
+  mutable default argument is a trap") without naming these specific dunder
+  methods as explicitly as it named unpacking or context managers. Re-read
+  `MISSION.md` directly this run to confirm the fit is real rather than
+  assumed: the object-model thread is present, and `__repr__`/`__eq__` were
+  already name-dropped in passing back on Day 7 ("comparing two instances
+  with `==` checks identity, not field values, unless you write `__repr__`
+  and `__eq__` by hand") and Day 17, always as something `@dataclass`/
+  pydantic generate automatically, never taught as a mechanism to write by
+  hand — a real, textually-grounded gap, not an invented one. Confirmed via
+  grep across all of `python/` for
+  `__repr__|__eq__|__lt__|@property|operator overload|dunder|__str__|__ne__|__gt__|__le__|__ge__`
+  before committing: every lesson-body hit (Day 7, Day 17) was passing
+  mention of dataclass/pydantic auto-generation, and every NOTES.md hit was
+  prior-day planning prose (Day 28's `Path`/`/`-operator aside, Day 29's
+  own next-day note) — no lesson ever taught writing `__repr__`, `__eq__`,
+  `__lt__`, an operator-overload dunder, or `@property` by hand. Topic
+  confirmed clear.
+  Web-lookup attempt: per this run's instructions, tried once rather than
+  assuming the prior run's block still holds — `WebFetch` against
+  `docs.python.org/3/reference/datamodel.html#special-method-names`
+  **succeeded** this run (a change from Day 29's hard permission denial on
+  both `WebSearch` and `WebFetch`), returning confirmation of the rich-
+  comparison method table (`__lt__`/`__le__`/`__eq__`/`__ne__`/`__gt__`/
+  `__ge__`), the `__repr__` "valid Python expression" convention, and the
+  `NotImplemented`-vs-`False` convention for unrelated-type comparisons —
+  all used directly in section 3's prose and the interview callout. Did not
+  add a new `RESOURCES.md` entry since the URL fetched is the same Data
+  model reference already cited there for Day 1 and Day 29; cited it again
+  for Day 30 instead, per the existing entry's own "any 'why does it behave
+  like that' question" scope.
+  Taught: section 1 shows the problem live (a plain class's ugly `__repr__`
+  default and identity-based `==`/broken `<`); section 2 `__repr__` (tied
+  back to Day 7's dataclass auto-generation, now explained rather than
+  taken on faith); section 3 `__eq__`/`__lt__` with the `isinstance` guard
+  and `NotImplemented` (not `NotImplementedError`) convention, plus the
+  payoff that `sorted()` needs no `key=` once `__lt__` exists, closing the
+  loop back to Day 4's `key=` lesson; section 4 operator overloading via
+  `__add__` on a `Vector`, with a one-line caution against overloading an
+  operator for a meaning that doesn't obviously fit; section 5 `@property`
+  plus a paired `@x.setter`, tied to Day 8's `raise` for validation and
+  explicitly compared to Day 17's pydantic validators ("the plain-Python
+  version of that same instinct, scoped to one derived attribute"). Bridged
+  from SQL per the baseline record: a table's column order/`ORDER BY` not
+  happening by accident, introduced before any Python in the top callout,
+  not from a pandas analogy.
+  No-pandas rule: zero pandas/NumPy API calls anywhere in the practice
+  file (grepped case-insensitively — zero hits, no imports beyond the
+  standard library, which today's practice file doesn't even need to
+  import anything from); exactly one hit in the lesson — one contrast
+  sentence/callout (titled "Where pandas/NumPy go from here") naming
+  `DataFrame.__eq__` returning an elementwise boolean mask as the same
+  dunder mechanism at bigger scale, without demonstrating any pandas API,
+  placed once after section 5/the interview callout, matching the hard-rule
+  section above.
+  Practice file `practice/30_object_model_dunder_and_property.py` (8 checks
+  across 5 exercises: `Point.__repr__`, `Version.__eq__`/`__lt__` plus
+  sorting a list of `Version`s with plain `sorted()` and no `key=`,
+  `Version == <int>` falling back to `False` via `NotImplemented` instead
+  of raising, `Vector.__add__` operator overloading, and a `Temperature`
+  class with a `@property`/`@x.setter` pair that converts C↔F and validates
+  against absolute zero) needed no on-disk fixtures. Followed this course's
+  standard defensive pattern against the Ellipsis-at-module-level bug
+  family: every class line stays fully definable (concrete base classes,
+  no bare `...` in a class header or decorator position), with unsolved
+  `...` living strictly inside method bodies. One real bug caught during
+  verification, not just markup: Ex 5b's original scenario started
+  `Temperature(0)` and set `.fahrenheit = 32`, expecting `.celsius == 0`
+  afterward — but an *unsolved* no-op setter also leaves `.celsius` at its
+  untouched initial value `0`, so the check passed ✓ even completely
+  unsolved, a false-positive matching the same failure family Day 29's log
+  flagged for Ex 5b there (coincidentally also a 5b). Fixed by starting
+  from `Temperature(100)` instead, so an unsolved no-op setter leaves
+  `.celsius` at `100` — correctly ✗ — while a solved setter still correctly
+  converts to `0`. Verified in a scratch dir (`.scratch_py30_verify/`,
+  created under the repo root and removed after use): the shipped
+  (unsolved) copy printed 8 clean ✗ lines with no traceback, both from the
+  scratch copy and from its real `practice/` path with the documented
+  command; a separately solved copy (every `...` filled in directly in the
+  scratch copy) printed all 8 ✓ and the "All green" tally. No other bugs
+  found.
+  Glossary: added a Day 30 section to `reference/glossary.html` (`dunder
+  method`, `operator overloading`, `@property`) after confirming via grep
+  that none collided with any Day 1-29 entry — deliberately did **not**
+  re-glossary `__repr__`/`__eq__`/`__lt__` themselves as separate rows,
+  since they're explained inline via `<code>` and the new `dunder method`/
+  `operator overloading` entries cover the general mechanism, matching this
+  course's no-duplicate-glossary-row convention. The 3 new `<dfn data-en`
+  tags in the lesson body match the 3 new glossary rows exactly (confirmed
+  by count).
+  Quiz: 5 questions. Word counts were checked with a small Python script
+  (regex-splitting the quiz block into its five question `<div>`s and
+  counting `.split()` words per `<button class="opt">` line, run from a
+  scratch dir via `uv run python3`) and mismatched on the first draft for
+  four of five questions (Q1 8/9/9, Q3 9/10/10, Q4 11/7/11, Q5 9/10/10) —
+  only Q2 was already equal (10/10/10). Each mismatched question went
+  through one to two rewrite-and-recount rounds — Q4's second option needed
+  two separate word insertions across two rounds before landing on 11 — re-
+  running the script after every edit, until every option matched (Q1
+  9/9/9, Q3 10/10/10, Q4 11/11/11, Q5 10/10/10). Re-verified with a second,
+  independently-written script (document-order `<button class="opt">`
+  extraction via regex across the whole document, ignoring the per-question
+  `<div>` wrapper entirely, then grouped in threes) run against the final
+  file — independently confirmed all 15 options (5 questions × 3 options)
+  land on their target counts (9/9/9, 10/10/10, 10/10/10, 11/11/11,
+  10/10/10) before shipping. Registered in `assets/nav.js` with
+  `date: "2026-08-27"`.
+  `bin/record-progress python lesson_generated --day 30 --lesson
+  0030-object-model-dunder-and-property.html --detail
+  '{"by":"github-actions"}'` was run once after shipping and **succeeded**:
+  `recorded: python/lesson_generated day=30
+  lesson=0030-object-model-dunder-and-property.html`. DB reads remain
+  blocked: `bin/query-progress python` was tried once this run (per the
+  one-attempt convention) and failed immediately with a generic "requires
+  approval" gate, no user present to grant it — identical to every prior
+  round, and notably still blocked even though `WebFetch` access was
+  granted this run, confirming the two gates are independent.
+  **Next-day note:** the object-model thread opened today (dunder methods,
+  `@property`) is now taught through the single-attribute case; `__hash__`
+  and its mutability interaction with `__eq__` (an object defining `__eq__`
+  should not also define a mutable `__hash__`, straight from today's fetched
+  Data model page) is the clearest immediate follow-on if Day 31 continues
+  the same thread, alongside `@classmethod`/`@staticmethod` (named but
+  deliberately deferred in Day 29's own log) as an alternative next pick.
+  With today's `WebFetch` success, Day 31 should also retry the interview-
+  prep source search flagged unresolved since Day 28 — worth attempting
+  again now that at least one web tool responded, even though `WebSearch`
+  itself was not re-tested this run. Still no `lesson_completed`/quiz/kata
+  outcome record exists for any day — no reported weak spot to target.
 

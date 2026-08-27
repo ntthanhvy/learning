@@ -64,6 +64,8 @@
       file: "lessons/0028-unpacking.html" },
     { n: 29, date: "2026-08-26", title: "Writing your own context manager",
       file: "lessons/0029-writing-context-managers.html" },
+    { n: 30, date: "2026-08-27", title: "Making your own objects behave like built-ins",
+      file: "lessons/0030-object-model-dunder-and-property.html" },
   ];
 
   const REFS = [

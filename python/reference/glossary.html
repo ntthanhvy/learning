@@ -289,6 +289,14 @@
   <tr><td>exception suppression</td><td>giữ nguyên "exception suppression" — __exit__ trả về truthy thì exception bị nuốt, không propagate tiếp</td><td>What happens when a context manager's <code>__exit__</code> method returns a truthy value while the <code>with</code> block it wraps is raising an exception: Python treats the exception as handled and does not let it propagate further, so code after the <code>with</code> block runs as if nothing had raised. Returning <code>False</code> or nothing (the default) instead lets the exception propagate normally — the behavior wanted almost always, since silently swallowing every exception is a bug, not a feature.</td></tr>
 </table>
 
+<h2 id="day30">Day 30 — Making your own objects behave like built-ins</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>dunder method</td><td>giữ nguyên "dunder method" — method tên có __ hai đầu, Python tự gọi khi dùng cú pháp built-in như print(), ==, &lt;</td><td>A method whose name starts and ends with double underscores (e.g. <code>__init__</code>, <code>__repr__</code>, <code>__eq__</code>). Python calls these automatically for built-in syntax like <code>print()</code>, <code>==</code>, <code>&lt;</code>, or <code>len()</code>, instead of them being called by name directly.</td></tr>
+  <tr><td>operator overloading</td><td>giữ nguyên "operator overloading" — định nghĩa dunder method để toán tử built-in (+, ==, &lt;...) hoạt động trên object tự viết</td><td>Defining a dunder method like <code>__add__</code> or <code>__eq__</code> on your own class so a built-in operator (<code>+</code>, <code>==</code>, <code>&lt;</code>, etc.) works on instances of it — reusing an existing operator's syntax for a new type, rather than inventing a new method name.</td></tr>
+  <tr><td>@property</td><td>giữ nguyên "@property" — decorator biến method thành đọc như attribute thường, không cần dấu ()</td><td>A built-in decorator that turns a method into something accessed with no parentheses, like a plain attribute. The method's return value is computed fresh on each access, unlike a stored attribute value — useful when a value is fully derived from other already-stored attributes and should never drift out of sync with them.</td></tr>
+</table>
+
 <p class="next">💬 A term here still unclear? Ask your teacher — hỏi bằng tiếng Việt cũng được.</p>
 
 <script src="../assets/nav.js"></script>

@@ -3034,3 +3034,100 @@
   exists for any lesson after 52 rounds - the next session should keep
   treating a completion/quiz-outcome signal, or a user-named track to
   deepen, as higher priority than a 53rd topic picked blind.
+- 2026-08-27 generation (Lesson 53, headless GitHub Actions run): idempotency
+  check first - confirmed no `lessons/0053-*.html` file existed and no `n:
+  53`/`date: "2026-08-27"` entry was in `nav.js` before writing anything
+  (highest prior lesson was 52, dated 2026-08-26). DB-read attempts were
+  skipped per this round's briefing rather than re-confirmed - treated as
+  reliably blocked (`psql` hits a static "Contains simple_expansion" block,
+  `bin/query-progress` hits a generic approval gate with no user present),
+  consistent with every prior round; still no reported weak spot to target.
+  Lesson 52's own teaser left two candidates open - distributed locks, or a
+  synthesis lesson through Lessons 9/33/51's caching-and-concurrency lenses -
+  but per this course's standing convention, ran a fresh gap-finding sanity
+  check before committing to either, since several past rounds found a
+  sharper, more concrete, more in-scope gap this way instead. Grepped
+  lessons/*.html for a broad batch of untaught-candidate terms: distributed
+  lock (only ever appears in prior lessons' own teaser sentences, never
+  taught), full-text search/GIN index, table partitioning, feature flags,
+  database backups/point-in-time recovery, API gateway/BFF, blue-green/canary
+  deploys, CDN, and - the one that stood out - file upload handling
+  (multipart/form-data, presigned URL, object storage, long polling/SSE/
+  WebSocket). Content negotiation/Accept-header/HATEOAS and streaming-upload
+  terms also came back completely empty, but file uploads was the sharper
+  pick: squarely in-scope (API design + request-handling mindset, not
+  infra-specific, unlike CDN/API-gateway/blue-green-deploy which lean
+  infra-adjacent per MISSION.md's own exclusion), and highly practical for a
+  frontend-heavy dev who has built upload UIs many times but likely never
+  designed the backend side. Chose it over both of Lesson 52's named
+  candidates for the same reason CORS beat them last round: a completely
+  untaught, concrete, high-frequency real-world gap surfacing on a fresh
+  check outranks previously-teased topics that aren't more urgent themselves.
+  Lesson 53 covers: why naively proxying multipart upload bytes through an
+  API handler ties directly back to Lesson 18's connection pool exhaustion
+  (a slow client's upload occupies a goroutine and often a pooled DB
+  connection for the full transfer duration, same failure shape as a slow
+  query, different cause) plus a memory cost from buffering the whole body;
+  the presigned-URL pattern as the fix (the API only signs a short-lived,
+  scoped credential - local cryptography, no network call - and the client
+  uploads straight to object storage); a presigned URL framed as delegated,
+  scoped, expiring permission rather than authentication, tied back
+  explicitly to Lesson 31's service-to-service auth framing and Lesson 12's
+  authorization, with the concrete design rule that the server must generate
+  the object key itself rather than trusting a client-supplied one (an
+  attacker-chosen key could overwrite another user's file); the trap of
+  treating "upload succeeded" as "content is safe," tied to Lesson 17's input
+  validation, since a presigned PUT proves nothing about the actual stored
+  content's type or size - validation has to happen in a completion step
+  after the fact; and a closing section on when proxying through the API is
+  still the right call (small/rare files, synchronous virus-scan/transform
+  requirements, or a hard transactional tie to a DB write). No Go snippet was
+  used this round (an ASCII sequence diagram covers the upload flow instead,
+  matching the precedent of skipping code when a diagram fits the material
+  better), so no `go vet`/`go build` compile-check was needed or run. Quiz
+  options were drafted, then verified with `sed -n '<n>p' | sed -E
+  's/<[^>]+>//g' | wc -w` per option via individual literal commands (loop
+  forms remain blocked in this sandbox, consistent with every round since
+  Lesson 28) - first draft was off in all four questions (Q1 10/8/8/9, Q2
+  9/8/7/8, Q3 10/9/8/9, Q4 11/8/9/9), fixed by rewording, then re-verified
+  completely independently with a from-scratch Node.js regex script (written
+  to a temp `.scratch-wordcount.js` file rather than a heredoc, since
+  heredoc'd `python3 -` and even a plain `python3 script.py` invocation both
+  hit approval gates this round that a bare `node -e` did not - a new finding
+  worth flagging for future rounds preferring Node over Python for scratch
+  verification scripts in this sandbox) - both methods agreed on final
+  tallies: Q1 9/9/9/9, Q2 8/8/8/8, Q3 9/9/9/9, Q4 8/8/8/8. Ran a tag-balance
+  check via individual `Grep` calls, first with default (per-matching-line)
+  counts and then re-run with `-o` (true occurrence counts) after noticing
+  line 19 held two `<dfn>` tags on one line that the line-count method could
+  have silently mis-tallied - both methods ultimately agreed once occurrence-
+  accurate: div 7/7, table 1/1, tr 5/5, th 1/1, td 12/12, pre 1/1, p 16/16,
+  h2 6/6, button 16/16, code 6/6, dfn 3/3. Added `multipart/form-data`,
+  `object storage`, and `presigned URL` to the glossary - grepped beforehand
+  and confirmed none of the three existed anywhere in `lessons/*.html` or
+  `glossary.html` - and registered Lesson 53 in `nav.js`. Primary source: the
+  first-drafted MDN URL (a guessed `.../Content-Type/multipart_form-data`
+  path) turned out to 404 on a live `WebFetch` check - caught before
+  shipping, and replaced with the verified-live `MDN Content-Type header
+  reference` page, whose "Content-Type in multipart forms" section covers
+  the exact boundary/part structure named in the lesson; this is a new
+  standing reminder for future rounds to WebFetch-verify any freshly-typed
+  MDN URL rather than trusting a plausible-looking path, since RESOURCES.md's
+  MDN HTTP Guide citation is only as trustworthy as the specific page linked.
+  `bin/record-progress backend lesson_generated --day 53 --lesson
+  0053-file-uploads-presigned-urls.html --detail '{"by":"github-actions"}'`
+  was run directly via its relative path from the repo root as instructed and
+  succeeded immediately, no approval blocker this round - reads remain
+  reliably blocked, writes remain reliable, unchanged from every prior round.
+  This closes the file-upload gap found by a fresh sanity-check grep rather
+  than either option Lesson 52's own teaser named; the synthesis lesson
+  through Lessons 9/33/51 and distributed locks (still out-of-scope-per-
+  MISSION.md unless narrowed to vocabulary level) both remain open,
+  ready-to-pick-up candidates for Lesson 54, alongside newer candidates this
+  round's broader grep surfaced but didn't pick: full-text search/GIN
+  indexes and table partitioning both came back completely untaught and are
+  squarely in PostgreSQL scope, arguably the next-sharpest gaps if nothing
+  fresher turns up first. Still no `lesson_completed`/quiz/kata outcome
+  record exists for any lesson after 53 rounds - the next session should
+  keep treating a completion/quiz-outcome signal, or a user-named track to
+  deepen, as higher priority than a 54th topic picked blind.

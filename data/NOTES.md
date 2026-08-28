@@ -3296,3 +3296,101 @@
   MultiIndex-specific and likely pair better taught together in one lesson
   once a MultiIndex-heavy topic is due, rather than split across two
   standalone rounds.
+- 2026-08-28 generation (Lesson 51, headless GitHub Actions run): idempotency
+  was self-confirmed first — grepped `assets/nav.js` for `n: 51`/
+  `date: "2026-08-28"` (neither found, highest registered lesson was still
+  50, dated 2026-08-27) and globbed `data/lessons/` for `0051-*.html` (none
+  found) — so this round proceeded. `bin/query-progress data` was not
+  attempted this round per this round's own instructions (already confirmed
+  hard-blocked in effectively every prior round); still no readable
+  `course_progress` rows and no `lesson_completed`/quiz/kata outcome record
+  beyond the Lesson 1 baseline, so no reported weak spot to target. Topic was
+  pre-chosen per Lesson 50's own teaser: `convert_dtypes()`, named explicitly
+  as the strongest single remaining candidate from the Lesson-47-flagged
+  batch (`.xs()`/`droplevel()` deliberately deferred as MultiIndex-specific,
+  better taught together later). Re-grepped fresh before committing rather
+  than trusting the old note: `grep -l "convert_dtypes"` across
+  `lessons/*.html` and `reference/glossary.html` returned zero hits —
+  genuinely uncovered, confirmed, teaser was not stale. `uv run --with
+  pandas` worked directly this round (pandas 3.0.5, confirmed via
+  `pd.__version__`); a genuine version-specific finding surfaced immediately
+  while exploring: this pandas build reads plain CSV text columns as a
+  lowercase `str` dtype by default (not the classic `object` dtype older
+  pandas/NumPy docs describe), so the lesson's prose was written to say
+  "generic text" rather than hardcode "object", staying accurate regardless
+  of which of the two a reader's own pandas build produces. Every number/
+  dtype was hand-verified in `.scratch/data-lesson51/run/explore.py` and
+  `explore2.py` (both deleted after) against the real `orders_raw.csv`
+  fixture before writing a word of the lesson: `clean.convert_dtypes()`
+  turns `order_id` (`int64`) into `Int64` and `amount` (`float64`) into
+  `Float64`, matching Lesson 47's own nullable-Int64/Float64 glossary entry
+  exactly; the uncoerced `raw["amount"]` column (still carrying the stray
+  `"unknown"` from row 3) becomes pandas' own `string` dtype under
+  `convert_dtypes()`, NOT `Float64` — the lesson's real teaching hook, a new
+  instance of the "no crash, quietly wrong" family already flagged for
+  `describe()`, `corr()`, `reindex()`, and `str.extract()`, since the column
+  now looks upgraded but the values were never actually fixed; a second,
+  independently surprising finding was also hand-confirmed: an all-whole-
+  number `float64` Series (`[1.0, 2.0, 3.0]`) is promoted to `Int64`, not
+  `Float64`, while a genuinely fractional Series (`[1.5, 2.0, 3.0]`) stays
+  `Float64` — the container's starting dtype name doesn't predict the
+  result, the actual values do; coercing first with
+  `pd.to_numeric(errors="coerce")` and then calling `convert_dtypes()`
+  correctly reaches `Float64`, confirming the fix. Designing the practice
+  file hit two real instances of this course's running Ellipsis-is-truthy/
+  doesn't-raise family, both caught by actually running the draft rather
+  than reasoning about it: (1) `clean.convert_dtypes(...)` (Ellipsis passed
+  positionally) does NOT raise — pandas' real signature accepts a positional
+  `infer_objects: bool` argument first, so Ellipsis's truthiness silently
+  became `infer_objects=True` and the exercise would have shipped as an
+  accidental freebie ✓, confirmed directly with a standalone probe
+  (`inspect.signature` plus a live call) before trusting it; fixed by moving
+  the placeholder to the whole right-hand side (`converted = ...`) instead,
+  since `Ellipsis["order_id"]` genuinely raises `TypeError: 'ellipsis'
+  object is not subscriptable` on its own, confirmed with its own standalone
+  probe; (2) `fractional[...]` (Ellipsis as a whole-Series indexer) does NOT
+  raise either — same finding as Lessons 20/25/45/46/49, it silently returns
+  the Series unchanged — fixed the same way, moving the placeholder to
+  `fractional_dtype = ...` on the whole right-hand side so an unfilled
+  exercise never even calls `.convert_dtypes()` and fails the string-
+  equality check for a real ✗. `raw[...]` (Ellipsis as a DataFrame column
+  selector, Exercise 2) was checked directly and confirmed it DOES raise
+  `KeyError: Ellipsis` on its own, matching Lesson 50's identical finding, so
+  needed no extra guarding. The shipped (unsolved) `practice/
+  51_convert_dtypes.py` was executed in a mirrored `.scratch/data-lesson51/
+  run2/practice/` layout (fixture CSVs copied alongside) and printed all 5
+  expected ✗ (Exercise 1's 2 checks, Exercise 2's 1 check, Exercise 3's 1 of
+  2 checks, Exercise 4's 1 check) with no crash, while Exercise 3's other
+  check — pre-written, not placeholder-gated — correctly stayed ✓ even
+  unsolved, same expected shape as prior lessons' precedent; a solved copy
+  (same scratch path, not shipped) then printed all 6 ✓ against the exact
+  hand-verified dtypes above; the shipped file was also re-run a second time
+  directly from its real `practice/` location (`cd data && uv run --with
+  pandas python3 practice/51_convert_dtypes.py`) and confirmed identical ✗
+  output. The entire `.scratch/data-lesson51/` directory was fully removed
+  (`rm -rf`) after verification, no approval needed this round. Added
+  `convert_dtypes()` to the glossary (checked for a collision first —
+  grepped for `convert_dtypes`, no existing row) placed directly after
+  Lesson 50's `corr()` entry, and registered Lesson 51 in `nav.js`. Quiz
+  options were drafted and checked with a Python regex/word-count script
+  isolating each `<div class="q">` block by its own start offset (this
+  course's established approach since Lesson 42), run via `uv run python3`
+  — the first draft came out mismatched on all four questions (Q1 12/9/12,
+  Q2 10/12/12, Q3 14/10/10, Q4 12/14/9); several rewrite + recount cycles
+  landed all four level (Q1 12/12/12, Q2 12/12/12, Q3 13/13/13, Q4
+  14/14/14), then independently re-verified with a second, fully separate
+  method (manual word-by-word counting done by hand directly from the
+  shipped HTML's `grep` output, not a second run of the same script), per
+  this file's standing warning that a single verification pass isn't
+  reliable — both methods agreed on all four counts. `bin/record-progress
+  data lesson_generated --day 51 --lesson 0051-convert-dtypes.html --detail
+  '{"by":"github-actions"}'` was run once from the repo root as instructed
+  and succeeded on the first try (`recorded: data/lesson_generated day=51
+  lesson=0051-convert-dtypes.html`), no approval blocker this round. This
+  agent does not run `git commit` — leaving working-tree changes
+  uncommitted remains this course's established convention. Set the teaser
+  going forward to the last two names on the Lesson-47-flagged batch: `.xs()`
+  and `droplevel()`, both MultiIndex-specific and likely worth teaching
+  together in one lesson once a MultiIndex-heavy topic is due, rather than
+  split across two standalone rounds — otherwise a fresh scan for the next
+  strongest uncovered candidate if a MultiIndex-heavy lesson isn't yet due.

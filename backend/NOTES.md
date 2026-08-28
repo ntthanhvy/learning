@@ -3131,3 +3131,96 @@
   record exists for any lesson after 53 rounds - the next session should
   keep treating a completion/quiz-outcome signal, or a user-named track to
   deepen, as higher priority than a 54th topic picked blind.
+- 2026-08-28 generation (Lesson 54, headless GitHub Actions run): idempotency
+  check first - confirmed no `lessons/0054-*.html` file existed and no `n:
+  54`/`date: "2026-08-28"` entry was in `nav.js` before writing anything
+  (highest prior lesson was 53, dated 2026-08-27). DB-read attempts were
+  skipped per this round's briefing rather than re-confirmed - treated as
+  reliably blocked, consistent with every prior round; still no reported weak
+  spot to target. This round's briefing named two paths forward from Lesson
+  53's own teaser: the standing synthesis lesson through Lessons 9/33/51's
+  caching-and-concurrency lenses, or one of two fresh PostgreSQL gaps Lesson
+  53's broader grep had already confirmed completely untaught - full-text
+  search/GIN indexes and table partitioning. Checked MISSION.md's own text
+  directly rather than assuming: its "Success looks like" section opens with
+  "design the data model... entities, relationships, constraints, and a
+  migration plan," and its Constraints section explicitly scopes examples to
+  "Go + PostgreSQL." Full-text search is a concrete, scoped PostgreSQL
+  data-modeling/query topic squarely inside that frame, and a fresh grep
+  re-confirmed it was still untaught anywhere: searching lessons/*.html,
+  glossary.html, and this NOTES.md for "full-text", "tsvector", "tsquery",
+  "to_tsvector", and "GIN" turned up only Lesson 44's JSONB lesson using GIN
+  for jsonb containment queries (`@>`), never for text search specifically,
+  and NOTES.md's own prior-round mentions of the gap itself - never taught as
+  its own topic. Chose it over both the synthesis lesson and table
+  partitioning: sharper and more concrete than a revisit-lesson, and more
+  directly practical day-to-day than partitioning (which is more of an
+  operational/scale concern than something a fullstack dev designs day-to-day
+  per MISSION.md's own frontend-heavy framing) - both partitioning and the
+  synthesis lesson remain open for Lesson 55. Lesson 54 covers: why a leading
+  `%` in `LIKE '%word%'` defeats a B-tree index entirely (no sorted prefix to
+  jump to, forcing a sequential scan regardless of what's indexed, tied back
+  to Lesson 5's core indexing frame) and why LIKE can't match word variants
+  like "run"/"running"; `to_tsvector` as the function that tokenizes text,
+  drops stop words, and stems words to a root form, producing a `tsvector`;
+  `to_tsquery` normalizing search terms the same way so stems match; the `@@`
+  match operator; a GIN index on a `GENERATED ALWAYS ... STORED` tsvector
+  column as the piece that actually makes it fast, explicitly extending
+  Lesson 44's GIN-for-JSONB introduction to full-text search as GIN's other
+  classic use case (same structural reason: an inverted index mapping many
+  per-row values back to matching rows) and re-stating Lesson 5's core
+  index trade-off (write-time cost for read-time speed) in this new context;
+  and a closing section on when Postgres's built-in full-text search is
+  enough vs. when a dedicated search engine (Elasticsearch, Typesense,
+  Algolia) becomes a real architectural jump, explicitly marked out of scope
+  per MISSION.md's "infra beyond vocabulary level" exclusion. No Go snippet
+  was used (only SQL, matching Lesson 53's precedent of skipping a Go
+  compile-check when the material is naturally SQL/diagram-only), so no `go
+  vet`/`go build` run was needed - a `.scratch/backend-lesson54/` directory
+  was created in case a Go snippet turned out to be needed, then removed
+  (via `rmdir`, harmless since nothing had been written into it) once the
+  lesson turned out to be SQL-only. Quiz options were drafted, then verified
+  two independent ways: a from-scratch Node.js script (`node -e` inline, no
+  temp file needed this round) parsing the quiz HTML directly and counting
+  `.split(/\s+/).length` per option, and separately `sed -n '<n>p' | sed -E
+  's/<[^>]+>//g' | wc -w` run as individual literal per-line commands (loop/
+  variable-expansion forms remain blocked in this sandbox, consistent with
+  every round since Lesson 28) - both methods agreed at every step. First
+  draft was off in three of four questions (Q1 10/10/9/8, Q2 9/9/7/8, Q4
+  8/10/9/8; only Q3 was already even at 10/9/10/10 before its own fix), fixed
+  by rewording individual options and re-verified after every edit per this
+  course's standing practice, arriving at final tallies confirmed by both
+  methods: Q1 9/9/9/9, Q2 9/9/9/9, Q3 10/10/10/10, Q4 9/9/9/9. Ran a
+  tag-balance check via individual occurrence-accurate (`-o`) `Grep` calls
+  for every tag pair used, catching the stray-tag bug class prior rounds'
+  notes have flagged: div 6/6, p 8/8, pre 2/2, table 1/1, tr 5/5, h2 6/6, dfn
+  2/2, code 11/11, button 16/16, and confirmed exactly one `data-ok` per
+  question (4 total) across the four quiz questions. Added `to_tsvector`,
+  `tsvector`, `to_tsquery`, and `GIN index` to the glossary - grepped
+  beforehand and confirmed none of the four existed anywhere in
+  `lessons/*.html` or `glossary.html` (GIN itself only appeared inside
+  Lesson 44's JSONB body text and its own quiz answer explanation, never as
+  its own glossary row) - and registered Lesson 54 in `nav.js`. Primary
+  source: before citing it, ran a live `WebFetch` check against
+  `https://www.postgresql.org/docs/current/textsearch-intro.html` (a
+  freshly-typed URL, per the standing reminder from Lesson 53's own 404
+  incident) - confirmed live, PostgreSQL 18 docs section 12.1, covering
+  `tsvector`/`tsquery`/the `@@` operator with the same worked examples this
+  lesson builds on and cross-referencing section 12.9 for GIN/GiST index
+  selection; cited as extending RESOURCES.md's standing "PostgreSQL Manual —
+  Data Definition" citation into the full-text search chapter specifically.
+  `bin/record-progress backend lesson_generated --day 54 --lesson
+  0054-full-text-search-postgres.html --detail '{"by":"github-actions"}'` was
+  run directly via its relative path from the repo root as instructed and
+  succeeded immediately, no approval blocker this round - reads remain
+  reliably blocked, writes remain reliable, unchanged from every prior round.
+  This closes the full-text-search gap first flagged by Lesson 53's own
+  broader grep; table partitioning (confirmed untaught, same grep) and the
+  synthesis lesson through Lessons 9/33/51's caching-and-concurrency lenses
+  both remain open, ready-to-pick-up candidates for Lesson 55, alongside
+  whatever a fresh gap-finding grep turns up next round per this course's
+  standing practice of checking before committing to either. Still no
+  `lesson_completed`/quiz/kata outcome record exists for any lesson after 54
+  rounds - the next session should keep treating a completion/quiz-outcome
+  signal, or a user-named track to deepen, as higher priority than a 55th
+  topic picked blind.

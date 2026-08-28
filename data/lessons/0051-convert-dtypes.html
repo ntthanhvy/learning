@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 51 · convert_dtypes(): the best-guess dtype pass</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 51 · ~20 min · 28 Aug 2026</p>
+<h1>convert_dtypes(): the best-guess dtype pass</h1>
+<p class="byline">Lesson 50's own closing teaser named this as the strongest remaining candidate from the Lesson-47-flagged batch: still genuinely uncovered, and unlike <code>.xs()</code>/<code>droplevel()</code> (both MultiIndex-specific, better taught together later), <code>convert_dtypes()</code> applies to any DataFrame. It's the one-call answer to a question every earlier lesson has handled column-by-column: "what's the best dtype for each of these columns, given what's actually in them?"</p>
+
+<h2>Recap, in one line</h2>
+<p>Lessons 3/25/47 taught fixing dtypes one column at a time — <code>pd.to_numeric()</code>, <code>pd.to_datetime()</code>, <code>astype()</code>, each aimed at a single named column. <dfn data-en="a DataFrame/Series method that inspects the ACTUAL values already in each column and switches each one to the best-fitting pandas nullable dtype (Int64, Float64, string, boolean) it can infer -- a best-guess pass across every column at once, not a targeted conversion of one named column to one named type" data-vn="giữ nguyên 'convert_dtypes()' — quét GIÁ TRỊ THẬT trong từng cột rồi tự chọn dtype nullable phù hợp nhất (Int64, Float64, string, boolean) cho MỌI cột cùng lúc, khác astype()/to_numeric() là ép 1 cột cụ thể sang 1 kiểu cụ thể">convert_dtypes()</dfn> runs that same instinct across the whole table in one call, inferring the best-fitting dtype per column from what's actually stored in it.</p>
+
+<h2>1 · One call, every column upgraded at once</h2>
+<p>The real <code>orders_raw.csv</code> fixture, already cleaned through Lessons 6-50's standard path (<code>to_numeric</code> + <code>to_datetime</code> + <code>dropna</code>):</p>
+<pre><code>clean.dtypes
+<span class="cm">-- order_id               int64
+-- customer                 str
+-- amount               float64
+-- order_date    datetime64[us]
+-- dtype: object</span></code></pre>
+<p>One call upgrades every column to pandas' own nullable dtypes, each one inferred from the values actually sitting in that column:</p>
+<pre><code>clean.convert_dtypes().dtypes
+<span class="cm">-- order_id               Int64
+-- customer              string
+-- amount               Float64
+-- order_date    datetime64[us]
+-- dtype: object</span></code></pre>
+<p><code>int64</code> becomes capitalized <code>Int64</code>, <code>float64</code> becomes <code>Float64</code>, and the text <code>customer</code> column becomes pandas' own dedicated <code>string</code> dtype — the same nullable-numeric family Lesson 47's glossary entry already named (<code>Int64</code>/<code>Float64</code> reserve a real <code>&lt;NA&gt;</code> marker for missing values, where plain <code>astype(int)</code> has no bit pattern for "missing" and raises <code>IntCastingNaNError</code> on any NaN instead). <code>order_date</code> stays a datetime — nothing to upgrade there, <code>convert_dtypes()</code> only touches columns where a better-fitting dtype actually exists.</p>
+
+<h2>2 · The gotcha: it upgrades to the best type it can see — not the type you meant</h2>
+<p>The trap: <code>convert_dtypes()</code> only ever looks at the values that are actually there. Run it on <code>raw</code> — the uncoerced fixture, before <code>pd.to_numeric()</code> has touched <code>amount</code>, still carrying the stray <code>"unknown"</code> from row 3 that has blocked numeric auto-detection since Lesson 2:</p>
+<pre><code>raw[<span class="str">"amount"</span>].tolist()
+<span class="cm">-- ['120.0', '35.5', 'unknown', '99.9', '180.0', '42.0']</span>
+raw[<span class="str">"amount"</span>].convert_dtypes().dtype
+<span class="cm">-- string</span></code></pre>
+<p>Not <code>Float64</code> — <code>string</code>. Every value in that column really is text as far as pandas' own dtype system can tell (<code>"unknown"</code> is a perfectly valid string, so the whole column qualifies as string-typed, nothing to reject). The column now LOOKS converted — it went from generic <code>str</code>/<code>object</code> to pandas' dedicated <code>string</code> dtype, a real change — but the numbers inside it are still stored as text, not floats, and arithmetic on it still fails exactly as before. This is the same "no crash, quietly wrong" family already flagged for <code>describe()</code> (Lesson 49), <code>corr()</code> (Lesson 50), <code>reindex()</code> (Lesson 47), and <code>str.extract()</code> (Lesson 42): <code>convert_dtypes()</code> never asks whether a column's CONTENT is what you intended, only whether its current values fit a better-typed container than the one they're already in. The fix is unchanged from Lesson 2 — <code>pd.to_numeric(raw["amount"], errors="coerce")</code> first, to actually coerce <code>"unknown"</code> into a real missing value, THEN <code>convert_dtypes()</code> to upgrade the result to <code>Float64</code>.</p>
+
+<h2>3 · A second surprise: float64 can become Int64, not just Float64</h2>
+<p>A column doesn't need any missing values to get upgraded — and it doesn't always land on the dtype you'd expect from its current one:</p>
+<pre><code>whole = pd.Series([1.0, 2.0, 3.0])
+whole.convert_dtypes().dtype
+<span class="cm">-- Int64</span>
+
+mixed = pd.Series([1.5, 2.0, 3.0])
+mixed.convert_dtypes().dtype
+<span class="cm">-- Float64</span></code></pre>
+<p><code>whole</code> is stored as <code>float64</code>, but every value happens to be a whole number — so <code>convert_dtypes()</code> looks past the CONTAINER's current dtype and asks what the VALUES actually need, landing on <code>Int64</code> instead of the expected <code>Float64</code>. <code>mixed</code> has one genuinely fractional value (<code>1.5</code>), so it stays <code>Float64</code>. Worth checking a column's new dtype explicitly rather than assuming "was <code>float64</code>, so becomes <code>Float64</code>" — a downstream <code>.astype("float64")</code> or a merge key comparison written against the old assumption can behave differently once the dtype has quietly shifted to an integer type.</p>
+
+<h2>4 · The SQL bridge</h2>
+<p>SQL columns don't have this problem in the first place — a table's column types are declared at <code>CREATE TABLE</code> time and every insert is checked against them; there's no equivalent moment where SQL "looks at what's already in a column and picks a better type for it," because a column can never silently hold the wrong type to begin with. <code>convert_dtypes()</code> exists because pandas' load path is the opposite: <code>read_csv()</code> guesses per-column types from raw text with no schema to enforce them, so a whole table can end up under-typed (numbers stored as generic strings, missing values blocking a clean integer dtype) with no error at load time. The nearest SQL analogue isn't a single statement — it's closer to running <code>ALTER TABLE ... ALTER COLUMN ... TYPE ...</code> once per column after eyeballing what's actually in each one, except <code>convert_dtypes()</code> proposes the target type for you instead of requiring it named up front, and it never touches the underlying values, only the container.</p>
+
+<div class="interview">
+<p><strong>Q: "You just ran convert_dtypes() on a loaded DataFrame. Does that mean the data is now clean?"</strong> A strong answer, out loud: <em>"No — convert_dtypes() only upgrades a column to the best-fitting dtype given the values that are ALREADY there; it never validates or fixes the values themselves. If a numeric column got loaded as text because of one bad row — a stray 'unknown' blocking auto-detection, for example — convert_dtypes() will happily promote that column to pandas' own string dtype instead of a numeric one, since every value genuinely is valid text. It looks converted, but it's still not usable for arithmetic. I'd run convert_dtypes() as a final polish AFTER the real cleaning step — to_numeric()/to_datetime() with errors='coerce' to fix the actual values — not as a substitute for it, the same order Lesson 2's cleaning path already established."</em> The signal: naming that it upgrades containers, not values, and placing it after coercion in the pipeline rather than instead of it.</p>
+</div>
+
+<h2>Try it — self-checking practice (~15 min)</h2>
+<p>Open <code>practice/51_convert_dtypes.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/51_convert_dtypes.py</code></pre>
+<p>Uses the same real <code>orders_raw.csv</code> fixture as every recent lesson. Exercise 1 runs <code>convert_dtypes()</code> on the already-cleaned table and checks the resulting <code>order_id</code>/<code>amount</code> dtypes (Section 1); Exercise 2 reproduces the "still uncoerced, still stuck as text" gotcha on the raw <code>amount</code> column (Section 2); Exercise 3 checks the float64-with-only-whole-numbers surprise against a genuinely fractional column (Section 3); Exercise 4 confirms the fixed order — coerce first, then <code>convert_dtypes()</code> — actually reaches <code>Float64</code>.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="convert_dtypes() inspects the actual values already stored in each column and switches each to the best-fitting pandas nullable dtype it can infer (Int64, Float64, string, boolean) -- a whole-table best-guess pass, not a targeted single-column conversion the way astype() or to_numeric() are.">
+    <p class="stem">What does <code>DataFrame.convert_dtypes()</code> do?</p>
+    <button class="opt" data-ok>upgrades each column to its best-fitting nullable dtype, inferred from its values</button>
+    <button class="opt">deletes every column whose dtype cannot be correctly inferred at all today</button>
+    <button class="opt">converts every single column in the table to one same shared dtype</button>
+  </div>
+  <div class="q" data-why="convert_dtypes() only looks at the values that are already in a column. A numeric column still stuck as text because of one bad value (like a stray 'unknown') has every value qualify as valid text, so it gets promoted to pandas' own string dtype instead of a numeric one -- it looks converted, but the underlying values were never fixed.">
+    <p class="stem">An <code>amount</code> column loaded as text due to one stray non-numeric value. What does <code>convert_dtypes()</code> do to it?</p>
+    <button class="opt" data-ok>promotes it to pandas' own new string dtype, still unusable for arithmetic</button>
+    <button class="opt">raises an error, refusing to touch a column with any bad value</button>
+    <button class="opt">silently drops that one bad row and returns a clean Float64 column</button>
+  </div>
+  <div class="q" data-why="convert_dtypes() looks past a column's current container dtype and asks what the values themselves actually need. A float64 column where every value happens to be a whole number (no fractional part, with or without missing values) gets promoted to the nullable integer dtype Int64, not Float64 as the old dtype name might suggest.">
+    <p class="stem">A <code>float64</code> column where every value happens to be a whole number (e.g. <code>1.0, 2.0, 3.0</code>). What dtype does <code>convert_dtypes()</code> give it?</p>
+    <button class="opt" data-ok>Int64 -- every value is a whole number, so an integer type fits</button>
+    <button class="opt">Float64 -- it always faithfully mirrors the original container's own exact numeric kind</button>
+    <button class="opt">object -- mixed-looking numeric columns always just fall straight back to plain object</button>
+  </div>
+  <div class="q" data-why="SQL enforces a column's declared type at every insert, so a column can never silently hold the wrong type. pandas' read_csv() has no such schema to enforce, so convert_dtypes() exists specifically to patch that gap after loading -- there is no single SQL statement that does the same 'inspect current values, propose a better type' inference in one step.">
+    <p class="stem">Why doesn't SQL have a direct equivalent to <code>convert_dtypes()</code>?</p>
+    <button class="opt" data-ok>SQL enforces column types on every single insert, so mistyped columns cannot occur ever</button>
+    <button class="opt">SQL has no real concept of column data types, so nothing ever converts here</button>
+    <button class="opt">SQL only ever supports plain string columns, making type inference always meaningless anyway today</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official pandas <a href="https://pandas.pydata.org/docs/user_guide/index.html">User Guide</a> (~5 min) — its "Nullable integer data type" and "Working with missing data" pages document the full <code>Int64</code>/<code>Float64</code>/<code>string</code>/<code>boolean</code> dtype family <code>convert_dtypes()</code> draws from, plus the <code>dtype_backend=</code> keyword for routing to PyArrow-backed dtypes instead.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>convert_dtypes()</code> was added today, placed right after Lesson 50's <code>corr()</code> entry.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-51 comes back reported as shakiest, otherwise <code>.xs()</code> and <code>droplevel()</code> — both MultiIndex-specific and the last two names left on the Lesson-47-flagged batch, likely worth teaching together in one lesson once a MultiIndex-heavy topic is due.<br><br>
+💬 Anything unclear — the nullable-dtype family, the string-not-Float64 gotcha, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

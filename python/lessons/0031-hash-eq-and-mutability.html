@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 31 · __hash__: why a custom __eq__ can silently break dict and set</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 31 · ~20 min · 28 Aug 2026</p>
+<h1>__hash__: why a custom __eq__ can silently break dict and set</h1>
+<p class="byline">Day 30 wrote <code>__eq__</code> by hand for the first time. Today shows the side effect nobody warns you about: defining <code>__eq__</code> quietly disables the dunder method that lets an object be a dict key or a set element at all — <code>__hash__</code> — unless you write that one too. Today explains what <code>__hash__</code> does, why Python disables it the moment <code>__eq__</code> appears, and why an object with mutable state should usually leave it disabled rather than fix it.</p>
+
+<div class="callout"><strong>Bridge from SQL:</strong> a table's primary key has to stay put while it's being used as a lookup or a join key — <code>UPDATE orders SET id = 999 WHERE id = 1</code> against a row still referenced elsewhere breaks every index and every foreign key pointing at the old value. Python's <code>dict</code> and <code>set</code> have the exact same requirement for whatever you use as a key: it has to produce the same lookup value for as long as it's stored, or the structure can no longer find it. Today's dunder method, <code>__hash__</code>, is what computes that lookup value — and Python's own safety rule for it is exactly "don't let a value that can change be used as a key."</div>
+
+<h2>1 · What <code>__hash__</code> actually does</h2>
+<p>Day 3 said dict keys and set elements "must be immutable (hashable)" without explaining the mechanism. Here it is: <code>hash(x)</code> calls <code>x.__hash__()</code>, producing an integer Python uses to decide which internal bucket <code>x</code> belongs in — the reason dict/set lookup is direct instead of a scan through every entry. Every plain object already has one, inherited from the base <code>object</code> class:</p>
+<pre><code><span class="kw">class</span> Point:
+    <span class="kw">def</span> __init__(self, x, y):
+        self.x = x
+        self.y = y
+
+p = Point(<span class="num">1</span>, <span class="num">2</span>)
+<span class="kw">hash</span>(p)             <span class="cm"># some integer — works, based on identity (Day 1's `is`), not on .x/.y</span>
+{p: <span class="str">"first point"</span>}    <span class="cm"># fine — a plain object is hashable by default</span></code></pre>
+<p>The default <code>__hash__</code> is based on identity — the same object always hashes the same way, but two separately built <code>Point(1, 2)</code>s hash differently, because the default <code>__eq__</code> (Day 30) also compares identity. The two stay in lockstep on purpose: <code>x == y</code> being true always implies <code>hash(x) == hash(y)</code> for the defaults, which is exactly the rule dict/set lookup depends on.</p>
+
+<h2>2 · Defining <code>__eq__</code> breaks that lockstep</h2>
+<p>Day 30's <code>Money</code> defined <code>__eq__</code> to compare <code>.cents</code> instead of identity — two different objects with the same <code>cents</code> now compare equal. But nothing told <code>__hash__</code> about that change, so Python takes it away instead of leaving it wrong:</p>
+<pre><code><span class="kw">class</span> Money:
+    <span class="kw">def</span> __init__(self, cents):
+        self.cents = cents
+
+    <span class="kw">def</span> __eq__(self, other):
+        <span class="kw">if</span> <span class="kw">not</span> isinstance(other, Money):
+            <span class="kw">return</span> NotImplemented
+        <span class="kw">return</span> self.cents == other.cents
+
+<span class="kw">hash</span>(Money(<span class="num">500</span>))          <span class="cm"># TypeError: unhashable type: 'Money'</span>
+{Money(<span class="num">500</span>): <span class="str">"five dollars"</span>}  <span class="cm"># same TypeError — a dict key must be hashable</span></code></pre>
+<p>This is not a bug to work around by accident — it is <dfn data-en="the Python rule that a class defining __eq__() without also defining __hash__() has its __hash__ implicitly set to None, making instances unhashable (raising TypeError from hash() or as a dict key/set element), straight from the Data model docs" data-vn="giữ nguyên 'implicit unhashable' — class định nghĩa __eq__ mà không định nghĩa __hash__ thì Python tự set __hash__ = None, object không hash được nữa">Python's documented behavior</dfn>: "a class that overrides <code>__eq__()</code> and does not define <code>__hash__()</code> will have its <code>__hash__()</code> implicitly set to <code>None</code>." Leaving the old identity-based hash in place would have been actively wrong — it would let two "equal" <code>Money</code> objects land in different buckets of the same dict, so a lookup could miss a key that <code>==</code> says is right there. Python would rather refuse outright than let that silently corrupt a lookup.</p>
+
+<h2>3 · Fixing it — and the mutability trap</h2>
+<p>The fix looks like matching <code>__hash__</code> to whatever field (or fields, wrapped in a tuple) <code>__eq__</code> compares, passed through the built-in <code>hash()</code> function:</p>
+<pre><code><span class="kw">class</span> Money:
+    <span class="kw">def</span> __init__(self, cents):
+        self.cents = cents
+
+    <span class="kw">def</span> __eq__(self, other):
+        <span class="kw">if</span> <span class="kw">not</span> isinstance(other, Money):
+            <span class="kw">return</span> NotImplemented
+        <span class="kw">return</span> self.cents == other.cents
+
+    <span class="kw">def</span> __hash__(self):
+        <span class="kw">return</span> <span class="kw">hash</span>(self.cents)   <span class="cm"># same field __eq__ compares — equal Money now hash equal too</span>
+
+{Money(<span class="num">500</span>): <span class="str">"five dollars"</span>}   <span class="cm"># works now — hashable again</span>
+Money(<span class="num">500</span>) == Money(<span class="num">500</span>)     <span class="cm"># True, and hash(Money(500)) == hash(Money(500)) — back in lockstep</span></code></pre>
+<p>This is safe for <code>Money</code> only because nothing ever reassigns <code>.cents</code> after construction. If a class's fields <em>can</em> change after creation — the ordinary case for most hand-written classes — writing <code>__hash__</code> this way opens the exact bug SQL's primary-key rule warns against: put a mutable object into a <code>set</code>, change the field <code>__hash__</code> reads, and the object is now sitting in the wrong bucket. <code>x in my_set</code> can come back <code>False</code> for an object that is, by identity, still sitting inside <code>my_set</code> — the lookup structure and reality have split apart, and nothing raises an error to say so.</p>
+<pre><code><span class="kw">class</span> Tag:
+    <span class="kw">def</span> __init__(self, label):
+        self.label = label
+
+    <span class="kw">def</span> __eq__(self, other):
+        <span class="kw">if</span> <span class="kw">not</span> isinstance(other, Tag):
+            <span class="kw">return</span> NotImplemented
+        <span class="kw">return</span> self.label == other.label
+
+    <span class="kw">def</span> __hash__(self):
+        <span class="kw">return</span> <span class="kw">hash</span>(self.label)   <span class="cm"># dangerous: self.label is reassignable below</span>
+
+t = Tag(<span class="str">"draft"</span>)
+seen = {t}
+t.label = <span class="str">"published"</span>       <span class="cm"># mutated after being hashed into `seen`</span>
+t <span class="kw">in</span> seen                  <span class="cm"># False — wrong bucket now; `seen` still holds it, just unreachable by lookup</span></code></pre>
+<p>The documentation's own guidance (cited below) is direct about this: "if a class defines mutable objects and implements an <code>__eq__()</code> method, it should not implement <code>__hash__()</code>," precisely because a hashable collection's own correctness requires a key's hash to stay fixed for as long as it's stored. The safe default for a mutable class is exactly what Python already does automatically — leave <code>__hash__</code> unset (<code>None</code>) once <code>__eq__</code> is defined, so the class is correctly unhashable, and <code>TypeError</code> catches the mistake at the point of trying to use it as a key, rather than a silent wrong-bucket bug surfacing far away later. Only write <code>__hash__</code> by hand for a class whose relevant fields are fixed for the object's whole lifetime — the same shape Day 7's <code>@dataclass(frozen=True)</code> takes advantage of, generating both a matching <code>__eq__</code> and <code>__hash__</code> together, safely, because <code>frozen=True</code> already guarantees nothing on it can change after construction.</p>
+
+<div class="interview">
+<p><strong>Q: "Why would <code>hash(my_object)</code> suddenly raise <code>TypeError</code> after I added an <code>__eq__</code> method?"</strong> A strong answer, out loud: <em>"Python implicitly sets <code>__hash__</code> to <code>None</code> the moment a class defines <code>__eq__</code> without also defining <code>__hash__</code>, because the two have to stay in lockstep — objects that compare equal must hash equal, or dict/set lookup breaks. Rather than leave the old identity-based hash silently wrong, Python disables hashing entirely and makes you opt back in. I'd only write a matching <code>__hash__</code> if the fields <code>__eq__</code> compares can never change after construction — otherwise a mutated, already-stored object ends up in the wrong hash bucket and becomes unreachable by lookup, which is worse than a raised error because nothing tells you it happened."</em> The signal: naming the lockstep requirement specifically, and knowing when leaving a class unhashable is the <em>correct</em> choice, not a gap to close.</p>
+</div>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> a pandas <code>DataFrame</code> itself is unhashable for exactly this reason — its contents are mutable — while an individual cell value or a <code>tuple</code> used as a <code>MultiIndex</code> level follows the same hashable rule taught here. Not demonstrated here; that's <code>data/</code>'s job, and this is the only sentence in this lesson that names it.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/31_hash_eq_and_mutability.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/31_hash_eq_and_mutability.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: confirming a plain class is hashable by default, confirming a class defining only <code>__eq__</code> becomes unhashable (<code>TypeError</code>), writing a matching <code>__hash__</code> for an immutable-in-practice <code>Money</code> class so it can be used as a dict key, confirming two "equal" <code>Money</code> objects share one dict slot, and observing the wrong-bucket bug live on a deliberately mutable <code>Tag</code> class.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Python implicitly sets __hash__ to None the instant a class defines __eq__ without also defining __hash__, so hash() and any dict-key/set-element use of an instance raises TypeError until __hash__ is written by hand too.">
+    <p class="stem">What happens to <code>__hash__</code> when a class defines <code>__eq__</code> but not <code>__hash__</code>?</p>
+    <button class="opt" data-ok>Python implicitly sets it to None, so instances become unhashable</button>
+    <button class="opt">nothing changes — the old identity-based hash still runs fine</button>
+    <button class="opt">Python auto-writes a new matching __hash__ from every field value</button>
+  </div>
+  <div class="q" data-why="The required rule is that two objects comparing equal via __eq__ must produce the same hash value — otherwise dict and set lookup can miss a key that == correctly reports as already present, since lookup relies on hash to pick the bucket first.">
+    <p class="stem">Why must <code>x == y</code> imply <code>hash(x) == hash(y)</code>?</p>
+    <button class="opt" data-ok>dict/set lookup first picks a bucket by hash before comparing further</button>
+    <button class="opt">it is only a style convention with zero real runtime effect</button>
+    <button class="opt">Python only enforces it for built-in types, never for custom classes</button>
+  </div>
+  <div class="q" data-why="If the fields __hash__ reads can be reassigned after the object is already stored in a set or used as a dict key, mutating them moves the object to a different bucket than the one it was originally hashed into, so lookups by the new state silently fail to find it even though it is still sitting inside the collection.">
+    <p class="stem">Why is writing <code>__hash__</code> risky on a class with mutable fields?</p>
+    <button class="opt" data-ok>mutating a stored object moves it to the wrong lookup bucket</button>
+    <button class="opt">mutable fields simply make hash() run measurably slower every single time</button>
+    <button class="opt">Python silently converts the whole object into a plain tuple instead</button>
+  </div>
+  <div class="q" data-why="Leaving a mutable class's __hash__ unset (Python's own default the moment __eq__ is defined) makes it correctly unhashable, so attempting to use it as a dict key or set element raises TypeError immediately at that point — a loud, easy-to-find failure instead of a silent wrong-bucket bug discovered much later, far from its actual cause.">
+    <p class="stem">What is the safest choice for a mutable class that defines <code>__eq__</code>?</p>
+    <button class="opt" data-ok>leave __hash__ unset, so using it as a key raises TypeError loudly</button>
+    <button class="opt">always write __hash__ anyway regardless, purely just to silence that TypeError forever</button>
+    <button class="opt">hash only the object's own id() instead of any real field value</button>
+  </div>
+  <div class="q" data-why="frozen=True guarantees a dataclass's fields can never be reassigned after construction, which is exactly the condition that makes a hand-matched __hash__ safe — nothing can mutate after being hashed and stored, so the object can never drift into the wrong bucket, unlike an ordinary mutable dataclass.">
+    <p class="stem">Why can <code>@dataclass(frozen=True)</code> safely auto-generate a matching <code>__hash__</code>?</p>
+    <button class="opt" data-ok>frozen=True guarantees its own fields can never change once fully constructed</button>
+    <button class="opt">frozen=True quietly disables __eq__, so no lockstep rule applies at all</button>
+    <button class="opt">dataclasses always fully skip the implicit-None rule every other class follows</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the <a href="https://docs.python.org/3/reference/datamodel.html#object.__hash__">Python Language Reference's Data model — <code>object.__hash__</code></a> (same page cited for Day 1, 29, and 30's "why does it behave like that" questions) states the implicit-<code>None</code> rule and the mutable-object warning quoted above verbatim, and covers the default identity-based behavior inherited from <code>object</code> in full.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day31">glossary</a> under Day 31.<br>
+This closes the loop Day 30 opened on <code>__eq__</code>: the dunder method that decides equality and the one that decides hashability have to agree, and Python enforces that agreement automatically rather than trusting you to remember it.<br><br>
+💬 Anything unclear — the implicit-<code>None</code> rule, the mutable-class trap, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

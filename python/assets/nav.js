@@ -66,6 +66,8 @@
       file: "lessons/0029-writing-context-managers.html" },
     { n: 30, date: "2026-08-27", title: "Making your own objects behave like built-ins",
       file: "lessons/0030-object-model-dunder-and-property.html" },
+    { n: 31, date: "2026-08-28", title: "__hash__: why a custom __eq__ can silently break dict and set",
+      file: "lessons/0031-hash-eq-and-mutability.html" },
   ];
 
   const REFS = [

@@ -106,6 +106,8 @@
       file: "lessons/0049-describe.html" },
     { n: 50, date: "2026-08-27", title: "corr(): does this actually move with that?",
       file: "lessons/0050-corr.html" },
+    { n: 51, date: "2026-08-28", title: "convert_dtypes(): the best-guess dtype pass",
+      file: "lessons/0051-convert-dtypes.html" },
   ];
 
   const REFS = [

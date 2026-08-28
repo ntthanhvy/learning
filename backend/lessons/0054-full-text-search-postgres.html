@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 54 · Full-text search: why LIKE '%word%' doesn't scale</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 54 · ~20 min</p>
+<h1>Full-text search: why LIKE '%word%' doesn't scale</h1>
+<p class="byline">Every product eventually gets a search box — "find the order," "find the article," "find the user by bio." The reach-for-first tool is <code>LIKE '%word%'</code>, and it works right up until the table has real volume. Today: why that query can't use a normal index no matter how you tune it, and the Postgres feature built specifically to fix it.</p>
+
+<h2>1 · Why an ordinary index can't help a %wildcard% query</h2>
+<p>Lesson 5 covered how an index works: a sorted structure the planner can jump into, the way a phone book lets you binary-search a last name. A <code>WHERE title LIKE '%backend%'</code> query breaks that completely. A leading <code>%</code> means "this substring could start anywhere inside the text" — there's no sorted prefix to jump to, so Postgres has no choice but to read every row and scan its full text byte by byte, a sequential scan regardless of how many indexes exist on that column. It gets slower, not faster, as the table grows; ordering "match anywhere" is a fundamentally different problem from ordering "match this exact value or range," which is all a standard B-tree index (Lesson 5's default) is built to answer.</p>
+<p><code>LIKE</code> also has no idea that "run" and "running" are the same idea, or that "the," "a," and "of" barely carry meaning. It's pure byte matching. A user searching "run" gets zero results against a row containing only "running" — technically correct, practically useless for anything called <em>search</em>.</p>
+
+<h2>2 · What full-text search actually is</h2>
+<p>Postgres ships a purpose-built answer: a pipeline that turns free text into a searchable, indexable value instead of treating it as an opaque string. A <dfn data-en="a Postgres function that parses a text string into tokens, removes common stop words, reduces each remaining word to its root form (stemming), and packs the result into a sorted, indexable list called a tsvector" data-vn="to_tsvector (giữ nguyên) — hàm Postgres tách chuỗi text thành từ, bỏ từ dừng (stop word), rút gọn về dạng gốc (stem), rồi đóng gói thành tsvector để index được">to_tsvector</dfn> function does three things to a column's text: splits it into words, drops near-meaningless "stop words" (the, a, of, is), and stems every remaining word to a root form — "running," "runs," and "ran" all normalize toward "run". The output is a <dfn data-en="a sorted list of normalized word roots (lexemes) produced by to_tsvector, the value that gets indexed and matched against — a compact, search-ready representation of a text document, not the original string" data-vn="tsvector (giữ nguyên) — danh sách các từ gốc (lexeme) đã chuẩn hóa, sinh ra từ to_tsvector, là giá trị được index và so khớp">tsvector</dfn> — a compact list of normalized word roots (called lexemes) plus their positions, ready to be matched or indexed. The search side gets the same treatment through <dfn data-en="a Postgres function that parses a search string the same way to_tsvector parses a document, so a user's search terms are stemmed and normalized to match the same lexeme form stored in a tsvector" data-vn="to_tsquery (giữ nguyên) — hàm Postgres chuẩn hóa chuỗi tìm kiếm giống hệt to_tsvector, để khớp đúng dạng lexeme đã lưu">to_tsquery</dfn>, which parses a user's search terms the same way, so "Running" the query matches "runs" in the document — both reduce to the same root.</p>
+<pre><code><span class="cm">-- @@ is the full-text match operator: "does this tsvector match this tsquery"</span>
+<span class="kw">SELECT</span> to_tsvector(<span class="st">'english'</span>, <span class="st">'The quick runners are running fast'</span>)
+       @@ to_tsquery(<span class="st">'english'</span>, <span class="st">'run'</span>);
+<span class="cm">-- true -- "running" stems to "run", "the"/"are" were dropped as stop words</span></code></pre>
+
+<h2>3 · Making it fast: the GIN index</h2>
+<p>Computing <code>to_tsvector</code> on every row for every search would still mean scanning the whole table — the win only lands once that computed value is indexed. Lesson 44 already introduced the <dfn data-en="an index type (Generalized Inverted Index) built for columns holding multiple searchable values per row -- a tsvector's list of lexemes, or a jsonb document's keys -- mapping each individual value back to every row that contains it" data-vn="GIN index (giữ nguyên) — loại index cho cột chứa nhiều giá trị tìm được trên mỗi dòng (như danh sách lexeme trong tsvector, hay key trong jsonb), map ngược mỗi giá trị về các dòng chứa nó">GIN index</dfn> for JSONB's "does this contain that key" queries; full-text search is GIN's other classic use case, for exactly the same structural reason — a tsvector holds many lexemes per row, and GIN maps each lexeme back to every row containing it, an inverted index in the same sense a search engine builds one.</p>
+<pre><code><span class="kw">ALTER</span> <span class="kw">TABLE</span> articles <span class="kw">ADD</span> <span class="kw">COLUMN</span> search_vec <span class="ty">tsvector</span>
+  <span class="kw">GENERATED</span> <span class="kw">ALWAYS</span> <span class="kw">AS</span> (to_tsvector(<span class="st">'english'</span>, title || <span class="st">' '</span> || body)) <span class="kw">STORED</span>;
+
+<span class="kw">CREATE</span> <span class="kw">INDEX</span> <span class="kw">ON</span> articles <span class="kw">USING</span> GIN (search_vec);
+
+<span class="cm">-- now this hits the index instead of scanning every row</span>
+<span class="kw">SELECT</span> id, title <span class="kw">FROM</span> articles
+<span class="kw">WHERE</span> search_vec @@ to_tsquery(<span class="st">'english'</span>, <span class="st">'backend & postgres'</span>);</code></pre>
+<p>The <code>GENERATED ALWAYS ... STORED</code> column keeps the tsvector automatically in sync on every <code>INSERT</code>/<code>UPDATE</code> — no trigger to hand-write, no risk of the index searching stale text after an edit. That sync isn't free: like any index (Lesson 5's core trade-off), a GIN index on a generated tsvector column adds write-time cost — every insert or update to <code>title</code>/<code>body</code> now also recomputes and re-indexes the tsvector — in exchange for read-time speed on searches.</p>
+
+<table class="cmp">
+<tr><th></th><th>LIKE '%word%'</th><th>Full-text search (tsvector + GIN)</th></tr>
+<tr><td>Can use an index?</td><td>No — always a sequential scan</td><td>Yes — GIN index on the tsvector</td></tr>
+<tr><td>Matches word variants?</td><td>No, exact substring only</td><td>Yes — stemming ("run" matches "running")</td></tr>
+<tr><td>Ignores filler words?</td><td>No</td><td>Yes — stop words dropped</td></tr>
+<tr><td>Ranking by relevance?</td><td>Not supported</td><td>Yes — <code>ts_rank</code></td></tr>
+</table>
+
+<div class="callout"><strong>The mistake this retrains:</strong> reaching for <code>LIKE '%word%'</code> or, worse, doing a <code>SELECT *</code> and filtering matches in application code, because it "works" against a small dev database. Both approaches force a full scan on every search and get linearly slower as the table grows — the failure only shows up in production once the table is large enough to matter, the same shape as Lesson 5's "works fine locally, times out in prod" index lesson. If a column needs real text search, <code>tsvector</code> + GIN is the tool built for it, not a workaround.</div>
+
+<h2>4 · Where this stops being enough</h2>
+<p>Postgres full-text search covers a large share of real product search boxes — order notes, support tickets, article bodies, comments — without adding another service. It's not a replacement for a dedicated search engine (Elasticsearch, Typesense, Algolia) once requirements grow into fuzzy/typo-tolerant matching, faceted filtering across many fields, or relevance tuning beyond what <code>ts_rank</code> offers — that's a real architectural jump (a second system to keep in sync with Postgres), out of scope for this course per MISSION.md's own line on infra beyond vocabulary level. The instinct worth keeping: reach for Postgres's own full-text search first for anything that fits in one database, and justify a separate search service only once a concrete requirement — fuzzy matching, faceting, scale — actually demands it.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A leading % means the match could start anywhere in the text, so there is no sorted prefix a B-tree index can jump to -- Postgres must scan every row's full text, regardless of what indexes exist on that column.">
+    <p class="stem">Why can't a normal B-tree index speed up WHERE title LIKE '%word%'?</p>
+    <button class="opt" data-ok>a leading wildcard has no sorted prefix to jump</button>
+    <button class="opt">Postgres refuses to run any query using LIKE now</button>
+    <button class="opt">B-tree indexes only ever work on numeric id columns</button>
+    <button class="opt">wildcard queries always return every single row seen here</button>
+  </div>
+  <div class="q" data-why="to_tsvector parses text into tokens, drops stop words like the/a/of, and stems each remaining word to a root form, so variants like run/runs/running all normalize to the same lexeme and become matchable.">
+    <p class="stem">What does to_tsvector actually do to a column's raw text?</p>
+    <button class="opt" data-ok>tokenizes, drops stop words, and stems each word's root</button>
+    <button class="opt">encrypts the text so only to_tsquery can decode it</button>
+    <button class="opt">deletes the original column's stored value permanently right now</button>
+    <button class="opt">translates the text into a completely different spoken language</button>
+  </div>
+  <div class="q" data-why="A tsvector holds many lexemes per row, and a GIN index maps each individual lexeme back to every row containing it -- an inverted index, the same structural fit GIN already has for jsonb's per-key lookups.">
+    <p class="stem">Why is a GIN index the right index type for a tsvector column?</p>
+    <button class="opt" data-ok>it maps each lexeme back to every row containing it</button>
+    <button class="opt">GIN indexes are simply the newest index type available now</button>
+    <button class="opt">a tsvector column can only ever hold one single word</button>
+    <button class="opt">GIN indexes remove the need for any stemming step first</button>
+  </div>
+  <div class="q" data-why="Like any index, a GIN index on a generated tsvector column adds write-time cost -- every insert or update to the source columns must recompute and re-index the tsvector -- in exchange for read-time search speed, the same trade-off Lesson 5 covers for indexes generally.">
+    <p class="stem">What does a GIN index on a generated tsvector column cost in exchange for fast search?</p>
+    <button class="opt" data-ok>extra work recomputing and re-indexing on every single write</button>
+    <button class="opt">nothing at all, GIN indexes are entirely free always</button>
+    <button class="opt">the original title and body columns get deleted outright</button>
+    <button class="opt">every future SELECT query must now specify GIN explicitly</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://www.postgresql.org/docs/current/textsearch-intro.html">PostgreSQL Manual — Full Text Search: Introduction</a> (chapter 12.1), extending RESOURCES.md's standing "PostgreSQL Manual — Data Definition" citation into the full-text search chapter — it walks through <code>tsvector</code>/<code>tsquery</code> and the <code>@@</code> match operator with the same worked examples this lesson builds on, and links onward to section 12.9 on GIN/GiST index selection for text search specifically.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> open — table partitioning remains a fresh, confirmed-untaught PostgreSQL gap from this round's grep, alongside the standing synthesis-lesson candidate revisiting Lessons 9, 33, and 51's caching- and concurrency-control lenses together, and distributed locks (still out-of-scope-per-MISSION.md unless narrowed to vocabulary level).</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

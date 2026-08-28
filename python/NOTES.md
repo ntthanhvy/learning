@@ -3412,4 +3412,143 @@ fail *gracefully* so the learner sees which task failed.
   again now that at least one web tool responded, even though `WebSearch`
   itself was not re-tested this run. Still no `lesson_completed`/quiz/kata
   outcome record exists for any day — no reported weak spot to target.
+- 2026-08-28 — **Day 31 generated**
+  (`lessons/0031-hash-eq-and-mutability.html`), an automated headless
+  daily-generation run. Idempotency: confirmed before writing anything that
+  `assets/nav.js` had no `n: 31` entry and no `date: "2026-08-28"` entry
+  anywhere, and no `python/lessons/0031-*.html` file existed on disk —
+  highest existing lesson was `0030-object-model-dunder-and-property.html`
+  dated 2026-08-27, so generation proceeded as Day 31, not a re-run.
+  Topic selection: Day 30's own next-day note named two live candidates —
+  `__hash__`'s mutability interaction with `__eq__`, or `@classmethod`/
+  `@staticmethod` (deferred since Day 29) — and explicitly asked this run to
+  prefer the former as the more natural direct continuation unless research
+  turned up a strong reason otherwise. Picked `__hash__`/`__eq__`: it
+  continues the exact dunder-method thread Day 30 just opened (same
+  mechanism family, same `Money`-style worked example reusable across both
+  lessons), closes a real gap Day 3 left open (dict keys/set elements
+  "must be immutable (hashable)" was stated back then with zero mechanism
+  given), and Day 30's own practice file already named `__hash__` in its
+  "Go deeper" primary-source blurb as one of the dunders "left untaught
+  here" — a stronger textual hook than `@classmethod`/`@staticmethod` had.
+  `@classmethod`/`@staticmethod` remains a legitimate open thread for a
+  future day but was not picked today.
+  Web-lookup: per Day 30's success and this run's own instructions, used
+  `WebFetch` against
+  `docs.python.org/3/reference/datamodel.html#object.__hash__` before
+  writing anything — succeeded, returning the exact claims used directly in
+  the lesson: "the only required property is that objects which compare
+  equal have the same hash value," "a class that overrides `__eq__()` and
+  does not define `__hash__()` will have its `__hash__()` implicitly set to
+  `None`," and "if a class defines mutable objects and implements an
+  `__eq__()` method, it should not implement `__hash__()`" — all three
+  quoted close to verbatim in sections 1-3 and the interview callout, so no
+  claim in the lesson rests on memory alone. Did not add a new
+  `RESOURCES.md` entry since the URL is the same Data model reference
+  already cited there and reused for Day 1/29/30; cited it again for Day 31
+  instead. `WebSearch` (the still-unresolved `RESOURCES.md` "Gaps" —
+  Python interview prep, FastAPI project-layout reference) was not
+  re-attempted this run — today's session budget went to the `__hash__`
+  research and verification instead; still open for a future day.
+  Taught: section 1 what `__hash__` does mechanically (`hash(x)` calls
+  `x.__hash__()`, picks a dict/set bucket, default is identity-based and
+  stays in lockstep with the default `__eq__`, both from Day 30); section 2
+  shows Day 30's own `Money.__eq__` example silently becoming unhashable
+  the moment `__eq__` is defined, and states the implicit-`None` rule as
+  Python's documented behavior, not an accident; section 3 the fix (a
+  matching `__hash__` over the same field(s) `__eq__` compares) immediately
+  followed by the mutability trap live on a `Tag` class whose `.label` is
+  reassigned after being hashed into a `set`, showing `t in seen` return
+  `False` for an object still physically present — closing with the
+  documented guidance to leave mutable classes unhashable and the tie back
+  to Day 7's `@dataclass(frozen=True)`, confirmed by direct execution this
+  run (`hash()`/`==`/`FrozenInstanceError` all behaved as described) before
+  writing it into the quiz. Bridged from SQL per the baseline record: a
+  primary key that must stay put while used as a lookup/join key (`UPDATE
+  orders SET id = ...` against a referenced row breaks every index),
+  introduced before any Python in the top callout, not from a pandas
+  analogy — the same "changing a value used as a key breaks the lookup
+  structure" shape reused for the mutable-`__hash__` trap in section 3.
+  No-pandas rule: zero pandas/NumPy/DataFrame hits in the practice file
+  (grepped case-insensitively — zero hits; the file imports nothing at all,
+  standard library needing no import for this lesson's content); exactly
+  one hit in the lesson — one contrast sentence/callout (titled "Where
+  pandas goes from here") naming a `DataFrame`'s own unhashability (mutable
+  contents) and a `MultiIndex` level's use of hashable tuples, without
+  demonstrating any pandas API, placed once after section 3/the interview
+  callout, matching the hard-rule section above.
+  Practice file `practice/31_hash_eq_and_mutability.py` (5 checks across 5
+  exercises: a plain `PlainPoint` class hashable by default via identity,
+  an `UnsafeMoney` class whose `__eq__` TODOs are completed and which stays
+  correctly unhashable with no `__hash__` written, a `Money` class with a
+  hand-written matching `__hash__`, confirming two equal `Money(500))`s
+  share one dict slot, and a deliberately mutable `Tag` class demonstrating
+  the wrong-bucket bug live after `.label` is reassigned post-insertion)
+  needed no on-disk fixtures. Caught the same false-positive bug family
+  flagged on Days 29/30 during drafting itself, before shipping: Exercise
+  2's original check only called `hash(UnsafeMoney(500))` and never
+  exercised the `__eq__` TODOs at all, so an unsolved `__eq__` (falling
+  through to an implicit `None` return) would still correctly raise
+  `TypeError` on `hash()` regardless of whether the TODOs were filled in —
+  the TODO lines would have been decorative, producing an accidental ✓ with
+  the fill-in untested. Fixed before shipping by having
+  `run_unsafe_money_unhashable()` also evaluate and return
+  `UnsafeMoney(500) == UnsafeMoney(500)` alongside the hashability check, so
+  an unsolved `__eq__` now correctly fails Exercise 2 too (returns `None`
+  instead of `True`). Exercise 1 has no TODO by design (a pure
+  demonstration that a plain class is hashable by default) and is the one
+  exercise expected to print ✓ even unsolved — confirmed intentional, not
+  the same bug, since nothing in it is left for the learner to fill in.
+  Followed this course's standard defensive pattern against the
+  Ellipsis-at-module-level bug family: every class line and method
+  signature stays fully definable, with unsolved `...` living strictly
+  inside method bodies. Verified in a scratch dir (created under the repo
+  root as `.scratch_py31_verify`/`.scratch_py31_final`/`.scratch_py31_qc`
+  at different points this run, each removed immediately after use, per
+  every prior day's `/tmp`-is-out-of-bounds precedent): the shipped
+  (unsolved) copy printed exactly 1 ✓ (Exercise 1, by design) and 4 ✗ with
+  no traceback, both from a scratch copy and from its real `practice/` path
+  with the documented command; a separately solved copy (every `...` filled
+  in directly in a scratch copy) printed all 5 ✓ and the "All green" tally.
+  One real bug caught and fixed as described above; no other bugs found.
+  Glossary: added a Day 31 section to `reference/glossary.html`
+  (`implicit unhashable`) after confirming via grep that it collided with
+  no Day 1-30 entry — deliberately did **not** re-glossary `dunder method`
+  (Day 30), `hashable`/`key` (mentioned in passing under Day 3's existing
+  `dict`/`key` rows), or `frozen=True`/`dataclass` (Day 7), reusing all of
+  them as plain `<code>` in today's prose instead, matching this course's
+  no-duplicate-glossary-row convention. The 1 new `<dfn data-en` tag in the
+  lesson body matches the 1 new glossary row exactly (confirmed by count).
+  Quiz: 5 questions (added a 5th after drafting only 4, once a headcount
+  grep across all 31 lesson files showed every other lesson in the course
+  has exactly 5 — the 5th question covers `@dataclass(frozen=True)`'s safe
+  auto-generated `__hash__`, tying section 3's closing point back to Day 7).
+  Word counts were checked with a small Python script (regex-splitting the
+  quiz block into its question `<div>`s and counting `.split()` words per
+  `<button class="opt">` line, run from a scratch dir via `uv run python3`)
+  and mismatched on the first draft for all 4 originally-drafted questions
+  (Q1 9/10/8, Q2 10/11/10, Q3 11/9/10, Q4 12/9/11); the added 5th question
+  also mismatched on its own first draft (9/11/10). Each went through one
+  to four rewrite-and-recount rounds — Q5 in particular needed four rounds,
+  overshooting to 12/11/11 once before landing correctly — re-running the
+  script after every edit, until every option matched (Q1 10/10/10, Q2
+  11/11/11, Q3 11/11/11, Q4 12/12/12, Q5 11/11/11). Re-verified with a
+  second, independently-written script (document-order `<button
+  class="opt">` extraction via regex across the quiz block, ignoring the
+  per-question `<div>` wrapper, then grouped in threes) run against the
+  final file — independently confirmed all 15 options (5 questions × 3
+  options) land on their target counts before shipping. Registered in
+  `assets/nav.js` with `date: "2026-08-28"`.
+  `bin/record-progress python lesson_generated --day 31 --lesson
+  0031-hash-eq-and-mutability.html --detail '{"by":"github-actions"}'` was
+  run once after shipping and **succeeded**: `recorded: python/lesson_generated
+  day=31 lesson=0031-hash-eq-and-mutability.html`.
+  **Next-day note:** `@classmethod`/`@staticmethod` (deferred again this
+  run, now twice) is the clearest immediate candidate for Day 32 if the
+  object-model/dunder thread has run its course — otherwise `RESOURCES.md`'s
+  still-unresolved "Gaps" (Python interview prep, a FastAPI project-layout
+  reference) is worth a dedicated `WebSearch` attempt given `WebFetch` has
+  now succeeded on both Day 30 and Day 31. Still no `lesson_completed`/
+  quiz/kata outcome record exists for any day — no reported weak spot to
+  target.
 

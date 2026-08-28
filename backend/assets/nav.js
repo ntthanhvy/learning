@@ -112,6 +112,8 @@
       file: "lessons/0052-cors-same-origin-policy.html" },
     { n: 53, date: "2026-08-27", title: "File uploads: why your API shouldn't proxy the bytes",
       file: "lessons/0053-file-uploads-presigned-urls.html" },
+    { n: 54, date: "2026-08-28", title: "Full-text search: why LIKE '%word%' doesn't scale",
+      file: "lessons/0054-full-text-search-postgres.html" },
   ];
 
   const REFS = [

@@ -3224,3 +3224,70 @@
   rounds - the next session should keep treating a completion/quiz-outcome
   signal, or a user-named track to deepen, as higher priority than a 55th
   topic picked blind.
+- 2026-08-29 generation (Lesson 55, headless run): idempotency check first -
+  confirmed no `lessons/0055-*.html` file existed and no `n: 55`/`date:
+  "2026-08-29"` entry was in `nav.js` before writing anything (highest prior
+  lesson was 54, dated 2026-08-28). Direct `psql "$LEARNING_DB_URL" ...` reads
+  and `bin/query-progress` were not attempted this round, per the standing
+  finding (documented every round for ~7 weeks) that both are reliably
+  blocked in this sandbox with no user present to approve - fell back to
+  `learning-records/` and repo file state alone, same as every prior round.
+  Lesson 54 left two named candidates open: the standing synthesis lesson
+  through Lessons 9/33/51, and table partitioning, already confirmed
+  genuinely untaught by Lesson 53's broader grep and re-confirmed this round
+  (a fresh grep for "partition" across all 54 lessons and glossary.html
+  turned up only passing, unrelated uses in Lessons 49/50 - bulkhead/DLQ
+  context, never the table-partitioning topic itself). Chose partitioning
+  over the synthesis lesson for the same reason Lesson 54 gave when it made
+  the analogous choice: sharper and more concrete than a revisit, and
+  squarely inside MISSION.md's PostgreSQL data-modeling scope. Lesson 55
+  covers: why an index alone doesn't fix a huge table's maintenance cost
+  (VACUUM, backups, index rebuilds still walk the whole physical table
+  regardless of indexing, tied back to Lesson 5's indexing frame and Lesson
+  39's VACUUM); what a partitioned table actually is (one logical table,
+  many physical child partitions) and the three partition types (range,
+  list, hash) with a worked `CREATE TABLE ... PARTITION BY RANGE` example
+  including the partition-key-must-be-in-the-primary-key constraint; the two
+  distinct wins (partition pruning for filtered queries, tied to Lesson 5's
+  selectivity concept, versus the often-bigger maintenance win of
+  per-partition VACUUM/DROP instead of whole-table); and an explicit trap
+  callout that partitioning gives zero benefit to queries that don't filter
+  on the partition key. Closed with an explicit scope note tying this back
+  to MISSION.md - partitioning is a single-instance Postgres storage
+  decision, not the sharding/distributed-systems territory the mission
+  excludes. No Go snippet was used (SQL only, matching Lessons 53-54's
+  precedent of skipping a compile-check when the material is naturally
+  SQL-only), so no `go vet`/`go build` run was needed. Quiz options were
+  drafted, then verified with a `node -e` inline script parsing the quiz
+  HTML and counting `.split(/\s+/).length` per option (this course's
+  established Node-over-Python preference in this sandbox, per Lesson 53's
+  finding) - first draft was off in all four questions, fixed through three
+  rewrite passes (re-verified with the same script after each pass) to reach
+  final tallies of 9/9/9/9 across all four questions. Ran an occurrence-
+  accurate (`Grep -o`) tag-balance check for every tag pair used: div 6/6, p
+  14/14, pre 1/1, h2 6/6, dfn 6/6, button 16/16, and confirmed exactly one
+  `data-ok` per question (4 total). Added `partitioned table`, `partition`,
+  `range partitioning`, `list partitioning`, `hash partitioning`, and
+  `partition pruning` to the glossary - grepped beforehand and confirmed
+  none of the six existed anywhere in `lessons/*.html` or `glossary.html` -
+  and registered Lesson 55 in `nav.js`. Primary source: before citing it,
+  ran a live `WebFetch` check against
+  `https://www.postgresql.org/docs/current/ddl-partitioning.html` (a
+  freshly-typed URL, per the standing reminder from Lesson 53's 404
+  incident) - confirmed live, covering declarative partitioning, all three
+  partition types, and partition pruning with the same concepts this lesson
+  builds on; cited as extending RESOURCES.md's standing "PostgreSQL Manual —
+  Data Definition" citation into the partitioning chapter specifically.
+  `bin/record-progress backend lesson_generated --day 55 --lesson
+  0055-table-partitioning.html --detail '{"by":"headless"}'` was run
+  directly via its relative path from the repo root as a single standalone
+  command, per the standing finding that this write path works reliably
+  even though DB reads stay blocked. This closes the table-partitioning gap
+  first flagged by Lesson 53's broader grep and re-confirmed by Lesson 54
+  and this round; the synthesis lesson through Lessons 9/33/51's caching-
+  and concurrency-control lenses remains open, still a ready-to-pick-up
+  candidate for Lesson 56, alongside whatever a fresh gap-finding grep turns
+  up next round. Still no `lesson_completed`/quiz/kata outcome record exists
+  for any lesson after 55 rounds - the next session should keep treating a
+  completion/quiz-outcome signal, or a user-named track to deepen, as higher
+  priority than a 56th topic picked blind.

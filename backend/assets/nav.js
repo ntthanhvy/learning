@@ -114,6 +114,8 @@
       file: "lessons/0053-file-uploads-presigned-urls.html" },
     { n: 54, date: "2026-08-28", title: "Full-text search: why LIKE '%word%' doesn't scale",
       file: "lessons/0054-full-text-search-postgres.html" },
+    { n: 55, date: "2026-08-29", title: "Table partitioning: one logical table, many physical ones",
+      file: "lessons/0055-table-partitioning.html" },
   ];
 
   const REFS = [

@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 55 · Table partitioning: one logical table, many physical ones</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 55 · ~20 min</p>
+<h1>Table partitioning: one logical table, many physical ones</h1>
+<p class="byline">Lesson 54's closing teaser named table partitioning as a fresh, confirmed-untaught PostgreSQL gap, alongside a standing synthesis-lesson candidate. Today's the sharper, more concrete pick: what happens once a single table's rows number in the hundreds of millions — an index alone stops being enough, and Postgres has a purpose-built answer for splitting one logical table into many physical pieces.</p>
+
+<h2>1 · What an index can't fix</h2>
+<p>Lesson 5 covered indexes as the fix for "find matching rows without scanning everything." That still holds at huge scale — a B-tree index on <code>created_at</code> finds last week's <code>orders</code> rows fine whether the table has a million rows or ten billion. What indexes don't fix is the <em>other</em> cost of a huge table: routine maintenance (Lesson 39's <code>VACUUM</code>, a full-table backup, an index rebuild) still has to walk the whole physical table, and deleting "everything older than two years" is still millions of individual row deletes — one transaction, one WAL entry per row, regardless of how well-indexed the <code>WHERE</code> clause is. The table's <em>logical</em> size and its <em>physical</em> size are the same thing as far as Postgres storage is concerned — one giant heap file (or set of 1GB segment files) that every maintenance operation has to touch in full.</p>
+
+<h2>2 · Partitioning: one table, split into many</h2>
+<p>A <dfn data-en="a single logical table in Postgres whose actual rows are stored across several separate physical child tables (partitions), split by the value of one or more columns, and queried through the parent table's name as if it were one table" data-vn="partitioned table (giữ nguyên) — một bảng logic, nhưng dữ liệu thật nằm rải ở nhiều bảng con (partition) tách theo giá trị 1 hay nhiều cột, query qua tên bảng cha như bình thường">partitioned table</dfn> looks like one ordinary table to every query — same name, same columns, same constraints — but Postgres physically stores its rows across several separate child tables called <dfn data-en="one of the physical child tables that together make up a partitioned table's storage — each partition holds only the rows matching its own defined range, list, or hash bucket, and can be indexed, vacuumed, or dropped independently of the others" data-vn="partition (giữ nguyên) — 1 bảng con vật lý trong 1 partitioned table, chỉ giữ dòng khớp điều kiện range/list/hash của riêng nó, index/vacuum/drop độc lập với các partition khác">partitions</dfn>. Every partition is declared with a rule about which rows it owns — a <dfn data-en="a partitioning strategy where each partition owns a contiguous range of values of the partition key (e.g. one calendar month of created_at values), the most common choice for time-series or append-mostly data" data-vn="range partitioning (giữ nguyên) — chia partition theo khoảng giá trị liên tục của cột khóa (vd 1 tháng lịch của created_at), phổ biến nhất cho dữ liệu theo thời gian">range partition</dfn> owns a contiguous span of values (orders from March 2026), a <dfn data-en="a partitioning strategy where each partition owns an explicit, enumerated set of values of the partition key (e.g. one partition per country code), rather than a range" data-vn="list partitioning (giữ nguyên) — chia partition theo tập giá trị liệt kê rõ ràng (vd 1 partition mỗi mã quốc gia), không phải theo khoảng">list partition</dfn> owns an explicit set of values (orders from a named region), and a <dfn data-en="a partitioning strategy where Postgres hashes the partition key and assigns each row to one of a fixed number of partitions by the hash's remainder, used when there's no natural range or list to split on and the goal is just spreading rows evenly" data-vn="hash partitioning (giữ nguyên) — Postgres băm cột khóa rồi chia đều dòng vào N partition theo số dư, dùng khi không có range/list tự nhiên, mục tiêu chỉ là chia đều">hash partition</dfn> owns rows by a hash remainder when there's no natural range or list at all, just a desire to spread rows evenly. Time-range partitioning on a timestamp column is by far the most common shape for backend data — most tables that grow without bound (orders, events, audit logs — Lesson 46) grow by time.</p>
+<pre><code><span class="kw">CREATE</span> <span class="kw">TABLE</span> orders (
+  id <span class="ty">bigint</span> <span class="kw">GENERATED</span> <span class="kw">ALWAYS</span> <span class="kw">AS</span> <span class="kw">IDENTITY</span>,
+  created_at <span class="ty">timestamptz</span> <span class="kw">NOT</span> <span class="kw">NULL</span>,
+  customer_id <span class="ty">bigint</span> <span class="kw">NOT</span> <span class="kw">NULL</span>,
+  <span class="kw">PRIMARY</span> <span class="kw">KEY</span> (id, created_at)
+) <span class="kw">PARTITION</span> <span class="kw">BY</span> <span class="kw">RANGE</span> (created_at);
+
+<span class="kw">CREATE</span> <span class="kw">TABLE</span> orders_2026_07 <span class="kw">PARTITION</span> <span class="kw">OF</span> orders
+  <span class="kw">FOR</span> <span class="kw">VALUES</span> <span class="kw">FROM</span> (<span class="st">'2026-07-01'</span>) <span class="kw">TO</span> (<span class="st">'2026-08-01'</span>);
+
+<span class="kw">CREATE</span> <span class="kw">TABLE</span> orders_2026_08 <span class="kw">PARTITION</span> <span class="kw">OF</span> orders
+  <span class="kw">FOR</span> <span class="kw">VALUES</span> <span class="kw">FROM</span> (<span class="st">'2026-08-01'</span>) <span class="kw">TO</span> (<span class="st">'2026-09-01'</span>);
+
+<span class="cm">-- application code still just does this -- Postgres routes the row internally</span>
+<span class="kw">INSERT</span> <span class="kw">INTO</span> orders (created_at, customer_id) <span class="kw">VALUES</span> (now(), <span class="nu">42</span>);</code></pre>
+<p>Note the primary key: Postgres requires the partition key (<code>created_at</code>) to be part of any unique constraint on a partitioned table, since uniqueness can only be enforced within a partition, not cheaply across all of them at once — a real constraint to design around, not a formality.</p>
+
+<h2>3 · Why splitting the table actually helps</h2>
+<p>Two distinct wins, and it matters which one a given query gets. First, <dfn data-en="the query planner's ability to look at a WHERE clause's condition on the partition key and skip scanning any partition whose range or list cannot possibly contain a matching row, before execution even begins" data-vn="partition pruning (giữ nguyên) — planner nhìn điều kiện WHERE trên cột partition key, loại bỏ luôn các partition chắc chắn không có dòng khớp, trước khi chạy">partition pruning</dfn>: a query filtered on the partition key (<code>WHERE created_at >= '2026-08-01'</code>) only touches the one or two partitions that could possibly contain a match — the planner rules out every other partition before scanning anything, the same instinct as Lesson 5's selectivity, applied at the whole-partition level instead of the row level. Second — and often the bigger real-world win — maintenance operations become per-partition instead of whole-table: dropping two-year-old data is <code>DROP TABLE orders_2024_07</code> (near-instant, no row-by-row <code>DELETE</code>, no bloat left for <code>VACUUM</code> to clean up later), and a <code>VACUUM</code> or index rebuild on one month's partition doesn't have to walk every other month's rows at all.</p>
+<div class="callout"><strong>The trap this retrains:</strong> assuming partitioning is primarily a query-speed feature, then being disappointed. A query that doesn't filter on the partition key at all (<code>WHERE customer_id = 42</code> with no date bound, against a table partitioned by <code>created_at</code>) gets no pruning — Postgres must check every partition, which can be <em>slower</em> than one big well-indexed table due to the per-partition planning overhead. Partitioning is a maintenance and lifecycle tool first, a query-speed tool second, and only for queries that actually filter on the partition key.</div>
+
+<h2>4 · When it's worth reaching for</h2>
+<p>Partitioning adds real operational complexity — every new month needs a new partition created ahead of time (or an automation job that does it), and retrofitting an existing large table onto partitions is itself a nontrivial migration (Lesson 19), not a single <code>ALTER TABLE</code>. It earns that cost specifically when a table both (a) grows without bound and (b) has an old-data lifecycle — archive, cheaper storage, or delete — that "just drop the old partition" answers cleanly. A few-million-row <code>users</code> table that never needs bulk-aged-out deletes doesn't need it; a fast-growing <code>events</code> or <code>audit_log</code> table that must purge anything older than 90 days is the textbook case. This is squarely a PostgreSQL data-modeling decision — not the sharded/distributed-systems territory MISSION.md scopes out — the table still lives on one Postgres instance; partitioning only changes how that one instance stores and maintains it internally.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Partitioning splits one logical table's physical storage into several child tables, so maintenance operations like VACUUM, index rebuilds, and bulk deletes can act on one partition instead of the entire table.">
+    <p class="stem">What problem does table partitioning solve that a good index alone does not?</p>
+    <button class="opt" data-ok>whole-table maintenance cost across one very huge physical table</button>
+    <button class="opt">the database now refusing to store more than one</button>
+    <button class="opt">every row now needing its very own primary key</button>
+    <button class="opt">SQL queries suddenly running with completely wrong result sets</button>
+  </div>
+  <div class="q" data-why="Range partitioning assigns each partition a contiguous span of the partition key's values, list partitioning assigns explicit enumerated values, and hash partitioning spreads rows evenly by a hash remainder when there's no natural range or list.">
+    <p class="stem">What distinguishes range, list, and hash partitioning from each other?</p>
+    <button class="opt" data-ok>how each partition's own row-ownership rule actually gets defined</button>
+    <button class="opt">only range partitioning is ever actually queryable right now</button>
+    <button class="opt">hash partitioning requires exactly zero partition key columns now</button>
+    <button class="opt">list partitioning only ever works on numeric column values</button>
+  </div>
+  <div class="q" data-why="Partition pruning only fires when a query's WHERE clause filters on the partition key -- a query with no condition on that column gives the planner nothing to rule partitions out with, so it must check every partition instead.">
+    <p class="stem">Why does a query with no filter on the partition key get no pruning benefit?</p>
+    <button class="opt" data-ok>the planner has no partition key condition to use</button>
+    <button class="opt">partition pruning was fully disabled by that CREATE TABLE</button>
+    <button class="opt">unfiltered queries are always rejected by Postgres right now</button>
+    <button class="opt">every partitioned table secretly only stores one giant partition</button>
+  </div>
+  <div class="q" data-why="Dropping an entire partition (DROP TABLE orders_2024_07) is a near-instant metadata operation, unlike a row-by-row DELETE across millions of rows, which writes one WAL entry per row and leaves bloat behind for VACUUM to clean up.">
+    <p class="stem">Why is dropping an old partition cheaper than deleting its rows individually?</p>
+    <button class="opt" data-ok>it drops the whole partition at once, not row-by-row</button>
+    <button class="opt">deleted partitions get restored automatically after every single backup</button>
+    <button class="opt">Postgres compresses old partitions before any deletion ever happens</button>
+    <button class="opt">individual row deletes are actually always the slower option</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://www.postgresql.org/docs/current/ddl-partitioning.html">PostgreSQL Manual — Table Partitioning</a>, extending RESOURCES.md's standing "PostgreSQL Manual — Data Definition" citation into its partitioning chapter — covers declarative partitioning, all three partition types, partition pruning, and the primary-key-must-include-partition-key constraint this lesson's example works around.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> open — the standing synthesis-lesson candidate revisiting Lessons 9, 33, and 51's caching- and concurrency-control lenses together remains a ready pick, alongside distributed locks (still out-of-scope-per-MISSION.md unless narrowed to vocabulary level).</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

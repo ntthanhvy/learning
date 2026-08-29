@@ -3394,3 +3394,75 @@
   together in one lesson once a MultiIndex-heavy topic is due, rather than
   split across two standalone rounds — otherwise a fresh scan for the next
   strongest uncovered candidate if a MultiIndex-heavy lesson isn't yet due.
+- 2026-08-29 generation (Lesson 52, headless run): direct DB reads (`psql
+  "$LEARNING_DB_URL" ...`, `bin/query-progress`) stayed blocked in this
+  sandbox, same class of block as every prior round — no `course_progress`
+  rows readable and no `lesson_completed`/quiz/kata outcome beyond the
+  Lesson 1 baseline, so no reported weak spot to target; fell back to
+  on-disk state. Idempotency confirmed first: no `data/lessons/0052-*.html`
+  existed and `assets/nav.js` topped out at Lesson 51 (2026-08-28), so this
+  round proceeded. Lesson 51's own teaser named the last two names on the
+  Lesson-47-flagged batch explicitly — `.xs()` and `droplevel()`, deferred
+  as MultiIndex-specific and "worth teaching together once a MultiIndex-
+  heavy topic is due" — and Lessons 14/15/39 already built and lived inside
+  a MultiIndex (grouped rows, stacked columns, two-aggfunc pivots) without
+  ever using either tool, so the precondition was satisfied: Lesson 52
+  ships both together, reusing Lesson 15's grouped `by_customer_date`
+  Series and Lesson 39's two-aggfunc `pivot_table`/`stack(level=0)` fixture
+  rather than inventing new data. Taught: `.xs()` on the outer level (like
+  `.loc[]`) and, its real advantage, directly on an inner level via
+  `level=`; `.xs(..., axis=1)` on MultiIndex columns; `drop_level=False`;
+  `droplevel()` removing a whole level either direction with no filtering;
+  and the closing gotcha that `droplevel()` never checks whether the
+  dropped level was what kept labels unique, silently returning a
+  non-unique index — the same "no crash, quietly wrong" family running
+  since Lesson 19. `uv run --with pandas` worked directly this round
+  (pandas 3.0.5): every value was hand-verified in
+  `.scratch/data-lesson52/practice/explore.py` and `explore2.py` (both
+  deleted after) against the real `orders_raw.csv` fixture before writing a
+  word of the lesson — `xs("An")` sums to 162.0 over 2 rows;
+  `xs(Timestamp("2026-01-05"), level="order_date")` gives only An (120.0);
+  `pv.xs("sum", axis=1, level=0)` narrows to 4 date columns; `droplevel(0)`
+  and `droplevel(1)` on the stacked pivot both leave all 4 rows with no
+  filtering, and `droplevel(1)`'s result index is confirmed non-unique
+  (`is_unique` is `False`); a missing `.xs()` key raises `KeyError` and
+  `droplevel()` on a plain single-level Index raises `ValueError`, both
+  confirmed directly rather than assumed. This session's working directory
+  was restricted to the repo root (bare `mkdir`/`cp` outside it were
+  blocked outright, same restriction noted in several prior rounds) — used
+  the repo's own `.scratch/data-lesson52/` directory instead, this course's
+  established convention. The shipped (unsolved)
+  `practice/52_xs_and_droplevel.py` was executed in a mirrored
+  `.scratch/data-lesson52/run/practice/` layout (fixture CSV copied
+  alongside) and printed all 6 expected ✗ with no crash — every placeholder
+  sits on the whole right-hand side of its assignment rather than inside a
+  call's arguments, confirmed directly beforehand that this reliably raises
+  `AttributeError` on the following `.sum()`/`.loc[]`/`.index` access
+  against a bare Ellipsis, avoiding this course's by-now-familiar
+  Ellipsis-is-truthy/doesn't-raise family of gotchas without needing a
+  wrapping trick. A solved copy (`.scratch/data-lesson52/run/practice/
+  52_solved.py`, not shipped) then printed all 6 ✓ against the same
+  hand-verified numbers above; the shipped file was also re-run a second
+  time directly from its real `practice/` location (`cd data && uv run
+  --with pandas python3 practice/52_xs_and_droplevel.py`) and confirmed
+  identical ✗ output. `.scratch/data-lesson52/` was fully removed (`rm -rf`)
+  after verification, no approval needed this round. Added `.xs()` and
+  `droplevel()` to the glossary (checked for a collision first — none;
+  placed directly after Lesson 51's `convert_dtypes()` entry) and
+  registered Lesson 52 in `nav.js`. Quiz options were drafted and checked
+  with a Python regex/word-count script isolating each `<div class="q">`
+  block (this course's established approach since Lesson 42) — the first
+  draft came out mismatched on all three questions (Q1 10/10/8, Q2 9/9/8,
+  Q3 9/8/9) and needed two to three rewrite + recount cycles per question,
+  then an independent second pass (manual `Grep`-based line-by-line
+  read-through, this course's standing convention since Lesson 19) before
+  both methods agreed all three genuinely landed at 9/9/9. `bin/record-
+  progress data lesson_generated --day 52 --lesson 0052-xs-and-droplevel.html
+  --detail '{"by":"headless"}'` was run once from the repo root as
+  instructed as a single standalone command. This agent does not run `git
+  commit` — leaving working-tree changes uncommitted remains this course's
+  established convention. Set the teaser going forward to a fresh
+  curriculum/glossary scan for the next genuinely-uncovered pattern — the
+  entire Lesson-47-flagged batch (`.corr()`, `convert_dtypes()`, `.xs()`,
+  `droplevel()`) is now fully covered — if no drill-outcome signal surfaces
+  by next generation.

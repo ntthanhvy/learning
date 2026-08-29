@@ -108,6 +108,8 @@
       file: "lessons/0050-corr.html" },
     { n: 51, date: "2026-08-28", title: "convert_dtypes(): the best-guess dtype pass",
       file: "lessons/0051-convert-dtypes.html" },
+    { n: 52, date: "2026-08-29", title: ".xs() and droplevel(): slicing and simplifying a MultiIndex",
+      file: "lessons/0052-xs-and-droplevel.html" },
   ];
 
   const REFS = [

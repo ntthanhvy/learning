@@ -68,6 +68,8 @@
       file: "lessons/0030-object-model-dunder-and-property.html" },
     { n: 31, date: "2026-08-28", title: "__hash__: why a custom __eq__ can silently break dict and set",
       file: "lessons/0031-hash-eq-and-mutability.html" },
+    { n: 32, date: "2026-08-29", title: "@classmethod and @staticmethod",
+      file: "lessons/0032-classmethod-and-staticmethod.html" },
   ];
 
   const REFS = [

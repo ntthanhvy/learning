@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 32 · @classmethod and @staticmethod</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 32 · ~20 min · 29 Aug 2026</p>
+<h1>@classmethod and @staticmethod</h1>
+<p class="byline">Every method written so far takes <code>self</code> first and reads/writes one instance's state. Today's two decorators are for the other two shapes a method can be: one that builds an instance a different way (<code>@classmethod</code>), and one that is just a plain function living inside a class for organization, touching no instance at all (<code>@staticmethod</code>). Both are <dfn data-en="a dunder-adjacent decorator that changes what gets passed as a method's first argument, or removes that first argument entirely" data-vn="giữ nguyên 'method decorator' — decorator đổi tham số đầu tiên method nhận được, hoặc bỏ hẳn tham số đó">method decorators</dfn>, the same general mechanism Day 30's <code>@property</code> already used.</p>
+
+<div class="callout"><strong>Bridge from SQL:</strong> a table has exactly one <code>CREATE TABLE</code> shape, but real code builds rows several different ways — parsed from a CSV import, built from a form submission, copied from another row with one field changed. Each of those is a different construction path to the same row shape. Python's <code>__init__</code> is one construction path; today's <code>@classmethod</code> is how a class offers several named alternatives to it — <code>Money.from_dollars(5)</code> alongside plain <code>Money(cents=500)</code> — without duplicating the class itself.</div>
+
+<h2>1 · The problem: one <code>__init__</code>, several ways to build</h2>
+<p>Day 30's <code>Money</code> class stores cents. Real input is not always cents — a CSV column might hold dollars as a string, like <code>"5.00"</code>. Without today's tool, the conversion has to happen outside the class, at every call site:</p>
+<pre><code><span class="kw">class</span> Money:
+    <span class="kw">def</span> __init__(self, cents):
+        self.cents = cents
+
+<span class="cm"># every caller repeats the dollars-to-cents conversion by hand</span>
+row_amount = <span class="str">"5.00"</span>
+m = Money(<span class="kw">round</span>(<span class="kw">float</span>(row_amount) * <span class="num">100</span>))</code></pre>
+<p>That conversion belongs with the class that knows what a cent is, not scattered across every caller — the same "one fixed shape, defined once" instinct Day 7's <code>@dataclass</code> and Day 30's <code>__eq__</code> both already used, applied here to construction instead of comparison.</p>
+
+<h2>2 · <code>@classmethod</code>: an alternative constructor</h2>
+<p>A <code>@classmethod</code> receives the class itself as its first argument — conventionally named <code>cls</code>, playing the same role <code>self</code> plays for an instance method — instead of an instance. That lets it build and return a new instance using whatever conversion logic it needs, then hand back a normal, fully-formed object:</p>
+<pre><code><span class="kw">class</span> Money:
+    <span class="kw">def</span> __init__(self, cents):
+        self.cents = cents
+
+    <span class="kw">def</span> __repr__(self):
+        <span class="kw">return</span> f<span class="str">"Money({self.cents})"</span>
+
+    <span class="kw">@classmethod</span>
+    <span class="kw">def</span> from_dollars(cls, dollars_str):
+        cents = <span class="kw">round</span>(<span class="kw">float</span>(dollars_str) * <span class="num">100</span>)
+        <span class="kw">return</span> cls(cents)          <span class="cm"># cls(...) is Money(...) here, but works for a subclass too</span>
+
+Money.from_dollars(<span class="str">"5.00"</span>)   <span class="cm"># Money(500) — called on the class, not an instance</span></code></pre>
+<p>Two details matter: it is called on the class (<code>Money.from_dollars(...)</code>), never on an instance, and it calls <code>cls(cents)</code> rather than <code>Money(cents)</code> by name — using <code>cls</code> means a subclass inheriting <code>from_dollars</code> unmodified still builds an instance of <em>itself</em>, not hardcoded back to <code>Money</code>. This is the same pattern behind stdlib constructors already used without a second thought: <code>dict.fromkeys([...])</code> and <code>datetime.fromtimestamp(...)</code> are both <code>@classmethod</code>s under the hood, named constructors standing beside the plain one.</p>
+
+<h2>3 · <code>@staticmethod</code>: a method with no instance and no class</h2>
+<p>Sometimes a piece of logic belongs conceptually inside a class — it is only ever used alongside it — but needs neither <code>self</code> nor <code>cls</code>. It doesn't read or write any instance state, and it doesn't build one either. That is what <code>@staticmethod</code> is for: a plain function, grouped inside the class purely for organization and lookup (<code>Money.is_valid_dollars(...)</code> reads clearly as "a <code>Money</code>-related check"), with no automatic first argument at all:</p>
+<pre><code><span class="kw">class</span> Money:
+    <span class="kw">def</span> __init__(self, cents):
+        self.cents = cents
+
+    <span class="kw">@staticmethod</span>
+    <span class="kw">def</span> is_valid_dollars(dollars_str):
+        <span class="kw">try</span>:
+            <span class="kw">return</span> <span class="kw">float</span>(dollars_str) &gt;= <span class="num">0</span>
+        <span class="kw">except</span> ValueError:
+            <span class="kw">return</span> <span class="kw">False</span>
+
+Money.is_valid_dollars(<span class="str">"5.00"</span>)    <span class="cm"># True — called on the class, no instance needed</span>
+Money.is_valid_dollars(<span class="str">"nope"</span>)    <span class="cm"># False</span></code></pre>
+<p>The tell for "this should be a <code>@staticmethod</code>, not a plain instance method": try deleting <code>self</code> from the parameter list and the body. If nothing inside the method ever reads or writes <code>self.anything</code>, it was never really about one instance — it just lives near the class it supports.</p>
+
+<h2>4 · Telling the three apart</h2>
+<p>Three method shapes now exist, distinguished entirely by their first parameter — the same "look at what's actually being passed" instinct Day 4 used to tell positional from keyword arguments:</p>
+<pre><code><span class="kw">class</span> Money:
+    <span class="kw">def</span> as_dollars(self):           <span class="cm"># instance method — needs one specific object's state</span>
+        <span class="kw">return</span> self.cents / <span class="num">100</span>
+
+    <span class="kw">@classmethod</span>
+    <span class="kw">def</span> from_dollars(cls, s):      <span class="cm"># classmethod — builds a new instance, needs the class</span>
+        <span class="kw">return</span> cls(<span class="kw">round</span>(<span class="kw">float</span>(s) * <span class="num">100</span>))
+
+    <span class="kw">@staticmethod</span>
+    <span class="kw">def</span> is_valid_dollars(s):        <span class="cm"># staticmethod — needs neither, just organized here</span>
+        <span class="kw">try</span>:
+            <span class="kw">return</span> <span class="kw">float</span>(s) &gt;= <span class="num">0</span>
+        <span class="kw">except</span> ValueError:
+            <span class="kw">return</span> <span class="kw">False</span></code></pre>
+<p>An instance method needs a specific object's data to do its job (<code>self.cents</code>) — the shape every method through Day 31 has used. A <code>@classmethod</code> needs the class itself, to build a new instance a different way. A <code>@staticmethod</code> needs neither — if it did, it would already be one of the other two. Reaching for a free-floating module-level function instead of a <code>@staticmethod</code> is also completely fine when there is no strong reason to group it under the class; <code>@staticmethod</code> is a convenience for discoverability and namespacing, not a requirement.</p>
+
+<div class="interview">
+<p><strong>Q: "What's the difference between <code>@classmethod</code> and <code>@staticmethod</code>?"</strong> A strong answer, out loud: <em>"Both are called on the class rather than an instance, but a <code>classmethod</code> still receives the class itself as its first argument, conventionally called <code>cls</code>, which lets it build and return a new instance — that's the alternative-constructor pattern, like <code>dict.fromkeys()</code>. A <code>staticmethod</code> gets no automatic first argument at all; it's a plain function that happens to live inside the class for organization, and it never touches instance or class state. If a method doesn't read <code>self</code> and doesn't build a new instance, it's a <code>staticmethod</code> candidate; if it builds a new instance a different way than <code>__init__</code>, it's a <code>classmethod</code> candidate."</em> The signal: naming <code>cls</code> specifically and giving <code>dict.fromkeys</code>/<code>datetime.fromtimestamp</code> as a stdlib example, not just reciting the decorator names.</p>
+</div>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> <code>pd.DataFrame.from_dict(...)</code> and <code>pd.DataFrame.from_records(...)</code> are both <code>@classmethod</code> alternative constructors on <code>DataFrame</code>, the exact pattern taught here at bigger scale. Not demonstrated here; that's <code>data/</code>'s job, and this is the only sentence in this lesson that names it.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/32_classmethod_and_staticmethod.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/32_classmethod_and_staticmethod.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: writing <code>Money.from_dollars</code> as a <code>@classmethod</code> alternative constructor, writing <code>Money.is_valid_dollars</code> as a <code>@staticmethod</code> validity check, confirming a subclass's inherited <code>@classmethod</code> builds an instance of the subclass via <code>cls</code> rather than the hardcoded parent, and a small "sort the three method shapes" exercise reading unlabeled method bodies to tell which decorator each one needs.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A classmethod's first parameter is the class itself (conventionally cls), letting the method build and return a new instance via cls(...) — the alternative-constructor pattern behind stdlib methods like dict.fromkeys and datetime.fromtimestamp.">
+    <p class="stem">What does a <code>@classmethod</code> receive as its first argument?</p>
+    <button class="opt" data-ok>the class itself, conventionally named cls in code</button>
+    <button class="opt">the specific instance the method was called on</button>
+    <button class="opt">nothing at all, exactly like a staticmethod does</button>
+  </div>
+  <div class="q" data-why="A staticmethod gets no automatic first argument — no self, no cls — because it neither reads/writes one instance's state nor builds a new instance; it is a plain function grouped inside the class purely for organization and namespaced lookup.">
+    <p class="stem">Why does a <code>@staticmethod</code> take no automatic first argument?</p>
+    <button class="opt" data-ok>it touches neither one instance's state nor the class</button>
+    <button class="opt">Python forbids passing any argument to any static method</button>
+    <button class="opt">static methods secretly still receive self behind the scenes</button>
+  </div>
+  <div class="q" data-why="Using cls(...) instead of hardcoding the class name means an inherited classmethod, unmodified, still builds an instance of whichever class it was actually called through — a subclass calling the inherited classmethod gets back a subclass instance, not a hardcoded parent instance.">
+    <p class="stem">Why does <code>from_dollars</code> call <code>cls(cents)</code> instead of <code>Money(cents)</code> by name?</p>
+    <button class="opt" data-ok>so an inherited call from a subclass builds itself instead</button>
+    <button class="opt">cls and Money behave completely differently in every single case</button>
+    <button class="opt">calling Money(cents) directly by name is simply not legal Python</button>
+  </div>
+  <div class="q" data-why="The practical test is whether the method body ever reads or writes self.anything — if it needs one specific object's stored state, it is an ordinary instance method, the exact shape every method before this lesson has used, regardless of what the method is named or where it is called from.">
+    <p class="stem">How do you tell a plain instance method apart from the other two shapes?</p>
+    <button class="opt" data-ok>it reads or writes one specific instance's own stored state</button>
+    <button class="opt">it is the only shape ever allowed to return anything</button>
+    <button class="opt">it is the only shape decorated with any decorator whatsoever</button>
+  </div>
+  <div class="q" data-why="dict.fromkeys(...) is called on the class dict, not on an existing instance, and it returns a brand-new dict built from the given keys — exactly the classmethod alternative-constructor shape taught in this lesson, already in use since well before today without that label attached.">
+    <p class="stem">Which already-familiar stdlib method is itself a <code>@classmethod</code> in disguise?</p>
+    <button class="opt" data-ok>dict.fromkeys(...), building a new dict from given keys</button>
+    <button class="opt">len(...), reporting how many items a container holds</button>
+    <button class="opt">str.strip(...), trimming whitespace off both ends of text</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the <a href="https://docs.python.org/3/library/functions.html#classmethod">Python standard library docs — built-in functions, <code>classmethod</code></a> and its neighboring <a href="https://docs.python.org/3/library/functions.html#staticmethod"><code>staticmethod</code></a> entry cover both decorators' exact mechanics and the <code>dict.fromkeys</code>-style alternative-constructor idiom referenced above.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day32">glossary</a> under Day 32.<br>
+This closes out the method-shapes thread the object-model days (30-31) opened: every method in a class is now either an instance method (needs <code>self</code>), a <code>@classmethod</code> (needs <code>cls</code>, builds an instance), or a <code>@staticmethod</code> (needs neither).<br><br>
+💬 Anything unclear — <code>cls</code> vs. the class name, when to use a <code>@staticmethod</code> vs. a plain module-level function, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

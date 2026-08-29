@@ -3551,4 +3551,121 @@ fail *gracefully* so the learner sees which task failed.
   now succeeded on both Day 30 and Day 31. Still no `lesson_completed`/
   quiz/kata outcome record exists for any day — no reported weak spot to
   target.
+- 2026-08-29 — **Day 32 generated**
+  (`lessons/0032-classmethod-and-staticmethod.html`), an automated headless
+  daily-generation run. Idempotency: confirmed before writing anything that
+  no `python/lessons/0032-*.html` (or higher-numbered) file existed and no
+  `n: 32`/`date: "2026-08-29"` entry existed anywhere in `assets/nav.js` —
+  highest existing lesson on disk was `0031-hash-eq-and-mutability.html`
+  dated 2026-08-28, so generation proceeded as Day 32, not a re-run.
+  Topic selection: Day 31's own next-day note named `@classmethod`/
+  `@staticmethod` directly as the clearest immediate candidate, deferred
+  twice already (first named in Day 29's log, deferred again in Day 30's).
+  Grepped all of `python/` for `classmethod|staticmethod` before committing:
+  the only hits were pydantic-validator mentions (Day 17's lesson/practice,
+  Day 26's capstone) and this file's own prior planning prose — neither
+  decorator was ever taught as its own mechanism, confirming a real,
+  textually-grounded gap. Picked over re-attempting `RESOURCES.md`'s "Gaps"
+  (interview prep, FastAPI project-layout) since those still have no chosen
+  primary source and this run's budget went to verifying the chosen topic
+  instead; DB access (both `bin/query-progress` and direct
+  `psql "$LEARNING_DB_URL"`) was not attempted this run per this run's own
+  instructions (hard-blocked/gated every prior day since Day 8 except the
+  Day 5/9/10 read-adjacent successes) — paced entirely from on-disk state
+  (this file's own log, `python/lessons/`, `python/assets/nav.js`,
+  `python/learning-records/` — still only the Day 1 baseline record, no
+  completion/quiz record for any day 2-31).
+  Taught: the three method shapes distinguished by first parameter — a
+  plain instance method needing `self` (every method through Day 31);
+  `@classmethod` receiving the class itself as `cls`, used as an alternative
+  constructor (`Money.from_dollars("5.00")` beside plain `Money(cents=500)`),
+  with the `cls(...)`-not-`Money(...)` convention explained via a subclass
+  example so an inherited classmethod builds the subclass, not a hardcoded
+  parent; and `@staticmethod`, needing neither `self` nor `cls`, framed as a
+  plain function grouped inside a class purely for organization/lookup, with
+  "delete `self` and see if the body still reads `self.anything`" as the
+  concrete test for reaching for it. Tied `dict.fromkeys(...)` and
+  `datetime.fromtimestamp(...)` in as already-familiar classmethod examples
+  the learner has used without the label attached. Bridged from SQL per the
+  baseline record: one `CREATE TABLE` shape but several real construction
+  paths to a row (CSV import, form submission, copy-with-one-field-changed),
+  introduced before any Python in the top callout, not from a pandas
+  analogy.
+  No-pandas rule: zero pandas/NumPy API calls anywhere in the practice file
+  (grepped case-insensitively — zero hits, no imports at all needed); exactly
+  one hit in the lesson — one contrast sentence/callout (titled "Where
+  pandas goes from here") naming `pd.DataFrame.from_dict(...)` and
+  `pd.DataFrame.from_records(...)` as classmethod alternative constructors
+  at bigger scale, without demonstrating any pandas API, placed once after
+  section 4/the interview callout, matching the hard-rule section above.
+  Practice file `practice/32_classmethod_and_staticmethod.py` (4 exercises:
+  completing `Money.from_dollars` as a `@classmethod` alternative
+  constructor, completing `parse_amount()` to use the already-written
+  `Money.is_valid_dollars` `@staticmethod` as a guard, confirming a
+  `GiftCard(Money)` subclass's inherited `from_dollars` builds a `GiftCard`
+  instance rather than a `Money` via the `cls(...)` convention, and a
+  "classify three unlabeled method bodies" exercise reading commented-out
+  code shapes to return which of instance/classmethod/staticmethod each
+  needs) needed no on-disk fixtures. Followed this course's standard
+  defensive pattern against the Ellipsis-at-module-level bug family flagged
+  repeatedly since Days 11/12/17/28/29/30: every class/decorator line stays
+  fully definable, with unsolved `...` living strictly inside method/function
+  bodies, so an unsolved function returns `None` instead of raising at
+  import/decoration time. Verified in a scratch dir
+  (`.scratch_py32_verify/`, created under the repo root and removed after
+  use, per every prior day's `/tmp`-is-out-of-bounds precedent — confirmed
+  again this run when a bare `mkdir /tmp/...` was blocked outright): the
+  shipped (unsolved) copy, run via plain `uv run python3` (no `--with`
+  needed), both from a scratch copy and from its real `practice/` path with
+  the documented command, printed four clean ✗ lines with no traceback each
+  time; a separately solved copy (every `...`/TODO filled in directly in the
+  scratch copy) printed all four ✓ and the "All green" tally. No bugs found
+  during verification — both passes succeeded on the first attempt.
+  Glossary: added a Day 32 section to `reference/glossary.html` (`method
+  decorator`) after confirming via grep that the term collided with no Day
+  1-31 entry — deliberately did **not** re-glossary `@classmethod`/
+  `@staticmethod`/`cls` as separate rows, explaining them inline via
+  `<code>` and folding the general mechanism into the one new `method
+  decorator` entry, matching this course's no-duplicate-glossary-row
+  convention (the same choice Day 30 made for `__repr__`/`__eq__`/`__lt__`
+  and Day 31 for `hashable`/`key`). The 1 new `<dfn data-en` tag in the
+  lesson body matches the 1 new glossary row exactly (confirmed by count).
+  Quiz: 5 questions. Word counts were checked with a small Python script
+  (splitting the quiz block into its question `<div>`s via regex and
+  counting `.split()` words per `<button class="opt">` line, run from a
+  scratch dir via `uv run python3`) and mismatched on the first draft for
+  all five questions (Q1 6/8/8, Q2 10/9/9, Q3 11/10/10, Q4 10/13/10, Q5
+  8/9/8). Each mismatched question went through one rewrite-and-recount
+  round, re-running the script after every edit, until every option matched
+  (Q1 8/8/8, Q2 9/9/9, Q3 10/10/10, Q4 10/10/10, Q5 8/8/8) — Q3's first
+  rewrite attempt undershot at 11 words and needed a second pass. Re-verified
+  with a second, independently-written script (extracting every
+  `<button class="opt">` in document order across the whole file, ignoring
+  the per-question `<div>` wrapper, then grouped in threes) run against the
+  final file — independently confirmed all 15 options (5 questions × 3
+  options) land on their target counts before shipping. Registered in
+  `assets/nav.js` with `date: "2026-08-29"`.
+  **DB access:** per this run's confirmed-facts brief, both the
+  `bin/query-progress` read path and direct `psql "$LEARNING_DB_URL"` were
+  not attempted this run — documented as blocked on every prior day since
+  Day 8 except the inconsistent Day 5/9/10 successes, so this run paced
+  entirely from on-disk state (this file's own log, `python/lessons/`,
+  `python/assets/nav.js`, `python/learning-records/` — still only the Day 1
+  baseline record).
+  `bin/record-progress python lesson_generated --day 32 --lesson
+  0032-classmethod-and-staticmethod.html --detail '{"by":"headless"}'` was
+  run once after shipping as a single standalone command, per this run's
+  confirmed-working write-path convention.
+  **Next-day note:** with `@classmethod`/`@staticmethod` now taught, the
+  object-model/dunder thread opened on Day 30 (dunder methods, `@property`,
+  `__hash__`) and extended through method shapes today has no further
+  explicitly-named-but-untaught mechanism left in `MISSION.md`/`PLAN.md`
+  that this run's grepping surfaced. Day 33 should re-scan
+  `MISSION.md`/`PLAN.md`/`RESOURCES.md` fresh for a still-open, textually-
+  grounded gap before falling back to an unnamed Phase 3 direction, and
+  should retry `WebSearch` for `RESOURCES.md`'s still-unresolved "Gaps"
+  (Python interview prep, a FastAPI project-layout reference) given
+  `WebFetch` has now succeeded on Days 30 and 31. Still no
+  `lesson_completed`/quiz/kata outcome record exists for any day — no
+  reported weak spot to target.
 

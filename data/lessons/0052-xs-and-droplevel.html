@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 52 · .xs() and droplevel(): slicing and simplifying a MultiIndex</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 52 · ~20 min · 29 Aug 2026</p>
+<h1>.xs() and droplevel(): slicing and simplifying a MultiIndex</h1>
+<p class="byline">Lesson 51's own closing teaser named these as the last two names on the Lesson-47-flagged batch — both MultiIndex-specific, deliberately deferred until a MultiIndex-heavy topic was due. Lessons 14/15/39 already built and lived inside a <code>MultiIndex</code> (grouped rows, stacked columns, two-aggfunc pivots) without ever showing the two tools built for working <em>inside</em> one once it exists — today closes that gap using the exact same fixtures.</p>
+
+<h2>Recap, in one line</h2>
+<p>A <dfn data-en="a pandas column (or row) index with more than one level, so a single column/row is identified by a tuple like ('sum', '2026-01-05') rather than one plain label -- the shape stack()/unstack()/pivot_table(aggfunc=[...]) all produce" data-vn="giữ nguyên 'MultiIndex' — nhãn nhiều tầng, 1 hàng/cột = 1 tuple, không phải 1 nhãn đơn">MultiIndex</dfn> is something Lessons 14/15/39 already built more than once — <code>groupby()</code> on two columns, <code>stack()</code>/<code>unstack()</code>, a <code>pivot_table</code> with two aggfuncs at once. Every one of those lessons reached for <code>reset_index()</code> to flatten it back to something ordinary. Today's tools are for the case where you don't want to flatten yet — you just want <em>one slice</em> (<code>.xs()</code>) or to <em>drop one whole level</em> (<code>droplevel()</code>) while the rest of the structure stays put.</p>
+
+<h2>1 · .xs(): pull out one label's slice, on any level</h2>
+<p>Lesson 15's exact grouped Series, a two-level row MultiIndex (<code>customer</code> outer, <code>order_date</code> inner):</p>
+<pre><code>by_customer_date = clean.groupby([<span class="kw">"customer"</span>, <span class="kw">"order_date"</span>])[<span class="kw">"amount"</span>].sum()
+<span class="cm">-- customer  order_date
+-- An        2026-01-05    120.0
+--           2026-01-10     42.0
+-- Binh      2026-01-06     35.5
+--           2026-01-09    180.0
+-- Name: amount, dtype: float64</span></code></pre>
+<p><dfn data-en="a Series/DataFrame method that selects one label's cross-section from a MultiIndex on either axis, given a level name or position -- unlike .loc[], it can reach into an INNER level directly without needing the outer level's key first" data-vn="giữ nguyên '.xs()' — lấy ra 1 lát cắt ứng với 1 nhãn, chỉ định level nào (ngoài/trong) qua tên hoặc vị trí; khác .loc[] là lấy được tầng TRONG trực tiếp, không cần key tầng ngoài trước">.xs()</dfn> pulls out the cross-section for one label — on the outer level by default, matching a plain <code>.loc["An"]</code> lookup:</p>
+<pre><code>by_customer_date.xs(<span class="str">"An"</span>)
+<span class="cm">-- order_date
+-- 2026-01-05    120.0
+-- 2026-01-10     42.0
+-- Name: amount, dtype: float64</span></code></pre>
+<p>The real reason to reach for <code>.xs()</code> instead of <code>.loc[]</code>: it can also cross-section an <strong>inner</strong> level directly, something <code>.loc[]</code> can't do without first supplying the outer level's key too. Naming <code>level="order_date"</code> pulls every customer's value for one date at once:</p>
+<pre><code>by_customer_date.xs(pd.Timestamp(<span class="str">"2026-01-05"</span>), level=<span class="str">"order_date"</span>)
+<span class="cm">-- customer
+-- An    120.0
+-- Name: amount, dtype: float64</span></code></pre>
+<p>Only An ordered on that date, so only An's row survives — <code>.xs()</code> filters across every outer-level group at once, matching whichever rows have that inner-level label, wherever they sit. A missing label raises loudly, the same as <code>.loc[]</code>: <code>by_customer_date.xs("Danh")</code> raises <code>KeyError: 'Danh'</code>, no silent empty result.</p>
+
+<h2>2 · .xs() also works on columns, via axis=</h2>
+<p>Lesson 39's two-aggfunc pivot has a MultiIndex on the <strong>columns</strong>, not the rows:</p>
+<pre><code>pv = clean.pivot_table(
+    index=<span class="str">"customer"</span>, columns=<span class="str">"order_date"</span>, values=<span class="str">"amount"</span>,
+    aggfunc=[<span class="str">"sum"</span>, <span class="str">"count"</span>], fill_value=<span class="kw">0</span>,
+)
+<span class="cm">-- columns: MultiIndex [("sum", 2026-01-05), ..., ("count", 2026-01-10)]</span></code></pre>
+<p><code>axis=1</code> tells <code>.xs()</code> to cross-section the columns instead of the rows — pulling just the <code>"sum"</code> half back out to a plain, single-level-column table:</p>
+<pre><code>pv.xs(<span class="str">"sum"</span>, axis=<span class="kw">1</span>, level=<span class="kw">0</span>)
+<span class="cm">-- order_date  2026-01-05  2026-01-06  2026-01-09  2026-01-10
+-- customer
+-- An               120.0         0.0         0.0        42.0
+-- Binh               0.0        35.5       180.0         0.0</span></code></pre>
+<p>Same idea as Section 1, just the other axis: <code>level=0</code> names the outer column level (the aggfunc name), and every remaining column level (<code>order_date</code>) stays exactly as it was — <code>.xs()</code> only ever removes the one level it matched on.</p>
+
+<h2>3 · drop_level=False: keep the matched level instead of removing it</h2>
+<p>By default <code>.xs()</code> drops the level it just matched (that's why <code>by_customer_date.xs("An")</code> came back with only <code>order_date</code> left). <code>drop_level=False</code> keeps it, as a single-value level rather than removing it — useful right before a <code>pd.concat()</code> (Lesson 21) with other slices that still need that level to line up:</p>
+<pre><code>by_customer_date.xs(<span class="str">"An"</span>, drop_level=<span class="kw">False</span>)
+<span class="cm">-- customer  order_date
+-- An        2026-01-05    120.0
+--           2026-01-10     42.0
+-- Name: amount, dtype: float64</span></code></pre>
+
+<h2>4 · droplevel(): remove a level outright, no filtering</h2>
+<p><dfn data-en="a Series/DataFrame method that permanently removes one whole level from a MultiIndex (row or column axis, by name or position) and keeps every row/column that was already there -- unlike .xs(), it does not filter down to one label's slice" data-vn="giữ nguyên 'droplevel()' — bỏ hẳn 1 tầng khỏi MultiIndex (theo tên hoặc vị trí), giữ nguyên mọi hàng/cột đang có; khác .xs() là KHÔNG lọc theo 1 nhãn nào cả">droplevel()</dfn> solves a different problem than <code>.xs()</code>: it doesn't filter anything down to one label — it removes an entire level and keeps every row/column that was already there, whatever labels they carry. Stack Lesson 39's two-aggfunc pivot down one level to get a genuinely two-level row MultiIndex to work with:</p>
+<pre><code>stacked = pv.stack(level=<span class="kw">0</span>)
+<span class="cm">-- order_date      2026-01-05  2026-01-06  2026-01-09  2026-01-10
+-- customer
+-- An       sum         120.0         0.0         0.0        42.0
+--          count         1.0         0.0         0.0         1.0
+-- Binh     sum           0.0        35.5       180.0         0.0
+--          count         0.0         1.0         1.0         0.0</span></code></pre>
+<p><code>droplevel(0)</code> (or the equivalent name, <code>"customer"</code>) removes the outer level, leaving every row's aggfunc label behind with no customer information at all — <code>0</code> counts from the outside in, same convention as every other positional <code>level=</code> argument this course has used:</p>
+<pre><code>stacked.droplevel(<span class="kw">0</span>)
+<span class="cm">-- order_date  2026-01-05  2026-01-06  2026-01-09  2026-01-10
+-- sum              120.0         0.0         0.0        42.0
+-- count              1.0         0.0         0.0         1.0
+-- sum                0.0        35.5       180.0         0.0
+-- count              0.0         1.0         1.0         0.0</span></code></pre>
+<p><code>droplevel(1)</code> does the opposite — drops the inner (aggfunc) level, leaving <code>customer</code> repeated once per aggfunc row instead:</p>
+<pre><code>stacked.droplevel(<span class="kw">1</span>)
+<span class="cm">-- order_date  2026-01-05  2026-01-06  2026-01-09  2026-01-10
+-- customer
+-- An               120.0         0.0         0.0        42.0
+-- An                 1.0         0.0         0.0         1.0
+-- Binh               0.0        35.5       180.0         0.0
+-- Binh               0.0         1.0         1.0         0.0</span></code></pre>
+<p>Notice both results still have four rows — nothing was filtered out, unlike every <code>.xs()</code> example above. The only thing that changed is which level of the label is still visible; the underlying data is untouched. <code>axis=1</code> does the same job on columns, pulling the aggfunc level straight off <code>pv</code> without stacking first: <code>pv.droplevel(0, axis=1)</code> leaves 8 columns with just the date, one <code>"sum"</code> block and one <code>"count"</code> block sitting side by side under matching date labels.</p>
+
+<h2>5 · The gotcha: droplevel() on a level with duplicate values silently produces a non-unique index</h2>
+<p>Both results in Section 4 have repeated labels now — <code>"sum"</code>/<code>"count"</code> appear twice, and <code>An</code>/<code>Binh</code> appear twice. <code>droplevel()</code> never checks for this and never raises: it happily returns an index with duplicate labels, and the very next <code>.loc[]</code> lookup against it inherits the same silent multi-row-instead-of-one-row behavior Lesson 33's <code>set_index()</code> entry already warned about:</p>
+<pre><code>result = stacked.droplevel(<span class="kw">1</span>)
+result.loc[<span class="str">"An"</span>]  <span class="cm"># both An rows come back, not an error, not one row</span></code></pre>
+<p>This is the same "no crash, quietly wrong" family flagged since Lesson 19 (most recently <code>convert_dtypes()</code> in Lesson 51): <code>droplevel()</code> did exactly what it was asked — remove a level — and it is genuinely not <code>droplevel()</code>'s job to notice the result is now ambiguous to look up by label. Check <code>result.index.is_unique</code> after a <code>droplevel()</code> before relying on single-row <code>.loc[]</code> lookups against the result. A plain, single-level Index has no level to drop at all: calling <code>droplevel()</code> on one raises <code>ValueError: Cannot remove 1 levels from an index with 1 levels: at least one level must be left</code> — the one case this method does refuse outright.</p>
+
+<h2>6 · The SQL bridge</h2>
+<p><code>.xs()</code> reads like a <code>WHERE</code> clause pinned to one part of a composite key — <code>WHERE customer = 'An'</code> when matching the outer level, or <code>WHERE order_date = '2026-01-05'</code> alone when matching the inner one without needing to also specify <code>customer</code>, something a composite <code>PRIMARY KEY</code> lookup in SQL can't do partially either (an index on <code>(customer, order_date)</code> can't be probed by <code>order_date</code> alone without a full scan). <code>droplevel()</code> has no real SQL equivalent — SQL rows don't carry a structured, leveled key the way a MultiIndex does, so there's no operation that "removes one column from every row's identity while keeping every row" in quite the same sense; the closest analogy is simply <code>SELECT</code>ing a narrower column list and accepting that the result may now have duplicate rows where it didn't before.</p>
+
+<div class="interview">
+<p><strong>Q: "What's the difference between .xs() and droplevel() on a MultiIndex, and when would each one produce duplicate labels?"</strong> A strong answer, out loud: <em>"They solve opposite problems. .xs() filters down to one label's cross-section on a chosen level — it can reach an inner level directly, which plain .loc[] can't do without the outer key too — and it never introduces duplicates, since it's narrowing the data, not renaming its index. droplevel() does the reverse: it keeps every row or column exactly as it was and just removes one level of the label outright, so if that dropped level was what made two rows distinguishable, droplevel() happily hands back a non-unique index with no warning — I'd check index.is_unique right after, before trusting a single-row .loc[] lookup against the result. In one sentence: .xs() can shrink the data but keeps labels unique; droplevel() keeps the data but can make labels stop being unique."</em> The signal: naming the axis= flexibility, the inner-level reach .loc[] lacks, and the specific duplicate-label risk droplevel() introduces silently.</p>
+</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/52_xs_and_droplevel.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/52_xs_and_droplevel.py</code></pre>
+<p>Uses the same real <code>orders_raw.csv</code> fixture and grouped/pivoted shapes as Lessons 15/39. Exercise 1 rebuilds <code>by_customer_date</code> and checks <code>.xs("An")</code> and the inner-level <code>.xs(..., level="order_date")</code> (Sections 1-2); Exercise 2 rebuilds the two-aggfunc <code>pivot_table</code> and checks <code>.xs("sum", axis=1, level=0)</code> (Section 2); Exercise 3 checks <code>drop_level=False</code> keeps the matched level (Section 3); Exercise 4 checks both directions of <code>droplevel()</code> on the stacked result and confirms the duplicate-label gotcha (Sections 4-5).</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why=".xs() selects the cross-section matching one label on a chosen MultiIndex level -- unlike plain .loc[], it can reach an INNER level directly (via level=), matching every row/column with that label regardless of what the outer level's value is, without needing the outer key supplied first.">
+    <p class="stem">What can <code>.xs(value, level=...)</code> do that plain <code>.loc[value]</code> cannot?</p>
+    <button class="opt" data-ok>match an inner MultiIndex level directly, no outer key</button>
+    <button class="opt">sort every result row strictly by its own value</button>
+    <button class="opt">permanently delete the whole matched index level today too</button>
+  </div>
+  <div class="q" data-why="droplevel() removes one whole level from a MultiIndex and keeps every row/column that was already there -- it does not filter anything down to one label's slice, which is exactly what .xs() does instead. droplevel() and .xs() solve opposite problems: one narrows the data (keeping labels unique), the other keeps the data (which can make labels stop being unique).">
+    <p class="stem">How does <code>droplevel()</code> differ from <code>.xs()</code> on the same MultiIndex?</p>
+    <button class="opt" data-ok>droplevel keeps all rows, only removing one label level</button>
+    <button class="opt">droplevel and xs always return one identical final result</button>
+    <button class="opt">droplevel only ever works right on plain single-level columns</button>
+  </div>
+  <div class="q" data-why="droplevel() never checks whether the level it's removing was the thing keeping every row/column label unique -- it silently returns a non-unique index with no warning or error at all. The one case it does refuse outright is removing the last remaining level, which raises ValueError instead.">
+    <p class="stem">After <code>droplevel()</code> removes a level that made labels unique, what happens?</p>
+    <button class="opt" data-ok>a non-unique index comes back silently, with no warning</button>
+    <button class="opt">pandas raises ValueError right away, refusing the whole call</button>
+    <button class="opt">pandas renumbers every duplicate label with a small suffix</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official pandas <a href="https://pandas.pydata.org/docs/user_guide/advanced.html">User Guide — MultiIndex / Advanced Indexing</a> (~10 min) — its "Cross-section" section documents <code>.xs()</code>'s full <code>level=</code>/<code>axis=</code>/<code>drop_level=</code> behavior directly, and links out to <code>droplevel()</code> from the same page.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>.xs()</code> and <code>droplevel()</code> were both added today, right after Lesson 51's <code>convert_dtypes()</code> entry.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-52 comes back reported as shakiest, otherwise a fresh curriculum/glossary scan for the next genuinely-uncovered pattern — the Lesson-47-flagged batch (<code>.corr()</code>, <code>convert_dtypes()</code>, <code>.xs()</code>, <code>droplevel()</code>) is now fully covered, so this closes that whole line.<br><br>
+💬 Anything unclear — the inner-level <code>.xs()</code> lookup, the duplicate-label gotcha, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

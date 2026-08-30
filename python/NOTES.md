@@ -3668,4 +3668,154 @@ fail *gracefully* so the learner sees which task failed.
   `WebFetch` has now succeeded on Days 30 and 31. Still no
   `lesson_completed`/quiz/kata outcome record exists for any day — no
   reported weak spot to target.
+- 2026-08-30 — **Day 33 generated** (`lessons/0033-enum.html`), an
+  automated headless daily-generation run. Idempotency: confirmed before
+  writing anything that no `python/lessons/0033-*.html` (or higher-numbered)
+  file existed and no `n: 33`/`date: "2026-08-30"` entry existed anywhere in
+  `assets/nav.js` — highest existing lesson on disk was
+  `0032-classmethod-and-staticmethod.html` dated 2026-08-29, so generation
+  proceeded as Day 33, not a re-run.
+  Topic selection: per Day 32's own closing note, re-scanned
+  `MISSION.md`/`PLAN.md`/`RESOURCES.md` fresh rather than assuming any prior
+  round's gap analysis still held. Checked every named item on `PLAN.md`'s
+  Phase 2 spine (2a: exceptions, modules/imports, environments/pyproject,
+  pytest, decorators, pathlib, datetime/timezones, logging; 2b: FastAPI
+  handlers, pydantic, request/response schemas, dependency injection,
+  async/await, PostgreSQL, httpx testing) against `python/lessons/*.html` by
+  filename and content grep — every single one is already taught (Days
+  8-32), confirming the plan's explicit spine is now fully exhausted, not
+  just the object-model/dunder thread Day 32 closed. Also grepped for
+  mechanisms named in `MISSION.md`'s "Success looks like" section but never
+  confirmed taught: `enum`/`Enum` came back with zero hits anywhere in
+  `python/lessons/` or `python/practice/` (Day 17's pydantic/Day 16's FastAPI
+  status-code lessons use plain ints and strings throughout, never
+  `Enum`), while `match`/`__slots__`/`Protocol` also came back with zero
+  hits but are not named anywhere in `MISSION.md`/`PLAN.md`, making `enum`
+  the more textually-grounded pick of the four. Picked `enum.Enum`: it is a
+  common, practically important stdlib mechanism for a closed set of named
+  values (order/request status, priority levels), a real gap FastAPI
+  path/query-parameter validation (Day 16) and pydantic fields (Day 17)
+  both silently left open by using plain strings/ints throughout, and fits
+  "rounding out the language" squarely. Did not re-attempt `RESOURCES.md`'s
+  still-unresolved "Gaps" (Python interview prep, FastAPI project-layout
+  reference) this run since `enum` is the more concretely-grounded pick
+  with an obvious primary source already listed in this course's own docs
+  citation pattern; those two gaps remain open for a future day. DB access
+  (`bin/query-progress` and direct `psql "$LEARNING_DB_URL"`) was not
+  attempted this run per this run's own instructions — paced entirely from
+  on-disk state (this file's own log, `python/lessons/`, `python/assets/
+  nav.js`, `python/learning-records/` — still only the Day 1 baseline
+  record, no completion/quiz/kata outcome record for any day 2-32).
+  Web-lookup: used `WebFetch` against `docs.python.org/3/library/enum.html`
+  before writing anything — succeeded, returning class-syntax definition,
+  `auto()`'s per-variant numbering behavior, member equality/identity
+  (`Color.RED is Color.RED`), by-value/by-name lookup (`Color(1)` /
+  `Color['RED']`), `IntEnum`/`StrEnum`, and documented guidance on when to
+  reach for an enum over a plain constant — all used directly in sections
+  2-3 of the lesson. Added a new `RESOURCES.md`-style citation to the
+  lesson's "Go deeper" pointing at this same URL; did not edit
+  `RESOURCES.md` itself (out of scope — read-only per this run's own
+  instructions did not extend to it, and the existing "Knowledge — the
+  language" section's docs-first citation pattern already covers adding new
+  stdlib-doc links implicitly via each lesson's own "Go deeper").
+  Taught: section 1 the problem live (a plain string/int status field
+  accepting a typo like `"shiped"` silently, with nothing listing the valid
+  set in one place); section 2 `enum.Enum` class-syntax definition,
+  `.name`/`.value`, and the deliberate `Status.SHIPPED != "shipped"`
+  inequality — a misspelled member raises `AttributeError` immediately
+  instead of a silent wrong string; section 3 `auto()`, `list(Enum)`
+  iteration in definition order (tied back to Day 5's iteration protocol),
+  and the two lookup directions (`Status(2)` by value via call syntax,
+  `Status["SHIPPED"]` by name via index syntax); section 4 replacing a
+  string-based `if/elif` parameter-checking function with an `Enum`-typed
+  one, bridged to Day 18's "type hints are the contract" idea and Day 16's
+  FastAPI path/query parameters, which validate an `Enum` type hint
+  automatically with a `422` for anything outside the set. Bridged from SQL
+  per the baseline record: a `CHECK (status IN (...))` constraint or a
+  small lookup table a column foreign-keys against, introduced before any
+  Python in the top callout, not from a pandas analogy.
+  No-pandas rule: zero pandas/NumPy/`pd.`/`np.` hits in the practice file
+  (grepped case-insensitively — zero hits, only a plain `from enum import
+  Enum, auto` stdlib import); exactly one hit in the lesson — one contrast
+  sentence/callout (titled "Where pandas goes from here") naming a pandas
+  `Categorical` column as the same closed-set-of-values idea at column
+  scale, without demonstrating any pandas API, placed once after section
+  4/the interview callout, matching the hard-rule section above.
+  Practice file `practice/33_enum.py` (4 exercises: defining a `Status`
+  `Enum` with explicit string values, writing `mark_shipped()` to confirm a
+  real `Status.SHIPPED` member matches while the lookalike string
+  `"shipped"` does not, an `auto()`-based `Priority` `Enum` confirming
+  definition-order iteration via `list(Priority)`, and `lookup_both()`
+  exercising both by-value call syntax and by-name index syntax) needed no
+  on-disk fixtures. Followed this course's standard defensive pattern
+  against the Ellipsis-at-module-level bug family: both `Enum` class bodies
+  (`Status`, `Priority`) assign `...` directly as each member's placeholder
+  value rather than leaving any line undefinable — confirmed this does not
+  raise at class-definition time (`Enum` treats members sharing an equal
+  value as aliases, not an error), with all other unsolved `...`/TODOs
+  living strictly inside function bodies (`mark_shipped`, `lookup_both`).
+  Verified in a scratch dir (`.scratch_py33_verify/`, created under the
+  repo root and removed after use, per every prior day's `/tmp`-is-out-of-
+  bounds precedent): the shipped (unsolved) copy, run via plain `uv run
+  python3` (no `--with` needed), both from a scratch copy and from its real
+  `practice/` path with the documented command, printed four clean ✗ lines
+  with no traceback each time; a separately solved copy (every `...`/TODO
+  filled in directly in the scratch copy) printed all four ✓ and the "All
+  green" tally. No bugs found during verification — both passes succeeded
+  on the first attempt; also spot-checked that all three `Status` members
+  sharing the placeholder value `...` before being solved does not itself
+  crash class definition, confirming the defensive pattern holds for `Enum`
+  specifically, not just plain classes/functions as in prior days.
+  Glossary: added a Day 33 section to `reference/glossary.html` (`enum`)
+  after confirming via grep that the term collided with no Day 1-32 entry —
+  deliberately did **not** re-glossary `auto()`, `.name`/`.value`,
+  `IntEnum`/`StrEnum`, or the by-value/by-name lookup syntax as separate
+  rows, explaining them inline via `<code>` and folding the general
+  mechanism into the one new `enum` entry, matching this course's
+  no-duplicate-glossary-row convention (the same choice Day 30 made for
+  `__repr__`/`__eq__`/`__lt__`, Day 31 for `hashable`/`key`, and Day 32 for
+  `@classmethod`/`@staticmethod`/`cls`). The 1 new `<dfn data-en` tag in the
+  lesson body matches the 1 new glossary row exactly (confirmed by count).
+  Quiz: 5 questions. Word counts were checked with a small Python script
+  (regex-splitting the quiz block into its five question `<div>`s and
+  counting `.split()` words per `<button class="opt">` line, run from a
+  scratch dir via `uv run python3`) and mismatched on the first draft for
+  all five questions (Q1 11/9/10, Q2 8/9/10, Q3 10/11/11, Q4 11/10/10, Q5
+  10/11/11). Each mismatched question went through one to two
+  rewrite-and-recount rounds — Q4 in particular overshot to 13/11/10 on its
+  first rewrite attempt before a second pass landed all three options at
+  11 — re-running the script after every edit, until every option matched
+  (Q1 11/11/11, Q2 10/10/10, Q3 11/11/11, Q4 11/11/11, Q5 11/11/11).
+  Re-verified with a second, independently-written script (document-order
+  `<button class="opt">` extraction via regex across the whole file,
+  ignoring the per-question `<div>` wrapper entirely, then grouped in
+  threes) run against the final file — independently confirmed all 15
+  options (5 questions × 3 options) land on their target counts before
+  shipping. Registered in `assets/nav.js` with `date: "2026-08-30"`.
+  **DB access:** per this run's own instructions, both the
+  `bin/query-progress` read path and direct `psql "$LEARNING_DB_URL"` were
+  not attempted this run — documented as blocked on every prior day since
+  Day 8 except the inconsistent Day 5/9/10 successes, so this run paced
+  entirely from on-disk state as described above under topic selection.
+  `bin/record-progress python lesson_generated --day 33 --lesson
+  0033-enum.html --detail '{"by":"headless"}'` was run once after shipping
+  as a single standalone command and **succeeded**: `recorded:
+  python/lesson_generated day=33 lesson=0033-enum.html`.
+  **Next-day note:** with `PLAN.md`'s entire Phase 2 spine (2a and 2b) now
+  fully taught and the object-model/dunder/method-shapes thread (Days
+  30-32) closed, Day 34 has no single named-but-untaught mechanism left in
+  `PLAN.md` itself — the plan's own text says "revisit this plan when
+  Phase 2a ends," which has now happened, so Day 34 should treat this as
+  entering an unnamed Phase 3 and lean on `RESOURCES.md`'s still-unresolved
+  "Gaps" (Python interview prep, a FastAPI project-layout reference — both
+  named since Day 28/25 respectively, still with no chosen primary source)
+  as the most textually-grounded next targets, attempting a fresh
+  `WebSearch` for each given `WebFetch` has now succeeded on Days 30-33.
+  Other live candidates if those searches come up empty: `match`/case
+  structural pattern matching (PEP 634, never mentioned anywhere in this
+  course), `__slots__` (a real Day 1/7 follow-on for memory/attribute-typo
+  tradeoffs), or a testing-focused retrieval day revisiting `pytest`
+  fixtures/parametrize (Day 11) now that FastAPI/httpx testing exists too.
+  Still no `lesson_completed`/quiz/kata outcome record exists for any
+  day — no reported weak spot to target.
 

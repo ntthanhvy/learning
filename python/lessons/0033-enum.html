@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 33 · enum: naming a closed set of choices</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 33 · ~20 min · 30 Aug 2026</p>
+<h1>enum: naming a closed set of choices</h1>
+<p class="byline">Every field written so far has been a plain string, int, or bool. Some fields aren't really that — an order's status is not "any string," it's one of a fixed handful: pending, shipped, cancelled. Today's standard-library module, <dfn data-en="a standard-library module for defining a fixed, named set of possible values as a type of its own, instead of scattering matching string or int literals across a codebase" data-vn="giữ nguyên 'enum' — module chuẩn thư viện định nghĩa 1 tập giá trị cố định, có tên, thành 1 type riêng, thay vì rải string/int rời rạc khắp code">enum</dfn>, gives that fixed set a name and a type, so "misspelled a magic string" becomes a startup-time error instead of a silent bug found in production.</p>
+
+<div class="callout"><strong>Bridge from SQL:</strong> a column like <code>status</code> is often constrained to a known list — <code>CHECK (status IN ('pending', 'shipped', 'cancelled'))</code>, or a small lookup table it foreign-keys against — precisely so <code>'shiped'</code> (typo) can never land in the column. Plain Python strings have no such guardrail: <code>order.status = "shiped"</code> is accepted silently, and the bug surfaces later, wherever code checks <code>== "shipped"</code> and quietly never matches. <code>enum.Enum</code> is Python's version of that <code>CHECK</code> constraint — a closed set of named values, enforced by the type itself rather than by convention.</p></div>
+
+<h2>1 · The problem: magic strings with no guardrail</h2>
+<p>A plain string or int "status" field compiles and runs even when it's wrong — there's nothing to catch a typo, and nothing to list the valid options in one place:</p>
+<pre><code><span class="kw">class</span> Order:
+    <span class="kw">def</span> __init__(self, status):
+        self.status = status
+
+o = Order(<span class="str">"shiped"</span>)     <span class="cm"># typo — no error anywhere, ever</span>
+<span class="kw">if</span> o.status == <span class="str">"shipped"</span>:  <span class="cm"># silently never True for this order</span>
+    ...</code></pre>
+<p>Nothing lists the valid values in one place either — a new teammate has to grep the codebase for every string literal ever compared against <code>.status</code> to reconstruct the set by hand.</p>
+
+<h2>2 · <code>enum.Enum</code>: a fixed, named set of values</h2>
+<p>An <code>Enum</code> subclass defines its members as class attributes; each member is a distinct object, accessed by name, never spelled as a raw string at the call site:</p>
+<pre><code><span class="kw">from</span> enum <span class="kw">import</span> Enum
+
+<span class="kw">class</span> Status(Enum):
+    PENDING = <span class="str">"pending"</span>
+    SHIPPED = <span class="str">"shipped"</span>
+    CANCELLED = <span class="str">"cancelled"</span>
+
+Status.SHIPPED            <span class="cm"># &lt;Status.SHIPPED: 'shipped'&gt;</span>
+Status.SHIPPED.name       <span class="cm"># 'SHIPPED'</span>
+Status.SHIPPED.value      <span class="cm"># 'shipped'</span>
+Status.SHIPPED == Status.SHIPPED   <span class="cm"># True — same member</span>
+Status.SHIPPED == <span class="str">"shipped"</span>       <span class="cm"># False — a Status is not a str, on purpose</span></code></pre>
+<p>That last line is the entire point: <code>Status.SHIPPED</code> and the string <code>"shipped"</code> are deliberately not equal. A typo like <code>Status.SHIPED</code> is not a silent wrong string — it's an <code>AttributeError</code> raised immediately, at the line that made the mistake, the same "fail loudly and immediately" instinct Day 8's exceptions and Day 31's implicit-unhashable rule both already used.</p>
+
+<h2>3 · <code>auto()</code>, iteration, and lookup by value</h2>
+<p>When the specific underlying value doesn't matter — only that each member is distinct — <code>auto()</code> assigns one, so nothing has to be typed and re-typed by hand:</p>
+<pre><code><span class="kw">from</span> enum <span class="kw">import</span> Enum, auto
+
+<span class="kw">class</span> Status(Enum):
+    PENDING = auto()      <span class="cm"># 1</span>
+    SHIPPED = auto()      <span class="cm"># 2</span>
+    CANCELLED = auto()    <span class="cm"># 3</span>
+
+<span class="kw">list</span>(Status)                  <span class="cm"># [Status.PENDING, Status.SHIPPED, Status.CANCELLED], definition order</span>
+Status(<span class="num">2</span>)                     <span class="cm"># Status.SHIPPED — look a member up by its value</span>
+Status[<span class="str">"SHIPPED"</span>]              <span class="cm"># Status.SHIPPED — look a member up by its name (string)</span></code></pre>
+<p>An <code>Enum</code> is iterable in definition order — the same protocol Day 5's generators and every <code>for</code> loop already rely on — which makes "list every valid status" a one-line <code>list(Status)</code> instead of a comment someone has to keep in sync by hand. <code>Status(2)</code> (call syntax, by value) and <code>Status["SHIPPED"]</code> (index syntax, by name) are two different, deliberate lookup directions — mixing them up is a common first mistake.</p>
+
+<h2>4 · Where this replaces a pattern already half-used</h2>
+<p>A function parameter restricted to a handful of literal strings is exactly the shape an <code>Enum</code> replaces — the difference is whether typos are caught at the call site or not:</p>
+<pre><code><span class="kw">def</span> ship(order, method):        <span class="cm"># method: any string at all gets through</span>
+    <span class="kw">if</span> method == <span class="str">"ground"</span>:
+        ...
+    <span class="kw">elif</span> method == <span class="str">"air"</span>:
+        ...
+
+<span class="kw">class</span> ShipMethod(Enum):
+    GROUND = <span class="str">"ground"</span>
+    AIR = <span class="str">"air"</span>
+
+<span class="kw">def</span> ship(order, method: ShipMethod):   <span class="cm"># method: only a real ShipMethod member gets through</span>
+    <span class="kw">if</span> method == ShipMethod.GROUND:
+        ...
+    <span class="kw">elif</span> method == ShipMethod.AIR:
+        ...</code></pre>
+<p>This is the same type-hint-as-contract idea Day 18 already used for pydantic request bodies — an <code>Enum</code> type hint on a FastAPI path or query parameter (Day 16) is validated automatically the same way, rejecting any value outside the named set with a <code>422</code> before the handler body ever runs, with no hand-written <code>if/elif</code> chain of string comparisons needed at all.</p>
+
+<div class="interview">
+<p><strong>Q: "Why use <code>enum.Enum</code> instead of a plain string constant?"</strong> A strong answer, out loud: <em>"A plain string has no guardrail — any string is accepted anywhere one is expected, so a typo like <code>'shiped'</code> compiles, runs, and fails silently far from where the mistake happened. An <code>Enum</code> makes the valid set a real, closed type: <code>Status.SHIPED</code> raises <code>AttributeError</code> immediately, <code>list(Status)</code> always lists every valid option in one place, and a type-hinted parameter or pydantic field gets that validation for free, rejecting anything outside the set before the code that assumes it's valid ever runs."</em> The signal: naming the immediate-<code>AttributeError</code>-versus-silent-typo contrast specifically, not just "it's more organized."</p>
+</div>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> a pandas <code>Categorical</code> column enforces the same closed-set-of-values idea at the scale of an entire column of millions of rows, rather than one Python object at a time. Not demonstrated here; that's <code>data/</code>'s job, and this is the only sentence in this lesson that names it.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/33_enum.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/33_enum.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: defining a <code>Status</code> <code>Enum</code> with explicit string values, writing a function that only accepts a real <code>Status</code> member and rejects a plain string with the same text, using <code>auto()</code> on a <code>Priority</code> <code>Enum</code> and confirming iteration order, and looking a member up both by value (call syntax) and by name (index syntax).</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Status.SHIPPED and the string 'shipped' are deliberately not equal — an Enum member is a distinct object of its own type, not a stand-in for its underlying value, which is exactly what stops a bare string from being accepted anywhere a real member is expected.">
+    <p class="stem">Is <code>Status.SHIPPED == "shipped"</code> ever <code>True</code> for a plain <code>Enum</code>?</p>
+    <button class="opt" data-ok>no, an Enum member and its underlying value are deliberately unequal</button>
+    <button class="opt">yes, every Enum member always equals its own underlying string value</button>
+    <button class="opt">only when that particular Enum class happens to define no members</button>
+  </div>
+  <div class="q" data-why="Misspelling a member name like Status.SHIPED raises AttributeError immediately, at the exact line responsible, because no such class attribute exists — the failure-mode Enum is designed to produce instead of a plain string typo that runs and fails silently far away.">
+    <p class="stem">What happens when code references a misspelled member like <code>Status.SHIPED</code>?</p>
+    <button class="opt" data-ok>AttributeError is raised immediately, right at that exact code line</button>
+    <button class="opt">Python silently creates a brand new member called SHIPED there</button>
+    <button class="opt">it quietly returns the closest existing member by name instead</button>
+  </div>
+  <div class="q" data-why="auto() only guarantees each member gets a distinct value in definition order (1, 2, 3, ...); it deliberately does not promise anything about what that specific underlying value will be, since the whole point of reaching for auto() is that the value itself doesn't matter.">
+    <p class="stem">What does <code>auto()</code> guarantee about the value it assigns a member?</p>
+    <button class="opt" data-ok>only that it is distinct from every other member's own value</button>
+    <button class="opt">that it always exactly matches the member's own name as text</button>
+    <button class="opt">that it is always a value chosen randomly on each run</button>
+  </div>
+  <div class="q" data-why="Status(2) is call syntax and looks a member up by its stored value; Status['SHIPPED'] is index syntax and looks a member up by its name as a string — two distinct, non-interchangeable lookup directions that are a common first source of confusion.">
+    <p class="stem"><code>Status(2)</code> and <code>Status["SHIPPED"]</code> both return a member — what's the difference?</p>
+    <button class="opt" data-ok>one looks up by value, the other looks up by name</button>
+    <button class="opt">nothing at all — the two different spellings are fully interchangeable</button>
+    <button class="opt">Status(2) only works outside any class, Status["SHIPPED"] only works inside one</button>
+  </div>
+  <div class="q" data-why="A type-hinted Enum parameter on a FastAPI path or query parameter is validated automatically against the closed set of members, rejecting any other value with a 422 before the handler body runs at all — the same type-hints-are-the-contract idea Day 18 already used for pydantic request bodies, extended to a closed set of choices instead of an open-ended type like str or int.">
+    <p class="stem">Why type-hint a FastAPI parameter as an <code>Enum</code> instead of <code>str</code>?</p>
+    <button class="opt" data-ok>FastAPI then automatically rejects any value outside the named set entirely</button>
+    <button class="opt">Enum parameters make a handler run measurably faster than str ones</button>
+    <button class="opt">str type hints are not actually allowed on any FastAPI parameter</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the <a href="https://docs.python.org/3/library/enum.html">Python standard library docs — <code>enum</code></a> covers class-syntax definition, <code>auto()</code>, member lookup by value and by name, and <code>IntEnum</code>/<code>StrEnum</code> variants beyond what today's lesson needed.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day33">glossary</a> under Day 33.<br>
+This closes a small gap Day 3 and every status-code/string-literal example since has quietly left open: a "fixed set of valid values" now has a real, checked type instead of a convention held together by hoping nobody typos a string.<br><br>
+💬 Anything unclear — <code>auto()</code>, the by-value vs. by-name lookup, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

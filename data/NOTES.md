@@ -3466,3 +3466,119 @@
   entire Lesson-47-flagged batch (`.corr()`, `convert_dtypes()`, `.xs()`,
   `droplevel()`) is now fully covered — if no drill-outcome signal surfaces
   by next generation.
+- 2026-08-30 generation (Lesson 53, headless run): idempotency was
+  self-confirmed first — globbed `data/lessons/` for `0053-*.html` (none
+  found), grepped `assets/nav.js` for `n: 53`/`date: "2026-08-30"` (neither
+  found, highest registered lesson was still 52, dated 2026-08-29), and
+  grepped `NOTES.md` for a `2026-08-30` entry (none found) — so this round
+  proceeded. Per this round's own instructions, DB access (`psql
+  "$LEARNING_DB_URL" ...`, `bin/query-progress`) was not attempted at all —
+  documented as hard-blocked for ~6 weeks straight in this file's own
+  history — so still no `course_progress` rows readable and no
+  `lesson_completed`/quiz/kata outcome record beyond the Lesson 1 baseline
+  (re-confirmed by reading every file in `data/learning-records/`: still
+  just the single baseline file, no drill-outcome signal). Lesson 52's own
+  teaser named no single dangling candidate this time ("a fresh
+  curriculum/glossary scan... the entire Lesson-47-flagged batch is now
+  fully covered"), so this round did exactly that: grepped `lessons/*.html`
+  and `reference/glossary.html` for a batch of common pandas/NumPy methods
+  not yet confirmed taught (`to_dict(`, `to_records(`, `add_prefix`,
+  `add_suffix`, `.equals(`, `.compare(`, `json_normalize`, `merge_asof`,
+  `merge_ordered`, `memory_usage`, `infer_objects`). `to_dict()`,
+  `to_records()`, `add_prefix()`/`add_suffix()`, `.equals()`/`.compare()`,
+  and `json_normalize()` all came back genuinely zero-hit anywhere (`sample(`
+  had 3 grep hits but every one was a false positive on the word "example,"
+  confirmed by reading the surrounding context directly, not real
+  `sample()` teaching). Picked `to_dict()`/`to_records()` together over the
+  other zero-hit candidates: MISSION.md's own wrangling path explicitly ends
+  in "output" (load → inspect → clean → transform → aggregate → output),
+  and every lesson through 52 has ended with the result still living inside
+  a DataFrame/Series — nothing has ever taught the step of handing a
+  finished table back out to plain Python, which is both the natural
+  curriculum gap and a genuinely common interview/take-home need (returning
+  a JSON API response, building a test fixture). `uv run --with pandas`
+  worked directly this round (pandas 3.0.5, confirmed via `pd.__version__`):
+  every value was hand-verified in `.scratch/data-lesson53/explore.py` and
+  `explore2.py` (both deleted after) against the real `orders_raw.csv` clean
+  4-row slice before writing a word of the lesson —
+  `clean.to_dict(orient="records")` gives exactly 4 dicts in row order, the
+  first with `amount` 120.0; `clean.groupby("customer")["amount"].sum()
+  .to_dict()` gives `{"An": 162.0, "Binh": 215.5}`, the same totals every
+  prior lesson since Lesson 4 has used; `clean.to_records(index=False)`
+  gives a `numpy.rec.recarray` with field names exactly `("order_id",
+  "customer", "amount", "order_date")`, no leftover index field; a genuine
+  new finding, confirmed by actually running it rather than assumed:
+  `json.dumps(clean.to_dict(orient="records"))` raises `TypeError: Object of
+  type Timestamp is not JSON serializable` — a real crash, not a quiet wrong
+  answer, a different failure shape from this course's usual "no crash,
+  quietly wrong" family (`describe()`/`corr()`/`convert_dtypes()`/
+  `droplevel()`) — while plain int/float/str columns serialize fine on
+  their own; fixed by `.dt.strftime("%Y-%m-%d")` on `order_date` before
+  `to_dict()`, confirmed the fix round-trips through `json.dumps()` +
+  `json.loads()` back to 4 rows exactly. Also explored (mentioned in prose
+  only, not demoed as runnable code, to keep today's lesson focused):
+  `df.to_json(orient="records")` writes valid JSON directly but its default
+  date format is a raw millisecond epoch integer, not a readable string,
+  confirmed directly (`1767571200000` for `2026-01-05`) — a real tradeoff
+  worth naming, not a strictly better alternative. Designing the practice
+  file surfaced one genuine new instance of this course's running
+  Ellipsis-is-truthy/doesn't-raise family: `to_records(index=...)` does NOT
+  raise on its own — Ellipsis is truthy, so pandas would silently treat an
+  unfilled placeholder as `index=True` (matching the already-passing default
+  case) and the exercise would have shipped as an accidental freebie ✓,
+  confirmed directly with a standalone probe before trusting it; fixed by
+  moving the placeholder to the whole right-hand side (`rec = ...` instead
+  of `to_records(index=...)`), since a bare `Ellipsis.dtype` access reliably
+  raises `AttributeError` on its own, confirmed with its own standalone
+  probe before shipping. Every other placeholder (`records = ...`,
+  `totals_dict = ...`, `fixed_json = ...`) was also probed standalone first
+  and confirmed to raise on its own via `len(Ellipsis)`,
+  `Ellipsis["An"]`/`Ellipsis.dtype`, and `json.dumps(Ellipsis)` respectively
+  — no accidental-freebie risk in any of the four exercises. The shipped
+  (unsolved) `practice/53_to_dict_and_to_records.py` was executed in a
+  mirrored `.scratch/data-lesson53/run/practice/` layout (fixture CSVs
+  copied alongside) and printed exactly the expected 4 ✗ (Exercises 1-3's
+  placeholder-gated checks, plus Exercise 4's second check) and 1 ✓
+  (Exercise 4's first, pre-written, not-placeholder-gated check — the
+  `json.dumps()`-raises-TypeError assertion holds true even unsolved, same
+  expected shape as prior lessons' precedent for pre-written checks) with no
+  crash; a solved copy (`.scratch/data-lesson53/run/practice/53_solved.py`,
+  not shipped) then printed all 5 ✓ against the exact hand-verified numbers
+  above; the shipped file was also re-run a second time directly from its
+  real `practice/` location (`cd data && uv run --with pandas python3
+  practice/53_to_dict_and_to_records.py`) and confirmed identical output (4
+  ✗, 1 ✓, no crash). The entire `.scratch/data-lesson53/` directory was
+  fully removed (`rm -rf`) after verification, no approval needed this
+  round. Added `to_dict()`, `to_records()`, and a combined `json.dumps() vs
+  pandas Timestamp` entry to the glossary (checked for a collision first —
+  grepped for `to_dict`/`to_records`/`json.dumps`, no existing rows) placed
+  directly after Lesson 52's `droplevel()` entry, and registered Lesson 53
+  in `nav.js`. Quiz options were drafted and checked with a Python
+  regex/word-count script isolating each `<div class="q">` block by its own
+  start offset (this course's established approach since Lesson 42), run
+  via `uv run python3` — the first draft came out mismatched on all three
+  questions (Q1 7/8/7, Q2 8/7/8, Q3 7/7/9); three rewrite + recount cycles
+  landed all three level (Q1 8/8/8, Q2 8/8/8, Q3 8/8/8), then independently
+  re-verified with a second, fully separate method (manual word-by-word
+  counting done by hand directly from a `Grep`-extracted raw option-text
+  listing, not a second run of the same script), per this file's standing
+  warning that a single verification pass isn't reliable — both methods
+  agreed all three questions genuinely landed at 8/8/8. An occurrence-
+  accurate HTML tag-balance check (a small Node script counting every
+  `<tag>`/`</tag>` occurrence, cross-checked against `Grep -o` counts for
+  `<dfn>`/`</dfn>`, `<div>`/`</div>`, `<pre>`/`</pre>`) confirmed every tag
+  pair in the shipped lesson HTML is balanced (`p` 25/25, `h2` 9/9, `pre`
+  9/9, `code` 81/81, `div` 5/5, `dfn` 2/2, `button` 9/9, `strong` 4/4, `em`
+  5/5, `a` 2/2, `span` 19/19). `bin/record-progress data lesson_generated
+  --day 53 --lesson 0053-to-dict-and-to-records.html --detail
+  '{"by":"headless"}'` was run once from the repo root as instructed as a
+  single standalone command and succeeded on the first try (`recorded:
+  data/lesson_generated day=53 lesson=0053-to-dict-and-to-records.html`), no
+  approval blocker this round. This agent does not run `git commit` —
+  leaving working-tree changes uncommitted remains this course's
+  established convention. Set the
+  teaser going forward to a fresh curriculum/glossary scan for the next
+  genuinely-uncovered pattern if no drill-outcome signal surfaces by next
+  generation — `add_prefix()`/`add_suffix()`, `.equals()`/`.compare()`, and
+  `json_normalize()` all came back zero-hit in today's scan and remain open
+  candidates, named explicitly in the lesson's own closing teaser too.

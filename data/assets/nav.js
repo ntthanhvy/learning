@@ -110,6 +110,8 @@
       file: "lessons/0051-convert-dtypes.html" },
     { n: 52, date: "2026-08-29", title: ".xs() and droplevel(): slicing and simplifying a MultiIndex",
       file: "lessons/0052-xs-and-droplevel.html" },
+    { n: 53, date: "2026-08-30", title: "to_dict() and to_records(): handing a table back to plain Python",
+      file: "lessons/0053-to-dict-and-to-records.html" },
   ];
 
   const REFS = [

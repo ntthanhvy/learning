@@ -116,6 +116,8 @@
       file: "lessons/0054-full-text-search-postgres.html" },
     { n: 55, date: "2026-08-29", title: "Table partitioning: one logical table, many physical ones",
       file: "lessons/0055-table-partitioning.html" },
+    { n: 56, date: "2026-08-30", title: "Advisory locks: coordinating processes without a new row",
+      file: "lessons/0056-postgres-advisory-locks.html" },
   ];
 
   const REFS = [

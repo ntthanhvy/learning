@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 53 · to_dict() and to_records(): handing a table back to plain Python</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 53 · ~20 min · 30 Aug 2026</p>
+<h1>to_dict() and to_records(): handing a table back to plain Python</h1>
+<p class="byline">Lesson 52 closed out the whole Lesson-47-flagged batch, so this round did a fresh scan of the curriculum and glossary for the next genuinely-uncovered pattern (per its own teaser). Every lesson so far has ended with a DataFrame or Series still <em>inside</em> pandas — MISSION.md's own wrangling path ends in "output," and nothing has taught the step of handing the finished table back out as plain Python objects. That's today's gap.</p>
+
+<h2>Recap, in one line</h2>
+<p>Lesson 1's whole pitch was "think in tables" — stay inside DataFrames and Series instead of looping. Eventually something outside pandas needs the result: a JSON API response, a plain <code>dict</code> for a unit test fixture, a loop-friendly list of rows. <dfn data-en="a DataFrame/Series method converting the object into a plain Python dict, with several output shapes controlled by orient= -- the reverse direction of pd.DataFrame(a_list_of_dicts), handing a table back OUT of pandas into ordinary Python data structures" data-vn="giữ nguyên 'to_dict()' — chuyển DataFrame/Series thành dict Python thường, orient= chọn hình dạng output; làm chiều NGƯỢC với pd.DataFrame(list các dict), đưa bảng ra khỏi pandas thành cấu trúc dữ liệu Python thường">to_dict()</dfn> and <dfn data-en="a DataFrame method converting it into a NumPy structured array (numpy.rec.recarray) -- each row is one fixed-layout record with named, typed fields accessible by attribute or key, a lighter-weight alternative to to_dict() when the consumer is NumPy/C-level code rather than plain Python" data-vn="giữ nguyên 'to_records()' — chuyển DataFrame thành mảng cấu trúc của NumPy (numpy.rec.recarray), mỗi hàng là 1 record có field tên + kiểu cố định, truy cập qua thuộc tính hoặc key; nhẹ hơn to_dict() khi bên nhận là NumPy/code C chứ không phải Python thường">to_records()</dfn> are today's two answers to "how do I get this out."</p>
+
+<h2>1 · to_dict(orient="records"): a list of row-dicts</h2>
+<p>The real <code>orders_raw.csv</code> fixture, cleaned the same way as every lesson since Lesson 6:</p>
+<pre><code>clean
+<span class="cm">--   order_id customer  amount order_date
+-- 0         1       An   120.0 2026-01-05
+-- 1         6       An    42.0 2026-01-10
+-- 2         2     Binh    35.5 2026-01-06
+-- 3         5     Binh   180.0 2026-01-09</span></code></pre>
+<p><code>orient="records"</code> is the shape most interview take-homes and API responses actually want: one <code>dict</code> per row, in a plain Python <code>list</code> — the exact reverse of building a DataFrame from a list of dicts in the first place.</p>
+<pre><code>clean.to_dict(orient=<span class="str">"records"</span>)
+<span class="cm">-- [{'order_id': 1, 'customer': 'An', 'amount': 120.0, 'order_date': Timestamp('2026-01-05 00:00:00')},
+--  {'order_id': 6, 'customer': 'An', 'amount': 42.0,  'order_date': Timestamp('2026-01-10 00:00:00')},
+--  {'order_id': 2, 'customer': 'Binh', 'amount': 35.5, 'order_date': Timestamp('2026-01-06 00:00:00')},
+--  {'order_id': 5, 'customer': 'Binh', 'amount': 180.0, 'order_date': Timestamp('2026-01-09 00:00:00')}]</span></code></pre>
+<p>4 rows in, 4 dicts out, same order. Plain numeric and text columns come back as ordinary Python <code>int</code>/<code>float</code>/<code>str</code> — but notice <code>order_date</code> came back as a pandas <code>Timestamp</code>, not a plain Python value. That matters in Section 4.</p>
+
+<h2>2 · Other orient= shapes, and Series.to_dict()</h2>
+<p>The default orient (no argument at all) is <code>"columns"</code> — a dict of dicts, outer keys are column names, inner keys are the row index:</p>
+<pre><code>clean.to_dict()  <span class="cm"># same as orient="columns"</span>
+<span class="cm">-- {'order_id': {0: 1, 1: 6, 2: 2, 3: 5},
+--  'customer': {0: 'An', 1: 'An', 2: 'Binh', 3: 'Binh'}, ...}</span></code></pre>
+<p><code>orient="list"</code> is column-oriented too, but each column becomes a plain Python <code>list</code> instead of an index-keyed dict — the shape a plotting library or a bulk-insert call usually wants:</p>
+<pre><code>clean.to_dict(orient=<span class="str">"list"</span>)
+<span class="cm">-- {'order_id': [1, 6, 2, 5], 'customer': ['An', 'An', 'Binh', 'Binh'], ...}</span></code></pre>
+<p>A <strong>Series</strong> has its own simpler <code>to_dict()</code>, no <code>orient=</code> needed — the index becomes the keys directly:</p>
+<pre><code>clean.groupby(<span class="str">"customer"</span>)[<span class="str">"amount"</span>].sum().to_dict()
+<span class="cm">-- {'An': 162.0, 'Binh': 215.5}</span></code></pre>
+<p>That's Lesson 4's exact groupby total, now a plain <code>dict</code> — no DataFrame, no Index object, just two key-value pairs.</p>
+
+<h2>3 · to_records(): a NumPy structured array instead</h2>
+<p><code>to_records()</code> answers the same "get it out" question but for NumPy/C-level consumers instead of plain Python — its output is a <code>numpy.rec.recarray</code>, not a <code>dict</code> or <code>list</code>:</p>
+<pre><code>clean.to_records(index=<span class="kw">False</span>)
+<span class="cm">-- rec.array([(1, 'An', 120. , '2026-01-05T00:00:00.000000'),
+--            (6, 'An',  42. , '2026-01-10T00:00:00.000000'),
+--            (2, 'Binh',  35.5, '2026-01-06T00:00:00.000000'),
+--            (5, 'Binh', 180. , '2026-01-09T00:00:00.000000')],
+--           dtype=[('order_id', '&lt;i8'), ('customer', 'O'), ('amount', '&lt;f8'), ('order_date', '&lt;M8[us]')])</span></code></pre>
+<p>Each row is a fixed-layout <em>record</em> with named, typed fields — <code>rec[0].amount</code> and <code>rec[0]["amount"]</code> both work. <code>index=False</code> drops the row Index from the output entirely; the default <code>index=True</code> adds it back as the first field, named <code>"index"</code> (or the index's real name, if it was <code>set_index()</code>'d first) — the same default-keeps-the-index instinct as Lesson 31's <code>reset_index()</code>.</p>
+
+<h2>4 · The gotcha: to_dict() output is NOT automatically JSON-safe</h2>
+<p>The most common reason to reach for <code>to_dict(orient="records")</code> is to hand a result to <code>json.dumps()</code> for an API response. This is where Section 1's <code>Timestamp</code> value bites — <code>json</code> only knows how to serialize plain Python types, and a pandas <code>Timestamp</code> is not one of them:</p>
+<pre><code><span class="kw">import</span> json
+json.dumps(clean.to_dict(orient=<span class="str">"records"</span>))
+<span class="cm">-- TypeError: Object of type Timestamp is not JSON serializable</span></code></pre>
+<p>This is a real crash, not a quiet wrong answer — a genuinely different failure shape from this course's usual "no crash, quietly wrong" family (<code>describe()</code>, <code>corr()</code>, <code>convert_dtypes()</code>). The int/float/str columns above serialize fine on their own; only the datetime column needs help. The fix is to convert the datetime column to a plain string <em>before</em> calling <code>to_dict()</code>, using Lesson 32's <code>.dt</code> accessor:</p>
+<pre><code>fixed = clean.assign(order_date=clean[<span class="str">"order_date"</span>].dt.strftime(<span class="str">"%Y-%m-%d"</span>))
+json.dumps(fixed.to_dict(orient=<span class="str">"records"</span>))
+<span class="cm">-- '[{"order_id": 1, "customer": "An", "amount": 120.0, "order_date": "2026-01-05"}, ...]'</span></code></pre>
+<p>pandas does have its own <code>to_json()</code> method that sidesteps this by writing a JSON string directly — but its default date format is a raw millisecond epoch integer (<code>1767571200000</code> for <code>2026-01-05</code>), not a readable date string, so it trades one surprise for another unless <code>date_format="iso"</code> is passed explicitly. Knowing <em>why</em> the plain <code>to_dict()</code> + <code>json.dumps()</code> path fails is the more broadly useful interview answer, since it explains the same root cause even when the eventual output isn't JSON at all.</p>
+
+<h2>5 · The SQL bridge</h2>
+<p>Neither method has a direct SQL equivalent — a SQL result set is already row-oriented and client libraries (e.g. <code>psycopg</code>, an ORM) handle the "give me plain objects" step automatically when a query returns. The closest mental model is a driver's <code>cursor.fetchall()</code> paired with <code>cursor.description</code> for column names: <code>to_dict(orient="records")</code> is pandas doing that zip-into-named-dicts step for you in one call, and <code>to_records()</code> is the lower-level, fixed-schema cousin — closer to the raw tuples <code>fetchall()</code> returns before any naming happens at all.</p>
+
+<div class="interview">
+<p><strong>Q: "You've cleaned a DataFrame — how do you hand the result to a downstream API as JSON?"</strong> A strong answer, out loud: <em>"to_dict(orient='records') gives me a list of one dict per row, which is the shape most JSON APIs expect. The catch is that pandas types like Timestamp aren't JSON-serializable on their own — json.dumps raises a TypeError on any datetime column — so I'd convert those columns to plain strings with .dt.strftime() first, or use pandas' own to_json() with date_format='iso' if I want it to write the JSON string directly. I'd pick to_dict() when I still need to touch the data in Python afterward, and to_json() when I just need the final string."</em> The signal: naming the specific TypeError, not just "it doesn't always work," and knowing there are two real fixes with a real tradeoff between them.</p>
+</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/53_to_dict_and_to_records.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/53_to_dict_and_to_records.py</code></pre>
+<p>Uses the same real <code>orders_raw.csv</code> clean 4-row slice as Lessons 6-52. Exercise 1 checks <code>to_dict(orient="records")</code> (Section 1); Exercise 2 checks the grouped <code>Series.to_dict()</code> (Section 2); Exercise 3 checks <code>to_records(index=False)</code>'s field names (Section 3); Exercise 4 checks the <code>json.dumps()</code> gotcha and its <code>.dt.strftime()</code> fix (Section 4).</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="orient='records' produces a list with one dict per row, keyed by column name -- the shape most JSON APIs and take-home fixtures expect, and the exact reverse of building a DataFrame from a list of row-dicts in the first place.">
+    <p class="stem">What does <code>df.to_dict(orient="records")</code> return?</p>
+    <button class="opt" data-ok>a list holding one plain dict per row</button>
+    <button class="opt">a single dict keyed by column name only</button>
+    <button class="opt">a NumPy structured array of typed named fields</button>
+  </div>
+  <div class="q" data-why="pandas Timestamp values (and other pandas-specific types) are not plain Python types json knows how to serialize, so json.dumps raises TypeError on any datetime column inside a to_dict() result -- a real crash, not a silent wrong answer, unlike most of this course's other flagged gotchas.">
+    <p class="stem">Why does <code>json.dumps(df.to_dict(orient="records"))</code> often raise <code>TypeError</code>?</p>
+    <button class="opt" data-ok>a Timestamp value isn't a plain JSON-safe type</button>
+    <button class="opt">to_dict() always returns raw byte strings, never text</button>
+    <button class="opt">json.dumps rejects any list longer than one row</button>
+  </div>
+  <div class="q" data-why="to_records() returns a numpy.rec.recarray, a NumPy structured array of fixed-layout, named-and-typed records -- built for NumPy/C-level consumers, unlike to_dict()'s plain Python dict/list output aimed at ordinary Python code.">
+    <p class="stem">What kind of object does <code>df.to_records()</code> return?</p>
+    <button class="opt" data-ok>a NumPy structured array of fixed, named records</button>
+    <button class="opt">a plain Python dict, identical to to_dict() output</button>
+    <button class="opt">a new DataFrame with its own index reset</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official pandas <a href="https://pandas.pydata.org/docs/user_guide/index.html">User Guide</a> — the <code>DataFrame.to_dict()</code> and <code>DataFrame.to_records()</code> API reference pages document every <code>orient=</code> value and the exact structured-array dtype rules directly (~10 min).</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>to_dict()</code> and <code>to_records()</code> were both added today, right after Lesson 52's <code>droplevel()</code> entry.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-53 comes back reported as shakiest, otherwise a fresh curriculum/glossary scan for the next genuinely-uncovered pattern — <code>add_prefix()</code>/<code>add_suffix()</code>, <code>.equals()</code>/<code>.compare()</code>, and <code>json_normalize()</code> all came back zero-hit in today's scan and remain open candidates.<br><br>
+💬 Anything unclear — the orient= shapes, the JSON gotcha, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 56 · Advisory locks: coordinating processes without a new row</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 56 · ~20 min</p>
+<h1>Advisory locks: coordinating processes without a new row</h1>
+<p class="byline">"Distributed locks" has been this course's own standing out-of-scope teaser for 25+ rounds — real distributed coordination (Redis/Zookeeper/etcd-based) is beyond MISSION.md's single-instance scope. But the actual question behind that teaser usually isn't distributed at all: "how do I stop two of my own processes from doing the same thing at once?" Postgres already answers that, in-scope, with a lock that isn't attached to any row.</p>
+
+<h2>1 · The problem Lessons 6 and 33 don't quite cover</h2>
+<p>Lesson 6's row lock (<code>SELECT ... FOR UPDATE</code>) and Lesson 33's optimistic version column both protect <em>a specific row someone is about to write</em>. But plenty of coordination problems have no row to lock at all: "only one instance should run the nightly cleanup job," "don't let two workers pick up the same un-rowed batch of work at once," "run this migration step exactly once even if three instances start up simultaneously." There's nothing to <code>SELECT ... FOR UPDATE</code> — the thing being protected is a piece of logic, not a database record.</p>
+<div class="callout"><strong>Frontend-habit trap:</strong> the instinct is often "add a <code>jobs</code> table with an <code>is_running</code> boolean and check it first" — but that's a fresh check-then-act race of its own (Lesson 6's exact bug), now one level up: two instances can both read <code>is_running = false</code> before either writes <code>true</code>. Coordinating processes with an ordinary row needs the same atomic-check discipline the row itself was supposed to provide.</div>
+
+<h2>2 · Advisory locks: a lock keyed by a number, not a row</h2>
+<p>An <dfn data-en="a Postgres lock that is not attached to any table row — the application picks an arbitrary integer key, and Postgres tracks whether that key is currently locked, purely as a coordination signal between sessions" data-vn="advisory lock (giữ nguyên) — lock của Postgres không gắn với dòng nào cả, app tự chọn 1 số nguyên làm key, Postgres chỉ theo dõi key đó đang bị khóa hay không, dùng để đồng bộ giữa các session">advisory lock</dfn> is Postgres's answer: a lock keyed by an integer the application chooses, with no row, no table, and no data behind it at all — the "resource" being locked is whatever meaning the application assigns to that number. Postgres just tracks, for each key, whether it's currently held and by whom; every session in the same database can ask about the same key and get a consistent answer, which is exactly the coordination signal "only one of us do this" needs.</p>
+<pre><code><span class="cm">-- pick any bigint as the lock key -- often a hash of a string like 'nightly-cleanup'</span>
+<span class="kw">SELECT</span> pg_try_advisory_lock(hashtext(<span class="st">'nightly-cleanup'</span>)::<span class="ty">bigint</span>);
+<span class="cm">-- true  = lock acquired, this session is the one that should run the job
+-- false = someone else already holds it, this session should skip and exit</span></code></pre>
+<p><code>pg_try_advisory_lock</code> never blocks — it returns immediately with <code>true</code> or <code>false</code>, which is the shape almost every real "only one of us should do this" scenario wants: a losing instance doesn't wait around, it just skips this run and tries again next cycle. Postgres also offers <code>pg_advisory_lock</code> (blocks until the key is free) for the rarer case where waiting is actually the right behavior.</p>
+
+<h2>3 · Session-level vs. transaction-level: the detail that causes real bugs</h2>
+<p>An advisory lock comes in two lifetimes, and picking the wrong one is the single most common mistake with this feature. A <strong>session-level</strong> lock (<code>pg_advisory_lock</code> / <code>pg_try_advisory_lock</code>) stays held until the session explicitly releases it with <code>pg_advisory_unlock</code> or the connection closes — it survives across multiple transactions on that connection. A <strong>transaction-level</strong> lock (<code>pg_advisory_xact_lock</code>) is released automatically the instant the current transaction commits or rolls back, with no unlock call needed at all.</p>
+<pre><code><span class="cm">-- transaction-scoped: released automatically at COMMIT/ROLLBACK, nothing to forget</span>
+<span class="kw">BEGIN</span>;
+<span class="kw">SELECT</span> pg_try_advisory_xact_lock(hashtext(<span class="st">'nightly-cleanup'</span>)::<span class="ty">bigint</span>);
+<span class="cm">-- ... do the guarded work inside this same transaction ...</span>
+<span class="kw">COMMIT</span>; <span class="cm">-- lock released here, automatically</span></code></pre>
+<p>Session-level locks are the sharper tool but the one that leaks: since they live on the pooled connection (Lesson 18) rather than the transaction, returning that connection to the pool without calling <code>pg_advisory_unlock</code> leaves the lock held indefinitely — the next request that happens to borrow the same pooled connection inherits a lock it never asked for, and every other session trying that key gets stuck behind a lock nobody remembers taking. The transaction-scoped variant exists specifically to make that mistake impossible: there's no unlock call to forget, because commit or rollback always releases it.</p>
+
+<div class="cmp-wrap">
+<table class="cmp">
+<thead><tr><th></th><th>Row lock (Lesson 6)</th><th>Advisory lock (today)</th></tr></thead>
+<tbody>
+<tr><th>Guards</th><td>a specific existing row</td><td>an arbitrary application-chosen key</td></tr>
+<tr><th>Needs a row to exist?</th><td>yes — <code>SELECT ... FOR UPDATE</code> targets one</td><td>no — the key can mean anything, or nothing in the schema</td></tr>
+<tr><th>Typical use</th><td>protecting one row's read-then-write</td><td>"only one process should run this logic right now"</td></tr>
+<tr><th>Released by</th><td>the transaction ending</td><td>transaction ending (xact variant) or an explicit unlock call (session variant)</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2>4 · A Go worker using it to avoid double-running a job</h2>
+<p>This is the shape Lesson 10's background-jobs lesson left implicit: at-least-once delivery means a job handler must tolerate running twice, but for something like a scheduled cleanup, the cleaner fix is often just making sure only one instance starts it in the first place.</p>
+<pre><code><span class="cm">// runNightlyCleanup only proceeds if this instance wins the advisory lock for
+// this named job -- every other instance's attempt returns false and exits
+// immediately instead of doing (or waiting to do) the same work twice.</span>
+<span class="kw">func</span> runNightlyCleanup(ctx context.Context, db *pgxpool.Pool) error {
+    <span class="kw">const</span> jobName = <span class="str">"nightly-cleanup"</span>
+    <span class="kw">var</span> acquired <span class="ty">bool</span>
+    err := db.QueryRow(ctx,
+        <span class="str">`SELECT pg_try_advisory_lock(hashtext($1)::bigint)`</span>, jobName,
+    ).Scan(&amp;acquired)
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        <span class="kw">return</span> err
+    }
+    <span class="kw">if</span> !acquired {
+        <span class="kw">return</span> <span class="kw">nil</span> <span class="cm">// another instance already has it -- skip this run, not an error</span>
+    }
+    <span class="kw">defer</span> db.Exec(ctx, <span class="str">`SELECT pg_advisory_unlock(hashtext($1)::bigint)`</span>, jobName)
+
+    <span class="kw">return</span> doCleanup(ctx, db)
+}</code></pre>
+<p>Notice this snippet uses the session-level pair deliberately, with an explicit <code>defer</code> unlock right next to the acquire — the discipline Section 3 named, made concrete: the unlock call exists in the same breath as the lock call, so it can't be forgotten later. A version scoped to one transaction (<code>pg_try_advisory_xact_lock</code> wrapped in a <code>BEGIN</code>/<code>COMMIT</code>) would drop the <code>defer</code> entirely and rely on the transaction's own end instead — the safer default whenever the guarded work naturally fits inside one transaction.</p>
+
+<div class="interview">
+<p><strong>Q: "Three instances of your service start up at the same time and each tries to run a one-time migration step. How do you make sure it only runs once?"</strong> A strong answer, out loud: <em>"A jobs table with an is_running flag has the same check-then-act race Lesson 6 covers — two instances can both read false before either writes true. I'd use a Postgres advisory lock instead: each instance calls pg_try_advisory_lock with the same key on startup. Exactly one gets true and runs the migration step; the other two get false and skip it immediately, no waiting, no extra table. If the guarded work fits inside one transaction, I'd reach for the transaction-scoped variant instead, so there's no explicit unlock call to forget."</em> The subtext: naming the row-based alternative's exact failure mode, and knowing the two lock lifetimes are a real choice, not an implementation detail.</p>
+</div>
+
+<h2>5 · Why this isn't the "distributed lock" this course kept deferring</h2>
+<p>This is genuinely narrower than what "distributed lock" usually means, and worth being precise about the difference rather than quietly renaming the same thing. An advisory lock only coordinates sessions connected to <em>the same</em> Postgres instance — it says nothing about, and doesn't help with, coordination across multiple independent databases or services with no shared Postgres to ask. That broader problem — consensus across genuinely separate systems, the Redis/Zookeeper/etcd territory this course's teasers have named since Lesson 30 — stays out of scope per MISSION.md's distributed-systems exclusion. What today closes out is the much more common version of that question a single-instance Postgres-backed service actually has: "stop two of my own processes, that already share one database, from doing the same thing at once" — narrowed to exactly the vocabulary level MISSION.md allows, using a mechanism this course's own stack already ships.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="An advisory lock is keyed by an arbitrary application-chosen integer, with no table or row behind it at all -- Postgres just tracks whether that key is currently held, which is exactly the signal 'only one of us should do this' needs.">
+    <p class="stem">What does a Postgres advisory lock actually attach to?</p>
+    <button class="opt" data-ok>an arbitrary integer key the application picks</button>
+    <button class="opt">one specific row inside some existing table</button>
+    <button class="opt">the entire database, blocking every other query</button>
+    <button class="opt">a fixed key defined once inside postgresql.conf</button>
+  </div>
+  <div class="q" data-why="pg_try_advisory_lock never blocks -- it returns true immediately if the key was free, or false immediately if another session already holds it, letting the caller skip this run instead of waiting around.">
+    <p class="stem">What does <code>pg_try_advisory_lock</code> return when another session already holds that key?</p>
+    <button class="opt" data-ok>false, immediately, without waiting at all right now</button>
+    <button class="opt">true, since trying always succeeds no matter what</button>
+    <button class="opt">an error the caller must absolutely always retry</button>
+    <button class="opt">it blocks silently until that exact key opens</button>
+  </div>
+  <div class="q" data-why="A transaction-scoped advisory lock (pg_advisory_xact_lock) is released automatically the instant the transaction commits or rolls back -- there is no separate unlock call to remember, unlike the session-scoped variant.">
+    <p class="stem">Why does a transaction-scoped advisory lock avoid the leaked-lock mistake?</p>
+    <button class="opt" data-ok>commit or rollback releases it, nothing gets forgotten</button>
+    <button class="opt">transaction-scoped locks are actually never released at all</button>
+    <button class="opt">that variant refuses to run inside any transaction</button>
+    <button class="opt">it silently upgrades into a permanent whole-table lock</button>
+  </div>
+  <div class="q" data-why="An advisory lock only coordinates sessions connected to the same Postgres instance -- it does nothing for coordination across separate databases or services with no shared Postgres to ask, which is the genuinely distributed problem this course keeps out of scope.">
+    <p class="stem">Why isn't a Postgres advisory lock the same thing as a distributed lock?</p>
+    <button class="opt" data-ok>it only coordinates sessions on one shared instance now</button>
+    <button class="opt">advisory locks are much slower than plain row locks</button>
+    <button class="opt">it requires a completely separate Redis instance running now</button>
+    <button class="opt">advisory locks cannot ever be released until a restart</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://www.postgresql.org/docs/current/functions-admin.html#FUNCTIONS-ADVISORY-LOCKS">PostgreSQL Manual — Advisory Lock Functions</a> (section 9.28.10), extending RESOURCES.md's standing "PostgreSQL Manual — Data Definition" citation into the admin-functions chapter — covers every function used above (<code>pg_advisory_lock</code>, <code>pg_try_advisory_lock</code>, <code>pg_advisory_unlock</code>, <code>pg_advisory_xact_lock</code>) plus the session-vs-transaction lifetime distinction Section 3 built on, and cross-references section 13.3.5 for the underlying locking model.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> open — this finally closes the standing "distributed locks" teaser named since Lesson 30, narrowed to the in-scope, single-instance mechanism MISSION.md allows. The synthesis lesson through Lessons 9, 33, and 51's caching- and concurrency-control lenses remains a ready, still-open candidate, alongside cache stampede / thundering herd (a fresh, confirmed-untaught gap found this round, tying directly to Lesson 9's cache-aside pattern and Lesson 32's retry-storm material) as a sharper alternative worth considering first.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

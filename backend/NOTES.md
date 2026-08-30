@@ -3291,3 +3291,120 @@
   for any lesson after 55 rounds - the next session should keep treating a
   completion/quiz-outcome signal, or a user-named track to deepen, as higher
   priority than a 56th topic picked blind.
+- 2026-08-30 generation (Lesson 56, headless run): idempotency check first -
+  confirmed no `lessons/0056-*.html` file existed and no `n: 56`/`date:
+  "2026-08-30"` entry was in `nav.js` before writing anything (highest prior
+  lesson was 55, dated 2026-08-29). Per this round's briefing, direct `psql
+  "$LEARNING_DB_URL" ...` / `bin/query-progress` reads were not attempted -
+  treated as reliably blocked in this sandbox with no user present to
+  approve, per every round's finding for the past ~7 weeks. Read all of
+  `learning-records/` (0001's baseline, 0002's concurrency-vocabulary gap) -
+  both already fully reflected in prior lessons, nothing new to act on; no
+  `lesson_completed`/quiz-outcome record exists for any lesson, so there is
+  still no reported weak spot to target, same standing note every round since
+  Lesson 19 has carried. Lesson 55 left two named candidates open: the
+  standing synthesis lesson through Lessons 9/33/51's caching- and
+  concurrency-control lenses, and distributed locks (named as an
+  out-of-scope-per-MISSION.md candidate in nearly every round's teaser since
+  Lesson 30, ~25 rounds running, always deferred rather than resolved). Before
+  committing to either, ran this course's standing gap-finding sanity check
+  (grep for other untaught candidates) - confirmed "distributed lock"/
+  "advisory lock" had zero hits anywhere in `lessons/*.html` or
+  `glossary.html` (the former only ever inside prior lessons' own teaser
+  sentences, the latter never mentioned at all), and separately confirmed
+  "cache stampede"/"thundering herd"/"dogpile"/"singleflight"/"request
+  coalescing" also had zero hits anywhere in the workspace - a second,
+  genuinely untaught candidate tying directly to Lesson 9's cache-aside
+  pattern and Lesson 32's retry-storm material. Chose Postgres advisory locks
+  over both cache stampede and the synthesis lesson: it's the sharper pick
+  because it's the first genuine way to close the standing "distributed
+  locks" teaser without going out of scope - `pg_advisory_lock`/
+  `pg_try_advisory_lock`/`pg_advisory_xact_lock` are a single-instance,
+  Postgres-native mechanism (not the Redis/Zookeeper/etcd distributed-consensus
+  territory MISSION.md excludes), so it resolves the multi-round-old open
+  thread in-scope rather than deferring it yet again; cache stampede remains a
+  strong, confirmed-untaught candidate and was set as this lesson's own
+  closing teaser alongside the synthesis lesson. Verified via a live `WebFetch`
+  check (not blocked this round, unlike several prior rounds' documented
+  network-tool approval gates - `en.wikipedia.org` and `aws.amazon.com` URLs
+  were both blocked mid-round with a permission prompt and not retried past
+  one attempt each per this course's own two-strikes convention, but
+  `developer.mozilla.org` and `postgresql.org` both loaded successfully,
+  suggesting a domain-level allowlist rather than a blanket block) that
+  `https://www.postgresql.org/docs/current/functions-admin.html#FUNCTIONS-ADVISORY-LOCKS`
+  is live (PostgreSQL 18.6 docs) and documents exactly the functions and the
+  session-vs-transaction-level distinction this lesson teaches, confirmed
+  before citing it - cited as extending RESOURCES.md's standing "PostgreSQL
+  Manual — Data Definition" citation into the admin-functions chapter, the
+  same extend-an-existing-citation pattern Lessons 51/52/54/55 used. Lesson 56
+  covers: the gap between Lesson 6's row lock / Lesson 33's optimistic version
+  column (both need an actual row to protect) and coordination problems with
+  no row at all ("only one instance should run this job"), naming the
+  check-then-act race a naive `is_running` boolean column reintroduces as the
+  same bug Lesson 6 already named, one level up; advisory locks as a lock
+  keyed by an arbitrary application-chosen integer with no table or row
+  behind it; `pg_try_advisory_lock`'s non-blocking true/false return as the
+  shape most real "only one of us" scenarios want, versus blocking
+  `pg_advisory_lock` for the rarer wait-is-correct case; the session-level vs.
+  transaction-level lifetime distinction as the single most common real
+  mistake with this feature (a session-level lock living on a pooled
+  connection, Lesson 18, and leaking indefinitely if `pg_advisory_unlock` is
+  forgotten before the connection returns to the pool, versus the
+  transaction-scoped variant that makes that mistake structurally impossible);
+  a three-row `table.cmp` (reusing Lesson 25's component) contrasting row
+  locks against advisory locks; a `runNightlyCleanup` Go snippet using the
+  session-level pair with an explicit adjacent `defer` unlock; and a closing
+  section explicitly naming why this is narrower than "distributed lock" in
+  the industry sense (one shared Postgres instance only, not consensus across
+  separate systems) rather than quietly claiming to have taught something
+  bigger than it did. The Go snippet was compile-checked clean with `go build
+  -C` / `go vet -C` in a scratch module (`.scratch/backend-lesson56/`, minimal
+  stand-in `pool`/`row` types since the lesson's point is the advisory-lock
+  call shape, not a specific driver; built binary written to `/tmp` and left
+  there - `rm -f` on that path was blocked by this session's sandbox as
+  outside the allowed working directory, same harmless precedent established
+  since Lesson 27; scratch dir itself left with only `go.mod`/`main.go`) - no
+  approval blocker for either `-C`-style invocation this round. Caught and
+  fixed two real authoring bugs before shipping: an unclosed `<p class=
+  "byline">` tag (found on first full re-read, not caught while drafting -
+  the same stray-tag bug class many prior rounds' notes have flagged, this
+  time on the byline paragraph rather than a callout div) and two malformed
+  `data-why` quiz attributes left over from a copy-paste slip (a stray
+  `"</code>>` sequence and a doubled trailing quote) that would have broken
+  the quiz markup silently - both fixed via `Edit` and re-read to confirm
+  clean. Quiz options were drafted, then verified with a `node -e` inline
+  script parsing the quiz HTML and counting `.split(/\s+/).length` per option
+  (this course's established Node-over-shell-loop preference in this
+  sandbox) - Q1 was correct on the first draft at 7/7/7/7; Q2, Q3, and Q4 each
+  needed several successive rewrite-and-recount passes (the same
+  hand-editing-without-immediate-recount failure mode this log has flagged
+  repeatedly) before landing on final tallies Q1 7/7/7/7, Q2 8/8/8/8, Q3
+  8/8/8/8, Q4 9/9/9/9 - independently cross-checked a second way via
+  individual `Grep -o` extraction of every `class="opt"...` line and a manual
+  per-line word count matching the Node script's tallies exactly. Ran an
+  occurrence-accurate (`Grep -o`) tag-balance check for every tag pair used:
+  div 8/8, p 18/18, pre 3/3, table 1/1, tr 5/5, th 5/5, td 4/4, h2 7/7, dfn
+  1/1, code 12/12, button 16/16, and confirmed exactly 4 `data-ok` (one per
+  question) - all balanced after the byline-tag fix above. Added exactly one
+  new glossary term, `advisory lock` - grepped beforehand and confirmed it
+  existed nowhere in `lessons/*.html` or `glossary.html`; deliberately did
+  NOT re-add `row lock` or `transaction`, both already in the glossary since
+  Lesson 6, since this lesson explicitly links back to that existing
+  vocabulary rather than duplicating it, the same "check first, don't
+  re-add" convention Lesson 51's round documented for `Cache-Control`.
+  Registered Lesson 56 in `nav.js`. `bin/record-progress backend
+  lesson_generated --day 56 --lesson 0056-postgres-advisory-locks.html
+  --detail '{"by":"headless"}'` will be run directly from the repo root as a
+  single standalone command immediately after this entry is written, per the
+  standing finding that this write path works reliably even though DB reads
+  stay blocked. This finally closes the "distributed locks" teaser first
+  named around Lesson 30 and repeated in nearly every round's closing note
+  since - narrowed to the in-scope, single-instance mechanism MISSION.md
+  allows, rather than deferred yet again. Cache stampede / thundering herd
+  (confirmed genuinely untaught this round, tying to Lessons 9 and 32) and the
+  standing synthesis lesson through Lessons 9/33/51 both remain open,
+  ready-to-pick-up candidates for Lesson 57. Still no `lesson_completed`/
+  quiz/kata outcome record exists for any lesson after 56 rounds - the next
+  session should keep treating a completion/quiz-outcome signal, or a
+  user-named track to deepen, as higher priority than a 57th topic picked
+  blind.

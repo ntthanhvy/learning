@@ -70,6 +70,8 @@
       file: "lessons/0031-hash-eq-and-mutability.html" },
     { n: 32, date: "2026-08-29", title: "@classmethod and @staticmethod",
       file: "lessons/0032-classmethod-and-staticmethod.html" },
+    { n: 33, date: "2026-08-30", title: "enum: naming a closed set of choices",
+      file: "lessons/0033-enum.html" },
   ];
 
   const REFS = [

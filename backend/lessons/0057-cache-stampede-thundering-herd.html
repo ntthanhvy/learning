@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 57 · Cache stampede: when the cache itself causes the outage</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 57 · ~20 min</p>
+<h1>Cache stampede: when the cache itself causes the outage</h1>
+<p class="byline">Lesson 56 named this as its own closing teaser: a second confirmed-untaught gap tying directly to Lesson 9's cache-aside pattern and Lesson 32's retry-storm material. Lesson 9 taught the cache as the fix for repeated reads hitting Postgres. Today's lesson is the failure mode where that exact fix backfires the moment the cached value expires while it's popular.</p>
+
+<h2>1 · The gap in Lesson 9's cache-aside pattern</h2>
+<p>Lesson 9's cache-aside flow was: check the cache, and on a miss, read the real source and write the result back with a <dfn data-en="time-to-live: a cache entry's expiry duration; once it passes, the entry is dropped or ignored automatically, forcing the next read to refetch a fresh copy" data-vn="TTL (giữ nguyên) — thời gian sống, hết hạn tự bị bỏ">TTL</dfn>. That flow quietly assumes misses arrive one at a time. It doesn't say what happens when a single hot key — a trending product page, a popular user's profile, a homepage feed — expires while thousands of requests per second are asking for exactly that key. Every one of those requests sees a miss at the same instant, and every one of them independently falls through to Postgres to recompute the same value.</p>
+<div class="callout"><strong>Frontend-habit trap:</strong> this looks identical to Lesson 32's retry storm at first glance — many clients doing the same expensive thing at once — but the trigger is different. A retry storm needs a prior failure to synchronize clients around. A <dfn data-en="a spike of many requests hitting the origin at the same instant because a cached value that many callers depend on expired or was evicted, unrelated to any earlier failure" data-vn="cache stampede (giữ nguyên) — nhiều request cùng dội vào nguồn gốc vì 1 cache key được nhiều người dùng vừa hết hạn">cache stampede</dfn> (also called the <dfn data-en="another name for a cache stampede: many callers 'piling on' the same expensive recomputation at once, as if digging into the same pile of work simultaneously" data-vn="dogpile effect (giữ nguyên) — tên khác của cache stampede">dogpile effect</dfn> or <dfn data-en="the general pattern this course has already named twice — many independent actors converging on the same resource at the same moment and overloading it, whether the trigger is a cache expiry, a service recovering from an outage, or a scheduled job" data-vn="thundering herd (giữ nguyên) — nhiều tiến trình cùng 'xông vào' 1 tài nguyên cùng lúc, gây quá tải">thundering herd</dfn> problem) needs no failure at all — a perfectly healthy cache expiring on schedule is enough to trigger it, because popularity, not breakage, is the fuel.</div>
+
+<h2>2 · Why this is worse than an ordinary cache miss</h2>
+<p>An ordinary cache miss costs one expensive read. A stampede costs N simultaneous expensive reads for the same key, where N is however many requests arrived in the gap between "the old value expired" and "the new value finished being written back." If the origin computation is a slow aggregate query or a call to a third-party API, that gap might be hundreds of milliseconds — long enough, on a hot key, for thousands of duplicate requests to land on Postgres or the downstream API at once. The cache, whose entire job was to protect the origin from repeated load, becomes the mechanism that synchronizes an overload against it. Worse, if that overload makes the origin slow enough to blow past the caller's own timeout, some of those N callers retry — turning a stampede into the retry storm Lesson 32 already named, now stacked on top.</p>
+
+<h2>3 · Three fixes, each closing a different part of the gap</h2>
+<p>The first fix is <dfn data-en="a lock (often a Redis SETNX or a Postgres advisory lock) that lets only one caller recompute a given cache key at a time; every other caller for that same key waits for the result or serves a slightly stale value instead of recomputing independently" data-vn="request coalescing / dogpile lock (giữ nguyên) — chỉ 1 caller được tính lại giá trị, các caller khác chờ hoặc dùng tạm giá trị cũ">request coalescing</dfn>: on a miss, the first caller to arrive takes a short-lived lock keyed to that cache key (a Redis <code>SETNX</code>, or Lesson 56's Postgres advisory lock repurposed for exactly this) and is the only one that actually recomputes the value. Every other caller that misses while the lock is held either waits briefly for the winner to finish and populate the cache, or — if the old value is still around — serves that slightly stale copy instead of joining the recomputation. N simultaneous origin hits collapses to 1.</p>
+<pre><code><span class="cm">// coalesced recompute: only the lock winner actually queries Postgres;
+// everyone else waits on the same result instead of duplicating the work</span>
+<span class="kw">func</span> getProductPage(ctx context.Context, id <span class="ty">string</span>) (*Page, <span class="ty">error</span>) {
+    <span class="kw">if</span> p, ok := cache.Get(id); ok {
+        <span class="kw">return</span> p, <span class="kw">nil</span>
+    }
+    <span class="cm">// only one goroutine per key actually calls the function below;</span>
+    <span class="cm">// concurrent callers for the same id block here and share its result</span>
+    v, err, _ := group.Do(id, <span class="kw">func</span>() (<span class="kw">any</span>, <span class="ty">error</span>) {
+        p, err := loadFromPostgres(ctx, id)
+        <span class="kw">if</span> err != <span class="kw">nil</span> {
+            <span class="kw">return</span> <span class="kw">nil</span>, err
+        }
+        cache.Set(id, p, 10*time.Minute)
+        <span class="kw">return</span> p, <span class="kw">nil</span>
+    })
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        <span class="kw">return</span> <span class="kw">nil</span>, err
+    }
+    <span class="kw">return</span> v.(*Page), <span class="kw">nil</span>
+}</code></pre>
+<p>The <code>group.Do</code> call above is the shape of Go's <code>golang.org/x/sync/singleflight</code> package — one in-process call per key, with every concurrent caller for that same key blocking on and sharing the single result, no explicit lock code needed. It only coalesces callers within one process, though: across multiple instances, an external lock (Redis or a Postgres advisory lock) is still needed to get the same one-recompute guarantee.</p>
+<p>The second fix is <dfn data-en="a scheduled or background refresh of a cache entry shortly before its TTL expires, so the value is proactively kept warm and requests never actually hit a miss on a hot key at all" data-vn="cache warming / early refresh (giữ nguyên) — chủ động làm mới cache trước khi hết hạn, tránh có request nào bị miss">early refresh</dfn>: recompute a hot key's value slightly before its TTL actually expires — deterministically, or probabilistically with rising odds as expiry approaches — so requests never observe a real miss on it at all. The third fix is simplest and often good enough: serve the stale value while recomputing in the background (<dfn data-en="a caching strategy that returns the currently-cached value immediately even after its TTL passed, while triggering a background refresh, so callers never wait on the recompute and never see a hard miss" data-vn="stale-while-revalidate (giữ nguyên) — trả tạm giá trị cache cũ ngay lập tức, đồng thời làm mới ở nền">stale-while-revalidate</dfn>), trading a few seconds of staleness — the same staleness-tolerance judgment call Lesson 9 already asked for every cache — for zero synchronized origin hits.</p>
+
+<div class="cmp-wrap">
+<table class="cmp">
+<thead><tr><th>Fix</th><th>What it trades away</th><th>Best for</th></tr></thead>
+<tbody>
+<tr><th>Request coalescing</th><td>a small wait for callers behind the lock winner</td><td>expensive, must-be-fresh recomputes</td></tr>
+<tr><th>Early refresh</th><td>extra background recompute work before expiry</td><td>predictably hot keys with known traffic</td></tr>
+<tr><th>Stale-while-revalidate</th><td>a short window of stale reads</td><td>data that tolerates a few seconds of lag</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2>4 · The trap: this only fires on hot keys</h2>
+<p>A cache holding a million rarely-read keys essentially never stampedes — misses on cold keys are already spread out in time, so nothing synchronizes. The failure mode is specific to popularity: the more callers share one key, the more of them land in the exact same expiry gap. That's also why it's easy to miss in testing — a staging environment with light, spread-out traffic will never reproduce it, and the first real evidence is often an on-call page the moment a homepage or trending-item cache entry expires under real production load.</p>
+
+<div class="interview">
+<p><strong>Q: "Your cache TTL is 10 minutes and every 10 minutes you see a latency spike on Postgres. Why, and what would you do?"</strong> A strong answer, out loud: <em>"That's a classic cache stampede — the TTL expiring on a hot key means every concurrent request for it misses at once and all fall through to Postgres simultaneously, not because anything broke but because the value was popular. I'd add request coalescing so only one caller per key actually recomputes and the rest share that result — Go's singleflight package does this in-process, or a Redis lock across instances. If the data tolerates a few seconds of staleness, serving the old value while refreshing in the background is often simpler and just as effective."</em> The subtext: naming that this is a popularity problem, not a bug, and knowing there's more than one valid fix depending on staleness tolerance.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A cache stampede is triggered purely by a popular key's TTL expiring while many concurrent requests want it -- no prior failure or outage is needed at all, unlike a retry storm which needs an earlier failed call to synchronize clients around.">
+    <p class="stem">What actually triggers a cache stampede?</p>
+    <button class="opt" data-ok>a popular cached key expiring under heavy load</button>
+    <button class="opt">a prior outage every client is now retrying</button>
+    <button class="opt">the cache server crashing itself totally unexpectedly today</button>
+    <button class="opt">a scheduled nightly job restarting the whole database</button>
+  </div>
+  <div class="q" data-why="Request coalescing (a lock, or Go's singleflight) makes only the first caller for a given key actually recompute the value -- every other concurrent caller for that same key waits and shares that one result instead of duplicating the expensive work.">
+    <p class="stem">What does request coalescing change about a cache miss on a hot key?</p>
+    <button class="opt" data-ok>only one caller recomputes, others share the result</button>
+    <button class="opt">every caller recomputes fully, then results get merged</button>
+    <button class="opt">the cache key gets deleted right away permanently</button>
+    <button class="opt">all callers are queued and rejected with errors</button>
+  </div>
+  <div class="q" data-why="Stale-while-revalidate returns the currently-cached value immediately, even past its TTL, while a background refresh runs -- trading a short window of staleness for completely avoiding a synchronized hit on the origin.">
+    <p class="stem">What does stale-while-revalidate trade away to avoid a stampede?</p>
+    <button class="opt" data-ok>a short window of returning an outdated value</button>
+    <button class="opt">the ability to ever cache that specific key</button>
+    <button class="opt">correctness of every single write to the database</button>
+    <button class="opt">all future reads must skip the cache layer</button>
+  </div>
+  <div class="q" data-why="A cache holding many rarely-read keys essentially never stampedes, because misses on cold keys are already spread out in time -- the failure mode is specific to popularity, where many concurrent callers share the exact same expiry gap on one key.">
+    <p class="stem">Why do cold, rarely-read cache keys almost never stampede?</p>
+    <button class="opt" data-ok>their misses are already spread naturally over time</button>
+    <button class="opt">cold keys are technically incapable of ever expiring</button>
+    <button class="opt">Postgres blocks all reads against cold cache keys</button>
+    <button class="opt">cold keys skip the cache layer automatically somehow</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://pkg.go.dev/golang.org/x/sync/singleflight">Go — <code>golang.org/x/sync/singleflight</code> package docs</a>, the standard library-adjacent implementation of the request-coalescing fix in Section 3 above (the <code>group.Do</code> call in the snippet is this package's actual API) — read the package doc's own description of duplicate-call suppression, which is the mechanism this lesson builds on. Note: this round's live-fetch check against that URL and a Wikipedia backup were both blocked by this sandbox's network-tool approval gate with no user present to approve (unlike Lesson 56's round, where some domains loaded); per this course's two-strikes convention this citation is offered unverified this round and should be re-checked live next time network access is available. This extends RESOURCES.md's caching coverage (Kleppmann's <em>Designing Data-Intensive Applications</em>, ch. 3, already cited for storage engines) into the specific duplicate-suppression mechanism.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> open — this closes the second of Lesson 56's two named candidates (cache stampede here; the synthesis lesson through Lessons 9, 33, and 51's caching- and concurrency-control lenses remains open and is now the longest-standing deferred candidate). A fresh gap-finding grep next round, per this course's standing practice, should confirm what else in `lessons/*.html` and `glossary.html` remains untaught before picking Lesson 58's topic.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 34 · match/case: structural pattern matching</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 34 · ~20 min · 31 Aug 2026</p>
+<h1>match/case: structural pattern matching</h1>
+<p class="byline">An <code>if/elif</code> chain that checks one variable against several possibilities, then reaches inside it once it matches, is common enough that Python 3.10 added syntax for it directly. <dfn data-en="a match statement compares a subject value against a series of case patterns in order, running the first one that fits and optionally binding names to the pieces it matched inside" data-vn="giữ nguyên 'structural pattern matching' — so 1 subject value với nhiều case pattern theo thứ tự, chạy pattern đầu tiên khớp, có thể gán tên cho từng phần bên trong luôn">structural pattern matching</dfn> — <code>match</code>/<code>case</code> — checks shape and content together in one place, instead of an <code>if</code> for the check and separate lines to unpack what was found.</p>
+
+<div class="callout"><strong>Bridge from SQL:</strong> a <code>CASE WHEN status = 'pending' THEN ... WHEN status = 'shipped' THEN ...</code> block picks one branch out of several based on a value, and each branch's `THEN` only runs for that one condition. <code>match</code>/<code>case</code> is that same one-value-many-branches shape in Python — with the added trick that a branch can also reach inside the value (a tuple, a list, an object) and bind pieces of it to names, something SQL's <code>CASE</code> has no equivalent for.</p></div>
+
+<h2>1 · The problem: check, then unpack, as two separate steps</h2>
+<p>Handling a coordinate that might be a 1-, 2-, or 3-item tuple with <code>if/elif</code> means checking the length and then indexing into it, twice over:</p>
+<pre><code><span class="kw">def</span> describe(point):
+    <span class="kw">if</span> <span class="kw">len</span>(point) == <span class="num">2</span>:
+        x, y = point
+        <span class="kw">return</span> <span class="kw">f</span><span class="str">"2D point at ({x}, {y})"</span>
+    <span class="kw">elif</span> <span class="kw">len</span>(point) == <span class="num">3</span>:
+        x, y, z = point
+        <span class="kw">return</span> <span class="kw">f</span><span class="str">"3D point at ({x}, {y}, {z})"</span>
+    <span class="kw">else</span>:
+        <span class="kw">return</span> <span class="str">"unknown shape"</span></code></pre>
+<p>The length check and the unpacking say the same thing twice — the second line only runs because the first line already promised a 2-tuple, but nothing ties them together as one statement.</p>
+
+<h2>2 · <code>match</code>/<code>case</code>: check shape and bind pieces at once</h2>
+<p>A <em>sequence pattern</em> checks length and unpacks in a single <code>case</code> line — no separate <code>len()</code> check, no separate unpacking assignment:</p>
+<pre><code><span class="kw">def</span> describe(point):
+    <span class="kw">match</span> point:
+        <span class="kw">case</span> (x, y):
+            <span class="kw">return</span> <span class="kw">f</span><span class="str">"2D point at ({x}, {y})"</span>
+        <span class="kw">case</span> (x, y, z):
+            <span class="kw">return</span> <span class="kw">f</span><span class="str">"3D point at ({x}, {y}, {z})"</span>
+        <span class="kw">case</span> _:
+            <span class="kw">return</span> <span class="str">"unknown shape"</span></code></pre>
+<p><code>match point:</code> evaluates <code>point</code> once (the <em>subject</em>), then tries each <code>case</code> pattern top to bottom, running the first one that fits. <code>case (x, y):</code> only matches a 2-item sequence — and, if it matches, <code>x</code> and <code>y</code> are already bound to the two items, ready to use in that branch. The final <code>case _:</code> is the <dfn data-en="the underscore case pattern that matches any subject and binds nothing, conventionally placed last as the catch-all — the pattern-matching equivalent of an else clause" data-vn="giữ nguyên 'wildcard pattern' — case _ khớp với bất kỳ giá trị nào, không gán tên gì, đặt cuối cùng làm nhánh mặc định giống else">wildcard pattern</dfn> — it matches anything and binds nothing, playing the role <code>else</code> plays in <code>if/elif</code>.</p>
+
+<h2>3 · Guards, OR-patterns, and matching class instances</h2>
+<p>A <code>case</code> pattern can add an <code>if</code> <dfn data-en="an extra condition attached to a case pattern with if, checked only after the pattern itself already matched, that can reject a structural match that fits the shape but fails some further condition" data-vn="giữ nguyên 'guard clause' — điều kiện if thêm vào case, chỉ check sau khi pattern đã khớp shape, để loại bớt trường hợp khớp shape nhưng không đạt điều kiện khác">guard clause</dfn>, combine alternatives with <code>|</code>, or match an object's type and pull out its attributes by name, using Day 33's <code>Status</code> enum and Day 7's <code>dataclass</code> together:</p>
+<pre><code><span class="kw">from</span> dataclasses <span class="kw">import</span> dataclass
+<span class="kw">from</span> enum <span class="kw">import</span> Enum
+
+<span class="kw">class</span> Status(Enum):
+    PENDING = <span class="str">"pending"</span>
+    SHIPPED = <span class="str">"shipped"</span>
+    CANCELLED = <span class="str">"cancelled"</span>
+
+<span class="kw">@dataclass</span>
+<span class="kw">class</span> Order:
+    status: Status
+    total: <span class="kw">float</span>
+
+<span class="kw">def</span> handle(order):
+    <span class="kw">match</span> order:
+        <span class="kw">case</span> Order(status=Status.PENDING, total=t) <span class="kw">if</span> t &gt; <span class="num">1000</span>:
+            <span class="kw">return</span> <span class="str">"needs manual approval"</span>
+        <span class="kw">case</span> Order(status=Status.PENDING | Status.SHIPPED):
+            <span class="kw">return</span> <span class="str">"still active"</span>
+        <span class="kw">case</span> Order(status=Status.CANCELLED):
+            <span class="kw">return</span> <span class="str">"no action needed"</span>
+        <span class="kw">case</span> _:
+            <span class="kw">return</span> <span class="str">"unrecognized"</span></code></pre>
+<p><code>Order(status=Status.PENDING, total=t)</code> — a <em>class pattern</em> — matches only an <code>Order</code> instance, only when its <code>status</code> attribute equals <code>Status.PENDING</code>, and binds its <code>total</code> attribute to <code>t</code>; the trailing <code>if t &gt; 1000</code> guard then further narrows that branch, so a small pending order falls through to check the next <code>case</code> instead. <code>Status.PENDING | Status.SHIPPED</code> is an <em>OR-pattern</em> — matches either member, one branch instead of two near-identical ones. Order matters: Python tries each <code>case</code> top to bottom and stops at the first match, exactly like <code>if/elif</code>.</p>
+
+<h2>4 · A capture pattern binds unconditionally — position it last</h2>
+<p>A bare name in a <code>case</code>, with no literal, no parentheses, always matches and binds the whole subject to that name — writing one before an intended case is a mistake Python actually catches, rather than a silent trap:</p>
+<pre><code><span class="kw">match</span> command:
+    <span class="kw">case</span> cmd:              <span class="cm"># binds ANYTHING to cmd — always matches</span>
+        <span class="kw">return</span> <span class="kw">f</span><span class="str">"got {cmd}"</span>
+    <span class="kw">case</span> <span class="str">"quit"</span>:          <span class="cm"># SyntaxError: unreachable, caught before the code even runs</span>
+        <span class="kw">return</span> <span class="str">"bye"</span></code></pre>
+<p>A <em>capture pattern</em> (a bare name, with no guard) is irrefutable — it always succeeds — so it must be written last, the same role <code>case _:</code> plays. Unlike most Python mistakes, this one doesn't wait for a bug report: CPython's compiler statically proves the <code>"quit"</code> case below can never run and refuses to even start the program, raising <code>SyntaxError: name capture 'cmd' makes remaining patterns unreachable</code> at import time. Adding a guard changes the story — <code>case cmd if cmd == "special":</code> is no longer irrefutable, since the guard can fail, so it's allowed before other cases and Python falls through to try the next one exactly when the guard doesn't hold.</p>
+
+<div class="interview">
+<p><strong>Q: "When would you reach for <code>match</code>/<code>case</code> over <code>if</code>/<code>elif</code>?"</strong> A strong answer, out loud: <em>"When a branch depends on both the shape of a value and its contents — a tuple's length while also unpacking it, or an object's type while also reading its attributes. <code>match</code> checks and destructures in one pattern instead of a length or <code>isinstance</code> check followed by separate unpacking. For a flat comparison against one variable with no destructuring, <code>if</code>/<code>elif</code> is just as clear and there's no reason to reach for the newer syntax."</em> The signal: naming the combined check-and-destructure benefit specifically, not just "it's the modern way to do it."</p>
+</div>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> nothing directly — pandas has no equivalent to structural pattern matching; row-wise branching there is usually vectorized with <code>np.select</code> or <code>.apply()</code> instead of a per-row <code>match</code>. Not demonstrated here; that's <code>data/</code>'s territory, and this is the only sentence in this lesson that names it.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/34_match_case.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/34_match_case.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: a sequence pattern that describes a 2- or 3-item point tuple, a class pattern with a guard clause over an <code>Order</code> dataclass carrying a <code>Status</code> enum, an OR-pattern combining two enum members into one branch, and a guarded capture pattern placed correctly ahead of a literal <code>case</code>, contrasted with the unguarded form that would make Python refuse to run at all.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A sequence pattern like case (x, y): checks the subject's length and structure and, only if that check passes, binds x and y to its two items in the same statement — replacing a separate len() check followed by a separate unpacking assignment with one combined step.">
+    <p class="stem">What does a sequence pattern like <code>case (x, y):</code> do in one step?</p>
+    <button class="opt" data-ok>checks the length is two, then binds both items to names</button>
+    <button class="opt">only checks the length, never binding any names at all here</button>
+    <button class="opt">only binds names, without ever checking the length at all first</button>
+  </div>
+  <div class="q" data-why="Python evaluates the match subject exactly once, then tries each case pattern in the order it is written, running the body of the first one that matches and skipping every case written after it — the same top-to-bottom, first-match-wins order an if/elif chain already uses.">
+    <p class="stem">In what order does a <code>match</code> statement try its <code>case</code> patterns?</p>
+    <button class="opt" data-ok>top to bottom, running only the first pattern that matches</button>
+    <button class="opt">bottom to top, running only the last pattern that matches</button>
+    <button class="opt">all patterns at once, running every single one that matches</button>
+  </div>
+  <div class="q" data-why="A guard clause (the trailing if condition on a case) is checked only after the pattern itself has already structurally matched; if the guard evaluates false, that whole case is rejected and Python moves on to try the next case below it, rather than raising an error or treating the pattern as still matched." >
+    <p class="stem">What happens when a <code>case</code> pattern matches but its trailing <code>if</code> guard is false?</p>
+    <button class="opt" data-ok>that whole case is skipped, and the next one is tried</button>
+    <button class="opt">that whole case still runs normally, entirely ignoring the guard clause</button>
+    <button class="opt">Python immediately raises an error about that one failed guard clause</button>
+  </div>
+  <div class="q" data-why="A bare, unguarded capture pattern is irrefutable, so CPython's compiler can statically prove any case written after it can never run, and it refuses to even start the program: a SyntaxError naming the unreachable pattern, raised at import time rather than left as a silent runtime shadowing bug.">
+    <p class="stem">What happens if an unguarded capture pattern comes before another case?</p>
+    <button class="opt" data-ok>Python raises a SyntaxError before the program even starts running</button>
+    <button class="opt">the earlier case is simply ignored and skipped at runtime</button>
+    <button class="opt">nothing happens; the later case still matches exactly as intended</button>
+  </div>
+  <div class="q" data-why="Status.PENDING | Status.SHIPPED inside a case is an OR-pattern: it matches if the subject equals either alternative, letting one case branch cover two related enum members instead of writing two nearly-identical case lines that both lead to the same body." >
+    <p class="stem">What does <code>case Order(status=Status.PENDING | Status.SHIPPED):</code> match?</p>
+    <button class="opt" data-ok>an Order whose status equals either one of those two members</button>
+    <button class="opt">an Order whose status equals both of those two members together</button>
+    <button class="opt">only a bare Status value alone, never any Order instance ever</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the <a href="https://docs.python.org/3/reference/compound_stmts.html#the-match-statement">Python Language Reference — the match statement</a> covers every pattern kind used above plus mapping patterns and nested patterns beyond what today's lesson needed; see also <a href="https://peps.python.org/pep-0634/">PEP 634</a> for the original design rationale.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day34">glossary</a> under Day 34.<br>
+This closes out the last named-but-untaught core-syntax gap left after Day 33 — <code>match</code>/<code>case</code> is 3.10+ syntax that had no lesson yet, and it composes directly with Day 33's <code>Enum</code> and Day 7's <code>dataclass</code>.<br><br>
+💬 Anything unclear — sequence patterns, guards, or why a capture pattern must go last? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

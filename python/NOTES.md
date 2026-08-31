@@ -3818,4 +3818,116 @@ fail *gracefully* so the learner sees which task failed.
   fixtures/parametrize (Day 11) now that FastAPI/httpx testing exists too.
   Still no `lesson_completed`/quiz/kata outcome record exists for any
   day — no reported weak spot to target.
+- 2026-08-31 — **Day 34 generated** (headless 06:00 run). Topic: `match`/case
+  structural pattern matching (PEP 634, Python 3.10+) — the top live candidate
+  Day 33's own next-day note named, since `PLAN.md`'s entire Phase 2 spine
+  (2a and 2b) is already fully taught and `match`/`case` was never mentioned
+  anywhere in this course. Did not chase Day 33's other suggestion (a fresh
+  `WebSearch`/`WebFetch` for `RESOURCES.md`'s "Gaps" — interview prep, FastAPI
+  project-layout) this run: those are resource-hunting tasks, not
+  single-lesson topics, and `match`/`case` was the cleaner, better-scoped,
+  clearly-in-lane pick, pairing directly with Day 33's `Enum` and Day 7's
+  `dataclass`. Sourced from `docs.python.org/3/reference/compound_stmts.html#the-match-statement`
+  (fetched before writing anything — succeeded, covering the match statement,
+  literal/capture/wildcard/OR/sequence/class patterns and guard clauses) and
+  `peps.python.org/pep-0634` (design rationale, cited as a secondary link).
+  Taught: section 1 the problem live (an `if`/`elif` chain checking `len()`
+  then unpacking separately, saying the same thing twice); section 2
+  `match`/`case` with sequence patterns and the wildcard `case _:`; section 3
+  guard clauses (`if` on a `case`), OR-patterns (`|`), and class patterns
+  matching an `Order` dataclass's `Status` enum attribute — reusing Day 33's
+  `Enum` and Day 7's `dataclass` directly rather than inventing new types;
+  section 4 capture-pattern irrefutability and ordering. Bridged from SQL per
+  the baseline record: a `CASE WHEN ... THEN ...` block, introduced before
+  any Python in the top callout, not from a pandas analogy.
+  **Correction made mid-generation, worth recording:** section 4's first
+  draft claimed an unguarded capture pattern placed before another `case`
+  "silently shadows" the later case with "nothing raises an error to say
+  so." Verifying this live in a scratch dir (`uv run python3` against a
+  two-line repro) showed that claim is wrong for this course's Python
+  3.12.3: CPython's compiler statically detects an irrefutable capture
+  pattern followed by any other pattern and refuses to even start the
+  program, raising `SyntaxError: name capture 'x' makes remaining patterns
+  unreachable` at import time — not a silent runtime bug at all. Also
+  verified (same scratch method) that a *guarded* capture pattern
+  (`case cmd if cmd == "special":`) is not considered irrefutable and is
+  correctly allowed before other cases. Rewrote section 4's prose, its code
+  comment, and quiz Q4 (stem + all three options + `data-why`) to teach the
+  accurate SyntaxError behavior and the guard-clause exception instead of
+  the invented silent-shadowing claim, and rewrote practice Exercise 4 to
+  match (a `broken_handler` reorder demo does not even parse under 3.12 and
+  was replaced with a guarded-capture-before-literal-case exercise) before
+  first verification, so no incorrect version of this lesson was ever
+  shipped. Recorded here because the same-shaped mistake (checking a
+  language-behavior claim against docs prose but not against the actual
+  running interpreter) is worth watching for on any future dunder/exception/
+  syntax-edge-case lesson.
+  No-pandas rule: zero pandas/NumPy/`pd.`/`np.` hits in the practice file
+  (grepped case-insensitively); exactly one hit in the lesson — one contrast
+  sentence/callout (titled "Where pandas goes from here") naming `np.select`/
+  `.apply()` as pandas's row-wise-branching equivalent, without demonstrating
+  any pandas API, placed once after section 4/the interview callout, matching
+  the hard-rule section above.
+  Practice file `practice/34_match_case.py` (4 exercises: a sequence pattern
+  distinguishing 2D/3D/unknown point tuples, a class-pattern-plus-guard
+  `classify_order` over an `Order`/`Status` pair, an OR-pattern `is_active`
+  check, and a guarded-capture-before-literal-case `handler`) needed no
+  on-disk fixtures. Followed this course's standard defensive pattern against
+  the Ellipsis-at-module-level bug family: every unsolved `...`/TODO lives
+  strictly inside function bodies, none at class or module level. Verified
+  in a scratch dir at the repo root (`.scratch_py34_verify/`, created outside
+  `python/` and removed after use, per Day 33's `/tmp`-is-out-of-bounds
+  precedent — confirmed again this run that direct `/tmp` writes are
+  sandbox-blocked): the shipped (unsolved) copy, run via plain `uv run
+  python3` (no `--with` needed), both from the scratch copy and from its
+  real `practice/` path with the documented command, printed four clean ✗
+  lines with no traceback each time; a separately solved copy (every
+  `...`/TODO filled in directly) printed all four ✓ and the "All green"
+  tally. The one bug found during verification was the section-4/Exercise-4
+  SyntaxError issue described above, caught and fixed before the first
+  "shipped" verification pass — no bugs found after that fix.
+  Glossary: added a Day 34 section to `reference/glossary.html` (`structural
+  pattern matching`, `wildcard pattern (_)`, `guard clause`) after confirming
+  via grep that none of the three collided with any Day 1-33 entry —
+  deliberately did **not** re-glossary `case`, `capture pattern`, `class
+  pattern`, `sequence pattern`, or `OR-pattern` as separate rows, explaining
+  each inline via `<code>`/`<em>` and folding the general mechanism into the
+  three new rows, matching this course's no-duplicate-glossary-row
+  convention. The 3 new `<dfn data-en` tags in the lesson body match the 3
+  new glossary rows exactly (confirmed by count).
+  Quiz: 5 questions. Word counts were checked with a small Python script
+  (regex-splitting the quiz block into its five question `<div>`s and
+  counting `.split()` words per `<button class="opt">` line, run via `uv run
+  python3`) and mismatched on the first draft for three of five questions
+  (Q1 11/10/9, Q3 12/9/9, Q5 11/10/11 before Q4's SyntaxError rewrite; Q4
+  itself needed one more round after its content rewrite, landing at
+  10/11/10 then 10/10/10). Each mismatched question went through one to
+  three rewrite-and-recount rounds, re-running the script after every edit,
+  until every option matched (Q1 11/11/11, Q2 10/10/10, Q3 11/11/11, Q4
+  10/10/10, Q5 11/11/11). Re-verified with a second, independently-written
+  script (document-order `<button class="opt">` extraction via regex across
+  the whole file, ignoring the per-question `<div>` wrapper entirely, then
+  grouped in threes) run against the final file — independently confirmed
+  all 15 options (5 questions × 3 options) land on their target counts
+  before shipping. Registered in `assets/nav.js` with `date: "2026-08-31"`.
+  **DB access:** per this run's own instructions, the direct `psql
+  "$LEARNING_DB_URL"` read path was attempted first and failed exactly as
+  documented — the sandbox hard-blocks the literal `$LEARNING_DB_URL`
+  expansion with a "Contains simple_expansion" error — so this run paced
+  entirely from on-disk state (`NOTES.md`'s own generation log plus
+  `learning-records/`, which still holds only the Day 1 baseline) as
+  described above under topic selection, same as every prior day since Day
+  8 except the inconsistent Day 5/9/10 successes.
+  `bin/record-progress python lesson_generated --day 34 --lesson
+  0034-match-case.html --detail '{"by":"headless-06:00"}'` was attempted
+  once after shipping as a single standalone command — see the report for
+  this run for its outcome.
+  **Next-day note:** with `match`/`case` now taught, the remaining
+  never-covered core-language corner is `__slots__` (memory/attribute-typo
+  tradeoffs, a real Day 1/7 follow-on) — the strongest single named
+  candidate for Day 35. `RESOURCES.md`'s "Gaps" (Python interview prep, a
+  FastAPI project-layout reference) remain unresolved and are worth one
+  `WebSearch` attempt before falling back to `__slots__` or a testing-
+  focused pytest/httpx retrieval day. Still no `lesson_completed`/quiz/kata
+  outcome record exists for any day — no reported weak spot to target.
 

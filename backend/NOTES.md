@@ -3408,3 +3408,103 @@
   session should keep treating a completion/quiz-outcome signal, or a
   user-named track to deepen, as higher priority than a 57th topic picked
   blind.
+- 2026-08-31 generation (Lesson 57, headless 06:00 run): idempotency check
+  first - confirmed no `lessons/0057-*.html` file existed and no `n: 57`/
+  `date: "2026-08-31"` entry was in `nav.js` before writing anything (highest
+  prior lesson was 56, dated 2026-08-30). Direct `psql "$LEARNING_DB_URL" ...`
+  read was attempted this round per the briefing's instruction to try it
+  first - blocked immediately with a literal "Contains simple_expansion"
+  sandbox error before the command ever ran, exactly as flagged going in, so
+  fell back to `learning-records/` and repo file state alone, same as every
+  prior round for ~7 weeks running. Read both `learning-records/` entries
+  (0001's baseline, 0002's concurrency-vocabulary gap) - both already fully
+  reflected in prior lessons, nothing new to act on; still no
+  `lesson_completed`/quiz-outcome record exists for any lesson, so there is
+  still no reported weak spot to target beyond what's already been acted on.
+  Lesson 56 left two named candidates open for this round: cache stampede /
+  thundering herd (confirmed genuinely untaught, tying to Lesson 9's
+  cache-aside pattern and Lesson 32's retry-storm material) and the standing
+  synthesis lesson through Lessons 9/33/51. Re-ran the gap-finding grep before
+  committing - confirmed "cache stampede"/"thundering herd"/"dogpile"/
+  "singleflight"/"request coalescing" still had zero hits anywhere in
+  `lessons/*.html` or `glossary.html` except Lesson 56's own teaser sentence
+  and this file's log of it. Chose cache stampede over the synthesis lesson
+  for the same reason recent rounds have given when making the analogous
+  choice: it's a sharper, single, well-defined mechanism rather than a
+  revisit, and it closes a gap this course's own prior round already flagged
+  as the more concrete of the two open threads. Lesson 57 covers: the gap in
+  Lesson 9's cache-aside flow, which quietly assumes cache misses arrive one
+  at a time - what happens when a single hot key expires while thousands of
+  concurrent requests want it, all missing at the same instant and all
+  independently falling through to the origin; naming cache stampede (aka
+  dogpile effect, aka thundering herd) as distinct from Lesson 32's retry
+  storm because it needs no prior failure at all, popularity alone is enough;
+  why it's worse than an ordinary miss (N simultaneous origin hits instead of
+  one, and a callout that a slow-enough origin can cascade into an actual
+  Lesson-32 retry storm on top); three fixes - request coalescing (a lock, or
+  Go's `singleflight.Group.Do`, reusing Lesson 56's advisory lock as the
+  cross-instance option), early refresh, and stale-while-revalidate - each
+  named for what it trades away, plus a three-row `table.cmp` (Lesson 25's
+  component) contrasting the three; a `getProductPage` Go snippet showing the
+  coalesced-recompute shape; and an explicit trap section naming that this
+  only fires on hot/popular keys, which is also why it's easy to miss in
+  staging and often first shows up as a production on-call page. Attempted a
+  live `WebFetch` check against both the primary source
+  (`https://pkg.go.dev/golang.org/x/sync/singleflight`) and a Wikipedia
+  backup on "Cache stampede" before citing either, per the standing
+  reminder from Lesson 53's 404 incident and Lesson 56's domain-allowlist
+  finding - both blocked this round by the sandbox's network-tool approval
+  gate with no user present to approve, unlike Lesson 56's round where two of
+  four attempted domains did load; per this course's two-strikes convention,
+  did not retry past one attempt per URL. Cited the singleflight package doc
+  anyway as the primary source since it directly documents the exact API the
+  lesson's snippet uses, but flagged inside the lesson's own "Go deeper"
+  section that this citation is unverified this round and should be
+  re-checked live next time network access is available - chose honesty
+  about the verification gap over silently dropping the citation or silently
+  omitting the caveat. The Go snippet was compile-checked with `go build` /
+  `go vet` in a scratch module (`.scratch/backend-lesson57/`) - no network
+  access to `go get golang.org/x/sync/singleflight` either (same gate),
+  so used a minimal local stand-in type mirroring `singleflight.Group`'s
+  `Do` method signature exactly, the same minimal-stand-in precedent Lesson
+  56 set for its `pool`/`row` types; both `go build` and `go vet` passed
+  clean on the first attempt, no approval blocker for either invocation this
+  round. Quiz options were drafted, then verified with a `node -e` inline
+  script parsing the quiz HTML and counting `.split(/\s+/).length` per
+  option (this course's established Node-over-shell-loop preference in this
+  sandbox, reconfirmed this round after a `for` loop over shell variables in
+  Bash also hit the sandbox's expansion block) - first draft was uneven on
+  three of four questions (Q1 7/8/6/7, Q3 8/9/8/9), fixed through several
+  rewrite-and-recount passes (the same hand-editing-without-immediate-recount
+  failure mode this log has flagged repeatedly) to reach final tallies of
+  8/8/8/8 across all four questions, cross-checked with the same script
+  after each edit. Ran an occurrence-accurate regex tag-balance check
+  (via the same Node script, since a shell loop over tag names also hit the
+  sandbox's expansion block) for every tag pair used: div 8/8, p 16/16, pre
+  1/1, h2 6/6, dfn 7/7, code 6/6, button 16/16, table 1/1, thead 1/1, tbody
+  1/1, tr 4/4, th 6/6, strong 4/4, em 3/3, and confirmed exactly 4 `data-ok`
+  (one per question) - all balanced on first full check. Added six new
+  glossary terms - cache stampede, dogpile effect, thundering herd, request
+  coalescing, early refresh, stale-while-revalidate - grepped beforehand and
+  confirmed none existed anywhere in `lessons/*.html` or `glossary.html`;
+  deliberately did NOT re-add TTL, already in the glossary since Lesson 9,
+  since this lesson explicitly links back to that existing vocabulary rather
+  than duplicating it. Registered Lesson 57 in `nav.js`. Attempted
+  `bin/record-progress backend lesson_generated --day 57 --lesson
+  0057-cache-stampede-thundering-herd.html --detail '{"by":"headless-06:00"}'`
+  as a direct, literal, standalone command from the repo root exactly as
+  instructed - blocked twice in a row this round with a generic "requires
+  approval" gate and no user present to approve, unlike the write path's
+  documented reliability across nearly every prior round; did not retry a
+  third time per the two-strikes convention. Both DB read and DB write are
+  therefore unconfirmed this round, a departure from the last several
+  rounds' pattern where writes succeeded even when reads didn't - worth
+  flagging explicitly for whoever reviews this log, since it means Lesson 57
+  may need its `lesson_generated` row backfilled manually once DB access is
+  available. This closes the cache-stampede gap Lesson 56 flagged as a
+  confirmed-untaught, ready candidate; the standing synthesis lesson through
+  Lessons 9/33/51 remains the sole, now longest-running open candidate for
+  Lesson 58. Still no `lesson_completed`/quiz/kata outcome record exists for
+  any lesson after 57 rounds - the next session should keep treating a
+  completion/quiz-outcome signal, or a user-named track to deepen, as higher
+  priority than a 58th topic picked blind.

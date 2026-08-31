@@ -118,6 +118,8 @@
       file: "lessons/0055-table-partitioning.html" },
     { n: 56, date: "2026-08-30", title: "Advisory locks: coordinating processes without a new row",
       file: "lessons/0056-postgres-advisory-locks.html" },
+    { n: 57, date: "2026-08-31", title: "Cache stampede: when the cache itself causes the outage",
+      file: "lessons/0057-cache-stampede-thundering-herd.html" },
   ];
 
   const REFS = [

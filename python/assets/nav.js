@@ -72,6 +72,8 @@
       file: "lessons/0032-classmethod-and-staticmethod.html" },
     { n: 33, date: "2026-08-30", title: "enum: naming a closed set of choices",
       file: "lessons/0033-enum.html" },
+    { n: 34, date: "2026-08-31", title: "match/case: structural pattern matching",
+      file: "lessons/0034-match-case.html" },
   ];
 
   const REFS = [

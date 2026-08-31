@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 54 · .equals() and .compare(): checking whether two DataFrames match</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 54 · ~20 min · 31 Aug 2026</p>
+<h1>.equals() and .compare(): checking whether two DataFrames match</h1>
+<p class="byline">Lesson 53's own teaser named three zero-hit candidates from a fresh curriculum/glossary scan: <code>add_prefix()</code>/<code>add_suffix()</code>, <code>.equals()</code>/<code>.compare()</code>, and <code>json_normalize()</code>. This round picks <code>.equals()</code>/<code>.compare()</code>: both answer "did this table change?" — a natural pairing for real interview/take-home work (checking a transform did what it should, diffing a before/after cleaning pass), and neither has ever appeared anywhere in the curriculum.</p>
+
+<h2>Recap, in one line</h2>
+<p>Every wrangling step since Lesson 3 has produced a new DataFrame — cleaned, merged, reshaped. A genuinely common next question is whether two of those tables actually match: did a refactor of the cleaning pipeline change any values? Did two data sources agree? <dfn data-en="a DataFrame/Series method returning a single True/False for whether two objects have the exact same shape, values, dtypes, and NaN positions -- unlike ==, it treats matching NaN positions as equal and never raises on a shape/column mismatch, just returns False" data-vn="giữ nguyên 'equals()' — trả về 1 True/False duy nhất, so TOÀN BỘ: hình dạng, giá trị, dtype, vị trí NaN đều phải khớp; khác == là coi NaN khớp NaN là True, và không lỗi khi lệch hình dạng/cột mà chỉ trả về False">.equals()</dfn> answers that with one boolean; <dfn data-en="a DataFrame method returning a new DataFrame showing only the cells that differ between two identically-labeled DataFrames, with self/other columns per differing column -- raises ValueError if the two DataFrames don't share the exact same index and columns" data-vn="giữ nguyên 'compare()' — trả về 1 DataFrame mới chỉ liệt kê Ô nào khác nhau giữa 2 DataFrame CÙNG nhãn hàng/cột, mỗi cột khác nhau có 2 cột con self/other; lỗi ValueError luôn nếu 2 bảng không cùng index/cột">.compare()</dfn> shows exactly which cells differ, when they don't.</p>
+
+<h2>1 · equals(): one True/False, but stricter than it looks</h2>
+<p>The real <code>orders_raw.csv</code> fixture, cleaned the same way as every lesson since Lesson 6:</p>
+<pre><code>clean
+<span class="cm">--   order_id customer  amount order_date
+-- 0         1       An   120.0 2026-01-05
+-- 1         6       An    42.0 2026-01-10
+-- 2         2     Binh    35.5 2026-01-06
+-- 3         5     Binh   180.0 2026-01-09</span></code></pre>
+<p>A genuine copy compares equal, as expected:</p>
+<pre><code>clean.equals(clean.copy())
+<span class="cm">-- True</span></code></pre>
+<p>The surprise: <code>equals()</code> is <strong>dtype-strict</strong>. Narrowing <code>amount</code> to <code>float32</code> keeps every value numerically identical, but <code>equals()</code> says no:</p>
+<pre><code>narrowed = clean.copy()
+narrowed[<span class="str">"amount"</span>] = narrowed[<span class="str">"amount"</span>].astype(<span class="str">"float32"</span>)
+clean.equals(narrowed)
+<span class="cm">-- False</span></code></pre>
+<p>Row order and column order both count as real differences too — a re-sorted or re-ordered copy of the exact same data compares unequal. <code>equals()</code> is asking "is this the same table, cell for cell, dtype for dtype, in this exact layout?" — not "does this data represent the same facts?"</p>
+
+<h2>2 · compare(): which cells, not just whether</h2>
+<p><code>equals()</code> collapses everything to one boolean; <code>compare()</code> shows the actual differing cells. Change Binh's second order to 999.0:</p>
+<pre><code>changed = clean.copy()
+changed.loc[<span class="kw">3</span>, <span class="str">"amount"</span>] = <span class="kw">999.0</span>
+clean.compare(changed)
+<span class="cm">--   amount
+--     self  other
+-- 3  180.0  999.0</span></code></pre>
+<p>Only the one differing row and column survive, with <code>self</code>/<code>other</code> sub-columns holding each side's value — every unchanged cell is dropped entirely. On two genuinely identical DataFrames, <code>compare()</code> returns an <strong>empty DataFrame</strong>, not a boolean — checking "did anything change" from <code>compare()</code>'s result means checking <code>.empty</code>, not treating the return value itself as a yes/no answer.</p>
+
+<h2>3 · Two sharp edges</h2>
+<p><strong>Edge 1 — shape/labels must already match.</strong> <code>compare()</code> requires both DataFrames to share the exact same index and columns going in; it has no merge-like key-matching step. Comparing against a DataFrame with a row dropped raises outright:</p>
+<pre><code>clean.compare(clean.drop(index=<span class="kw">0</span>))
+<span class="cm">-- ValueError: Can only compare identically-labeled (both index and columns) DataFrame objects</span></code></pre>
+<p><code>equals()</code> takes the opposite approach on the same situation — a shape or column mismatch never raises, it just quietly returns <code>False</code>, the same "no crash, meaningful-looking result" shape as this course's other flagged gotchas, just landing on a boolean instead of a wrong value. <strong>Edge 2 — why not just <code>==</code>?</strong> Plain <code>==</code> compares cell-by-cell and returns a same-shaped True/False DataFrame — but by IEEE float rules, <code>NaN != NaN</code>, so two otherwise-identical tables that both carry a real, matching <code>NaN</code> report as unequal:</p>
+<pre><code>a = pd.DataFrame({<span class="str">"x"</span>: [<span class="kw">1.0</span>, float(<span class="str">"nan"</span>)]})
+b = pd.DataFrame({<span class="str">"x"</span>: [<span class="kw">1.0</span>, float(<span class="str">"nan"</span>)]})
+(a == b).all().all()
+<span class="cm">-- False  -- wrong! these two frames ARE the same data</span>
+a.equals(b)
+<span class="cm">-- True   -- equals() treats matching NaN positions as equal</span></code></pre>
+<p>Any real-world table with missing values (which is most of them, per Lesson 3) makes plain <code>==</code>-then-<code>.all().all()</code> an unreliable equality check. <code>equals()</code> exists specifically to handle this correctly.</p>
+
+<h2>4 · Shaping compare()'s output: keep_shape and keep_equal</h2>
+<p>The default trims everything unchanged away, which can hide context. <code>keep_shape=True</code> keeps every row, filling unchanged cells with <code>NaN</code> instead of dropping them:</p>
+<pre><code>clean.compare(changed, keep_shape=<span class="kw">True</span>)
+<span class="cm">-- (all 4 rows survive; unchanged cells and columns are NaN)</span></code></pre>
+<p>Adding <code>keep_equal=True</code> alongside it fills the unchanged cells back in with their real, matching value on both sides instead of <code>NaN</code> — a full side-by-side view of every cell, changed or not:</p>
+<pre><code>clean.compare(changed, keep_shape=<span class="kw">True</span>, keep_equal=<span class="kw">True</span>)
+<span class="cm">-- (all 4 rows, every column; unchanged cells show the same real value under self and other)</span></code></pre>
+
+<h2>5 · The SQL bridge</h2>
+<p>Neither method has a clean single-statement SQL equivalent, because SQL has no notion of "two whole result sets, compared cell-by-cell in a fixed row order." The closest real-world parallel is <code>EXCEPT</code> (or <code>MINUS</code>): <code>SELECT * FROM new EXCEPT SELECT * FROM old</code> returns whole rows present in one side but not the other — set-based, order-independent, and row-level rather than cell-level. <code>compare()</code> is finer-grained than that: it can show that only <em>one column</em> of an otherwise-matching row changed, something <code>EXCEPT</code> can't express without hand-listing which columns to compare.</p>
+
+<div class="interview">
+<p><strong>Q: "How would you verify that a refactored cleaning pipeline still produces the same output as the old one?"</strong> A strong answer, out loud: <em>"Run both versions on the same input and call old_df.equals(new_df) first — one boolean, and it's stricter than it looks: it also checks dtype and row/column order, not just values, and it correctly treats matching NaN positions as equal, unlike a plain == comparison which would report a false mismatch on any shared missing value. If equals() comes back False, I'd switch to old_df.compare(new_df) to see exactly which cells changed — but only after confirming both frames share the same index and columns, since compare() raises ValueError on a shape mismatch instead of handling it. That combination — equals() as the yes/no gate, compare() for the diff when it's no — is faster than eyeballing two printed DataFrames."</em> The signal: naming the dtype-strictness, the NaN-handling advantage over ==, and compare()'s shape-matching requirement.</p>
+</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/54_equals_and_compare.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/54_equals_and_compare.py</code></pre>
+<p>Uses the same real <code>orders_raw.csv</code> clean 4-row slice as Lessons 6-53. Exercise 1 checks a genuine copy compares equal (Section 1); Exercise 2 checks <code>equals()</code>'s dtype-strictness with a <code>float32</code> copy (Section 1); Exercise 3 checks <code>compare()</code> isolates exactly one changed cell (Section 2); Exercise 4 checks the <code>==</code>-vs-<code>equals()</code> NaN gotcha both ways (Section 3).</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="equals() checks dtype as part of what counts as 'the same' -- two columns with identical numeric values but different dtypes (float64 vs float32) compare unequal, unlike a values-only comparison.">
+    <p class="stem">Why can <code>df.equals(other)</code> return <code>False</code> even when every value looks numerically identical?</p>
+    <button class="opt" data-ok>a column's dtype differs, and equals() checks dtype too</button>
+    <button class="opt">equals() always ignores the last row of any table</button>
+    <button class="opt">equals() only ever works on a Series, not DataFrames</button>
+  </div>
+  <div class="q" data-why="NaN != NaN under IEEE float rules, so plain == marks a shared missing value as a mismatch even though both sides genuinely agree there. equals() is specifically built to treat matching NaN positions as equal instead.">
+    <p class="stem">Why does <code>(a == b).all().all()</code> wrongly report two identical-with-NaN DataFrames as unequal?</p>
+    <button class="opt" data-ok>NaN never equals NaN, even when both sides match</button>
+    <button class="opt">the == operator cannot compare more than one column</button>
+    <button class="opt">all() silently skips every row containing a NaN value</button>
+  </div>
+  <div class="q" data-why="compare() has no key-matching step of its own -- it assumes the two inputs already share the same index and columns, and raises ValueError immediately if that assumption is false, rather than attempting any alignment.">
+    <p class="stem">What happens when you call <code>df.compare(other)</code> and the two DataFrames don't share the same index and columns?</p>
+    <button class="opt" data-ok>it raises ValueError right away, before any comparison is attempted</button>
+    <button class="opt">it silently aligns both frames on their shared columns first</button>
+    <button class="opt">it returns an empty DataFrame with no error at all</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official pandas <a href="https://pandas.pydata.org/docs/user_guide/index.html">User Guide</a> — the <code>DataFrame.equals()</code> and <code>DataFrame.compare()</code> API reference pages document the exact dtype/shape rules and every <code>keep_shape</code>/<code>keep_equal</code> combination directly (~10 min).</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>.equals()</code> and <code>.compare()</code> were both added today, right after Lesson 53's <code>json.dumps() vs pandas Timestamp</code> entry.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-54 comes back reported as shakiest, otherwise a fresh curriculum/glossary scan for the next genuinely-uncovered pattern — <code>add_prefix()</code>/<code>add_suffix()</code> and <code>json_normalize()</code> remain open candidates from Lesson 53's scan.<br><br>
+💬 Anything unclear — the equals()/compare() difference, the NaN gotcha, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

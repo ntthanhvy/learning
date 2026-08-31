@@ -457,3 +457,22 @@
   `quiz-bank.js` — the 7 real kata entries `k1`-`k7` plus the commented
   example — `day:` tags still run 1-7 only, `nav.js` `LESSONS` still
   registers only the 7 Jul 8-14 lessons).
+- 2026-08-31 (headless 06:00 run): skipped again per the same rule — the
+  course window closed 2026-07-20, now forty-two days past it. Day 13
+  (`0014-concurrency-capstone.html`) re-confirmed present on disk and
+  registered in `assets/nav.js` — moot either way. This session's sandbox
+  again hard-blocked any command referencing `LEARNING_DB_URL` directly
+  ("Contains simple_expansion"). This round, the `bin/record-progress`
+  write path — which had reliably worked in prior rounds when invoked
+  directly with a literal command — also hit the generic "requires
+  approval" gate with no user present, both for the orchestrator and for
+  each delegated agent (backend, data, python all reported the same
+  failure independently). Moot for this course since it's a pure skip
+  regardless of DB state. Backend lesson 57 (cache stampede / thundering
+  herd), data lesson 54 (`.equals()`/`.compare()`), and python Day 34
+  (`match`/`case` structural pattern matching) were generated this round
+  via delegated agents, each confirmed to have written only within its own
+  course directory — see their own NOTES.md entries for detail; rust's
+  post-week daily quiz+kata infra was re-verified unchanged (7 real kata
+  entries `k1`-`k7`, `day:` tags still run 1-7 only, `nav.js` `LESSONS`
+  still registers only the 7 Jul 8-14 lessons).

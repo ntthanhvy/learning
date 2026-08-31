@@ -3582,3 +3582,123 @@
   generation — `add_prefix()`/`add_suffix()`, `.equals()`/`.compare()`, and
   `json_normalize()` all came back zero-hit in today's scan and remain open
   candidates, named explicitly in the lesson's own closing teaser too.
+- 2026-08-31 generation (Lesson 54, headless 06:00 run): idempotency was
+  self-confirmed first — globbed `data/lessons/` for `0054-*.html` (none
+  found), grepped `assets/nav.js` for `n: 54`/`2026-08-31` (neither found,
+  highest registered lesson was still 53, dated 2026-08-30), and grepped
+  `NOTES.md` for a `2026-08-31` entry (none found) — so this round proceeded.
+  Direct DB reads (`psql "$LEARNING_DB_URL" ...`) were attempted exactly as
+  instructed and failed immediately with a sandbox `Contains
+  simple_expansion` error on the literal `$LEARNING_DB_URL` — the same class
+  of hard block documented in this file's history for ~7 weeks straight, no
+  workaround attempted per this round's own instructions — so still no
+  `course_progress` rows readable and no `lesson_completed`/quiz/kata
+  outcome record beyond the Lesson 1 baseline (re-confirmed by reading every
+  file in `data/learning-records/`: still just the single baseline file, no
+  drill-outcome signal). Fell back to on-disk state (NOTES.md +
+  learning-records) as the source of truth for what to teach next, as
+  instructed. Lesson 53's own teaser named three concrete zero-hit
+  candidates from its own fresh scan: `add_prefix()`/`add_suffix()`,
+  `.equals()`/`.compare()`, and `json_normalize()`. Picked `.equals()`/
+  `.compare()`: both answer "did this table change," a natural pairing
+  (checking a refactored pipeline still produces the same output, diffing a
+  before/after cleaning pass) and a genuine MISSION.md-relevant interview
+  skill that nothing through Lesson 53 had touched. Re-confirmed zero-hit
+  before writing a word: grepped `lessons/*.html` and `reference/
+  glossary.html` for `equals()`/`compare()`, no real hits (collision check
+  repeated again just before the glossary edit, still none). `uv run --with
+  pandas` worked directly this round (pandas 3.0.5, confirmed via
+  `pd.__version__`): every value was hand-verified in `.scratch/
+  data-lesson54/explore.py` (deleted after) against the real `orders_raw.csv`
+  clean 4-row slice before writing a word of the lesson — a genuine copy
+  compares equal (`clean.equals(clean.copy())` is `True`); narrowing
+  `amount` to `float32` with identical values compares unequal
+  (`equals()` is dtype-strict, confirmed directly rather than assumed);
+  `equals()` also cares about row order and column order, both confirmed to
+  flip a same-data comparison to `False`; `compare()` on two identical
+  frames returns an empty DataFrame, not a boolean; `compare()` on
+  differently-shaped frames raises `ValueError: Can only compare
+  identically-labeled (both index and columns) DataFrame objects`, the
+  opposite failure behavior from `equals()`'s quiet `False` on the same
+  situation; `keep_shape=True` keeps every row (NaN for unchanged cells),
+  and adding `keep_equal=True` fills those back in with the real matching
+  value, both confirmed by actually running each combination. A genuine new
+  "why not just ==" finding, confirmed directly: `(a == b).all().all()` on
+  two DataFrames that both carry a real, matching NaN in the same position
+  returns `False` (IEEE `NaN != NaN` under plain `==`), while
+  `a.equals(b)` correctly returns `True` on the identical pair — a concrete,
+  common real-world trap since most tables have missing values (per Lesson
+  3), and the clearest reason `equals()` exists at all rather than a manual
+  `==` check. Designing the practice file surfaced one genuine new instance
+  of this course's running Ellipsis-is-truthy/doesn't-raise family, caught
+  by actually probing rather than assuming: `df.equals(...)` (Ellipsis
+  passed as the argument) does NOT raise — Ellipsis is not a DataFrame, so
+  pandas' own comparison logic just returns plain `False` for the unfilled
+  case, confirmed directly with a standalone probe before trusting it;
+  handled by checking `same is True` (strict identity) rather than plain
+  truthiness, since `False is True` is correctly `False` either way the bug
+  could otherwise slip an accidental-looking pass through. A second, equally
+  real finding surfaced only by actually running the solved practice file,
+  not by reasoning about it: `(a == b).all().all()` returns a NumPy
+  `numpy.bool_`, not a plain Python `bool`, so an `is False` identity check
+  against it silently fails even on a fully correct solution (confirmed
+  directly: `numpy.bool_(False) is False` is `False`, while `== False` is
+  `True`) — fixed by switching that one check to `double_equal_result ==
+  False and double_equal_result is not None`, re-verified safe against the
+  unfilled case too (`None == False` is also `False`, no accidental pass).
+  Every other placeholder (`narrowed = ...`, `changed = ...`,
+  `elementwise_equal = ...`) was probed standalone first and confirmed to
+  raise on its own via `Ellipsis.astype`/`Ellipsis.copy`/`(...).all`
+  attribute access — no accidental-freebie risk in the other three
+  exercises. The shipped (unsolved) `practice/54_equals_and_compare.py` was
+  executed in a mirrored `.scratch/data-lesson54/practice/` layout (fixture
+  CSV copied alongside, since this session's working directory was again
+  restricted to the repo root — bare `mkdir`/`cp` outside it were blocked
+  outright, same restriction noted in several prior rounds) and printed
+  exactly the expected 4 ✗ (Exercises 1-3's placeholder-gated checks, plus
+  Exercise 4's first check) and 1 ✓ (Exercise 4's second, pre-written,
+  not-placeholder-gated check — `a.equals(b)` on the matching-NaN pair holds
+  true even unsolved, same expected shape as prior lessons' precedent for
+  pre-written checks) with no crash; a solved copy (`.scratch/
+  data-lesson54/practice/54_solved.py`, not shipped) then printed all 5 ✓
+  after the `numpy.bool_` fix above (the first solved run genuinely failed
+  Exercise 4's first check before that fix was found and applied — a real
+  catch, not a hypothetical one); the shipped file was also re-run a second
+  time directly from its real `practice/` location (`cd data && uv run
+  --with pandas python3 practice/54_equals_and_compare.py`) and confirmed
+  identical output (4 ✗, 1 ✓, no crash). The entire `.scratch/
+  data-lesson54/` directory was fully removed (`rm -rf`) after verification,
+  no approval needed this round. Added `.equals()` and `.compare()` to the
+  glossary (checked for a collision first — grepped for `equals()`/
+  `compare()`, no existing rows) placed directly after Lesson 53's
+  `json.dumps() vs pandas Timestamp` entry, and registered Lesson 54 in
+  `nav.js`. Quiz options were drafted and checked with a Python
+  regex/word-count script isolating each `<div class="q">` block by its own
+  start offset (this course's established approach since Lesson 42), run
+  via `uv run python3` — the first draft came out mismatched on two of three
+  questions (Q1 9/9/8, Q3 8/10/10; Q2 was already level at 9/9/9); two
+  rewrite + recount cycles landed all three level (Q1 9/9/9, Q2 9/9/9, Q3
+  10/10/10), then independently re-verified with a second, fully separate
+  method (manual word-by-word counting done by hand directly from a
+  `Grep`-extracted raw option-text listing, not a second run of the same
+  script), per this file's standing warning that a single verification pass
+  isn't reliable — both methods agreed all three questions genuinely landed
+  level. An occurrence-count HTML tag-balance check (a small Python regex
+  script counting every `<tag>`/`</tag>` occurrence) confirmed every tag
+  pair in the shipped lesson HTML is balanced (`p` 24/24, `h2` 9/9, `pre`
+  9/9, `code` 70/70, `div` 5/5, `dfn` 2/2, `button` 9/9, `strong` 7/7, `em`
+  2/2, `a` 2/2, `span` 25/25). `bin/record-progress data lesson_generated
+  --day 54 --lesson 0054-equals-and-compare.html --detail
+  '{"by":"headless-06:00"}'` was attempted once from the repo root exactly
+  as instructed, as a single standalone direct command with no wrapper —
+  it hit a "requires approval" gate with no user present in this headless
+  run, so it did NOT succeed this round (unlike Lessons 50-53, which each
+  reported this exact command succeeding on the first try); the write-path
+  workaround is apparently not universally reliable either, contrary to
+  this round's own background assumption that it "reportedly works even
+  when the read path doesn't." This agent does not run `git commit` —
+  leaving working-tree changes uncommitted remains this course's
+  established convention. Set the teaser going forward to the two remaining
+  zero-hit candidates from Lesson 53's scan — `add_prefix()`/`add_suffix()`
+  and `json_normalize()` — as open candidates if no drill-outcome signal
+  surfaces by next generation.

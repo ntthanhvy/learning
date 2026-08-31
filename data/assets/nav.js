@@ -112,6 +112,8 @@
       file: "lessons/0052-xs-and-droplevel.html" },
     { n: 53, date: "2026-08-30", title: "to_dict() and to_records(): handing a table back to plain Python",
       file: "lessons/0053-to-dict-and-to-records.html" },
+    { n: 54, date: "2026-08-31", title: ".equals() and .compare(): checking whether two DataFrames match",
+      file: "lessons/0054-equals-and-compare.html" },
   ];
 
   const REFS = [

@@ -804,3 +804,21 @@ by the user there; they apply here identically.
   forty-two days past it; backend lesson 57, data lesson 54, and python
   Day 34 were generated this round via delegated agents — see their own
   NOTES.md entries for detail.)
+- 2026-09-01 (headless 06:00 run): same as every prior post-week day —
+  verified `daily.html`, `assets/srs.js`, and `assets/quiz-bank.js` are all
+  present and untouched (8 textual `id: "k` matches in `quiz-bank.js` — the
+  7 real kata entries `k1`-`k7` plus the commented-out example line; `day:`
+  tags in `nav.js` still register exactly 7 lessons, days 1-7 only,
+  unchanged). Still the correct "daily quiz+kata" for this post-week phase
+  per PLAN.md, so nothing new was generated, nav.js was untouched, and no
+  bank content was added. Direct `psql "$LEARNING_DB_URL" ...` was blocked
+  again this session ("Contains simple_expansion" — same content-level
+  block on that exact variable name as every prior round), so no
+  `course_progress` rows could be read for a scope-change signal (e.g. a
+  request to keep growing the bank past Day 7). No new learning record
+  beyond the Day-1 baseline. (Go skipped again per its own window close,
+  now forty-three days past it; backend lesson 58 — a synthesis lesson
+  tying Lessons 9/33/51 together — data lesson 55 — `add_prefix()`/
+  `add_suffix()` — and python Day 35 — `__slots__` — were generated this
+  round via delegated agents, each confirmed to have written only within
+  its own course directory; see their own NOTES.md entries for detail.)

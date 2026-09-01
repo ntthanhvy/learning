@@ -323,6 +323,13 @@
   <tr><td>guard clause</td><td>giữ nguyên "guard clause" — điều kiện if thêm vào case, chỉ check sau khi pattern đã khớp shape, để loại bớt trường hợp khớp shape nhưng không đạt điều kiện khác</td><td>An extra condition attached to a <code>case</code> pattern with <code>if</code>, checked only after the pattern itself already matched structurally — a match with a false guard is rejected and Python moves on to try the next <code>case</code>. A guarded capture pattern (<code>case cmd if ...:</code>) is not irrefutable, so — unlike an unguarded one — it's allowed before other <code>case</code> lines.</td></tr>
 </table>
 
+<h2 id="day35">Day 35 — __slots__: trading dynamic attributes for memory and safety</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>__slots__</td><td>giữ nguyên "__slots__" — khai tên các attribute cố định cho class, bỏ dict riêng mỗi instance để tiết kiệm bộ nhớ, đổi lại không gán được attribute ngoài danh sách</td><td>A class attribute, written as a tuple of attribute-name strings, that tells Python exactly which attributes instances of this class are allowed to have — removing the per-instance <code>dict</code> every plain object carries by default, in exchange for losing the ability to add a new attribute name that wasn't declared. Every class in an inheritance chain needs its own <code>__slots__</code>, or a subclass without one silently regains a <code>__dict__</code>.</td></tr>
+  <tr><td>instance __dict__</td><td>giữ nguyên "instance __dict__" — dict riêng mỗi instance có sẵn, chứa tên và giá trị attribute, x.attr = value ghi vào đây</td><td>The dict every plain instance carries by default, mapping each instance attribute's name to its value — where <code>x.attr = value</code> actually stores the label, and the reason a typo'd attribute name silently succeeds instead of raising an error. <code>__slots__</code> removes it.</td></tr>
+</table>
+
 <p class="next">💬 A term here still unclear? Ask your teacher — hỏi bằng tiếng Việt cũng được.</p>
 
 <script src="../assets/nav.js"></script>

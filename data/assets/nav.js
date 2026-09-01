@@ -114,6 +114,8 @@
       file: "lessons/0053-to-dict-and-to-records.html" },
     { n: 54, date: "2026-08-31", title: ".equals() and .compare(): checking whether two DataFrames match",
       file: "lessons/0054-equals-and-compare.html" },
+    { n: 55, date: "2026-09-01", title: "add_prefix() and add_suffix(): renaming a whole axis at once",
+      file: "lessons/0055-add-prefix-and-add-suffix.html" },
   ];
 
   const REFS = [

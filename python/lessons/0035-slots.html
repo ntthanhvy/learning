@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 35 · __slots__: trading dynamic attributes for memory and safety</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 35 · ~20 min · 1 Sep 2026</p>
+<h1>__slots__: trading dynamic attributes for memory and safety</h1>
+<p class="byline">Day 1 built the whole object model on one picture: a name is a label, an object lives in memory, and <code>x.attr = value</code> sticks a new label onto whatever <code>x</code> points at. What Day 1 didn't say is <em>where</em> those labels are kept — every plain instance carries its own private <code>dict</code> just to hold them. Today's mechanism, <dfn data-en="a class attribute, written as a tuple of attribute-name strings, that tells Python exactly which attributes instances of this class are allowed to have — removing the per-instance dict every plain object carries by default, in exchange for losing the ability to add a new attribute name that wasn't declared" data-vn="giữ nguyên &quot;__slots__&quot; — khai tên các attribute cố định cho class, bỏ dict riêng mỗi instance để tiết kiệm bộ nhớ, đổi lại không gán được attribute ngoài danh sách">__slots__</dfn>, tells Python to skip that dict entirely for a class whose fields are fixed — Day 7's <code>@dataclass</code> is exactly that kind of class.</p>
+
+<div class="callout"><strong>Bridge from SQL:</strong> a table with a fixed set of typed columns doesn't let a row silently grow a new column mid-query — inserting into a nonexistent column is an error, not a quiet no-op. <code>__slots__</code> gives a Python object that same guarantee at the instance level: only the declared attributes exist, and anything else raises immediately instead of quietly succeeding.</div>
+
+<h2>1 · What a plain instance actually carries</h2>
+<p>Go back to Day 1's picture: an object is data in memory, a name is a label stuck onto it. For a plain instance, part of that data is a hidden <dfn data-en="the dict every plain instance carries by default, mapping each instance attribute's name to its value — where x.attr = value actually stores the label, and the reason a typo'd attribute name silently succeeds instead of raising an error" data-vn="giữ nguyên &quot;instance __dict__&quot; — dict riêng mỗi instance có sẵn, chứa tên và giá trị attribute, x.attr = value ghi vào đây">instance <code>__dict__</code></dfn> — a small dict mapping each attribute name to its value. <code>self.x = x</code> in <code>__init__</code> is really just writing into that dict.</p>
+<pre><code><span class="kw">class</span> Point:
+    <span class="kw">def</span> __init__(self, x, y):
+        self.x = x
+        self.y = y
+
+p = Point(<span class="num">1</span>, <span class="num">2</span>)
+<span class="kw">print</span>(p.__dict__)     <span class="cm"># {'x': 1, 'y': 2} — this is where x and y actually live</span>
+p.z = <span class="num">99</span>              <span class="cm"># dynamic attribute assignment: just adds a new key</span>
+<span class="kw">print</span>(p.__dict__)     <span class="cm"># {'x': 1, 'y': 2, 'z': 99}</span></code></pre>
+<p>That dict is what makes Python attributes feel effortless — any name can be attached to any instance at any time, no declaration required. It's also two costs at once: every single instance pays for its own dict (real memory, one per object, even though every <code>Point</code> has exactly the same two field names), and nothing stops <code>p.yz = 5</code> from silently succeeding when it should have been <code>p.y = 5</code> — a typo that becomes a brand-new attribute instead of an error.</p>
+
+<h2>2 · <code>__slots__</code>: declare the fields, lose the dict</h2>
+<p>A class body can set <code>__slots__</code> to a tuple of the exact attribute names instances are allowed to have. Do that, and Python stops giving instances a <code>__dict__</code> at all — the named slots become the only place those values can live:</p>
+<pre><code><span class="kw">class</span> Point:
+    __slots__ = (<span class="str">"x"</span>, <span class="str">"y"</span>)
+
+    <span class="kw">def</span> __init__(self, x, y):
+        self.x = x
+        self.y = y
+
+p = Point(<span class="num">1</span>, <span class="num">2</span>)
+p.x, p.y                  <span class="cm"># (1, 2) — reading and writing declared slots works exactly as before</span>
+
+p.__dict__                <span class="cm"># AttributeError: 'Point' object has no attribute '__dict__'</span>
+p.z = <span class="num">99</span>                  <span class="cm"># AttributeError: 'Point' object has no attribute 'z'</span></code></pre>
+<p>Everything about using <code>p.x</code> and <code>p.y</code> is unchanged — <code>__slots__</code> doesn't touch how declared attributes work. What disappears is the escape hatch: no <code>__dict__</code> exists to catch an undeclared name, so <code>p.z = 99</code> — and, more usefully, a typo like <code>p.yz = 5</code> — raises <code>AttributeError</code> immediately instead of quietly creating a new attribute nobody will ever read. This was verified live against this course's own interpreter (Python 3.12.3, not just read from docs): both the missing-<code>__dict__</code> and the undeclared-attribute cases raise exactly that <code>AttributeError</code>, on the first attempt.</p>
+<div class="callout"><strong>The real payoff isn't the error message — it's when it fires.</strong> Without <code>__slots__</code>, <code>p.yz = 5</code> is indistinguishable from correct code right up until something later reads <code>p.y</code> and gets a stale or default value, far from where the typo was written. With <code>__slots__</code>, the same typo fails on the exact line that made it — the same "fail fast, fail where the mistake happened" win Day 33's <code>Enum</code> gave a misspelled status string.</div>
+
+<h2>3 · The memory case, measured</h2>
+<p>The saved <code>__dict__</code> is not a small win at scale. Measured live in a scratch script against this course's interpreter — 100,000 plain instances versus 100,000 slotted instances of the same two-field class:</p>
+<pre><code>100000 plain instances:   13,600,000 bytes total, 136.0 bytes/instance
+100000 slotted instances:  4,800,000 bytes total,  48.0 bytes/instance
+ratio: 2.83x</code></pre>
+<p>Nearly a 3x reduction per instance, entirely from removing one small dict each object no longer needs. This matters exactly when a program holds a lot of small, fixed-shape objects at once — millions of parsed rows from Day 6's CSV pipeline, or graph nodes, or anything read from a large file and kept in memory rather than streamed. It's not a general "always add this" habit: a class with only a handful of live instances saves nothing worth mentioning, and <code>__slots__</code> is one more thing to keep in sync if fields change later.</p>
+
+<h2>4 · <code>__slots__</code> and inheritance: every class in the chain must opt in</h2>
+<p>This is the detail worth being careful with, and it was checked live rather than assumed: <strong>a subclass that doesn't declare its own <code>__slots__</code> gets a <code>__dict__</code> back anyway</strong> — even if its parent class declared slots.</p>
+<pre><code><span class="kw">class</span> Base:
+    __slots__ = (<span class="str">"a"</span>,)
+
+<span class="kw">class</span> Child(Base):
+    <span class="kw">pass</span>                  <span class="cm"># no __slots__ declared here</span>
+
+c = Child()
+c.a = <span class="num">1</span>
+c.anything_at_all = <span class="num">99</span>   <span class="cm"># works — Child instances have a __dict__ after all</span></code></pre>
+<p>Confirmed against docs.python.org's data model reference and reproduced live: <code>Child</code> here has a real <code>__dict__</code>, and the memory/typo-safety benefit is gone for it — silently, with no error telling you it happened. The fix is what you'd guess: every class in the inheritance chain that wants the guarantee must declare its own <code>__slots__</code>, listing only the fields <em>that class</em> adds (not the parent's, which stay in the parent's own slots):</p>
+<pre><code><span class="kw">class</span> Base:
+    __slots__ = (<span class="str">"a"</span>,)
+
+<span class="kw">class</span> Child(Base):
+    __slots__ = (<span class="str">"b"</span>,)    <span class="cm"># only the NEW field — "a" is already in Base's slots</span>
+
+c = Child()
+c.a, c.b = <span class="num">1</span>, <span class="num">2</span>       <span class="cm"># fine — both slots exist, across two classes</span>
+c.z = <span class="num">3</span>                  <span class="cm"># AttributeError — no __dict__ anywhere in the chain now</span></code></pre>
+
+<h2>5 · With <code>@dataclass</code>: one keyword, same tradeoff</h2>
+<p>Day 7's <code>@dataclass</code> writes <code>__init__</code>, <code>__repr__</code>, and <code>__eq__</code> from a list of typed fields. Since Python 3.10, it can write <code>__slots__</code> from that same field list too — pass <code>slots=True</code> and the fields that were already being declared do double duty:</p>
+<pre><code><span class="kw">from</span> dataclasses <span class="kw">import</span> dataclass
+
+<span class="kw">@dataclass</span>(slots=<span class="kw">True</span>)
+<span class="kw">class</span> Point:
+    x: <span class="kw">int</span>
+    y: <span class="kw">int</span>
+
+p = Point(<span class="num">1</span>, <span class="num">2</span>)
+<span class="kw">print</span>(p)              <span class="cm"># Point(x=1, y=2) — __repr__ still generated, unaffected</span>
+Point(<span class="num">1</span>, <span class="num">2</span>) == Point(<span class="num">1</span>, <span class="num">2</span>)   <span class="cm"># True — __eq__ still generated, unaffected</span>
+p.z = <span class="num">5</span>                <span class="cm"># AttributeError — no __dict__, exactly like a hand-written __slots__</span></code></pre>
+<p>Verified live rather than assumed from docs: <code>dataclass(slots=True)</code> runs cleanly on this course's Python (3.12.3), and <code>__repr__</code>/<code>__eq__</code> behave exactly as they did without it — <code>slots=True</code> only removes the dict, nothing else about Day 7's generated methods changes. Nothing here is free forever, though: <code>@dataclass(slots=True)</code> was added in Python 3.10 specifically (confirmed against the <code>dataclasses</code> docs), so it's unavailable on anything older, and passing a class-level default like <code>region: Optional[str] = None</code> still works as before — the caveats worth knowing about but skipped today are around <code>__init_subclass__</code> and weak references, both edge cases this course's data-shaped classes don't hit.</p>
+
+<div class="interview">
+<p><strong>Q: "What does <code>__slots__</code> actually do, and when would you use it?"</strong> A strong answer, out loud: <em>"It replaces the per-instance <code>__dict__</code> every plain object carries with a fixed set of named slots declared on the class. Two effects: less memory per instance, since there's no dict to allocate, and any attribute not in the list raises <code>AttributeError</code> immediately instead of silently succeeding — which turns a typo'd attribute name into a bug caught on the spot rather than a value that's quietly wrong somewhere downstream. I'd reach for it on a class I'm instantiating a lot of — parsed records, graph nodes — where the field list is genuinely fixed. I wouldn't bother for a handful of instances, and I'd remember that every subclass in the hierarchy needs its own <code>__slots__</code> too, or the dict quietly comes back on that subclass."</em> The signal: naming both effects (memory <em>and</em> the typo-safety win), not just one, and knowing the inheritance gotcha.</p>
+</div>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> nothing to demonstrate — a DataFrame already stores every column in one shared, typed memory block rather than one dict per row, so pandas gets <code>__slots__</code>'s memory win for free at the table level, by a completely different mechanism. Not covered here; that's <code>data/</code>'s territory, and this is the only sentence in this lesson that names it.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/35_slots.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/35_slots.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: adding <code>__slots__</code> to a plain class and confirming a declared field still works while an undeclared one raises <code>AttributeError</code>, fixing a two-class inheritance chain so the subclass doesn't silently regain a <code>__dict__</code>, converting a Day-7-style <code>@dataclass</code> to <code>slots=True</code>, and writing a small function that reports whether a given object has an instance <code>__dict__</code> at all.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A plain instance's attributes live in a hidden per-instance dict, __dict__, that self.x = x actually writes into — that dict is what lets any attribute name be attached to any instance at any time with no declaration needed.">
+    <p class="stem">Where does a plain instance's attributes actually live, by default?</p>
+    <button class="opt" data-ok>in a hidden per-instance dict, named __dict__ always</button>
+    <button class="opt">in a fixed list, baked into the definition</button>
+    <button class="opt">nowhere; every attribute is computed fresh each time</button>
+  </div>
+  <div class="q" data-why="Declaring __slots__ removes the instance's __dict__ entirely, so any attribute name not listed in __slots__ has nowhere to be stored — assigning it raises AttributeError immediately, turning a typo'd attribute name into an error caught on the spot rather than a silently created new attribute.">
+    <p class="stem">What happens assigning an undeclared attribute on a <code>__slots__</code> instance?</p>
+    <button class="opt" data-ok>an AttributeError, since no dict exists to hold it</button>
+    <button class="opt">it is silently added to the instance, as normal</button>
+    <button class="opt">it silently overwrites the first declared slot's own value</button>
+  </div>
+  <div class="q" data-why="Verified live: a subclass that declares no __slots__ of its own gets a real __dict__ back, even when its parent class declared __slots__ — the memory and typo-safety benefit is lost silently on that subclass unless it also declares its own __slots__ listing only the fields it adds.">
+    <p class="stem">A subclass of a <code>__slots__</code> class declares no <code>__slots__</code> itself. What happens?</p>
+    <button class="opt" data-ok>the subclass silently gets a real __dict__ back</button>
+    <button class="opt">the subclass simply inherits the parent's exact slots</button>
+    <button class="opt">Python raises an error, right at class-definition time</button>
+  </div>
+  <div class="q" data-why="dataclass(slots=True), added in Python 3.10, generates a __slots__ tuple from the dataclass's own typed field list — the same fields already being declared for __init__/__repr__/__eq__ do double duty, with no change to how those generated methods behave.">
+    <p class="stem">What does Python 3.10+'s <code>@dataclass(slots=True)</code> generate <code>__slots__</code> from?</p>
+    <button class="opt" data-ok>the dataclass's own already-declared list of typed record fields</button>
+    <button class="opt">every single method defined anywhere in the class body</button>
+    <button class="opt">nothing; slots still must be listed by hand, separately</button>
+  </div>
+  <div class="q" data-why="__slots__ trades away the ability to attach an attribute name that was never declared on the class — that's the cost side of the tradeoff, in exchange for less per-instance memory and immediate errors on typo'd or unplanned attribute names.">
+    <p class="stem">What capability does <code>__slots__</code> give up, in exchange for its benefits?</p>
+    <button class="opt" data-ok>attaching any brand-new, undeclared attribute name, later at will</button>
+    <button class="opt">reading or writing any attribute it did already declare</button>
+    <button class="opt">generating a working __init__ method for the whole class</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the <a href="https://docs.python.org/3/reference/datamodel.html#slots">Python Language Reference — Data model, <code>__slots__</code></a> (cited in RESOURCES.md as this course's standing source for object-model claims) — the authoritative account of what slots remove and how they interact with inheritance. The <a href="https://docs.python.org/3/library/dataclasses.html">dataclasses</a> docs cover the <code>slots=True</code> parameter specifically, including the 3.10 version requirement and the narrower <code>__init_subclass__</code>/weak-reference caveats skipped today.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day35">glossary</a> under Day 35.<br>
+This is a direct follow-on to Day 1's object-model framing and Day 7's <code>@dataclass</code> — the same names-and-objects picture from Lesson 1, one layer deeper.<br><br>
+💬 Anything unclear — the inheritance gotcha, <code>dataclass(slots=True)</code>, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

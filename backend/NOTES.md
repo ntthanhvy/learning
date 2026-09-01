@@ -3508,3 +3508,107 @@
   any lesson after 57 rounds - the next session should keep treating a
   completion/quiz-outcome signal, or a user-named track to deepen, as higher
   priority than a 58th topic picked blind.
+- 2026-09-01 generation (Lesson 58, headless 06:00 run): idempotency check
+  first - confirmed no `lessons/0058-*.html` file existed and no `n: 58`/
+  `date: "2026-09-01"` entry was in `nav.js` before writing anything (highest
+  prior lesson was 57, dated 2026-08-31). Attempted a direct DB read via
+  `bin/query-progress backend` as a single standalone command per the
+  briefing's instruction to try it once - blocked immediately, requiring
+  approval with no user present, exactly as flagged going in and consistent
+  with every prior round for ~7 weeks; did not retry. Fell back to
+  `learning-records/` and repo file state alone - both records
+  (0001's baseline, 0002's concurrency-vocabulary gap) confirmed unchanged
+  and already fully reflected in prior lessons; still no
+  `lesson_completed`/quiz-outcome record exists for any lesson, so there is
+  still no reported weak spot to target beyond what's already been acted on.
+  Lesson 57 left exactly one open candidate, repeated across several rounds'
+  closing notes as the longest-standing: "the standing synthesis lesson
+  through Lessons 9/33/51." Read all three lessons in full plus Lesson 20
+  (the prior synthesis-lesson format/tone reference) before writing. Chose
+  this topic because it was the sole remaining named candidate, not a
+  fresh pick from a gap-search - closing out a thread this course's own
+  notes have carried since around Lesson 33's round. Lesson 58 covers: one
+  concrete feature (an internal order-editing screen, reusing Lesson 51's
+  order #482) walked through a single lost-update scenario at three layers
+  in dependency order - Layer 1, the database row itself, where Lesson 33's
+  `version` column check in the `UPDATE`'s `WHERE` clause is the innermost
+  guard that protects the row regardless of caller; Layer 2, the HTTP
+  request/response, where Lesson 51's `ETag`/`If-Match` catches the same
+  race one step earlier, rejecting a stale write with 412 before it ever
+  reaches the database and wastes a round trip; Layer 3, the cache in front
+  of the read path, where Lesson 9's TTL/invalidation determines whether the
+  ETag handed to a client was ever current in the first place - explicitly
+  named as Layer 2's guard being fed a wrong input rather than a fourth new
+  bug. A `table.cmp` (Lesson 25's component, reused again) lines up all
+  three layers' marker/check/question/guards-against side by side, plus a
+  closing paragraph reading the table by dependency chain (Layer 3 feeds
+  Layer 2 feeds Layer 1) rather than as three independent alternatives.
+  Deliberately used SQL and raw HTTP wire-format snippets (matching Lessons
+  33's and 51's own style for those specific mechanisms) rather than a Go
+  snippet, since the lesson's content is inherently SQL/HTTP at those two
+  layers - so no Go compile-check applies this round. This is itself worth
+  flagging: `go version` was attempted twice this round in different forms
+  (plain invocation, `/usr/bin/env go version`) before any Go snippet was
+  even planned, and both were blocked requiring approval with no user
+  present - a departure from every prior round back through Lesson 27, all
+  of which reported successful `go build`/`go vet` runs in a scratch module.
+  Whether this reflects a genuine sandbox regression or was coincidental
+  given this lesson didn't end up needing Go code is unclear; the next
+  round should re-attempt `go version` early, before committing to a
+  Go-snippet-free lesson design, to check whether this was a one-off or a
+  new standing block. The `.scratch/backend-lesson58/` directory was created
+  or `go mod init` before the block was discovered, then removed again once
+  it was clear it would stay empty. Quiz options were drafted, then verified
+  with a `node -e` inline script parsing the quiz HTML and counting
+  `.split(/\s+/).length` per option (this course's established
+  Node-over-shell-loop preference, reconfirmed again this round since
+  `python3` also required approval and was abandoned after one attempt) -
+  first draft was uneven on Q1 and Q4 (an accidental extra word in one
+  option each: "exact byte size" vs the other three options' two-word
+  endings, and an uneven length on two of Q4's four options), fixed through
+  rewrite-and-recount passes to reach final tallies of Q1 9/9/9/9, Q2
+  8/8/8/8, Q3 9/9/9/9, Q4 11/11/11/11, then re-verified a second time
+  directly against the shipped HTML file (not the scratch draft) plus an
+  independent `Grep -o` line-by-line manual word count that matched the
+  script's tallies exactly for all sixteen options. Ran an occurrence-
+  accurate tag-balance check (via the same Node-script pattern) for every
+  tag pair used: div 9/9, p 18/18, pre 2/2, code 37/37, h1 1/1, h2 7/7,
+  table 1/1, thead 1/1, tbody 1/1, tr 5/5, th 8/8, td 12/12, strong 6/6,
+  em 3/3, dfn 4/4, button 16/16, a 3/3, span 2/2, and confirmed exactly 4
+  `data-ok` (one per question) - caught and fixed one real authoring bug on
+  first full re-read before the final check: a stray `";` sequence left
+  inside Q4's `data-why` attribute from an editing slip, the same
+  stray-malformed-attribute bug class Lesson 56's round flagged (that time
+  a stray `</code>>` and doubled quote) - fixed via `Edit`, confirmed clean
+  on re-check. Added zero new glossary terms - all four `dfn` terms used
+  (`lost update`, `TTL`, `invalidate cache`, `stale read`) were grepped
+  beforehand and confirmed already present in `glossary.html` verbatim from
+  Lessons 6, 9, and 33's rounds; deliberately did not re-add `ETag`,
+  `If-Match`, `optimistic locking`, or `version` either, since reusing
+  Lessons 9/33/51's existing vocabulary rather than inventing new terms is
+  the actual point of a synthesis lesson - this round shipped with zero
+  glossary edits, which is itself notable since almost every prior round
+  added at least one term. Registered Lesson 58 in `nav.js`. Cited no new
+  primary source deliberately: Lesson 33's DDIA ch. 7 citation and Lesson
+  51's MDN conditional-requests citation are both reused as-is rather than
+  re-fetched, since RESOURCES.md already grounds both and this lesson
+  synthesizes rather than introduces new material; a live re-check of
+  either URL was not attempted this round (no network/approval access in
+  this headless session, consistent with every recent round), and the
+  lesson's own "Go deeper" section names this gap honestly rather than
+  silently presenting either citation as freshly verified. `bin/record-
+  progress backend lesson_generated --day 58 --lesson
+  0058-same-version-three-layers.html --detail '{"by":"headless-06:00"}'`
+  ran directly from the repo root as a single standalone command and
+  succeeded on the first attempt - no approval blocker this round, unlike
+  Lesson 57's round where it was blocked twice. This closes the last
+  standing synthesis-lesson candidate carried since roughly Lesson 33's
+  round - there is no confirmed next-lesson gap named as of this entry.
+  Honestly: a fresh gap-finding grep would need to run next round to find
+  anything new, since every named candidate from recent rounds' closing
+  notes has now been used (advisory locks/Lesson 56, cache stampede/Lesson
+  57, this synthesis lesson/Lesson 58). Still no `lesson_completed`/quiz/
+  kata outcome record exists for any lesson after 58 rounds - the next
+  session should treat a completion/quiz-outcome signal, or a user-named
+  track to deepen, as materially higher priority than searching for a 59th
+  topic with no reported learning signal to aim at.

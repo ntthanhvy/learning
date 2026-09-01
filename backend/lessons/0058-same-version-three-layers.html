@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 58 · Synthesis: the same "is this current?" check, three layers</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 58 · ~20 min</p>
+<h1>Synthesis: the same "is this current?" check, three layers</h1>
+<p class="byline">Lesson 57's closing teaser named the sole remaining candidate: "the standing synthesis lesson through Lessons 9/33/51," open for several rounds now. Those three lessons taught three mechanisms that look unrelated — an HTTP header, a database column, a cache TTL — but they answer the exact same question at three different points in a request's path: is the copy of this data I'm holding still current? Today ties them together on one feature, so the pattern shows instead of just getting asserted.</p>
+
+<h2>1 · One feature, one bug, three places it can hide</h2>
+<p>The feature: an internal order-editing screen. A support agent opens order <code>#482</code>, sees <code>status: "packed"</code>, and a moment later marks it <code>"shipped"</code>. Nothing exotic — the same order Lesson 51 already used. The bug that can happen at each layer is always the same shape: someone writes based on a copy of the row that is no longer the newest one, and a newer change gets silently overwritten. Lesson 33 named this precisely — the <dfn data-en="a race condition where two concurrent transactions each read the same stale value, both decide to update based on it, and one write silently overwrites the other's effect instead of combining correctly" data-vn="giữ nguyên &quot;lost update&quot; — 2 transaction cùng đọc rồi cùng ghi đè, một bên bị mất tác dụng">lost update</dfn> — and it turns out that same failure can occur three times over, once per layer, unless each layer separately guards against it.</p>
+
+<h2>2 · Layer 1 — the database row itself (Lesson 33)</h2>
+<p>Two support agents both open order <code>#482</code> within the same second: agent A sees <code>status = "packed", version = 4</code>; agent B sees the identical row. Agent A submits <code>"shipped"</code> first — Postgres accepts it, the row becomes <code>version = 5</code>. A moment later agent B submits <code>"cancelled"</code>, still holding <code>version = 4</code> in memory. Without a check, that plain <code>UPDATE</code> would win too, silently erasing agent A's "shipped" write. Lesson 33's version-column pattern is exactly the guard: agent B's <code>UPDATE</code> requires <code>version = 4</code> in its <code>WHERE</code> clause, which no longer matches — zero rows update, and the application surfaces the conflict instead of losing it.</p>
+<pre><code>UPDATE orders SET status = $1, version = version + 1
+WHERE id = $2 AND version = $3;
+<span class="cm">-- agent B's $3 is 4, but the row is already at version 5 --
+-- 0 rows updated, B's stale write is rejected, not silently applied.</span></code></pre>
+<p>This is the innermost layer: it protects the row no matter which client, which API, or which internal script tries to write it. Every write to this table, from any source, passes through this same guard.</p>
+
+<h2>3 · Layer 2 — the HTTP request/response (Lesson 51)</h2>
+<p>One layer out, the same race can happen before either write even reaches the database. Agent B's browser fetched order <code>#482</code> a minute ago and cached the response body client-side; agent B edits the status in that stale view and submits a <code>PATCH</code> — no version conflict occurs at the database yet, because this is the very first write attempt this browser tab has made. Lesson 51's fix guards this specific handoff: the earlier <code>GET</code> response carried an <code>ETag</code>, and the <code>PATCH</code> must send it back as <code>If-Match</code>. The server compares that ETag to the order's current one before the request ever reaches the <code>UPDATE</code> statement above.</p>
+<pre><code>PATCH /orders/482 HTTP/1.1
+If-Match: "etag-v4"
+Content-Type: application/json
+
+{"status":"cancelled"}
+
+<span class="cm">-- server's current ETag for #482 is now "etag-v5" (agent A's write) --
+-- comparison fails before any SQL runs:</span>
+HTTP/1.1 412 Precondition Failed</code></pre>
+<p>Notice what this layer catches that Layer 1 alone would miss until the very last moment: a wasted round trip. Without <code>If-Match</code>, agent B's whole request — network hop, handler, serialization — would travel all the way to the database only to be rejected there. <code>If-Match</code> rejects it at the door, before any of that work runs, using the same underlying fact (the row moved past version 4) expressed as an HTTP precondition instead of a SQL <code>WHERE</code> clause.</p>
+
+<h2>4 · Layer 3 — the read path, before either write happens (Lesson 9)</h2>
+<p>Now go back one more step, to something neither Layer 1 nor Layer 2 touches at all: what agent B saw when they opened the order in the first place. If the order-detail endpoint sits behind an application cache (Lesson 9's cache-aside pattern) with, say, a five-minute <dfn data-en="time-to-live: a cache entry's expiry duration; once it passes, the entry is dropped or ignored automatically, forcing the next read to refetch a fresh copy" data-vn="TTL (giữ nguyên) — thời gian sống, hết hạn tự bị bỏ">TTL</dfn>, agent A's "shipped" write can commit to Postgres and still leave the cached response — ETag and all — pointing at the old <code>version = 4</code> state for up to five more minutes, unless the write path explicitly <dfn data-en="deliberately removing or refreshing a cached entry the moment its underlying data changes, instead of only waiting for its TTL — needed for data that must never be stale right after a write" data-vn="invalidate cache (giữ nguyên) — chủ động xóa cache khi data gốc đổi">invalidates</dfn> the cache entry for <code>order:482</code>. Until that invalidation happens, agent B's browser is handed a perfectly valid-looking <code>ETag</code> for data that Postgres itself has already moved past — a <dfn data-en="a read that returns a cached value that no longer matches the current source of truth — the risk every cache introduces, traded for speed" data-vn="stale read (giữ nguyên) — đọc trúng cache cũ, gốc đã đổi">stale read</dfn> handed out with full confidence.</p>
+<div class="callout"><strong>The point of this section:</strong> Layer 3's bug isn't really a new bug — it's Layer 2's guard being fed a wrong input. If the cache in front of the <code>GET</code> handler isn't invalidated the instant Postgres's <code>version</code> changes, the ETag it serves is stale <em>before</em> the client ever makes a request — Layer 2 will still correctly compare the ETag it's given, it's just been given the wrong one to compare against.</div>
+
+<h2>5 · The same idea, seen three times</h2>
+<p>Line the three mechanisms up side by side and the pattern that was implicit in Lessons 9, 33, and 51 becomes explicit: every one of them is a cheap, comparable stand-in for "the full current state of this data," checked before trusting or acting on a copy.</p>
+<div class="cmp-wrap">
+<table class="cmp">
+<thead><tr><th></th><th>Layer 1 — DB row (L33)</th><th>Layer 2 — HTTP (L51)</th><th>Layer 3 — cache (L9)</th></tr></thead>
+<tbody>
+<tr><th>The marker</th><td><code>version</code> integer column</td><td><code>ETag</code> response header</td><td>a TTL, or an invalidation signal</td></tr>
+<tr><th>Checked by</th><td>the <code>UPDATE</code>'s <code>WHERE</code> clause</td><td>the handler, via <code>If-Match</code></td><td>the read path, before it answers</td></tr>
+<tr><th>Answers</th><td>"did anyone else write since I read?"</td><td>"is the copy I'm about to act on current?"</td><td>"is the copy I'm about to hand out current?"</td></tr>
+<tr><th>Guards against</th><td>a stale write reaching storage</td><td>a stale write reaching the DB at all</td><td>a stale value being served in the first place</td></tr>
+</tbody>
+</table>
+</div>
+<p>Reading that table top to bottom instead of left to right shows the actual dependency chain: Layer 3 decides what Layer 2 gets to compare against, and Layer 2 decides whether Layer 1 ever gets asked to do anything. A gap at any single layer doesn't break the others — Layer 1's version check still protects Postgres even if the cache is stale — but it does mean the bug surfaces later and closer to the database than it needed to, instead of being caught at the cheapest possible point.</p>
+
+<div class="callout"><strong>Frontend-habit trap:</strong> this three-layer shape already exists on the frontend, just under different names — a React Query cache entry going stale (Layer 3's problem), a fetch that should have sent <code>If-Match</code> but didn't (Layer 2's problem), and a form's "last write wins" bug if the backend never checks a version at all (Layer 1's problem). Recognizing "which layer is this staleness bug actually in" is the same diagnostic skill on both sides of the wire — only the vocabulary changes.</div>
+
+<div class="interview">
+<p><strong>Q: "Users are reporting that a colleague's changes sometimes get overwritten on this edit screen. Where do you even start looking?"</strong> A strong answer, out loud: <em>"I'd check for a staleness guard at each of the three places this can go wrong. First, does the UPDATE check a version or timestamp column in its WHERE clause — if not, that's the DB-level lost update Lesson 33 covers, and it's the most serious gap since nothing else would catch it either. Second, does the write endpoint require an If-Match header and reject a stale one with 412 — that catches it one layer earlier, before the DB is even touched. Third, is there a cache in front of the read that this same resource goes through, and does the write path invalidate it — because if the read itself hands out a stale ETag, the If-Match check downstream is being fed the wrong answer from the start. All three checks are the same question — is this copy still current — asked at three different points, and a bug report like this usually means one of the three was skipped, not that the whole approach is wrong."</em> The signal: naming that it's one recurring question at three layers, not three unrelated debugging leads.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="TTL/invalidation, the version column, and ETag/If-Match are three different mechanisms for the same underlying idea: a cheap, comparable stand-in for a resource's full current state, checked before trusting or acting on a held copy of it.">
+    <p class="stem">What single idea do TTL/invalidation (Lesson 9), the version column (Lesson 33), and ETag/If-Match (Lesson 51) all share?</p>
+    <button class="opt" data-ok>a cheap comparable marker for the data's current state</button>
+    <button class="opt">a cheap comparable marker for the data's byte size</button>
+    <button class="opt">a cheap comparable marker for the data's original author</button>
+    <button class="opt">a cheap comparable marker for the data's storage location</button>
+  </div>
+  <div class="q" data-why="The version column is checked inside the UPDATE statement's WHERE clause itself, which is the only layer that guards every write to that row regardless of which client or API path it came through.">
+    <p class="stem">In the layered order example, which layer catches a write racing against another write inside the database itself?</p>
+    <button class="opt" data-ok>the version column, checked inside the UPDATE clause</button>
+    <button class="opt">the browser cache, checked inside the fetch request</button>
+    <button class="opt">the ETag header, checked inside the HTTP response</button>
+    <button class="opt">the TTL timer, checked inside the Redis client</button>
+  </div>
+  <div class="q" data-why="If the cache sitting in front of the read path isn't invalidated the instant the underlying row's version changes, it keeps handing out an ETag computed from the old state -- the ETag check itself still runs correctly, it's just being compared against a value that was already wrong before the request arrived.">
+    <p class="stem">Why can an ETag stay fresh while the version column underneath it has already moved on?</p>
+    <button class="opt" data-ok>nothing recomputed the ETag after that particular database write</button>
+    <button class="opt">nothing recomputed the version after that particular database write</button>
+    <button class="opt">nothing recomputed the TTL after that particular database write</button>
+    <button class="opt">nothing recomputed the cache after that particular database write</button>
+  </div>
+  <div class="q" data-why="Each layer can only guard the requests that actually pass through it -- a cache invalidation gap never reaches the HTTP layer's If-Match check, and a missing If-Match check never reaches the database's version-column guard, so a gap at any one layer isn't caught by the others further down the chain.">
+    <p class="stem">Why can't a single layer alone fully replace the other two layers?</p>
+    <button class="opt" data-ok>each layer only ever sees requests that reach that specific layer</button>
+    <button class="opt">each layer only ever sees requests that bypass that specific layer</button>
+    <button class="opt">each layer only ever sees requests rejected right at that layer</button>
+    <button class="opt">each layer only ever sees requests duplicated right at that layer</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> Lesson 33 already cites <a href="https://dataintensive.net">Designing Data-Intensive Applications</a> (Kleppmann, ch. 7) for optimistic concurrency control, and Lesson 51 cites <a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Conditional_requests">MDN's HTTP conditional requests guide</a> for ETag/If-Match — this lesson doesn't introduce a new source, since it's a synthesis of material those two lessons already grounded; both remain the arbiters for their respective layers. <strong>Verification gap, noted honestly:</strong> per this course's established practice (Lesson 57's round flagged the same gap), a live check against either URL was not attempted this round — network/approval access for outbound fetches was not available in this headless session, so both citations are carried over unverified rather than re-confirmed. This lesson's snippets are SQL and raw HTTP, not Go, so no Go compile-check applies to them either way — see this round's NOTES.md entry for the full detail, including why the usual Go scratch-module verification step didn't come up this round.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> open. This closes the last standing named candidate carried since Lesson 33's round. No confirmed next gap is named yet, and there is still no <code>lesson_completed</code>/quiz/kata outcome recorded for any lesson after 58 rounds — the honest next step is a completion signal or a user-named track to go deeper on, not a topic picked blind.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

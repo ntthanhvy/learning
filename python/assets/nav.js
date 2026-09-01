@@ -74,6 +74,8 @@
       file: "lessons/0033-enum.html" },
     { n: 34, date: "2026-08-31", title: "match/case: structural pattern matching",
       file: "lessons/0034-match-case.html" },
+    { n: 35, date: "2026-09-01", title: "__slots__: trading dynamic attributes for memory and safety",
+      file: "lessons/0035-slots.html" },
   ];
 
   const REFS = [

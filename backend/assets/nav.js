@@ -120,6 +120,8 @@
       file: "lessons/0056-postgres-advisory-locks.html" },
     { n: 57, date: "2026-08-31", title: "Cache stampede: when the cache itself causes the outage",
       file: "lessons/0057-cache-stampede-thundering-herd.html" },
+    { n: 58, date: "2026-09-01", title: "Synthesis: the same \"is this current?\" check, three layers",
+      file: "lessons/0058-same-version-three-layers.html" },
   ];
 
   const REFS = [

@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 55 · add_prefix() and add_suffix(): renaming a whole axis at once</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 55 · ~20 min · 1 Sep 2026</p>
+<h1>add_prefix() and add_suffix(): renaming a whole axis at once</h1>
+<p class="byline">Lesson 54's own teaser named two remaining zero-hit candidates from its fresh curriculum/glossary scan: <code>add_prefix()</code>/<code>add_suffix()</code> and <code>json_normalize()</code>. This round picks <code>add_prefix()</code>/<code>add_suffix()</code>: a self-contained, single-concept pair of column-renaming utilities that come up directly after a <code>groupby().agg()</code> or <code>pivot_table()</code> call (Lesson 4 and Lesson 6) produces awkward multi-function or generic column names — a genuinely common real-world next step this course hadn't covered yet.</p>
+
+<h2>Recap, in one line</h2>
+<p>Lesson 4's <code>groupby().agg(["sum", "mean", "count"])</code> and Lesson 6's <code>pivot_table()</code> both produce columns named after the aggregate function alone — <code>sum</code>, <code>mean</code>, <code>count</code> — with no hint of which source column they came from once several aggregated tables get merged together. <dfn data-en="a DataFrame/Series method returning a copy with a given string prepended to every label on one axis (columns by default, or the row index via axis=0/'index') -- pure string concatenation on the label, not a lookup or a rename map" data-vn="giữ nguyên 'add_prefix()' — trả về bản sao với 1 chuỗi được GẮN VÀO ĐẦU mọi nhãn trên 1 trục (mặc định là cột, hoặc index hàng nếu axis=0/'index'); chỉ là nối chuỗi vào nhãn, không phải tra cứu hay rename map">add_prefix()</dfn> and its mirror, <dfn data-en="a DataFrame/Series method returning a copy with a given string appended to every label on one axis (columns by default, or the row index via axis=0/'index') -- pure string concatenation, same mechanics as add_prefix() but at the end of the label instead of the start" data-vn="giữ nguyên 'add_suffix()' — trả về bản sao với 1 chuỗi được GẮN VÀO CUỐI mọi nhãn trên 1 trục; cơ chế giống add_prefix() nhưng gắn ở cuối nhãn thay vì đầu">add_suffix()</dfn>, fix that in one call — no per-column rename map required.</p>
+
+<h2>1 · The basic shape</h2>
+<p>Called with no other arguments, both stamp every column label with the given string — pure string concatenation, nothing fancier:</p>
+<pre><code>clean.columns.tolist()
+<span class="cm">-- ['order_id', 'customer', 'amount', 'order_date']</span>
+clean.add_prefix(<span class="str">"raw_"</span>).columns.tolist()
+<span class="cm">-- ['raw_order_id', 'raw_customer', 'raw_amount', 'raw_order_date']</span>
+clean.add_suffix(<span class="str">"_v1"</span>).columns.tolist()
+<span class="cm">-- ['order_id_v1', 'customer_v1', 'amount_v1', 'order_date_v1']</span></code></pre>
+<p>Confirmed directly: like almost every pandas method, both return a new object and leave the original untouched — no <code>inplace=</code> surprise. The one-liner alternative, <code>df.rename(columns=lambda c: "raw_" + c)</code>, does the identical job but needs a lambda; <code>add_prefix()</code>/<code>add_suffix()</code> exist purely so the everyday case doesn't need one.</p>
+
+<h2>2 · The real payoff: after groupby().agg() with multiple functions</h2>
+<p>Running several aggregate functions on one column at once (Lesson 4) produces columns named only after the function, with no trace of which source column they summarize:</p>
+<pre><code>clean.groupby(<span class="str">"customer"</span>)[<span class="str">"amount"</span>].agg([<span class="str">"sum"</span>, <span class="str">"mean"</span>, <span class="str">"count"</span>])
+<span class="cm">--             sum    mean  count
+-- customer
+-- An        162.0   81.00      2
+-- Binh      215.5  107.75      2</span></code></pre>
+<p>Fine in isolation — but if this table later gets merged with a second aggregation of a different column (say, a headcount by customer), both would independently have a plain <code>count</code> column and collide. <code>add_prefix()</code> disambiguates them cleanly, confirmed directly against the real fixture:</p>
+<pre><code>clean.groupby(<span class="str">"customer"</span>)[<span class="str">"amount"</span>].agg([<span class="str">"sum"</span>, <span class="str">"mean"</span>, <span class="str">"count"</span>]).add_prefix(<span class="str">"amount_"</span>)
+<span class="cm">--           amount_sum  amount_mean  amount_count
+-- customer
+-- An             162.0        81.00             2
+-- Binh           215.5       107.75             2</span></code></pre>
+<p>Now every column name carries both the source column and the function that produced it — self-describing, and safe to merge with a same-shaped table built from a different source column.</p>
+
+<h2>3 · The sharp edge: MultiIndex columns get prefixed on every level</h2>
+<p>Aggregating <em>multiple</em> source columns with multiple functions each (or a raw <code>pivot_table()</code> with more than one <code>aggfunc</code>) produces genuine <code>MultiIndex</code> columns (Lesson 52), not the flat one above:</p>
+<pre><code>agg = clean.groupby(<span class="str">"customer"</span>).agg({<span class="str">"amount"</span>: [<span class="str">"sum"</span>, <span class="str">"mean"</span>], <span class="str">"order_id"</span>: <span class="str">"count"</span>})
+agg.columns
+<span class="cm">-- MultiIndex([('amount',   'sum'),
+--             ('amount',  'mean'),
+--             ('order_id', 'count')])</span></code></pre>
+<p>Confirmed directly: calling <code>add_prefix()</code> on this does NOT prefix only the outer level, and does NOT raise for being "not a plain Index" — it stamps the prefix onto <strong>every level of every tuple</strong>:</p>
+<pre><code>agg.add_prefix(<span class="str">"x_"</span>).columns.tolist()
+<span class="cm">-- [('x_amount', 'x_sum'), ('x_amount', 'x_mean'), ('x_order_id', 'x_count')]</span></code></pre>
+<p>That is almost never what's wanted — the usual goal is one flat, readable name like <code>amount_sum</code>, not a MultiIndex where both the outer and inner label now carry the same stray prefix. The working pattern is to flatten the MultiIndex to plain strings first (joining each tuple's parts), and only then call <code>add_prefix()</code>/<code>add_suffix()</code> on the now-flat result:</p>
+<pre><code>agg.columns = [<span class="str">"_"</span>.join(col).strip(<span class="str">"_"</span>) <span class="kw">for</span> col <span class="kw">in</span> agg.columns]
+agg.columns.tolist()
+<span class="cm">-- ['amount_sum', 'amount_mean', 'order_id_count']</span>
+agg.add_prefix(<span class="str">"agg_"</span>).columns.tolist()
+<span class="cm">-- ['agg_amount_sum', 'agg_amount_mean', 'agg_order_id_count']</span></code></pre>
+<p>The <code>[... for col in agg.columns]</code> line is a Python <dfn data-en="a compact one-line way to build a new list by applying an expression to every item of an existing iterable, equivalent to a for-loop that appends each result -- doesn't touch pandas' own vectorization, this is plain Python building a list of column-name strings" data-vn="giữ nguyên 'list comprehension' — cách viết gọn trong 1 dòng để tạo list mới bằng cách áp dụng 1 biểu thức lên từng phần tử của iterable có sẵn, tương đương vòng for rồi append; không liên quan gì tới vectorization của pandas, đây chỉ là Python thường tạo list các chuỗi tên cột">list comprehension</dfn> — it runs once over the small list of column tuples to build plain strings, not a per-row loop over the DataFrame's data, so it doesn't violate this course's tables-not-loops rule (Lesson 1).</p>
+
+<h2>4 · axis=: the same trick on the row index</h2>
+<p>Both methods default to the columns axis, but accept <code>axis=0</code> (or <code>axis="index"</code>) to prefix/suffix the row index instead — confirmed directly, useful right before a <code>pd.concat()</code> of two tables whose row labels would otherwise collide:</p>
+<pre><code>clean.head(<span class="kw">3</span>).add_prefix(<span class="str">"row_"</span>, axis=<span class="kw">0</span>)
+<span class="cm">--        order_id customer  amount order_date
+-- row_0         1       An   120.0 2026-01-05
+-- row_1         6       An    42.0 2026-01-10
+-- row_2         2     Binh    35.5 2026-01-06</span></code></pre>
+
+<h2>5 · The SQL bridge</h2>
+<p>SQL's closest equivalent is column aliasing in the <code>SELECT</code> list — <code>SELECT SUM(amount) AS amount_sum, AVG(amount) AS amount_mean FROM ... GROUP BY customer</code> — except SQL requires naming each alias individually, one <code>AS</code> per column, by hand. <code>add_prefix()</code>/<code>add_suffix()</code> apply the same renaming idea to every column at once with a single call, the same "operate on the whole axis, not one column at a time" instinct behind <code>select_dtypes()</code> and <code>rename(columns=...)</code>.</p>
+
+<div class="interview">
+<p><strong>Q: "You've aggregated the same table two different ways and need to merge the results — what's the cleanest way to avoid column-name collisions?"</strong> A strong answer, out loud: <em>"After each groupby().agg() call, I'd call add_prefix() with a name tied to what that aggregation represents — say amount_ for the spend summary and orders_ for the count summary — before merging on the shared key. That way every column in the merged result is self-describing, and I don't have to hand-write a rename map. The one thing I'd watch for is a MultiIndex column result from aggregating multiple source columns at once — add_prefix() stamps the prefix onto every level of the tuple, not just the outer one, so I'd flatten the MultiIndex to plain strings first, then prefix."</em> The signal: naming the collision problem itself, and the MultiIndex-every-level gotcha rather than assuming it "just works."</p>
+</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/55_add_prefix_and_add_suffix.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/55_add_prefix_and_add_suffix.py</code></pre>
+<p>Uses the same real <code>orders_raw.csv</code> clean 4-row slice as Lessons 6-54. Exercise 1 checks basic <code>add_prefix()</code> on the raw columns (Section 1); Exercise 2 checks <code>add_prefix()</code> after a <code>groupby().agg()</code> with multiple functions (Section 2); Exercise 3 checks the MultiIndex-every-level gotcha and the flatten-then-prefix fix (Section 3); Exercise 4 checks <code>axis=0</code> prefixing the row index (Section 4).</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="add_prefix()/add_suffix() are pure string concatenation onto every label of an axis -- no lookup, no per-column mapping, no filtering. rename() with a dict/lambda is the tool for anything more selective.">
+    <p class="stem">What do <code>add_prefix()</code> and <code>add_suffix()</code> actually do to a DataFrame's columns?</p>
+    <button class="opt" data-ok>concatenate a given string onto every column label, unconditionally</button>
+    <button class="opt">only rename columns whose name matches a given pattern</button>
+    <button class="opt">reorder every column alphabetically before finally returning the result</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: add_prefix() on a MultiIndex column result stamps the given string onto every level of every tuple, not just the outer level -- almost never the intended result, which is why flattening to plain strings first is the working pattern.">
+    <p class="stem">Calling <code>add_prefix("x_")</code> on a DataFrame with genuine MultiIndex columns (from aggregating multiple columns with multiple functions) does what?</p>
+    <button class="opt" data-ok>prefixes every level of the column tuple, outer included</button>
+    <button class="opt">raises TypeError, since add_prefix() only accepts flat Index columns</button>
+    <button class="opt">prefixes only the outermost level, leaving inner levels untouched</button>
+  </div>
+  <div class="q" data-why="Both methods default to axis=1/'columns'. axis=0 (or axis='index') retargets the same prefixing behavior onto the row index instead -- useful right before a pd.concat() where row labels would otherwise collide.">
+    <p class="stem">By default, which axis does <code>add_prefix()</code> operate on, and how do you target the row index instead?</p>
+    <button class="opt" data-ok>columns by default; pass axis=0 (or axis="index") to target the row index</button>
+    <button class="opt">the row index by default; there is no way to reach columns</button>
+    <button class="opt">both axes always at once, with no way to choose only one</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official pandas <a href="https://pandas.pydata.org/docs/user_guide/index.html">User Guide</a> — the <code>DataFrame.add_prefix()</code>/<code>DataFrame.add_suffix()</code> API reference pages document the exact <code>axis=</code> parameter and confirm the string-concatenation-only behavior directly (~5 min).</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>add_prefix()</code> and <code>add_suffix()</code> were both added today, right after Lesson 54's <code>.compare()</code> entry.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-55 comes back reported as shakiest, otherwise a fresh curriculum/glossary scan for the next genuinely-uncovered pattern — <code>json_normalize()</code> remains the one open candidate from Lesson 53's original scan.<br><br>
+💬 Anything unclear — the MultiIndex-prefix gotcha, the axis= trick, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

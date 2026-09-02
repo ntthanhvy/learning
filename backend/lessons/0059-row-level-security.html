@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 59 · Row-level security: the database enforces the same rule your handler does</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 59 · ~20 min</p>
+<h1>Row-level security: the database enforces the same rule your handler does</h1>
+<p class="byline">Lesson 12 fixed IDOR with one line in the handler: <code>if order.UserID != user.ID &amp;&amp; !user.HasRole("admin")</code>. That line works — as long as every handler that ever queries <code>orders</code> remembers to write it. Today's question: what if a query gets there without going through that handler at all — a new endpoint someone forgets to check, an admin script, a background job with a typo'd <code>WHERE</code> clause? Postgres has a mechanism that answers "no row leaks" at the table itself, not per query.</p>
+
+<h2>1 · The gap Lesson 12's fix doesn't close</h2>
+<p>Lesson 12's ownership check is correct and it belongs in the handler — but it's an <em>application-level</em> guarantee, which means it only holds where that code actually runs. Picture the same <code>orders</code> table three months later: a teammate adds an internal <code>/admin/export</code> endpoint and forgets the ownership check because "it's just for us"; a new background job queries <code>orders</code> directly to build a report and nobody thought to add the same <code>if</code>; someone runs an ad-hoc query in a database console while debugging a ticket. None of these go through the handler Lesson 12 fixed. Every one of them can see every row, because the guarantee lived in application code, and application code is exactly the thing that gets skipped, forgotten, or bypassed.</p>
+<p><dfn data-en="a Postgres feature where the database itself attaches a filter condition to every query against a table, so rows a policy excludes are invisible to a query no matter what SQL was written or which code path issued it" data-vn="row-level security / RLS (giữ nguyên) — Postgres tự lọc dòng cho mọi query, không phụ thuộc code app có check hay không">Row-level security</dfn> (RLS) moves the same "does this caller own this row?" question down one layer, from the handler into Postgres itself. Once RLS is enabled on a table and a policy is defined, <em>every</em> query against that table — from the handler, the export endpoint, the report job, the console — gets the same filter applied automatically, before any rows come back.</p>
+
+<h2>2 · How it actually works: enable, then define a policy</h2>
+<p>Two steps. First, turn RLS on for the table — this alone doesn't grant access, it flips the table from "open" to "deny by default":</p>
+<pre><code>ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
+<span class="cm">-- from this point on, a role with no matching policy sees zero rows,
+-- not an error -- queries still run, they just return nothing.</span></code></pre>
+<p>Second, define a <dfn data-en="a named rule attached to a table under row-level security, written as a boolean SQL expression, that decides which rows a given role may see or affect" data-vn="policy (giữ nguyên) — luật boolean quyết định role nào thấy dòng nào">policy</dfn> — a boolean expression Postgres silently ANDs onto the <code>WHERE</code> clause of every query that role runs:</p>
+<pre><code>CREATE POLICY orders_owner_only ON orders
+  USING (user_id = current_setting(<span class="kw">'app.current_user_id'</span>)::int);
+<span class="cm">-- app.current_user_id is a session-local setting the application sets
+-- once per connection/transaction, right after authenticating the caller.</span></code></pre>
+<p>The application still has to say who's asking — RLS doesn't skip authentication, it consumes the result of it. Right after Lesson 4's middleware identifies the caller, the handler sets a session variable, and every query on that connection is filtered from then on without needing its own <code>WHERE user_id = ...</code>:</p>
+<pre><code>SET app.current_user_id = <span class="kw">'42'</span>;
+SELECT * FROM orders; <span class="cm">-- only rows where user_id = 42 come back --
+-- no WHERE clause needed here: the policy supplies it.</span></code></pre>
+
+<h2>3 · What changes for the handler that already had the check</h2>
+<p>Lesson 12's fixed handler still works fine, and RLS doesn't ask you to delete that <code>if</code> — the two are complementary, not competing, guarantees. What changes is what happens when a query <em>doesn't</em> have the check:</p>
+<table class="cmp">
+<thead><tr><th></th><th>App-level check (Lesson 12)</th><th>Row-level security (today)</th></tr></thead>
+<tbody>
+<tr><th>Enforced by</th><td>the handler's own <code>if</code></td><td>Postgres, on every query against the table</td></tr>
+<tr><th>Applies to</th><td>only code paths that remembered to write it</td><td>every code path, including ones written later</td></tr>
+<tr><th>Fails how</th><td>silently returns another user's row (IDOR)</td><td>query runs, matching rows simply aren't there</td></tr>
+<tr><th>Cost</th><td>one <code>if</code> per handler, easy to forget</td><td>one policy per table, plus a session variable to set</td></tr>
+</tbody>
+</table>
+<p>Neither replaces the other. The handler's check can return a clean <code>403</code> with a message; a database that just returns zero rows can't distinguish "doesn't exist" from "exists, not yours" without extra work, and a 403 is a better response than a confusing 404. RLS's value isn't a nicer error — it's that the guarantee holds even where nobody wrote an <code>if</code> at all. Layering both is the actual production pattern: the handler for a good client-facing error, RLS as the backstop that catches everything the handler didn't.</p>
+
+<h2>4 · The most common real mistake: forgetting to set the session variable</h2>
+<p>RLS policies typically read a session-local value like <code>app.current_user_id</code> — and if the application forgets to set it on a given connection (a pooled connection reused from a prior request, a background worker that never authenticates a "user" at all), <code>current_setting</code> either errors or returns an empty string, and the policy's comparison fails for every row. The practical effect is usually not a security hole — it's the opposite failure, a caller silently seeing <em>zero</em> rows they should see, which shows up as a confusing bug report rather than a leak. This is exactly the kind of per-connection state Lesson 18 already flagged as dangerous: a session variable set on a pooled connection must be reset (or the connection discarded) before it's handed to the next request, or one caller's <code>current_user_id</code> can leak into another caller's query.</p>
+<div class="callout"><strong>Trap:</strong> RLS policies are bypassed by default for a table's owner role and any role with the <code>BYPASSRLS</code> attribute — including, commonly, whatever role your migration tool or admin scripts connect as. This is by design (someone has to be able to do a full backup), but it means "I enabled RLS" is not automatically true for every connection your system makes; check which role the application actually connects as day to day, and confirm that role is <em>not</em> the table owner and does not have <code>BYPASSRLS</code>.</div>
+
+<h2>5 · Where this earns its keep: defense in depth, not a replacement</h2>
+<p>RLS is not a substitute for Lesson 17's parameterized queries — a policy is itself SQL evaluated by Postgres, so it doesn't stop <a href="../lessons/0017-sql-injection-and-input-validation.html">SQL injection</a> in application code that builds queries by string concatenation; injected SQL still runs as that role, and the policy still applies to it, but the underlying vulnerability is unrelated and still needs fixing at the query-building layer. What RLS adds is a second, independent layer that holds even when the first layer (a correct handler) has a bug or a gap — the same "don't rely on one layer" instinct Lesson 58's three-layer synthesis lesson taught for staleness checks, applied here to access control instead. The strongest real-world case for it: a table shared by many tenants in one database, where "which rows belong to this caller" is not a rare edge case but the central question every single query against that table has to get right, forever, across every future engineer who touches the codebase.</p>
+
+<div class="interview">
+<p><strong>Q: "We had an incident where an internal script exposed another customer's data. How would row-level security have helped?"</strong> A strong answer, out loud: <em>"The script bypassed our usual API handlers, so whatever ownership check we'd written in the handler layer never ran — that's the actual root cause, not that anyone wrote bad SQL. Row-level security moves the same check into Postgres itself: once it's enabled on the table and a policy is defined, every query against that table gets the ownership filter applied automatically, whether it comes from the API, a background job, or someone's ad-hoc script. I'd still keep the handler-level check too, because it gives a clean 403 instead of a silent empty result — but RLS is the backstop for every code path we didn't think to check by hand. The one thing I'd flag: it only helps for the roles it actually applies to, so I'd also confirm our application doesn't connect as the table owner or a BYPASSRLS role, which skip policies entirely."</em> The signal: naming RLS as a second, independent layer rather than a replacement for the existing handler check, and knowing the bypass caveat exists.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Lesson 12's ownership check only runs inside the handler that contains it -- any other code path querying the same table (a new endpoint, a background job, an ad-hoc script) never passes through that check at all, so it can still see every row.">
+    <p class="stem">What gap does an app-level ownership check (Lesson 12) leave open that RLS is designed to close?</p>
+    <button class="opt" data-ok>code paths that never run the handler's ownership check</button>
+    <button class="opt">code paths that run the handler's ownership check twice</button>
+    <button class="opt">code paths that run before the handler's own authentication</button>
+    <button class="opt">code paths that only run during the handler's migration</button>
+  </div>
+  <div class="q" data-why="A policy is a boolean SQL expression Postgres applies to every query against that table for the affected roles, filtering rows automatically rather than requiring each query to repeat its own WHERE condition.">
+    <p class="stem">Once RLS is enabled and a policy is created, what does Postgres do on every query against that table?</p>
+    <button class="opt" data-ok>silently applies the policy's condition to filter the rows returned</button>
+    <button class="opt">silently applies the policy's condition to sort the rows returned</button>
+    <button class="opt">silently applies the policy's condition to rename the rows returned</button>
+    <button class="opt">silently applies the policy's condition to encrypt the rows returned</button>
+  </div>
+  <div class="q" data-why="A policy comparing against a session variable like app.current_user_id fails closed if that variable was never set on the connection -- current_setting returns empty or errors, so the comparison matches nothing, and the caller sees zero rows rather than the wrong rows.">
+    <p class="stem">A pooled connection never had `app.current_user_id` set before a query ran. What's the likely practical effect?</p>
+    <button class="opt" data-ok>the caller sees zero rows instead of their rows</button>
+    <button class="opt">the caller sees every single row, regardless of owner</button>
+    <button class="opt">the query fails to parse and the connection drops</button>
+    <button class="opt">the policy gets skipped and the old check reapplies</button>
+  </div>
+  <div class="q" data-why="RLS policies are themselves evaluated by Postgres as SQL, so they filter whatever rows a query would otherwise return -- they do nothing to stop a query built by unsafe string concatenation from being injected in the first place; that fix still belongs at the query-building layer, per Lesson 17.">
+    <p class="stem">Why doesn't enabling RLS on a table protect against SQL injection in application code?</p>
+    <button class="opt" data-ok>RLS filters rows a query returns, it doesn't stop unsafe query building</button>
+    <button class="opt">RLS filters rows a query returns, it doesn't stop unsafe connection pooling</button>
+    <button class="opt">RLS filters rows a query returns, it doesn't stop unsafe password hashing</button>
+    <button class="opt">RLS filters rows a query returns, it doesn't stop unsafe cache invalidation</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> before citing it, ran a live <code>WebFetch</code> check against <code>https://www.postgresql.org/docs/current/ddl-rowsecurity.html</code> (a freshly-typed URL, per the standing reminder from Lesson 53's 404 incident) — result noted in this round's NOTES.md entry. This extends RESOURCES.md's standing "PostgreSQL Manual — Data Definition" citation into the row security chapter specifically, covering <code>CREATE POLICY</code> syntax, the owner/<code>BYPASSRLS</code> exemption, and the distinction between <code>USING</code> (read/existing-row filter) and <code>WITH CHECK</code> (write filter) beyond what today's lesson had room for.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> open. No confirmed next-lesson gap is named yet, and there is still no <code>lesson_completed</code>/quiz/kata outcome recorded for any lesson after 59 rounds — the honest next step is a completion signal or a user-named track to go deeper on, not a topic picked blind. If neither shows up, a fresh gap-finding grep against MISSION.md's four tracks (data modeling, API design, runtime concepts, auth/security/ops) is the fallback, same as this round's own approach.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

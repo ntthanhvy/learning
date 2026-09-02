@@ -3612,3 +3612,118 @@
   session should treat a completion/quiz-outcome signal, or a user-named
   track to deepen, as materially higher priority than searching for a 59th
   topic with no reported learning signal to aim at.
+- 2026-09-02 generation (Lesson 59, headless 06:00 run): idempotency check
+  first - confirmed no `lessons/0059-*.html` file existed and no `n: 59`/
+  `date: "2026-09-02"` entry was in `nav.js` before writing anything (highest
+  prior lesson was 58, dated 2026-09-01). Read both `learning-records/`
+  entries (0001's baseline, 0002's concurrency-vocabulary gap) - both already
+  fully reflected in prior lessons, nothing new to act on; still no
+  `lesson_completed`/quiz-outcome record exists for any lesson, so there is
+  still no reported weak spot to target, unchanged since roughly Lesson 19's
+  round. Lesson 58 left no named candidate - its own closing note said a
+  fresh gap-finding grep would be needed this round, since every prior
+  round's named candidate (advisory locks/56, cache stampede/57, the
+  Lessons-9/33/51 synthesis/58) had already been used. Ran that fresh pass:
+  read MISSION.md's four scope tracks (data modeling/schema design, API/
+  service design, backend runtime concepts, auth/security/ops) and grepped
+  all 58 lesson titles plus `glossary.html`'s full term list via a Node
+  script (`fs.readdirSync` + lowercase substring match) against roughly 70
+  candidate terms spanning all four tracks, rather than a shell loop, since a
+  `for` loop over shell variables hit this sandbox's "Contains
+  simple_expansion" block on the first attempt, consistent with several
+  prior rounds' documented finding. The script surfaced ~65 untaught
+  candidates; most were ruled out immediately as out-of-scope per MISSION.md
+  (sharding, replication/read-replicas, consistent hashing, CQRS/saga/2PC/
+  event sourcing - "distributed systems beyond vocabulary level" - plus
+  Kubernetes/infra-tooling-flavored ones like autoscaling/cold-start/warm-
+  pool). Row-level security stood out as the strongest remaining candidate:
+  Postgres-native (single-instance, not the distributed/multi-tenant
+  territory MISSION.md excludes), squarely in the data-modeling and auth/
+  security tracks, ties directly back to Lesson 12's authorization/IDOR fix
+  and Lesson 17's SQL-injection material, and is a genuinely common real-
+  world interview and production topic (multi-tenant SaaS backends). Double-
+  checked "row-level security", "row level security", "policy" (in RLS
+  context), "current_setting", and "BYPASSRLS" all had zero hits anywhere in
+  `lessons/*.html` or `glossary.html` before committing (the bare substring
+  "rls" gave a false-positive hit inside the word "URLs" in Lesson 52's CORS
+  material - re-checked with a wider context grep and confirmed it was
+  unrelated). Lesson 59 covers: the gap Lesson 12's handler-level ownership
+  check leaves open - it only protects code paths that actually contain that
+  `if`, so a later endpoint, background job, or ad-hoc console query against
+  the same table can still see every row; enabling RLS
+  (`ALTER TABLE ... ENABLE ROW LEVEL SECURITY`) and defining a `CREATE
+  POLICY` as a boolean expression Postgres ANDs onto every query's `WHERE`
+  clause automatically, keyed off a session variable
+  (`app.current_user_id`) the application sets once per connection right
+  after authentication; a `table.cmp` (Lesson 25's component) contrasting
+  the app-level check against RLS as complementary, not competing,
+  guarantees; the most common real mistake - a pooled connection that never
+  had the session variable set, which fails closed (zero rows, not a leak),
+  tied back to Lesson 18's pooled-connection state warning; an explicit trap
+  on the table-owner/`BYPASSRLS` exemption, since migration tools and admin
+  scripts commonly connect as a role that silently skips every policy; and a
+  closing section naming RLS as defense-in-depth alongside Lesson 17's
+  parameterized queries, not a replacement for either that or Lesson 12's
+  handler check - explicitly citing Lesson 58's own three-layer synthesis
+  framing ("don't rely on one layer") as the same instinct applied to access
+  control instead of staleness. No Go snippet was used (SQL only, matching
+  Lessons 43/44/55's precedent for DB-feature lessons) - `go version` was
+  attempted early this round, before any lesson content was drafted, per
+  Lesson 58's explicit suggestion to re-check whether its block was a
+  one-off; it was blocked again requiring approval with no user present,
+  same as Lesson 58's round, now two rounds running - worth continued
+  tracking as a possible standing sandbox change rather than a one-off, but
+  moot for this lesson's own content either way since it never needed Go.
+  Quiz options were drafted, then verified with a `node -e` inline script
+  parsing the quiz HTML and counting `.split(/\s+/).length` per option (this
+  course's established Node-over-shell-loop preference) - first draft was
+  uneven on Q1 and Q3 (Q1 10/8/7/8, Q3 12/11/10/10), fixed through three
+  rewrite-and-recount passes (re-verified with the same script after each
+  pass) to reach final tallies of Q1 9/9/9/9, Q2 10/10/10/10, Q3 9/9/9/9, Q4
+  12/12/12/12 - independently cross-checked a second way via `Grep` line-by-
+  line extraction of every `class="opt"` line and a manual per-line word
+  count that matched the script's tallies exactly for all sixteen options.
+  Ran an occurrence-accurate tag-balance check (Node script counting open
+  vs. close tags via regex) for every tag pair used: div 7/7, p 19/19, pre
+  3/3, code 29/29, h1 1/1, h2 7/7, table 1/1, thead 1/1, tbody 1/1, tr 5/5,
+  th 7/7, td 8/8, strong 4/4, em 7/7, dfn 2/2, button 16/16, a 2/2, span
+  5/5, and confirmed exactly 4 `data-ok` (one per question) - independently
+  re-verified div and p counts a second way via individual `Grep -o` counts
+  on `<div`, `</div>`, `<p `, and `</p>`, matching the script exactly. Caught
+  and fixed two real authoring bugs on the full re-read after the first
+  verification pass: an unescaped `&&` inside the byline's inline Go
+  snippet (`user.ID && !user.HasRole` needed to be `&amp;&amp;`, the same
+  raw-ampersand bug class worth watching for in any inline code example) and
+  a stray line-break inside Q4's `data-why` attribute left over from
+  drafting (harmless to rendering but inconsistent with every other
+  question's single-line attribute, cleaned up for consistency) - both fixed
+  via `Edit`, then the full quiz-tally and tag-balance checks above were
+  re-run after the fix and confirmed unchanged and clean. Added three new
+  glossary terms - `row-level security (RLS)`, `policy (RLS)`, `BYPASSRLS` -
+  grepped beforehand per the paragraph above and confirmed none existed;
+  deliberately did NOT re-add `authorization`, `IDOR`, or `SQL injection`,
+  all already in the glossary since Lessons 12 and 17, since this lesson
+  explicitly links back to that existing vocabulary rather than duplicating
+  it. Registered Lesson 59 in `nav.js`. Primary source: before citing it,
+  ran a live `WebFetch` check against
+  `https://www.postgresql.org/docs/current/ddl-rowsecurity.html` (a
+  freshly-typed URL, per the standing reminder from Lesson 53's 404
+  incident) - confirmed live and covering exactly the material cited:
+  `ALTER TABLE ... ENABLE ROW LEVEL SECURITY`, `CREATE POLICY` syntax, the
+  `USING`/`WITH CHECK` distinction, and the table-owner/`BYPASSRLS`
+  exemption; cited as extending RESOURCES.md's standing "PostgreSQL Manual —
+  Data Definition" citation into the row-security chapter specifically, the
+  same extend-an-existing-citation pattern recent rounds have used. Ran
+  `bin/record-progress backend lesson_generated --day 59 --lesson
+  0059-row-level-security.html --detail '{"by":"headless-06:00"}'` directly
+  from the repo root as a single standalone command - succeeded immediately
+  on the first attempt, no approval blocker this round, consistent with the
+  write path's general reliability across nearly every prior round
+  regardless of read-path status. This closes the "fresh gap-finding grep"
+  task Lesson 58's own closing note assigned to this round, via a genuinely
+  new topic (row-level security) rather than any previously-named candidate,
+  since none remained. Still no `lesson_completed`/quiz/kata outcome record
+  exists for any lesson after 59 rounds - the next session should treat a
+  completion/quiz-outcome signal, or a user-named track to deepen, as
+  materially higher priority than searching for a 60th topic with no
+  reported learning signal to aim at.

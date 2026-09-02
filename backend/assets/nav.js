@@ -122,6 +122,8 @@
       file: "lessons/0057-cache-stampede-thundering-herd.html" },
     { n: 58, date: "2026-09-01", title: "Synthesis: the same \"is this current?\" check, three layers",
       file: "lessons/0058-same-version-three-layers.html" },
+    { n: 59, date: "2026-09-02", title: "Row-level security: the database enforces the same rule your handler does",
+      file: "lessons/0059-row-level-security.html" },
   ];
 
   const REFS = [

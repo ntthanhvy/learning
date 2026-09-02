@@ -4079,4 +4079,155 @@ fail *gracefully* so the learner sees which task failed.
   FastAPI/httpx testing) remains a reasonable fallback. Still no
   `lesson_completed`/quiz/kata outcome record exists for any day — no
   reported weak spot to target.
-
+- 2026-09-02 — **Day 36 generated** (headless 06:00 run). Idempotency:
+  confirmed before writing anything that no `python/lessons/0036-*.html` (or
+  higher) file existed, `assets/nav.js` had no `n: 36`/`date: "2026-09-02"`
+  entry, and `NOTES.md` had no existing `2026-09-02` entry — highest lesson
+  on disk was `0035-slots.html` dated 2026-09-01, so generation proceeded as
+  Day 36, not a re-run.
+  Topic selection: Day 35's own next-day note said `PLAN.md`'s spine and
+  every previously-named candidate (`enum`, `match`/`case`, `__slots__`) are
+  exhausted, and offered `RESOURCES.md`'s two open "Gaps" (Python
+  interview-prep source, FastAPI project-layout reference), a testing
+  retrieval day (pytest + httpx), or — per this run's own instructions —
+  `functools` (`lru_cache`/`wraps`/`partial`/`reduce`) or descriptors as
+  fresh core-language candidates. Picked `functools`: grepped every lesson
+  and practice file first for `lru_cache`/`functools.partial`/
+  `functools.reduce`/`from functools import` and confirmed zero prior hits
+  for all three (only `functools.wraps` itself is already taught, on Day 12,
+  for decorator identity preservation). `functools` was the stronger pick
+  over descriptors and over the two open Gaps: it is concretely scoped to
+  one lesson, ties directly back to Day 12's decorators (`lru_cache` is
+  itself a decorator) and Day 4/27's `key=`/`itertools` idioms, and is
+  routinely asked about in Python interviews — the two Gaps are
+  resource-hunting tasks rather than single-lesson topics (as Day 34 also
+  concluded when deferring them), and descriptors risked going deeper/more
+  abstract than a ~20 min lesson suits, so kept it in reserve for a future
+  day if `functools` gets exhausted first. Read Day 12
+  (`0012-decorators.html`) in full before drafting so today's lesson opens
+  by naming that `functools.wraps` was already taught there, rather than
+  re-teaching it — the byline and section 1 explicitly frame today as
+  opening the three tools Day 12 left unopened (`lru_cache`, `partial`,
+  `reduce`), and the "Go deeper" footer cross-links Day 12 and Day 27
+  (`itertools.accumulate`, named as `reduce`'s cousin for the "want every
+  intermediate value" case, not taught today).
+  Web-lookup: used `WebFetch` against `docs.python.org/3/library/
+  functools.html` before writing anything — succeeded, returning
+  `lru_cache`'s `maxsize`/`typed` parameters, `cache_info()`/`cache_clear()`,
+  version-added (3.2), `wraps`'s copied-attributes list and rationale,
+  `partial`'s behavior and `.func`/`.args`/`.keywords` attributes, and
+  `reduce`'s two-/three-argument forms plus the "prefer a plain loop /
+  `itertools.accumulate`" guidance — all used directly in sections 1-3 and
+  the interview callout.
+  Taught: section 1 `lru_cache` as a decorator (explicitly reusing Day 12's
+  mechanism rather than introducing a new one) that memoizes by argument,
+  `cache_info()`/`cache_clear()` for inspecting the cache rather than
+  assuming it works, `maxsize` (including the `None`-means-unbounded
+  tradeoff), and a callout on the two real hazards — unhashable arguments
+  (Day 31's rule again) and impure functions (a clock/DB/global-state read)
+  silently serving stale results; section 2 `partial` as a `lambda`
+  alternative for pre-filling arguments, tied to Day 4's `key=` functions and
+  Day 27's `itertools` recipes as the usual place this shape shows up;
+  section 3 `reduce`'s two- and three-argument forms, the empty-iterable-
+  with-no-initial `TypeError`, and explicit "this is a last resort, not a
+  first instinct" guidance favoring `sum`/`max`/`any`/a plain loop when one
+  of those already names the combining rule, with `itertools.accumulate`
+  named (not taught) as the "need every intermediate value" alternative.
+  Bridged from SQL per the baseline record: `lru_cache` as a query result
+  cache, `reduce` as the hand-rolled mechanism `SUM()`/`MAX()`/`COUNT()` are
+  each one fixed case of — introduced before any Python in the top callout,
+  not from a pandas analogy.
+  **Interpreter-behavior claims verified live, not just from docs**, per Day
+  34/35's precedent — all run via scratch `uv run python3` probes against
+  this course's actual Python (confirmed `3.12.3`, matching every prior
+  day) before being stated as fact: (1) the `lru_cache` call-count/hit
+  example — a global counter stayed at 2 after three calls (two distinct
+  arguments, one repeat) — matched exactly, `cache_info()` reported
+  `hits=1, misses=2`; (2) `functools.wraps`'s effect (name/docstring lost
+  without it, preserved with it) re-confirmed against Day 12's existing
+  claim rather than assumed still true; (3) both `partial` examples
+  (`basetwo("10010")` → `18`, a `partial(power, exp=2)` call) matched; (4)
+  `reduce`'s sum example returned `15`, the three-argument empty-list case
+  returned the initial value `100` without calling the lambda, and the
+  two-argument empty-list case raised `TypeError: reduce() of empty
+  iterable with no initial value` — the exact message quoted in section 3.
+  No claim required correction this run — every drafted behavioral claim
+  matched its live probe on the first attempt.
+  No-pandas rule: zero pandas/NumPy/`pd.`/`np.` hits in the practice file
+  (grepped case-insensitively — zero hits, only stdlib `from functools
+  import lru_cache, partial, reduce`); exactly one hit in the lesson — one
+  contrast sentence/callout (titled "Where pandas goes from here") naming
+  pandas's own vectorized reductions (`.sum()`, `.agg()`, `.apply()`) as the
+  column-at-a-time equivalent `functools.reduce` is the plain-Python,
+  one-value-at-a-time mechanism behind, without demonstrating any pandas
+  API, placed once after section 3/the interview callout, matching the
+  hard-rule section above.
+  Practice file `practice/36_functools.py` (4 exercises: adding
+  `@lru_cache` to a call-counting function and confirming a repeat call
+  doesn't re-run the body, reading `cache_info()` to report hits versus
+  misses for a 5,5,5,6 call sequence, building a `partial`-based narrower
+  `cube` from a two-argument `power` function, and writing a `longest_word`
+  helper with `reduce` including the empty-input-via-initial-value case)
+  needed no on-disk fixtures. Followed this course's standard defensive
+  pattern against the Ellipsis-at-module-level bug family: Exercise 1's TODO
+  is a comment-only marker above an already-valid `def` (no placeholder
+  needed at all), Exercise 3's placeholder is `cube = None` at module level
+  (a real, valid assignment, not a bare `...`), and only Exercise 4's TODO
+  uses a bare `...`, living strictly inside `longest_word`'s function body —
+  no `...` anywhere at module or class scope.
+  Verified in a scratch dir under the repo root (`python/.scratch/
+  lesson36/`, created under `python/` per this run's own instructions and
+  removed after use): the shipped (unsolved) copy, run via plain `uv run
+  python3` (no `--with` needed), both from a scratch copy and from its real
+  `practice/` path with the documented command, printed four clean ✗ lines
+  with no traceback each time; a separately solved copy (every `...`/TODO
+  filled in by hand in the scratch copy) printed all four ✓ and the "All
+  green" tally. No bugs found during verification — both passes succeeded
+  on the first attempt.
+  Glossary: added a Day 36 section to `reference/glossary.html` (`lru_cache`,
+  `partial`, `reduce`) after confirming via grep that none of the three
+  collided with any Day 1-35 entry. Deliberately did **not** re-glossary
+  `functools.wraps` (already a Day 12 entry) even though it's mentioned
+  again in today's byline — reused the existing row rather than duplicating
+  it, matching this course's no-duplicate-glossary-row convention. The 3 new
+  `<dfn data-en` tags in the lesson body match the 3 new glossary rows
+  exactly (confirmed by count).
+  Quiz: 5 questions. Word counts were checked with a small Python script
+  (splitting the quiz block into its five question `<div>`s via a
+  `data-why=`-anchored regex split, then counting `.split()` words per
+  `<button class="opt">` line, run via `uv run python3`) and mismatched on
+  the first draft for all five questions (Q1 9/10/8, Q2 11/10/7, Q3 12/8/11,
+  Q4 12/11/8, Q5 12/11/12). A first extraction script actually undercounted
+  to 4 questions found (a greedy lookahead regex silently dropped Q5) before
+  being replaced with the `data-why=`-anchored split — worth noting since it
+  would have shipped an unverified Q5 if not caught. Each mismatched
+  question went through two to three rewrite-and-recount rounds — Q2 in
+  particular overshot once (12/10/10) before landing 11/11/11 — re-running
+  the script after every edit, until every option matched (Q1 10/10/10, Q2
+  11/11/11, Q3 11/11/11, Q4 12/12/12, Q5 12/12/12). Re-verified with a
+  second, independently-written script (document-order `<button
+  class="opt">` extraction across the whole file with no quiz-div scoping at
+  all, then grouped in threes) run against the final file — independently
+  confirmed all 15 options (5 questions × 3 options) land on their target
+  counts before shipping. HTML tag-balance was checked two ways: a
+  counting-open-vs-close-tags-per-element script, and a second, structurally
+  different stack-based check using Python's stdlib `html.parser.HTMLParser`
+  — both agreed the file is fully balanced, no fixes needed. Registered in
+  `assets/nav.js` with `date: "2026-09-02"`.
+  **DB access:** not attempted this run — paced entirely from on-disk state
+  (`NOTES.md`'s own generation log, `python/lessons/`, `python/assets/
+  nav.js`, `python/learning-records/` — still only the Day 1 baseline, no
+  completion/quiz/kata outcome record for any day 2-35), consistent with the
+  blocked/inconsistent outcome on nearly every prior day since Day 8.
+  `bin/record-progress python lesson_generated --day 36 --lesson
+  0036-functools.html --detail '{"by":"headless-06:00"}'` was run once
+  after shipping as a single standalone command and **succeeded**:
+  `recorded: python/lesson_generated day=36 lesson=0036-functools.html`.
+  **Next-day note:** with `functools` now taught, the remaining most
+  concretely-grounded next candidate is descriptors (how `property`/
+  `classmethod` work under the hood, ties back to Day 30/32) — flagged in
+  this run's own instructions and deliberately kept in reserve rather than
+  spent today. `RESOURCES.md`'s "Gaps" (Python interview prep, a FastAPI
+  project-layout reference) remain open since Day 25/28. Still no
+  `lesson_completed`/quiz/kata outcome record exists for any day — no
+  reported weak spot to target.

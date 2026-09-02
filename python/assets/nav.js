@@ -76,6 +76,8 @@
       file: "lessons/0034-match-case.html" },
     { n: 35, date: "2026-09-01", title: "__slots__: trading dynamic attributes for memory and safety",
       file: "lessons/0035-slots.html" },
+    { n: 36, date: "2026-09-02", title: "functools: memoizing, freezing arguments, and folding",
+      file: "lessons/0036-functools.html" },
   ];
 
   const REFS = [

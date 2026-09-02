@@ -116,6 +116,8 @@
       file: "lessons/0054-equals-and-compare.html" },
     { n: 55, date: "2026-09-01", title: "add_prefix() and add_suffix(): renaming a whole axis at once",
       file: "lessons/0055-add-prefix-and-add-suffix.html" },
+    { n: 56, date: "2026-09-02", title: "json_normalize(): flattening nested JSON into a table",
+      file: "lessons/0056-json-normalize.html" },
   ];
 
   const REFS = [

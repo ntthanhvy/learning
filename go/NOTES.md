@@ -476,3 +476,23 @@
   post-week daily quiz+kata infra was re-verified unchanged (7 real kata
   entries `k1`-`k7`, `day:` tags still run 1-7 only, `nav.js` `LESSONS`
   still registers only the 7 Jul 8-14 lessons).
+- 2026-09-02 (headless 06:00 run): skipped again per the same rule — the
+  course window closed 2026-07-20, now forty-eight days past it. All 14
+  lessons (`0001`-`0014`) re-confirmed present on disk and registered in
+  `assets/nav.js` — moot either way. Direct `psql "$LEARNING_DB_URL" ...`
+  and every helper script wrapping it (`bin/query-progress`) were blocked
+  again this session ("Contains simple_expansion" content-level block on
+  the raw variable reference, plus a generic "requires approval" gate on
+  the helper script with no user present) — same two classes of block as
+  every prior round — so no `course_progress` rows could be read; fell
+  back to file-state + learning-records alone per the standing fallback
+  rule. Moot for this course since it's a pure skip regardless of DB
+  state. Backend lesson 59 (row-level security), data lesson 56
+  (`json_normalize()`), and python Day 36 (`functools`) were generated
+  this round via delegated agents, each confirmed to have written only
+  within its own course directory — see their own NOTES.md entries for
+  detail; rust's post-week daily quiz+kata infra was re-verified unchanged
+  (8 textual `id: "k` matches — 7 real kata entries `k1`-`k7` plus the
+  commented-out example line — `day:` tags still running 1-7 only across
+  49 occurrences, `nav.js` `LESSONS` still registers only the 7 Jul 8-14
+  lessons).

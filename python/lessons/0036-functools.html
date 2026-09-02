@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 36 · functools: memoizing, freezing arguments, and folding</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 36 · ~20 min · 2 Sep 2026</p>
+<h1>functools: memoizing, freezing arguments, and folding</h1>
+<p class="byline">Day 12 already introduced the <code>functools</code> module once, for exactly one job: <code>@functools.wraps</code>, fixing a decorated function's lost <code>__name__</code>. That's still the same module — a small toolbox of higher-order functions, ones that take or return other functions, for jobs common enough that the standard library ships them instead of everyone hand-rolling their own. Today covers the three left unopened: <dfn data-en="a decorator, @functools.lru_cache, that wraps a function with a cache keyed on its arguments — a repeat call with arguments already seen returns the stored result immediately instead of recomputing it" data-vn="giữ nguyên &quot;lru_cache&quot; — decorator cache kết quả hàm theo tham số, gọi lại với tham số cũ trả kết quả lưu sẵn, không tính lại">lru_cache</dfn>, which remembers a function's past results so it never redoes the same work twice, <dfn data-en="a function, functools.partial, that takes a function plus some of its arguments and returns a new callable with those arguments already filled in — calling the new callable only needs whatever arguments are left" data-vn="giữ nguyên &quot;partial&quot; — cố định sẵn 1 số tham số của hàm, trả về hàm mới chỉ cần truyền phần tham số còn lại">partial</dfn>, which pre-fills some of a function's arguments to make a narrower, ready-to-call version, and <dfn data-en="a function, functools.reduce(function, iterable, initial), that applies a two-argument function cumulatively across an iterable, left to right, collapsing it down to one single value — the general mechanism sum()/any()/max() are each one narrow, named case of" data-vn="giữ nguyên &quot;reduce&quot; — gộp toàn bộ iterable thành 1 giá trị duy nhất, áp hàm 2 tham số lần lượt từ trái sang phải">reduce</dfn>, which collapses a whole iterable down to a single value by combining elements two at a time.</p>
+
+<div class="callout"><strong>Bridge from SQL:</strong> <code>lru_cache</code> is a query result cache — the same statement with the same parameters gets served from memory instead of hitting the engine again. <code>reduce</code> is a hand-rolled aggregate: <code>SUM()</code>, <code>MAX()</code>, and <code>COUNT()</code> are each one fixed way of combining rows into one value; <code>reduce</code> is what those are all built from, with the combining rule spelled out instead of picked from a short list of names.</div>
+
+<h2>1 · <code>lru_cache</code>: never redo the same call twice</h2>
+<p>A pure function — same arguments in, same result out, no side effects — that gets called repeatedly with arguments it has already seen is wasting work. <code>functools.lru_cache</code> is a decorator (Day 12's mechanism, applied here rather than built) that wraps a function with a cache keyed on its arguments:</p>
+<pre><code><span class="kw">from</span> functools <span class="kw">import</span> lru_cache
+
+calls = <span class="num">0</span>
+
+<span class="kw">@lru_cache</span>(maxsize=<span class="kw">None</span>)
+<span class="kw">def</span> slow_square(n):
+    <span class="kw">global</span> calls
+    calls += <span class="num">1</span>
+    <span class="kw">return</span> n * n
+
+slow_square(<span class="num">4</span>)   <span class="cm"># runs the real function: calls == 1</span>
+slow_square(<span class="num">4</span>)   <span class="cm"># same argument again: served from cache, calls stays 1</span>
+slow_square(<span class="num">5</span>)   <span class="cm"># new argument: runs for real, calls == 2</span>
+<span class="kw">print</span>(calls)                  <span class="cm"># 2 — not 3</span>
+<span class="kw">print</span>(slow_square.cache_info())   <span class="cm"># CacheInfo(hits=1, misses=2, maxsize=None, currsize=2)</span></code></pre>
+<p>Verified live against this course's interpreter: the third call above is a cache hit, and <code>calls</code> stops at <code>2</code>. <code>cache_info()</code> reports <code>hits</code>/<code>misses</code>/<code>maxsize</code>/<code>currsize</code> directly from the running cache, and <code>cache_clear()</code> empties it — both useful for confirming a cache is actually doing something rather than assuming it. <code>maxsize</code> caps how many distinct argument combinations get remembered before the least-recently-used entry is evicted to make room (the "LRU" in the name); <code>maxsize=None</code>, used above, means unbounded — fine for a small, fixed set of inputs, risky for a function called with unboundedly many distinct arguments over a long-running process, since nothing ever gets evicted.</p>
+<div class="callout"><strong>Not free, and not for everything.</strong> The cache is keyed on the exact arguments passed, so every argument to a cached function must be hashable (Day 31's rule again — a <code>list</code> argument raises <code>TypeError</code>, a <code>tuple</code> doesn't). And caching only helps a <em>pure</em> function: one whose result depends only on its arguments. Decorating a function that reads a clock, hits a database, or depends on mutable global state with <code>lru_cache</code> silently serves stale answers instead of speeding anything up correctly.</div>
+
+<h2>2 · <code>partial</code>: pre-filling arguments to make a narrower function</h2>
+<p><code>functools.partial</code> takes a function plus some of its arguments and returns a new callable that already has those arguments baked in — calling the result only needs whatever is left:</p>
+<pre><code><span class="kw">from</span> functools <span class="kw">import</span> partial
+
+<span class="kw">def</span> power(base, exp):
+    <span class="kw">return</span> base ** exp
+
+square = partial(power, exp=<span class="num">2</span>)   <span class="cm"># exp is fixed at 2 from here on</span>
+square(<span class="num">5</span>)                       <span class="cm"># 25 — same as power(5, exp=2)</span>
+square(<span class="num">9</span>)                       <span class="cm"># 81</span>
+
+basetwo = partial(<span class="kw">int</span>, base=<span class="num">2</span>)   <span class="cm"># works on any callable, not just your own functions</span>
+basetwo(<span class="str">"10010"</span>)                <span class="cm"># 18 — same as int("10010", base=2)</span></code></pre>
+<p>Both calls verified live to return exactly those values. This is the same shape Day 4's <code>key=</code> functions and Day 27's <code>itertools</code> recipes lean on constantly: something expects a plain one- or few-argument callable — a <code>sorted(key=...)</code>, a callback, an event handler — but the function that does the real work needs more arguments than that slot provides. Writing a one-line <code>lambda x: power(x, exp=2)</code> works too; <code>partial</code> is the same idea without a <code>lambda</code>, and it keeps the original function's name and the fixed arguments inspectable on the result (<code>square.func</code>, <code>square.keywords</code>) rather than hiding them inside a closure.</p>
+
+<h2>3 · <code>reduce</code>: collapsing an iterable to one value, by hand</h2>
+<p><code>functools.reduce(function, iterable, initial)</code> applies a two-argument function cumulatively across an iterable, left to right, until only one value is left:</p>
+<pre><code><span class="kw">from</span> functools <span class="kw">import</span> reduce
+
+nums = [<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>, <span class="num">4</span>, <span class="num">5</span>]
+total = reduce(<span class="kw">lambda</span> acc, x: acc + x, nums)
+<span class="cm"># (((( 1+2 )+3 )+4 )+5) == 15 — acc carries the running result forward each step</span></code></pre>
+<p><code>reduce</code> without a third argument uses the iterable's first element as the starting <code>acc</code> — which is also why an empty iterable with no initial value raises <code>TypeError</code> (confirmed live: <code>"reduce() of empty iterable with no initial value"</code>). Pass a third argument and it becomes both the starting value and the result for an empty iterable, sidestepping that crash: <code>reduce(lambda acc, x: acc + x, [], 100)</code> returns <code>100</code> without ever calling the lambda.</p>
+<p>This is the general mechanism — <code>sum()</code>, <code>any()</code>, <code>all()</code>, and <code>max()</code> are each one fixed, named combining rule; <code>reduce</code> is what runs underneath when the combining rule doesn't already have a name. That generality is also the usual objection to it: <code>reduce(lambda acc, x: acc + x, nums)</code> says less clearly what it does than <code>sum(nums)</code> does, and a plain <code>for</code> loop building up <code>acc</code> is often just as short and reads top-to-bottom instead of inside-out. Reach for <code>reduce</code> when the combining step is genuinely custom and there's no <code>sum</code>/<code>max</code>/<code>any</code> already spelling it — not as a reflex replacement for a loop that already reads fine. (Need every intermediate running total, not just the final one? That's <code>itertools.accumulate</code> — Day 27's module, not today's.)</p>
+
+<div class="interview">
+<p><strong>Q: "When would you reach for <code>lru_cache</code>, <code>partial</code>, or <code>reduce</code>?"</strong> A strong answer, out loud: <em>"<code>lru_cache</code> when a pure function — no side effects, same output for the same input — gets called repeatedly with arguments I've already seen, and I'd check <code>cache_info()</code> to confirm it's actually paying off rather than assuming it. <code>partial</code> when something expects a plain callable with fewer arguments than the function that does the real work takes — a <code>sorted(key=...)</code>, a callback — so I don't need a throwaway <code>lambda</code> just to fix a couple of arguments. <code>reduce</code> only when the combining rule is genuinely custom; if it's a sum, a max, or an <code>any</code>/<code>all</code> check, I'd use the named built-in instead, because it says what it does more clearly than a <code>reduce</code> call with a lambda inside it."</em> The signal: knowing <code>reduce</code> is a last resort, not a first instinct, and that <code>lru_cache</code> requires hashable arguments and a pure function to be safe.</p>
+</div>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> pandas has its own vectorized reductions — <code>.sum()</code>, <code>.agg()</code>, <code>.apply()</code> — that operate across a whole column at once rather than one Python-level call per element; <code>functools.reduce</code> is the plain-Python, one-value-at-a-time mechanism those are built on conceptually, not something you'd reach for on a DataFrame. Not covered here; that's <code>data/</code>'s territory, and this is the only sentence in this lesson that names it.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/36_functools.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/36_functools.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: adding <code>@lru_cache</code> to a call-counting function and confirming a repeat call doesn't re-run the body, reading <code>cache_info()</code> to report hits versus misses, building a <code>partial</code>-based narrower version of a two-argument function, and writing a small custom aggregate with <code>reduce</code> (the longest word in a list) including the empty-input case via an initial value.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="lru_cache wraps a function with a cache keyed on its arguments, so a repeat call with arguments already seen is served from that cache instead of re-running the function body — confirmed live: a global call counter stopped incrementing on the repeat call.">
+    <p class="stem">What does <code>@functools.lru_cache</code> do to a decorated function?</p>
+    <button class="opt" data-ok>caches results keyed by argument, skipping repeat calls already seen</button>
+    <button class="opt">runs the whole function body exactly once total, ever, always</button>
+    <button class="opt">converts the plain function into an async coroutine, entirely silently</button>
+  </div>
+  <div class="q" data-why="lru_cache is only safe on a pure function - one whose result depends only on its arguments, with no side effects like reading a clock, a database, or mutable global state - because it silently returns yesterday's cached answer without re-checking anything about the world outside the arguments themselves.">
+    <p class="stem">Why is <code>lru_cache</code> unsafe on a function that reads the current time?</p>
+    <button class="opt" data-ok>a cached stale result gets served instead of a fresh read</button>
+    <button class="opt">it is not; lru_cache always re-checks the clock before every hit</button>
+    <button class="opt">Python simply raises TypeError while decorating any clock-reading function at all</button>
+  </div>
+  <div class="q" data-why="functools.partial(func, ...) returns a new callable with some of func's arguments already filled in - calling that result only needs whichever arguments were left open, useful anywhere a plain few-argument callable is expected but the real work needs more arguments than that.">
+    <p class="stem">What does <code>functools.partial(power, exp=2)</code> return?</p>
+    <button class="opt" data-ok>a new callable, with exp already fixed at 2, base open</button>
+    <button class="opt">the exact number that calling power(exp=2) itself would immediately compute here</button>
+    <button class="opt">a plain string naming the function and its one fixed argument</button>
+  </div>
+  <div class="q" data-why="reduce(function, iterable) with no third argument uses the iterable's own first element as the starting accumulator - so an empty iterable has no first element to start from and raises TypeError, unless a third initial-value argument is supplied to serve as both the starting point and the empty-input result.">
+    <p class="stem">Why does <code>reduce(function, [])</code>, with no third argument, raise <code>TypeError</code>?</p>
+    <button class="opt" data-ok>an empty iterable has no first element to use as a start</button>
+    <button class="opt">reduce always requires at least four separate arguments to run at all</button>
+    <button class="opt">Python simply cannot import the whole functools module without a populated iterable</button>
+  </div>
+  <div class="q" data-why="sum()/max()/any() are each one fixed, named combining rule already built on the same cumulative-combination idea reduce spells out in general; reduce is worth reaching for only when the combining rule is genuinely custom and none of those narrower, more readable built-ins already say what's needed.">
+    <p class="stem">Why prefer <code>sum(nums)</code> over <code>reduce(lambda acc, x: acc + x, nums)</code>?</p>
+    <button class="opt" data-ok>sum names the fixed combining rule reduce would spell out by hand</button>
+    <button class="opt">reduce here cannot correctly compute a sum of more than two numbers</button>
+    <button class="opt">sum silently ignores the last element in every list it is given</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the <a href="https://docs.python.org/3/library/functools.html">functools</a> docs (cited in RESOURCES.md's "Knowledge — the language" section already, via the general stdlib-docs-first pattern) — authoritative on <code>lru_cache</code>'s <code>maxsize</code>/<code>typed</code> parameters and <code>cache_info()</code>/<code>cache_clear()</code>, <code>partial</code>'s attribute access (<code>.func</code>, <code>.args</code>, <code>.keywords</code>), and <code>reduce</code>'s two- and three-argument forms.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day36">glossary</a> under Day 36.<br>
+This is a direct follow-on to Day 12's decorators (<code>lru_cache</code> is one, and reuses <code>functools.wraps</code>'s module) and Day 27's <code>itertools</code> (<code>reduce</code>'s cousin, <code>itertools.accumulate</code>).<br><br>
+💬 Anything unclear — <code>lru_cache</code>'s hashability requirement, <code>partial</code> vs. a <code>lambda</code>, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

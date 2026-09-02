@@ -3816,3 +3816,113 @@
   zero-hit candidate from Lesson 53's original scan — `json_normalize()` — as
   the open candidate if no drill-outcome signal surfaces by next generation;
   a fresh curriculum/glossary scan is due once that candidate is closed too.
+- 2026-09-02 generation (Lesson 56, headless 06:00 run): idempotency was
+  self-confirmed first — globbed `data/lessons/` for `0056-*.html` (none
+  found), grepped `assets/nav.js` for `n: 56`/`2026-09-02` (neither found,
+  highest registered lesson was still 55, dated 2026-09-01), and grepped
+  `NOTES.md` for a `2026-09-02` entry (none found) — so this round proceeded.
+  Read every file in `data/learning-records/`: still just the single baseline
+  file, no drill-outcome signal beyond it. Fell back to on-disk state (NOTES.md
+  + nav.js + lesson teasers) as the source of truth for what to teach next, as
+  instructed. Lesson 55's own teaser named the one remaining zero-hit
+  candidate from Lesson 53's original scan: `json_normalize()` — the only
+  candidate left, so no fresh scan/pick decision was needed this round.
+  Re-confirmed zero-hit before writing a word: grepped `lessons/*.html` and
+  `reference/glossary.html` for `json_normalize`, only Lessons 53-55's own
+  teaser-text mentions came back, no real teaching content; collision check
+  repeated again just before the glossary edit, same result. `uv run --with
+  pandas` worked directly this round (pandas 3.0.5, confirmed via
+  `pd.__version__`): every claim was hand-verified in `.scratch/
+  data-lesson56/explore.py`, `explore2.py`, and `explore3.py` (all deleted
+  after) before writing a word of the lesson. Unlike every prior lesson, this
+  topic needed a genuinely new fixture — nothing through Lesson 55 had nested
+  JSON — so `practice/data/orders_nested.json` was created: 4 order dicts
+  shaped like a typical API response (nested `customer` dict, nested `items`
+  list), deliberately using the exact same `order_id`/`amount`/`order_date`
+  values as the `orders_raw.csv` clean 4-row slice used since Lesson 6 (An
+  120.0/42.0, Binh 35.5/180.0) so the new lesson still ties back to prior
+  lessons' known numbers. Confirmed directly: plain `pd.DataFrame(records)` on
+  nested dicts leaves the nested value as one untouched `object`-dtype cell,
+  not flattened; `pd.json_normalize(records)` flattens a nested dict into
+  dotted columns (`customer.name`, `customer.region`) by default, and `sep=`
+  changes the joiner (confirmed `sep="_"` gives `customer_name`); a nested
+  *list* (`items`) is a different shape needing `record_path="items"` to
+  explode it into one row per item, with `meta=` (including a nested path list
+  like `["customer", "name"]`) carrying outer fields onto every resulting row
+  — confirmed 4 orders became exactly 6 item rows with the right per-row
+  `order_id`/`customer.name` values and a summed `qty` of 10. Two genuine new
+  findings, both a different failure shape from this course's usual "no
+  crash, quietly wrong" family: `pd.json_normalize()` does NOT accept a raw
+  JSON string, only already-parsed Python objects — passing
+  `json.dumps(records)` straight through raises `NotImplementedError`,
+  confirmed directly, so `json.loads()` must run first; and a record missing
+  a field named in `meta=` raises `KeyError` by default (not a quiet NaN),
+  confirmed directly against a deliberately-broken fixture in `explore2.py`,
+  the opposite default from `str.extract()`'s non-match-becomes-NaN behavior
+  (Lesson 42) — `errors="ignore"` is the documented fix, named in the error
+  message itself. Designing the practice file surfaced one genuine new
+  instance of this course's running Ellipsis-handling family, but this time
+  in the *opposite* direction from most prior lessons: `pd.json_normalize(...)`
+  (Ellipsis as the records argument) DOES raise on its own —
+  `NotImplementedError`, confirmed directly with a standalone probe before
+  shipping — so Exercise 1's placeholder needed no special guarding, unlike
+  most prior lessons' Ellipsis-is-truthy/doesn't-raise gotchas. Exercise 3 was
+  the opposite case and needed real care: an unfilled `raw_call_raised = ...`
+  leaves bare Ellipsis, and `bool(Ellipsis)` does NOT raise (Ellipsis is
+  truthy) — so gating on truthiness alone would have let an unfilled
+  placeholder slip through if `raw_call_raised` itself were left as Ellipsis;
+  handled by checking `raw_call_raised is True` (strict identity, the same
+  defensive pattern Lesson 54 used for its own `numpy.bool_` trap), confirmed
+  directly that a bare Ellipsis is truthy but not `is True`, so it still
+  correctly prints ✗ unsolved. Exercises 2 and 4's placeholders
+  (`items_flat = ...`, `flat_us = ...`) were each probed standalone first and
+  confirmed to raise on their own via `Ellipsis["qty"]`
+  (TypeError)/`Ellipsis.columns` (AttributeError) — no accidental-freebie risk
+  there. The shipped (unsolved) `practice/56_json_normalize.py` was executed
+  in a mirrored `.scratch/data-lesson56/practice/` layout (new fixture JSON
+  copied alongside, plain flagless `mkdir -p`/`cp` since this session's
+  working directory was again restricted to the repo root for compound `cd`
+  commands, same restriction noted in several prior rounds, worked around by
+  running `uv run` directly against relative paths without a leading `cd`)
+  and printed exactly the expected 4 ✗ with no crash; a solved copy
+  (`.scratch/data-lesson56/practice/56_solved.py`, not shipped) then printed
+  all 4 ✓ on the first run — no bugs found in the solved logic itself this
+  round. The shipped file was also re-run a second time directly from its
+  real `practice/` location (`cd data && uv run --with pandas python3
+  practice/56_json_normalize.py`) and confirmed identical output (4 ✗, no
+  crash). The entire `.scratch/data-lesson56/` directory was fully removed
+  (`rm -rf`) after verification, no approval needed this round. Added a
+  `json_normalize()` glossary entry (checked for a collision first — grepped
+  for `json_normalize`, no existing real rows, only teaser-text mentions)
+  placed directly after Lesson 55's `add_prefix()`/`add_suffix()` entry, and
+  registered Lesson 56 in `nav.js`. Quiz options were drafted and checked with
+  a Python regex/word-count script isolating each `<div class="q">` block by
+  its own start offset (this course's established approach since Lesson 42),
+  run via `uv run python3` — the first draft came out mismatched on all three
+  questions (Q1 9/10/15, Q2 8/13/12, Q3 14/14/13); several rewrite + recount
+  cycles landed all three level (Q1 11/11/11, Q2 12/12/12, Q3 15/15/15), then
+  independently re-verified with a second, fully separate method (manual
+  word-by-word counting done by hand directly from a `Grep`-extracted raw
+  option-text listing, not a second run of the same script), per this file's
+  standing warning that a single verification pass isn't reliable — both
+  methods agreed all three questions genuinely landed level. An
+  occurrence-count Python regex tag-balance check confirmed every tag pair in
+  the shipped lesson HTML is balanced (`p` 23/23, `h2` 9/9, `pre` 6/6, `code`
+  72/72, `div` 5/5, `dfn` 1/1, `button` 9/9, `strong` 5/5, `em` 5/5, `a` 2/2,
+  `span` 22/22, plus `html`/`head`/`body`/`title` 1/1 each); cross-checked
+  with a second method (`Grep` occurrence counts on `<dfn`/`</dfn>`,
+  `<pre>`/`</pre>`, `<div`/`</div>`) which agreed exactly on all three spot-
+  checked tags. `bin/record-progress data lesson_generated --day 56 --lesson
+  0056-json-normalize.html --detail '{"by":"headless-06:00"}'` was run once
+  from the repo root as instructed as a single standalone command and
+  succeeded on the first try (`recorded: data/lesson_generated day=56
+  lesson=0056-json-normalize.html`), no approval blocker this round, matching
+  Lessons 50-53/55's successful pattern rather than Lesson 54's failed one.
+  This agent does not run `git commit` — leaving working-tree changes
+  uncommitted remains this course's established convention. This closes out
+  every zero-hit candidate named across Lessons 53-55's scans (`add_prefix()`/
+  `add_suffix()`, `.equals()`/`.compare()`, `json_normalize()` — all now
+  covered). Set the teaser going forward to: no queued candidate remains, so
+  the next generation should run a fresh curriculum/glossary scan for the
+  next genuinely-uncovered pattern, or pivot to a review/drill round if any
+  `lesson_completed`/quiz-outcome signal has surfaced by then.

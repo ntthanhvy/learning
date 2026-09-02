@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 56 · json_normalize(): flattening nested JSON into a table</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 56 · ~20 min · 2 Sep 2026</p>
+<h1>json_normalize(): flattening nested JSON into a table</h1>
+<p class="byline">Lesson 55's own teaser named the last remaining zero-hit candidate from Lesson 53's original scan: <code>json_normalize()</code>. Every lesson through 55 started from a flat CSV — but a real interview take-home, or an actual API response, just as often arrives as nested JSON (an object inside an object, a list of line items inside an order). This lesson covers the tool built for exactly that gap.</p>
+
+<h2>Recap, in one line</h2>
+<p>Every fixture since Lesson 2 loaded flat via <code>pd.read_csv()</code> — one row, one dict-of-scalars, no nesting. <dfn data-en="a pandas top-level function that flattens a list of nested dicts (or a single nested dict) into a regular DataFrame, turning nested keys into dotted column names and optionally exploding a nested list into one row per item -- not a DataFrame/Series method, called as pd.json_normalize()" data-vn="giữ nguyên 'json_normalize()' — hàm cấp cao nhất của pandas, làm PHẲNG 1 list các dict lồng nhau (hoặc 1 dict lồng nhau) thành DataFrame bình thường, biến key lồng thành tên cột có dấu chấm, và có thể 'nổ' 1 list lồng thành mỗi item 1 hàng riêng; không phải method của DataFrame/Series, gọi là pd.json_normalize()">json_normalize()</dfn> is what handles the other common shape: a list of dicts where some values are themselves dicts or lists, the shape a JSON API almost always actually returns.</p>
+
+<h2>1 · Why plain pd.DataFrame() isn't enough</h2>
+<p>Feeding nested dicts straight to the regular DataFrame constructor doesn't flatten anything — the nested value just becomes one <code>object</code> cell holding the raw Python dict, unusable for any vectorized column operation:</p>
+<pre><code>records[<span class="kw">0</span>]
+<span class="cm">-- {'order_id': 1, 'amount': 120.0, 'order_date': '2026-01-05',
+--  'customer': {'name': 'An', 'region': 'North'},
+--  'items': [{'sku': 'A1', 'qty': 2}, {'sku': 'A2', 'qty': 1}]}</span>
+pd.DataFrame(records)[<span class="str">"customer"</span>].iloc[<span class="kw">0</span>]
+<span class="cm">-- {'name': 'An', 'region': 'North'}   (still a plain dict, dtype object)</span></code></pre>
+<p>Confirmed directly against the real fixture: the <code>customer</code> column's dtype stays <code>object</code>, and nothing like <code>df["customer.region"]</code> exists yet — the nested structure is just carried along untouched, not flattened.</p>
+
+<h2>2 · json_normalize(): nested dicts become dotted columns</h2>
+<p><code>pd.json_normalize()</code> is a top-level function (<code>pd.json_normalize(records)</code>, not <code>records.json_normalize()</code>) that walks every nested dict and turns each nested key into its own column, joined with a dot by default:</p>
+<pre><code>flat = pd.json_normalize(records)
+flat.columns.tolist()
+<span class="cm">-- ['order_id', 'amount', 'order_date', 'items', 'customer.name', 'customer.region']</span>
+flat[[<span class="str">"order_id"</span>, <span class="str">"customer.name"</span>, <span class="str">"customer.region"</span>]]
+<span class="cm">--    order_id customer.name customer.region
+-- 0         1            An           North
+-- 1         2          Binh           South
+-- 2         5          Binh           South
+-- 3         6            An           North</span></code></pre>
+<p>Confirmed directly: the nested <code>customer</code> dict becomes two real, independently-selectable columns — <code>customer.name</code> and <code>customer.region</code> — ordinary <code>str</code> dtype columns, filterable and groupable like any other. The <code>items</code> column is left alone here (still one list-of-dicts per row) — flattening a nested <em>list</em>, rather than a nested dict, needs the separate tool in the next section. The joiner is configurable: <code>sep="_"</code> gives <code>customer_name</code>/<code>customer_region</code> instead of the dotted default.</p>
+
+<h2>3 · record_path + meta: exploding a nested list into its own rows</h2>
+<p>Each order's <code>items</code> is a nested <em>list</em> of line items, a different shape from a nested dict — flattening it means one output row per item, not one output column. <code>record_path=</code> names the list to explode; <code>meta=</code> names which outer fields to carry along on every resulting row, confirmed directly against the real fixture:</p>
+<pre><code>items = pd.json_normalize(
+    records,
+    record_path=<span class="str">"items"</span>,
+    meta=[<span class="str">"order_id"</span>, [<span class="str">"customer"</span>, <span class="str">"name"</span>]],
+)
+<span class="cm">--   sku  qty  order_id customer.name
+-- 0  A1    2         1            An
+-- 1  A2    1         1            An
+-- 2  B1    1         2          Binh
+-- 3  B1    3         5          Binh
+-- 4  B2    2         5          Binh
+-- 5  A1    1         6            An</span></code></pre>
+<p>4 orders became 6 item rows — order 1 had 2 items, order 5 had 2 items, orders 2 and 6 had 1 each — with <code>order_id</code> and the nested <code>customer.name</code> (a two-element path list, since it's nested one level deep in the source) copied onto every row that item belongs to. This is the pandas shape of a SQL one-to-many join: <code>orders</code> joined to <code>order_items</code> on <code>order_id</code>, except the "join" is really just un-nesting a list that was already embedded in the source JSON.</p>
+
+<h2>4 · Two sharp edges, both confirmed directly</h2>
+<p><strong>A raw JSON string is NOT accepted.</strong> <code>json_normalize()</code> expects already-parsed Python objects (a list of dicts, or a dict) — not the text of a JSON document. Passing the raw string genuinely raises, confirmed directly against the real fixture:</p>
+<pre><code>raw_text = json.dumps(records)
+pd.json_normalize(raw_text)
+<span class="cm">-- NotImplementedError</span>
+<span class="cm">-- (the fix: parse first)</span>
+pd.json_normalize(json.loads(raw_text)).columns.tolist()
+<span class="cm">-- ['order_id', 'amount', 'order_date', 'items', 'customer.name', 'customer.region']</span></code></pre>
+<p>A real crash, not a silent wrong answer — the same "loudly refuses on a type it wasn't built for" family as <code>.compare()</code>'s <code>ValueError</code> on mismatched shapes (Lesson 54), not the quieter "no crash, quietly wrong" family most of this course's other gotchas have fallen into.</p>
+<p><strong>A missing <code>meta</code> key raises by default, unlike a missing dict key elsewhere in pandas.</strong> If some record in the list is missing a field named in <code>meta=</code>, the default behavior is a hard <code>KeyError</code> — not a quiet <code>NaN</code>, confirmed directly:</p>
+<pre><code><span class="cm">-- one record has no "order_id" key at all</span>
+pd.json_normalize(records_missing, record_path=<span class="str">"items"</span>, meta=[<span class="str">"order_id"</span>])
+<span class="cm">-- KeyError: "Key 'order_id' not found. To replace missing values
+--            of 'order_id' with np.nan, pass in errors='ignore'"</span></code></pre>
+<p>The error message names its own fix: <code>errors="ignore"</code> switches that record's missing meta value to <code>NaN</code> instead of raising — the opposite default from <code>str.extract()</code>'s "non-match becomes NaN, never raises" (Lesson 42), worth naming explicitly if asked in an interview, since guessing the wrong default here means a crash the first time real-world data has a gap.</p>
+
+<h2>5 · The SQL bridge</h2>
+<p>There's no single SQL equivalent, because SQL tables can't hold nested values in a column to begin with — a JSON or JSONB column is the closest cousin, and <code>json_normalize()</code>'s two behaviors map onto two different SQL operators: flattening a nested <em>dict</em> (Section 2) is like Postgres's <code>->></code> operator pulling a named field out of a <code>jsonb</code> column into its own column, while <code>record_path=</code> exploding a nested <em>list</em> (Section 3) is like Postgres's <code>jsonb_array_elements()</code> combined with a join back to the parent row — one input row becomes several output rows, carrying the parent's key along on each.</p>
+
+<div class="interview">
+<p><strong>Q: "You're handed a REST API response — a list of orders, each with a nested customer object and a nested list of line items. How do you get this into a usable DataFrame?"</strong> A strong answer, out loud: <em>"First json.loads() it if it's still raw text — json_normalize() only accepts already-parsed Python objects, not a JSON string directly, and it genuinely raises NotImplementedError if you skip that step. Then pd.json_normalize() on the list flattens every nested dict into dotted columns automatically — customer.name, customer.region. For the nested items list, that's a different shape: I'd use record_path='items' with meta=['order_id', ...] to explode it into one row per line item, carrying the order-level fields along — basically un-nesting a one-to-many relationship that was embedded directly in the JSON, the same shape as a SQL join to a child table."</em> The signal: distinguishing dict-flattening from list-exploding as two different problems, and knowing the raw-string gotcha instead of assuming json_normalize() reads text directly.</p>
+</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/56_json_normalize.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/56_json_normalize.py</code></pre>
+<p>New fixture for this lesson: <code>practice/data/orders_nested.json</code>, a list of 4 order dicts shaped like a typical API response — same <code>order_id</code>/<code>amount</code>/<code>order_date</code> values as the <code>orders_raw.csv</code> clean 4-row slice used since Lesson 6 (An 120.0/42.0, Binh 35.5/180.0), but with a nested <code>customer</code> dict and a nested <code>items</code> list instead of flat CSV columns. Exercise 1 checks the default dict-flattening (Section 2); Exercise 2 checks <code>record_path=</code>/<code>meta=</code> list-exploding (Section 3); Exercise 3 checks the raw-string-raises gotcha and its <code>json.loads()</code>-first fix (Section 4); Exercise 4 checks the <code>sep=</code> joiner override (Section 2).</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="json_normalize() is a top-level pandas function (pd.json_normalize(...)), not a DataFrame/Series method -- it's what you reach for before you have a usable DataFrame, not after.">
+    <p class="stem">How is <code>json_normalize()</code> called, and on what kind of input?</p>
+    <button class="opt" data-ok>a top-level function, pd.json_normalize(...), called on already-parsed Python dicts or lists</button>
+    <button class="opt">a DataFrame method, df.json_normalize(...), called on an existing flat DataFrame directly</button>
+    <button class="opt">a top-level function that happily accepts an unparsed raw JSON string</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: pd.json_normalize() on a raw JSON string raises NotImplementedError -- it only accepts already-parsed Python objects (list of dicts / dict), so json.loads() has to run first.">
+    <p class="stem">What happens if you pass a raw JSON string (not yet parsed) straight to <code>pd.json_normalize()</code>?</p>
+    <button class="opt" data-ok>it raises NotImplementedError -- json.loads() must always run once first before it</button>
+    <button class="opt">it silently parses the string first, exactly as if json.loads() had run</button>
+    <button class="opt">it returns a one-row, one-column DataFrame holding the raw string as text</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: record_path='items' explodes the nested list into one row per item; meta=[...] copies named outer-level fields onto every resulting row, including a nested field via a path list like ['customer', 'name'].">
+    <p class="stem">With a nested <code>items</code> list inside each order dict, what does <code>record_path="items", meta=["order_id"]</code> produce?</p>
+    <button class="opt" data-ok>one output row per item, each row carrying that item's own order_id copied alongside it</button>
+    <button class="opt">one output row per order overall, with the items list left as one unflattened cell</button>
+    <button class="opt">a ValueError raised immediately, since record_path and meta can never be combined together at all</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official pandas <a href="https://pandas.pydata.org/docs/user_guide/index.html">User Guide</a> — the <code>pandas.json_normalize()</code> API reference page documents <code>record_path=</code>, <code>meta=</code>, <code>sep=</code>, <code>max_level=</code>, and the <code>errors=</code> parameter directly (~5 min).</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>json_normalize()</code> was added today, right after Lesson 55's <code>add_prefix()</code>/<code>add_suffix()</code> entry.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-56 comes back reported as shakiest, otherwise a fresh curriculum/glossary scan for the next genuinely-uncovered pattern — every candidate named across Lessons 53-55's scans has now been covered.<br><br>
+💬 Anything unclear — record_path, the meta path-list syntax, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

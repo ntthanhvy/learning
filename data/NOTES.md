@@ -3926,3 +3926,114 @@
   the next generation should run a fresh curriculum/glossary scan for the
   next genuinely-uncovered pattern, or pivot to a review/drill round if any
   `lesson_completed`/quiz-outcome signal has surfaced by then.
+- 2026-09-03 generation (Lesson 57, headless 06:00 run): idempotency was
+  self-confirmed first — globbed `data/lessons/` for `0057-*.html` (none
+  found), grepped `assets/nav.js` for `n: 57`/`2026-09-03` (neither found,
+  highest registered lesson was still 56, dated 2026-09-02), and grepped
+  `NOTES.md` for a `2026-09-03` entry (none found) — so this round proceeded.
+  `bin/query-progress` was attempted once as instructed and hit the same
+  "requires approval" sandbox gate documented for months straight, no
+  workaround attempted per this round's own instructions. Read every file in
+  `data/learning-records/`: still just the single baseline file, no
+  drill-outcome signal beyond it. Fell back to on-disk state (NOTES.md +
+  nav.js + lesson teasers) as the source of truth for what to teach next, as
+  instructed. Lesson 56's own teaser closed out every candidate named across
+  Lessons 53-55's scans and explicitly called for a fresh curriculum/glossary
+  scan this round — no queued candidate remained. Listed all 56 existing
+  lesson topics and grepped `reference/glossary.html`'s full term list;
+  landed on `merge(validate=)` — Lesson 5 taught `pd.merge()`/`how=` and
+  explicitly flagged "row multiplication" (a non-unique join key silently
+  producing more output rows than either input table, nothing raising) as a
+  named gotcha, but never taught the tool built specifically to guard against
+  it. Confirmed zero-hit before writing a word: grepped `lessons/*.html` and
+  `reference/glossary.html` for `validate=`, zero hits anywhere, not even a
+  teaser mention; collision check repeated again just before the glossary
+  edit, same result. `uv run --with pandas` worked directly this round
+  (pandas 3.0.5, confirmed via `pd.__version__`): every claim was
+  hand-verified in `.scratch/lesson57/explore.py`, `explore2.py`, and
+  `explore3.py` (all deleted after) against Lesson 5's own fixtures
+  (`orders_raw.csv`: An×3/Binh×2/Chi×1; `customers.csv`: An/Binh/Danh, one row
+  each) before writing a word of the lesson — no new fixture needed, the
+  first practice file since at least Lesson 53 to reuse existing fixtures
+  with zero additions. Confirmed directly: `validate="one_to_many"` on
+  `customers.merge(orders, ...)` (left unique, right may repeat) passes
+  cleanly, 5 rows; mislabeling the identical call `validate="one_to_one"`
+  raises `pandas.errors.MergeError` naming which side ("right") had the
+  duplicate; the reversed direction (`orders.merge(customers, ...,
+  validate="many_to_one")`) passes symmetrically, and deliberately swapping
+  which frame is duplicated flips the error message to name "left" instead —
+  direction is about argument position, not which table is conceptually the
+  "parent." Two further findings confirmed directly and folded into the
+  lesson: `validate=` is a pure pre-flight assertion that never changes a
+  *passing* merge's output — `.equals()` confirmed byte-identical results
+  with and without `validate="one_to_many"` on the same data; and short SQL-
+  flavored aliases (`"1:1"`, `"1:m"`, `"m:1"`, `"m:m"`) work identically to
+  the long-form labels, confirmed directly. Cross-checked the primary source
+  live via WebFetch against the official pandas "Merge, join, concatenate and
+  compare" user guide page (the same page Lesson 5 already cited) — its
+  "Checking for duplicate keys" section names the identical four labels and
+  the identical `MergeError` exception, matching every hands-on probe result
+  exactly. Designing the practice file surfaced a new, carefully-checked
+  instance of this course's running Ellipsis-handling family: Exercise 2's
+  `mislabel_validate = ...` placeholder, if left unfilled and passed straight
+  into `validate=mislabel_validate`, raises `ValueError` ("Ellipsis" is not a
+  valid argument) rather than the specifically-caught `pd.errors.MergeError`
+  — confirmed directly that this falls through to the generic `except
+  Exception` clause, leaving `mislabel_raised` at its default `False` and
+  correctly printing ✗ unsolved, no accidental freebie despite superficially
+  "the call did raise something." Exercises 1 and 3's placeholders (`merged =
+  ...`, `reversed_merge = ...`) were each probed standalone first and
+  confirmed to raise `TypeError` on their own via `len(Ellipsis)` — no
+  accidental-freebie risk there. The shipped (unsolved)
+  `practice/57_merge_validate.py` was executed via `cd data && uv run --with
+  pandas python3 practice/57_merge_validate.py` (this session's `cd`
+  completed with no sandbox block this round, unlike some prior rounds' noted
+  restriction) and printed exactly the expected 3 ✗ with no crash; a solved
+  copy (`.scratch/lesson57/practice/57_solved.py`, mirrored fixture CSVs
+  copied alongside, not shipped) then printed all 3 ✓ on the first run — no
+  bugs found this round. The shipped file was re-run a second time directly
+  from its real `practice/` location and confirmed identical output (3 ✗, no
+  crash). The entire `.scratch/lesson57/` directory was fully removed
+  (`rm -rf`) after verification, no approval needed this round. Quiz options
+  were drafted and checked with a Python regex/word-count script isolating
+  each `<div class="q">` block by its own start offset (this course's
+  established approach since Lesson 42), run via `uv run python3` — the
+  first draft came out mismatched on all three questions (Q1 15/10/10, Q2
+  10/12/11, Q3 13/10/10); four rewrite + recount cycles landed all three
+  level (Q1 10/10/10, Q2 11/11/11, Q3 10/10/10), then independently
+  re-verified with a second, fully separate method (manual word-by-word
+  counting done by hand directly from a `Grep`-extracted raw option-text
+  listing, not a second run of the same script), per this file's standing
+  warning that a single verification pass isn't reliable — both methods
+  agreed all three questions genuinely landed level. A Python regex
+  tag-balance script (occurrence-count, not line-count) confirmed every tag
+  pair in the shipped lesson HTML is balanced (`p` 18/18, `h2` 8/8, `pre`
+  3/3, `code` 50/50, `div` 5/5, `dfn` 1/1, `button` 9/9, `strong` 3/3, `em`
+  3/3, `a` 2/2, `span` 11/11, plus `html`/`head`/`body`/`title` 1/1 each);
+  cross-checked with a second method (`Grep` occurrence counts on
+  `<dfn`/`</dfn>`, `<pre>`/`</pre>`, `<div`/`</div>`, `<button
+  class="opt"`/`</button>`) which agreed exactly on all four spot-checked
+  tags. `bin/record-progress data lesson_generated --day 57 --lesson
+  0057-merge-validate.html --detail '{"by":"headless-06:00"}'` was attempted
+  once from the repo root as a single standalone command as instructed and
+  hit the same "requires approval" sandbox gate as `query-progress` this
+  round — unlike Lessons 50-53/55-56's successful attempts, closer to Lesson
+  54's failed one; no bypass attempted per this round's hard rules, and no
+  retry loop attempted per this round's own instructions (one prescribed
+  attempt only). This agent does not run `git commit` — leaving working-tree
+  changes uncommitted remains this course's established convention. Added a
+  `validate= (merge)` glossary entry (checked for a collision first — grepped
+  for `validate=`, zero hits anywhere, not even a teaser mention) placed
+  directly after Lesson 56's `json_normalize()` entry, and registered Lesson
+  57 in `nav.js`. Set the teaser going forward to: no queued candidate
+  remains again, so the next generation should run a fresh curriculum/
+  glossary scan for the next genuinely-uncovered pattern (candidate
+  categories per MISSION.md still open: more groupby/agg patterns beyond
+  Lesson 4/40/48, additional string/regex methods beyond Lesson 42/43,
+  additional time-series methods beyond Lesson 32/38, `pd.merge_asof()` as a
+  `merge()` follow-up, or memory/dtype optimization beyond Lesson 25/41/51),
+  or pivot to a review/drill round if any `lesson_completed`/quiz-outcome
+  signal has surfaced by then; also worth re-attempting `bin/record-progress`
+  fresh next round, since this round's block looked like the same
+  intermittent approval-gate pattern as `query-progress` rather than a
+  permanent regression.

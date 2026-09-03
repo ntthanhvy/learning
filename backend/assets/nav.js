@@ -124,6 +124,8 @@
       file: "lessons/0058-same-version-three-layers.html" },
     { n: 59, date: "2026-09-02", title: "Row-level security: the database enforces the same rule your handler does",
       file: "lessons/0059-row-level-security.html" },
+    { n: 60, date: "2026-09-03", title: "CHECK constraints: teaching the row its own rules",
+      file: "lessons/0060-check-constraints.html" },
   ];
 
   const REFS = [

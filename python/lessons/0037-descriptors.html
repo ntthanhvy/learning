@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 37 · Descriptors: how @property and @classmethod actually work</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 37 · ~20 min · 3 Sep 2026</p>
+<h1>Descriptors: how <code>@property</code> and <code>@classmethod</code> actually work</h1>
+<p class="byline">Day 30 taught <code>@property</code> as "a method that reads like an attribute." Day 32 taught <code>@classmethod</code>/<code>@staticmethod</code> as "decorators that change the first argument." Both were true, and both stopped one level short of the mechanism: all three are built on one general protocol — the <dfn data-en="the set of methods (__get__, __set__, __set_name__) that, when defined on an object stored in a class's own __dict__, let that object intercept and customize attribute access on every instance of the class, instead of a plain value just sitting there" data-vn="giữ nguyên &quot;descriptor protocol&quot; — tập method (__get__, __set__, __set_name__) cho phép 1 object đặt trong class tự can thiệp vào việc đọc/ghi attribute trên mọi instance">descriptor protocol</dfn> — that any class can opt into. Today opens that box.</p>
+
+<div class="callout"><strong>Bridge from SQL:</strong> a computed column and a stored column look identical in a <code>SELECT *</code> — the engine hides which one is really stored on disk versus derived on read. A descriptor is the same hidden switch for a Python attribute: <code>obj.price</code> reads exactly the same whether <code>price</code> is a plain stored value or a descriptor quietly running code on every access. The protocol below is what lets Python make that switch invisible at the call site.</div>
+
+<h2>1 · The protocol: <code>__get__</code>, <code>__set__</code>, <code>__set_name__</code></h2>
+<p>A <dfn data-en="an object, stored as a class attribute (in the class's __dict__, not an instance's), that defines __get__ and/or __set__ — Python calls these methods automatically on attribute access (obj.attr) instead of just returning a plain stored value" data-vn="giữ nguyên &quot;descriptor&quot; — object gắn ở class, định nghĩa __get__/__set__, Python tự gọi khi đọc/ghi obj.attr thay vì trả giá trị lưu sẵn">descriptor</dfn> is any object whose class defines one or more of these three methods, and which is itself stored as a class attribute:</p>
+<pre><code><span class="kw">class</span> Validated:
+    <span class="kw">def</span> __set_name__(self, owner, name):
+        <span class="cm"># called once, when the *class* using this descriptor is created —</span>
+        <span class="cm"># owner is that class, name is the attribute name assigned to it</span>
+        self.public_name = name
+        self.private_name = <span class="str">"_"</span> + name
+
+    <span class="kw">def</span> __get__(self, obj, objtype=<span class="kw">None</span>):
+        <span class="kw">if</span> obj <span class="kw">is</span> <span class="kw">None</span>:
+            <span class="kw">return</span> self          <span class="cm"># accessed on the class itself, e.g. Product.price</span>
+        <span class="kw">return</span> getattr(obj, self.private_name)
+
+    <span class="kw">def</span> __set__(self, obj, value):
+        <span class="kw">if</span> value &lt; <span class="num">0</span>:
+            <span class="kw">raise</span> ValueError(f<span class="str">"{self.public_name} can't be negative"</span>)
+        setattr(obj, self.private_name, value)
+
+
+<span class="kw">class</span> Product:
+    price = Validated()      <span class="cm"># the descriptor lives on the CLASS, once</span>
+
+    <span class="kw">def</span> __init__(self, price):
+        self.price = price    <span class="cm"># this line triggers Validated.__set__, not a plain dict write</span></code></pre>
+<p>Verified live: creating the <code>Product</code> class itself calls <code>__set_name__(Validated_instance, Product, "price")</code> immediately — before any <code>Product</code> is ever instantiated. Every later <code>p.price</code> read calls <code>__get__</code>; every <code>p.price = ...</code> write calls <code>__set__</code>. <code>p.price = -5</code> raises <code>ValueError</code> exactly like Day 30's hand-written <code>@dollars.setter</code> did — because a <code>@property</code> setter <em>is</em> this same mechanism, one level down.</p>
+
+<h2>2 · <code>@property</code> is one specific descriptor, built in</h2>
+<p>Day 30 introduced <code>@property</code> as syntax; underneath, <code>property</code> is a built-in class whose instances are data descriptors — confirmed live: <code>hasattr(property, "__get__")</code> and <code>hasattr(property, "__set__")</code> are both <code>True</code>. Writing this Day-30-style class:</p>
+<pre><code><span class="kw">class</span> Money:
+    <span class="kw">def</span> __init__(self, cents):
+        self.cents = cents
+
+    <span class="kw">@property</span>
+    <span class="kw">def</span> dollars(self):
+        <span class="kw">return</span> self.cents / <span class="num">100</span></code></pre>
+<p>is shorthand for storing a <code>property</code> instance built from the getter function: <code>dollars = property(fget=&lt;the function above&gt;)</code>. Confirmed live: <code>isinstance(Money.__dict__["dollars"], property)</code> is <code>True</code>, and accessing <code>Money.dollars</code> (on the class, no instance) returns the <code>property</code> object itself rather than a number — that is the <code>if obj is None: return self</code> branch in <code>__get__</code> above, the exact line that makes <code>help(Money.dollars)</code> and similar introspection work. <code>@dollars.setter</code> from Day 30 fills in that same <code>property</code> object's <code>__set__</code> path. There is no separate "property mechanism" — it is one descriptor class, and Day 30's <code>@property</code> was always calling it.</p>
+
+<h2>3 · <code>@classmethod</code> and <code>@staticmethod</code> are descriptors too</h2>
+<p>Day 32's two method decorators use the same protocol, but as <dfn data-en="a descriptor whose class defines only __get__, with no __set__ or __delete__ — it customizes reads but has no say over writes, so a same-named entry in an instance's own __dict__ is found first and the descriptor's __get__ never runs" data-vn="giữ nguyên &quot;non-data descriptor&quot; — descriptor chỉ có __get__, không có __set__, nên instance __dict__ cùng tên sẽ được ưu tiên đọc trước, __get__ không chạy">non-data descriptors</dfn> — confirmed live: both <code>classmethod</code> and <code>staticmethod</code> have <code>__get__</code> but no <code>__set__</code>. Their <code>__get__</code> doesn't fetch a stored value at all; it returns a differently-bound callable:</p>
+<pre><code><span class="kw">class</span> D:
+    <span class="kw">@classmethod</span>
+    <span class="kw">def</span> make(cls):
+        <span class="kw">return</span> cls()      <span class="cm"># classmethod.__get__ binds the CLASS as the first argument</span>
+
+    <span class="kw">@staticmethod</span>
+    <span class="kw">def</span> helper(x):
+        <span class="kw">return</span> x * <span class="num">2</span>       <span class="cm"># staticmethod.__get__ returns the plain function, no binding at all</span></code></pre>
+<p>This is also why an ordinary method — a plain <code>def</code> with no decorator — works with dot-call syntax at all: a plain function is <em>itself</em> a non-data descriptor (functions define <code>__get__</code>), and <code>instance.method()</code> is that <code>__get__</code> binding <code>self</code> as the first argument, the same protocol running underneath, invisibly, for the most ordinary method in the language.</p>
+
+<h2>4 · Data vs. non-data: who wins the lookup</h2>
+<p>The <code>__set__</code>-or-not distinction from section 3 has a direct, testable consequence for <em>which value <code>obj.attr</code> actually returns</em> when both an instance's own <code>__dict__</code> and its class hold something under the same name. Verified live with a minimal pair — a data descriptor (has <code>__set__</code>) and a non-data descriptor (only <code>__get__</code>), both deliberately shadowed by writing straight into <code>h.__dict__</code>:</p>
+<pre><code>h.__dict__[<span class="str">"data_attr"</span>] = <span class="str">"instance value"</span>
+h.__dict__[<span class="str">"nondata_attr"</span>] = <span class="str">"instance value"</span>
+
+h.data_attr      <span class="cm"># "from DataDesc.__get__" — the data descriptor still wins</span>
+h.nondata_attr   <span class="cm"># "instance value" — the instance dict wins this time</span></code></pre>
+<p>The full lookup order Python actually runs, for <code>obj.attr</code>, checking <code>type(obj)</code> and its bases in MRO order (Day 32's inheritance chain) at each step:</p>
+<ol>
+<li>a <strong>data descriptor</strong> (defines <code>__set__</code> and/or <code>__delete__</code>) found on the class — wins outright, even over the instance's own <code>__dict__</code>;</li>
+<li>otherwise, the instance's own <code>__dict__</code>, if the name is there;</li>
+<li>otherwise, a <strong>non-data descriptor</strong> (only <code>__get__</code>) or plain class attribute found on the class.</li>
+</ol>
+<p><code>property</code> deliberately sits at step 1 — that's the whole point of a validated <code>@property</code> setter: nothing an instance does can bypass it by sneaking a value straight into <code>self.__dict__</code>, because the data descriptor is checked first. A plain method or <code>@staticmethod</code>/<code>@classmethod</code> sits at step 3 precedence-wise, which is harmless for methods (nothing normally assigns over <code>self.some_method</code>) but is the exact reason a data descriptor is the right tool whenever an attribute must stay validated no matter what.</p>
+<div class="callout"><strong>One more mechanical detail, confirmed live:</strong> a descriptor only intercepts access when it is found in a <em>class's</em> <code>__dict__</code> during that MRO walk. Assigning a descriptor instance straight into an instance's own <code>__dict__</code> (<code>a.attr = Desc()</code>) does nothing special — it's just a plain stored object, returned as-is, <code>__get__</code> never called. The protocol only activates from the class side.</div>
+
+<div class="interview">
+<p><strong>Q: "How does <code>@property</code> actually work under the hood?"</strong> A strong answer, out loud: <em>"<code>property</code> is a built-in class implementing the descriptor protocol — <code>__get__</code>, <code>__set__</code>, and optionally <code>__delete__</code> — and <code>@property</code> is just <code>property()</code> called as a decorator on the getter function, stored once on the class. Because it defines <code>__set__</code>, it's a <em>data</em> descriptor, which means it takes priority over anything in an instance's own <code>__dict__</code> — that's what makes a validated setter actually unbypassable. <code>classmethod</code> and <code>staticmethod</code> use the same protocol but only define <code>__get__</code>, so they're non-data descriptors — <code>classmethod.__get__</code> binds the class as the first argument instead of an instance, and <code>staticmethod.__get__</code> just returns the plain function, unbound."</em> The signal: naming the data-vs-non-data distinction specifically, and connecting it to lookup priority rather than just reciting "it makes methods read like attributes."</p>
+</div>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> <code>DataFrame.loc</code> and <code>.iloc</code> are themselves descriptor-backed attributes — accessing <code>df.loc</code> returns a fresh indexer object via a <code>__get__</code>, the same protocol taught here, wired up to return something far more elaborate than a number. Not demonstrated here; that's <code>data/</code>'s job, and this is the only sentence in this lesson that names it.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/37_descriptors.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/37_descriptors.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: writing a <code>__get__</code>/<code>__set__</code>/<code>__set_name__</code> validated-attribute descriptor (a non-negative-quantity check reusable across several attribute names on one class), confirming a data descriptor wins over a same-named instance <code>__dict__</code> entry while a non-data descriptor loses to one, confirming <code>property</code> is itself a data descriptor by checking <code>hasattr</code> on it directly, and reading <code>classmethod</code>/<code>staticmethod</code> off an unlabeled class to say which is which from their <code>__get__</code> behavior alone.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="__set_name__ runs once, at class-body-execution time, right when the class using the descriptor is defined - confirmed live, it printed before any instance of that class was ever created, letting one descriptor object learn the attribute name it was assigned to.">
+    <p class="stem">When does a descriptor's <code>__set_name__</code> method get called?</p>
+    <button class="opt" data-ok>once, right when the class using the descriptor gets defined</button>
+    <button class="opt">every single time any instance attribute anywhere gets read now</button>
+    <button class="opt">only manually, whenever some other code calls it directly here</button>
+  </div>
+  <div class="q" data-why="property defines both __get__ and __set__ (confirmed live via hasattr), which makes it a data descriptor - data descriptors are checked first in attribute lookup, ahead of an instance's own __dict__, which is exactly what makes a validated property setter impossible to silently bypass.">
+    <p class="stem">Why is <code>property</code> specifically a <em>data</em> descriptor, not a non-data one?</p>
+    <button class="opt" data-ok>it defines both __get__ and __set__, confirmed live via hasattr</button>
+    <button class="opt">because it is a built-in type, not one hand-written here</button>
+    <button class="opt">data descriptors simply mean any descriptor that stores numeric values</button>
+  </div>
+  <div class="q" data-why="Verified live with a minimal pair: a data descriptor's __get__ still won even after writing straight into the instance's own __dict__ under the same name, while a non-data descriptor lost to that same instance-dict entry - data descriptors are checked before the instance __dict__, non-data descriptors only after it.">
+    <p class="stem">If both a data descriptor and a matching instance <code>__dict__</code> entry exist under the same name, which wins?</p>
+    <button class="opt" data-ok>the data descriptor, checked before the instance dict, confirmed live</button>
+    <button class="opt">the instance dict entry, which always wins over any descriptor</button>
+    <button class="opt">Python raises AttributeError instead of ever picking either one now</button>
+  </div>
+  <div class="q" data-why="classmethod and staticmethod both define __get__ but neither defines __set__ (confirmed live via hasattr on each), which makes them non-data descriptors - classmethod's __get__ binds the class as the first argument, staticmethod's __get__ just returns the plain function unbound.">
+    <p class="stem">Why are <code>classmethod</code> and <code>staticmethod</code> non-data descriptors?</p>
+    <button class="opt" data-ok>each defines __get__ only, confirmed live, with no __set__ present</button>
+    <button class="opt">because neither one is ever actually called through dot access</button>
+    <button class="opt">non-data simply means a descriptor storing no data whatsoever, ever</button>
+  </div>
+  <div class="q" data-why="Confirmed live: assigning a descriptor instance straight into an instance's own __dict__ does nothing special at all - it is returned as a plain stored object, unevaluated, because the protocol only activates when the descriptor is found on the class side during the MRO walk, not sitting inside one instance's own dict.">
+    <p class="stem">What happens if a descriptor instance is assigned straight into an instance's own <code>__dict__</code> instead of the class?</p>
+    <button class="opt" data-ok>nothing special, it's returned as a plain object, entirely unevaluated</button>
+    <button class="opt">Python raises TypeError immediately on that one exact assignment line</button>
+    <button class="opt">it behaves completely identically to living on the class instead</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official <a href="https://docs.python.org/3/howto/descriptor.html">Descriptor HowTo Guide</a> (fetched and verified live before writing this lesson) — the pure-Python reference implementations of <code>property</code>, <code>classmethod</code>, and <code>staticmethod</code> shown there are what sections 2-3 above are drawn from directly, and it covers the full attribute-lookup algorithm (<code>object.__getattribute__</code>) in more depth than section 4's summary.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day37">glossary</a> under Day 37.<br>
+This is the mechanism behind Day 30's <code>@property</code> and Day 32's <code>@classmethod</code>/<code>@staticmethod</code> — not new behavior, the machinery those two days were already quietly running.<br><br>
+💬 Anything unclear — the lookup order, writing a reusable validated-attribute descriptor, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

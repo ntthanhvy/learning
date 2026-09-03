@@ -3727,3 +3727,135 @@
   completion/quiz-outcome signal, or a user-named track to deepen, as
   materially higher priority than searching for a 60th topic with no
   reported learning signal to aim at.
+- 2026-09-03 generation (Lesson 60, headless 06:00 run): idempotency check
+  first - confirmed no `lessons/0060-*.html` file existed and no `n: 60`/
+  `date: "2026-09-03"` entry was in `nav.js` before writing anything (highest
+  prior lesson was 59, dated 2026-09-02). Attempted a direct DB read via
+  `bin/query-progress backend` as a single standalone command per the
+  briefing's instruction to try it once - blocked immediately requiring
+  approval with no user present, same as every prior round for ~8 weeks; did
+  not retry. Fell back to `learning-records/` and repo file state alone -
+  both records (0001's baseline, 0002's concurrency-vocabulary gap) confirmed
+  unchanged and already fully reflected in prior lessons; still no
+  `lesson_completed`/quiz-outcome record exists for any lesson, so there is
+  still no reported weak spot to target. Lesson 59 left no named candidate -
+  its own closing note said the next session should prioritize a
+  completion/quiz-outcome signal or a user-named track over a blind topic
+  pick, but neither existed, so ran a fresh gap-finding pass per the
+  briefing's explicit fallback instruction: read MISSION.md's four scope
+  tracks and grepped all 59 lesson titles plus `glossary.html`'s full term
+  list via a Node script (`fs.readdirSync` + lowercase substring match)
+  against 174 candidate terms spanning all four tracks, rather than a shell
+  loop, since a `for` loop hit this sandbox's "Contains simple_expansion"
+  block again this round, consistent with every prior round's documented
+  finding. The script surfaced 137 zero-hit candidates; the overwhelming
+  majority were out-of-scope per MISSION.md on inspection (GraphQL/gRPC/
+  websockets/API gateway - frameworks/infra-adjacent; OAuth/OIDC/PKCE/MFA -
+  large enough to warrant their own future lesson rather than a rushed
+  ~20-min pass; domain-driven design vocabulary (bounded context, aggregate
+  root) - closer to architecture-pattern territory than this course's four
+  named tracks; sharding/replica-lag/multi-tenancy-as-distributed-systems -
+  already-ruled-out categories from recent rounds' closing notes).
+  CHECK constraints stood out as the strongest remaining candidate: squarely
+  in the data-modeling/schema-design track, Postgres-native (no distributed-
+  systems territory involved), a genuinely fundamental DDL tool this course
+  had never covered despite five separate lessons on adjacent constraint
+  types (Lesson 33 version columns, Lesson 34 soft delete, Lesson 35 upsert/
+  ON CONFLICT, Lesson 38 foreign key referential actions, Lesson 40
+  deadlocks), and ties directly back to Lesson 17's handler-level input
+  validation and Lesson 59's RLS lesson via the same "push the guarantee
+  down a layer so it holds regardless of which code path writes the row"
+  framing used again here for data integrity instead of authorization.
+  Double-checked "CHECK constraint", `CHECK\s*\(` (SQL syntax form), and
+  the bare word "check" all before committing - the bare-word grep surfaced
+  28 files, all false positives on ordinary English "check" (liveness check,
+  health check, ownership check, RLS's own "WITH CHECK" clause name), none
+  a real CHECK-constraint mention; re-ran a second, separate substring probe
+  for "timezone"/"UTC" as a runner-up candidate and found the same false-
+  positive pattern (matches were inside unrelated words), while `statement_
+  timeout`/`lock_timeout` came back genuinely zero-hit but felt like a
+  thinner, more niche ~20-min lesson than CHECK constraints - noted as a
+  second-tier candidate for a future round rather than chosen this round.
+  Lesson 60 covers: the gap Lesson 17's handler-level validation leaves open
+  - it only holds for code that calls that validation function, so a
+  backfill script, a database-console fix, or a future admin tool can still
+  write an illegal value (a negative price) with nothing to stop it; CHECK
+  constraint syntax at both the per-column and per-table level (the latter
+  needed for any cross-column rule, e.g. discounted_price < price, which
+  can't be expressed per-column at all); adding one to an existing table via
+  `ALTER TABLE ... ADD CONSTRAINT ... CHECK (...)`, and that Postgres
+  validates every existing row immediately as part of that ALTER, failing
+  the whole statement if even one current row already violates the new
+  rule; an explicit trap on CHECK's NULL behavior, sourced directly from the
+  Postgres docs' own wording - a CHECK constraint is satisfied if its
+  expression evaluates to TRUE *or* NULL, so `CHECK (price > 0)` alone lets
+  a NULL price through silently and a separate `NOT NULL` is still needed;
+  a `table.cmp` (Lesson 25's component) lining up CHECK against FOREIGN KEY
+  (Lesson 38) and UNIQUE (Lesson 35) as three constraint types at the same
+  table layer, each answering a genuinely different question rather than
+  overlapping; and a closing section naming CHECK as a complement to
+  handler-level validation, not a replacement, explicitly reusing Lesson
+  59's "keep both layers" framing. No Go snippet was used (SQL/DDL only,
+  matching Lessons 38/59's precedent for constraint-and-DDL-native topics) -
+  `go version` was not attempted this round since the lesson never needed
+  Go content, so the two-rounds-running block flagged in Lessons 58/59's
+  notes remains unconfirmed either way as a standing sandbox change versus
+  coincidence. Quiz options were drafted, then verified with a `node -e`
+  inline script parsing the quiz HTML and counting `.split(/\s+/).length`
+  per option (this course's established Node-over-shell-loop preference) -
+  first draft was uneven on three of four questions (Q1 10/10/9/10, Q2
+  11/12/9/11 originally then 11/12/11/12 after a first fix, Q3 12/12/12/11
+  originally then 13/13/13/13 after a first fix), fixed through two
+  rewrite-and-recount passes per question (re-verified with the same script
+  after each pass) to reach final tallies of Q1 10/10/10/10, Q2 12/12/12/12,
+  Q3 13/13/13/13, Q4 11/11/11/11 - independently cross-checked a second way
+  via `Grep` line-by-line extraction of every `class="opt"` line and a
+  manual per-line word count that matched the script's tallies exactly for
+  all sixteen options; confirmed exactly 4 `data-ok` (one per question).
+  Ran an occurrence-accurate tag-balance check (Node script counting open
+  vs. close tags via regex) for every tag pair used: div 7/7, p 19/19, pre
+  4/4, code 27/27, h1 1/1, h2 7/7, table 1/1, thead 1/1, tbody 1/1, tr 5/5,
+  th 8/8, td 12/12, strong 4/4, em 5/5, dfn 1/1, button 16/16, a 1/1, span
+  2/2, and confirmed exactly 4 `data-ok` matching the quiz-check count
+  above. Independently re-verified div, p, code, and button counts a second
+  way via individual `Grep -o` occurrence counts (not the Grep tool's
+  built-in "count" mode, which was discovered this round to count matching
+  *lines* rather than total occurrences - `<code>` on line 46 appears nine
+  times on one line and the tool's count mode returned 12 total matches
+  where the correct occurrence count was 27, a real tooling-quirk catch
+  worth flagging for future rounds relying on that mode for tag-balance
+  work) - div 7/7, p 19/19, code 27/27, button 16/16, all matching the Node
+  script exactly. Full re-read of the shipped file after all verification
+  passes found no stray artifacts, no malformed attributes, no leftover
+  editing marks - clean on first full read, unlike Lessons 56/58/59's
+  rounds which each caught one authoring bug at this stage. Added one new
+  glossary term - `CHECK constraint` - grepped beforehand per the paragraph
+  above and confirmed no collision (the only near-hit was `foreign_key_
+  violation` mentioned in passing inside the existing RESTRICT row, not a
+  duplicate entry); deliberately did not add `check_violation`,
+  `foreign_key_violation`, or `unique_violation` as their own glossary rows,
+  since they're used only as one-line error-name examples inside the
+  comparison table rather than as jargon this lesson explains in the body
+  text. Registered Lesson 60 in `nav.js`. Primary source: before citing it,
+  ran a live `WebFetch` check against `https://www.postgresql.org/docs/
+  current/ddl-constraints.html` (a freshly-typed URL, per the standing
+  reminder from Lesson 53's 404 incident) - confirmed live and covering
+  exactly the material cited: section 5.5.1 "Check Constraints," per-column
+  and per-table CHECK syntax, and the documentation's own explicit note that
+  a check constraint is satisfied by TRUE or NULL, not just TRUE; cited as
+  extending RESOURCES.md's standing "PostgreSQL Manual — Data Definition"
+  citation into the constraints chapter specifically, the same extend-an-
+  existing-citation pattern recent rounds have used. Ran `bin/record-
+  progress backend lesson_generated --day 60 --lesson
+  0060-check-constraints.html --detail '{"by":"launchd"}'` directly from the
+  repo root as a single standalone command - succeeded immediately on the
+  first attempt, no approval blocker this round. This closes the fresh
+  gap-finding task this round's own briefing assigned, since Lesson 59 left
+  no named candidate. Named candidates for next round: statement_timeout/
+  lock_timeout (runtime-concepts track, confirmed zero-hit but assessed as
+  thinner material this round), and OAuth/OpenID Connect/PKCE/refresh tokens
+  (auth track, assessed as large enough to warrant its own dedicated lesson
+  rather than a rushed pass). No reported completion/quiz-outcome signal
+  still exists after 60 rounds - the next session should treat that signal,
+  or a user-named track to deepen, as materially higher priority than a
+  61st topic picked blind, same standing note as every prior round.

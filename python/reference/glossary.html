@@ -338,6 +338,14 @@
   <tr><td>reduce</td><td>giữ nguyên "reduce" — gộp toàn bộ iterable thành 1 giá trị duy nhất, áp hàm 2 tham số lần lượt từ trái sang phải</td><td>A function, <code>functools.reduce(function, iterable, initial)</code>, that applies a two-argument function cumulatively across an iterable, left to right, collapsing it to one value — the general mechanism <code>sum()</code>/<code>any()</code>/<code>max()</code> are each one narrow, named case of. An empty iterable with no <code>initial</code> raises <code>TypeError</code>.</td></tr>
 </table>
 
+<h2 id="day37">Day 37 — Descriptors: how @property and @classmethod actually work</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>descriptor protocol</td><td>giữ nguyên "descriptor protocol" — tập method (__get__, __set__, __set_name__) cho phép 1 object đặt trong class tự can thiệp vào việc đọc/ghi attribute</td><td>The set of methods (<code>__get__</code>, <code>__set__</code>, <code>__set_name__</code>) that, when defined on an object stored in a class's own <code>__dict__</code>, let that object intercept and customize attribute access on every instance of the class, instead of a plain value just sitting there. <code>property</code>, <code>classmethod</code>, and <code>staticmethod</code> are all built on it.</td></tr>
+  <tr><td>descriptor</td><td>giữ nguyên "descriptor" — object gắn ở class, định nghĩa __get__/__set__, Python tự gọi khi đọc/ghi obj.attr thay vì trả giá trị lưu sẵn</td><td>Any object whose class defines one or more of the descriptor protocol's methods, and which is itself stored as a class attribute. Python calls its <code>__get__</code>/<code>__set__</code> automatically on attribute access instead of just returning a plain stored value.</td></tr>
+  <tr><td>non-data descriptor</td><td>giữ nguyên "non-data descriptor" — descriptor chỉ có __get__, không có __set__, nên instance __dict__ cùng tên sẽ được ưu tiên đọc trước, __get__ không chạy</td><td>A descriptor whose class defines only <code>__get__</code>, with no <code>__set__</code> or <code>__delete__</code> — it customizes reads but has no say over writes, so a same-named entry in an instance's own <code>__dict__</code> is found first and the descriptor's <code>__get__</code> never runs. <code>classmethod</code>, <code>staticmethod</code>, and plain functions are all non-data descriptors; <code>property</code> is not (it defines <code>__set__</code>, making it a data descriptor, checked ahead of the instance <code>__dict__</code>).</td></tr>
+</table>
+
 <p class="next">💬 A term here still unclear? Ask your teacher — hỏi bằng tiếng Việt cũng được.</p>
 
 <script src="../assets/nav.js"></script>

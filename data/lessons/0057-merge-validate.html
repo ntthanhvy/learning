@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 57 · merge(validate=): catching row-multiplication before it ships</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 57 · ~20 min · 3 Sep 2026</p>
+<h1>merge(validate=): catching row-multiplication before it ships</h1>
+<p class="byline">A fresh curriculum/glossary scan for today: Lesson 5 taught <code>merge()</code>/<code>how=</code> and flagged "row multiplication" as a gotcha — a merge key that isn't unique on one side silently produces more output rows than either input table had, with no error. Lesson 5 named the trap but never showed the tool built specifically to catch it. That's today's gap: <code>validate=</code>.</p>
+
+<h2>Recap, in one line</h2>
+<p>Lesson 5's own words: <em>"If the join key isn't unique on one side... merging produces one row per match, not one row per input row... Not a bug... but a number that looks wrong at a glance."</em> <code>validate=</code> is the assertion you add so a wrong assumption about key uniqueness raises immediately, instead of shipping a silently-inflated row count.</p>
+
+<h2>1 · The assumption merge() never checks by default</h2>
+<p>Recall the fixtures from Lesson 5: <code>customers</code> (3 rows, one per customer) and <code>orders</code> (6 rows — An alone has 3 orders). A plain merge just runs, whatever the key cardinality turns out to be:</p>
+<pre><code>customers.merge(orders, on=<span class="str">"customer"</span>, how=<span class="str">"inner"</span>)
+<span class="cm">-- 5 rows -- correct for THIS data, but nothing checked the assumption</span></code></pre>
+<p>If a future data pull accidentally introduces a duplicate customer row (a bad dedupe upstream, a schema change), that same line of code still runs — it just quietly returns a bigger, wrong result. Nothing about the code says "I expect <code>customers</code> to be unique on this key" out loud.</p>
+
+<h2>2 · validate=: naming the expected cardinality, checked before the merge runs</h2>
+<p><dfn data-en="a pd.merge()/DataFrame.merge() keyword that checks the uniqueness of the merge key on one or both sides BEFORE performing the merge, raising pandas.errors.MergeError immediately if the actual data violates the stated expectation -- a pure safety check, it never changes the merge's output rows on success" data-vn="giữ nguyên 'validate=' — tham số của merge(), kiểm tra khóa merge có DUY NHẤT đúng như khai báo hay không TRƯỚC KHI merge chạy, sai thì báo lỗi pandas.errors.MergeError ngay; chỉ là bước kiểm tra an toàn, không đổi kết quả merge khi hợp lệ">validate=</dfn> takes one of four cardinality labels (or their SQL-flavored short aliases), checked against the actual data before the merge runs:</p>
+<pre><code>customers.merge(orders, on=<span class="str">"customer"</span>, how=<span class="str">"inner"</span>, validate=<span class="str">"one_to_many"</span>)
+<span class="cm">-- same 5 rows -- validate= never changes a *passing* result</span>
+
+customers.merge(orders, on=<span class="str">"customer"</span>, how=<span class="str">"inner"</span>, validate=<span class="str">"one_to_one"</span>)
+<span class="cm">-- MergeError: Merge keys are not unique in right dataset; not a one-to-one merge
+-- Duplicates in right:
+--  customer
+--       An
+--     Binh
+--       An ...</span></code></pre>
+<p>Confirmed directly: <code>validate=</code> never touches the output on a passing check — <code>customers.merge(orders, ..., validate="one_to_many")</code> and the same call with no <code>validate=</code> at all produced <code>.equals()</code>-identical results. It is purely a pre-flight assertion, not a transformation. The four labels: <code>"one_to_one"</code> (<code>"1:1"</code>) both sides unique, <code>"one_to_many"</code> (<code>"1:m"</code>) left unique only, <code>"many_to_one"</code> (<code>"m:1"</code>) right unique only, <code>"many_to_many"</code> (<code>"m:m"</code>) no uniqueness required on either side — the escape hatch when duplication really is expected. Direction matters: <code>"one_to_many"</code> checks the <em>left</em> frame is unique, confirmed directly that swapping which frame is duplicated (<code>orders.merge(customers, ..., validate="one_to_many")</code>, with the now-duplicated <code>orders</code> on the left) raises <code>"Merge keys are not unique in left dataset"</code> instead — the same label, checking the opposite side, because "left"/"right" tracks whichever frame is actually first.</p>
+
+<h2>3 · SQL bridge: an assertion, not a JOIN clause</h2>
+<p>SQL has no direct syntax equivalent — a <code>JOIN</code> never declares an expected key cardinality up front, it just runs and produces whatever row count the data implies. The nearest real-world SQL habit is a manual pre-check most engineers write by hand anyway: <code>SELECT key, COUNT(*) FROM t GROUP BY key HAVING COUNT(*) > 1</code> run against a table before trusting it as the "one" side of a join. <code>validate=</code> is that same defensive instinct, built into <code>merge()</code> itself and checked automatically every time instead of remembered occasionally.</p>
+
+<h2>4 · Why this earns its keep in an interview</h2>
+<p>The failure mode <code>validate=</code> guards against is exactly the "no crash, quietly wrong" family this course keeps surfacing (<code>add_prefix()</code> on MultiIndex columns, <code>convert_dtypes()</code>'s under-typed columns) — a row count that's technically a valid DataFrame, just silently bigger than intended, often not caught until a downstream <code>sum()</code> double-counts revenue. Naming <code>validate=</code> unprompted, when asked to combine two tables in an interview, is a strong signal: it says the row-multiplication trap is already internalized, not something to discover live when the numbers look off.</p>
+
+<div class="interview">
+<p><strong>Q: "You're merging a dimension table (customers) into a fact table (orders) — how do you make sure a bad customer dedupe upstream doesn't silently blow up your row count?"</strong> A strong answer, out loud: <em>"I'd add validate='many_to_one' to the merge — orders on the left can repeat a customer any number of times, that's expected, but customers on the right should be unique per key. If an upstream bug ever duplicates a customer row, that line raises a MergeError immediately instead of silently doubling matching orders. It's a pure safety check — on data that's actually clean, the output rows are identical with or without it."</em> The signal: naming the exact cardinality direction (many_to_one, not just "validate=True"), and being clear it's an assertion, not a transform.</p>
+</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/57_merge_validate.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/57_merge_validate.py</code></pre>
+<p>Reuses Lesson 5's fixtures — no new fixture needed: <code>practice/data/orders_raw.csv</code> (An has 3 orders, Binh has 2, Chi has 1 with no matching customer) and <code>practice/data/customers.csv</code> (An/Binh/Danh, one row each). Exercise 1 checks a passing <code>validate="one_to_many"</code> merge (Section 2). Exercise 2 checks that mislabeling the same merge as <code>validate="one_to_one"</code> raises <code>MergeError</code> (Section 2). Exercise 3 checks the reversed direction, <code>orders.merge(customers, ..., validate="many_to_one")</code> (Section 2's direction note).</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="validate= is a pure pre-flight assertion checked before the merge executes -- on data that actually satisfies the stated cardinality, the output rows are identical (confirmed via .equals()) whether or not validate= was passed at all.">
+    <p class="stem">What does <code>validate=</code> change about a merge's OUTPUT rows when the check passes?</p>
+    <button class="opt" data-ok>Nothing -- matches the same merge with no validate= given</button>
+    <button class="opt">It deduplicates the merge key on both sides before joining</button>
+    <button class="opt">It adds an extra column recording which cardinality was detected</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: a validate= mismatch raises pandas.errors.MergeError immediately, naming which side (left or right) had the unexpected duplicate key -- not a warning, not a silently-wrong row count.">
+    <p class="stem">A merge is called with <code>validate="one_to_one"</code>, but one side actually has a duplicate key. What happens?</p>
+    <button class="opt" data-ok>MergeError is raised right away, naming which side had the duplicate</button>
+    <button class="opt">A UserWarning prints, but the merge completes with extra rows anyway</button>
+    <button class="opt">Nothing -- validate= only takes effect when how="outer" is also passed</button>
+  </div>
+  <div class="q" data-why="one_to_many checks that the LEFT frame's key is unique; the right frame is allowed to repeat it. Direction is about which frame is passed first as the left argument, not about which table is conceptually the 'parent'.">
+    <p class="stem"><code>validate="one_to_many"</code> requires uniqueness of the merge key on which side?</p>
+    <button class="opt" data-ok>The left frame only -- the right frame repeats freely</button>
+    <button class="opt">Both frames -- one_to_many is just another spelling of one_to_one</button>
+    <button class="opt">Neither frame -- one_to_many never checks uniqueness, only row counts</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official pandas <a href="https://pandas.pydata.org/docs/user_guide/merging.html">Merge, join, concatenate and compare</a> user guide — the "Checking for duplicate keys" section documents <code>validate=</code>'s four cardinality labels, their short aliases, and the <code>MergeError</code> it raises (~5 min, same page Lesson 5 already cited).</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>validate=</code> was added today, right after Lesson 56's <code>json_normalize()</code> entry.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-57 comes back reported as shakiest, otherwise a fresh curriculum/glossary scan for the next genuinely-uncovered pattern.<br><br>
+💬 Anything unclear — the cardinality labels, the left/right direction, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

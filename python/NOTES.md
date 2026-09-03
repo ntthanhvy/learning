@@ -4231,3 +4231,135 @@ fail *gracefully* so the learner sees which task failed.
   project-layout reference) remain open since Day 25/28. Still no
   `lesson_completed`/quiz/kata outcome record exists for any day — no
   reported weak spot to target.
+- 2026-09-03 — **Day 37 generated** (Python topic: descriptors). Idempotency:
+  confirmed before writing anything that no `python/lessons/0037-*.html` (or
+  higher) file existed, `assets/nav.js` had no `n: 37`/`date: "2026-09-03"`
+  entry, and `NOTES.md` had no existing `2026-09-03` entry — highest lesson
+  on disk was `0036-functools.html` dated 2026-09-02, so generation proceeded
+  as Day 37, not a re-run.
+  Topic: fixed by this run's own instructions, per Day 36's own next-day
+  note — the descriptor protocol (`__get__`/`__set__`/`__set_name__`), how
+  `@property` is a built-in data descriptor, how `classmethod`/`staticmethod`
+  are non-data descriptors, and the data-vs-non-data lookup-precedence rule —
+  explicitly the mechanism behind Day 30's `@property` and Day 32's
+  `@classmethod`/`@staticmethod`, one level deeper, not a re-teach of either.
+  Read Day 30 (`0030-object-model-dunder-and-property.html`) and Day 32
+  (`0032-classmethod-and-staticmethod.html`) in full first — today's byline
+  and closing footer both name them explicitly and cross-link back, and
+  section 2/3 build directly on their exact `Money`/`Widget`-shaped examples
+  rather than introducing unrelated ones.
+  Web-lookup: used `WebFetch` against `docs.python.org/3/howto/descriptor.html`
+  (the official Descriptor HowTo Guide) before writing anything — succeeded,
+  returning the protocol's three methods, the data-vs-non-data distinction
+  and full lookup-precedence order, the pure-Python reference implementations
+  of `property`/`classmethod`/`staticmethod`, and the `__set_name__` example —
+  all used directly in sections 1-4 and cited as the primary source.
+  **Interpreter-behavior claims verified live, not just from docs**, per
+  Days 34-36's precedent — all run via five separate scratch `uv run python3`
+  probe files before being stated as fact (this course's Python reconfirmed
+  `3.12.3`, matching every prior day): (1) a hand-written `Validated`
+  descriptor's `__set_name__` fired once at class-definition time, before any
+  instance existed, and its `__get__`/`__set__` ran on every read/write,
+  raising `ValueError` on a negative value exactly as written; (2) a minimal
+  data-vs-non-data pair, both shadowed by writing straight into
+  `h.__dict__` under the same name — the data descriptor's `__get__` still
+  won, the non-data descriptor's `__get__` lost to the instance-dict entry;
+  (3) `property` confirmed to define both `__get__` and `__set__` via
+  `hasattr`, `Money.dollars` (class access, no instance) confirmed to return
+  the `property` object itself via the `obj is None` branch; (4) `classmethod`
+  and `staticmethod` confirmed to define `__get__` but not `__set__` via
+  `hasattr`; (5) a descriptor instance assigned straight into an instance's
+  own `__dict__` (not the class's) confirmed to do nothing special — returned
+  as a plain, unevaluated object, contrasted directly against the same
+  descriptor living on the class instead. No claim required correction —
+  every drafted behavioral claim matched its live probe on the first attempt.
+  **A real bug was caught during verification, not shipped**: practice
+  Exercise 2's initial check asserted the non-data descriptor's `__get__`
+  return value (`"from NonDataDesc"`) would show through even after being
+  shadowed by an instance `__dict__` entry — backwards from the lesson's own
+  claim. Running the solved scratch copy caught the mismatch immediately (the
+  correct, live-verified behavior is that the instance-dict entry wins for a
+  non-data descriptor); fixed the check's expected tuple to `("from
+  DataDesc", "instance value")`, matching section 4's actual, verified
+  claim, then re-ran both the unsolved and solved copies to confirm.
+  No-pandas rule: zero pandas/NumPy/`pd.`/`np.` hits in the practice file
+  (grepped case-insensitively — zero hits, no imports beyond built-ins);
+  exactly one hit in the lesson — one contrast sentence/callout (titled
+  "Where pandas goes from here") naming that `DataFrame.loc`/`.iloc` are
+  themselves descriptor-backed attributes, without demonstrating any pandas
+  API, placed once after section 4/the interview callout, matching the
+  hard-rule section above.
+  Practice file `practice/37_descriptors.py` (4 exercises: writing a
+  `__get__`/`__set__`/`__set_name__` validated-attribute descriptor reused
+  across two differently-named attributes on one class, confirming a data
+  descriptor wins over a same-named instance `__dict__` entry while a
+  non-data descriptor loses to one, confirming `property` is itself a data
+  descriptor via direct `hasattr` introspection, and telling `classmethod`
+  apart from `staticmethod` on an unlabeled class from `__get__` behavior
+  alone) needed no on-disk fixtures. Followed this course's standard
+  defensive pattern against the Ellipsis-at-module-level bug family: all four
+  `...` placeholders live strictly inside method/function bodies (`__set__`,
+  a `__get__`, and two plain functions) — confirmed by grep after writing,
+  none at module or class scope.
+  Verified in a scratch dir under the repo root (`python/.scratch/lesson37/`,
+  removed after use): the shipped (unsolved) copy, run via plain `uv run
+  python3` (no `--with` needed) from its real `practice/` path with the
+  documented command, printed four clean ✗ lines with no traceback; a
+  separately solved copy (every `...`/TODO filled in by hand in the scratch
+  copy) printed all four ✓ and the "All green" tally only after the Exercise
+  2 check-tuple bug above was found and fixed.
+  Glossary: added a Day 37 section to `reference/glossary.html`
+  (`descriptor protocol`, `descriptor`, `non-data descriptor`) after
+  confirming via grep that none of the three, nor `__get__`/`__set__`/
+  `__set_name__`, collided with any Day 1-36 entry (Day 30's `@property` and
+  Day 32's `method decorator` rows were left untouched, reused by reference
+  rather than duplicated). The 3 new `<dfn data-en` tags in the lesson body
+  match the 3 new glossary rows exactly (confirmed by count).
+  Quiz: 5 questions. Word counts were checked with a small Python script
+  (regex-extracting each `<div class="q">...</div>` block by scanning up to
+  the next `<div class="q"` or the quiz's end, then counting `.split()`
+  words per `<button class="opt">` line) and mismatched on the first draft
+  for all five questions (Q1 9/8/9, Q2 10/13/10, Q3 11/11/8, Q4 11/9/10, Q5
+  12/9/10). Went through several rewrite-and-recount rounds, including two
+  rounds that each fixed one option only to overshoot another in the same
+  question, before landing all five questions at a clean 10/10/10 — the same
+  "eyeballing is unreliable" lesson Day 35/36 already logged, reconfirmed
+  here by needing four full iteration passes instead of one or two. A stray
+  standalone hyphen character (`"the data descriptor - checked before..."`)
+  was also caught mid-process inflating a `.split()` count by one relative to
+  a hand-count that read the hyphen as punctuation, not its own token —
+  reworded around it (commas instead of a standalone hyphen) rather than
+  relying on manually discounting it. Re-verified with a second,
+  independently-written script (document-order `<button class="opt">`
+  extraction via regex across the whole file, ignoring the per-question
+  `<div>` wrapper entirely, then grouped in threes) run against the final
+  file — independently confirmed all 15 options (5 questions × 3 options)
+  land on exactly 10 words each before shipping. HTML tag-balance was
+  checked two ways: a counting-open-vs-close-tags-per-element script, and a
+  second, structurally different stack-based check using Python's stdlib
+  `html.parser.HTMLParser`; both agreed the file is fully balanced both
+  before and after the quiz-text edits, no structural fixes needed (only
+  visible-text changes inside existing tags). Registered in `assets/nav.js`
+  with `date: "2026-09-03"`.
+  **DB access:** `bin/query-progress` was attempted once per this run's own
+  instructions and was blocked before executing ("This command requires
+  approval"), the same sandbox gate documented on nearly every prior day
+  since Day 8. Not retried. This run paced entirely from on-disk state
+  (`NOTES.md`'s own generation log, `python/lessons/`, `python/assets/
+  nav.js`, `python/learning-records/` — still only the Day 1 baseline, no
+  completion/quiz/kata outcome record for any day 2-36).
+  `bin/record-progress python lesson_generated --day 37 --lesson
+  0037-descriptors.html --detail '{"by":"launchd"}'` was run once after
+  shipping as a single standalone command and **succeeded**: `recorded:
+  python/lesson_generated day=37 lesson=0037-descriptors.html`.
+  **Next-day note:** with descriptors now taught, `PLAN.md`'s Phase 2a spine
+  ("rounding out the language") and every previously-flagged live candidate
+  (`enum`, `match`/`case`, `__slots__`, `functools`, descriptors) are now
+  fully exhausted. The strongest concretely-grounded next step is
+  `RESOURCES.md`'s two still-open "Gaps" (this time actually attempting them
+  via `WebSearch` rather than deferring again, as Days 34-36 each did in
+  succession) — the remaining Phase 2a items `PLAN.md` named but never
+  assigned a day (`pathlib`, `datetime`/timezones, `logging`) are also a
+  reasonable fallback if the Gaps don't resolve cleanly. Still no
+  `lesson_completed`/quiz/kata outcome record exists for any day — no
+  reported weak spot to target.

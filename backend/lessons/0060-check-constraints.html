@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 60 · CHECK constraints: teaching the row its own rules</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 60 · ~20 min</p>
+<h1>CHECK constraints: teaching the row its own rules</h1>
+<p class="byline">Lesson 17 put input validation in the handler: reject a negative price before it ever reaches SQL. Lesson 59 showed the same instinct applied to authorization — push the rule into Postgres itself, so it holds even where the handler check doesn't run. Today's question: what stops a negative price from landing in the <code>orders</code> table via a background job, a migration's own <code>UPDATE</code>, or a teammate's one-off fix six months from now, none of which ever call your handler?</p>
+
+<h2>1 · The gap handler validation doesn't close</h2>
+<p>Lesson 17's input validation is correct and it belongs in the handler — checking that <code>price</code> is a positive number before an <code>INSERT</code> ever runs. But like Lesson 12's ownership check, it's an <em>application-level</em> guarantee: it only holds for code that actually calls that validation function. A data-backfill script writing straight SQL, a teammate's quick fix in a database console, an admin tool built eight months later by someone who never read the original handler — none of them re-run your validation, and none of them are stopped from writing <code>price = -5</code>.</p>
+<p><dfn data-en="a rule attached directly to a table or column, written as a boolean SQL expression, that Postgres evaluates on every INSERT and UPDATE and rejects the write if the expression is false" data-vn="CHECK constraint (giữ nguyên) — luật boolean gắn thẳng vào bảng, Postgres tự kiểm tra mỗi lần ghi, sai thì từ chối insert/update">A CHECK constraint</dfn> moves the same "is this value even legal?" question down into the table definition itself. Once it's declared, <em>every</em> write to that table — from the handler, the backfill script, the console, next year's admin tool — gets the same rule enforced, because the rule now lives on the row, not in any one code path.</p>
+
+<h2>2 · Syntax: per-column and per-table</h2>
+<p>A CHECK constraint is a boolean expression attached to a column or to the whole table. Per-column, right after the type:</p>
+<pre><code>CREATE TABLE products (
+  id SERIAL PRIMARY KEY,
+  name TEXT NOT NULL,
+  price NUMERIC CHECK (price > 0)
+);</code></pre>
+<p>Give it a name so a future violation error is readable instead of a generated string like <code>products_price_check</code>:</p>
+<pre><code>CREATE TABLE products (
+  id SERIAL PRIMARY KEY,
+  name TEXT NOT NULL,
+  price NUMERIC CONSTRAINT positive_price CHECK (price > 0)
+);</code></pre>
+<p>A table-level CHECK can reference more than one column — this is the only place a cross-column rule like "discounted price must actually be lower" can live at all:</p>
+<pre><code>CREATE TABLE products (
+  id SERIAL PRIMARY KEY,
+  price NUMERIC CHECK (price > 0),
+  discounted_price NUMERIC CHECK (discounted_price > 0),
+  <span class="cm">-- table-level: compares two columns, so it can't be written per-column</span>
+  CHECK (discounted_price &lt; price)
+);</code></pre>
+<p>Adding one to an existing table works the same as any other constraint — see Lesson 19's migration pattern:</p>
+<pre><code>ALTER TABLE products
+  ADD CONSTRAINT positive_price CHECK (price > 0);
+<span class="cm">-- Postgres checks every EXISTING row against the new rule immediately;
+-- the ALTER fails if even one current row already violates it.</span></code></pre>
+
+<h2>3 · The trap: CHECK says nothing about NULL</h2>
+<div class="callout"><strong>Trap:</strong> a CHECK constraint passes if its expression evaluates to <code>TRUE</code> <em>or</em> to <code>NULL</code> — only an explicit <code>FALSE</code> is rejected. <code>price > 0</code> evaluated against a <code>NULL</code> price yields <code>NULL</code>, not <code>FALSE</code>, so the row is allowed through with no price at all. <code>CHECK (price > 0)</code> guards against a wrong price; it does nothing to guard against a missing one. If a price is mandatory, that still needs its own <code>NOT NULL</code> alongside the CHECK — the two constraints answer different questions and neither substitutes for the other.</div>
+
+<h2>4 · CHECK vs. the other row-level guards this course already taught</h2>
+<p>Three constraint types now sit at the same layer — the table itself — each enforcing a different kind of rule. Lining them up by what each one actually answers:</p>
+<table class="cmp">
+<thead><tr><th></th><th>CHECK</th><th>FOREIGN KEY (Lesson 38)</th><th>UNIQUE (Lesson 35)</th></tr></thead>
+<tbody>
+<tr><th>Answers</th><td>is this value legal on its own (or vs. another column)?</td><td>does this reference point at a row that exists?</td><td>does this value collide with another row?</td></tr>
+<tr><th>Scope</th><td>one row's own columns</td><td>this row against another table</td><td>this row against every other row</td></tr>
+<tr><th>Example</th><td><code>price &gt; 0</code></td><td><code>user_id</code> must exist in <code>users</code></td><td><code>email</code> can't repeat</td></tr>
+<tr><th>Violation error</th><td>check_violation</td><td>foreign_key_violation</td><td>unique_violation</td></tr>
+</tbody>
+</table>
+<p>None of the three overlaps with the others — a table commonly carries all three at once, each closing a different way a row could be wrong, the same "every layer guards something different" reading Lesson 58's synthesis lesson gave to three staleness checks.</p>
+
+<h2>5 · Where this earns its keep over handler validation</h2>
+<p>A CHECK constraint isn't a replacement for Lesson 17's handler-level validation — keep both, for the same reason Lesson 59 kept the handler's ownership check alongside RLS. The handler can return a clean <code>400</code> with a field-specific message before a query even runs, which is a far better experience than parsing a raw Postgres error. What the constraint adds is the backstop: it holds even when a code path skips the handler, and it holds forever, across every future engineer who writes a query against that table without reading the original validation code first. The strongest case for reaching for one: any rule that must never be false regardless of which code wrote the row — a price that can never go negative, a status column limited to a fixed set of strings, an end date that can never precede its start date.</p>
+
+<div class="interview">
+<p><strong>Q: "When would you use a CHECK constraint instead of just validating in the application?"</strong> A strong answer, out loud: <em>"I'd keep the application-level validation regardless, because it gives a clean 400 with a useful message before a query even runs. A CHECK constraint is for rules that have to hold no matter which code path writes the row — a background job, a migration, someone's one-off fix in a console next year. If a rule like 'price can't be negative' is only enforced in one handler, it's one refactor away from a bad row landing in the table. I'd add the constraint for anything that would be a real data-integrity problem if it slipped through, and I'd remember it isn't a NOT NULL substitute — a CHECK passes on NULL unless I add that separately."</em> The signal: layering the constraint alongside application validation rather than picking one, and knowing the NULL caveat without being asked.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A CHECK constraint is enforced by Postgres on every write to the table, regardless of which code path issued it -- a handler's own validation function only runs for code that actually calls it, so any other write path (a script, a console query, a future tool) can still write an illegal value.">
+    <p class="stem">What gap does handler-level validation (Lesson 17) leave open that a CHECK constraint closes?</p>
+    <button class="opt" data-ok>writes from code paths that never call the handler's validation</button>
+    <button class="opt">writes from code paths that call the handler's validation twice</button>
+    <button class="opt">writes that happen only just before the handler's own authentication</button>
+    <button class="opt">writes that happen only during the handler's own migration step</button>
+  </div>
+  <div class="q" data-why="CHECK (price > 0) evaluated against a NULL price returns NULL, not FALSE, and a CHECK constraint only rejects an expression that evaluates to FALSE -- so a missing price passes the check silently, and a separate NOT NULL is needed to actually require a value.">
+    <p class="stem">A column has `CHECK (price > 0)` but no `NOT NULL`. What happens on `INSERT` with `price` left as `NULL`?</p>
+    <button class="opt" data-ok>the insert succeeds, since the null check evaluates to NULL, not false</button>
+    <button class="opt">the insert fails, since the check evaluates to false on any null</button>
+    <button class="opt">the insert fails, since a NULL price value always violates the constraint</button>
+    <button class="opt">the insert succeeds, but the price is silently set to zero instead</button>
+  </div>
+  <div class="q" data-why="A table-level CHECK constraint (written on its own line, not attached to one column's type) can reference more than one column in the same boolean expression, which is exactly what comparing discounted_price against price requires -- a per-column CHECK only ever sees the single column it's attached to.">
+    <p class="stem">Why must `CHECK (discounted_price &lt; price)` be written as a table-level constraint, not a per-column one?</p>
+    <button class="opt" data-ok>it compares two columns, and a per-column check only sees its own column</button>
+    <button class="opt">it compares two tables, and a per-column check only sees its own table</button>
+    <button class="opt">it compares two rows, and a per-column check only sees the current row</button>
+    <button class="opt">it compares two databases, and a per-column check only sees its own one</button>
+  </div>
+  <div class="q" data-why="Adding a CHECK constraint to an existing table makes Postgres validate every current row against the new rule immediately as part of the ALTER TABLE statement, so the ALTER itself fails and rolls back if even one existing row already violates the new condition.">
+    <p class="stem">What happens when you `ALTER TABLE ... ADD CONSTRAINT ... CHECK (...)` on a table that already has rows violating that condition?</p>
+    <button class="opt" data-ok>the ALTER TABLE statement itself fails and no constraint is added</button>
+    <button class="opt">the ALTER TABLE statement succeeds and silently deletes the bad rows</button>
+    <button class="opt">the ALTER TABLE statement succeeds and silently fixes the bad rows</button>
+    <button class="opt">the ALTER TABLE statement succeeds and ignores rows written before it</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> before citing it, ran a live <code>WebFetch</code> check against <code>https://www.postgresql.org/docs/current/ddl-constraints.html</code> (a freshly-typed URL, per the standing reminder from Lesson 53's 404 incident) — confirmed live and covering exactly the material cited: section 5.5.1 "Check Constraints," per-column and per-table CHECK syntax, and the documentation's own explicit note that "a check constraint is satisfied if the check expression evaluates to true or the null value." This extends RESOURCES.md's standing "PostgreSQL Manual — Data Definition" citation into the constraints chapter specifically, the same extend-an-existing-citation pattern recent rounds have used.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> open. No confirmed next-lesson gap is named yet, and there is still no <code>lesson_completed</code>/quiz/kata outcome recorded for any lesson after 60 rounds — the honest next step is a completion signal or a user-named track to go deeper on, not a topic picked blind. If neither shows up, a fresh gap-finding grep against MISSION.md's four tracks (data modeling, API design, runtime concepts, auth/security/ops) is the fallback, same as this round's own approach.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

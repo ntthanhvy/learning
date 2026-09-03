@@ -118,6 +118,8 @@
       file: "lessons/0055-add-prefix-and-add-suffix.html" },
     { n: 56, date: "2026-09-02", title: "json_normalize(): flattening nested JSON into a table",
       file: "lessons/0056-json-normalize.html" },
+    { n: 57, date: "2026-09-03", title: "merge(validate=): catching row-multiplication before it ships",
+      file: "lessons/0057-merge-validate.html" },
   ];
 
   const REFS = [

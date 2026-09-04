@@ -126,6 +126,8 @@
       file: "lessons/0059-row-level-security.html" },
     { n: 60, date: "2026-09-03", title: "CHECK constraints: teaching the row its own rules",
       file: "lessons/0060-check-constraints.html" },
+    { n: 61, date: "2026-09-04", title: "statement_timeout & lock_timeout: a query that should have died minutes ago",
+      file: "lessons/0061-statement-timeout-and-lock-timeout.html" },
   ];
 
   const REFS = [

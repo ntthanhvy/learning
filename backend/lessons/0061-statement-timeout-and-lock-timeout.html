@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 61 · statement_timeout &amp; lock_timeout: a query that should have died minutes ago</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 61 · ~20 min</p>
+<h1>statement_timeout &amp; lock_timeout: a query that should have died minutes ago</h1>
+<p class="byline">Lesson 18 covered a pool running dry because every connection was checked out and none came back. Lesson 40 covered two transactions stuck waiting on each other's locks forever, until Postgres's own deadlock detector stepped in. Neither lesson answered a simpler, more common version of both: one single query, or one single lock wait, that just never finishes — no deadlock cycle, no code bug, just a query that should have died minutes ago and didn't. By default, Postgres will let it run.</p>
+
+<h2>1 · Postgres's default patience is infinite</h2>
+<p>A missing <code>WHERE</code> clause on an <code>UPDATE</code>, an accidental cross join, a query against a table that grew ten times larger than when it was written, a row lock held by a transaction someone forgot to commit — none of these produce an error by default. Postgres will run the statement, or wait for the lock, for as long as it takes. There is no built-in ceiling.</p>
+<p>That silence is expensive precisely because of Lesson 18's own <code>connection pool</code>: a query that runs for ten minutes holds its one checked-out connection for the full ten minutes, unavailable to every other request. A pool of 20 connections doesn't need 20 runaway queries to seize up — a handful is often enough to starve every other handler waiting on <code>Acquire()</code>, exactly the pool-exhaustion symptom Lesson 18 described, just caused by one slow query instead of a leaked one.</p>
+<p><dfn data-en="a per-session setting that tells Postgres to abort any statement that runs longer than the given duration, returning an error instead of continuing to run or wait indefinitely" data-vn="statement_timeout (giữ nguyên) — set thời gian tối đa cho 1 câu lệnh, quá giờ thì Postgres tự hủy, trả lỗi">statement_timeout</dfn> and <dfn data-en="a per-session setting that tells Postgres to abort a statement if it waits longer than the given duration just to acquire a lock, separate from the total time the statement itself is allowed to run" data-vn="lock_timeout (giữ nguyên) — set thời gian tối đa CHỜ LOCK, quá giờ thì Postgres hủy statement đó, khác với statement_timeout">lock_timeout</dfn> exist to put a ceiling on both halves of that problem.</p>
+
+<h2>2 · Two different clocks, two different things they measure</h2>
+<p>These are easy to blur together because both abort a statement and both are configured the same way, but they start their clocks at different moments and measure different waiting:</p>
+<table class="cmp">
+<thead><tr><th></th><th>statement_timeout</th><th>lock_timeout</th></tr></thead>
+<tbody>
+<tr><th>Measures</th><td>total time the statement runs, start to finish</td><td>time spent only while waiting to acquire a lock</td></tr>
+<tr><th>Fires on</th><td>a slow scan, a huge sort, any long-running query</td><td>a <code>SELECT ... FOR UPDATE</code> or <code>UPDATE</code> blocked behind another transaction's lock</td></tr>
+<tr><th>SQLSTATE on abort</th><td><code>57014</code> (query_canceled)</td><td><code>55P03</code> (lock_not_available)</td></tr>
+<tr><th>Default value</th><td>0 — disabled, no limit</td><td>0 — disabled, no limit</td></tr>
+</tbody>
+</table>
+<p>A statement that never has to wait for a lock at all — a plain slow <code>SELECT</code> doing a full table scan — only ever risks hitting <code>statement_timeout</code>. A statement that runs instantly once it acquires its lock, but sits behind another transaction's row lock for nine minutes first, is the case <code>lock_timeout</code> exists for — <code>statement_timeout</code> would eventually catch that too, but <code>lock_timeout</code> lets you fail fast on lock contention specifically, with a much shorter budget than you'd want for genuinely heavy queries.</p>
+
+<h2>3 · Setting them: session, transaction, or query</h2>
+<p>Both are ordinary <code>SET</code> parameters — in milliseconds if no unit is given, or with an explicit unit like <code>'3s'</code>:</p>
+<pre><code><span class="cm">-- for the rest of this session/connection</span>
+SET statement_timeout = '5s';
+SET lock_timeout = '2s';
+
+<span class="cm">-- scoped to just this transaction -- reverts automatically at COMMIT/ROLLBACK,</span>
+<span class="cm">-- the safer default for anything running over a pooled connection</span>
+BEGIN;
+SET LOCAL statement_timeout = '5s';
+SET LOCAL lock_timeout = '2s';
+UPDATE accounts SET balance_cents = balance_cents - 500 WHERE id = 42;
+COMMIT;</code></pre>
+<p><code>SET</code> (without <code>LOCAL</code>) changes the setting for the rest of that connection — dangerous on a pooled connection, since the next unrelated request that happens to borrow it inherits a timeout it never asked for. <code>SET LOCAL</code> is scoped to the current transaction only and reverts automatically at <code>COMMIT</code> or <code>ROLLBACK</code>, which is why it's the shape worth reaching for by default when a value needs to differ per request rather than per whole database.</p>
+<p>Because the value is just a session setting, a Go handler using pgx can set it once at the start of a request-scoped transaction, before running the actual query:</p>
+<pre><code><span class="kw">func</span> updateBalance(ctx context.Context, pool *pgxpool.Pool, accountID <span class="ty">int64</span>, deltaCents <span class="ty">int64</span>) error {
+    tx, err := pool.Begin(ctx)
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        <span class="kw">return</span> fmt.Errorf(<span class="st">"begin: %w"</span>, err)
+    }
+    <span class="kw">defer</span> tx.Rollback(ctx)
+
+    <span class="cm">// scoped to this transaction only -- never leaks onto the next request</span>
+    <span class="cm">// that happens to reuse this pooled connection afterward</span>
+    <span class="kw">if</span> _, err := tx.Exec(ctx, <span class="st">`SET LOCAL lock_timeout = '2s'`</span>); err != <span class="kw">nil</span> {
+        <span class="kw">return</span> fmt.Errorf(<span class="st">"set lock_timeout: %w"</span>, err)
+    }
+    _, err = tx.Exec(ctx, <span class="st">`UPDATE accounts SET balance_cents = balance_cents + $1 WHERE id = $2`</span>, deltaCents, accountID)
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        <span class="kw">return</span> fmt.Errorf(<span class="st">"update balance: %w"</span>, err)
+    }
+    <span class="kw">return</span> tx.Commit(ctx)
+}</code></pre>
+<p>This is a different mechanism from <code>context.Context</code> cancellation, worth naming explicitly since both can end a query early: <code>ctx</code>'s deadline is enforced by the Go driver canceling the query from the client side; <code>statement_timeout</code>/<code>lock_timeout</code> are enforced by Postgres itself, server-side, regardless of what the client is doing. A generous or missing <code>ctx</code> deadline doesn't protect the database from a runaway statement — the two are complementary, not substitutes for each other.</p>
+
+<div class="callout"><strong>Trap:</strong> setting either value in <code>postgresql.conf</code> applies it to <em>every</em> session on the whole server, including migrations, long analytical reports, and admin backfills that may legitimately need minutes. The Postgres manual itself calls this out — a global <code>statement_timeout</code> is generally not the recommended way to apply it; scope it per role, per session, or per transaction (as above) so a genuinely long-running job can opt out or set its own larger budget, instead of a database-wide value fighting every use case at once.</div>
+
+<h2>4 · Where this sits next to Lesson 40's deadlock detector</h2>
+<p>Lesson 40's deadlock detector and <code>lock_timeout</code> both end a stuck lock wait, but they catch different shapes of stuck. The deadlock detector only fires when there's an actual <em>cycle</em> — transaction A waiting on a lock B holds, while B waits on a lock A holds. It does nothing for a transaction waiting on a lock held by a perfectly healthy transaction that is just slow, or one some engineer left open in a debugger and forgot about — there's no cycle, so nothing detects it, and the wait is unbounded. <code>lock_timeout</code> catches that second case: it doesn't care whether a cycle exists, only how long <em>this</em> statement has been waiting for <em>any</em> lock. The two are complementary — a real deadlock trips the detector almost immediately regardless of any timeout setting, while a plain single-sided long wait is exactly what only <code>lock_timeout</code> catches.</p>
+
+<div class="interview">
+<p><strong>Q: "An endpoint that updates a single row occasionally hangs for minutes with no error, then eventually succeeds. What would you check, and what would you change?"</strong> A strong answer, out loud: <em>"No error and no deadlock message rules out Lesson 40's cycle case — this sounds like the endpoint is sitting in a lock queue behind some other transaction that's holding the row's lock and just being slow, or that never committed. First I'd check for neither a <code>statement_timeout</code> nor a <code>lock_timeout</code> set on that connection — with both at the default of zero, Postgres will wait indefinitely, and that lines up with the symptom exactly. I'd add a <code>SET LOCAL lock_timeout</code> scoped to the transaction, short — a couple seconds — so a stuck lock wait fails fast with SQLSTATE <code>55P03</code> instead of silently tying up a pooled connection for minutes, which is its own problem given how few runaway queries it takes to exhaust a pool."</em> The signal: distinguishing this from a deadlock by the missing error, and reaching for <code>SET LOCAL</code> rather than a global config change.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="statement_timeout measures the statement's total running time from start to finish, while lock_timeout measures only the time spent waiting to acquire a lock -- a query that runs slowly without ever waiting on a lock can only trip statement_timeout, and a query blocked on a lock before it even starts running is exactly the case lock_timeout targets.">
+    <p class="stem">What is the actual difference between what `statement_timeout` and `lock_timeout` each measure?</p>
+    <button class="opt" data-ok>total run time, versus only the lock wait time</button>
+    <button class="opt">a server-wide setting, versus a purely client-side only setting</button>
+    <button class="opt">only SELECT statements, versus only UPDATE and DELETE statements</button>
+    <button class="opt">read replica queries, versus queries against the primary database</button>
+  </div>
+  <div class="q" data-why="Both statement_timeout and lock_timeout default to 0, which disables the timeout entirely -- Postgres will run a statement or wait for a lock indefinitely unless one of these is explicitly set to a nonzero duration.">
+    <p class="stem">What is the default value of both `statement_timeout` and `lock_timeout` in Postgres?</p>
+    <button class="opt" data-ok>zero, meaning no timeout applies at all</button>
+    <button class="opt">thirty seconds, a commonly assumed safe value</button>
+    <button class="opt">five minutes, matching a typical HTTP client</button>
+    <button class="opt">one second, an intentionally aggressive default pick</button>
+  </div>
+  <div class="q" data-why="SET LOCAL scopes the change to the current transaction only and reverts automatically at COMMIT or ROLLBACK, so the next unrelated request that borrows the same pooled connection afterward is unaffected -- plain SET changes the setting for the rest of that connection's session, which on a pooled connection can silently leak onto a completely unrelated later request.">
+    <p class="stem">Why is `SET LOCAL statement_timeout = '5s'` inside a transaction usually safer than a plain `SET` on a pooled connection?</p>
+    <button class="opt" data-ok>it reverts at commit, so it never leaks onto the next request</button>
+    <button class="opt">it applies to every single connection across the entire whole server instead</button>
+    <button class="opt">it is enforced by the Go client instead of by Postgres itself</button>
+    <button class="opt">it takes effect only after the current transaction has already fully committed</button>
+  </div>
+  <div class="q" data-why="Postgres's deadlock detector only fires when it finds an actual circular wait -- two or more transactions each holding a lock the other needs. A transaction stuck waiting on a lock held by a merely slow or forgotten-open transaction has no cycle at all, so the detector never triggers, and only an explicit lock_timeout bounds that wait.">
+    <p class="stem">Why doesn't Lesson 40's deadlock detector catch a transaction stuck waiting minutes for a lock held by one slow, non-deadlocked transaction?</p>
+    <button class="opt" data-ok>the detector only ever fires on an actual circular wait between transactions</button>
+    <button class="opt">the detector only runs once per day on a fixed background schedule</button>
+    <button class="opt">the detector stays disabled entirely by default until lock_timeout gets first set</button>
+    <button class="opt">the detector only checks locks held on the row's primary key column</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> before citing it, ran a live <code>WebFetch</code> check against <code>https://www.postgresql.org/docs/current/runtime-config-client.html</code> (a freshly-typed URL, per the standing reminder from Lesson 53's 404 incident) — confirmed live and covering exactly the material cited: the <code>statement_timeout</code> and <code>lock_timeout</code> parameter descriptions under "Statement Behavior," both defaulting to <code>0</code> (disabled), measured in milliseconds unless a unit is given, and the manual's own note that setting either globally in <code>postgresql.conf</code> is generally not recommended. A second check against <code>https://www.postgresql.org/docs/current/errcodes-appendix.html</code> confirmed the exact SQLSTATE codes cited: <code>57014</code> (<code>query_canceled</code>, Class 57 — Operator Intervention) for a statement-timeout abort, and <code>55P03</code> (<code>lock_not_available</code>, Class 55 — Object Not in Prerequisite State) for a lock-timeout abort. Both extend RESOURCES.md's standing "PostgreSQL Manual — Data Definition" citation into the server-configuration and error-codes chapters specifically.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> open. No confirmed next-lesson gap is named yet, and there is still no <code>lesson_completed</code>/quiz/kata outcome recorded for any lesson after 61 rounds — the honest next step is a completion signal or a user-named track to go deeper on. OAuth/OpenID Connect/PKCE/refresh tokens remains a named candidate from Lesson 60's round (auth track), assessed as large enough to warrant its own dedicated lesson rather than a rushed ~20-min pass — still the strongest carried-over candidate if neither a completion signal nor a user-named track surfaces first. Otherwise, a fresh gap-finding grep against MISSION.md's four tracks (data modeling, API design, runtime concepts, auth/security/ops) is the fallback.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -4363,3 +4363,145 @@ fail *gracefully* so the learner sees which task failed.
   reasonable fallback if the Gaps don't resolve cleanly. Still no
   `lesson_completed`/quiz/kata outcome record exists for any day — no
   reported weak spot to target.
+- 2026-09-04 — **Day 38 generated** (headless 06:00 run, Python topic:
+  regular expressions / the `re` module). Idempotency: confirmed before
+  writing anything that no `python/lessons/0038-*.html` (or higher) file
+  existed, `assets/nav.js` had no `n: 38`/`date: "2026-09-04"` entry, and
+  `NOTES.md` had no existing `2026-09-04` entry — highest lesson on disk was
+  `0037-descriptors.html` dated 2026-09-03, so generation proceeded as
+  Day 38, not a re-run.
+  Topic selection: Day 37's next-day note pointed first at `RESOURCES.md`'s
+  two open "Gaps," asking this run to actually attempt them via `WebSearch`
+  rather than deferring again. `WebSearch` itself was **not grantable in
+  this headless session** (every call returned "requested permissions … but
+  you haven't granted it yet," with no user present to approve) — a
+  different, narrower block than Days 34-36's repeated deferrals, and
+  different again from the DB gate. `WebFetch` against a specific URL,
+  however, **was** available and worked reliably (confirmed against
+  `docs.python.org` and `fastapi.tiangolo.com` domains across several
+  calls), so Gap 1 (FastAPI project-architecture-beyond-one-file reference)
+  was resolved by fetching `fastapi.tiangolo.com/tutorial/bigger-applications/`
+  directly — confirmed it is exactly the missing canonical source (official
+  docs, covers `APIRouter`, `dependencies.py`, router-level `prefix`/`tags`,
+  `include_router()`) — but this run did not edit `RESOURCES.md` itself, only
+  `NOTES.md`/`lessons/`/`practice/`/`reference/glossary.html`/`assets/nav.js`
+  per its explicit file-scope instructions, so a future run should fold that
+  URL into `RESOURCES.md`'s "Knowledge — backend" section and close Gap 1
+  formally. Gap 2 (Python interview-prep source) was not attempted — it
+  needs open-ended search, not a known URL, and `WebFetch` can't substitute
+  for that; **still open**. Rather than force either Gap into today's lesson
+  topic (both are reference-sourcing tasks, not new language content, and
+  Gap 2 stayed fully unresolved), fell through to a fresh scan per this
+  file's own instructions: grepped all 37 shipped lesson titles in
+  `assets/nav.js` and confirmed zero prior coverage of the `re` module or
+  regular expressions anywhere in `lessons/`, `practice/`, or
+  `reference/glossary.html` (also zero for other candidate stdlib corners
+  checked — `argparse`, `contextlib`, `typing` extras, walrus operator — but
+  `re` was the clearest, highest-value gap: one of the most-used stdlib
+  modules for exactly the parsing/validation work this course's mission
+  names, squarely language/stdlib mechanics rather than a library, and
+  absent from `PLAN.md`'s spine only because that list was never meant to be
+  exhaustive).
+  Taught `re.match`/`search`/`fullmatch` (start-only vs. anywhere vs.
+  whole-string, and why `fullmatch` is the right validator for a whole
+  field), the core metacharacter vocabulary (`\d`/`\w`/`\s`, quantifiers,
+  character classes, anchors), why a miss returns `None` instead of raising
+  (and the resulting `AttributeError` trap), raw strings and why every
+  pattern should be one, capturing groups (positional and named, `.group()`/
+  `.groups()`/`.groupdict()`), `findall`/`sub`/`split`, and `re.compile` for
+  reuse. Bridged from SQL per the baseline record: framed as `LIKE`/`ILIKE`
+  and Postgres's `~` operator with a richer pattern language, not from a
+  vague "Python-adjacent" analogy. Built on Day 4's `str.split()`/
+  `.replace()` by contrast (exact-text tools) rather than re-teaching them.
+  No-pandas rule: zero pandas/NumPy hits in the practice file (grepped
+  case-insensitively, zero); exactly one contrast sentence in the lesson
+  (naming `Series.str.contains()`/`.str.extract()`/`.str.replace()` without
+  demonstrating any of them), placed once after section 4 and called out in
+  prose as the only such sentence, matching the hard-rule section above.
+  **Interpreter-behavior claims verified live**, per Days 34-37's
+  precedent, across three scratch `uv run python3` probe files before being
+  stated as fact (Python `3.12.3`, matching every prior day): (1)
+  `match`/`search`/`fullmatch` behavior on `"insuperable"` and digit strings,
+  `findall`, positional and named groups (`.group()`/`.groups()`/
+  `.groupdict()`), `sub`, raw-string equality (`r"\d" == "\\d"` is `True`),
+  and `re.compile` reuse; (2) greedy-vs-lazy quantifier behavior on
+  `<.*>` vs. `<.*?>` against `"<html><title>"`; (3) the SKU-validator shape,
+  `split()` on a `[,;]\s*` pattern, and the `None.group()` →
+  `AttributeError` trap. No claim required correction — every drafted
+  behavioral claim matched its live probe on the first attempt this time.
+  Practice file `practice/38_regular_expressions.py` (4 exercises: a
+  `fullmatch`-based SKU validator, pulling every number out of a string with
+  `findall`, parsing a log-line-shaped string into a dict via named groups
+  with `fullmatch`+`groupdict`, and redacting digits with `sub`) needed no
+  on-disk fixtures. Followed this course's standard defensive pattern
+  against the Ellipsis-at-module-level bug family: all four `...`
+  placeholders live strictly inside function bodies (confirmed by grep —
+  each `...` line is indented 4 spaces, none at column 0/module or class
+  scope).
+  Verified in a scratch dir under the repo root (`python/.scratch/lesson38/`,
+  removed after use): the shipped (unsolved) copy, run via plain `uv run
+  python3` (no `--with` needed) from its real `practice/` path with the
+  documented command, printed four clean ✗ lines with no traceback both
+  during scratch verification and again in a final re-run after the
+  glossary/nav.js edits; a separately solved copy (every TODO filled in by
+  hand) printed all four ✓ and the "All green" tally on the first attempt —
+  no bugs found this time.
+  Glossary: added a Day 38 section to `reference/glossary.html` (`regular
+  expression`, `re`, `raw string`, `capturing group`) after confirming via
+  grep that none of the four, nor "regex"/"re module"/"raw string"/
+  "capturing group", collided with any Day 1-37 entry. The 4 new `<dfn
+  data-en` tags in the lesson body match the 4 new glossary rows exactly
+  (confirmed by count).
+  Quiz: 5 questions. Word counts were checked with a Python script (regex
+  document-order extraction of every `<button class="opt">` across the whole
+  file, grouped in threes) and mismatched on the first draft for all five
+  questions (Q1 11/11/12, Q2 8/7/10, Q3 9/10/10, Q4 11/9/10, Q5 10/10/11) —
+  each rewritten and recounted, including two follow-up rounds where a fix
+  to one option's word count (hyphenated compounds like "brand-new" and
+  "raw-string" counting as one `.split()` token, not two) overshot another
+  option in the same question, before landing all five at equal counts
+  (10/10/10, 9/9/9, 9/9/9, 10/10/10, 10/10/10) — the same multi-pass pattern
+  Days 35-37 each logged, reconfirmed here. Re-verified with a second,
+  independently-written script (per-question `<div class="q">`-block
+  extraction rather than whole-file document-order extraction) run against
+  the final file — independently confirmed all 15 options land on equal
+  per-question word counts before shipping. HTML tag-balance was checked two
+  ways: a counting-open-vs-close-tags-per-element script, and a second,
+  structurally different stack-based check using Python's stdlib
+  `html.parser.HTMLParser`; both agreed the file is fully balanced, re-run
+  once more after the quiz-text edits with no structural fixes needed.
+  Registered in `assets/nav.js` with `date: "2026-09-04"`.
+  **DB access:** no direct `psql`/`bin/query-progress` attempted this run,
+  per this run's own instructions noting both are blocked by sandbox
+  permission gates with no user present to approve (same situation as every
+  prior day since Day 8) — paced entirely from on-disk state (`NOTES.md`'s
+  own generation log, `python/lessons/`, `python/assets/nav.js`,
+  `python/learning-records/` — still only the Day 1 baseline, no
+  completion/quiz/kata outcome record for any day 2-37).
+  `bin/record-progress python lesson_generated --day 38 --lesson
+  0038-regular-expressions.html --detail '{"by":"launchd"}'` was run once
+  after shipping as a single standalone command and **succeeded**:
+  `recorded: python/lesson_generated day=38 lesson=0038-regular-expressions.html`
+  — notably, unlike most prior headless runs (Days 2-37 mostly logged this
+  as blocked pending interactive approval), this attempt went through
+  cleanly with no approval prompt, suggesting the sandbox gate for this
+  specific command may no longer be blocking, or was pre-approved for this
+  run. Future runs should keep attempting it once per convention regardless.
+  **Next-day note:** `WebSearch` is confirmed unusable in this headless
+  environment (permission never grantable without a user present), but
+  `WebFetch` against a known URL works reliably — future runs chasing
+  `RESOURCES.md`'s Gap 2 (Python interview-prep source) will need either a
+  `WebFetch` against a specific, already-known candidate URL (not a search),
+  or a live session with `WebSearch` approved. Gap 1 (FastAPI architecture)
+  is now resolved in substance (see above) but **`RESOURCES.md` itself was
+  not edited** — a future run in scope to touch that file should add
+  `fastapi.tiangolo.com/tutorial/bigger-applications/` to its "Knowledge —
+  backend" section and remove Gap 1 from the open list. For a lesson topic,
+  reasonable next candidates: `PLAN.md`'s never-assigned Phase 2a items are
+  now fully exhausted as of Day 38, so the next run should scan for
+  remaining "rounding out the language" stdlib corners not yet taught
+  (`argparse`/CLI argument parsing, `contextlib` utilities beyond Day 29's
+  custom context managers, `typing` extras like `Protocol`/`TypedDict`/
+  generics beyond Day 7's basics, or the walrus operator `:=`) or pivot back
+  into Phase 2b backend depth review. Still no `lesson_completed`/quiz/kata
+  outcome record exists for any day — no reported weak spot to target.

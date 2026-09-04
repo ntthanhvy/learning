@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 58 · pd.merge_asof(): joining on "nearest date," not an exact key</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 58 · ~20 min · 4 Sep 2026</p>
+<h1>pd.merge_asof(): joining on "nearest date," not an exact key</h1>
+<p class="byline">Lessons 5/57 taught <code>merge()</code> and <code>validate=</code> for exact-key joins — the merge key must match exactly, or the row is unmatched. But a real interview-shaped question keeps coming back: "attach the price/tier/rate that was ACTIVE when this order happened" — the order's timestamp almost never lines up exactly with the row recording when that price started. Today's tool is built for exactly that shape: <code>pd.merge_asof()</code>.</p>
+
+<h2>1 · Why a plain merge() fails here</h2>
+<p>Say a <code>promo</code> table records when each discount tier started applying, and <code>orders</code> has an <code>order_date</code> for each sale. An exact-key merge on the date only matches the rare order placed on the very day a tier changed — everything else comes back <code>NaN</code>:</p>
+<pre><code>orders.merge(promo, left_on=<span class="str">"order_date"</span>, right_on=<span class="str">"effective_date"</span>, how=<span class="str">"left"</span>)
+<span class="cm">-- tier is NaN for 3 of 4 orders -- only the one order placed exactly on a tier's start date matches</span></code></pre>
+<p>The real question was never "same date" — it was "which tier was already active on this date," i.e. the latest <code>effective_date</code> at or before each order. That's a range lookup, not an equality lookup, and <code>merge()</code> only ever does equality.</p>
+
+<h2>2 · merge_asof(): the last match at or before the key</h2>
+<p><dfn data-en="a top-level pandas function, pd.merge_asof(left, right, on=...), performing a nearest-key left join instead of an exact-key one -- for each left row it finds the LAST right row whose key is <= the left row's key (backward, the default), not a row where the keys are equal; both sides must already be sorted by the join key or it raises" data-vn="giữ nguyên 'merge_asof()' — hàm cấp cao nhất pd.merge_asof(...), join kiểu 'lấy hàng bên phải GẦN NHẤT (không vượt quá) khóa bên trái' thay vì khóa phải BẰNG khóa trái như merge() thường; cả 2 bảng phải sort theo khóa join sẵn, không thì báo lỗi ngay">pd.merge_asof()</dfn> is pandas' nearest-key join: for each row in <code>left</code>, it finds the <em>last</em> row in <code>right</code> whose key is less than or equal to the left row's key — not a row where the keys are equal.</p>
+<pre><code>orders_sorted = orders.sort_values(<span class="str">"order_date"</span>)
+promo_sorted = promo.sort_values(<span class="str">"effective_date"</span>)
+pd.merge_asof(orders_sorted, promo_sorted,
+              left_on=<span class="str">"order_date"</span>, right_on=<span class="str">"effective_date"</span>)
+<span class="cm">-- order 01-05 -> tier active since 01-01 ("standard")
+-- order 01-09 -> tier active since 01-07 ("silver")
+-- order 01-10 -> tier active since 01-10, exact match still works ("gold")</span></code></pre>
+<p>Confirmed directly: both frames must already be sorted by the join key — passing a shuffled (unsorted) <code>orders</code> raises <code>ValueError: left keys must be sorted</code> immediately, a real crash rather than a silently wrong answer. This is the one strict precondition <code>merge()</code> never had.</p>
+
+<h2>3 · direction=, tolerance=, and by=</h2>
+<p><code>direction=</code> controls which side of the left key the match looks on — the official parameter reference names all three: <code>"backward"</code> (the default, described above — last right row <em>at or before</em> the left key), <code>"forward"</code> (first right row at or after), and <code>"nearest"</code> (whichever candidate is closer by absolute distance, confirmed directly by hand-computing the day-gaps on both sides for each order). <code>tolerance=</code> caps how far the match is allowed to reach — <code>tolerance=pd.Timedelta("2D")</code> confirmed directly turning a too-distant backward match back into <code>NaN</code> rather than silently accepting a stale tier from a week earlier. <code>by=</code> adds an exact-match group key checked <em>before</em> the nearest-key search — confirmed directly with a per-customer promo table: each order only asof-matches promo rows for its own customer, never another customer's nearby row.</p>
+<pre><code>pd.merge_asof(orders_sorted, promo_sorted, on=<span class="str">"order_date"</span>, direction=<span class="str">"forward"</span>)
+<span class="cm">-- order 01-05 -> next tier starting 01-07 ("silver"), not 01-01</span>
+
+pd.merge_asof(orders_sorted, promo_by_customer, on=<span class="str">"order_date"</span>, by=<span class="str">"customer"</span>)
+<span class="cm">-- exact-match on customer FIRST, then nearest-date within that customer's own rows only</span></code></pre>
+
+<h2>4 · SQL bridge: no built-in equivalent, hand-rolled with a correlated subquery</h2>
+<p>Standard SQL has no dedicated "nearest key" join operator. The usual hand-written equivalent is a correlated subquery or a window function: <code>SELECT o.*, (SELECT tier FROM promo p WHERE p.effective_date &lt;= o.order_date ORDER BY p.effective_date DESC LIMIT 1) FROM orders o</code> — or, in databases that support it, a <code>LATERAL JOIN</code> doing the same "most recent row at or before" lookup per order. <code>merge_asof()</code> is that same idea built into pandas directly, vectorized instead of row-by-row.</p>
+
+<h2>5 · Why this earns its keep in an interview</h2>
+<p>This is the textbook "point-in-time" join: attaching the exchange rate active when a transaction happened, the price tier active when an order was placed, the sensor calibration active when a reading was taken. Reaching for a plain <code>merge()</code> here either silently drops almost every row (exact-date mismatch) or requires an <code>apply(axis=1)</code> row-by-row scan (Lesson 12's named escape hatch, here the wrong tool) — naming <code>merge_asof()</code> unprompted signals the "nearest match, not exact match" shape is already recognized, not discovered live while staring at a wall of <code>NaN</code>.</p>
+
+<div class="interview">
+<p><strong>Q: "You need to attach the exchange rate that was in effect at each transaction's timestamp — the rate table only has rows for when the rate CHANGED. How do you join these?"</strong> A strong answer, out loud: <em>"That's a point-in-time join, not an exact-key one — I'd sort both tables by timestamp and use merge_asof with direction='backward', the default, so each transaction gets the last rate that was already in effect at or before it. If rates are also per-currency, I'd add by='currency' so the nearest-match search stays within the same currency's own rows. A plain merge would only match transactions that happened on the exact same timestamp as a rate change, which is almost never."</em> The signal: recognizing "nearest, not equal" as a distinct join shape, and naming <code>by=</code> as the fix when a naive asof match would leak across an unrelated dimension.</p>
+</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/58_merge_asof.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/58_merge_asof.py</code></pre>
+<p>Reuses <code>practice/data/orders_raw.csv</code>'s clean 4-row slice (An/Binh, order_ids 1/2/5/6) plus a small inline <code>promo</code> DataFrame built directly in the practice file (three tiers: standard from 01-01, silver from 01-07, gold from 01-10). Exercise 1 checks a plain <code>direction="backward"</code> asof merge (Section 2). Exercise 2 checks that an unsorted left frame raises <code>ValueError</code> (Section 2). Exercise 3 checks <code>direction="forward"</code> (Section 3).</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="merge_asof's default direction='backward' finds the LAST right row whose key is <= the left row's key -- a nearest-at-or-before match, not an equal-key match. That's the whole point of the tool over a plain merge().">
+    <p class="stem">By default, <code>pd.merge_asof(left, right, on="date")</code> matches each left row to which right row?</p>
+    <button class="opt" data-ok>The last right row whose date is at or before the left's</button>
+    <button class="opt">The right row whose date is exactly equal to the left's date</button>
+    <button class="opt">Every right row whose date falls within the same calendar month here</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: passing an unsorted left frame to merge_asof raises ValueError immediately, naming that the left keys must be sorted -- a real crash, unlike merge()'s no-order-requirement.">
+    <p class="stem">What happens if the <code>left</code> DataFrame passed to <code>merge_asof()</code> is NOT sorted by the join key?</p>
+    <button class="opt" data-ok>ValueError is raised right away, both sides must already be sorted</button>
+    <button class="opt">pandas silently sorts it first, then just merges as normal anyway</button>
+    <button class="opt">It merges anyway, with some rows matched to the wrong key</button>
+  </div>
+  <div class="q" data-why="by= is an exact-match group key checked before the nearest-key search runs -- confirmed directly that an order only asof-matches promo rows sharing its own customer, never a nearby row from a different customer.">
+    <p class="stem">What does the <code>by=</code> argument add to a <code>merge_asof()</code> call?</p>
+    <button class="opt" data-ok>An exact-match group key, checked before the nearest-date search itself runs</button>
+    <button class="opt">A second nearest-key column, merged in addition to the first key</button>
+    <button class="opt">A minimum row count required before any match gets accepted here</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official pandas <a href="https://pandas.pydata.org/docs/user_guide/merging.html">Merge, join, concatenate and compare</a> user guide (the "merge_asof()" section, same page Lessons 5/57 already cited) for the sorted-keys requirement and <code>by=</code>/<code>tolerance=</code>; the <a href="https://pandas.pydata.org/docs/reference/api/pandas.merge_asof.html">pandas.merge_asof API reference</a> for the full <code>direction=</code> parameter (~5 min total).</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>pd.merge_asof()</code> was added today, right after Lesson 57's <code>validate= (merge)</code> entry.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-58 comes back reported as shakiest, otherwise a fresh curriculum/glossary scan for the next genuinely-uncovered pattern (open candidates per MISSION.md: more groupby/agg patterns, additional string/regex methods, additional time-series methods, or memory/dtype optimization).<br><br>
+💬 Anything unclear — direction=, the sorted-keys requirement, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

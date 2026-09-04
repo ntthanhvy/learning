@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 38 · Regular expressions: pattern-matching text with re</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 38 · ~20 min · 4 Sep 2026</p>
+<h1>Regular expressions: pattern-matching text with <code>re</code></h1>
+<p class="byline">Day 6 read and wrote whole files; Day 4's <code>str.split()</code>/<code>str.replace()</code> handle fixed, exact text. Neither answers "does this string look like an email address," "pull every number out of this log line," or "is this field a 3-letter code followed by 4 digits, and nothing else." That's a <dfn data-en="a regular expression: a small pattern language for describing a shape of text — which characters, how many, in what order — matched against a string rather than compared to it exactly" data-vn="giữ nguyên &quot;regular expression/regex&quot; — ngôn ngữ mô tả hình dạng chuỗi ký tự (loại ký tự, số lượng, thứ tự), dùng để match chứ không so sánh y hệt">regular expression</dfn> job, and Python's standard-library <dfn data-en="Python's standard-library module implementing regular-expression matching, exposing functions like match(), search(), findall(), sub(), and compile() for building and reusing patterns" data-vn="giữ nguyên &quot;re module&quot; — module chuẩn của Python cho regex, có match(), search(), findall(), sub(), compile()">re</dfn> module is where that pattern language plugs in: one small, sharp tool for "does this text have a certain shape," not a replacement for plain string methods when an exact match already does the job.</p>
+
+<div class="callout"><strong>Bridge from SQL:</strong> this is <code>LIKE</code>/<code>ILIKE</code> and Postgres's <code>~</code> operator, with a much richer pattern language. <code>WHERE email ~ '^[a-z]+@[a-z]+\.com$'</code> and Python's <code>re.fullmatch(r"[a-z]+@[a-z]+\.com", email)</code> are the same idea — "check the whole value against a shape" — just spelled differently, and the metacharacters below (<code>.</code>, <code>*</code>, <code>+</code>, character classes) carry over almost unchanged between the two.</div>
+
+<h2>1 · A pattern is a shape, not exact text</h2>
+<p>A plain string compared with <code>==</code> or found with <code>in</code> only ever matches itself. A regex pattern describes a <em>shape</em> instead — "one or more digits," "an <code>@</code> surrounded by word characters" — checked against a target string. The core functions:</p>
+<pre><code><span class="kw">import</span> re
+
+re.search(<span class="str">r"super"</span>, <span class="str">"insuperable"</span>)   <span class="cm"># found at index 2 -&gt; a Match object</span>
+re.match(<span class="str">r"super"</span>, <span class="str">"insuperable"</span>)    <span class="cm"># None -- match() only checks the very start</span>
+re.fullmatch(<span class="str">r"\d+"</span>, <span class="str">"123"</span>)         <span class="cm"># the *whole* string must fit the pattern -&gt; matches</span>
+re.fullmatch(<span class="str">r"\d+"</span>, <span class="str">"123a"</span>)        <span class="cm"># None -- the trailing "a" breaks a full match</span></code></pre>
+<p>Verified live: all four lines above return exactly what's commented. <code>search()</code> scans the whole string for the pattern anywhere inside it; <code>match()</code> only checks starting at index 0; <code>fullmatch()</code> demands the entire string, start to end, fit the pattern — the one to reach for when validating a whole field like a SKU or postal code, since <code>search()</code> would happily approve a valid pattern buried inside garbage on either side.</p>
+<div class="callout"><strong>A miss is <code>None</code>, not an exception.</strong> No match found means <code>search()</code>/<code>match()</code>/<code>fullmatch()</code> return <code>None</code> — they never raise. Calling <code>.group()</code> on that <code>None</code> without checking first raises <code>AttributeError: 'NoneType' object has no attribute 'group'</code> (confirmed live), a common first bug. Always test the result before using it: <code>if m := re.search(...): ...</code> or a plain <code>if m is not None:</code>.</div>
+
+<h2>2 · The metacharacters that cover most real patterns</h2>
+<p>A small vocabulary of special characters builds almost every pattern seen in practice:</p>
+<pre><code><span class="cm"># \d  any digit           \w  any "word" char (letter/digit/_)   \s  whitespace
+# .   any char (not \n)   *   0 or more of the last thing         +   1 or more
+# ?   0 or 1 (optional)   {m,n}  between m and n times            |   OR
+# []  one char from a set          ^  start of string    $  end of string
+# ()  a capturing group -- pulls that piece out of the match separately</span>
+
+re.findall(<span class="str">r"\d+"</span>, <span class="str">"room 12, row 4, seat 100"</span>)
+<span class="cm"># ['12', '4', '100'] -- every non-overlapping match, as plain strings</span></code></pre>
+<p>Character classes narrow "any character" to a specific set: <code>[A-Z]</code> is one uppercase letter, <code>[a-z0-9_]</code> is one lowercase letter, digit, or underscore, and <code>[^0-9]</code> (a <code>^</code> right after <code>[</code>) negates the set — anything <em>except</em> a digit. Combine a class with a quantifier for "how many": <code>[A-Z]{3}</code> is exactly three uppercase letters, <code>\d{4}</code> is exactly four digits. Anchor with <code>^</code>/<code>$</code> to pin a pattern to the start/end of a string when using <code>search()</code> instead of <code>fullmatch()</code>.</p>
+<div class="callout"><strong>Greedy by default.</strong> <code>*</code>/<code>+</code>/<code>{m,n}</code> grab as much text as they can while still letting the overall pattern match — verified live: <code>re.match(r"&lt;.*&gt;", "&lt;html&gt;&lt;title&gt;").group()</code> returns the whole <code>"&lt;html&gt;&lt;title&gt;"</code>, not just <code>"&lt;html&gt;"</code>, because <code>.*</code> greedily eats past the first <code>&gt;</code> looking for the last one. Add a <code>?</code> right after the quantifier — <code>.*?</code> — to make it lazy instead: <code>re.match(r"&lt;.*?&gt;", "&lt;html&gt;&lt;title&gt;").group()</code> then stops at the first <code>"&lt;html&gt;"</code>, confirmed live.</div>
+
+<h2>3 · Raw strings: why every pattern here starts with <code>r"…"</code></h2>
+<p>Python's own string escapes and regex's escapes both use backslash, and they collide. <code>"\d"</code> as a plain string tries to interpret <code>\d</code> as a Python escape sequence first (there isn't one, so newer Python versions warn about it); <code>r"\d"</code> — a <dfn data-en="a string literal prefixed with r, in which backslashes are kept literal instead of being interpreted as Python escape sequences — the recommended way to write any regex pattern, since regex has its own separate meaning for backslash" data-vn="giữ nguyên &quot;raw string&quot; — chuỗi có tiền tố r, giữ nguyên dấu backslash thay vì Python tự diễn giải, dùng cho regex pattern">raw string</dfn> — passes the two literal characters <code>\</code> and <code>d</code> straight through to <code>re</code>, which is what the regex engine actually expects. Confirmed live: <code>r"\d" == "\\d"</code> is <code>True</code> — a raw string is just a shorthand for double-backslashing by hand. <strong>Always write regex patterns as raw strings</strong>; it's the one habit that avoids an entire category of "why doesn't my pattern match" bugs.</p>
+
+<h2>4 · Pulling pieces out: groups, <code>findall</code>, and <code>sub</code></h2>
+<p>Parentheses in a pattern mark a <dfn data-en="a piece of a regex pattern wrapped in parentheses, capturing the text it matches so it can be retrieved separately from the full match via .group(n) or, for a named group, .group(&quot;name&quot;)" data-vn="giữ nguyên &quot;capturing group&quot; — phần pattern trong ngoặc đơn, tách riêng ra để lấy lại bằng .group(n) hoặc .group(&quot;tên&quot;)">capturing group</dfn> — a piece of the match retrievable on its own:</p>
+<pre><code>m = re.search(<span class="str">r"(\w+)@(\w+)\.com"</span>, <span class="str">"contact: alice@example.com today"</span>)
+m.group(<span class="num">0</span>)   <span class="cm"># 'alice@example.com' -- group 0 is always the whole match</span>
+m.group(<span class="num">1</span>)   <span class="cm"># 'alice'   -- first parenthesized piece</span>
+m.group(<span class="num">2</span>)   <span class="cm"># 'example' -- second parenthesized piece</span>
+m.groups()  <span class="cm"># ('alice', 'example') -- every captured group as one tuple</span>
+
+<span class="cm"># named groups read better than counting parentheses</span>
+m2 = re.search(<span class="str">r"(?P&lt;user&gt;\w+)@(?P&lt;domain&gt;\w+)\.com"</span>, <span class="str">"bob@site.com"</span>)
+m2.group(<span class="str">"user"</span>)   <span class="cm"># 'bob'</span>
+m2.groupdict()      <span class="cm"># {'user': 'bob', 'domain': 'site'}</span></code></pre>
+<p>All six results above verified live. <code>re.sub(pattern, replacement, string)</code> is the find-and-replace counterpart — <code>re.sub(r"\d+", "#", "room 12, row 4")</code> returns <code>"room #, row #"</code> (confirmed live), replacing every match rather than one fixed substring the way <code>str.replace()</code> does. <code>re.split(pattern, string)</code> splits on a pattern instead of a fixed separator — <code>re.split(r"[,;]\s*", "a, b;c,   d")</code> returns <code>['a', 'b', 'c', 'd']</code> (confirmed live), handling a comma-or-semicolon-plus-any-amount-of-space separator that <code>str.split()</code> alone can't express in one call.</p>
+<div class="callout"><strong>Compile once, reuse many times.</strong> <code>re.compile(pattern)</code> returns a pattern object with the same <code>.search()</code>/<code>.match()</code>/<code>.findall()</code> methods, letting a pattern used in a loop be parsed once instead of on every call: <code>pat = re.compile(r"\d+"); pat.findall("a1 b22 c333")</code> returns <code>['1', '22', '333']</code> (confirmed live) — the module-level <code>re.findall(pattern, s)</code> functions do this compiling internally anyway and cache a handful of recent patterns, so the difference is mostly clarity and avoiding repeated work in a tight loop, not a hard requirement.</div>
+
+<div class="interview">
+<p><strong>Q: "When would you reach for <code>re</code> instead of plain string methods?"</strong> A strong answer, out loud: <em>"When the thing I'm matching is a shape rather than an exact value — 'looks like an email,' 'starts with three letters then four digits,' 'pull every number out of this line' — not when a fixed substring or prefix check already does the job; <code>str.split()</code>/<code>.replace()</code>/<code>in</code> are faster and clearer for those. I'd reach for <code>fullmatch()</code> specifically when validating that an entire field matches a shape, not just that the shape appears somewhere inside it, and I'd always write patterns as raw strings to avoid backslash collisions with Python's own string escapes."</em> The signal: knowing regex is a targeted tool, not a default, and knowing the match/search/fullmatch distinction cold.</p>
+</div>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> <code>Series.str.contains()</code>, <code>.str.extract()</code>, and <code>.str.replace()</code> accept the same regex patterns taught here, applied across a whole column at once instead of one Python-level <code>re.search()</code> call per value. Not covered here; that's <code>data/</code>'s territory, and this is the only sentence in this lesson that names it.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/38_regular_expressions.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/38_regular_expressions.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: writing a <code>fullmatch()</code>-based validator for a SKU-shaped code, pulling every number out of a string with <code>findall()</code>, extracting named pieces from a log-style line with named groups, and redacting digits from a string with <code>sub()</code>.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="match() only checks starting at index 0 of the string, so a pattern that appears later - like 'super' inside 'insuperable' at index 2 - is missed entirely; search() scans the whole string for the pattern appearing anywhere, which is why it finds the same pattern match() does not.">
+    <p class="stem">Why does <code>re.match(r"super", "insuperable")</code> return <code>None</code>?</p>
+    <button class="opt" data-ok>match only checks the string's very start, not anywhere else</button>
+    <button class="opt">insuperable is simply too long a word for match itself</button>
+    <button class="opt">the pattern super always needs a raw-string prefix to work</button>
+  </div>
+  <div class="q" data-why="search()/match()/fullmatch() never raise on a miss - a failed match returns the value None instead, so calling .group() on that result without first checking for None raises AttributeError, a very common first regex bug.">
+    <p class="stem">What happens when a regex pattern finds no match in a string?</p>
+    <button class="opt" data-ok>the search function simply returns None, not an exception</button>
+    <button class="opt">Python here immediately raises a brand-new NoMatchError exception instead</button>
+    <button class="opt">the whole running program silently exits with nonzero status</button>
+  </div>
+  <div class="q" data-why="a raw string, written r'...', passes backslashes straight through unchanged instead of letting Python's own string-escape rules interpret them first - regex needs its own separate meaning for backslash sequences like \\d, so skipping Python's interpretation avoids a whole class of pattern bugs.">
+    <p class="stem">Why should a regex pattern be written as a raw string, <code>r"…"</code>?</p>
+    <button class="opt" data-ok>it stops Python interpreting backslashes before regex ever does</button>
+    <button class="opt">raw strings make every single pattern match noticeably faster</button>
+    <button class="opt">plain strings cannot legally contain any backslash character ever</button>
+  </div>
+  <div class="q" data-why="fullmatch() requires the entire string, start to end, to fit the given pattern, so it is the right choice for validating that a whole field - a SKU, a postal code - matches a shape; search() would happily approve a valid-looking pattern buried inside surrounding garbage on either side.">
+    <p class="stem">Why use <code>fullmatch()</code> rather than <code>search()</code> to validate a whole field?</p>
+    <button class="opt" data-ok>fullmatch demands the entire string match, not merely a part</button>
+    <button class="opt">search cannot accept any character-class pattern as input at all</button>
+    <button class="opt">fullmatch always runs measurably faster than search does on strings</button>
+  </div>
+  <div class="q" data-why="quantifiers like * and + are greedy by default, matching as much text as possible while the overall pattern still succeeds - confirmed live, .* matched all the way to the final closing bracket rather than stopping at the first one. Adding ? right after the quantifier switches it to lazy/non-greedy, stopping at the first possible match instead.">
+    <p class="stem">Why does <code>re.match(r"&lt;.*&gt;", "&lt;a&gt;&lt;b&gt;").group()</code> return the whole string, not just <code>"&lt;a&gt;"</code>?</p>
+    <button class="opt" data-ok>quantifiers are greedy by default, matching as much as possible</button>
+    <button class="opt">angle brackets are simply not legal inside any regex pattern</button>
+    <button class="opt">match() always returns the whole input no matter what pattern</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the <a href="https://docs.python.org/3/howto/regex.html">Regular Expression HOWTO</a> (official docs, added to <code>RESOURCES.md</code>'s "Knowledge — the language" section this run) — the canonical, beginner-aware walkthrough of <code>re</code>'s functions, metacharacters, and the greedy/non-greedy distinction; the <a href="https://docs.python.org/3/library/re.html"><code>re</code> module reference</a> is the exhaustive companion for every flag and edge case not covered today.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day38">glossary</a> under Day 38.<br>
+This rounds out the language-mechanics stdlib corners alongside Day 13's <code>pathlib</code>, Day 14's <code>datetime</code>, and Day 15's <code>logging</code> — another everyday standard-library tool, not a new language construct.<br><br>
+💬 Anything unclear — greedy vs. lazy quantifiers, named groups, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

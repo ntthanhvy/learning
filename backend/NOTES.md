@@ -3859,3 +3859,114 @@
   still exists after 60 rounds - the next session should treat that signal,
   or a user-named track to deepen, as materially higher priority than a
   61st topic picked blind, same standing note as every prior round.
+- 2026-09-04 generation (Lesson 61, headless 06:00 run): idempotency check
+  first - confirmed no `lessons/0061-*.html` file existed and no `n: 61`/
+  `date: "2026-09-04"` entry was in `nav.js` before writing anything (highest
+  prior lesson was 60, dated 2026-09-03). DB access was unreachable this
+  round the same way it has been for roughly eight weeks straight - direct
+  `psql`/`bin/query-progress` reads are blocked by this sandbox's permission
+  gates with no user present to approve, so, per the briefing's own
+  documented fallback, pacing came from NOTES.md's own log plus
+  `learning-records/` plus `nav.js` file state alone, not a live DB read.
+  Both `learning-records/` entries (0001's baseline, 0002's
+  concurrency-vocabulary gap) were re-read and confirmed unchanged and
+  already fully reflected in prior lessons; still no `lesson_completed`/
+  quiz-outcome record exists for any lesson, so there is still no reported
+  weak spot to target. Lesson 60's closing note named two candidates for
+  this round rather than leaving it fully open: `statement_timeout`/
+  `lock_timeout` (runtime-concepts track, confirmed zero-hit that round but
+  flagged as thinner material) and OAuth/OpenID Connect/PKCE/refresh tokens
+  (auth track, deliberately deferred as large enough to deserve its own
+  dedicated lesson rather than a rushed ~20-min pass). Chose
+  `statement_timeout`/`lock_timeout`: it's the smaller, already-scoped
+  candidate ready to use this round, squarely in the runtime-concepts track,
+  Postgres-native (no distributed-systems territory), and ties directly back
+  to two existing lessons rather than standing alone - Lesson 18's
+  connection-pool exhaustion (a runaway statement holding a pooled
+  connection open indefinitely is a slow-query-shaped variant of the same
+  symptom) and Lesson 40's deadlock detector (which only catches an actual
+  circular wait, not a single-sided long lock wait against a merely slow,
+  non-deadlocked transaction - the gap `lock_timeout` closes). Re-confirmed
+  the zero-hit status directly via `Grep` for `statement_timeout|lock_timeout`
+  across `backend/` before committing - the only hit was NOTES.md's own
+  candidate-list mention, no lesson or glossary collision. Lesson 61 covers:
+  Postgres's default of unbounded patience (both settings default to 0,
+  disabled) and why that's expensive specifically because of Lesson 18's
+  pool; the real distinction between the two settings (total statement run
+  time vs. only time spent waiting on a lock) with their respective SQLSTATE
+  codes on abort (57014 query_canceled vs. 55P03 lock_not_available); `SET`
+  vs. `SET LOCAL` scoping, with `SET LOCAL` inside a transaction as the
+  safer default so a value never leaks onto an unrelated later request
+  sharing the same pooled connection; a Go/pgx snippet setting `lock_timeout`
+  via `SET LOCAL` inside a request-scoped transaction, plus an explicit note
+  that this is a different, complementary mechanism from `context.Context`
+  cancellation (client-side vs. server-side enforcement); a trap on setting
+  either value globally in `postgresql.conf`, sourced from the Postgres
+  manual's own recommendation against it; and a closing section contrasting
+  `lock_timeout` against Lesson 40's deadlock detector - the detector only
+  catches an actual cycle, `lock_timeout` catches a single-sided long wait
+  the detector structurally cannot see. No Go-toolchain block this round:
+  `go version` was not attempted directly (per Lesson 13's finding that a
+  bare invocation outside any working directory is more likely to hit an
+  approval gate than the same tooling run inside an already-referenced
+  scratch directory), but `go mod init`, `go vet ./...`, and `go build ./...`
+  all ran successfully inside a fresh `.scratch/backend-lesson61/` directory
+  against a minimal stand-in `Pool`/`Tx` pair reproducing the lesson's exact
+  `updateBalance` snippet shape - clean build, no vet warnings, scratch
+  directory removed after. This breaks the two-rounds-running Go-tooling
+  block Lessons 58/59 flagged (both hit an approval gate on `go version`
+  before any Go content was even planned) - inconclusive either way on
+  whether that was a standing regression or coincidental, since this round
+  never attempted the same bare invocation those rounds did. Quiz options
+  were drafted, then verified with a `node -e` inline script parsing the
+  quiz HTML and counting `.split(/\s+/).length` per option (this course's
+  established Node-over-shell-loop preference) - first draft was uneven on
+  all four questions (Q1 11/9/9/9, Q2 7/7/8/7, Q3 13/10/12/11, Q4 11/12/11/12),
+  fixed through several rewrite-and-recount passes per question (re-verified
+  with the same script after every edit, not by eye) to reach final tallies
+  of Q1 9/9/9/9, Q2 7/7/7/7, Q3 12/12/12/12, Q4 12/12/12/12 - independently
+  cross-checked via a second `Grep -o` occurrence count on `<div` (7,
+  matching the script) plus a full manual re-read of all sixteen rendered
+  option strings; confirmed exactly 4 `data-ok` (one per question). Ran an
+  occurrence-accurate tag-balance check (Node script counting open vs. close
+  tags via regex, not Grep's line-counting `count` mode per Lesson 60's own
+  documented tooling-quirk warning) for every tag pair used: div 7/7, p
+  20/20, pre 2/2, code 48/48, h1 1/1, h2 6/6, table 1/1, thead 1/1, tbody
+  1/1, tr 5/5, th 7/7, td 8/8, strong 4/4, em 6/6, dfn 2/2, button 16/16, a
+  1/1, span 24/24 - all balanced. Full re-read of the shipped file after all
+  verification passes found no stray artifacts, no malformed attributes, no
+  leftover editing marks - clean on first full read. One authoring
+  adjustment made during drafting rather than caught after: the first draft
+  used a `dfn` for "pooled connection" as its own new jargon term, but that
+  duplicated the already-glossaried "connection pool" concept from Lesson
+  18's round (confirmed via `Grep` before deciding) rather than teaching
+  anything new - reworded to plain text reusing the existing `connection
+  pool` vocabulary instead of adding a near-duplicate glossary row, per
+  NOTES.md's own "prefer plain words when the jargon isn't the thing being
+  taught" rule. Added two new glossary terms - `statement_timeout` and
+  `lock_timeout` - grepped beforehand and confirmed neither existed.
+  Registered Lesson 61 in `nav.js`. Primary source: before citing it, ran a
+  live `WebFetch` check against `https://www.postgresql.org/docs/current/
+  runtime-config-client.html` (a freshly-typed URL, per the standing
+  reminder from Lesson 53's 404 incident) - confirmed live and covering
+  exactly the material cited: the `statement_timeout` and `lock_timeout`
+  parameter descriptions, both defaulting to `0` (disabled), and the
+  manual's own recommendation against setting either globally. A second live
+  `WebFetch` check against `https://www.postgresql.org/docs/current/
+  errcodes-appendix.html` confirmed the exact SQLSTATE codes cited (57014
+  query_canceled, 55P03 lock_not_available) before they were written into
+  the lesson. Both extend RESOURCES.md's standing "PostgreSQL Manual — Data
+  Definition" citation into the server-configuration and error-codes
+  chapters specifically, the same extend-an-existing-citation pattern recent
+  rounds have used. Ran `bin/record-progress backend lesson_generated --day
+  61 --lesson 0061-statement-timeout-and-lock-timeout.html --detail
+  '{"by":"headless-06:00"}'` directly from the repo root as a single
+  standalone command - succeeded immediately on the first attempt, no
+  approval blocker this round. This uses the last of Lesson 60's two named
+  candidates that's actually scoped for a single round; OAuth/OpenID
+  Connect/PKCE/refresh tokens remains the sole carried-over named candidate
+  for the next round, still assessed as large enough to warrant its own
+  dedicated lesson. No reported completion/quiz-outcome signal still exists
+  after 61 rounds - the next session should treat that signal, or a
+  user-named track to deepen, as materially higher priority than a 62nd
+  topic picked blind, same standing note as every prior round.

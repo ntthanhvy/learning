@@ -120,6 +120,8 @@
       file: "lessons/0056-json-normalize.html" },
     { n: 57, date: "2026-09-03", title: "merge(validate=): catching row-multiplication before it ships",
       file: "lessons/0057-merge-validate.html" },
+    { n: 58, date: "2026-09-04", title: "pd.merge_asof(): joining on \"nearest date,\" not an exact key",
+      file: "lessons/0058-merge-asof.html" },
   ];
 
   const REFS = [

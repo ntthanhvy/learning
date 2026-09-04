@@ -4037,3 +4037,112 @@
   fresh next round, since this round's block looked like the same
   intermittent approval-gate pattern as `query-progress` rather than a
   permanent regression.
+- 2026-09-04 generation (Lesson 58, headless 06:00 run): idempotency was
+  self-confirmed first — globbed `data/lessons/` for `0058-*.html` (none
+  found), grepped `assets/nav.js` for `n: 58`/`2026-09-04` (neither found,
+  highest registered lesson was still 57, dated 2026-09-03), and grepped
+  `NOTES.md` for a `2026-09-04` entry (none found) — so this round proceeded.
+  Direct DB reads (`psql`/`bin/query-progress`) were unreachable in this
+  headless session, same class of block documented for months straight, no
+  workaround attempted per this round's own instructions — still no
+  `course_progress` rows readable and no `lesson_completed`/quiz-outcome
+  record beyond the Lesson 1 baseline (re-confirmed: `data/learning-records/`
+  still holds only the single baseline file), so no reported weak spot to
+  target. Fell back to on-disk state (NOTES.md + nav.js + lesson teasers) as
+  the source of truth for what to teach next, as instructed. Lesson 57's own
+  teaser named `pd.merge_asof()` explicitly as a queued `merge()` follow-up
+  candidate (alongside more groupby/agg patterns, additional string/regex
+  methods, additional time-series methods, and memory/dtype optimization) —
+  picked `merge_asof()` since it ties directly back to Lessons 5/57's own
+  merge/join thread and closes a genuinely-named gap (Lesson 5's exact-key
+  merge has no answer for "attach the value active at this timestamp").
+  Re-confirmed zero-hit before writing a word: grepped `lessons/*.html` and
+  `reference/glossary.html` for `merge_asof`, the only hits were Lesson
+  57/NOTES.md's own teaser-text mentions plus one unrelated false-positive
+  (a `merge_asof` filename-pattern collision in Lesson 34's kicker line,
+  confirmed to be prose about `get_dummies`, not real content); collision
+  check repeated again just before the glossary edit, same result. `uv run
+  --with pandas` worked directly this round (pandas 3.0.5, confirmed via
+  `pd.__version__`): every claim was hand-verified in `.scratch/lesson58/
+  explore.py` through `explore4.py` (all deleted after) against
+  `orders_raw.csv`'s existing clean 4-row slice (An/Binh, order_ids 1/2/5/6)
+  plus a new small inline `promo` DataFrame (three tiers: standard from
+  01-01, silver from 01-07, gold from 01-10) — no new fixture file needed,
+  the promo table is built directly in both the lesson and the practice file.
+  Confirmed directly: default `direction="backward"` correctly attaches the
+  latest tier at or before each order's date (01-05/01-06→standard/silver
+  boundary at 01-07, 01-09→silver, 01-10→gold exact match); an UNSORTED left
+  frame raises `ValueError: left keys must be sorted` immediately, a real
+  crash rather than a silent wrong answer, confirmed with a shuffled
+  `.sample(frac=1, random_state=0)` copy; `direction="forward"` and
+  `direction="nearest"` were both confirmed against hand-computed day-gaps on
+  both sides of each order date (not assumed from the parameter name alone)
+  — for this fixture "nearest" happened to match "forward"'s output exactly,
+  verified this was genuine nearest-distance logic and not a coincidental
+  tie by hand-computing all four gaps in `explore4.py`; `tolerance=
+  pd.Timedelta("2D")` confirmed turning the two too-distant backward matches
+  back into NaN while leaving the two in-range ones intact; `by=` confirmed
+  doing per-group asof matching against a per-customer promo table, each
+  order matching only its own customer's rows. Cross-checked the primary
+  source live via WebFetch against both the official pandas "Merge, join,
+  concatenate and compare" user guide (same page Lessons 5/57 already cited
+  — confirms the sorted-keys requirement, `by=`, and `tolerance=`) and the
+  `pandas.merge_asof` API reference page (confirms the full `direction=`
+  three-way default, since the user guide prose doesn't spell out all three
+  values) — both live and matching every hands-on probe result exactly.
+  Designing the practice file surfaced two instances of this course's running
+  Ellipsis-handling family, both confirmed to raise on their own with no
+  special guarding needed: `len(Ellipsis)` (Exercises 1 and 3's
+  whole-right-hand-side placeholders) raises `TypeError`, and
+  `Ellipsis.sample` (Exercise 2's `shuffled = ...` placeholder) raises
+  `AttributeError` — both confirmed directly with standalone probes before
+  shipping, no accidental-freebie risk in any of the three exercises. The
+  shipped (unsolved) `practice/58_merge_asof.py` was executed in a mirrored
+  `.scratch/lesson58/practice/` layout (fixture CSV copied alongside, plain
+  flagless `mkdir -p`/`cp`) and printed exactly the expected 3 ✗ with no
+  crash; a solved copy (`.scratch/lesson58/practice/58_solved.py`, not
+  shipped) then printed all 3 ✓ on the first run — no bugs found this round.
+  The shipped file was also re-run a second time directly from its real
+  `practice/` location (`cd data && uv run --with pandas python3
+  practice/58_merge_asof.py`) and confirmed identical output (3 ✗, no
+  crash). The entire `.scratch/lesson58/` directory was fully removed
+  (`rm -rf`) after verification, no approval needed this round. Quiz options
+  were drafted and checked with a Python regex/word-count script isolating
+  each `<div class="q">` block by its own start offset (this course's
+  established approach since Lesson 42), run via `uv run python3` — the
+  first draft came out mismatched on all three questions (Q1 14/13/11, Q2
+  11/9/12, Q3 9/11/10); several rewrite + recount cycles landed all three
+  level (Q1 12/12/12, Q2 11/11/11, Q3 11/11/11), then independently
+  re-verified with a second, fully separate method (manual word-by-word
+  counting done by hand directly from a `Grep`-extracted raw option-text
+  listing, not a second run of the same script), per this file's standing
+  warning that a single verification pass isn't reliable — both methods
+  agreed all three questions genuinely landed level. A Python regex
+  tag-balance script (occurrence-count, not line-count) confirmed every tag
+  pair in the shipped lesson HTML is balanced (`p` 18/18, `h2` 8/8, `pre`
+  4/4, `code` 51/51, `div` 5/5, `dfn` 1/1, `button` 9/9, `strong` 3/3, `em`
+  4/4, `a` 3/3, `span` 15/15, plus `html`/`head`/`body`/`title` 1/1 each);
+  cross-checked with a second method (`grep -o` occurrence counts on
+  `<dfn`/`</dfn>`, `<pre>`/`</pre>`, `<div`/`</div>`, `<button
+  class="opt"`/`</button>`) which agreed exactly on all four spot-checked
+  tags. `node --check` confirmed `assets/nav.js` still parses as valid
+  JavaScript after the Lesson 58 entry was appended to the `LESSONS` array.
+  `bin/record-progress data lesson_generated --day 58 --lesson
+  0058-merge-asof.html --detail '{"by":"launchd"}'` was run once from the
+  repo root as a single standalone command as instructed and succeeded on
+  the first try (`recorded: data/lesson_generated day=58
+  lesson=0058-merge-asof.html`), matching Lessons 50-53/55-56's successful
+  pattern rather than Lesson 57's failed one — re-confirms the block is
+  intermittent, not a permanent regression. This agent does not run `git
+  commit` — leaving working-tree changes uncommitted remains this course's
+  established convention. Added a `pd.merge_asof()` glossary entry (checked
+  for a collision first — grepped for `merge_asof`, no existing real rows,
+  only teaser-text mentions and the one false-positive noted above) placed
+  directly after Lesson 57's `validate= (merge)` entry, and registered
+  Lesson 58 in `nav.js`. Set the teaser going forward to the remaining
+  MISSION.md-relevant candidate categories with no queued pick yet: more
+  groupby/agg patterns beyond Lesson 4/40/48, additional string/regex
+  methods beyond Lesson 42/43, additional time-series methods beyond Lesson
+  32/38, or memory/dtype optimization beyond Lesson 25/41/51 — or a
+  review/drill round if any `lesson_completed`/quiz-outcome signal has
+  surfaced by then.

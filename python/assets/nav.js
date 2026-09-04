@@ -80,6 +80,8 @@
       file: "lessons/0036-functools.html" },
     { n: 37, date: "2026-09-03", title: "Descriptors: how @property and @classmethod actually work",
       file: "lessons/0037-descriptors.html" },
+    { n: 38, date: "2026-09-04", title: "Regular expressions: pattern-matching text with re",
+      file: "lessons/0038-regular-expressions.html" },
   ];
 
   const REFS = [

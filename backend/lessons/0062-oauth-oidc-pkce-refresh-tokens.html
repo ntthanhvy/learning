@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 62 · OAuth, OpenID Connect, PKCE, and refresh tokens: "Sign in with Google," properly named</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 62 · ~25 min</p>
+<h1>OAuth, OpenID Connect, PKCE, and refresh tokens: "Sign in with Google," properly named</h1>
+<p class="byline">Lesson 4 built login for a user proving their own identity to your own backend. Lesson 31 built one backend proving its identity to another, with no human involved at all. Neither covers the case sitting between them: a human, at your app, wants your app to act on their behalf against <em>someone else's</em> API — their Google Calendar, their GitHub repos — without ever handing your app their Google password. That specific problem is what OAuth 2.0 exists to solve, and it's been a named, deferred candidate since Lesson 60's round for exactly this reason: it's large enough to deserve its own lesson rather than a rushed mention.</p>
+
+<h2>1 · The problem: delegated access, not your own login</h2>
+<p>Your app wants to read a user's Google Calendar to suggest meeting times. The wrong design is obvious once stated: ask the user to type their Google password into your login form, store it, and use it to call Google's API yourself. That fails the moment you think about it — your app now holds a credential that unlocks the user's <em>entire</em> Google account, forever, with no way for the user to revoke just your app's access without changing their password everywhere else.</p>
+<p><dfn data-en="an authorization framework letting a user grant one application limited, revocable access to their data on another service, without ever sharing their password with the requesting application" data-vn="OAuth 2.0 (giữ nguyên) — cho phép app A xin quyền truy cập giới hạn vào dữ liệu user ở service B, mà không cần user đưa mật khẩu cho app A">OAuth 2.0</dfn> is the fix: the user proves who they are directly to Google (never to your app), then Google hands your app a narrow, revocable token — not the password, and not full account access, just "calendar read, for this app, until it expires." Three distinct parties are worth naming precisely, because the rest of this lesson refers to them by role: the <dfn data-en="the app requesting access on the user's behalf — your backend, in this scenario" data-vn="client (OAuth) (giữ nguyên) — app đang xin quyền truy cập thay mặt user">client</dfn> (your app), the <dfn data-en="the party that authenticates the user and issues tokens — Google's own login and consent server, not your app" data-vn="authorization server (giữ nguyên) — bên xác thực user và phát token, vd server của Google">authorization server</dfn> (Google's login/consent screen), and the <dfn data-en="the API that actually holds the user's data and accepts the access token as proof of permission to read it" data-vn="resource server (giữ nguyên) — API thật sự giữ dữ liệu, nhận access token để cho phép truy cập">resource server</dfn> (the Google Calendar API itself) — often the same company operates both the authorization server and resource server, but the roles are still distinct.</p>
+
+<h2>2 · The authorization code flow, step by step</h2>
+<p>The dominant flow for a backend web app is the <dfn data-en="the standard OAuth 2.0 flow where the client redirects the user to the authorization server, receives a short-lived one-time code via redirect, then exchanges that code server-side for the actual tokens" data-vn="authorization code flow (giữ nguyên) — flow chuẩn: redirect user qua authorization server, nhận code một lần dùng, rồi đổi code đó lấy token ở phía server">authorization code flow</dfn>:</p>
+<pre>
+1. Your app redirects the browser to Google:
+   GET https://accounts.google.com/o/oauth2/auth
+     ?client_id=...&amp;redirect_uri=https://yourapp.com/callback
+     &amp;scope=calendar.readonly&amp;response_type=code&amp;state=xyz123
+
+2. User logs into Google (if not already) and approves the requested scope
+3. Google redirects back: GET https://yourapp.com/callback?code=AUTH_CODE&amp;state=xyz123
+4. Your BACKEND (never the browser) exchanges the code, server-to-server:
+   POST https://oauth2.googleapis.com/token
+     grant_type=authorization_code&amp;code=AUTH_CODE&amp;client_secret=...
+5. Google responds: { access_token, refresh_token, expires_in }
+</pre>
+<p>Two details carry real weight. First, the code from step 3 is a one-time-use, short-lived value — it is not itself the access token, only something exchangeable for one, and only from the backend, since only the backend holds the <code>client_secret</code> the exchange requires. Second, <code>state</code> is not decoration: it's a random value your app generated before the redirect and must check for an exact match on the way back, closing off a CSRF-shaped attack where a forged callback with someone else's code gets linked to the wrong account. <code>scope</code> is the other load-bearing parameter — it names exactly what access is being requested (<code>calendar.readonly</code>, not the whole account), and it's what the user actually sees and approves on Google's own consent screen, not something your app can silently widen later without the user approving again.</p>
+
+<h2>3 · Access tokens vs. refresh tokens: why there are two</h2>
+<p>Step 5's response carries two different tokens with two different jobs:</p>
+<table class="cmp">
+<thead><tr><th></th><th>Access token</th><th>Refresh token</th></tr></thead>
+<tbody>
+<tr><th>Used for</th><td>calling the resource server's API directly, on every request</td><td>getting a new access token once the old one expires</td></tr>
+<tr><th>Typical lifetime</th><td>minutes to about an hour</td><td>days, months, or until revoked</td></tr>
+<tr><th>Sent to</th><td>the resource server (e.g. the Calendar API)</td><td>only back to the authorization server's token endpoint</td></tr>
+<tr><th>If leaked</th><td>useful only until it expires soon</td><td>useful until revoked — the higher-value target</td></tr>
+</tbody>
+</table>
+<p>This is the same short-lived-credential shape Lesson 31's client credentials grant used for service-to-service calls, applied here to a human's delegated access instead: a short-lived <dfn data-en="an OAuth token that the client presents to the resource server on every API call, proving the granted access, and deliberately short-lived so a leaked copy is only useful briefly" data-vn="access token (giữ nguyên) — token gửi kèm mỗi lần gọi API, sống ngắn để lỡ lộ ra cũng ít nguy hiểm">access token</dfn> is what actually travels on every API call, while a longer-lived <dfn data-en="an OAuth token used only to obtain a new access token from the authorization server once the current one expires, without asking the user to log in again" data-vn="refresh token (giữ nguyên) — token dùng để xin access token mới, không cần user đăng nhập lại">refresh token</dfn> is kept server-side and never sent to the resource server at all — only back to the authorization server's own token endpoint. That split exists because the two are exposed in different places with different risk: an access token rides along on every one of potentially thousands of API calls, so keeping it short-lived caps the damage of any single leaked copy; a refresh token is used rarely and only against one trusted endpoint, so it's allowed to live much longer without the same exposure.</p>
+
+<h2>4 · PKCE: the fix for a flow that can't keep a secret</h2>
+<p>Step 4's exchange assumed the client holds a <code>client_secret</code> — fine for a backend web app, since the secret never leaves your server. A mobile app or a single-page app has no such place to hide one: decompile the app or read the JS bundle and the "secret" is right there, not secret at all. <dfn data-en="Proof Key for Code Exchange — an OAuth extension letting a public client (mobile app, SPA) prove it's the same client that started the flow, without ever needing a client_secret" data-vn="PKCE (giữ nguyên, đọc 'pixy') — cơ chế cho client không giữ được secret (mobile app, SPA) chứng minh nó là client đã bắt đầu flow, không cần client_secret">PKCE</dfn> (pronounced "pixy") fixes this without a shared secret at all:</p>
+<pre>
+1. Client generates a random code_verifier, keeps it in memory only
+2. Client derives code_challenge = BASE64URL(SHA256(code_verifier))
+3. Authorization redirect includes code_challenge (not the verifier)
+4. Authorization server stores code_challenge alongside the issued code
+5. Token exchange sends the original code_verifier (not the challenge)
+6. Authorization server hashes the received verifier and checks it
+   matches the challenge stored in step 4 -- proves same client, no secret needed
+</pre>
+<p>The trick is a one-way function: anyone who intercepts the authorization code in step 3's redirect (a real risk on mobile, where another app can sometimes register the same custom URL scheme) only ever sees the <em>hashed</em> challenge, never the verifier — and a hash can't be reversed to recover the value that produced it. Only the client that generated the original <code>code_verifier</code> can produce a match in step 6, so a stolen authorization code alone is useless to an attacker without also holding the verifier that never left the legitimate client's memory. PKCE was designed for public clients but is now recommended for confidential (backend) clients too, as defense-in-depth alongside the <code>client_secret</code> — the same "don't rely on one layer" instinct Lesson 58's synthesis lesson and Lesson 59's RLS lesson both already made for other problems.</p>
+
+<h2>5 · OpenID Connect: OAuth answers "can this app act," not "who is this"</h2>
+<p>A subtle trap: OAuth's access token only proves the client was granted some scope of access — it was never designed to answer "who is the user," and treating it as an identity proof is a well-documented misuse. <dfn data-en="an identity layer built on top of OAuth 2.0, adding a signed ID token that actually answers 'who is this user,' distinct from OAuth's access token which only proves granted scope" data-vn="OpenID Connect / OIDC (giữ nguyên) — lớp xác thực danh tính xây trên OAuth 2.0, thêm ID token trả lời 'user là ai', khác với access token của OAuth chỉ chứng minh quyền truy cập">OpenID Connect (OIDC)</dfn> is the layer built on top of OAuth specifically to answer that question properly: the same authorization-code exchange also returns an <code>id_token</code> — a <dfn data-en="a JWT (Lesson 4's token design, reused here) issued by an OpenID Connect authorization server, containing signed claims about who the user is (subject id, email, name) -- distinct from an access token, which grants API access rather than proving identity" data-vn="ID token (giữ nguyên) — JWT chứa claim về danh tính user (id, email, tên), ký bởi authorization server, khác access token (dùng để gọi API)">ID token</dfn>, literally Lesson 4's JWT design, reused — carrying signed claims (a stable subject id, email, name) your app verifies and reads to establish the session, exactly the way "Sign in with Google" buttons work in practice. The rule of thumb: an access token is a key that opens a specific door on someone else's API; an ID token is a signed statement of who's asking. Confusing the two — using an access token as if it proved identity — is a real, named class of implementation bug, not a pedantic distinction.</p>
+
+<h2>6 · A PKCE code-verifier pair and the callback exchange, in Go</h2>
+<p>The verifier/challenge pair from section 4, plus the callback handler that reads the returned <code>code</code> and would exchange it server-side:</p>
+<pre><code><span class="cm">// newPKCEVerifier generates a cryptographically random code_verifier and its</span>
+<span class="cm">// derived code_challenge (S256), the pair PKCE uses to bind an authorization</span>
+<span class="cm">// code to the same client that started the flow.</span>
+<span class="kw">func</span> newPKCEVerifier() (verifier, challenge <span class="ty">string</span>, err <span class="ty">error</span>) {
+    raw := make([]<span class="ty">byte</span>, 32)
+    <span class="kw">if</span> _, err := rand.Read(raw); err != <span class="kw">nil</span> {
+        <span class="kw">return</span> <span class="st">""</span>, <span class="st">""</span>, err
+    }
+    verifier = base64.RawURLEncoding.EncodeToString(raw)
+
+    sum := sha256.Sum256([]<span class="ty">byte</span>(verifier))
+    challenge = base64.RawURLEncoding.EncodeToString(sum[:])
+    <span class="kw">return</span> verifier, challenge, <span class="kw">nil</span>
+}
+
+<span class="cm">// callbackHandler is the OAuth redirect target: it reads the authorization</span>
+<span class="cm">// code Google appended to the redirect URI, looks up the code_verifier this</span>
+<span class="cm">// browser stashed before the redirect (keyed by the state value), then</span>
+<span class="cm">// exchanges code + verifier for tokens -- never the browser's job, always</span>
+<span class="cm">// the backend's, since only the backend should ever see the tokens.</span>
+<span class="kw">func</span> callbackHandler(exchange <span class="kw">func</span>(code, verifier <span class="ty">string</span>) (*tokenResponse, <span class="ty">error</span>), verifierForState <span class="kw">func</span>(state <span class="ty">string</span>) <span class="ty">string</span>) http.HandlerFunc {
+    <span class="kw">return</span> <span class="kw">func</span>(w http.ResponseWriter, r *http.Request) {
+        code := r.URL.Query().Get(<span class="st">"code"</span>)
+        state := r.URL.Query().Get(<span class="st">"state"</span>)
+        <span class="kw">if</span> code == <span class="st">""</span> {
+            http.Error(w, <span class="st">"missing code parameter"</span>, http.StatusBadRequest)
+            <span class="kw">return</span>
+        }
+        verifier := verifierForState(state) <span class="cm">// looked up, never re-derived</span>
+        tok, err := exchange(code, verifier)
+        <span class="kw">if</span> err != <span class="kw">nil</span> {
+            http.Error(w, <span class="st">"token exchange failed"</span>, http.StatusBadGateway)
+            <span class="kw">return</span>
+        }
+        _ = tok <span class="cm">// store access/refresh tokens server-side; never send to the browser</span>
+    }
+}</code></pre>
+<div class="callout"><strong>Trap:</strong> the last line's comment is the part worth internalizing, not just the code — both tokens belong in your backend's storage (encrypted at rest), never in a cookie or response body the browser can read. The browser only ever needed the authorization code, briefly, to get here; once your backend has exchanged it, the browser's job in this flow is done.</div>
+
+<h2>7 · Where this sits next to Lessons 4 and 31</h2>
+<p>All three "who/what is this request" lessons now cover a distinct shape of the same underlying question, and it's worth lining them up explicitly so they don't blur together:</p>
+<table class="cmp">
+<thead><tr><th>Lesson</th><th>Who's proving what, to whom</th></tr></thead>
+<tbody>
+<tr><th>Lesson 4</th><td>a user proves their identity directly to <em>your own</em> backend (sessions or JWT)</td></tr>
+<tr><th>Lesson 31</th><td>your backend proves its own identity to <em>another</em> backend, no human involved</td></tr>
+<tr><th>Lesson 62 (this one)</th><td>a user grants <em>your</em> app limited, revocable access to <em>someone else's</em> API, without sharing a password</td></tr>
+</tbody>
+</table>
+<p>OAuth is not a replacement for Lesson 4's own login — most apps still run their own session or JWT for "is this user logged into my app," and separately hold OAuth tokens for whichever third-party APIs the user has connected. The two systems commonly coexist in the same app for entirely different jobs.</p>
+
+<div class="interview">
+<p><strong>Q: "Walk me through what happens when a user clicks 'Connect your Google Calendar' in our app."</strong> A strong answer, out loud: <em>"We'd redirect the browser to Google's authorization endpoint with our client_id, the exact scope we need — calendar.readonly, not broader — a state value we generate and will check on return, and if this is a public client like a mobile app, a PKCE code_challenge too. The user approves on Google's own consent screen, never our login form, so we never see their Google password. Google redirects back to our callback with a one-time authorization code; our backend, not the browser, exchanges that code server-side for an access token and a refresh token. We store both server-side, use the short-lived access token on actual Calendar API calls, and use the refresh token — only against Google's token endpoint — to get a new access token once the old one expires, without asking the user to reconnect."</em> The signal: naming the code-for-token exchange as strictly server-side, distinguishing access vs. refresh token lifetimes and where each travels, and treating scope as something the user actually approved rather than an implementation detail.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="OAuth exists so a user can grant one app limited, revocable access to their data on another service, without ever handing that app their password for the other service -- the core problem Lesson 4's own-app login and Lesson 31's service-to-service auth don't address.">
+    <p class="stem">What problem does OAuth 2.0 solve that Lesson 4's session/JWT login does not?</p>
+    <button class="opt" data-ok>letting a user grant your app limited access elsewhere</button>
+    <button class="opt">letting a user reset a forgotten password more quickly</button>
+    <button class="opt">letting a user's browser cache static assets more locally</button>
+    <button class="opt">letting a user change their own display name safely</button>
+  </div>
+  <div class="q" data-why="The authorization code returned in the redirect is a one-time-use, short-lived value that must be exchanged for the actual access and refresh tokens -- and that exchange must happen server-to-server, since only the backend holds the client_secret (or PKCE verifier) the exchange requires.">
+    <p class="stem">Why must the authorization code be exchanged for tokens by the backend, not the browser?</p>
+    <button class="opt" data-ok>only the backend holds the secret the exchange needs</button>
+    <button class="opt">browsers cannot send any HTTPS POST request at all</button>
+    <button class="opt">authorization codes expire before any redirect even completes fully</button>
+    <button class="opt">Google only accepts requests sent from a mobile device</button>
+  </div>
+  <div class="q" data-why="Access tokens are sent on every API call to the resource server and deliberately kept short-lived, so a leaked copy is only useful briefly. Refresh tokens are sent only to the authorization server's own token endpoint, rarely, and live much longer -- which is exactly why a leaked refresh token is the higher-value target for an attacker.">
+    <p class="stem">Why is a refresh token allowed to live far longer than an access token?</p>
+    <button class="opt" data-ok>it is sent only rarely, to one trusted endpoint</button>
+    <button class="opt">it is mathematically impossible for refresh tokens to expire</button>
+    <button class="opt">it never actually grants any access to any resource</button>
+    <button class="opt">it is regenerated automatically every single minute without fail</button>
+  </div>
+  <div class="q" data-why="PKCE's code_verifier is a random value the client keeps in memory and never transmits until the final token exchange; only the derived code_challenge (a one-way SHA256 hash of it) travels in the earlier authorization redirect, so an attacker who intercepts that redirect cannot reverse the hash to recover the verifier and cannot complete the exchange without it.">
+    <p class="stem">Why does intercepting the authorization redirect not help an attacker complete a PKCE-protected exchange?</p>
+    <button class="opt" data-ok>only the one-way hashed challenge appears there, not the verifier</button>
+    <button class="opt">the redirect step is always encrypted with a separate key</button>
+    <button class="opt">Google blocks every redirect coming from an unfamiliar network today</button>
+    <button class="opt">PKCE redirects always expire within a single passing millisecond, roughly</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://thecopenhagenbook.com">The Copenhagen Book</a> — its "OAuth" section is exactly what RESOURCES.md already flags this resource for ("Use for: ... OAuth, CSRF"); read it for the authorization code flow and PKCE at implementation depth. A live-fetch confirmation of that specific page was not available in this run (<code>WebFetch</code> was not granted for this session, and direct network commands were blocked the same way DB reads are — see this generation's NOTES.md entry) — cited conservatively on RESOURCES.md's own existing recommendation rather than a freshly-verified URL, unlike Lessons 59-61's practice. Treat the specific page URL as worth a live check next time an interactive session has WebFetch access.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> open. No confirmed next-lesson gap is named yet, and there is still no <code>lesson_completed</code>/quiz/kata outcome recorded for any lesson after 62 rounds — the honest next step is a completion signal or a user-named track to go deeper on. Otherwise, a fresh gap-finding grep against MISSION.md's four tracks (data modeling, API design, runtime concepts, auth/security/ops) is the fallback.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

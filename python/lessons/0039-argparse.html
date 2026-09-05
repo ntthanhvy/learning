@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 39 · argparse: turning a script into a real command-line tool</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 39 · ~20 min · 5 Sep 2026</p>
+<h1><code>argparse</code>: turning a script into a real command-line tool</h1>
+<p class="byline">Day 7's capstone hardcoded its CSV path at the top of the file. Every script so far has, one way or another — change what it does, and you edit the source. A <dfn data-en="a command-line interface: a program controlled by typed text arguments after its name, rather than a fixed file path baked into the source or a menu clicked through" data-vn="giữ nguyên &quot;CLI&quot; — chương trình điều khiển bằng tham số gõ trên dòng lệnh, không phải sửa code hay bấm menu">CLI</dfn> tool takes its input from the command line instead — <code>wordcount report.txt --top 3</code> — and Python's standard-library <dfn data-en="Python's standard-library module for parsing command-line arguments: declares what a program's positional and optional arguments are, then validates and converts sys.argv into a plain object with one attribute per argument" data-vn="giữ nguyên &quot;argparse&quot; — module chuẩn parse tham số dòng lệnh, khai báo argument rồi tự validate/convert sys.argv thành object 1 attribute mỗi argument">argparse</dfn> module is the standard way to build one, without hand-parsing <code>sys.argv</code> yourself.</p>
+
+<div class="callout"><strong>Bridge from SQL:</strong> think of <code>argparse</code>'s declared arguments as a stored procedure's typed parameter list (<code>CREATE PROCEDURE report(top_n INT DEFAULT 5, unit TEXT DEFAULT 'words')</code>) — declare the names, types, and defaults once, and every call is checked and coerced against that shape before the body ever runs, instead of the body defensively parsing raw text itself.</div>
+
+<h2>1 · The problem: <code>sys.argv</code> is just a list of strings</h2>
+<p>Every command-line invocation lands in <code>sys.argv</code> — a plain list, index 0 is the script's own name, everything after is whatever the caller typed, and <em>all of it is a string</em>, untyped and unvalidated:</p>
+<pre><code><span class="cm"># python3 report.py report.txt --top 3 -v
+# sys.argv == ['report.py', 'report.txt', '--top', '3', '-v']</span></code></pre>
+<p>Hand-parsing that means writing your own loop to find <code>"--top"</code>, grab the next element, convert it with <code>int()</code>, handle it missing, handle a typo like <code>--to</code>, and write your own <code>--help</code> text — all before the script's actual job starts. <code>argparse</code> replaces that loop: declare what arguments exist, once, and it handles finding, converting, defaulting, rejecting bad input, and <code>--help</code> for free.</p>
+
+<h2>2 · Declaring arguments: positional, optional, flags</h2>
+<p>An <code>ArgumentParser</code> is built once, then told about each argument via <code>add_argument()</code>:</p>
+<pre><code><span class="kw">import</span> argparse
+
+parser = argparse.ArgumentParser(
+    prog=<span class="str">"wordcount"</span>,
+    description=<span class="str">"Count top words in a text file"</span>,
+)
+parser.add_argument(<span class="str">"infile"</span>, help=<span class="str">"path to the text file"</span>)          <span class="cm"># positional -- required, no --</span>
+parser.add_argument(<span class="str">"-n"</span>, <span class="str">"--top"</span>, type=<span class="kw">int</span>, default=<span class="num">5</span>,      <span class="cm"># optional -- has a default</span>
+                    help=<span class="str">"how many top words to show"</span>)
+parser.add_argument(<span class="str">"-v"</span>, <span class="str">"--verbose"</span>, action=<span class="str">"store_true"</span>,   <span class="cm"># a flag -- no value, just on/off</span>
+                    help=<span class="str">"print extra detail"</span>)
+
+args = parser.parse_args()   <span class="cm"># reads sys.argv[1:] automatically</span>
+<span class="kw">print</span>(args.infile, args.top, args.verbose)</code></pre>
+<p>A name with no leading dash (<code>"infile"</code>) is a <dfn data-en="a required command-line argument identified purely by its position in the command, with no leading dash — argparse rejects the whole call if it is missing" data-vn="giữ nguyên &quot;positional argument&quot; — argument dòng lệnh bắt buộc, xác định theo vị trí, không có dấu gạch ngang, thiếu là argparse từ chối cả lệnh">positional argument</dfn> — required, matched purely by order. A name starting with <code>-</code>/<code>--</code> is an <dfn data-en="a command-line argument identified by a leading -short or --long flag name rather than position, optional by default unless required=True is passed, and given a value via default= when the caller omits it" data-vn="giữ nguyên &quot;optional argument (flag)&quot; — argument dòng lệnh xác định bằng tên -short/--long thay vì vị trí, mặc định không bắt buộc trừ khi required=True">optional argument</dfn> — has a default, and the caller can skip it entirely. <code>action="store_true"</code> makes an option a pure on/off switch: present on the command line means <code>True</code>, absent means the flag's default (<code>False</code> here), with no value to type after it.</p>
+
+<h2>3 · What comes back: a <code>Namespace</code>, already typed</h2>
+<p>Verified live: calling <code>parser.parse_args(["report.txt", "--top", "3", "-v"])</code> directly (bypassing real <code>sys.argv</code> for a repeatable check) returns <code>Namespace(infile='report.txt', top=3, verbose=True, unit='words')</code> — <code>args.top</code> is a real <code>int</code>, <code>3</code>, not the string <code>"3"</code> that was typed, because <code>type=int</code> already ran the conversion. Omitting <code>--top</code> entirely and re-parsing confirms the declared default takes over: <code>args.top == 5</code>, still an <code>int</code>. Every declared argument becomes one attribute on the returned <dfn data-en="the plain object argparse's parse_args() returns, with one attribute per declared argument, already type-converted and defaulted — access args.name the same way as any object attribute, or convert the whole thing with vars(args)" data-vn="giữ nguyên &quot;Namespace&quot; — object argparse.parse_args() trả về, mỗi argument 1 attribute, đã convert type và áp default sẵn">Namespace</dfn> object — <code>args.infile</code>, <code>args.top</code> — not a dict to key into, though <code>vars(args)</code> converts it to one if a dict is genuinely needed.</p>
+<div class="callout"><strong><code>choices=</code> narrows valid values.</strong> <code>parser.add_argument("--unit", choices=["words", "lines"], default="words")</code> restricts that option to exactly those two strings — verified live, calling it with <code>--unit bytes</code> is rejected before <code>args</code> is even built, with no code needed to check the value by hand.</div>
+
+<h2>4 · Bad input doesn't raise — it prints usage and exits</h2>
+<p>This is the one behavior most worth getting right before shipping a CLI: <code>parse_args()</code> does not raise a catchable Python exception on bad input. Verified live against three failure cases — a non-integer passed where <code>type=int</code> expected one, a value outside <code>choices=</code>, and a missing required positional — all three print a usage line plus a one-line error to stderr, then call <code>sys.exit(2)</code>, which raises <code>SystemExit</code>. A bare <code>try</code>/<code>except Exception:</code> around <code>parse_args()</code> (Day 8's narrow-catch habit) will <em>not</em> catch this, because <code>SystemExit</code> deliberately does not inherit from <code>Exception</code> — it inherits directly from <code>BaseException</code>, precisely so a normal <code>except Exception</code> lets a program-ending exit through rather than swallowing it. Confirmed live: <code>-h</code>/<code>--help</code> takes the same <code>SystemExit</code> path but with code <code>0</code> — success, not failure — after printing the auto-generated help text <code>argparse</code> builds from every <code>help=</code> string supplied.</p>
+
+<h2>5 · Reading a real argument list end to end</h2>
+<p>Put together, a small tool looks like this — no more hand-rolled string comparisons against <code>sys.argv</code>:</p>
+<pre><code><span class="kw">import</span> argparse
+
+<span class="kw">def</span> build_parser():
+    parser = argparse.ArgumentParser(prog=<span class="str">"wordcount"</span>)
+    parser.add_argument(<span class="str">"infile"</span>)
+    parser.add_argument(<span class="str">"-n"</span>, <span class="str">"--top"</span>, type=<span class="kw">int</span>, default=<span class="num">5</span>)
+    parser.add_argument(<span class="str">"-v"</span>, <span class="str">"--verbose"</span>, action=<span class="str">"store_true"</span>)
+    <span class="kw">return</span> parser
+
+<span class="kw">def</span> main(argv=<span class="kw">None</span>):
+    args = build_parser().parse_args(argv)   <span class="cm"># argv=None -> real sys.argv[1:]</span>
+    <span class="kw">if</span> args.verbose:
+        <span class="kw">print</span>(<span class="str">f"reading </span><span class="str">{args.infile}</span><span class="str">, top </span><span class="str">{args.top}</span><span class="str">"</span>)
+    <span class="cm"># ... real work here, using args.infile / args.top ...</span></code></pre>
+<p><code>build_parser()</code> split out as its own function, and <code>main(argv=None)</code> taking an explicit (optional) argument list rather than always reading real <code>sys.argv</code>, is what makes a CLI testable — a test calls <code>main(["fixture.txt", "--top", "2"])</code> directly with a fake argument list, no subprocess needed, tying straight back to Day 11's <code>pytest</code>.</p>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> a pandas-based script still typically takes its input path and options from <code>argparse</code> exactly this way — <code>argparse</code> is the CLI layer regardless of whether the body underneath is plain Python or <code>pd.read_csv(args.infile)</code>; nothing here is pandas-specific, and this is the only sentence in this lesson that names it.</div>
+
+<div class="interview">
+<p><strong>Q: "How would you turn a one-off script into a command-line tool?"</strong> A strong answer, out loud: <em>"I'd reach for the standard library's <code>argparse</code> rather than hand-parsing <code>sys.argv</code> — declare each argument once with <code>add_argument()</code>, including its type, default, and help text, and <code>parse_args()</code> gives back a typed <code>Namespace</code> with validation, <code>--help</code>, and clear error messages for free. One thing I'd watch for: bad input doesn't raise a normal exception, it calls <code>sys.exit()</code> under the hood, so a broad <code>except Exception</code> around parsing won't catch it — and that's deliberate, not a bug, since <code>SystemExit</code> inherits from <code>BaseException</code> specifically so it isn't accidentally swallowed."</em> The signal: knowing the module exists and reaching for it by default, plus understanding the exit-not-raise behavior instead of being surprised by it in production.</p>
+</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/39_argparse.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/39_argparse.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: building a parser with one positional and one <code>type=int</code> optional argument with a default, adding a <code>store_true</code> flag, adding a <code>choices=</code>-restricted option, and confirming bad input raises <code>SystemExit</code> rather than a normal exception.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="a name with no leading dash is matched purely by its position in the command and is always required - argparse rejects the whole call outright if it is missing, unlike an optional argument (-x/--name), which has a default and can be skipped entirely by the caller.">
+    <p class="stem">What distinguishes a positional argument from an optional one in <code>argparse</code>?</p>
+    <button class="opt" data-ok>a positional argument has no leading dash and is always required</button>
+    <button class="opt">a positional argument can only ever hold a plain string value</button>
+    <button class="opt">optional arguments must always come before any positional one is typed</button>
+  </div>
+  <div class="q" data-why="type=int tells add_argument to run the given callable on the raw command-line string before storing it, so args.top comes back as a real int object like 3, not the original typed string '3' - the same conversion runs for any callable passed as type=, not just int specifically.">
+    <p class="stem">Why does <code>args.top</code> come back as an <code>int</code> after <code>add_argument("--top", type=int)</code>?</p>
+    <button class="opt" data-ok>type=int converts the raw string before it gets stored on args</button>
+    <button class="opt">argparse always correctly guesses each argument's own real type by itself</button>
+    <button class="opt">command-line text is never actually treated as a string type here</button>
+  </div>
+  <div class="q" data-why="parse_args() does not raise a normal, catchable exception on bad input - confirmed live - it prints a usage line plus an error to stderr and then calls sys.exit(2), which raises SystemExit. A plain except Exception will not catch this, since SystemExit deliberately inherits from BaseException, not Exception, so a program-ending exit is not silently swallowed.">
+    <p class="stem">Why doesn't a plain <code>except Exception:</code> catch a bad <code>parse_args()</code> call?</p>
+    <button class="opt" data-ok>bad input raises SystemExit, which does not inherit from Exception</button>
+    <button class="opt">argparse silently ignores every value it simply cannot fully parse</button>
+    <button class="opt">parse_args always simply returns None instead of ever raising anything</button>
+  </div>
+  <div class="q" data-why="choices=[...] restricts an optional argument to one of a fixed, named list of allowed values - confirmed live, passing a value outside that list is rejected by argparse itself before parse_args() ever returns, with no manual if-check needed anywhere in the program's own code.">
+    <p class="stem">What does <code>add_argument("--unit", choices=["words", "lines"])</code> do?</p>
+    <button class="opt" data-ok>it rejects any value given for --unit outside that fixed two-item list</button>
+    <button class="opt">it merges the words and lines counts into one single combined total</button>
+    <button class="opt">it silently renames the --unit flag to whichever choice is given here</button>
+  </div>
+  <div class="q" data-why="action=store_true declares a pure on/off flag with no value typed after it - confirmed live, the attribute defaults to False when the flag is absent from the command line and becomes True the moment the flag is present, with no value ever expected or consumed after it on the command line.">
+    <p class="stem">What does <code>add_argument("-v", "--verbose", action="store_true")</code> produce?</p>
+    <button class="opt" data-ok>a flag defaulting to False, becoming True only if present</button>
+    <button class="opt">a required option that always demands an explicit true/false value</button>
+    <button class="opt">a positional argument accepting either verbose or quiet as text</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://docs.python.org/3/library/argparse.html">the official <code>argparse</code> module reference</a> (stable since Python 3.2) — the canonical source for every <code>add_argument()</code> parameter (<code>action</code>, <code>type</code>, <code>default</code>, <code>choices</code>, <code>required</code>, <code>nargs</code>) beyond the handful used today.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day39">glossary</a> under Day 39.<br>
+This is another "rounding out the language" stdlib corner, alongside Day 13's <code>pathlib</code>, Day 14's <code>datetime</code>, Day 15's <code>logging</code>, and Day 38's <code>re</code> — the standard toolkit a real script reaches for, not a new language construct.<br><br>
+💬 Anything unclear — positional vs. optional, the <code>SystemExit</code> behavior, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

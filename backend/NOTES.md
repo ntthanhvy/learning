@@ -3970,3 +3970,121 @@
   after 61 rounds - the next session should treat that signal, or a
   user-named track to deepen, as materially higher priority than a 62nd
   topic picked blind, same standing note as every prior round.
+- 2026-09-05 generation (Lesson 62, headless 06:00 run): idempotency check
+  first - confirmed no `lessons/0062-*.html` file existed, no `n: 62`/
+  `date: "2026-09-05"` entry was in `nav.js`, and no `2026-09-05` entry
+  existed in `NOTES.md` before writing anything (highest prior lesson was
+  61, dated 2026-09-04). Read `MISSION.md`, `RESOURCES.md`, both
+  `learning-records/` entries, `assets/nav.js`, and this file in full per
+  the briefing's own instruction. Both learning-records entries (0001's
+  baseline, 0002's concurrency-vocabulary gap) were confirmed unchanged and
+  already fully reflected in prior lessons; still no `lesson_completed`/
+  quiz-outcome record exists for any lesson after 61 rounds, so there is
+  still no reported weak spot to target - consistent with every prior
+  round since roughly Lesson 19. Per the briefing's own instruction, did not
+  attempt direct DB reads (`psql`/`bin/query-progress`) this round at all,
+  since that class of block has been standing and confirmed for ~8 weeks
+  straight and re-attempting it wastes time without new information - relied
+  entirely on `NOTES.md`'s own generation log, `learning-records/`, and
+  `nav.js` file state, per the briefing's documented fallback. Topic choice:
+  Lesson 61's own closing note named exactly one carried-over candidate -
+  OAuth/OpenID Connect/PKCE/refresh tokens (auth track), deliberately
+  deferred across Lessons 60 and 61's rounds as large enough to deserve its
+  own dedicated lesson rather than a rushed ~20-min pass - and no newer,
+  stronger candidate turned up in MISSION.md or RESOURCES.md on this round's
+  own re-read, so it was used as the strong default the briefing itself
+  anticipated. Lesson 62 covers: the delegated-access problem OAuth solves
+  (a user granting one app limited, revocable access to another service's
+  API without ever sharing their password) as a third distinct shape
+  alongside Lesson 4's own-app login and Lesson 31's service-to-service
+  auth - explicitly lined up against both in a closing `table.cmp` (Lesson
+  25's component) so the three "who/what is this request" lessons don't
+  blur together; the three OAuth roles (client, authorization server,
+  resource server); the authorization code flow step by step, with `state`
+  and `scope` named as load-bearing rather than decorative; access token vs.
+  refresh token as two deliberately different lifetimes for two different
+  exposure profiles, explicitly tied back to Lesson 31's client-credentials
+  short-lived-token shape; PKCE as the fix for a client that can't hold a
+  `client_secret` (mobile apps, SPAs), with the code_verifier/code_challenge
+  hash relationship walked through step by step and tied to Lesson 58/59's
+  "don't rely on one layer" framing (PKCE as defense-in-depth even for
+  confidential clients); and OpenID Connect/the ID token as the identity
+  layer OAuth itself was never designed to provide, naming the
+  access-token-as-identity-proof confusion as a real, named implementation
+  bug class rather than pedantry. Checked the glossary first for collisions
+  before adding anything: `JWT` and `client credentials grant` already
+  existed (Lessons 4 and 31), reused as-is rather than re-added; a
+  substring/regex check for `OAuth`, `OpenID`, `PKCE`, `refresh token`,
+  `access token`, `authorization server`, `resource server`, `authorization
+  code flow`, and `ID token` confirmed the only two hits were both inside
+  the existing `client credentials grant` row's own description text (not
+  dedicated glossary rows for those concepts), so all ten were added as
+  genuinely new terms: `OAuth 2.0`, `client (OAuth)`, `authorization
+  server`, `resource server`, `authorization code flow`, `access token`,
+  `refresh token`, `PKCE`, `OpenID Connect (OIDC)`, `ID token`. The Go
+  snippet (`newPKCEVerifier` generating a code_verifier/code_challenge pair
+  via `crypto/rand`+`crypto/sha256`, plus `callbackHandler` reading the
+  OAuth redirect's `code`/`state` query params) was compile-checked clean
+  with `go mod init`, `go vet ./...`, and `go build ./...` in a scratch
+  module (`.scratch/lesson62/`, contents removed after, directory left
+  empty) - used the exact code as shipped in the lesson for this check, not
+  a paraphrase, per the briefing's own instruction; clean build, no vet
+  warnings. Quiz options were drafted, then verified with a `node -e`
+  inline script parsing the quiz HTML and counting
+  `.split(/\s+/).length` per option (this course's established
+  Node-over-shell-loop preference) - first draft was uneven on all four
+  questions (Q1 11/9/8/9, Q2 11/9/7/9, Q3 10/9/10/7, Q4 10/11/9/8), fixed
+  through two rewrite-and-recount passes per question (re-verified with the
+  same script after every edit) to reach final tallies of Q1 9/9/9/9, Q2
+  9/9/9/9, Q3 9/9/9/9, Q4 10/10/10/10 - independently cross-checked a second
+  way via a genuinely different implementation (`Grep` line-by-line
+  extraction of every `class="opt"` line, then a manual word-by-word count
+  against each extracted line) that matched the script's tallies exactly for
+  all sixteen options; confirmed exactly 4 `data-ok` (one per question). Ran
+  an occurrence-accurate tag-balance check (Node script counting open vs.
+  close tags via regex, not Grep's line-counting `count` mode per Lesson
+  60's own documented tooling-quirk warning - re-confirmed that quirk this
+  round too: Grep's count mode returned 8 for `<code>` and 5 for `<dfn`
+  where the true occurrence counts were 12 and 10, undercounting on lines
+  with multiple tags or very long lines) for every tag pair used: div 7/7, p
+  22/22, pre 3/3, code 12/12, h1 1/1, h2 9/9, table 2/2, thead 2/2, tbody
+  2/2, tr 9/9, th 12/12, td 11/11, strong 4/4, em 9/9, dfn 10/10, button
+  16/16, a 2/2, span 41/41 - all balanced, independently re-verified via a
+  second, differently-implemented Node method (string `.split()`-based
+  counting rather than regex `.match()`-based counting) that matched every
+  count exactly. Also verified `glossary.html`'s own table/tr/td/th balance
+  after the ten-row addition (222/222, 663/663, 3/3, 1/1) since that file
+  was edited too. Full re-read of the shipped lesson file after the first
+  verification pass caught one real authoring bug, same class as Lesson
+  59's round: six unescaped raw `&` characters inside the authorization-code
+  flow's plain-text `<pre>` block (literal query-string separators like
+  `...&scope=...&response_type=...`) - found via a Node regex scanning for
+  `&` not followed by a valid entity name, fixed to `&amp;` for all six, then
+  the full tag-balance and quiz-count checks above were re-run afterward and
+  confirmed unchanged and clean. `WebFetch` was not available in this
+  session (the tool call was attempted against
+  `https://thecopenhagenbook.com/oauth` and returned a permissions error
+  before any content was fetched), and a direct `curl` network check was
+  blocked by the same approval gate as every DB-read attempt in prior
+  rounds - so, per the briefing's own explicit fallback instruction, this
+  round cited conservatively from RESOURCES.md's own existing entry (The
+  Copenhagen Book, already flagged there for "sessions, tokens, OAuth,
+  CSRF") rather than a freshly live-verified URL, breaking the
+  Lessons-53-through-61 streak of live `WebFetch` pre-citation checks - noted
+  explicitly in the lesson's own "Go deeper" section as a gap for a future
+  session with `WebFetch` access to close. Registered Lesson 62 in `nav.js`.
+  Ran `bin/record-progress backend lesson_generated --day 62 --lesson
+  0062-oauth-oidc-pkce-refresh-tokens.html --detail '{"by":"launchd"}'`
+  directly from the repo root as a single standalone command - succeeded
+  immediately on the first attempt, no approval blocker this round,
+  consistent with the write path's general reliability across nearly every
+  prior round regardless of read-path status. This uses the last of Lesson
+  60's two named candidates,
+  deliberately deferred through Lesson 61's round specifically for this
+  lesson's larger scope; no confirmed next-lesson gap is named for the
+  round after this one - the next session should treat a completion/
+  quiz-outcome signal, or a user-named track to deepen, as materially higher
+  priority than a 63rd topic picked blind, same standing note as every prior
+  round, and should also re-attempt a live `WebFetch` citation check against
+  The Copenhagen Book's OAuth page specifically if that tool is available by
+  then.

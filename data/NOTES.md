@@ -4146,3 +4146,131 @@
   32/38, or memory/dtype optimization beyond Lesson 25/41/51 — or a
   review/drill round if any `lesson_completed`/quiz-outcome signal has
   surfaced by then.
+- 2026-09-05 generation (Lesson 59, headless 06:00 run): idempotency was
+  self-confirmed first — globbed `data/lessons/` for `0059-*.html` (none
+  found), grepped `assets/nav.js` for `n: 59`/`2026-09-05` (neither found,
+  highest registered lesson was still 58, dated 2026-09-04), and grepped
+  `NOTES.md` for a `2026-09-05` entry (none found) — so this round proceeded.
+  Direct DB reads (`psql "$LEARNING_DB_URL" ...`) were not attempted per this
+  round's own hard rule (documented for months straight as a sandbox
+  `Contains simple_expansion` content-level block, not permission-related,
+  no workaround possible); `bin/query-progress` was likewise skipped since
+  it's a non-executable helper that hits a generic approval gate with no
+  user present — so still no `course_progress` rows readable and no
+  `lesson_completed`/quiz-outcome record beyond the Lesson 1 baseline
+  (re-confirmed: `data/learning-records/` still holds only the single
+  baseline file). Fell back to on-disk state (NOTES.md + nav.js + lesson
+  teasers) as the source of truth for what to teach next, as instructed.
+  Lesson 58's own teaser named the remaining MISSION.md-relevant candidate
+  categories with no single queued pick: more groupby/agg patterns beyond
+  Lesson 4/40/48, additional string/regex methods beyond Lesson 42/43,
+  additional time-series methods beyond Lesson 32/38, or memory/dtype
+  optimization beyond Lesson 25/41/51. Picked additional time-series methods:
+  `.dt.to_period()`/`Period` and `tz_localize()`/`tz_convert()` — both tie
+  directly back to Lesson 32's `.dt` accessor and Lesson 38's `resample()`,
+  and close a genuine gap neither lesson touched (calendar-bucket labeling
+  distinct from a fixed resample grid; timezone-aware vs -naive handling,
+  never mentioned anywhere before today). Confirmed zero-hit before writing
+  a word: grepped `lessons/*.html` and `reference/glossary.html` for
+  `to_period`, `tz_localize`, `tz_convert`, and `PeriodIndex` — no real hits
+  anywhere (a combined-pattern grep briefly suggested one `Period` hit in
+  glossary.html, but a follow-up isolated grep for the literal string
+  `Period` alone returned nothing — false positive from the OR'd pattern
+  matching `memory_usage`/`nbytes` text instead, not a real collision);
+  collision check repeated again just before the glossary edit, same
+  zero-hit result. `uv run --with pandas` worked directly this round
+  (pandas 3.0.5, confirmed via `pd.__version__`): every claim was
+  hand-verified in `.scratch/lesson59/explore.py` and `explore2.py` (both
+  deleted after) against the real `orders_raw.csv` clean 4-row slice (An/
+  Binh, 01-05 through 01-10, all one calendar month) before writing a word
+  of the lesson — no new fixture needed. Confirmed directly: grouping by
+  `.dt.to_period("M")` gives one bucket, `2026-01 → 377.5`, the same total
+  as Lesson 38's `resample("ME")` on the same data but with a genuinely
+  different index (a calendar label `2026-01` vs. a period-end Timestamp
+  `2026-01-31`); Period arithmetic (`p + 1`) shifts by whole periods;
+  `to_timestamp()` converts back to the period's START by default; a
+  `Period` does NOT compare equal to the plain string it prints as
+  (`pd.Period("2026-01") == "2026-01"` is `False`), a genuinely surprising
+  edge confirmed directly rather than assumed, since `str(period)` produces
+  that exact string. On timezones: `tz_localize("UTC")` attaches a label
+  without moving clock digits (confirmed dtype becomes `datetime64[us,
+  UTC]` with the same `00:00:00` numbers); `tz_convert()` shifts the actual
+  clock to another zone (`Asia/Ho_Chi_Minh` gives `07:00:00+07:00` from a
+  UTC `00:00:00+00:00`); calling `tz_localize` twice raises `TypeError:
+  Already tz-aware, use tz_convert to convert`; calling `tz_convert` on a
+  naive column raises `TypeError: Cannot convert tz-naive timestamps, use
+  tz_localize to localize`; and comparing a naive column against a tz-aware
+  one with `>` raises `TypeError: Invalid comparison between dtype=
+  datetime64[us] and DatetimeArray` — all four confirmed directly with
+  standalone probes, not assumed from the parameter names. Cross-checked
+  the primary source live via WebFetch against the official pandas "Time
+  series / date functionality" user guide (same page family already cited
+  by Lessons 32/38) — its "Converting between period and timestamp" and
+  "Time zone handling" sections named the identical raise behavior and the
+  identical localize-attaches/convert-shifts distinction, matching every
+  hands-on probe result exactly. Designing the practice file surfaced
+  three placeholders, all confirmed to raise on their own with no special
+  guarding needed (a different, easier shape than several recent lessons'
+  Ellipsis-is-truthy/doesn't-raise gotchas): `len(Ellipsis)` (Exercise 1's
+  whole-right-hand-side `monthly = ...` placeholder) raises `TypeError`, and
+  `Ellipsis.dt` (Exercises 2 and 3's `localized = ...`/`converted = ...`
+  placeholders) raises `AttributeError` before either tz call is even
+  reached — all three confirmed directly with standalone probes
+  (`.scratch/lesson59/explore2.py`, deleted after) before shipping, no
+  accidental-freebie risk in any exercise. The shipped (unsolved)
+  `practice/59_to_period_and_timezones.py` was executed in a mirrored
+  `.scratch/lesson59/practice/` layout (fixture CSV copied alongside, plain
+  flagless `mkdir -p`/`cp`) and printed exactly the expected 3 ✗ with no
+  crash; a solved copy (`.scratch/lesson59/practice/59_solved.py`, not
+  shipped) then printed all 3 ✓ on the first run — no bugs found this
+  round. Both the shipped (unsolved) file and a temporary solved copy were
+  then also run a second time directly from the real `practice/` location
+  (`cd data && uv run --with pandas python3 practice/
+  59_to_period_and_timezones.py`, and the same for a `59_solved_tmp_check.py`
+  copy) and confirmed identical output (3 ✗ unsolved, 3 ✓ solved, no crash
+  either way); the temporary solved copy was deleted from `practice/`
+  immediately after, leaving only the intended shipped file there. The
+  entire `.scratch/lesson59/` directory was fully removed (`rm -rf`) after
+  verification, no approval needed this round. Added four glossary entries
+  (`to_period() / Period`, `tz-naive`, `tz_localize()`, `tz_convert()`,
+  checked for a collision first — grepped for each term, no existing real
+  rows) placed directly after Lesson 58's `pd.merge_asof()` entry, and
+  registered Lesson 59 in `nav.js` (`node --check` confirmed it still
+  parses as valid JavaScript after the edit). Quiz options were drafted and
+  checked with a Python regex/word-count script isolating each `<div
+  class="q">` block by its own start offset (this course's established
+  approach since Lesson 42), run via `uv run python3` — the first draft
+  came out mismatched on all three questions (Q1 9/11/10, Q2 11/10/11, Q3
+  10/10/11); three rewrite + recount cycles landed all three level (Q1
+  10/10/10, Q2 10/10/10, Q3 10/10/10), then independently re-verified with
+  a second, fully separate method (manual word-by-word counting done by
+  hand directly from a `Grep`-extracted raw option-text listing, not a
+  second run of the same script), per this file's standing warning that a
+  single verification pass isn't reliable — both methods agreed all three
+  questions genuinely landed at 10/10/10. An occurrence-count Python regex
+  tag-balance script confirmed every tag pair in the shipped lesson HTML is
+  balanced (`p` 20/20, `h2` 8/8, `pre` 5/5, `code` 72/72, `div` 5/5, `dfn`
+  5/5, `button` 9/9, `strong` 4/4, `em` 1/1, `a` 2/2, `span` 24/24, plus
+  `html`/`head`/`body`/`title` 1/1 each); cross-checked with a second method
+  (`Grep -o` occurrence counts on `<dfn`/`</dfn>`, `<pre>`/`</pre>`,
+  `<div`/`</div>`, `<button class="opt"`/`</button>`) which agreed exactly
+  — a first plain-count `Grep` attempt at the `<dfn` count wrongly reported
+  3 (line-count, not occurrence-count, since two pairs of lines each carry
+  two `<dfn>` tags), caught by re-running with `-o` (occurrence mode)
+  instead, which correctly showed 5/5, matching the Python script — the
+  same class of false-undercount documented in Lesson 55's entry, confirmed
+  to recur and worth remembering for future rounds. `bin/record-progress
+  data lesson_generated --day 59 --lesson
+  0059-to-period-and-timezones.html --detail '{"by":"launchd"}'` was run
+  once from the repo root as a single standalone command as instructed and
+  succeeded on the first try (`recorded: data/lesson_generated day=59
+  lesson=0059-to-period-and-timezones.html`), matching most recent rounds'
+  successful pattern. This agent does not run `git commit` — leaving
+  working-tree changes uncommitted remains this course's established
+  convention. This closes out the "additional time-series methods" category
+  named in Lesson 58's teaser. Set the teaser going forward to the
+  remaining MISSION.md-relevant candidate categories with no queued pick
+  yet: more groupby/agg patterns beyond Lesson 4/40/48, additional
+  string/regex methods beyond Lesson 42/43, or memory/dtype optimization
+  beyond Lesson 25/41/51 — or a review/drill round if any
+  `lesson_completed`/quiz-outcome signal has surfaced by then.

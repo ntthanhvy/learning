@@ -4505,3 +4505,181 @@ fail *gracefully* so the learner sees which task failed.
   generics beyond Day 7's basics, or the walrus operator `:=`) or pivot back
   into Phase 2b backend depth review. Still no `lesson_completed`/quiz/kata
   outcome record exists for any day — no reported weak spot to target.
+- 2026-09-05 — **Day 39 generated** (headless 06:00 run, Python topic:
+  `argparse` — CLI argument parsing). Idempotency: confirmed before writing
+  anything that no `python/lessons/0039-*.html` (or higher) file existed via
+  glob, `assets/nav.js` had no `n: 39`/`2026-09-05` entry via grep, and
+  `NOTES.md` had no existing `2026-09-05` entry via grep — highest lesson on
+  disk was `0038-regular-expressions.html` dated 2026-09-04, so generation
+  proceeded as Day 39, not a re-run.
+  Topic selection: Day 38's next-day note listed four remaining named
+  "rounding out the language" stdlib corners never taught — `argparse`,
+  `contextlib` beyond Day 29, `typing` extras (`Protocol`/`TypedDict`/generics
+  beyond Day 7), and the walrus operator `:=` — or a pivot into Phase 2b
+  backend review. Grepped all four candidates first: `contextlib` had zero
+  hits anywhere; `TypedDict`/`Protocol[`/`typing.Protocol` had zero hits;
+  `argparse` had zero hits; the walrus operator appeared exactly once, in Day
+  38's own lesson body, but only as an unexplained inline example
+  (`if m := re.search(...): ...`) inside a callout about checking for `None`
+  — never actually taught as its own topic. Picked `argparse`: the cleanest,
+  most concretely-scoped candidate — squarely stdlib/language-mechanics (not
+  a library), ties directly to the mission's "build things Python is hired
+  for" framing and Day 7's ETL capstone (which hardcoded its file path rather
+  than taking it from the command line), and unlike the walrus operator
+  (a small syntax footnote better absorbed as a one-line aside in a future
+  lesson than stretched into a full ~20 min lesson) or `contextlib`/`typing`
+  extras (both flagged in this run's own instructions as reasonable but not
+  preferred over a fresh, well-scoped pick), had a full lesson's worth of
+  real material: positional/optional arguments, `type=`/`default=`/`choices=`/
+  `action="store_true"`, the `Namespace` return value, and the
+  `SystemExit`-not-`Exception` behavior. Kept the other three candidates in
+  reserve for future days rather than trying to force more than one into
+  today's ~20 min budget.
+  Learning records: still only the Day 1 baseline
+  (`learning-records/0001-baseline-reads-python-writes-little.md`) — no
+  completion/quiz/kata outcome record for any day 2-38 was found, confirmed
+  again this run. Per this run's own instructions, treated that as "no
+  reported weak spot" and picked the next stdlib-corner candidate rather than
+  a review day, matching every prior round's approach since Day 34.
+  Web-lookup: used `WebFetch` against `docs.python.org/3/library/
+  argparse.html` before writing anything — succeeded, returning
+  `ArgumentParser`/`add_argument()` basics, the `action=`/`type=`/`default=`/
+  `choices=`/`required=`/`help=` parameters, the `Namespace` return value,
+  and the exit-with-status-2-on-bad-input behavior — all used directly in
+  sections 1-4 and cited as the primary source. `WebSearch` was not attempted
+  this run (Day 38 already confirmed it is not grantable in this headless
+  environment with no user present to approve); not needed here since the
+  topic had a single well-known canonical URL.
+  Taught: section 1 the problem live (`sys.argv` is a plain list of
+  untyped, unvalidated strings — hand-parsing it means writing a lookup loop,
+  manual `int()` conversion, missing/typo handling, and a hand-rolled
+  `--help`, all before the script's real job starts); section 2 declaring
+  arguments via `add_argument()` — a no-dash name as a required positional
+  argument, a `-short`/`--long` name as an optional argument with a default,
+  and `action="store_true"` as a pure on/off flag; section 3 the returned
+  `Namespace` object, with `type=int` already converting the stored value
+  (verified live, not assumed) and `choices=` rejecting an out-of-list value
+  before `args` is even built; section 4 the one behavior most worth getting
+  right — bad input does not raise a normal `Exception`, it prints usage
+  text and calls `sys.exit(2)`, which raises `SystemExit`, explicitly tied
+  back to Day 8's narrow-catch habit (`except Exception:` will not catch
+  this, since `SystemExit` inherits from `BaseException` directly, by
+  design); section 5 a `build_parser()`/`main(argv=None)` split as the
+  testable shape, tying back to Day 11's `pytest` (a test calls
+  `main([...])` directly with a fake argument list, no subprocess needed).
+  Bridged from SQL per the baseline record: a stored procedure's typed,
+  defaulted parameter list, introduced before any Python in the top callout,
+  not from a pandas analogy.
+  **Interpreter-behavior claims verified live, not just from docs**, per
+  Days 34-38's precedent — run via two scratch `uv run python3` probe files
+  before being stated as fact (Python `3.12.3`, matching every prior day,
+  confirmed again via `sys.version` in the probe): (1) a full `Namespace`
+  built from a mixed positional+optional+flag parse matched exactly
+  (`Namespace(infile='report.txt', top=3, verbose=True, unit='words')`),
+  `args.top` confirmed a real `int` both when supplied and when defaulted;
+  `store_true`'s default confirmed `False`; three separate bad-input cases
+  (non-int `--top`, an out-of-`choices=` `--unit`, a missing required
+  positional) all confirmed to raise `SystemExit` with `.code == 2`, not a
+  normal exception; (2) `-h`/`--help` confirmed to also raise `SystemExit`,
+  but with `.code == 0` — success, not failure — distinguished explicitly in
+  section 4 from the code-2 error path. No claim required correction — every
+  drafted behavioral claim matched its live probe on the first attempt.
+  No-pandas rule: zero pandas/NumPy/`pd.`/`np.` hits in the practice file
+  (grepped case-insensitively, zero — only stdlib `import argparse`);
+  exactly one contrast sentence in the lesson (titled "Where pandas goes from
+  here," naming that a pandas-based script still typically takes its input
+  path via `argparse` the same way, `pd.read_csv(args.infile)` named without
+  demonstrating any pandas API), placed once after section 5/the interview
+  callout, matching the hard-rule section above.
+  Practice file `practice/39_argparse.py` (4 exercises: building a parser
+  with one positional argument and one `type=int` optional with a default,
+  adding a `store_true` flag, adding a `choices=`-restricted option, and
+  writing `parses_cleanly()` confirming bad input raises `SystemExit` while
+  good input does not) needed no on-disk fixtures. Followed this course's
+  standard defensive pattern against the Ellipsis-at-module-level bug
+  family: all four `...` placeholders live strictly inside function bodies
+  (confirmed by grep — each `...` line is indented 4 spaces, none at column
+  0/module or class scope).
+  Verified in a scratch dir under the repo root (`python/.scratch/lesson39/`,
+  removed after use): the shipped (unsolved) copy, run via plain `uv run
+  python3` (no `--with` needed), both from a scratch copy and from its real
+  `practice/` path with the documented command, printed four clean ✗ lines
+  with no traceback each time (re-confirmed once more after all lesson edits
+  landed); a separately solved copy (every TODO filled in by hand in the
+  scratch copy) printed all four ✓ and the "All green" tally on the first
+  attempt — no bugs found this time. The interleaved usage/error text
+  `argparse` itself prints to stderr for the three deliberate bad-input test
+  cases inside Exercise 4's check is expected `argparse` behavior, not a
+  script bug — it does not affect the ✓/✗ output or crash the script.
+  Glossary: added a Day 39 section to `reference/glossary.html` (`CLI`,
+  `argparse`, `positional argument (CLI)`, `optional argument (flag)`,
+  `Namespace`) after grepping for collisions with Days 1-38 — caught one
+  real collision: Day 4 already has a `positional argument` row, but in the
+  function-call-argument sense ("matched to a function's parameter purely by
+  its position in the call"), distinct from today's CLI sense. Retitled
+  today's row `positional argument (CLI)` (matching Day 4's own `key=
+  (sorting)` and Day 7's `default (dataclass field)` disambiguation
+  precedent) and added a cross-reference sentence in its definition rather
+  than duplicating or overwriting Day 4's row. The other four terms (`CLI`,
+  `argparse`, `optional argument (flag)`, `Namespace`) had zero collisions.
+  The 5 new `<dfn data-en` tags in the lesson body match the 5 new glossary
+  rows exactly (confirmed by count, cross-checked against a grep miscount
+  that initially looked like only 3 — the true count via a direct `grep -n`
+  was 5, matching `data-en="` attribute occurrences).
+  Quiz: 5 questions. Word counts were checked with a Python script
+  (per-question `<div class="q">`-block extraction via a `data-why=`-anchored
+  regex split, then counting `.split()` words per `<button class="opt">`
+  line) and mismatched on the first draft for three of the five questions
+  (Q1 11/11/9, Q2 11/10/11, Q3 10/9/8 — Q4 and Q5 were already equal on the
+  first draft at 11/11/11 and 10/10/10). Went through several
+  rewrite-and-recount rounds — one round's fix to Q2/Q3 accidentally landed
+  on the wrong question block by misreading which `<div class="q">` a given
+  option set belonged to, caught immediately by re-running the script rather
+  than trusting the edit — before landing all five questions at equal
+  per-option counts (Q1 11/11/11, Q2 11/11/11, Q3 10/10/10, Q4 12/12/12, Q5
+  10/10/10). Re-verified with a second, independently-written script
+  (whole-file document-order `<button class="opt">` extraction with no
+  quiz-div scoping at all, grouped in threes) run against the final file —
+  independently confirmed all 15 options (5 questions × 3 options) land on
+  their target counts before shipping. HTML tag-balance was checked two ways:
+  a counting-open-vs-close-tags-per-element regex script, and a second,
+  structurally different stack-based check using Python's stdlib
+  `html.parser.HTMLParser`; both agreed the file is fully balanced. One
+  cleanup caught during this pass: an early draft used an unprecedented
+  `<span class="fn">` around function names in two code blocks (`build_parser`,
+  `main`) — grepping every prior lesson and `course.css` confirmed no other
+  lesson ever uses an `fn` span class and `course.css` only styles `.kw`/`.cm`,
+  so both spans were removed to match the established plain-text-after-`def`
+  convention (e.g. Day 12, Day 36), then tag-balance and word-count were
+  re-verified against the final file after that fix — both still agreed,
+  no regressions. Registered in `assets/nav.js` with `date: "2026-09-05"`.
+  **DB access:** per this run's own instructions, `psql`/`bin/query-progress`
+  were not attempted (both reliably blocked in this sandbox with no user
+  present, per months of prior-day precedent) — paced entirely from on-disk
+  state (`NOTES.md`'s own generation log, `python/lessons/`,
+  `python/assets/nav.js`, `python/learning-records/` — still only the Day 1
+  baseline, no completion/quiz/kata outcome record for any day 2-38).
+  `bin/record-progress python lesson_generated --day 39 --lesson
+  0039-argparse.html --detail '{"by":"launchd"}'` was run once after shipping
+  as a single standalone command and **succeeded**: `recorded:
+  python/lesson_generated day=39 lesson=0039-argparse.html` — consistent
+  with Days 36-38's successes, suggesting this specific command's approval
+  gate may no longer be blocking in general, though future runs should keep
+  attempting it once per convention regardless.
+  **Next-day note:** with `argparse` now taught, the remaining named-but-
+  untaught stdlib corners from Day 38's list are `contextlib` utilities
+  beyond Day 29's custom context managers, and `typing` extras
+  (`Protocol`/`TypedDict`/generics beyond Day 7's basics) — both confirmed
+  zero prior hits this run. The walrus operator `:=` remains only an
+  unexplained inline example in Day 38's lesson (never its own topic) and is
+  a reasonable small-footnote candidate if a future day wants a short topic.
+  `RESOURCES.md`'s Gap 1 (FastAPI project-architecture reference) was
+  resolved in substance by Day 38 but that file was never actually edited —
+  still worth folding `fastapi.tiangolo.com/tutorial/bigger-applications/`
+  into its "Knowledge — backend" section on some future run in scope to
+  touch it (this run stayed in scope: `NOTES.md`/`lessons/`/`practice/`
+  /`reference/glossary.html`/`assets/nav.js` only, matching every prior
+  headless run's file-scope discipline). Gap 2 (Python interview-prep source)
+  remains open, still needing `WebSearch` or a known-URL `WebFetch` fallback.
+  Still no `lesson_completed`/quiz/kata outcome record exists for any day —
+  no reported weak spot to target.

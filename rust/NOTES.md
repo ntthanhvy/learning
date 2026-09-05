@@ -843,3 +843,28 @@ by the user there; they apply here identically.
   and python Day 36 — `functools` — were generated this round via
   delegated agents, each confirmed to have written only within its own
   course directory; see their own NOTES.md entries for detail.)
+- 2026-09-05 (headless 06:00 run; verified by the orchestrator directly
+  rather than a delegated agent, since this course needs no new content):
+  same as every prior post-week day — verified `daily.html`,
+  `assets/srs.js`, and `assets/quiz-bank.js` are all present and untouched
+  (8 textual `id: "k` matches in `quiz-bank.js` — the 7 real kata entries
+  `k1`-`k7` plus the commented-out example line; `day:` tags still running
+  1-7 only; `nav.js` `LESSONS` array still registers only the 7 Jul 8-14
+  lessons, unchanged). Still the correct "daily quiz+kata" for this
+  post-week phase per PLAN.md, so nothing new was generated, nav.js was
+  untouched, and no bank content was added. Direct `psql
+  "$LEARNING_DB_URL" ...` was blocked again this session ("Contains
+  simple_expansion" — same content-level block on that exact variable name
+  as every prior round), so no `course_progress` rows could be read for a
+  scope-change signal (e.g. a request to keep growing the bank past Day 7).
+  `bin/record-progress` was not invoked since nothing new was generated or
+  completed to log this round. No new learning record beyond the Day-1
+  baseline. Note: this file has no entries for 2026-09-03/09-04 even though
+  the repo's lessons were generated those days (per the single squashed
+  commit "lessons: 2026-09-04") — not backfilled here, out of scope for
+  today's run. (Go skipped again per its own window close, now fifty-one
+  days past it; backend lesson 62 — OAuth/OIDC/PKCE/refresh tokens — data
+  lesson 59 — `to_period()`/timezones — and python Day 39 — `argparse` —
+  were generated this round via delegated agents, each confirmed to have
+  written only within its own course directory; see their own NOTES.md
+  entries for detail.)

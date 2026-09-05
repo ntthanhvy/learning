@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 59 · .dt.to_period() and timezones: calendar buckets, not fixed grids</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 59 · ~20 min · 5 Sep 2026</p>
+<h1>.dt.to_period() and timezones: calendar buckets, not fixed grids</h1>
+<p class="byline">Lesson 32 pulled parts out of a datetime column with the <code>.dt</code> accessor; Lesson 38's <code>resample()</code> built a fixed-frequency grid (every day, every week) with gaps filled in. Today closes two things neither one covers: labeling each row with the CALENDAR bucket it belongs to (<code>"this is a January row"</code>, not just "here's a timestamp"), and what happens the moment a timestamp needs a timezone attached.</p>
+
+<h2>1 · to_period(): a calendar label, not a fixed grid</h2>
+<p><dfn data-en="a pandas Series/DatetimeIndex method, dt.to_period(freq), converting each point-in-time Timestamp into a Period -- a SPAN of calendar time (the whole month, the whole week) rather than one instant; the resulting dtype is period[freq]" data-vn="giữ nguyên 'to_period()' -- method dt.to_period(freq), biến mỗi Timestamp (1 điểm thời gian) thành Period (1 KHOẢNG thời gian theo lịch, ví dụ cả tháng 1) thay vì 1 thời điểm; dtype kết quả là period[freq]">.dt.to_period(freq)</dfn> converts each row's exact <code>Timestamp</code> into a <dfn data-en="a pandas object representing a SPAN of calendar time (e.g. the entire month of January 2026), not one instant -- printed as '2026-01', distinct from a Timestamp which is one point in time" data-vn="giữ nguyên 'Period' -- đối tượng đại diện 1 KHOẢNG thời gian theo lịch (vd cả tháng 1/2026), không phải 1 thời điểm -- in ra '2026-01', khác Timestamp (1 điểm)">Period</dfn> — the calendar bucket that timestamp falls in, printed like <code>2026-01</code> for a month. Group by it directly, no <code>resample()</code> grid required:</p>
+<pre><code>clean[<span class="str">"order_date"</span>].dt.to_period(<span class="str">"M"</span>)
+<span class="cm">-- every 2026-01-xx date becomes the same Period, "2026-01"</span>
+
+clean.groupby(clean[<span class="str">"order_date"</span>].dt.to_period(<span class="str">"M"</span>))[<span class="str">"amount"</span>].sum()
+<span class="cm">-- 2026-01    377.5   (all 4 clean orders fall in one month here)</span></code></pre>
+<p>Confirmed directly against the real <code>orders_raw.csv</code> clean 4-row slice (An/Binh, 01-05 through 01-10): grouping by <code>to_period("M")</code> gives one row, <code>2026-01 → 377.5</code> — the exact same number as <code>resample("ME")</code> on the same data — but the RESULT differs in a way that matters: <code>to_period()</code>'s index is a calendar label (<code>2026-01</code>), while <code>resample()</code>'s index is a Timestamp naming the period's END (<code>2026-01-31</code>). Same total, different index dtype and meaning.</p>
+
+<h2>2 · Why not just always resample()?</h2>
+<p>Lesson 38 already named <code>resample()</code>'s whole point: build a FIXED, gap-included grid — every day or week gets a row even with zero orders. <code>to_period()</code> does the opposite job — it only labels rows that actually exist, with no grid-building step and no empty buckets manufactured. Reach for <code>to_period()</code> when the question is "which month does this row belong to" (a label, feeding straight into a plain <code>groupby()</code>); reach for <code>resample()</code> when the question is "show me every period in range, including the empty ones."</p>
+<pre><code>p = clean[<span class="str">"order_date"</span>].dt.to_period(<span class="str">"M"</span>)
+p + <span class="num">1</span>
+<span class="cm">-- 2026-02 for every row -- Period arithmetic shifts by whole periods, "1 month forward"</span>
+
+p.dt.to_timestamp()
+<span class="cm">-- back to a real Timestamp -- 2026-01-01, the period's START by default</span></code></pre>
+<p>A genuinely surprising finding, confirmed directly rather than assumed: a <code>Period</code> does <strong>not</strong> compare equal to the plain string that prints the same way. <code>pd.Period("2026-01", freq="M") == "2026-01"</code> is <code>False</code> — pandas does not parse the right-hand string into a <code>Period</code> for the comparison. Compare against another real <code>Period</code> (<code>pd.Period("2026-01")</code>) instead, or convert first.</p>
+
+<h2>3 · Timezones: tz_localize() attaches, tz_convert() shifts</h2>
+<p>A plain parsed datetime column (like <code>order_date</code> here) is <dfn data-en="a datetime value with no timezone attached -- pandas has no idea what timezone the clock time is measured in, and will refuse to compare it against a timezone-aware value" data-vn="giữ nguyên 'tz-naive' -- giá trị datetime KHÔNG gắn timezone, pandas không biết giờ đó tính theo múi giờ nào">tz-naive</dfn>: pandas has no idea what timezone that clock time is measured in. Two methods handle timezones, and they are not interchangeable:</p>
+<pre><code>clean[<span class="str">"order_date"</span>].dt.tz_localize(<span class="str">"UTC"</span>)
+<span class="cm">-- ATTACHES a timezone label -- clock numbers stay 2026-01-05 00:00:00, now tagged +00:00
+-- dtype becomes datetime64[us, UTC]</span>
+
+localized.dt.tz_convert(<span class="str">"Asia/Ho_Chi_Minh"</span>)
+<span class="cm">-- SHIFTS the clock to the same real instant in another zone -- 2026-01-05 07:00:00+07:00</span></code></pre>
+<p><dfn data-en="a Series/DatetimeIndex method, dt.tz_localize(tz), attaching a timezone label to a tz-naive datetime WITHOUT changing the clock numbers themselves -- the reverse of stripping a timezone off is tz_localize(None)" data-vn="giữ nguyên 'tz_localize()' -- method dt.tz_localize(tz), GẮN nhãn timezone vào datetime tz-naive, KHÔNG đổi số giờ hiển thị -- muốn bỏ timezone thì gọi tz_localize(None)">tz_localize()</dfn> only stamps a label on — the clock digits (<code>00:00:00</code>) never move. <dfn data-en="a Series/DatetimeIndex method, dt.tz_convert(tz), converting an ALREADY timezone-aware datetime to a different timezone, shifting the clock numbers to represent the same real instant in the new zone" data-vn="giữ nguyên 'tz_convert()' -- method dt.tz_convert(tz), chuyển 1 datetime ĐÃ có timezone sang timezone khác, đổi số giờ hiển thị để vẫn đúng 1 thời điểm thực tế">tz_convert()</dfn> requires the value to already be tz-aware and shifts the actual clock digits to show the same real-world instant in the new zone. Confirmed directly, both raise (not silently do the wrong thing):</p>
+<pre><code>localized.dt.tz_localize(<span class="str">"UTC"</span>)
+<span class="cm">-- TypeError: Already tz-aware, use tz_convert to convert</span>
+
+clean[<span class="str">"order_date"</span>].dt.tz_convert(<span class="str">"UTC"</span>)
+<span class="cm">-- TypeError: Cannot convert tz-naive timestamps, use tz_localize to localize</span>
+
+clean[<span class="str">"order_date"</span>] &gt; localized
+<span class="cm">-- TypeError: Invalid comparison between dtype=datetime64[us] and DatetimeArray
+-- pandas refuses to compare naive against aware rather than silently guessing a zone</span></code></pre>
+<p>The rule of thumb: <code>tz_localize()</code> exactly once, right after loading, to say what timezone the source data actually means — then <code>tz_convert()</code> any time a different zone needs to be displayed or compared.</p>
+
+<h2>4 · SQL bridge</h2>
+<p><code>to_period()</code> is the pandas equivalent of grouping by <code>DATE_TRUNC('month', order_date)</code> — a calendar-bucket label used only for rows that exist, not a manufactured empty-inclusive grid (that's <code>resample()</code>, the closer cousin of a generated calendar table joined with <code>LEFT JOIN</code>). <code>tz_localize()</code>/<code>tz_convert()</code> map to Postgres's <code>AT TIME ZONE</code>: applying it to a plain <code>timestamp</code> column attaches a zone (like <code>tz_localize</code>); applying it to a <code>timestamptz</code> column re-renders it in another zone (like <code>tz_convert</code>) — same naive-vs-aware distinction, same two different operations under one SQL-looking clause.</p>
+
+<h2>5 · Why this earns its keep in an interview</h2>
+<p>"Group sales by month" sounds trivial until the interviewer adds "...but only for months that actually had orders" (<code>to_period()</code> + <code>groupby()</code>) versus "...and show every month in the range, zeros included" (<code>resample()</code>, Lesson 38) — naming which one fits, unprompted, is the signal. Timezones show up the moment "the data comes from a different region's servers" gets mentioned — knowing that pandas refuses to silently compare naive against aware, and which of the two methods to reach for, heads off a whole class of silent off-by-some-hours bugs before they ship.</p>
+
+<div class="interview">
+<p><strong>Q: "Our orders table has a plain datetime column, but the analytics team just told you it's actually recorded in UTC and needs to display in the user's local time zone. What do you do, and what could go wrong?"</strong> A strong answer, out loud: <em>"First I'd <code>tz_localize('UTC')</code> on the column — that just stamps the UTC label on without moving any clock digits, since the values are already correct UTC times. Then <code>tz_convert()</code> to the target zone for display, which actually shifts the numbers to the same real instant elsewhere. The failure mode to watch for: calling <code>tz_localize</code> a second time, or on data that's actually already local time, silently mislabels every row — and pandas will then refuse any comparison against a naive column, which is actually the safety net that catches the mistake early instead of shipping wrong hours."</em> The signal: naming the naive-vs-aware distinction correctly and knowing localize attaches while convert shifts.</p>
+</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/59_to_period_and_timezones.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/59_to_period_and_timezones.py</code></pre>
+<p>Reuses <code>practice/data/orders_raw.csv</code>'s clean 4-row slice (An/Binh, order_ids 1/2/5/6). Exercise 1 checks <code>to_period("M")</code> grouped totals (Section 1). Exercise 2 checks that calling <code>tz_localize("UTC")</code> twice on the same column raises <code>TypeError</code> (Section 3). Exercise 3 checks <code>tz_convert("Asia/Ho_Chi_Minh")</code> on an already-localized column (Section 3).</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="to_period() converts a Timestamp into a Period -- a calendar-time SPAN like the whole month -- and only labels rows that actually exist, unlike resample() which builds a fixed grid including empty buckets.">
+    <p class="stem">What does <code>.dt.to_period("M")</code> convert each row's Timestamp into?</p>
+    <button class="opt" data-ok>A Period, a whole calendar-month span, not one exact instant</button>
+    <button class="opt">A fixed grid row per month, empty months always included</button>
+    <button class="opt">A plain string formatted from just the year and month</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: tz_localize() only attaches a timezone label without moving the clock digits; tz_convert() requires an already tz-aware value and shifts the clock digits to the same real instant in the new zone.">
+    <p class="stem">What is the real difference between <code>tz_localize()</code> and <code>tz_convert()</code>?</p>
+    <button class="opt" data-ok>localize only attaches a zone label, convert shifts the clock</button>
+    <button class="opt">They are two interchangeable spellings of the exact same operation</button>
+    <button class="opt">localize shifts the clock itself, convert only attaches a label</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: comparing a tz-naive Series against a tz-aware one raises TypeError immediately -- pandas refuses to guess which zone the naive side means rather than silently producing a wrong comparison.">
+    <p class="stem">What happens comparing a tz-naive datetime column against a tz-aware one with <code>&gt;</code>?</p>
+    <button class="opt" data-ok>TypeError is raised right away, no silent zone guessed here</button>
+    <button class="opt">pandas assumes the naive side is UTC and compares normally</button>
+    <button class="opt">It compares fine, treating both sides as one local zone</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official pandas <a href="https://pandas.pydata.org/docs/user_guide/timeseries.html">Time series / date functionality</a> user guide (the "Converting between period and timestamp" and "Time zone handling" sections, same page family already cited by Lessons 32/38) for <code>to_period()</code>/<code>to_timestamp()</code> and the <code>tz_localize()</code>/<code>tz_convert()</code> raise behavior (~5 min).</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>to_period()</code>/<code>Period</code>, <code>tz-naive</code>, <code>tz_localize()</code>, and <code>tz_convert()</code> were added today, right after Lesson 58's <code>pd.merge_asof()</code> entry.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-59 comes back reported as shakiest, otherwise a fresh curriculum/glossary scan for the next genuinely-uncovered pattern (open candidates per MISSION.md: more groupby/agg patterns, additional string/regex methods, or memory/dtype optimization).<br><br>
+💬 Anything unclear — to_period() vs resample(), the naive/aware distinction, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

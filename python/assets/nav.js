@@ -82,6 +82,8 @@
       file: "lessons/0037-descriptors.html" },
     { n: 38, date: "2026-09-04", title: "Regular expressions: pattern-matching text with re",
       file: "lessons/0038-regular-expressions.html" },
+    { n: 39, date: "2026-09-05", title: "argparse: turning a script into a real command-line tool",
+      file: "lessons/0039-argparse.html" },
   ];
 
   const REFS = [

@@ -128,6 +128,8 @@
       file: "lessons/0060-check-constraints.html" },
     { n: 61, date: "2026-09-04", title: "statement_timeout & lock_timeout: a query that should have died minutes ago",
       file: "lessons/0061-statement-timeout-and-lock-timeout.html" },
+    { n: 62, date: "2026-09-05", title: "OAuth, OpenID Connect, PKCE, and refresh tokens: \"Sign in with Google,\" properly named",
+      file: "lessons/0062-oauth-oidc-pkce-refresh-tokens.html" },
   ];
 
   const REFS = [

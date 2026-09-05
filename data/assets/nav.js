@@ -122,6 +122,8 @@
       file: "lessons/0057-merge-validate.html" },
     { n: 58, date: "2026-09-04", title: "pd.merge_asof(): joining on \"nearest date,\" not an exact key",
       file: "lessons/0058-merge-asof.html" },
+    { n: 59, date: "2026-09-05", title: ".dt.to_period() and timezones: calendar buckets, not fixed grids",
+      file: "lessons/0059-to-period-and-timezones.html" },
   ];
 
   const REFS = [

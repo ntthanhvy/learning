@@ -130,6 +130,8 @@
       file: "lessons/0061-statement-timeout-and-lock-timeout.html" },
     { n: 62, date: "2026-09-05", title: "OAuth, OpenID Connect, PKCE, and refresh tokens: \"Sign in with Google,\" properly named",
       file: "lessons/0062-oauth-oidc-pkce-refresh-tokens.html" },
+    { n: 63, date: "2026-09-06", title: "Polling, long polling, SSE, and WebSockets: how \"real-time\" actually gets to the browser",
+      file: "lessons/0063-polling-sse-websockets.html" },
   ];
 
   const REFS = [

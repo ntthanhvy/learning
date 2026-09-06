@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 60 · str.contains(): substring filtering, and the NaN trap</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 60 · ~20 min · 6 Sep 2026</p>
+<h1>str.contains(): substring filtering, and the NaN trap</h1>
+<p class="byline">Lesson 10 used <code>.str.contains()</code> for one line in passing; Lessons 42/43 went deep on <code>str.extract()</code>/<code>str.extractall()</code> for pulling pieces OUT of text. Today is the other half of the <code>.str</code> toolkit that never got its own lesson: filtering ROWS by whether a text column contains something — and the one dtype-dependent default that quietly changes whether a missing value crashes your filter or not.</p>
+
+<h2>1 · The basic filter: SQL LIKE, spelled in pandas</h2>
+<p><dfn data-en="a Series.str method returning a True/False mask for whether each value contains a given substring or regex pattern -- the pandas spelling of SQL's LIKE '%pattern%'" data-vn="giữ nguyên 'str.contains()' -- method str.contains(pattern), trả về mask True/False xem mỗi giá trị có chứa chuỗi con/regex đó không -- giống LIKE '%pattern%' trong SQL">.str.contains(pattern)</dfn> returns a boolean mask, one row per value, marking which ones contain that substring — index into the DataFrame with it to actually filter, same as any boolean mask:</p>
+<pre><code>merged = orders.merge(customers, on=<span class="str">"customer"</span>, how=<span class="str">"left"</span>)
+merged[merged[<span class="str">"region"</span>].str.contains(<span class="str">"south"</span>, case=<span class="kw">False</span>)]
+<span class="cm">-- both Binh rows: region "South" contains "south" case-insensitively</span></code></pre>
+<p>Confirmed directly against the real <code>orders_raw.csv</code> left-merged with <code>customers.csv</code>: <code>case=False</code> makes the match case-insensitive (the same instinct as SQL's <code>ILIKE</code> vs <code>LIKE</code>, case-sensitive by default) and returns exactly the 2 Binh rows whose region is <code>"South"</code>.</p>
+
+<h2>2 · The trap: na= default depends on the column's dtype</h2>
+<p>The left-merge above leaves Chi's <code>region</code> as missing — Chi has an order but no row in <code>customers.csv</code>. What <code>str.contains()</code> does with that missing value is NOT one fixed rule; confirmed directly, it depends entirely on the column's dtype:</p>
+<pre><code><span class="cm"># modern pandas "str" dtype (the default for a plain read_csv() column, pandas 3.x) --</span>
+<span class="cm"># missing values silently become False, no error, no NaN in the result</span>
+merged[<span class="str">"region"</span>].dtype                          <span class="cm"># str</span>
+merged[<span class="str">"region"</span>].str.contains(<span class="str">"north"</span>, case=<span class="kw">False</span>)  <span class="cm"># row 3 (Chi, NaN) -&gt; False, dtype: bool</span>
+
+<span class="cm"># legacy "object" dtype -- missing values become NaN, an object-dtype mask with NaN mixed in</span>
+obj_region = merged[<span class="str">"region"</span>].astype(<span class="kw">object</span>)
+mask = obj_region.str.contains(<span class="str">"north"</span>, case=<span class="kw">False</span>)  <span class="cm"># row 3 -> NaN, dtype: object</span>
+merged[mask]
+<span class="cm">-- ValueError: Cannot mask with non-boolean array containing NA / NaN values</span></code></pre>
+<p>Confirmed directly on this course's own real fixture, on both dtypes: the modern <code>"str"</code> dtype (what a plain <code>pd.read_csv()</code> column now loads as, pandas 3.0.5) defaults missing values to <code>False</code> and never raises. The older <code>object</code> dtype defaults them to <code>NaN</code> instead — filtering with a mask that mixes <code>True</code>/<code>False</code>/<code>NaN</code> then raises <code>ValueError</code> immediately, because pandas refuses to guess whether a missing value should pass the filter. Passing <code>na=False</code> explicitly sidesteps the whole question — it names "missing rows don't match" outright, on any dtype, and is the safest default to reach for by habit before checking which dtype you actually have.</p>
+<p><dfn data-en="a keyword argument on str.contains() (and several other .str methods) naming what boolean value a missing/NaN entry should map to in the result mask -- its own default is not one fixed value, it depends on the column's dtype (False for 'str' dtype, NaN for legacy object dtype, pd.NA for nullable StringDtype)" data-vn="giữ nguyên 'na=' -- tham số của str.contains() (và vài method .str khác) quy định giá trị NaN/thiếu trong cột sẽ thành True hay False trong mask kết quả -- mặc định của chính nó KHÔNG cố định, tuỳ dtype của cột (False cho dtype 'str', NaN cho object dtype cũ, pd.NA cho StringDtype)">na=</dfn> is the keyword that controls this directly — set it once, explicitly, rather than trusting whichever default the column's dtype happens to carry.</p>
+
+<h2>3 · Negation: ~ flips the mask, missing values included</h2>
+<p>There's no <code>.str.not_contains()</code> — negate with <code>~</code>, the same operator used on any boolean mask:</p>
+<pre><code>merged[~merged[<span class="str">"region"</span>].str.contains(<span class="str">"north"</span>, case=<span class="kw">False</span>, na=<span class="kw">False</span>)]
+<span class="cm">-- 3 rows: both Binh (region "South", doesn't contain "north") PLUS Chi (region NaN)
+-- Chi's NaN mapped to False by na=False, then flipped to True by ~ -- a "doesn't
+-- contain north" row correctly includes "no region on file at all"</span></code></pre>
+<p>Confirmed directly: this is a real, not hypothetical, edge — a missing value passes the negated filter for exactly the same reason it failed the un-negated one. Decide up front whether "unknown" should count as "doesn't match" for the question actually being asked; <code>na=False</code> before negating is usually the intent, but naming it out loud is the interview-grade move.</p>
+
+<h2>4 · regex=True by default — special characters mean something</h2>
+<p>The pattern is a regex by default, not a plain substring — a character like <code>.</code> means "any character," not a literal dot:</p>
+<pre><code>skus = pd.Series([<span class="str">"A.1"</span>, <span class="str">"A21"</span>, <span class="str">"B.5"</span>])
+skus.str.contains(<span class="str">"A."</span>)               <span class="cm"># True, True, False -- "." matches ANY char, "A21" matches too</span>
+skus.str.contains(<span class="str">"A."</span>, regex=<span class="kw">False</span>)  <span class="cm"># True, False, False -- literal dot now, only "A.1" matches</span></code></pre>
+<p>Confirmed directly: searching for a literal SKU code, filename, or version string containing regex-special characters (<code>.</code>, <code>+</code>, <code>(</code>, <code>|</code>, ...) without <code>regex=False</code> silently matches more rows than intended — no error, just a quietly wrong filter. <code>str.contains()</code> accepts a full regex pattern too (capture groups aren't needed here — that's what <code>str.extract()</code>, Lesson 42, is for); <code>regex=False</code> is the fix whenever the pattern is meant as a literal string, not a pattern.</p>
+
+<h2>5 · SQL bridge</h2>
+<p><code>str.contains(pat, case=False, na=False)</code> is <code>column ILIKE '%pat%'</code> (case-sensitive default <code>str.contains()</code> maps to plain <code>LIKE</code>); <code>~str.contains(..., na=False)</code> is <code>NOT (column ILIKE '%pat%')</code>. The <code>na=</code> question has no clean SQL parallel — SQL's three-valued logic makes <code>NULL LIKE '%x%'</code> evaluate to <code>NULL</code> automatically (which <code>WHERE</code> then treats as "don't include"), while pandas forces the choice explicitly via <code>na=</code> instead of having a built-in three-valued mask.</p>
+
+<h2>6 · Why this earns its keep in an interview</h2>
+<p>"Filter to rows where the description mentions X" is one of the most common live-coding asks, and the dtype-dependent <code>na=</code> default is exactly the kind of thing that works fine on a clean interview dataset and then breaks — or silently drops rows — the moment real data with missing text shows up. Naming <code>na=False</code> explicitly, unprompted, signals the same "I've been burned by this before" instinct as remembering <code>errors="coerce"</code> or <code>validate=</code> on a merge.</p>
+
+<div class="interview">
+<p><strong>Q: "You filter a text column with `.str.contains('refund')` and it raises `ValueError: Cannot mask with non-boolean array containing NA / NaN values` — what happened and how do you fix it?"</strong> A strong answer, out loud: <em>"The column has missing values, and on whatever dtype it's stored as here, `str.contains()`'s default `na=` produced an actual `NaN` in the mask instead of `True`/`False` — pandas won't guess whether a missing value counts as a match, so filtering with a mask that isn't purely boolean raises rather than silently including or excluding those rows. The fix is passing `na=False` explicitly, which says 'a missing value never matches' — or `na=True` if the question actually calls for treating unknowns as matches."</em> The signal: knowing the default isn't one fixed value, and naming `na=False` as the deliberate choice rather than a magic fix.</p>
+</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/60_str_contains.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/60_str_contains.py</code></pre>
+<p>Reuses <code>practice/data/orders_raw.csv</code> left-merged with <code>practice/data/customers.csv</code> (Lesson 5's fixtures) — Chi's order has no matching customer row, leaving <code>region</code> genuinely NaN for that one row. Exercise 1 checks a case-insensitive <code>str.contains()</code> filter (Section 1). Exercise 2 checks <code>~str.contains(..., na=False)</code> negation, confirming the NaN row is included (Section 3). Exercise 3 checks <code>regex=False</code> literal matching against a small SKU-style Series (Section 4).</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: str.contains()'s na= default is not one fixed value -- it depends on the column's dtype, False for the modern 'str' dtype, NaN for legacy object dtype, pd.NA for nullable StringDtype.">
+    <p class="stem">What decides the value <code>str.contains()</code> assigns to a missing entry when <code>na=</code> is left unset?</p>
+    <button class="opt" data-ok>The column's own dtype, since there's no fixed default</button>
+    <button class="opt">It always silently becomes False, regardless of the dtype</button>
+    <button class="opt">It always raises ValueError right away, no dtype matters</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: filtering with a mask that mixes True/False and an actual NaN (the object-dtype default) raises ValueError, because pandas refuses to guess whether a missing value should pass a boolean filter.">
+    <p class="stem">Why does filtering with an object-dtype <code>str.contains()</code> mask (missing na=) sometimes raise <code>ValueError</code>?</p>
+    <button class="opt" data-ok>It mixes a real NaN with True/False, not pure boolean</button>
+    <button class="opt">Object dtype columns simply cannot ever run str.contains() at all</button>
+    <button class="opt">ValueError only fires when the pattern string is left empty</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: str.contains() treats the pattern as regex by default, so '.' matches any character -- regex=False switches to a literal substring match instead.">
+    <p class="stem">Why does <code>str.contains("A.")</code> match <code>"A21"</code> when <code>regex=False</code> is not passed?</p>
+    <button class="opt" data-ok>The default treats the pattern as regex, so "." matches any character</button>
+    <button class="opt">pandas always matches only the very first two characters of the value</button>
+    <button class="opt">A dot inside any pattern string just always gets silently ignored entirely</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official pandas <a href="https://pandas.pydata.org/docs/reference/api/pandas.Series.str.contains.html">Series.str.contains()</a> API reference (the "na" parameter description spells out the exact per-dtype default) — cross-referenced against the <a href="https://pandas.pydata.org/docs/user_guide/text.html">Working with text data</a> user guide, same page family cited for str.extract() in Lessons 42/43 (~5 min).</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>str.contains()</code> and <code>na=</code> were added today, right after Lesson 59's <code>tz_convert()</code> entry.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-60 comes back reported as shakiest, otherwise a fresh curriculum/glossary scan for the next genuinely-uncovered pattern (open candidates per MISSION.md: more groupby/agg patterns beyond Lesson 4/40/48, or memory/dtype optimization beyond Lesson 25/41/51).<br><br>
+💬 Anything unclear — the na= dtype-dependent default, the negation edge case, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

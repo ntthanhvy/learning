@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 63 · Polling, long polling, SSE, and WebSockets: how "real-time" actually gets to the browser</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 63 · ~20 min</p>
+<h1>Polling, long polling, SSE, and WebSockets: how "real-time" actually gets to the browser</h1>
+<p class="byline">Every lesson so far has assumed the shape Lesson 1 laid out: the browser asks, the backend answers, the connection ends. That shape has no way for the server to say "something changed" on its own — a new chat message, a price update, a job finishing — without the browser asking again first. Four different fixes exist for that gap, and picking the wrong one is a genuinely common design mistake, not a style preference. You already know the client side of at least two of these from the DOM; today is the backend side.</p>
+
+<h2>1 · The gap: HTTP only answers, it never volunteers</h2>
+<p>A plain <code>fetch()</code> is a question-then-answer: the browser opens a connection, sends a request, the server sends exactly one response, and the connection's job is done. Lesson 1 built the whole mental model of this course on that shape. It works perfectly for "load my orders" — but it has no mechanism at all for "tell me the moment a new order arrives," because the server has no way to speak first. The server can only ever respond to a question it was just asked.</p>
+<p>Four different techniques close that gap, each trading away a different thing to do it. None of them is strictly "the modern one" that replaced the others — each is still the right choice in specific, nameable situations, which is exactly why picking blind is the actual mistake.</p>
+
+<h2>2 · Polling: the honest, wasteful default</h2>
+<p><dfn data-en="the client repeatedly sends a normal request on a fixed interval (e.g. every 5 seconds) to check whether anything new exists, getting an immediate response each time whether or not anything changed" data-vn="polling (giữ nguyên) — client tự hỏi lại theo chu kỳ cố định, hỏi xong là server trả lời ngay dù chưa có gì mới">Polling</dfn> is just a <code>setInterval</code> around a normal <code>fetch()</code> — nothing new architecturally, every request is a complete, ordinary request-response pair, and the server answers instantly every time, even when the honest answer is "nothing changed." That simplicity is real: no new backend infrastructure, works through every proxy and firewall, and a stateless handler (Lesson 8) handles it exactly like any other endpoint. The cost is just as real: an interval short enough to feel responsive (every 2-3 seconds) means most requests are wasted round trips answering "no," multiplied by every client polling at once — a chat app with 10,000 open tabs polling every 3 seconds is 3,300+ requests per second asking a question whose answer is "no" the overwhelming majority of the time.</p>
+
+<h2>3 · Long polling: making the wasted request wait instead</h2>
+<p><dfn data-en="the client sends a request as usual, but the server deliberately holds it open without responding until either new data exists or a timeout is reached, then the client immediately opens a new request to repeat the wait" data-vn="long polling (giữ nguyên) — server giữ request không trả lời cho tới khi có dữ liệu mới hoặc hết timeout, xong client lại mở request mới ngay">Long polling</dfn> fixes polling's core waste with one change: the server doesn't answer immediately. It holds the request open — no response sent — until either new data actually exists or a timeout passes (say, 30 seconds), then responds and the client immediately opens a fresh request to resume waiting. From the client's side the code looks almost identical to polling; from the server's side, a handler goroutine now blocks for up to 30 seconds per open connection instead of returning in milliseconds, which is the trade being made: far fewer wasted "no" answers, at the cost of holding far more connections (and their goroutines, and their memory) open at once. It's still ordinary HTTP request-response underneath — nothing about the protocol changed, only how long the server chooses to wait before using it.</p>
+
+<h2>4 · SSE: the server keeps one connection open and just keeps talking</h2>
+<p><dfn data-en="Server-Sent Events — a one-way HTTP connection the server keeps open and writes new events to over time, using a text/event-stream response and a special client API that auto-reconnects" data-vn="SSE / Server-Sent Events (giữ nguyên) — HTTP connection 1 chiều, server giữ mở và liên tục gửi event mới xuống, client dùng EventSource, tự reconnect nếu rớt">SSE (Server-Sent Events)</dfn> keeps a single connection open indefinitely and the server pushes new events down it as they happen, instead of the client re-asking on any schedule. It's still plain HTTP — one request, one response — except the response never formally ends; the server just keeps writing to it, formatted as a simple text stream (<code>data: {...}\n\n</code> per event). The browser side is a few lines you may already recognize: <code>new EventSource("/updates")</code> fires an <code>onmessage</code> callback per event and, notably, reconnects automatically if the connection drops — that reconnection logic is built into the browser API, not something you write yourself. The real constraint is architectural, not code-level: this is one-way only, server-to-client. A chat app's incoming messages fit SSE well; a chat app's outgoing messages still need a normal POST alongside it, because SSE has no channel back.</p>
+<pre><code><span class="cm">// sseHandler keeps one HTTP response open and writes events to it as they occur,</span>
+<span class="cm">// instead of returning immediately -- the defining shape of Server-Sent Events.</span>
+<span class="kw">func</span> sseHandler(events &lt;-<span class="kw">chan</span> Event) http.HandlerFunc {
+    <span class="kw">return</span> <span class="kw">func</span>(w http.ResponseWriter, r *http.Request) {
+        w.Header().Set(<span class="st">"Content-Type"</span>, <span class="st">"text/event-stream"</span>)
+        w.Header().Set(<span class="st">"Cache-Control"</span>, <span class="st">"no-cache"</span>)
+
+        flusher, ok := w.(http.Flusher) <span class="cm">// must flush per event, not buffer until the end</span>
+        <span class="kw">if</span> !ok {
+            http.Error(w, <span class="st">"streaming unsupported"</span>, http.StatusInternalServerError)
+            <span class="kw">return</span>
+        }
+
+        <span class="kw">for</span> {
+            <span class="kw">select</span> {
+            <span class="kw">case</span> ev := &lt;-events:
+                fmt.Fprintf(w, <span class="st">"data: %s\n\n"</span>, ev.JSON())
+                flusher.Flush() <span class="cm">// push this event now, don't wait for more</span>
+            <span class="kw">case</span> &lt;-r.Context().Done(): <span class="cm">// Lesson 41: client disconnected, stop writing</span>
+                <span class="kw">return</span>
+            }
+        }
+    }
+}</code></pre>
+<div class="callout"><strong>Trap:</strong> that handler goroutine blocks in its own <code>select</code> loop for as long as the client stays connected — potentially hours. A server holding thousands of these open at once needs to plan for that connection count the same way Lesson 18 planned for connection-pool exhaustion: an open SSE connection is a held resource, not a fire-and-forget response.</div>
+
+<h2>5 · WebSockets: when the server needs to listen back</h2>
+<p>SSE's one-way limit is exactly what <dfn data-en="a persistent, full-duplex TCP connection established via an HTTP upgrade handshake, letting client and server send messages to each other at any time over the same open connection" data-vn="WebSocket (giữ nguyên) — kết nối TCP 2 chiều, mở qua HTTP upgrade handshake, client và server gửi message qua lại bất cứ lúc nào">WebSockets</dfn> exist to remove: after an initial HTTP request that asks to <dfn data-en="the HTTP mechanism a WebSocket connection starts with -- a normal GET request carrying an Upgrade header, which the server accepts to switch the same TCP connection from HTTP to the WebSocket protocol" data-vn="protocol upgrade (giữ nguyên) — cơ chế bắt đầu WebSocket, GET request kèm header Upgrade, server đồng ý thì đổi giao thức trên cùng 1 TCP connection">upgrade</dfn> the protocol, the same TCP connection stops speaking HTTP entirely and becomes a raw, full-duplex channel: either side can send a message at any time, with no request/response pairing at all. A multiplayer cursor position, a live collaborative document edit, a game's input stream — anything genuinely bidirectional and frequent belongs here, not on SSE plus a workaround POST channel.</p>
+<p>The cost is the one this course has been building toward since Lesson 8: a WebSocket connection is inherently <em>stateful</em> and pinned to whichever single instance accepted the upgrade. Lesson 8's whole point was that any instance should be able to handle any request because nothing lived only in one process's memory — a live WebSocket connection breaks that assumption on purpose, by design, because the whole feature requires one instance to hold one specific open socket for one specific client for the life of that connection. Broadcasting a message to "every connected client" behind multiple instances then needs its own fan-out mechanism (commonly Redis pub/sub) so instance B can tell instance A "forward this to the socket you're holding" — a real piece of infrastructure SSE and polling never require at all.</p>
+
+<h2>6 · Choosing: match the shape of the actual problem</h2>
+<table class="cmp">
+<thead><tr><th></th><th>Polling</th><th>Long polling</th><th>SSE</th><th>WebSocket</th></tr></thead>
+<tbody>
+<tr><th>Direction</th><td>client asks</td><td>client asks</td><td>server pushes</td><td>both, freely</td></tr>
+<tr><th>Connection</th><td>short, repeated</td><td>held, then repeated</td><td>held indefinitely</td><td>held indefinitely</td></tr>
+<tr><th>Server cost</th><td>lowest per-conn.</td><td>one blocked goroutine</td><td>one blocked goroutine</td><td>one blocked goroutine</td></tr>
+<tr><th>Good fit</th><td>rare, tolerable delay</td><td>infrequent events</td><td>frequent, one-way feed</td><td>frequent, two-way</td></tr>
+</tbody>
+</table>
+<p>The decision rule worth saying out loud in review: start from how often things actually change and which direction data needs to flow, not from which technique sounds newest. A dashboard that refreshes real numbers once a minute has no business holding a WebSocket open all day just because it sounds more "real-time" — polling is the honestly simpler, cheaper, correct answer there. A live multiplayer whiteboard has no business polling every 2 seconds hoping to catch up — the lag alone breaks the feature. Reaching for WebSockets by default, the way this course has flagged similar reflexes before (Lesson 36's N+1, Lesson 57's cache stampede), tends to add real operational cost — connection-count capacity planning, the cross-instance fan-out problem, reconnect/backoff logic — to solve a problem a cheaper technique already solved.</p>
+
+<div class="interview">
+<p><strong>Q: "A client wants live updates when an order's status changes. How would you build that?"</strong> A strong answer, out loud: <em>"First I'd ask how often status actually changes and whether the client ever needs to send anything back mid-stream. If it's occasional — a few times over an order's life — long polling or even plain polling every few seconds is honestly fine and needs zero new infrastructure. If updates are frequent and strictly server-to-client, I'd reach for SSE: one open connection, the browser's EventSource handles reconnects for me, and I don't need a fan-out system unless I'm behind multiple instances, in which case I'd add Redis pub/sub so any instance can push to any connected client. I'd only reach for a full WebSocket if the client also needs to send frequent messages back on the same channel — status updates alone don't need that."</em> The signal: naming the actual constraint (direction, frequency) before naming a technology, and knowing that a live connection is stateful and pinned to one instance, which Lesson 8's stateless-handler assumption doesn't cover for free.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Plain HTTP request-response has no mechanism for the server to speak first -- it can only ever answer a request it was just asked, so it has no way to announce that something changed on its own.">
+    <p class="stem">Why can't plain request-response HTTP tell the browser about a change on its own?</p>
+    <button class="opt" data-ok>the server can only answer a request already asked</button>
+    <button class="opt">browsers refuse to accept any response over one second</button>
+    <button class="opt">HTTP headers cannot legally carry any JSON body content</button>
+    <button class="opt">TCP connections always close after exactly one single packet</button>
+  </div>
+  <div class="q" data-why="Long polling holds the request open without responding until new data exists or a timeout passes, so most answers are no longer wasted 'nothing changed yet' round trips the way fixed-interval polling produces.">
+    <p class="stem">What does long polling change about plain polling to reduce wasted requests?</p>
+    <button class="opt" data-ok>the server holds the request open until data actually exists</button>
+    <button class="opt">the client stops sending any further request afterward at all</button>
+    <button class="opt">the server compresses every single response body down by half</button>
+    <button class="opt">the browser caches replies for the entire following hour instead</button>
+  </div>
+  <div class="q" data-why="SSE is a one-way channel, server to client only, over a single long-lived HTTP response -- a client that needs to send frequent messages back on the same channel needs a WebSocket instead, or a separate request alongside the SSE stream.">
+    <p class="stem">What is the key architectural limit of Server-Sent Events?</p>
+    <button class="opt" data-ok>data can only flow from the server to the client</button>
+    <button class="opt">only exactly one single browser tab may connect at once</button>
+    <button class="opt">every message must always stay under one entire kilobyte total</button>
+    <button class="opt">the connection always auto-closes after precisely ten seconds have passed</button>
+  </div>
+  <div class="q" data-why="A WebSocket connection is stateful and pinned to whichever single instance accepted the upgrade -- unlike Lesson 8's stateless handlers, broadcasting to clients spread across multiple instances needs its own fan-out mechanism, commonly Redis pub/sub, so one instance can reach a socket only another instance is holding.">
+    <p class="stem">Why does a WebSocket break Lesson 8's "any instance can handle any request" assumption?</p>
+    <button class="opt" data-ok>the open socket stays pinned to one specific instance</button>
+    <button class="opt">WebSockets are physically unable to run behind any balancer</button>
+    <button class="opt">every WebSocket message must be individually re-authenticated each time</button>
+    <button class="opt">Go's standard library forbids holding more than one socket</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events">MDN — Server-Sent Events</a> (RESOURCES.md's standing HTTP-semantics arbiter), read alongside its sibling page <a href="https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API">MDN — The WebSockets API</a> for the upgrade handshake and full-duplex message model side by side with SSE's one-way shape covered above.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> open. Still no <code>lesson_completed</code>/quiz-outcome record exists for any lesson after 63 rounds — the honest next step is a completion signal or a user-named track to go deeper on. Otherwise, a fresh gap-finding grep against MISSION.md's four tracks (data modeling, API design, runtime concepts, auth/security/ops) is the fallback — secrets management (Vault/KMS-style rotation, only ever mentioned in passing so far in Lessons 21/31) and distributed tracing/correlation-ID propagation across services are two named candidates from this round's own search that remain uncovered as dedicated topics.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -4274,3 +4274,116 @@
   string/regex methods beyond Lesson 42/43, or memory/dtype optimization
   beyond Lesson 25/41/51 — or a review/drill round if any
   `lesson_completed`/quiz-outcome signal has surfaced by then.
+- 2026-09-06 generation (Lesson 60, headless 06:00 run): idempotency was
+  self-confirmed first — globbed `data/lessons/` for `0060-*.html` (none
+  found), grepped `assets/nav.js` for `n: 60`/`2026-09-06` (neither found,
+  highest registered lesson was still 59, dated 2026-09-05), and grepped
+  `NOTES.md` for a `2026-09-06` entry (none found) — so this round proceeded.
+  Direct DB reads (`psql` against the DB URL env var) were not attempted this
+  round per the orchestrator's own stated hard rule (documented for months as
+  a sandbox content-level block on expanding that env var name, not a
+  permissions issue, no workaround); `bin/query-progress` was likewise
+  skipped as a non-executable helper hitting the same generic approval gate
+  with no user present — so still no `course_progress` rows readable and no
+  `lesson_completed`/quiz-outcome record beyond the Lesson 1 baseline
+  (re-confirmed: `data/learning-records/` still holds only the single
+  baseline file). Fell back to on-disk state (NOTES.md history + nav.js +
+  lesson teasers) as the source of truth for what to teach next, as
+  instructed. Lesson 59's teaser named the remaining MISSION.md-relevant
+  candidate categories with no single queued pick: more groupby/agg patterns
+  beyond Lesson 4/40/48, additional string/regex methods beyond Lesson
+  42/43, or memory/dtype optimization beyond Lesson 25/41/51. Picked
+  additional string/regex methods: `str.contains()` and its `na=` parameter
+  — Lesson 10 had used `.str.contains()` for one line in passing (case=False
+  only) and Lessons 42/43 went deep on `str.extract()`/`str.extractall()`
+  for pulling pieces OUT of text, but no lesson had ever covered
+  `str.contains()` as a filtering tool in its own right, especially its
+  dtype-dependent `na=` default. Confirmed zero-hit before writing a word:
+  grepped `lessons/*.html` and `reference/glossary.html` for `str.contains`
+  as a dedicated glossary entry and `na=` as a term — Lesson 10 had one
+  passing code-line use with no glossary entry, confirmed via targeted grep,
+  not a real collision. `uv run --with pandas` worked directly this round
+  (pandas 3.0.5, confirmed via `pd.__version__`) — a scratch dir was created
+  at `.scratch/lesson60/` inside the repo (not literally `/tmp`, which this
+  sandbox blocks `mkdir` under) and fully removed (`rm -rf`) after
+  verification, matching recent rounds' actual practice. Every claim was
+  hand-verified in `.scratch/lesson60/explore.py` (deleted after) against
+  the real `orders_raw.csv` left-merged with `customers.csv` (Lesson 5's
+  fixtures) before writing a word of the lesson — no new fixture invented;
+  reused the existing two, since their left-merge already produces a genuine
+  NaN in a text column (Chi has an order but no `customers.csv` row),
+  exactly the shape needed to demonstrate the `na=` gotcha honestly. Confirmed
+  directly: `str.contains("south", case=False)` returns exactly the 2 Binh
+  rows; on the modern `"str"` dtype (what a plain `read_csv()` column loads
+  as by default in pandas 3.0.5, confirmed via `.dtype`), a missing value
+  silently becomes `False` with no error; cast the same column to legacy
+  `object` dtype first and the same call's default `na=` produces a real
+  `NaN` in the mask, and filtering with that mask raises `ValueError: Cannot
+  mask with non-boolean array containing NA / NaN values` (the actual modern
+  message, more specific than a generic `TypeError`) — cross-checked live via
+  `WebFetch` against the official `Series.str.contains()` API reference,
+  whose "na" parameter description names the exact same per-dtype default
+  (`False` for `"str"` dtype, `NaN` for `object`, `pd.NA` for nullable
+  `StringDtype`), matching the hands-on probe exactly. Also confirmed
+  directly: `~str.contains(..., na=False)` correctly includes Chi's NaN-region
+  row in a "doesn't contain north" filter (3 rows: both Binh + Chi), a real
+  edge case worth naming rather than assumed; and `regex=True` being the
+  default means `"A."` matches `"A21"` (any character) while `regex=False`
+  restricts it to a literal dot (only `"A.1"` matches) — both confirmed with
+  a standalone probe. Designing the practice file surfaced three
+  placeholders, all confirmed to raise on their own with no special guarding
+  needed: `Ellipsis.str` (Exercises 1 and 3's whole-right-hand-side
+  `south_mask = ...`/`literal_mask = ...` placeholders) raises
+  `AttributeError`, and `~Ellipsis` (Exercise 2's `not_north_mask = ...`
+  placeholder) raises `TypeError` — both confirmed directly with a
+  standalone probe (`.scratch/lesson60/probe_ellipsis.py`, deleted after)
+  before shipping, no accidental-freebie risk in any exercise. The shipped
+  (unsolved) `practice/60_str_contains.py` was executed in a mirrored
+  `.scratch/lesson60/practice/` layout (fixture CSVs copied alongside, plain
+  flagless `mkdir -p`/`cp`) and printed exactly the expected 3 ✗ with no
+  crash; a solved copy (`.scratch/lesson60/practice/60_solved.py`, not
+  shipped) then printed all 3 ✓ on the first run — no bugs found this round.
+  The shipped file was also re-run a second time directly from its real
+  `practice/` location (`cd data && uv run --with pandas python3
+  practice/60_str_contains.py`) and confirmed identical output (3 ✗, no
+  crash). The entire `.scratch/lesson60/` directory was fully removed (`rm
+  -rf`) after verification. Quiz options were drafted and checked with a
+  Python regex/word-count script isolating each `<div class="q">` block by
+  its own start offset (this course's established approach since Lesson 42),
+  run via `uv run python3` — the first draft came out mismatched on all
+  three questions (Q1 11/8/8, Q2 10/9/9, Q3 11/9/10); several rewrite +
+  recount cycles landed all three level (Q1 9/9/9, Q2 10/10/10, Q3 12/12/12),
+  then independently re-verified with a second, fully separate method (a
+  standalone hardcoded-string word-count script, not a second run of the
+  same HTML-parsing script), per this file's standing warning that a single
+  verification pass isn't reliable — both methods agreed all three questions
+  genuinely landed level. A Python regex tag-balance script (occurrence-count,
+  not line-count) confirmed every tag pair in the shipped lesson HTML is
+  balanced (`p` 22/22, `h2` 9/9, `pre` 5/5, `code` 73/73, `div` 5/5, `dfn`
+  2/2, `button` 9/9, `strong` 3/3, `em` 1/1, `a` 3/3, `span` 34/34, plus
+  `html`/`head`/`body`/`title` 1/1 each); cross-checked the `dfn` count
+  specifically with a second method (`Grep -o` occurrence counts on
+  `<dfn`/`</dfn>`), which agreed exactly (2/2) — this course's documented
+  false-undercount trap (plain line-count `Grep` undercounting multi-tag
+  lines) did not recur this round since both real `<dfn>` uses sit on their
+  own separate lines. `node --check` confirmed `assets/nav.js` still parses
+  as valid JavaScript after the Lesson 60 entry was appended to the `LESSONS`
+  array. `bin/record-progress data lesson_generated --day 60 --lesson
+  0060-str-contains.html --detail '{"by":"launchd"}'` was run once from the
+  repo root as a single standalone command as instructed and succeeded on
+  the first try (`recorded: data/lesson_generated day=60
+  lesson=0060-str-contains.html`), matching most recent rounds' successful
+  pattern — direct DB reads stayed blocked this round but the write path
+  worked fine, consistent with the orchestrator's stated distinction between
+  the two. This agent does not run `git commit` — leaving working-tree
+  changes uncommitted remains this course's established convention. Added
+  two glossary entries (`str.contains()`,
+  `na= (str.contains)`, checked for a collision first — grepped for both
+  terms, no existing real rows) placed directly after Lesson 59's
+  `tz_convert()` entry, and registered Lesson 60 in `nav.js`. This closes out
+  the "additional string/regex methods" category named in Lesson 59's
+  teaser. Set the teaser going forward to the remaining MISSION.md-relevant
+  candidate categories with no queued pick yet: more groupby/agg patterns
+  beyond Lesson 4/40/48, or memory/dtype optimization beyond Lesson 25/41/51
+  — or a review/drill round if any `lesson_completed`/quiz-outcome signal has
+  surfaced by then.

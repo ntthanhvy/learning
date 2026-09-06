@@ -124,6 +124,8 @@
       file: "lessons/0058-merge-asof.html" },
     { n: 59, date: "2026-09-05", title: ".dt.to_period() and timezones: calendar buckets, not fixed grids",
       file: "lessons/0059-to-period-and-timezones.html" },
+    { n: 60, date: "2026-09-06", title: "str.contains(): substring filtering, and the NaN trap",
+      file: "lessons/0060-str-contains.html" },
   ];
 
   const REFS = [

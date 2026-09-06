@@ -4088,3 +4088,116 @@
   round, and should also re-attempt a live `WebFetch` citation check against
   The Copenhagen Book's OAuth page specifically if that tool is available by
   then.
+- 2026-09-06 generation (Lesson 63, headless 06:00 run): idempotency check
+  first - confirmed no `lessons/0063-*.html` file existed and no `n: 63`/
+  `date: "2026-09-06"` entry was in `nav.js` before writing anything (highest
+  prior lesson was 62, dated 2026-09-05). Read `MISSION.md`, `RESOURCES.md`,
+  both `learning-records/` entries, `assets/nav.js`, and this file (in full,
+  reading around the 256KB single-read cap with an offset/limit pass over the
+  history log's tail) per the briefing's own instruction. Per this run's
+  explicit environment-constraints note, did not attempt direct `psql`/
+  `bin/query-progress` reads at all this round - that class of block has been
+  standing for roughly two months of rounds and re-attempting it wastes time
+  without new information - relied entirely on `NOTES.md`'s own generation
+  log, `learning-records/`, and `nav.js` file state, per the briefing's
+  documented fallback. Both learning-records entries (0001's baseline, 0002's
+  concurrency-vocabulary gap) were confirmed unchanged and already fully
+  reflected in prior lessons; still no `lesson_completed`/quiz-outcome record
+  exists for any lesson after 62 rounds, so there is still no reported weak
+  spot to target - consistent with every round since roughly Lesson 19.
+  Topic choice: Lesson 62's own closing note named no confirmed next-lesson
+  gap, so this round ran a fresh gap-finding grep against a broad candidate
+  list instead of picking blind - checked `lessons/*.html` and
+  `reference/glossary.html` for: correlation ID/structured logging (already
+  covered, Lessons 7/13), feature flags (already covered, Lesson 21),
+  secrets management/Vault/KMS (only ever mentioned in passing inside
+  Lessons 21/31, never its own topic), distributed tracing/OpenTelemetry
+  (zero hits), API gateway/BFF, blue-green/canary deploys, CDN, read
+  replicas (all zero hits, but all lean infra/cloud-provider-specific or
+  distributed-systems-beyond-vocabulary, both explicitly excluded by
+  MISSION.md's Out of scope section), GraphQL/event-sourcing/CQRS (zero
+  hits, but frameworks-and-paradigms-beyond-REST edges outside the
+  four scope tracks) - and the one that stood out as genuinely in-scope and
+  uncovered: real-time server-to-client delivery (polling, long polling, SSE,
+  WebSockets - zero hits for all four terms anywhere in `lessons/*.html` or
+  the glossary). Chose it: squarely an API/runtime-design topic (MISSION
+  criteria 2 and 3), not infra-specific, and a strong bridge-from-frontend
+  candidate per the user's own standing preference - the user already knows
+  `EventSource`/`WebSocket` from the client side, so this lesson is the
+  backend half of something half-already-owned. Lesson 63 covers: the gap
+  plain request-response HTTP can't close (the server can never speak
+  first); polling as the honest, simple, wasteful default; long polling as
+  the same HTTP shape with the server deliberately holding the request
+  open; SSE (`text/event-stream`, `EventSource`, auto-reconnect) as one-way
+  server-push over a single long-lived response, with a Go `sseHandler`
+  snippet using `http.Flusher` and `r.Context().Done()` (explicitly tied
+  back to Lesson 41's cancellation-signal lesson); WebSockets as the
+  full-duplex fix via an HTTP protocol-upgrade handshake, explicitly tied
+  back to Lesson 8's stateless-instance lesson - a live WebSocket connection
+  is pinned to one instance on purpose, breaking the "any instance can
+  handle any request" assumption, requiring a cross-instance fan-out
+  mechanism (Redis pub/sub) that polling/SSE never need; and a closing
+  comparison table plus decision rule (match direction + frequency to the
+  technique, not to whichever sounds newest), echoing the same
+  reach-for-the-complex-tool-by-default caution Lessons 36 and 57 already
+  raised for other problems. Checked the glossary first for collisions on
+  all five candidate terms (`polling`, `long polling`, `SSE`/`Server-Sent
+  Events`, `WebSocket`, `protocol upgrade`) - zero hits anywhere, all five
+  added as genuinely new terms. The Go snippet (`sseHandler`, using
+  `http.Flusher` and a `select` over an events channel and
+  `r.Context().Done()`) was compile-checked clean with `go mod init`,
+  `go vet -C`, and `go build -C` in a scratch module
+  (`.scratch/backend-lesson63/`, deleted entirely after, per the standing
+  delete-the-scratch-dir convention) - used the exact code as shipped in the
+  lesson for this check, not a paraphrase; clean build, no vet warnings; a
+  bare `-C`-less invocation from `/tmp` was blocked by this session's
+  directory-change sandboxing (only the repo root and its subpaths are
+  allowed working directories), so the scratch module was built and checked
+  directly inside the repo instead, same net effect. Quiz options were
+  drafted, then verified with a `node -e` inline script parsing the quiz
+  HTML and counting `.split(/\s+/).length` per option (this course's
+  established Node-over-shell-loop preference) - first draft was uneven on
+  all four questions (Q1 9/8/9/8, Q2 9/9/8/9, Q3 10/9/8/8, Q4 9/10/7/9),
+  fixed through several rewrite-and-recount passes per question (re-verified
+  with the same script after every edit, not by eye, including one round
+  where a comma inside an option's wording silently changed its own
+  `.split(/\s+/)` count and had to be re-balanced) to reach final tallies of
+  Q1 9/9/9/9, Q2 10/10/10/10, Q3 10/10/10/10, Q4 9/9/9/9; confirmed exactly 4
+  `data-ok` (one per question) via the same script. Ran an occurrence-
+  accurate tag-balance check (Node script using a lookahead regex for open
+  tags rather than Grep's line-counting `count` mode, per Lesson 60's own
+  documented tooling-quirk warning - re-confirmed this round too, since a
+  first draft of the same check used a naive open-tag regex that
+  undercounted `div`/`p`/`dfn`/`button`/`a`/`span`/`table` before the
+  lookahead fix) for every tag pair used: div 7/7, p 18/18, pre 1/1, code
+  9/9, h1 1/1, h2 8/8, table 1/1, thead 1/1, tbody 1/1, tr 5/5, th 9/9, td
+  16/16, strong 4/4, em 3/3, dfn 5/5, button 16/16, a 3/3, span 22/22 - all
+  balanced; also re-verified `glossary.html`'s own table/tr/td/th balance
+  after the five-row addition (1/1, 227/227, 678/678, 3/3) since that file
+  was edited too. A Node regex scan for unescaped raw `&` characters (the
+  exact bug class Lessons 59 and 62 both shipped and had to fix) found zero
+  instances this round. Full re-read of the shipped file after all
+  verification passes found no stray artifacts, no malformed attributes, no
+  leftover editing marks - clean on first full read. `WebFetch` WAS
+  available this round (unlike Lesson 62's round) - ran live checks against
+  both cited MDN pages (`Web/API/Server-sent_events` and
+  `Web/API/WebSockets_API`) before finalizing the citation; both confirmed
+  live and on-topic (SSE page covers `EventSource`/one-way push/
+  `text/event-stream`; WebSockets page covers the upgrade handshake headers
+  and full-duplex messaging), extending RESOURCES.md's standing MDN HTTP
+  Guide citation into the two dedicated real-time-API pages specifically.
+  Registered Lesson 63 in `nav.js`. Ran `bin/record-progress backend
+  lesson_generated --day 63 --lesson 0063-polling-sse-websockets.html
+  --detail '{"by":"launchd"}'` directly from the repo root as a single
+  standalone command per this run's environment notes (never sourcing the
+  DB env var by name directly) - succeeded immediately on the first
+  attempt, no approval blocker this round, consistent with the write path's
+  general reliability across nearly every prior round regardless of
+  read-path status. No confirmed next-lesson gap
+  is named for the round after this one - the next session should treat a
+  completion/quiz-outcome signal, or a user-named track to deepen, as
+  materially higher priority than a 64th topic picked blind, same standing
+  note as every prior round; secrets management (Vault/KMS-style rotation)
+  and distributed tracing/correlation-ID propagation across services remain
+  the two sharpest named candidates from this round's own gap search if
+  neither signal materializes first.

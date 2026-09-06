@@ -84,6 +84,8 @@
       file: "lessons/0038-regular-expressions.html" },
     { n: 39, date: "2026-09-05", title: "argparse: turning a script into a real command-line tool",
       file: "lessons/0039-argparse.html" },
+    { n: 40, date: "2026-09-06", title: "contextlib: ready-made context managers beyond @contextmanager",
+      file: "lessons/0040-contextlib-utilities.html" },
   ];
 
   const REFS = [

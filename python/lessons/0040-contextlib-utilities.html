@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 40 · contextlib: suppress and ExitStack</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 40 · ~20 min · 6 Sep 2026</p>
+<h1><code>contextlib</code>: ready-made context managers beyond <code>@contextmanager</code></h1>
+<p class="byline">Day 29 taught you to <em>write</em> a context manager, either as a class or with <code>@contextmanager</code>. Today is shorter: two context managers the standard library already wrote for you, for two problems that show up constantly — ignoring one specific, expected exception cleanly, and closing a variable, not-known-in-advance number of resources no matter how the middle fails.</p>
+
+<div class="callout"><strong>Bridge from SQL:</strong> <code>DROP TABLE IF EXISTS</code> exists so you don't have to check whether the table is there before dropping it — the database swallows exactly one specific, expected failure and nothing else. <code>contextlib.suppress()</code> is that same narrow, named tolerance applied to Python's own exceptions.</div>
+
+<h2>1 · <code>contextlib.suppress()</code>: ignoring one named exception, cleanly</h2>
+<p>A common pattern: delete a file that might already be gone, and don't treat "already gone" as an error.</p>
+<pre><code><span class="kw">import</span> os
+
+<span class="kw">try</span>:
+    os.remove(<span class="str">"report.tmp"</span>)
+<span class="kw">except</span> FileNotFoundError:
+    <span class="kw">pass</span></code></pre>
+<p>That works, but a bare <code>except: pass</code>-shaped block reads as "something is being silently ignored here" even when it's completely intentional and narrow. <dfn data-en="a context manager from the standard library's contextlib module that ignores one or more named exception types raised inside its with block, letting execution continue right after the block — any other exception type still propagates normally" data-vn="giữ nguyên &quot;contextlib.suppress()&quot; — context manager có sẵn, bỏ qua đúng những exception type được liệt kê trong with block, exception khác vẫn propagate bình thường">contextlib.suppress()</dfn> says the same thing declaratively, naming exactly what's expected:</p>
+<pre><code><span class="kw">from</span> contextlib <span class="kw">import</span> suppress
+<span class="kw">import</span> os
+
+<span class="kw">with</span> suppress(FileNotFoundError):
+    os.remove(<span class="str">"report.tmp"</span>)
+<span class="cm"># execution continues right here whether the file existed or not</span></code></pre>
+<p>Verified live: raising <code>ValueError</code> inside that same <code>with suppress(FileNotFoundError):</code> block does <em>not</em> get swallowed — it propagates out normally, exactly as if <code>suppress</code> weren't there. <code>suppress()</code> accepts multiple exception types as separate arguments (<code>suppress(FileNotFoundError, PermissionError)</code>), and only exactly those types are ignored. This is a different thing from Day 29's <dfn data-en="Day 29's term for what happens when a hand-written __exit__ method returns a truthy value while its with block is raising — distinct from today's contextlib.suppress(), which is a ready-made context manager naming specific exception types to ignore, not a return-value convention on a custom __exit__" data-vn="giữ nguyên &quot;exception suppression (Day 29)&quot; — __exit__ tự viết trả về truthy để nuốt exception, khác với contextlib.suppress() là context manager có sẵn">exception suppression (Day 29)</dfn> — that was about what a hand-written <code>__exit__</code> returns; <code>suppress()</code> is a ready-made context manager that does the narrow version of the same job without writing a class at all.</p>
+
+<h2>2 · <code>contextlib.ExitStack()</code>: a variable number of context managers</h2>
+<p><code>with</code> handles a fixed number of resources fine — <code>with open(a) as fa, open(b) as fb:</code> — but that syntax can't handle "however many files happen to be in this list," decided at runtime. <dfn data-en="a context manager from contextlib that lets you enter any number of other context managers, decided at runtime rather than fixed in the source, and guarantees all of them exit in reverse order when the with block ends, exception or not" data-vn="giữ nguyên &quot;ExitStack&quot; — context manager quản lý số lượng context manager khác không cố định lúc viết code, đảm bảo tất cả đều exit đúng thứ tự ngược khi kết thúc">ExitStack</dfn> is built for exactly that:</p>
+<pre><code><span class="kw">from</span> contextlib <span class="kw">import</span> ExitStack
+
+filenames = [<span class="str">"a.txt"</span>, <span class="str">"b.txt"</span>, <span class="str">"c.txt"</span>]   <span class="cm"># length only known at runtime</span>
+
+<span class="kw">with</span> ExitStack() <span class="kw">as</span> stack:
+    files = [stack.enter_context(<span class="kw">open</span>(name)) <span class="kw">for</span> name <span class="kw">in</span> filenames]
+    <span class="cm"># ... use files ...</span>
+<span class="cm"># every opened file is closed here, in reverse order, even if the loop raised partway through</span></code></pre>
+<p><code>stack.enter_context(cm)</code> calls <code>cm</code>'s <code>__enter__</code> immediately (Day 29's protocol, called by hand instead of by <code>with</code>'s own syntax) and remembers to call its <code>__exit__</code> later. Verified live with a logging stand-in for three resources: opening all three then raising partway through the block still closed all three that had already opened, in reverse order (<code>c</code>, then <code>b</code>, then <code>a</code>) — <code>ExitStack</code> gives the same all-or-nothing cleanup guarantee as a fixed <code>with a, b, c:</code> chain, just for a list built at runtime instead of names typed in the source.</p>
+<div class="callout"><strong><code>stack.callback(fn)</code> queues a plain function, not just a context manager.</strong> Verified live: <code>stack.callback(lambda: log.append("cleanup"))</code> runs <code>fn</code> at the same point <code>__exit__</code> would run — useful for one-off cleanup (deleting a temp file, closing a socket) that doesn't have its own context-manager class.</div>
+
+<h2>3 · One more corner, named not demonstrated: <code>redirect_stdout</code></h2>
+<p><code>contextlib.redirect_stdout(target)</code> temporarily points <code>print()</code>'s output at a different file-like object for the duration of a <code>with</code> block, then restores it — handy for capturing output from code that only knows how to <code>print()</code>. Named here for the module's shape, not built into today's practice file; the <a href="https://docs.python.org/3/library/contextlib.html">docs</a> cover it in one short example if it's ever needed.</p>
+
+<div class="interview">
+<p><strong>Q: "How would you clean up an unknown number of resources safely?"</strong> A strong answer, out loud: <em>"<code>contextlib.ExitStack</code> — build the list of things to open at runtime, call <code>stack.enter_context()</code> on each inside a <code>with ExitStack() as stack:</code> block, and every one of them is guaranteed to close, in reverse order, even if something partway through raises. A fixed <code>with a, b, c:</code> chain only works when you know the count and names ahead of time; <code>ExitStack</code> is the version of that guarantee for a count decided at runtime."</em> The signal: recognizing that <code>with</code>'s multi-manager syntax has a real limit, and knowing the standard-library answer instead of hand-rolling a <code>try</code>/<code>finally</code> loop that closes already-opened resources on error.</p>
+</div>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> nothing pandas-specific here — <code>ExitStack</code> and <code>suppress()</code> are plain Python plumbing that a pandas script would reach for exactly the same way, e.g. wrapping a variable number of <code>open()</code> calls before any <code>pd.read_csv()</code> runs. This is the only sentence in this lesson that names pandas.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/40_contextlib_utilities.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/40_contextlib_utilities.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: using <code>suppress()</code> to ignore a missing-key <code>KeyError</code> while confirming a different exception type still propagates, using <code>ExitStack</code> to enter a runtime-built list of logging stand-in resources and confirming they close in reverse order, confirming <code>ExitStack</code> still closes every already-opened resource when the block raises partway through, and registering a plain cleanup function with <code>stack.callback()</code>.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="contextlib.suppress(SomeError) only ignores the exact exception types named as its arguments - confirmed live, raising a different exception type inside the same with block still propagates normally, exactly as if suppress weren't there at all.">
+    <p class="stem">What does <code>with suppress(FileNotFoundError):</code> do if a <code>ValueError</code> is raised inside the block?</p>
+    <button class="opt" data-ok>it lets that ValueError propagate normally and unsuppressed</button>
+    <button class="opt">it silently swallows any and every exception raised</button>
+    <button class="opt">it converts the ValueError into a FileNotFoundError instead</button>
+  </div>
+  <div class="q" data-why="ExitStack.enter_context(cm) calls cm's own __enter__ immediately and remembers to call its __exit__ later, when the surrounding with ExitStack() block ends - it is Day 29's __enter__/__exit__ protocol invoked by a method call instead of by with's own built-in syntax.">
+    <p class="stem">What does <code>stack.enter_context(cm)</code> do inside a <code>with ExitStack() as stack:</code> block?</p>
+    <button class="opt" data-ok>calls cm's __enter__ right now, schedules __exit__ for later</button>
+    <button class="opt">only checks whether cm defines both dunder methods needed</button>
+    <button class="opt">permanently prevents cm's own __exit__ from ever running here</button>
+  </div>
+  <div class="q" data-why="Confirmed live: when a with ExitStack() block raises partway through, every resource entered so far via enter_context() still gets its __exit__ called, in reverse order of opening - the same all-or-nothing cleanup guarantee a fixed with a, b, c: chain gives, just for a runtime-built list instead of names fixed in the source.">
+    <p class="stem">If code inside a <code>with ExitStack() as stack:</code> block raises after opening three resources, what happens to those three?</p>
+    <button class="opt" data-ok>all three still get closed, in reverse of their own open order</button>
+    <button class="opt">only the very first resource that was ever opened stays closed now</button>
+    <button class="opt">none of the three get closed until the whole program finally exits</button>
+  </div>
+  <div class="q" data-why="ExitStack solves the case with's fixed with a, b, c: syntax cannot: a number of context managers decided at runtime (e.g. built from a list of filenames whose length is not known until the program runs), rather than a fixed count of names typed directly into the source ahead of time.">
+    <p class="stem">Why reach for <code>ExitStack</code> instead of a plain <code>with a, b, c:</code> chain?</p>
+    <button class="opt" data-ok>the count of context managers needed is only known live</button>
+    <button class="opt">plain with chains cannot ever call any __enter__ method correctly</button>
+    <button class="opt">ExitStack always runs measurably faster than any fixed with chain</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the <a href="https://docs.python.org/3/library/contextlib.html">contextlib</a> standard-library docs — <code>suppress()</code>, <code>ExitStack</code>, and <code>redirect_stdout()</code>/<code>redirect_stderr()</code> are all covered there with more examples than today's lesson needed room for.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day40">glossary</a> under Day 40.<br>
+This closes the <code>contextlib</code> gap Day 39's next-day note flagged as still open after Day 29's custom-context-manager lesson — the remaining named-but-untaught stdlib corner from that same list is <code>typing</code> extras (<code>Protocol</code>/<code>TypedDict</code>/generics beyond Day 7's basics).<br><br>
+💬 Anything unclear — <code>suppress()</code>, <code>ExitStack</code>, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

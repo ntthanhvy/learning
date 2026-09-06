@@ -4683,3 +4683,152 @@ fail *gracefully* so the learner sees which task failed.
   remains open, still needing `WebSearch` or a known-URL `WebFetch` fallback.
   Still no `lesson_completed`/quiz/kata outcome record exists for any day —
   no reported weak spot to target.
+- 2026-09-06 — **Day 40 generated** (headless 06:00 run, Python topic:
+  `contextlib` utilities beyond Day 29 — `suppress()` and `ExitStack`).
+  Idempotency: confirmed before writing anything that no `python/lessons/
+  0040-*.html` file existed via glob, `assets/nav.js` had no `n: 40`/
+  `2026-09-06` entry via grep, and the highest lesson on disk was
+  `0039-argparse.html` dated 2026-09-05 — generation proceeded as Day 40, not
+  a re-run.
+  Topic selection: Day 39's next-day note left two named-but-untaught
+  "rounding out the language" stdlib corners: `contextlib` utilities beyond
+  Day 29's custom context managers, and `typing` extras (`Protocol`/
+  `TypedDict`/generics beyond Day 7). Grepped both first: zero prior hits for
+  either (the only prior `contextlib` hit anywhere was Day 29's own lesson
+  teaching `@contextmanager`, not `suppress`/`ExitStack`/`redirect_stdout`).
+  Picked `contextlib` utilities: a tighter, more concretely scoped ~20 min
+  lesson than `typing` extras (which risks sprawling across `Protocol`,
+  `TypedDict`, and generics all at once), and a direct, natural continuation
+  of Day 29's `__enter__`/`__exit__` foundation rather than a cold-start
+  topic. Kept `typing` extras in reserve, named explicitly in this lesson's
+  closing note for the next run.
+  Learning records: still only the Day 1 baseline
+  (`learning-records/0001-baseline-reads-python-writes-little.md`) — no
+  completion/quiz/kata outcome record for any day 2-39 found, confirmed again
+  this run. Treated as "no reported weak spot" per every prior round since
+  Day 34, picked the next stdlib-corner candidate rather than a review day.
+  Web-lookup: used `WebFetch` against `docs.python.org/3/library/
+  contextlib.html` before writing anything — succeeded, returning
+  `suppress()`, `ExitStack` (with `enter_context()`, `push()`, `callback()`,
+  `pop_all()`), and `redirect_stdout()`/`redirect_stderr()`, all confirmed
+  available in 3.12. `WebSearch` was not attempted (confirmed not grantable
+  in this headless environment since Day 38); not needed here, single known
+  canonical URL.
+  Taught: section 1 `contextlib.suppress()` as the declarative version of a
+  narrow `try`/`except SomeError: pass`, bridged from SQL's `DROP TABLE IF
+  EXISTS` in the opening callout; explicitly distinguished from Day 29's own
+  "exception suppression" term (a hand-written `__exit__` returning truthy) —
+  same English word, different mechanism, cross-referenced in both directions
+  rather than left ambiguous, following the disambiguation precedent Day 39
+  set for "positional argument (CLI)" vs. Day 4's function-call sense.
+  Section 2 `ExitStack` for a runtime-determined number of context managers,
+  explicitly framed against the limit of a fixed `with a, b, c:` chain;
+  `stack.enter_context()` tied back to Day 29's `__enter__`/`__exit__`
+  protocol as "the same protocol, called by hand instead of by `with`'s own
+  syntax." A callout covers `stack.callback()` for a plain cleanup function.
+  Section 3 names `redirect_stdout` for the module's shape without
+  demonstrating it (not built into the practice file) — kept the lesson to
+  one tangible pair of tools rather than three, matching MISSION.md's
+  20%-of-real-work framing.
+  **Interpreter-behavior claims verified live, not just from docs**, per
+  Days 34-39's precedent — two scratch `uv run python3` probe files (Python
+  `3.12.3`, matching every prior day): (1) `suppress(FileNotFoundError)`
+  let a `ValueError` raised in the same block propagate unsuppressed, and
+  correctly swallowed the named `FileNotFoundError` with no crash; (2)
+  `ExitStack` entering three logging stand-in resources then raising
+  partway through the block still closed all three already-opened
+  resources, in reverse order (`c`, `b`, `a`), confirmed against an exact
+  expected log list; `stack.callback()` confirmed to run at the same point
+  `__exit__` would. No claim required correction — every drafted behavioral
+  claim matched its live probe on the first attempt.
+  No-pandas rule: zero pandas/NumPy/`pd.`/`np.` hits in the practice file
+  (grepped case-insensitively); exactly one contrast sentence in the lesson
+  (titled "Where pandas goes from here," naming that `ExitStack`/`suppress()`
+  are plain Python plumbing a pandas script would use identically, without
+  demonstrating any pandas API), placed once after section 3, matching the
+  hard-rule section above.
+  Practice file `practice/40_contextlib_utilities.py` (5 exercises:
+  `suppress(KeyError)` around a dict lookup, confirming `suppress(KeyError)`
+  lets a different exception type propagate, `ExitStack` entering a
+  runtime-built list of logging stand-in resources, confirming `ExitStack`
+  still closes everything already opened when the block raises partway
+  through, and `stack.callback()` registering a plain cleanup function)
+  needed no on-disk fixtures. Followed the standard defensive pattern against
+  the Ellipsis-at-module-level bug family: all five `...` placeholders live
+  strictly inside function bodies (confirmed by grep — each is indented 4
+  spaces, none at column 0/module or class scope).
+  **Bug caught during solved-copy verification, not shipped**: the first
+  draft's Exercise 3 check asserted the shared log list would read
+  `["open a", "open b", "open c"]` at the point `enter_all()` returns, but
+  since `enter_all()`'s own `with ExitStack()` block has already exited by
+  the time it returns, the log correctly also contains the three `close`
+  lines in reverse order by then — the *test's* expected value was wrong,
+  not the solution code. Caught because the solved copy printed a real ✗
+  on first run instead of being assumed to pass; fixed the expected tuple
+  in both the shipped practice file and the verification copy, re-ran, all
+  five exercises green on the next attempt. Logged here per this course's
+  standing practice of recording every bug the verification step actually
+  catches, not just a pass/fail summary.
+  Verified in a scratch dir under the repo root (`python/.scratch/lesson40/`,
+  removed after use, since this sandbox blocks `cd` outside the repo
+  working directory entirely — plain `/tmp` scratch dirs are not reachable
+  this run, unlike some prior days' notes): the shipped (unsolved) copy, run
+  via plain `uv run python3` (no `--with` needed), both from a scratch copy
+  and from its real `practice/` path directly, printed five clean ✗ lines
+  with no traceback each time; a separately solved copy (every TODO filled
+  in by hand) printed all five ✓ and the "All green" tally once the
+  Exercise 3 check fix above landed — one real bug found and fixed this
+  round, unlike Day 39's clean first pass.
+  Glossary: added a Day 40 section to `reference/glossary.html`
+  (`contextlib.suppress()`, `exception suppression (Day 29) vs.
+  contextlib.suppress()`, `ExitStack`) after grepping for collisions with
+  Days 1-39 — one deliberate near-collision handled explicitly: Day 29
+  already has an `exception suppression` row (the `__exit__`-truthy-return
+  sense); today's row is titled distinctly and cross-references Day 29's
+  row rather than duplicating or overwriting it, matching the "positional
+  argument (CLI)" precedent Day 39 set. The 3 new `<dfn data-en` tags in the
+  lesson body match the 3 new glossary rows exactly (confirmed by direct
+  grep count of `data-en=` occurrences, cross-checked against the glossary
+  table's new `<tr>` count).
+  Quiz: 4 questions (one fewer than the usual 5 — the topic is two tools,
+  not five distinct facts, and a forced fifth question would have padded
+  rather than tested new material). Word counts were checked with a Python
+  script (two independent extraction methods: whole-file document-order
+  `<button class="opt">` grouping in threes, and per-question `<div
+  class="q">`-block-scoped extraction) and mismatched on the first draft for
+  all four questions (Q1 7/9/8, Q2 10/9/8, Q3 12/11/11, Q4 11/10/10) — each
+  rewritten and recounted over several rounds (one round's fix accidentally
+  reordered two words instead of changing the count, caught immediately by
+  re-running the script rather than trusting the edit) before landing all
+  four at equal per-option counts (8/8/8, 9/9/9, 12/12/12, 10/10/10) —
+  the same multi-pass pattern every recent day has logged. Both extraction
+  methods independently confirmed the final counts agree before shipping.
+  HTML tag-balance was checked two ways: a counting-open-vs-close-tags-per-
+  element script, and a second, structurally different stack-based check
+  using Python's stdlib `html.parser.HTMLParser`; both agreed the file is
+  fully balanced.
+  Registered in `assets/nav.js` with `date: "2026-09-06"`.
+  **DB access:** per this run's own instructions, direct `psql`/
+  `bin/query-progress` were not attempted this run (both confirmed blocked
+  in this sandbox with no user present to approve, per months of prior-day
+  precedent) — paced entirely from on-disk state (`NOTES.md`'s own
+  generation log, `python/lessons/`, `python/assets/nav.js`,
+  `python/learning-records/` — still only the Day 1 baseline, no
+  completion/quiz/kata outcome record for any day 2-39).
+  `bin/record-progress python lesson_generated --day 40 --lesson
+  0040-contextlib-utilities.html --detail '{"by":"launchd"}'` will be run
+  once after this entry is saved, per convention, regardless of past
+  approval-gate flakiness.
+  **Next-day note:** with `contextlib` utilities now taught, the one
+  remaining named-but-untaught stdlib corner from Day 38/39's list is
+  `typing` extras (`Protocol`/`TypedDict`/generics beyond Day 7's basics) —
+  confirmed zero prior hits this run, a reasonable default pick for Day 41.
+  The walrus operator `:=` remains only an unexplained inline example in Day
+  38's lesson body (never its own topic) and stays a viable small-footnote
+  candidate. `RESOURCES.md`'s Gap 2 (Python interview-prep source) and Gap 1
+  (folding `fastapi.tiangolo.com/tutorial/bigger-applications/` into
+  "Knowledge — backend," substance-resolved by Day 38 but never actually
+  written into that file) both remain open for a future run with either
+  `WebSearch` access or explicit scope to touch `RESOURCES.md`. Still no
+  `lesson_completed`/quiz/kata outcome record exists for any day — no
+  reported weak spot to target.

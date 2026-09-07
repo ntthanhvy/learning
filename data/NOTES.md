@@ -4387,3 +4387,119 @@
   beyond Lesson 4/40/48, or memory/dtype optimization beyond Lesson 25/41/51
   — or a review/drill round if any `lesson_completed`/quiz-outcome signal has
   surfaced by then.
+- 2026-09-07 generation (Lesson 61, headless 06:00 run): idempotency was
+  self-confirmed first — globbed `data/lessons/` for `0061-*.html` (none
+  found), grepped `assets/nav.js` for `n: 61`/`2026-09-07` (neither found,
+  highest registered lesson was still 60, dated 2026-09-06), and grepped
+  `NOTES.md` for a `2026-09-07` entry (none found before this one) — so this
+  round proceeded. Direct DB reads: `bin/query-progress data` was tried once
+  from the repo root and immediately hit a generic "requires approval" gate
+  with no user present (consistent with the orchestrator's stated
+  long-standing limitation); did not retry further and did not attempt raw
+  `psql` against the DB URL env var at all this round, since prior rounds'
+  notes already establish that path as sandbox-blocked regardless of
+  phrasing. Fell back to on-disk state (NOTES.md history + nav.js + lesson
+  content) as the source of truth for what to teach next, as instructed —
+  `data/learning-records/` still holds only the single Jul 9 baseline file,
+  no quiz/completion signal has ever landed. Lesson 60's teaser named two
+  remaining MISSION.md-relevant candidates with no queued pick: more
+  groupby/agg patterns beyond Lesson 4/40/48, or memory/dtype optimization
+  beyond Lesson 25/41/51 — picked the groupby/agg option per the task's
+  stated tie-break (higher interview frequency). Confirmed genuinely
+  uncovered before writing a word: grepped every lesson for `.agg(` and
+  `groupby` — Lesson 4 already teaches named aggregation and `.agg({...})`
+  with one function per column, Lesson 38 uses `.agg({...})` inside
+  `resample()`, Lesson 55 uses `.agg({col: [list]})` with multiple functions
+  per column but only in service of teaching `add_prefix()`/`add_suffix()`,
+  never as its own topic — and a targeted grep for
+  `groupby([^)]*)\.apply\(|groupby.*apply\(lambda` across all of
+  `lessons/*.html` returned zero matches, confirming `groupby().apply()`
+  itself has never been taught. Picked both as one lesson: multi-function
+  `.agg({col: [funcs]})` as its own topic (not just a side effect of
+  add_prefix), and `groupby().apply()` for the harder case `.agg()`
+  structurally cannot express (a function needing several columns of the
+  same group at once, or returning more than one value per group). A
+  scratch dir was created at `.scratch/lesson61/` inside the repo (this
+  sandbox blocks `mkdir` under literal `/tmp`, consistent with prior
+  rounds' actual practice) and fully removed (`rm -rf`) after verification.
+  Every claim was hand-verified there against the real `orders_raw.csv`
+  (Lessons 2-4's fixture, coerced the same way) before writing a word of the
+  lesson: confirmed directly that `.agg({"amount_clean": ["sum", "mean"],
+  "order_id": "count"})` runs all three functions in one pass and produces a
+  two-level MultiIndex on the output columns, flattened by
+  `columns = ["_".join(c) for c in columns]`; confirmed directly that
+  `groupby().apply()` with `include_groups=False` (required — passing
+  `include_groups=True` explicitly now raises `ValueError:
+  include_groups=True is no longer allowed` outright in this pandas version,
+  3.0.5, not merely a deprecation warning, checked directly since the
+  lesson needed to state this precisely rather than guess) lets a custom
+  function read multiple values from the same column of one group (max
+  minus min) and, separately, return a multi-value `pd.Series` per group
+  (range and count together), producing a DataFrame with named columns —
+  both shapes confirmed impossible to express as a single named `.agg()`
+  function. Designing the practice file surfaced a real bug caught before
+  shipping: the first draft placed Exercise 1's MultiIndex-flatten line
+  (`multi_agg.columns = [...]`) directly at module level outside any
+  try/except, so the unsolved placeholder (`multi_agg = ...`) crashed with
+  an uncaught `AttributeError` traceback instead of printing a clean ✗ —
+  caught by actually running the unsolved file in the scratch dir per this
+  round's required verification step, not assumed safe; fixed by wrapping
+  Exercise 1 in the same try/except-then-None pattern already used for
+  Exercises 2 and 3. After the fix, the shipped (unsolved)
+  `practice/61_groupby_apply_and_multi_agg.py` was executed in a mirrored
+  `.scratch/lesson61/practice/` layout (fixture CSVs copied alongside) and
+  printed exactly the expected 3 ✗ with no crash; a solved copy
+  (`.scratch/lesson61/practice/61_solved.py`, not shipped) then printed all
+  3 ✓ on the first run — one bug found and fixed this round, unlike Lesson
+  60's clean first pass. The shipped file was also re-run a second time
+  directly from its real `practice/` location
+  (`cd data && uv run --with pandas python3
+  practice/61_groupby_apply_and_multi_agg.py`) and confirmed identical
+  output (3 ✗, no crash) both before and after the glossary/nav.js edits
+  that followed. The entire `.scratch/lesson61/` directory (and the later
+  `.scratch/check61/` used only for post-edit tag-balance/glossary-table
+  checks) was fully removed (`rm -rf`) after verification — confirmed via
+  `git status --porcelain` at the end that no stray files remain under
+  `data/`. Quiz options were drafted and checked with a Python
+  regex/word-count script isolating each `<div class="q">` block by its own
+  start offset (this course's established approach since Lesson 42), run via
+  `uv run python3` — the first draft came out mismatched on Q1 (12/10/10)
+  and Q3 (12/9/9), Q2 was already level (10/10/10); several rewrite +
+  recount cycles landed all three level (Q1 9/9/9, Q2 10/10/10, Q3
+  10/10/10), then independently re-verified with a second, fully separate
+  method (manual word-by-word counting done by hand directly from a
+  `Grep`-extracted raw option-text listing, not a second run of the same
+  script), per this file's standing warning that a single verification pass
+  isn't reliable — both methods agreed all three questions genuinely landed
+  level. A Python regex tag-balance script (occurrence-count, not
+  line-count) confirmed every tag pair in the shipped lesson HTML is
+  balanced (`p` 22/22, `h1` 1/1, `h2` 9/9, `pre` 5/5, `code` 70/70, `div`
+  5/5, `dfn` 2/2, `button` 9/9, `strong` 5/5, `em` 3/3, `a` 3/3, `span`
+  33/33, `head`/`body`/`title` 1/1 each), cross-checked with a second method
+  (`Grep -o` occurrence counts on `<dfn`/`<pre>`/`<button class="opt"`),
+  which agreed exactly (2, 5, 9) — no false-undercount trap hit this round.
+  Checked for a glossary collision before adding anything: `MultiIndex`
+  already had its own entry from an earlier lesson (pivot_table-era) — reused
+  that existing term/definition in the lesson's `<dfn>` rather than
+  duplicating a second glossary row for it, and updated the lesson's closing
+  note to say so explicitly rather than falsely claim it was added today.
+  Added exactly one new glossary entry, `groupby().apply()`, placed directly
+  after Lesson 60's `na= (str.contains)` entry; confirmed the glossary
+  table's `<tr>`/`<td>`/`<table>` tags stayed balanced (120/120, 357/357,
+  1/1) after the insert. Registered Lesson 61 in `nav.js`; `node --check`
+  confirmed it still parses as valid JavaScript after the edit. This closes
+  out the "groupby/agg patterns" category named in Lesson 60's teaser. Set
+  the teaser going forward to the one remaining MISSION.md-relevant
+  candidate category with no queued pick: memory/dtype optimization beyond
+  Lesson 25/41/51 — or a review/drill round if any
+  `lesson_completed`/quiz-outcome signal has surfaced by then. This agent
+  does not run `git commit` — leaving working-tree changes uncommitted
+  remains this course's established convention. `bin/record-progress data
+  lesson_generated --day 61 --lesson 0061-groupby-apply-and-multi-agg.html
+  --detail '{"by":"headless"}'` was run once from the repo root as a single
+  standalone command as instructed and succeeded on the first try
+  (`recorded: data/lesson_generated day=61
+  lesson=0061-groupby-apply-and-multi-agg.html`) — the write path worked
+  fine even though the read path (`bin/query-progress`) stayed blocked this
+  round, consistent with the orchestrator's stated distinction between the
+  two and every prior round's pattern.

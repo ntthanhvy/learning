@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 61 · groupby().apply() and multi-function .agg(): when built-in aggregations aren't enough</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 61 · ~20 min · 7 Sep 2026</p>
+<h1>groupby().apply() and multi-function .agg(): when built-in aggregations aren't enough</h1>
+<p class="byline">Lesson 4 covered <code>.agg()</code> with named aggregation and Lesson 55 used <code>.agg({...})</code> with multiple functions per column in passing (in service of <code>add_prefix()</code>), but neither taught the dict-of-list shape as its own topic, and no lesson has covered <code>groupby().apply()</code> at all. Today closes both gaps: the multi-function <code>.agg()</code> pattern for stacking several built-in stats on one column, and <code>.apply()</code> for the harder case — a custom per-group calculation that <code>.agg()</code> genuinely cannot express.</p>
+
+<h2>1 · Multiple functions per column: .agg({col: [funcs]})</h2>
+<p>Lesson 4's <code>.agg()</code> took one function per column (via a plain dict or named aggregation). Give a column a <em>list</em> of function names instead, and every one of them runs on that column, all in a single pass over the data:</p>
+<pre><code>df2.groupby(<span class="str">"customer"</span>).agg({<span class="str">"amount_clean"</span>: [<span class="str">"sum"</span>, <span class="str">"mean"</span>], <span class="str">"order_id"</span>: <span class="str">"count"</span>})
+<span class="cm">--           amount_clean         order_id
+--                    sum    mean    count
+-- customer
+-- An                162.0   81.00        3
+-- Binh              215.5  107.75        2
+-- Chi                99.9   99.90        1</span></code></pre>
+<p>Confirmed directly against this course's real <code>orders_raw.csv</code> (coerced the same way as Lessons 2-4): mixing a list-of-functions column with a single-function column in the same dict works fine, and the result grows a two-level <dfn data-en="a DataFrame column index with more than one level, produced here because .agg() needs to name both WHICH column and WHICH function for each output column -- (\"amount_clean\", \"sum\") and (\"amount_clean\", \"mean\") are two different column labels sharing the same top level" data-vn="giữ nguyên 'MultiIndex' -- ở đây là MultiIndex CỘT, vì .agg() cần đặt tên cả cột gốc lẫn hàm tính, nên ('amount_clean','sum') và ('amount_clean','mean') là hai cột khác nhau dùng chung tầng trên">MultiIndex</dfn> on the columns — one level names the source column, the other names the function that produced it. That's the same output shape Lesson 55 flattened with <code>add_prefix()</code>-adjacent tricks; the plain fix reached for most often is joining the levels by hand:</p>
+<pre><code>result = df2.groupby(<span class="str">"customer"</span>).agg({<span class="str">"amount_clean"</span>: [<span class="str">"sum"</span>, <span class="str">"mean"</span>], <span class="str">"order_id"</span>: <span class="str">"count"</span>})
+result.columns = [<span class="str">"_"</span>.join(c) <span class="kw">for</span> c <span class="kw">in</span> result.columns]
+<span class="cm">-- columns become: amount_clean_sum, amount_clean_mean, order_id_count</span></code></pre>
+<p>SQL bridge: this is exactly <code>SELECT customer, SUM(amount), AVG(amount), COUNT(order_id) FROM orders GROUP BY customer</code> — one <code>SELECT</code>, several aggregate expressions, same idea as naming several functions in one <code>.agg()</code> call instead of running three separate <code>groupby()</code>s.</p>
+
+<h2>2 · The wall .agg() hits: one function, one column, at a time</h2>
+<p>Every function <code>.agg()</code> accepts — built-in name or custom callable — receives <strong>one column's values</strong> for the group and returns <strong>one scalar</strong>. That's fine for "sum of amount" or "count of orders," but breaks down the moment the calculation needs to look at <em>several columns of the same group together</em>, or return more than one value from one pass over the group. Confirmed directly: a function that needs two columns at once from the same group has no clean home inside <code>.agg()</code>'s per-column contract.</p>
+
+<h2>3 · groupby().apply(): handing pandas a whole group at a time</h2>
+<p><dfn data-en="a groupby method that hands the ENTIRE per-group DataFrame (or Series) to a custom function, one group at a time, and combines whatever that function returns back into one result -- unlike .agg()'s one-column-in-one-scalar-out contract, the function here can read multiple columns of the same group together and return a scalar, a Series, or a whole DataFrame" data-vn="giữ nguyên 'groupby().apply()' -- method groupby().apply(func) đưa NGUYÊN DataFrame của từng nhóm (không chỉ 1 cột) cho hàm tự viết xử lý, rồi gộp kết quả lại; khác .agg() (1 cột vào - 1 số ra), func ở đây được đọc nhiều cột cùng lúc và trả về số, Series, hay cả DataFrame">groupby().apply(func)</dfn> hands the whole per-group table to a custom function — every column, not just one — and combines whatever comes back:</p>
+<pre><code><span class="kw">def</span> revenue_range(g):
+    <span class="kw">return</span> g[<span class="str">"amount_clean"</span>].max() - g[<span class="str">"amount_clean"</span>].min()
+
+df2.groupby(<span class="str">"customer"</span>).apply(revenue_range, include_groups=<span class="kw">False</span>)
+<span class="cm">-- customer
+-- An       78.0
+-- Binh    144.5
+-- Chi       0.0
+-- dtype: float64</span></code></pre>
+<p>Confirmed directly: <code>include_groups=False</code> is required in this pandas version (3.0.5) to drop the grouping column from what the function receives — passing <code>include_groups=True</code> explicitly now raises <code>ValueError: include_groups=True is no longer allowed</code> outright, not merely a warning, so the grouping column is never silently re-included inside the function's view of the group.</p>
+<p>The real payoff shows up once the custom function needs more than one column and returns more than one value — the exact shape <code>.agg()</code> cannot express:</p>
+<pre><code><span class="kw">def</span> range_and_count(g):
+    <span class="kw">return</span> pd.Series({
+        <span class="str">"range"</span>: g[<span class="str">"amount_clean"</span>].max() - g[<span class="str">"amount_clean"</span>].min(),
+        <span class="str">"n_orders"</span>: len(g),
+    })
+
+df2.groupby(<span class="str">"customer"</span>).apply(range_and_count, include_groups=<span class="kw">False</span>)
+<span class="cm">--           range  n_orders
+-- customer
+-- An         78.0       3.0
+-- Binh      144.5       2.0
+-- Chi         0.0       1.0</span></code></pre>
+<p>Confirmed directly: returning a <code>pd.Series</code> from the function (one entry per desired output column) makes <code>.apply()</code> combine the per-group results into a DataFrame with those names as columns — <code>len(g)</code> reaches every row of the group directly, and <code>g["amount_clean"].max() - g["amount_clean"].min()</code> reads the same column twice in one pass, both impossible to express as a single named function inside <code>.agg()</code>'s dict.</p>
+
+<h2>4 · The cost: apply() is a Python-level loop, agg() usually isn't</h2>
+<p>This power has a price. Built-in <code>.agg()</code> function names (<code>"sum"</code>, <code>"mean"</code>, <code>"count"</code>) run vectorized, compiled code across the whole column at once. <code>groupby().apply()</code> calls the Python function once per group, in a real Python-level loop under the hood — the exact cost Lesson 1's "think in tables, not loops" opened this course by warning against. The rule of thumb worth saying out loud in an interview: reach for <code>.agg()</code> (or <code>.transform()</code>, Lesson 16, when the shape needs to stay row-per-row) whenever a built-in or simple per-column function covers it, and drop to <code>.apply()</code> only when the calculation genuinely needs several columns of the same group together or a shape <code>.agg()</code> cannot produce.</p>
+
+<h2>5 · SQL bridge</h2>
+<p><code>.agg({"amount": ["sum", "mean"]})</code> is <code>SELECT customer, SUM(amount), AVG(amount) FROM orders GROUP BY customer</code> — plain aggregate functions, no procedural code needed. <code>groupby().apply()</code> has no clean SQL equivalent at all; the nearest real-world parallel is a stored procedure or a window-function-heavy CTE that computes several related values per partition in one procedural pass — the kind of per-group logic SQL pushes into either a UDF or a much longer query, and pandas expresses directly as an ordinary Python function.</p>
+
+<h2>6 · Why this earns its keep in an interview</h2>
+<p>"Give me the range of order values per customer" or "return the top N rows per group" are common follow-ups once the basic <code>groupby().sum()</code> answer lands — and both need <code>.apply()</code> (or <code>nlargest()</code> chained per group), not a one-line <code>.agg()</code>. Knowing the exact boundary — one column in, one scalar out for <code>.agg()</code>; whole group in, anything out for <code>.apply()</code> — signals real pandas fluency rather than pattern-matching from memorized snippets, and naming the performance tradeoff unprompted (vectorized vs. a per-group Python loop) is the senior-level version of that same answer.</p>
+
+<div class="interview">
+<p><strong>Q: "How would you get, per customer, the difference between their highest and lowest order amount?"</strong> A strong answer, out loud: <em>"That needs two values from the same column of the same group at once — max minus min — which `.agg()` can't do in one named function, so I'd reach for `groupby('customer').apply()` with a small function that takes the whole group's DataFrame and returns `g['amount'].max() - g['amount'].min()`. I'd pass `include_groups=False` so the grouping column itself doesn't leak into the function's view. It's slower than a built-in `.agg()` call since it's a real per-group Python loop under the hood, but for logic this specific there's no vectorized shortcut."</em> The signal: knowing exactly where `.agg()`'s one-column-one-scalar contract ends and naming the performance tradeoff instead of treating `.apply()` as a free upgrade.</p>
+</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/61_groupby_apply_and_multi_agg.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/61_groupby_apply_and_multi_agg.py</code></pre>
+<p>Reuses <code>practice/data/orders_raw.csv</code> coerced the same way as Lessons 2-4. Exercise 1 checks <code>.agg({col: [funcs]})</code> with a mixed dict, including flattening the resulting MultiIndex columns (Section 1). Exercise 2 checks a <code>groupby().apply()</code> call with a custom function reading two values from the same column of one group (Section 3). Exercise 3 checks a <code>groupby().apply()</code> function returning a multi-value <code>pd.Series</code> per group (Section 3).</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: every .agg() function, built-in name or custom callable, receives one column's values from the group and must return one scalar -- a function needing two columns of the same group together has no clean home inside that per-column contract.">
+    <p class="stem">Why can't <code>.agg()</code> compute "max minus min of the same column" and "row count" together in one named function?</p>
+    <button class="opt" data-ok>Each agg function gets one column, returns one scalar</button>
+    <button class="opt">pandas simply forbids more than one function per column</button>
+    <button class="opt">Subtraction is not an operation .agg() ever really supports</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: passing a plain dict where a column maps to a LIST of function names runs every listed function on that column in one pass, producing a two-level MultiIndex on the output columns (one level names the source column, the other names the function).">
+    <p class="stem">What does <code>.agg({"amount": ["sum", "mean"]})</code> produce, compared to <code>.agg({"amount": "sum"})</code>?</p>
+    <button class="opt" data-ok>Both functions run, giving MultiIndex columns naming column and function</button>
+    <button class="opt">Only the very first listed function actually runs at all</button>
+    <button class="opt">A ValueError, since agg() only ever accepts one function name</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: groupby().apply() calls the custom Python function once per group in a real Python-level loop, unlike built-in .agg() function names which run as vectorized compiled code across the whole column at once -- the same loop-cost tradeoff Lesson 1 opened the course warning about.">
+    <p class="stem">Why is <code>groupby().apply()</code> typically slower than <code>groupby().agg("sum")</code> on the same data?</p>
+    <button class="opt" data-ok>apply() runs the function once per group in a loop</button>
+    <button class="opt">apply() always silently re-sorts every single row before it starts</button>
+    <button class="opt">agg() secretly skips several rows that apply() always keeps around</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official pandas <a href="https://pandas.pydata.org/docs/user_guide/groupby.html#flexible-apply">Group by: flexible apply</a> section of the same user guide cited in Lesson 4 — covers exactly this <code>.agg()</code> vs <code>.apply()</code> boundary and the <code>include_groups=</code> behavior, straight from the source (~10 min). Wes McKinney's <a href="https://wesmckinney.com/book/data-wrangling.html">ch. 10</a> ("General split-apply-combine") has the clearest worked examples of custom <code>.apply()</code> functions returning a Series.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>groupby().apply()</code> was added today, right after Lesson 60's <code>na=</code> entry (<code>MultiIndex</code> already had its own entry from an earlier lesson, reused here rather than duplicated).<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-61 comes back reported as shakiest, otherwise memory/dtype optimization beyond Lessons 25/41/51 (the remaining MISSION.md-relevant candidate with no queued pick), or a fresh curriculum/glossary scan for the next genuinely-uncovered pattern.<br><br>
+💬 Anything unclear — the <code>.agg()</code> vs <code>.apply()</code> boundary, <code>include_groups=</code>, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

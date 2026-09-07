@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 41 · typing extras: Protocol, TypedDict &amp; generics</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 41 · ~20 min · 7 Sep 2026</p>
+<h1><code>typing</code> extras: <code>Protocol</code>, <code>TypedDict</code> &amp; generics</h1>
+<p class="byline">Day 7 covered enough <code>typing</code> to read most function signatures: plain types, <code>list[X]</code>, <code>Optional[X]</code>. Today adds three more shapes that show up constantly once code grows past single functions — duck-typing without inheritance, a dict with a fixed known shape, and a class or function that works the same way for any type while staying type-checkable.</p>
+
+<div class="callout"><strong>Bridge from SQL:</strong> a <code>TypedDict</code> is close to a table schema written in Python instead of SQL — fixed column names, fixed column types, checked by tooling before the code ever runs, but (unlike a real table) not enforced by anything at runtime.</div>
+
+<h2>1 · <code>Protocol</code>: structural typing, no inheritance required</h2>
+<p>Normal type hints usually mean "an instance of this class or a subclass of it." A <dfn data-en="a class from typing that defines structural typing - any object with matching method/attribute names and signatures satisfies it for a type checker, whether or not that object's class ever inherits from the Protocol" data-vn="giữ nguyên &quot;Protocol&quot; — kiểu structural typing, object nào có method/attribute khớp tên và signature là thỏa mãn, không cần kế thừa">Protocol</dfn> hints something different: "any object shaped like this," regardless of what it inherits from. This is duck-typing made checkable.</p>
+<pre><code><span class="kw">from</span> typing <span class="kw">import</span> Protocol
+
+<span class="kw">class</span> Named(Protocol):
+    <span class="kw">def</span> name(self) -> <span class="kw">str</span>: ...
+
+<span class="kw">class</span> Employee:
+    <span class="kw">def</span> name(self) -> <span class="kw">str</span>:
+        <span class="kw">return</span> <span class="str">"Ada"</span>
+
+<span class="kw">def</span> greet(item: Named) -> <span class="kw">str</span>:
+    <span class="kw">return</span> <span class="str">f"Hello, {item.name()}!"</span>
+
+greet(Employee())   <span class="cm"># fine — Employee never mentions Named at all</span></code></pre>
+<p><code>Employee</code> does not inherit from <code>Named</code> and never imports it — it just happens to have a <code>name()</code> method with a matching signature, and that's enough. Any other class with the same method — <code>Product</code>, <code>Customer</code>, whatever — satisfies the same <code>Protocol</code> with zero coupling between them. This is the same shape SQL never needs a name for: two unrelated tables can each have a <code>name</code> column without one "inheriting" from the other.</p>
+<div class="callout"><strong><code>isinstance()</code> against a <code>Protocol</code> needs an extra decorator.</strong> Verified live: plain <code>isinstance(emp, Named)</code> raises <code>TypeError: Instance and class checks can only be used with @runtime_checkable protocols</code>. Add <dfn data-en="a decorator from typing that makes a Protocol usable with isinstance()/issubclass() at runtime, checking only that the matching attribute/method names exist - not that their signatures match, which is a static-type-checker-only guarantee" data-vn="giữ nguyên &quot;@runtime_checkable&quot; — decorator cho phép dùng isinstance()/issubclass() với Protocol lúc runtime, chỉ check tên attribute/method tồn tại, không check signature">@runtime_checkable</dfn> above <code>class Named(Protocol):</code> and <code>isinstance()</code> works — confirmed live returning <code>True</code> for a class with a matching <code>name()</code> method and <code>False</code> for one without. It only checks that the names exist, not that the signatures actually match — that deeper check is still a static type checker's job, not <code>isinstance()</code>'s.</div>
+
+<h2>2 · <code>TypedDict</code>: a dict with a fixed, named, typed shape</h2>
+<p>A plain <code>dict[str, object]</code> hint says "some string keys, values of unknown type" — true, but useless for catching a typo'd key or a wrong value type. <dfn data-en="a class from typing whose subclasses declare a dict's exact expected keys and each key's value type, for static type checkers to verify - the resulting values are still plain dicts at runtime, with no enforcement of the declared shape" data-vn="giữ nguyên &quot;TypedDict&quot; — khai báo đúng key và type của value cho dict, để static type checker kiểm tra; lúc chạy vẫn là dict thường, không tự enforce">TypedDict</dfn> declares the exact keys and types a dict is supposed to have:</p>
+<pre><code><span class="kw">from</span> typing <span class="kw">import</span> TypedDict
+
+<span class="kw">class</span> Order(TypedDict):
+    sku: <span class="kw">str</span>
+    qty: <span class="kw">int</span>
+    unit_price: <span class="kw">float</span>
+
+<span class="kw">def</span> order_total(order: Order) -> <span class="kw">float</span>:
+    <span class="kw">return</span> order[<span class="str">"qty"</span>] * order[<span class="str">"unit_price"</span>]
+
+order: Order = {<span class="str">"sku"</span>: <span class="str">"A1"</span>, <span class="str">"qty"</span>: 3, <span class="str">"unit_price"</span>: 2.5}</code></pre>
+<p>Verified live: an <code>Order</code> value is a completely ordinary <code>dict</code> at runtime — <code>order["qty"]</code>, <code>order.keys()</code>, everything works exactly as it would without the hint. <code>TypedDict</code> buys nothing at runtime by itself; the payoff is a type checker (or a careful reader) catching <code>order["qyt"]</code> or <code>order["qty"] = "three"</code> before the code ever runs, the same way a table schema catches a bad column name at the database, not in application logic.</p>
+
+<h2>3 · Generics: one class or function, any type, still checkable</h2>
+<p>Without generics, "a box that holds one item" either loses its item's type entirely (<code>class Box: def __init__(self, item): ...</code> — <code>item</code> is typed as <code>Any</code>, effectively untyped) or needs a separate class per type (<code>IntBox</code>, <code>StrBox</code>, ...). A <dfn data-en="a TypeVar from typing represents a placeholder type used consistently across a class's or function's methods and parameters - combined with Generic[T] as a base class, or directly on a function signature, it lets one definition work for any type while a type checker still tracks which specific type was used at each call site" data-vn="giữ nguyên &quot;TypeVar&quot; — placeholder cho một type, dùng nhất quán trong class/function; kết hợp Generic[T] cho phép viết 1 class/function dùng được cho mọi type mà type checker vẫn theo dõi được type cụ thể ở từng nơi gọi">TypeVar</dfn> plus <code>Generic</code> keeps one definition and the type information both:</p>
+<pre><code><span class="kw">from</span> typing <span class="kw">import</span> TypeVar, Generic
+
+T = TypeVar(<span class="str">"T"</span>)
+
+<span class="kw">class</span> Box(Generic[T]):
+    <span class="kw">def</span> __init__(self, item: T):
+        self.item = item
+
+    <span class="kw">def</span> get(self) -> T:
+        <span class="kw">return</span> self.item
+
+int_box: Box[<span class="kw">int</span>] = Box(42)      <span class="cm"># get() is known to return int</span>
+str_box: Box[<span class="kw">str</span>] = Box(<span class="str">"hi"</span>)   <span class="cm"># get() is known to return str, same class</span></code></pre>
+<p>Verified live: <code>Box</code> is one class, and <code>int_box.get()</code>/<code>str_box.get()</code> return <code>42</code> and <code>"hi"</code> respectively — the same code path for both, no per-type subclass written. A <code>TypeVar</code> works the same way directly on a plain function, with no class involved:</p>
+<pre><code><span class="kw">def</span> first_or_default(items: <span class="kw">list</span>[T], default: T) -> T:
+    <span class="kw">return</span> items[0] <span class="kw">if</span> items <span class="kw">else</span> default</code></pre>
+<p>One <code>TypeVar</code> ties the return type to whichever type was actually passed as <code>items</code>'/<code>default</code>'s type at each call — a checker knows <code>first_or_default([1, 2], 0)</code> returns <code>int</code> and <code>first_or_default(["a"], "z")</code> returns <code>str</code>, from the exact same function body.</p>
+<div class="callout">Python 3.12 added a shorter built-in syntax for the same idea — <code>class Box[T]:</code> instead of <code>T = TypeVar("T"); class Box(Generic[T]):</code>. Named here so it's recognizable if seen; today's practice file uses the explicit <code>TypeVar</code>/<code>Generic</code> form because it works on every Python version this course targets and makes the underlying mechanism visible rather than hidden behind new syntax.</div>
+
+<div class="interview">
+<p><strong>Q: "What's the difference between a Protocol and inheriting from an abstract base class?"</strong> A strong answer, out loud: <em>"Inheritance is explicit — a class has to say up front which base it implements. A <code>Protocol</code> is structural: any class with matching method names and signatures satisfies it automatically, with zero coupling and no import needed in the implementing class at all. It's static duck-typing — useful when you don't own the class you're passing in, or don't want to force unrelated classes into a shared hierarchy just to satisfy one type hint."</em> The signal: knowing Python has both nominal (inheritance-based) and structural (shape-based) typing, and picking the right one instead of reaching for inheritance by default.</p>
+</div>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> nothing pandas-specific — these three are general Python typing tools a pandas-adjacent codebase would use identically, e.g. a <code>TypedDict</code> describing one row's shape before it ever becomes a DataFrame. This is the only sentence in this lesson that names pandas.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/41_typing_extras.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/41_typing_extras.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: writing a <code>@runtime_checkable Protocol</code> and confirming two unrelated classes both satisfy it structurally while a third doesn't, declaring a <code>TypedDict</code> and confirming it behaves like a plain dict at runtime, writing a generic <code>Box(Generic[T])</code> class that works the same way for an <code>int</code> and a <code>str</code>, and writing a <code>TypeVar</code>-based function whose return type follows its input type.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A Protocol is structural typing: any class whose methods and signatures match is considered to satisfy it, whether or not that class inherits from the Protocol or even imports it - confirmed live with Employee, which never mentions Named at all.">
+    <p class="stem">What makes a class satisfy a <code>Protocol</code> like <code>Named</code> above?</p>
+    <button class="opt" data-ok>having matching method names and signatures, nothing else</button>
+    <button class="opt">explicitly inheriting from that one exact Protocol class</button>
+    <button class="opt">merely importing the Protocol module somewhere in code</button>
+  </div>
+  <div class="q" data-why="Confirmed live: isinstance() against a plain Protocol raises TypeError, because Protocol classes aren't runtime-checkable by default - @runtime_checkable is the decorator that turns on isinstance()/issubclass() support, checking only that matching names exist.">
+    <p class="stem">What happens if you call <code>isinstance(obj, SomeProtocol)</code> without <code>@runtime_checkable</code>?</p>
+    <button class="opt" data-ok>it raises a TypeError, since Protocol checks need that decorator</button>
+    <button class="opt">it silently always returns True no matter what obj is</button>
+    <button class="opt">it silently always returns False no matter what obj is</button>
+  </div>
+  <div class="q" data-why="Confirmed live: a TypedDict-annotated value is a completely ordinary dict at runtime - order['qty'], .keys(), and item assignment all behave exactly as they would without the hint. The declared shape is checked by a static type checker or careful reading, never enforced by Python itself while running.">
+    <p class="stem">At runtime, what actually enforces a <code>TypedDict</code>'s declared keys and types?</p>
+    <button class="opt" data-ok>nothing at runtime — only a static type checker catches mismatches</button>
+    <button class="opt">Python raises immediately on any wrong key or value type used</button>
+    <button class="opt">the dict silently drops any key not declared in the TypedDict</button>
+  </div>
+  <div class="q" data-why="A single TypeVar-parameterized class or function keeps one definition for every type while a type checker still tracks which specific type was used at each call site - confirmed live with one Box class serving both Box[int] and Box[str] through the identical method body, no per-type subclass written.">
+    <p class="stem">What does a <code>TypeVar</code> combined with <code>Generic[T]</code> buy over writing one class per type?</p>
+    <button class="opt" data-ok>one shared definition, while per-call-site type tracking is kept</button>
+    <button class="opt">automatic runtime conversion between any two unrelated types now</button>
+    <button class="opt">complete removal of every type hint on any value</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the <a href="https://docs.python.org/3/library/typing.html">typing</a> standard-library docs (cited in RESOURCES.md) — cover <code>Protocol</code>, <code>runtime_checkable</code>, <code>TypedDict</code>, and <code>Generic</code>/<code>TypeVar</code> in full, including the newer Python 3.12 <code>class Box[T]:</code> syntax only named in passing today.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day41">glossary</a> under Day 41.<br>
+This closes the last named "rounding out the language" stdlib corner from Day 39/40's list. With Phase 2a's spine fully covered, the next candidates are open-ended: revisiting the walrus operator <code>:=</code> as its own short topic (so far only an unexplained inline example in Day 38), or a deeper look at a Phase 2b topic on request from a learning record.<br><br>
+💬 Anything unclear — <code>Protocol</code>, <code>TypedDict</code>, generics, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

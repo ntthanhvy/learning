@@ -4832,3 +4832,155 @@ fail *gracefully* so the learner sees which task failed.
   `WebSearch` access or explicit scope to touch `RESOURCES.md`. Still no
   `lesson_completed`/quiz/kata outcome record exists for any day — no
   reported weak spot to target.
+- 2026-09-07 — **Day 41 generated** (headless 06:00 run, Python topic:
+  `typing` extras — `Protocol`, `TypedDict`, and generics beyond Day 7's
+  `list[X]`/`Optional[X]` basics).
+  Idempotency: confirmed before writing anything that no `python/lessons/
+  0041-*.html` file existed via glob, and grepped the whole `python/` tree
+  for `0041`/`Day 41`/`day41`/`n: 41` — the only hit was Day 40's own
+  next-day note naming `typing` extras as the Day 41 candidate, not an
+  actual Day 41 artifact. Highest lesson on disk was `0040-contextlib-
+  utilities.html` dated 2026-09-06 — generation proceeded as Day 41.
+  Topic selection: Day 40's next-day note left exactly one named-but-
+  untaught "rounding out the language" stdlib corner — `typing` extras
+  (`Protocol`/`TypedDict`/generics) — after `contextlib` closed the other.
+  Cross-checked PLAN.md's Phase 2a list and Phase 2b spine against
+  `assets/nav.js`: every Phase 2a item (exceptions=8, modules=9,
+  environments=10, pytest=11, decorators=12, pathlib=13, datetime=14,
+  logging=15) and every Phase 2b item (16-26) is already taught, and Days
+  27-40 have already gone well past the plan into further stdlib/object-
+  model corners. `typing` extras was therefore both the explicit prior
+  next-day pick and the only remaining named gap — no PLAN.md re-derivation
+  needed, used the standard next-topic pick per this run's instructions.
+  Grepped Day 7's lesson to confirm scope: it teaches only plain types,
+  `list[X]`, and `Optional[X]` — zero prior mention of `Protocol`,
+  `TypedDict`, `Generic`, or `TypeVar` anywhere in `python/lessons/` or
+  `python/reference/glossary.html`, confirmed by grep before writing.
+  Learning records: still only the Day 1 baseline
+  (`learning-records/0001-baseline-reads-python-writes-little.md`) — no
+  completion/quiz/kata outcome record for any day 2-40 found, confirmed
+  again this run. Treated as "no reported weak spot" per every prior round
+  since Day 34 — generated conservatively, standard next-topic pick, no
+  special remediation.
+  Web-lookup: used `WebFetch` against `docs.python.org/3/library/
+  typing.html` before writing anything — confirmed `Protocol`,
+  `runtime_checkable`, `TypedDict`, and `Generic`/`TypeVar` are all
+  documented and available in 3.12, and surfaced the newer 3.12-native
+  `class Box[T]:` generic syntax as an alternative to the explicit
+  `TypeVar`/`Generic` spelling. `WebSearch` was not attempted (not
+  grantable in this headless environment per precedent since Day 38); not
+  needed, single known canonical URL sufficed.
+  Taught: section 1 `Protocol` as structural typing/duck-typing made
+  checkable, contrasted directly against the nominal (inheritance-based)
+  typing implied everywhere else in the course; bridged from SQL in the
+  opening callout (two unrelated tables can each have a `name` column
+  without one "inheriting" from the other). Section 2 `TypedDict` bridged
+  as "a table schema written in Python, but not enforced at runtime,"
+  explicitly flagged as adding nothing at runtime by itself — the payoff is
+  static-checker-only. Section 3 `TypeVar`/`Generic` for one class or
+  function that works for any type while staying type-checkable, shown
+  both as a `Generic[T]` base class and as a plain function-level
+  `TypeVar`; the 3.12 `class Box[T]:` shorthand is named in a callout but
+  not taught as the primary form, since the explicit `TypeVar`/`Generic`
+  spelling works on every Python version this course targets and keeps the
+  underlying mechanism visible.
+  **Interpreter-behavior claims verified live, not just from docs**, per
+  Days 34-40's precedent — three scratch `uv run python3` probe files
+  (Python `3.12.3`, matching every prior day): (1) confirmed a class with a
+  matching method satisfies a `Protocol` structurally, with no inheritance
+  or import coupling; (2) confirmed a bare, non-decorated `Protocol` raises
+  `TypeError: Instance and class checks can only be used with
+  @runtime_checkable protocols` on `isinstance()` — this was NOT assumed
+  from memory, it directly caught a draft bug (Exercise 1 originally called
+  `isinstance()` against a plain `Protocol` with no decorator) before it
+  ever reached the shipped practice file; (3) confirmed `@runtime_checkable`
+  fixes exactly that, returning `True`/`False` correctly for a matching vs.
+  non-matching class. No claim shipped that contradicted a live probe.
+  No-pandas rule: zero pandas/NumPy/`pd.`/`np.` hits in the practice file
+  (grepped case-insensitively); exactly one contrast sentence in the lesson
+  (titled "Where pandas goes from here," naming that a `TypedDict` could
+  describe one row's shape before it becomes a DataFrame, without
+  demonstrating any pandas API), placed once after section 3, matching the
+  hard-rule section above — confirmed by grep there is exactly one `pandas`
+  hit in the whole file.
+  Practice file `practice/41_typing_extras.py` (4 exercises: a
+  `@runtime_checkable Protocol` satisfied structurally by two unrelated
+  classes and rejected for a third with no matching method, a `TypedDict`
+  confirmed to behave like a plain dict at runtime, a generic
+  `Box(Generic[T])` class working identically for an `int` and a `str`, and
+  a `TypeVar`-based free function tying its return type to its input type)
+  needed no on-disk fixtures. Followed the standard defensive pattern
+  against the Ellipsis-at-module-level bug family: all five `...`
+  placeholders live strictly inside function or class bodies, confirmed by
+  grep — each indented 4 or 8 spaces, none at column 0/module scope.
+  **Bug caught during drafting, before the solved-copy verification step**:
+  covered above under interpreter-behavior claims — Exercise 1's first
+  draft asserted `isinstance()` would work against a plain `Protocol` with
+  no `@runtime_checkable` decorator; the live probe raised `TypeError`
+  immediately, so the decorator was added to both the taught example and
+  the practice file before either was ever run as a real exercise. Logged
+  here per this course's standing practice of recording every bug caught
+  during verification, not just a pass/fail summary.
+  Verified in a scratch dir under the repo root
+  (`python/.scratch/lesson41/`, removed after use — this sandbox blocks
+  `/tmp` and chained/multi-operation Bash commands entirely this run,
+  consistent with some prior days' notes, unlike other prior days that
+  reported `/tmp` reachable; single-operation commands under the repo root
+  worked throughout): the shipped (unsolved) copy, run via plain `uv run
+  python3` (no `--with` needed), both from the scratch copy and from its
+  real `practice/` path directly, printed a clean mix of ✓ (Ex 2 only,
+  which has no TODO gating it) and ✗ (Exercises 1, 3, 4) with no traceback
+  each time; a separately solved copy (every TODO filled in by hand)
+  printed all four ✓ and the "All green" tally on the first attempt after
+  the Exercise 1 fix above — no further bugs found once that one fix
+  landed.
+  Glossary: added a Day 41 section to `reference/glossary.html`
+  (`Protocol`, `@runtime_checkable`, `TypedDict`, `TypeVar`) after grepping
+  for collisions with Days 1-40 — none found; Day 7's existing `Optional[X]`
+  row was left untouched and not duplicated. The 4 new `<dfn data-en` tags
+  in the lesson body match the 4 new glossary rows exactly (confirmed by
+  direct grep count of `data-en=` occurrences, cross-checked against the
+  glossary table's new `<tr>` count); table-open/close tag counts in the
+  whole glossary file confirmed equal (41/41) after the addition.
+  Quiz: 4 questions (Protocol structural-satisfaction, the
+  `@runtime_checkable`/`isinstance()` TypeError, `TypedDict`'s lack of
+  runtime enforcement, and what `TypeVar`+`Generic` buys over one class per
+  type). Word counts were checked with a small Python script (regex-split
+  per `<div class="q">` block) and mismatched on the first draft for
+  Q1 and Q4 (Q1 7/7/8, Q4 8/8/11) while Q2 and Q3 landed correct on the
+  first attempt (10/10/10, 11/11/11) — Q1 and Q4 took several rounds of
+  single-word edits, re-running the counter script after every edit rather
+  than trusting hand-counts, before landing at 8/8/8 and 9/9/9
+  respectively. Final counts confirmed by re-running the same script once
+  more against the saved file before shipping.
+  HTML tag-balance was checked with a stdlib `html.parser.HTMLParser`-based
+  stack checker run against both the lesson file and the full
+  `glossary.html` — both reported fully balanced with no mismatched or
+  unmatched tags.
+  Registered in `assets/nav.js` with `date: "2026-09-07"`.
+  **DB access:** per this run's own instructions, direct `psql`/
+  `bin/query-progress` were not attempted more than once each this run —
+  `bin/query-progress python` hit an immediate "This command requires
+  approval" gate with no user present, confirmed blocked exactly as every
+  prior round described; did not retry further. Paced entirely from
+  on-disk state (`NOTES.md`'s own generation log, `python/lessons/`,
+  `python/assets/nav.js`, `python/learning-records/` — still only the Day 1
+  baseline, no completion/quiz/kata outcome record for any day 2-40).
+  `bin/record-progress python lesson_generated --day 41 --lesson
+  0041-typing-extras.html --detail '{"by":"headless"}'` will be attempted
+  once after this entry is saved, per this run's instructions, regardless
+  of past approval-gate flakiness for the read path.
+  **Next-day note:** with `typing` extras now taught, every explicitly
+  named item from PLAN.md's Phase 2a list and Phase 2b spine has been
+  covered (Phase 2a: Days 8-15; Phase 2b: Days 16-26) plus a long tail of
+  further stdlib/object-model corners (Days 27-40). The one remaining
+  loose thread named-but-not-yet-its-own-topic is the walrus operator `:=`
+  (still only an unexplained inline example in Day 38's lesson body) — a
+  viable small-footnote-sized Day 42 candidate. Beyond that, this
+  candidate list is now exhausted; the next run should consider either a
+  cross-cutting review/spaced-repetition day (still justified by zero
+  completion/quiz outcome records ever recorded for any day 2-40), or
+  revisiting `RESOURCES.md`'s two open Gaps (Python interview-prep source;
+  folding the FastAPI bigger-applications doc into "Knowledge — backend")
+  if given scope to touch that file. Still no `lesson_completed`/quiz/kata
+  outcome record exists for any day — no reported weak spot to target.

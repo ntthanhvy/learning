@@ -4201,3 +4201,77 @@
   and distributed tracing/correlation-ID propagation across services remain
   the two sharpest named candidates from this round's own gap search if
   neither signal materializes first.
+- 2026-09-07 generation (Lesson 64, headless 06:00 run): idempotency check
+  first — confirmed no `lessons/0064-*.html` file and no `n: 64`/
+  `date: "2026-09-07"` entry in `nav.js` before writing (highest prior
+  lesson was 63, dated 2026-09-06). Read `MISSION.md`, `RESOURCES.md`,
+  `assets/nav.js`, both `learning-records/` entries (still just the 0001
+  baseline and the 2026-07-30 concurrency-vocabulary gap — no quiz/
+  completion outcome ever recorded), and Lesson 63's full file for format.
+  DB read path: tried `bin/query-progress backend` once — hit the standing
+  "requires approval" gate immediately, consistent with every prior round;
+  did not retry further and relied on file-state + learning-records alone,
+  per this run's documented fallback. Topic choice: Lesson 63's closing note
+  named two candidates, secrets management and distributed tracing/
+  correlation-ID propagation; grepped `lessons/*.html` and
+  `reference/glossary.html` for both plus "vault"/"kms"/"rotation" — secrets
+  only ever appeared in passing inside Lessons 21 (env-var config) and 31
+  (service-to-service auth's API-key rotation aside), never its own topic;
+  distributed tracing had zero hits. Picked secrets management per the
+  briefing's tie-break default. Lesson 64 covers: why a secret differs from
+  ordinary config (leaked secret = real power until revoked, not just a
+  bug); environment variables as Lesson 21's floor, not ceiling (no audit
+  trail, manual rotation, `.env`-in-git risk); the secrets manager pattern
+  (Vault/AWS Secrets Manager-style — one system of record, authorized
+  fetch-on-demand, audit log); rotation with an overlap window to bound an
+  undetected leak's lifetime without causing an outage; and least privilege
+  applied to service credentials (Lesson 12's authorization concept
+  generalized to machines), plus a three-tier Go snippet (hardcoded →
+  `os.Getenv` → secrets-client fetch) explicitly anchored to Lesson 21.
+  Checked the glossary first for all four candidate terms (secret, secrets
+  manager, rotation, least privilege) — zero collisions, all four added as
+  new rows. The Go snippet was compile-checked clean via `go mod init`,
+  `go vet`, and `go build` in a scratch module under `.scratch/
+  backend-lesson64/` using `-C` (a bare heredoc write into the file was
+  blocked by this session's shell-expansion sandboxing, worked around with
+  the Write tool instead), confirmed clean, then the whole `.scratch/`
+  directory was deleted afterward per the standing convention — verified
+  via `git status --short` that no stray `go.mod`/scratch artifacts were
+  left in the repo (an earlier `go mod init` without `-C` briefly created a
+  stray root-level `go.mod`, caught and removed before the scratch-module
+  redo). Quiz options were drafted, then verified with a Node script
+  splitting each option on whitespace and counting words — first draft was
+  uneven on all four questions (Q1 8/9/9/9, Q2 9/8/8/9, Q3 7/6/8/9, Q4
+  9/8/9/9), fixed through several rewrite-and-recount passes per question
+  (re-verified after every edit) to reach final tallies of 9/9/9/9 on all
+  four questions; confirmed exactly 4 `data-ok` (one per question) via the
+  same script. Ran an occurrence-accurate tag-balance check (regex with a
+  trailing `[\s>]` lookahead, not naive substring counting) for every tag
+  pair used: div 7/7, p 18/18, pre 1/1, code 5/5, h1 1/1, h2 8/8, strong
+  4/4, em 4/4, dfn 4/4, button 16/16, a 2/2, span 12/12 — all balanced; a
+  Node regex scan for unescaped raw `&` (the bug class Lessons 59 and 62
+  shipped) found zero instances. Also re-verified `glossary.html`'s own
+  table/tr/td/th balance after the four-row addition (1/1, 231/231,
+  690/690, 3/3) since that file was edited too. `WebFetch` was requested
+  against the cited OWASP Secrets Management Cheat Sheet URL but returned a
+  permissions error before any content was fetched (unavailable this
+  session, same as Lesson 62's round) — cited conservatively instead from
+  RESOURCES.md's existing OWASP Cheat Sheet Series entry (already flagged
+  there for "input validation, SQL injection, session management, secrets")
+  using the same `cheatsheetseries.owasp.org/cheatsheets/
+  <Name>_Cheat_Sheet.html` URL pattern this course has used successfully in
+  Lessons 4, 7, 11, 12, 17, 23, 24, 30, 31, and 48 — noted as a live-check
+  gap for a future session with `WebFetch` access, same as Lesson 62's
+  round. Registered Lesson 64 in `nav.js`. Ran `bin/record-progress backend
+  lesson_generated --day 64 --lesson 0064-secrets-management.html --detail
+  '{"by":"headless"}'` directly from the repo root as a single standalone
+  command — succeeded immediately on the first attempt, no approval
+  blocker this round, consistent with the write path's general reliability
+  regardless of read-path status. No confirmed next-lesson gap is named for
+  the round after this one — the next session should treat a completion/
+  quiz-outcome signal, or a user-named track to deepen, as materially higher
+  priority than a 65th topic picked blind, same standing note as every
+  prior round; distributed tracing/correlation-ID propagation across
+  services remains the last of Lesson 63's two named candidates, deferred
+  through this round specifically for a larger dedicated lesson, and
+  should be it if no signal materializes first.

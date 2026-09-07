@@ -86,6 +86,8 @@
       file: "lessons/0039-argparse.html" },
     { n: 40, date: "2026-09-06", title: "contextlib: ready-made context managers beyond @contextmanager",
       file: "lessons/0040-contextlib-utilities.html" },
+    { n: 41, date: "2026-09-07", title: "typing extras: Protocol, TypedDict & generics",
+      file: "lessons/0041-typing-extras.html" },
   ];
 
   const REFS = [

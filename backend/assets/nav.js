@@ -132,6 +132,8 @@
       file: "lessons/0062-oauth-oidc-pkce-refresh-tokens.html" },
     { n: 63, date: "2026-09-06", title: "Polling, long polling, SSE, and WebSockets: how \"real-time\" actually gets to the browser",
       file: "lessons/0063-polling-sse-websockets.html" },
+    { n: 64, date: "2026-09-07", title: "Secrets management: the credential that isn't a password",
+      file: "lessons/0064-secrets-management.html" },
   ];
 
   const REFS = [

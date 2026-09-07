@@ -889,3 +889,23 @@ by the user there; they apply here identically.
   `contextlib.suppress()`/`ExitStack` — were generated this round via
   delegated agents, each confirmed to have written only within its own
   course directory; see their own NOTES.md entries for detail.)
+- 2026-09-07 (headless 06:00 run): same as every prior post-week day —
+  verified `daily.html`, `assets/srs.js`, and `assets/quiz-bank.js` are all
+  present and untouched (8 textual `id: "k` matches in `quiz-bank.js` — the
+  7 real kata entries `k1`-`k7` plus the commented-out example line;
+  `nav.js` `LESSONS` array still registers only the 7 Jul 8-14 lessons,
+  unchanged). Still the correct "daily quiz+kata" for this post-week phase
+  per PLAN.md, so nothing new was generated, nav.js was untouched, and no
+  bank content was added. Direct `psql "$LEARNING_DB_URL" ...` was blocked
+  again this session ("Contains simple_expansion" — same content-level
+  block on that exact variable name as every prior round), so no
+  `course_progress` rows could be read for a scope-change signal (e.g. a
+  request to keep growing the bank past Day 7). `bin/record-progress` was
+  not invoked since nothing new was generated or completed to log this
+  round. No new learning record beyond the Day-1 baseline. (Go skipped
+  again per its own window close, now fifty-three days past it; backend
+  lesson 64 — secrets management — data lesson 61 —
+  `groupby().apply()`/multi-function `.agg()` — and python Day 41 —
+  `typing` extras (`Protocol`/`TypedDict`/generics) — were generated this
+  round via delegated agents, each confirmed to have written only within
+  its own course directory; see their own NOTES.md entries for detail.)

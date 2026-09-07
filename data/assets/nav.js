@@ -126,6 +126,8 @@
       file: "lessons/0059-to-period-and-timezones.html" },
     { n: 60, date: "2026-09-06", title: "str.contains(): substring filtering, and the NaN trap",
       file: "lessons/0060-str-contains.html" },
+    { n: 61, date: "2026-09-07", title: "groupby().apply() and multi-function .agg()",
+      file: "lessons/0061-groupby-apply-and-multi-agg.html" },
   ];
 
   const REFS = [

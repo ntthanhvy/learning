@@ -88,6 +88,8 @@
       file: "lessons/0040-contextlib-utilities.html" },
     { n: 41, date: "2026-09-07", title: "typing extras: Protocol, TypedDict & generics",
       file: "lessons/0041-typing-extras.html" },
+    { n: 42, date: "2026-09-08", title: "The walrus operator: assignment expressions",
+      file: "lessons/0042-walrus-operator.html" },
   ];
 
   const REFS = [

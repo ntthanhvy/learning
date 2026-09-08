@@ -134,6 +134,8 @@
       file: "lessons/0063-polling-sse-websockets.html" },
     { n: 64, date: "2026-09-07", title: "Secrets management: the credential that isn't a password",
       file: "lessons/0064-secrets-management.html" },
+    { n: 65, date: "2026-09-08", title: "Distributed tracing: one request ID, many services",
+      file: "lessons/0065-distributed-tracing-and-correlation-ids.html" },
   ];
 
   const REFS = [

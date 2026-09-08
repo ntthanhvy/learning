@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 42 · The walrus operator: assignment expressions</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 42 · ~15 min · 8 Sep 2026</p>
+<h1>The walrus operator: <code>:=</code></h1>
+<p class="byline">Day 38's regex lesson used <code>if m := re.search(...): ...</code> in passing, without stopping to explain the <code>:=</code> itself. This short lesson closes that loose thread: what an <dfn data-en="an expression, written name := value, that both evaluates value and binds it to name, producing the bound value as the expression's own result - unlike a plain = statement, it can appear inside a larger expression such as a while or if condition" data-vn="giữ nguyên &quot;assignment expression / walrus operator&quot; — biểu thức name := value vừa tính value vừa gán vào name, trả về chính giá trị đó; khác với = (statement), := dùng được ngay bên trong while/if">assignment expression</dfn> is, the two or three places it genuinely helps, and when to leave it alone.</p>
+
+<div class="callout"><strong>Bridge from SQL:</strong> SQL has no equivalent — every SQL expression is already allowed to appear where it's needed, there's no separate "statement vs. expression" split to work around. The walrus operator exists purely to plug that gap in Python: it lets a name be bound to a value <em>without leaving the expression context</em> that needs it, such as inside a <code>while</code> or <code>if</code> condition.</div>
+
+<h2>1 · What <code>:=</code> actually does</h2>
+<p>A plain <code>name = value</code> is a <em>statement</em> — it does not produce a value usable anywhere else, so it can never appear inside a <code>while</code> condition, an <code>if</code> condition, or a comprehension. <code>name := value</code> is an <em>expression</em> instead: it binds <code>value</code> to <code>name</code>, exactly like <code>=</code> does, but the whole thing also evaluates to that bound value — so it can sit anywhere an expression is allowed.</p>
+<pre><code><span class="cm"># plain assignment -- a statement, cannot be used inside an if/while test</span>
+n = 5
+
+<span class="cm"># assignment expression -- binds n AND is itself usable as a value</span>
+<span class="kw">print</span>(n := 5)   <span class="cm"># prints 5 -- the := expression's value is 5, same as n</span></code></pre>
+<p>Outside of that one difference — usable inside a larger expression — a walrus binds a name into the surrounding scope exactly the way <code>=</code> would. It is not a new kind of variable or a special scope; it is the same assignment, just spelled so it fits where a statement can't go.</p>
+
+<h2>2 · Where it earns its keep: avoiding a repeated call</h2>
+<p>The clearest case is a <code>while</code> loop that needs to call something, test the result, and use that same result inside the loop body. Without a walrus this needs the call written out twice — once before the loop to prime it, once again at the end of the loop body to advance it:</p>
+<pre><code><span class="cm"># traditional shape -- the same call appears in two places</span>
+chunk = read_chunk()
+<span class="kw">while</span> chunk != <span class="str">""</span>:
+    process(chunk)
+    chunk = read_chunk()
+
+<span class="cm"># with walrus -- one call, one place, same behavior</span>
+<span class="kw">while</span> (chunk := read_chunk()) != <span class="str">""</span>:
+    process(chunk)</code></pre>
+<p>Verified live: both forms collect identical results, but the walrus version has the call site once instead of twice — one less place for the two copies to quietly drift apart after an edit. The same shape covers Day 38's exact example: <code>if (m := re.search(pattern, text)) is not None: use(m)</code> binds the match object and tests it in one line, instead of a separate <code>m = re.search(...)</code> line followed by the <code>if</code>.</p>
+
+<h2>3 · Where it earns its keep: avoiding a double computation in a comprehension</h2>
+<p>A comprehension that filters on a computed value and also uses that value in its output expression would otherwise compute it twice per passing element — once for the <code>if</code>, once for the result:</p>
+<pre><code><span class="cm"># without walrus -- expensive(x) runs twice for every x that passes the filter</span>
+result = [expensive(x) <span class="kw">for</span> x <span class="kw">in</span> nums <span class="kw">if</span> expensive(x) > 5]
+
+<span class="cm"># with walrus -- expensive(x) runs once per x, period</span>
+result = [y <span class="kw">for</span> x <span class="kw">in</span> nums <span class="kw">if</span> (y := expensive(x)) > 5]</code></pre>
+<p>Verified live with a print-tracing <code>expensive()</code>: the non-walrus version called it 8 times for a 5-element list (twice for each of the 4 elements that passed the filter after also being called once for the failing element); the walrus version called it exactly 5 times — once per element, full stop.</p>
+<div class="callout"><strong>Gotcha, confirmed live: the bound name leaks past the comprehension.</strong> A comprehension normally has its own scope — a plain loop variable like <code>x</code> above does not exist after the comprehension finishes. A walrus-bound name is the one exception: <code>y</code> from the example above is still readable afterward, holding whatever it was last set to during the comprehension's run. This is intentional (the whole point is to make a computed value available outside the throwaway comprehension scope), but it means a walrus name inside a comprehension is not private the way the comprehension's own <code>for</code> variable is — pick a name that's fine to have hanging around afterward, or use it immediately and don't rely on the leaked value later.</div>
+
+<h2>4 · When not to use it</h2>
+<p><a href="https://peps.python.org/pep-0572/">PEP 572</a>, which introduced the walrus operator, is explicit that it should be used <em>sparingly</em> — only where it removes real duplication, not as a way to cram more logic onto one line. A plain <code>=</code> on its own line is almost always more readable than a walrus stuffed into an <code>if</code> or a comprehension just to save a line:</p>
+<pre><code><span class="cm"># harder to read -- walrus adds nothing here, there's no duplication to avoid</span>
+<span class="kw">if</span> (result := compute()) > threshold:
+    log(result)
+
+<span class="cm"># plainer, and just as short -- prefer this when there's only one use of the value</span>
+result = compute()
+<span class="kw">if</span> result > threshold:
+    log(result)</code></pre>
+<p>The rule of thumb: reach for <code>:=</code> only when the alternative is genuinely calling the same thing twice or computing the same thing twice — a <code>while</code> loop's advancing condition, or a comprehension's filter-and-use pattern from section 3. If a plain assignment on the line above already reads cleanly, leave it as a plain assignment.</p>
+
+<div class="interview">
+<p><strong>Q: "What's the walrus operator for, and when would you avoid it?"</strong> A strong answer, out loud: <em>"It's an assignment that's also an expression, so it can sit inside a while or if condition or a comprehension instead of needing a separate statement first. I'd use it to avoid calling or computing the same thing twice — priming and advancing a while loop with one call site instead of two, or a comprehension that filters on a computed value and reuses it in the output. I'd avoid it anywhere a plain assignment on its own line already reads fine — PEP 572 itself says to use it sparingly, and stacking it into already-dense lines just to save a line hurts readability for no real gain."</em> The signal: knowing it's a readability tool for one specific duplication pattern, not a style default.</p>
+</div>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> nothing pandas-specific — <code>:=</code> is a general language feature, occasionally seen inside a pandas method chain's lambda for the same "avoid computing it twice" reason taught here. Not demonstrated; this is the only sentence in this lesson that names pandas.</div>
+
+<h2>Try it — self-checking practice (~15 min)</h2>
+<p>Open <code>practice/42_walrus_operator.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/42_walrus_operator.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: rewriting a duplicated-call <code>while</code> loop to use a walrus in its condition, rewriting a double-computing comprehension to compute its filtered value once with a walrus, and using a walrus inside an <code>if</code> to bind and test a dict's <code>.get()</code> result in one line.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A plain = is a statement and cannot appear inside an expression context like a while or if test - that's exactly the gap := fills, by being an expression that both binds a name and evaluates to the bound value, so it can sit inside a larger expression a plain = never could.">
+    <p class="stem">What can <code>name := value</code> do that plain <code>name = value</code> cannot?</p>
+    <button class="opt" data-ok>appear inside a larger expression, like a while or if test</button>
+    <button class="opt">bind a name to a value that later assignments cannot change</button>
+    <button class="opt">skip ever creating any new variable at all while code runs</button>
+  </div>
+  <div class="q" data-why="Verified live: a while loop that primes then advances the same call needs that call written out twice without a walrus - once before the loop, once at the end of the loop body. Wrapping the call in a walrus inside the while condition itself collapses that to one call site, with identical behavior.">
+    <p class="stem">Why is a walrus useful in a <code>while (chunk := read_chunk()) != "":</code> loop?</p>
+    <button class="opt" data-ok>it avoids writing the same read_chunk() call in two separate places</button>
+    <button class="opt">it makes the loop run measurably faster than any other form</button>
+    <button class="opt">it is the only syntax Python accepts for a while loop</button>
+  </div>
+  <div class="q" data-why="Verified live: a comprehension's own for-variable does not exist once the comprehension finishes, but a name bound with := inside a comprehension does leak into the enclosing scope and stays readable afterward - confirmed by reading the bound name right after the comprehension ran, unlike the throwaway for-variable.">
+    <p class="stem">What happens to a name bound with <code>:=</code> inside a list comprehension, after the comprehension finishes?</p>
+    <button class="opt" data-ok>it leaks into the enclosing scope, staying readable afterward</button>
+    <button class="opt">it is deleted the instant the comprehension finishes running</button>
+    <button class="opt">it becomes a brand new list holding every value</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://peps.python.org/pep-0572/">PEP 572 — Assignment Expressions</a> (cited in <code>RESOURCES.md</code>'s "Knowledge — the language" section as a new addition this run) — the proposal that introduced <code>:=</code>, including its own "sparingly" readability guidance referenced in section 4 above; the <a href="https://docs.python.org/3/reference/expressions.html#assignment-expressions">Language Reference's assignment expressions section</a> is the terse, exhaustive companion.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day42">glossary</a> under Day 42.<br>
+This closes the walrus-operator loose thread flagged back in Day 38 and named again in Day 41's next-day note. With every explicitly named PLAN.md Phase 2a/2b item and this last small thread now covered, the next lesson is likely a cross-cutting review/spaced-repetition day — no <code>lesson_completed</code>/quiz/kata outcome has ever been recorded for any day 2-41, so there's no specific weak spot to target yet, only the general case for revisiting older material.<br><br>
+💬 Anything unclear — where <code>:=</code> helps, where it doesn't, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

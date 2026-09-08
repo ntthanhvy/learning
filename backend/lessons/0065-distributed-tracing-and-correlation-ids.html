@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 65 · Distributed tracing: one request ID, many services</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 65 · ~20 min</p>
+<h1>Distributed tracing: one request ID, many services</h1>
+<p class="byline">Lesson 13 gave every log line a <code>request_id</code> and called it "the bridge that lets a support ticket be matched back to the exact server-side log entries" — but that bridge only spans one service's own logs. Lesson 64 closed naming distributed tracing as the standing next topic. Today: what happens to that same id once Lesson 31's world shows up — one request that fans out across several backends you operate — and why plain per-service logs stop being enough once it does.</p>
+
+<h2>1 · One request, several services, one story to reconstruct</h2>
+<p>Lesson 8 established that "the server" stops being one process the moment a second instance exists. Lesson 31 went further: a single user action — say, placing an order — often triggers your order service to call your billing service, which calls a payment provider, while a separate call goes to your inventory service. Four processes, four separate log streams, each written by a service that has no idea the other three even exist. If the payment call fails, "why did this order fail?" is really four questions across four log files, and nothing so far has said how to find the right four lines out of millions written that same minute.</p>
+<p>Lesson 13's <code>request_id</code> already solved this shape of problem — inside one service. A <dfn data-en="a unique identifier generated once for an incoming request and attached to every log line produced while handling it, so all log output belonging to one request can be found by searching for one value" data-vn="correlation ID / request ID (giữ nguyên) — mã nối một request với các dòng log server tương ứng">correlation ID</dfn> is exactly that value; the only change needed is to stop treating it as private to the service that minted it, and start treating it as something that travels with the request everywhere the request goes.</p>
+
+<h2>2 · Generate at the edge, or keep one you're handed</h2>
+<p>The rule is simple and has exactly one branch: the first service to see a request — the one sitting at the edge, directly facing the client — checks whether an inbound request already carries an id (a mobile app or another company's system might set one); if not, it generates a fresh one. Every service downstream of that first one does the opposite: it never generates its own id for a request that already has one. It reads the id it was handed, uses that same value in its own logs, and passes that same value on again to whatever it calls next. One id, minted once, threaded through the entire call graph unchanged.</p>
+<div class="callout"><strong>Not a new concept — a wider radius.</strong> Nothing above changes what a correlation ID <em>is</em>. It changes where it's allowed to travel: out of one process's log lines, across an HTTP call, into another process's log lines, as many times as the call graph requires.</div>
+
+<h2>3 · The carrier inside one process: context.Context</h2>
+<p>Lesson 41 named the exact mechanism for this without spelling out the example: "small pieces of request-scoped metadata a whole call chain needs to see... attached once at the edge with <code>context.WithValue</code> and read by the logging middleware three layers down without every function in between needing it threaded as its own parameter." A correlation ID is the canonical case that sentence was written for. It gets attached to the <code>context.Context</code> once, in the first middleware that touches the request, and every function further down the call chain — the handler, the service layer, the code that eventually makes an outbound HTTP call — pulls it back out of the same context it already receives as its first parameter, no extra plumbing required.</p>
+
+<h2>4 · The carrier between processes: an HTTP header</h2>
+<p><code>context.Context</code> only survives inside one running process — it cannot cross a network call by itself. So the moment a service makes an outbound HTTP request to another service, the correlation ID has to be pulled back out of the context and written onto that outbound request as a header, most simply <code>X-Request-ID</code>. The receiving service's own edge middleware reads that same header on the way in, and the cycle in section 2 repeats one hop further out: it already has an id, so it keeps it, attaches it to its own context, and logs with it.</p>
+<pre><code><span class="cm">// requestIDKey is the context.Context key; an unexported type prevents
+// collisions with keys set by other packages (the exact risk Lesson 41
+// flagged for WithValue misuse).</span>
+<span class="kw">type</span> ctxKey <span class="kw">string</span>
+
+<span class="kw">const</span> requestIDKey ctxKey = <span class="st">"request_id"</span>
+
+<span class="cm">// withRequestID is edge middleware: keep an inbound id if one arrived,
+// otherwise mint a fresh one, then store it on the context for every
+// handler and downstream call in this request's chain to read back.</span>
+<span class="kw">func</span> withRequestID(next http.Handler) http.Handler {
+    <span class="kw">return</span> http.HandlerFunc(<span class="kw">func</span>(w http.ResponseWriter, r *http.Request) {
+        id := r.Header.Get(<span class="st">"X-Request-ID"</span>)
+        <span class="kw">if</span> id == <span class="st">""</span> {
+            id = uuid.NewString()
+        }
+        ctx := context.WithValue(r.Context(), requestIDKey, id)
+        w.Header().Set(<span class="st">"X-Request-ID"</span>, id) <span class="cm">// echo it back, per Lesson 13's client-visible bridge</span>
+        next.ServeHTTP(w, r.WithContext(ctx))
+    })
+}
+
+<span class="cm">// chargeCard is deep in the call chain: it never received requestID as an
+// explicit argument, only ctx, and still logs and forwards the same id.</span>
+<span class="kw">func</span> chargeCard(ctx context.Context, logger *slog.Logger, amountCents <span class="kw">int</span>) error {
+    requestID, _ := ctx.Value(requestIDKey).(<span class="kw">string</span>)
+    logger.Info(<span class="st">"calling billing service"</span>, <span class="st">"request_id"</span>, requestID, <span class="st">"amount_cents"</span>, amountCents)
+
+    req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+        <span class="st">"https://billing.internal/charges"</span>, <span class="kw">nil</span>)
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        <span class="kw">return</span> fmt.Errorf(<span class="st">"build billing request: %w"</span>, err)
+    }
+    req.Header.Set(<span class="st">"X-Request-ID"</span>, requestID) <span class="cm">// carries the id across the network hop</span>
+
+    resp, err := http.DefaultClient.Do(req)
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        <span class="kw">return</span> fmt.Errorf(<span class="st">"call billing service: %w"</span>, err)
+    }
+    <span class="kw">defer</span> resp.Body.Close()
+    <span class="kw">if</span> resp.StatusCode != http.StatusOK {
+        <span class="kw">return</span> fmt.Errorf(<span class="st">"billing service returned %d"</span>, resp.StatusCode)
+    }
+    <span class="kw">return</span> <span class="kw">nil</span>
+}</code></pre>
+<p>Every piece here is a lesson already taught, applied to a new radius: <code>context.WithValue</code> for the in-process carry (Lesson 41), a structured <code>logger.Info</code> call with a stable field (Lesson 13), and an outbound call authenticated the way Lesson 31 described — the correlation ID header sits alongside whatever service-to-service auth mechanism that lesson picked, not instead of it. A correlation ID proves nothing about identity; it only answers "which request was this."</p>
+
+<h2>5 · What breaks without it</h2>
+<div class="cmp-wrap">
+<table class="cmp">
+<thead><tr><th>Scenario</th><th>Without a shared correlation ID</th><th>With one, propagated end to end</th></tr></thead>
+<tbody>
+<tr><th>Order fails at the payment step</th><td>Search four services' logs by rough timestamp and hope nothing else failed in that same second</td><td>One <code>grep request_id=req_8f3a</code> per service returns exactly this request's lines, in order</td></tr>
+<tr><th>A user reports a slow checkout</th><td>No way to tell which of four services was slow, only that "checkout" was slow overall</td><td>Each service's own log timestamps for the same id show exactly where the time went</td></tr>
+<tr><th>Support ticket references an error</th><td>The id the client saw isn't the id any backend log used, if one was even generated</td><td>The id echoed back to the client (Lesson 13) is the literal value to search across every service</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2>6 · Where this grows into full distributed tracing</h2>
+<p>A single correlation ID answers "which log lines, across every service, belong to this one request" — and for most debugging that's already the win. It does not, by itself, show the <em>shape</em> of the call graph: which calls ran in parallel, which ran one after another waiting on the last, or how long each hop actually took relative to the others. <dfn data-en="a system that records not just a shared request id but individual timed segments of work (spans) within it, each tagged with which service performed it and which other span it was called from, so the full call graph and per-hop timing can be reconstructed and visualized as one tree" data-vn="distributed tracing (giữ nguyên) — tracking từng đoạn công việc (span) có thời gian, gắn với ai gọi ai, dựng lại thành cây gọi xuyên nhiều service">Distributed tracing</dfn> is the generalization that adds that shape: alongside one shared trace id (playing the same role as the correlation ID above), each individual unit of work — one HTTP call, one DB query, one function doing real work — gets its own <dfn data-en="one timed unit of work within a distributed trace -- has a start time, an end time, a reference to which span called it (its parent), and the same shared trace id as every other span in the same request -- many spans together form the full call-graph tree for one request" data-vn="span (giữ nguyên) — một đoạn công việc có thời gian bắt đầu/kết thúc, biết span cha, cùng trace id với cả request">span</dfn> with its own start and end time and a pointer to whichever span called it. Collect enough spans sharing one trace id and a tracing backend — Jaeger and tools built on the vendor-neutral <a href="https://opentelemetry.io/">OpenTelemetry</a> standard are the common choices today — can render the whole thing as a timeline: which service took 800ms of a 900ms request, and whether that 800ms was one slow call or ten calls run one after another that could have run in parallel instead.</p>
+<p>None of that changes the propagation mechanism already shown above — a trace id still rides in <code>context.Context</code> inside a process and in a header (commonly the W3C's standardized <code>traceparent</code> header) between processes, exactly like the correlation ID in section 4. Full tracing is strictly more machinery for the same underlying idea: don't let a request's identity stop at a process boundary. This course stops at that concept-level understanding; wiring an actual OpenTelemetry SDK into a Go service is implementation detail for whenever a real system's debugging pain justifies adopting one.</p>
+
+<div class="interview">
+<p><strong>Q: "A checkout request touches four of our services and one call is failing intermittently — how would you debug it?"</strong> A strong answer, out loud: <em>"First thing I'd check is whether a correlation ID is actually propagating across all four — generated once at the edge, carried through context.Context inside each service, and forwarded as a header like X-Request-ID on every outbound call between them. If it is, I can grep that one id across all four services' logs and see exactly where the chain breaks, instead of correlating by rough timestamp. If it isn't propagating consistently, that's the first fix, before anything else — without it, four independent log streams are close to unreadable together. If the team needed to see relative timing across the hops too, not just 'which lines belong together,' that's the point where I'd bring up proper distributed tracing with spans, but the correlation ID alone usually answers 'what happened' well before that's necessary."</em> The signal: reaching for the shared id first, and knowing the difference between "which lines belong to this request" (correlation ID) and "how long did each hop take relative to the others" (full tracing).</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A single request fanning out across several services produces one independent log stream per service; without a shared id there's no reliable way to find the lines belonging to one specific request across all of them, only a rough timestamp guess.">
+    <p class="stem">Why does one request touching four services make debugging harder than one service alone?</p>
+    <button class="opt" data-ok>each service writes its own separate unlinked log stream</button>
+    <button class="opt">four services can never be deployed to same region</button>
+    <button class="opt">HTTP requests are physically limited to one hop total</button>
+    <button class="opt">structured logging stops working once more than one exists</button>
+  </div>
+  <div class="q" data-why="Once an inbound request already carries a correlation id, a downstream service must keep and forward that same value rather than mint its own -- generating a fresh id at every hop would break the single shared value the whole point depends on.">
+    <p class="stem">What should a downstream service do if an inbound request already carries a correlation ID?</p>
+    <button class="opt" data-ok>keep that same id and forward it not mint new</button>
+    <button class="opt">discard it and always generate a brand new id anyway</button>
+    <button class="opt">reject the request since only edge services may set ids</button>
+    <button class="opt">store it only in a database table never in logs</button>
+  </div>
+  <div class="q" data-why="context.Context only carries a value within one running process; the moment a service calls another service over HTTP, the id must be read back out of the context and written onto the outbound request as a header for the next process to read.">
+    <p class="stem">Why must a correlation ID be copied onto an outbound HTTP header, not just left in context.Context?</p>
+    <button class="opt" data-ok>a context value cannot cross a network call itself</button>
+    <button class="opt">HTTP headers are the only place Go allows strings</button>
+    <button class="opt">context.Context objects always expire after just a few milliseconds</button>
+    <button class="opt">outbound requests silently ignore any context values that exist</button>
+  </div>
+  <div class="q" data-why="A shared correlation id answers which log lines across services belong to one request. Full distributed tracing adds per-hop timed spans, each pointing to its parent span, so the actual call-graph shape and relative timing across hops can be reconstructed, not just which lines match.">
+    <p class="stem">What does full distributed tracing add beyond a single shared correlation ID?</p>
+    <button class="opt" data-ok>timed spans showing the call graph and per-hop timing</button>
+    <button class="opt">a way to skip authentication between two trusted services</button>
+    <button class="opt">automatic retries for any request that happens to fail</button>
+    <button class="opt">a guarantee that every downstream call runs in parallel</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the <a href="https://opentelemetry.io/docs/concepts/signals/traces/">OpenTelemetry Traces concept docs</a> are the vendor-neutral primary source for the span/trace-id model section 6 compressed — read the "Traces" and "Spans" sections (~10 min) for the exact vocabulary this lesson deliberately stopped short of teaching as an API. Kleppmann's <a href="https://dataintensive.net">Designing Data-Intensive Applications</a>, already this course's standing distributed-systems citation (Lessons 6, 33, 37, 39–41), frames why observability becomes mandatory rather than optional once a system stops being one process — worth revisiting its opening chapters with that lens.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> open. Still no <code>lesson_completed</code>/quiz-outcome record exists for any lesson after 65 rounds — the honest next step remains a completion signal or a user-named track. Absent that, a reasonable standing candidate is API gateways / BFF (backend-for-frontend) patterns — this course has covered individual services in depth (auth, rate limiting, circuit breakers, service-to-service auth) but never named the layer that commonly sits in front of all of them at the edge, where this lesson's correlation-ID generation naturally lives.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

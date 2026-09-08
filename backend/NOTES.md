@@ -4275,3 +4275,69 @@
   services remains the last of Lesson 63's two named candidates, deferred
   through this round specifically for a larger dedicated lesson, and
   should be it if no signal materializes first.
+- **2026-09-08 generation (Lesson 65):** idempotency check first — no
+  `backend/lessons/0065-*.html` and no `n: 65` entry in `nav.js` existed,
+  so generation proceeded. Read MISSION.md (unmodified), RESOURCES.md,
+  NOTES.md lines 1-80 plus the tail, both learning-records files, nav.js's
+  tail, and Lessons 41/13/31/64 in full for exact tie-back details and
+  closing-convention format. Topic: distributed tracing / correlation-ID
+  propagation across services — this was the standing named candidate from
+  Lessons 63 and 64's closing notes, deferred twice specifically for "a
+  larger dedicated lesson," and still no `lesson_completed`/quiz-outcome
+  record exists for any lesson after 64 rounds, so the conservative pattern
+  continued rather than picking a fresh topic blind. Covered: why one
+  request fanning out across services (Lesson 8's multi-instance framing,
+  Lesson 31's service-to-service calls) breaks per-service log correlation;
+  generate-at-the-edge-or-keep-what-you're-handed as the propagation rule;
+  `context.Context` as the in-process carrier (directly extending Lesson
+  41's own WithValue/correlation-ID example, which had never been shown as
+  code until now); an outbound HTTP header (`X-Request-ID`) as the
+  cross-process carrier; and a deliberately brief, concept-only extension
+  into full distributed tracing (trace id + spans, Jaeger/OpenTelemetry
+  named but not taught as an API, W3C `traceparent` mentioned) per the
+  brief's explicit instruction not to teach OpenTelemetry in depth. Reused
+  two existing glossary terms without duplicating (`correlation ID /
+  request ID` and `structured logging`, both already present from Lessons
+  7/13) and added exactly two new ones: `distributed tracing` and `span`
+  — grepped the glossary first for both plus "trace"/"traceparent"/"W3C",
+  confirmed no collisions. Verification actually performed, mechanically,
+  not eyeballed: (1) quiz word-count balance — `python3` invocation was
+  blocked by this sandbox's approval gate (even `python3 -c "print(1+1)"`
+  required approval with no user present; `node -e` worked fine), so the
+  occurrence-counting script was written and run in Node instead — found
+  and fixed three of four questions on the first pass (word-count
+  mismatches of 1-3 words from imprecise manual drafting), converged to
+  exactly 4/4/4/4-per-question equal word counts and exactly one
+  `data-ok` per question after two fix-and-rerun cycles; (2) HTML tag-
+  balance — a Node script did occurrence-counting (not line-counting) on
+  every tag pair used in the lesson (24 pairs incl. div/p/h2/table/tr/td/
+  th/pre/code/span/a/dfn/button/script/etc.) plus glossary.html's table/
+  tr/td/th — all balanced on the first check, plus a raw-unescaped-`&`
+  scan on both files returning zero; (3) Go compile check — wrote the
+  exact shipped snippet (middleware + chargeCard function, byte-for-byte
+  from the lesson) into `backend/.scratch/lesson65/main.go`, `go mod
+  init`; `go get github.com/google/uuid` was blocked by the same
+  approval gate (no network access in this headless sandbox), so a
+  minimal local replacement module implementing only `uuid.NewString()
+  string` was vendored via a `replace` directive in go.mod — `go build`
+  and `go vet` both completed with zero output (clean) against the real
+  shipped code; deleted `backend/.scratch/` entirely afterward and
+  confirmed via `git status --short` that only the intended lesson/nav/
+  glossary/NOTES files show as changed, nothing stray left behind.
+  Registered Lesson 65 in `nav.js` (date 2026-09-08). One reconfirmation
+  attempt at `psql "$LEARNING_DB_URL" ...` was made per the standing
+  two-month pattern and was blocked again immediately ("Contains
+  simple_expansion") — not retried further. `bin/record-progress backend
+  lesson_generated --day 65 --lesson
+  0065-distributed-tracing-and-correlation-ids.html --detail
+  '{"by":"headless"}'` ran as a single standalone command and succeeded
+  immediately, consistent with the write path's continued reliability
+  regardless of read-path status. No confirmed next-lesson gap is named
+  with certainty for the round after this one — same standing note as
+  every prior round, a completion/quiz-outcome signal should take
+  priority over guessing. If none materializes, the most natural named
+  candidate surfaced this round is API gateways / backend-for-frontend
+  (BFF) patterns: this course has taught rate limiting (11), circuit
+  breakers (28), service-to-service auth (31), and now correlation-ID
+  generation "at the edge" (65) without ever naming the edge layer itself
+  that commonly hosts all of them in front of a service fleet.

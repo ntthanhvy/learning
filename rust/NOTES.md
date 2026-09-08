@@ -909,3 +909,28 @@ by the user there; they apply here identically.
   `typing` extras (`Protocol`/`TypedDict`/generics) — were generated this
   round via delegated agents, each confirmed to have written only within
   its own course directory; see their own NOTES.md entries for detail.)
+- 2026-09-08 (headless 06:00 run; verified by the orchestrator directly
+  rather than a delegated agent, since this course needs no new content):
+  same as every prior post-week day — verified `daily.html`,
+  `assets/srs.js`, and `assets/quiz-bank.js` are all present and untouched
+  (8 textual `id: "k` matches in `quiz-bank.js` — the 7 real kata entries
+  `k1`-`k7` plus the commented-out example line; `day:` tags still running
+  1-7 only; `nav.js` `LESSONS` array still registers only the 7 Jul 8-14
+  lessons, unchanged). Still the correct "daily quiz+kata" for this
+  post-week phase per PLAN.md, so nothing new was generated, nav.js was
+  untouched, and no bank content was added. `bin/record-progress rust
+  note --detail '{"day":"post-week-2026-09-08","action":"verified-
+  unchanged","by":"headless"}'` succeeded on the first attempt this
+  round — the write path continues to work reliably regardless of the
+  read path's status. No direct `psql`/`bin/query-progress` read attempt
+  was made this round, per the finding reproduced daily since 2026-07-16
+  with no exception that the read path is blocked and re-attempting it
+  does not change the outcome. No new learning record beyond the Day-1
+  baseline. (Go skipped again per its own window close, now fifty-four
+  days past it; backend lesson 65 — distributed tracing and
+  correlation-ID propagation — data lesson 62 — memory/dtype optimization
+  via `memory_usage(deep=True)` and `to_numeric(downcast=)` — and python
+  Day 42 — the walrus operator `:=`, closing the Day 38/41 loose thread —
+  were generated this round via delegated agents, each confirmed to have
+  written only within its own course directory; see their own NOTES.md
+  entries for detail.)

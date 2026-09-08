@@ -4984,3 +4984,131 @@ fail *gracefully* so the learner sees which task failed.
   folding the FastAPI bigger-applications doc into "Knowledge — backend")
   if given scope to touch that file. Still no `lesson_completed`/quiz/kata
   outcome record exists for any day — no reported weak spot to target.
+- 2026-09-08 — **Day 42 generated** (headless run, Python topic: the walrus
+  operator `:=` / assignment expressions), closing the last named loose
+  thread from Day 38/41.
+  Read this run: `MISSION.md` (untouched, read-only), `RESOURCES.md`,
+  `PLAN.md`, this file's lines 1-100 plus the tail (~4830-4986), the sole
+  `learning-records/0001-baseline-reads-python-writes-little.md`,
+  `assets/nav.js`'s tail (LESSONS array + copy-button script), and the most
+  recent lesson/practice pair (`lessons/0041-typing-extras.html`,
+  `practice/41_typing_extras.py`) for exact structure.
+  Idempotency: confirmed via `ls python/lessons/0042-*` (no match) and a
+  grep across `python/` for `0042`/`Day 42`/`day42`/`n: 42` before writing
+  anything — the only pre-existing hits were Day 38/41's own prose
+  *mentioning* the walrus operator as a future topic, not an actual Day 42
+  artifact; `n: 42` had zero hits in `nav.js`. Proceeded as Day 42.
+  Topic selection: Day 41's own next-day note named exactly one remaining
+  loose thread — the walrus operator `:=`, until now only an unexplained
+  inline example in Day 38's callout (`if m := re.search(...): ...`) — and
+  flagged it explicitly as "small-footnote-sized," with a cross-cutting
+  review day as the only other candidate given zero completion/quiz
+  signal ever recorded. Since the walrus operator was concrete, well-scoped,
+  and already twice-flagged (Day 38's teaser, Day 41's explicit next-day
+  pick), generated it today rather than the review day, kept deliberately
+  short (~15 min framing, not the usual ~20) per the "closing out a loose
+  thread" instruction — one core mechanism, two payoff patterns, one
+  readability caveat, no padding into a bigger topic.
+  Grepped Day 38's lesson to confirm the only prior appearance was that one
+  inline, unexplained example; grepped `reference/glossary.html` for
+  "walrus"/"assignment expression"/`:=` — zero hits, confirming no prior
+  glossary row to collide with.
+  **Interpreter-behavior claims verified live**, per Days 34-41's
+  precedent — three scratch `uv run python3` probe files under
+  `python/.scratch/lesson42/` (Python `3.12.3`, matching every prior day):
+  (1) confirmed a `while (chunk := read_chunk()) != "":` loop collects the
+  same results as the traditional prime-then-advance-with-duplicated-call
+  shape; (2) confirmed a comprehension `[y for x in nums if (y := expensive(x)) > 5]`
+  calls `expensive()` exactly once per element (5 calls for a 5-element
+  list), versus 8 calls for the equivalent non-walrus form that calls it
+  again in the output expression for every element that passes the filter
+  — and, importantly, confirmed live that the walrus-bound name **leaks
+  into the enclosing scope** after the comprehension ends (unlike the
+  comprehension's own throwaway `for` variable), which became its own
+  callout in section 3 rather than an assumed-from-memory claim; (3)
+  confirmed Day 38's exact `if (m := re.search(...)) is not None:` shape
+  avoids a duplicate `re.search()` call, that a bare unparenthesized
+  `x := 5` statement raises `SyntaxError` (confirmed via `exec()` in the
+  probe), and that a parenthesized bare walrus statement `(z := 10)` is
+  legal. No claim shipped that contradicted a live probe. Deleted
+  `python/.scratch/` entirely after use; confirmed via `git status --short`
+  that nothing stray remained (only this run's real, intended changes plus
+  unrelated same-day `backend/`/`data/` course changes from parallel runs
+  showed up).
+  No-pandas rule: grepped the lesson case-insensitively for
+  `pandas`/`numpy`/`pd.`/`np.` — exactly one hit, the standing "Where
+  pandas goes from here" callout noting `:=` is a general language feature
+  occasionally seen inside a pandas method-chain lambda, not demonstrated;
+  grepped the practice file the same way — zero hits (stdlib `re` only).
+  Practice file `practice/42_walrus_operator.py` (4 exercises: a
+  `while`-loop reader collected via walrus instead of a duplicated call, a
+  comprehension squaring-over-threshold via walrus instead of double
+  computation, an `if`-walrus over `dict.get()` for a price-or-default
+  lookup, and Day 38's exact `if (m := re.search(...))` shape returning an
+  `int` or `None`) needed no on-disk fixtures. Followed the standing
+  defensive pattern against the Ellipsis-at-module-level bug family:
+  grepped for `...` occurrences — all four live indented 4 or 8 spaces
+  inside a function body, none at column 0/module scope; Exercises 2-4
+  additionally wrap their `...` in a `try/except Exception: return None`
+  so an unfilled TODO fails its assert-equality check cleanly (✗) rather
+  than raising `AttributeError`/`TypeError` out to the top level — Exercise
+  1's bare `...` inside a `while`-free function body is already safe as a
+  no-op, returning the untouched empty `collected` list, which likewise
+  fails its check cleanly without a wrapper.
+  Verified in a scratch dir (`python/.scratch/lesson42/`, removed after
+  use): the shipped (unsolved) copy, run via plain `uv run python3` (no
+  `--with` needed) directly from its real `practice/` path, printed a clean
+  mix of ✓ (Ex 1b and Ex 4b only, both of which happen to hold for the
+  unsolved stub's `[]`/`None` returns) and ✗ (Ex 1, 2, 2b, 3, 3b, 4) with no
+  traceback; a separately solved copy (every TODO filled in by hand)
+  printed all eight ✓ and the "All green" tally on the first attempt — no
+  bugs found during solving.
+  Glossary: added one Day 42 section to `reference/glossary.html` with one
+  new row (`assignment expression`, citing PEP 572 inline) after confirming
+  no collision; the lesson's single `<dfn data-en=` tag count (1) was
+  grepped and matches the one new glossary row exactly. HTML tag-balance
+  was checked with a stdlib `html.parser.HTMLParser`-based stack checker
+  (same tool/approach as Day 41) against both the lesson file and the full
+  `glossary.html` — the first pass on the lesson file caught a real bug
+  (a stray `</p>` closing tag left over from an early draft of the SQL
+  bridge callout, which uses a bare `<div class="callout">` with no `<p>`
+  wrapper elsewhere in this course, matching Day 38/41's own callout
+  markup) — fixed by removing the stray `</p>`, then both files reported
+  fully balanced.
+  Quiz: 3 questions (what `:=` can do that plain `=` cannot; why a walrus
+  helps in the `while (chunk := read_chunk()) != "":` shape; what happens
+  to a walrus-bound comprehension name after the comprehension ends).
+  Word counts were checked with a small Python script (regex-split per
+  `<div class="q">` block, per-option word count) and cross-checked with a
+  second, independent `html.parser`-based script per this course's
+  established two-method practice — the first draft mismatched on all
+  three questions (Q1 11/11/9, Q2 10/11/12, Q3 9/9/11) and took several
+  rounds of single- or few-word edits, re-running the counter script after
+  every edit, before landing at 11/11/11, 11/11/11, and 9/9/9 respectively;
+  both the primary and the independent cross-check script agreed on the
+  final counts and confirmed exactly one `data-ok` per question.
+  Registered in `assets/nav.js` with `date: "2026-09-08"`; confirmed
+  `node --check assets/nav.js` reports no syntax errors after the edit.
+  **DB access:** per this run's instructions, `bin/query-progress python`
+  was attempted exactly once to reconfirm and hit the same "This command
+  requires approval" gate as every prior round back to Day 34+ — not
+  retried further. Paced entirely from on-disk state (this file's own
+  generation log, `python/lessons/`, `python/assets/nav.js`,
+  `python/learning-records/` — still only the Day 1 baseline, no
+  completion/quiz/kata outcome record for any day 2-41).
+  `bin/record-progress python lesson_generated --day 42 --lesson
+  0042-walrus-operator.html --detail '{"by":"headless"}'` ran successfully
+  after this entry was drafted, per this run's instructions.
+  **Next-day note:** every explicitly named PLAN.md Phase 2a/2b item and
+  now the walrus-operator loose thread are all covered — the named-
+  candidate list from PLAN.md is fully exhausted as of this lesson. The
+  next run should strongly consider a cross-cutting review/spaced-
+  repetition day, since zero `lesson_completed`/quiz/kata outcome record
+  has ever been produced for any day 2-42 despite 42 lessons generated —
+  there's no reported weak spot to target with a review day's structure,
+  but the review itself (and getting a first-ever completion/quiz signal
+  recorded) is now the strongest remaining candidate absent further
+  learner input. Otherwise, revisiting `RESOURCES.md`'s two open Gaps
+  (Python interview-prep source; folding the FastAPI bigger-applications
+  doc into "Knowledge — backend") if given scope to touch that file remains
+  the fallback.

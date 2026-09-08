@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 62 · Memory/dtype optimization: measuring with memory_usage(deep=True) and downcasting on purpose</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 62 · ~20 min · 8 Sep 2026</p>
+<h1>Memory/dtype optimization: measuring with memory_usage(deep=True) and downcasting on purpose</h1>
+<p class="byline">Lesson 60's teaser named this as one of two remaining candidates; Lesson 61 took the other (groupby/agg patterns), so this closes the loop. Re-grepped every lesson before writing: Lesson 25 already taught <code>select_dtypes()</code>, the <code>category</code> dtype, and a single-column <code>memory_usage(deep=True)</code> comparison; Lesson 41 taught <code>astype()</code>'s raise-on-failure behavior and nullable <code>Int64</code>/<code>Float64</code>; Lesson 51 taught <code>convert_dtypes()</code>'s best-guess pass. None of them taught <code>memory_usage(deep=True)</code> as a whole-table profiling <em>workflow</em>, or numeric downcasting (<code>pd.to_numeric(..., downcast=)</code>, explicit <code>astype("int32")</code>/<code>"float32"</code>) and its overflow/precision-loss risk — today closes exactly that gap, the numeric half of memory optimization that the text-focused Lesson 25 didn't cover.</p>
+
+<h2>1 · Recap: what's already covered, and what's new today</h2>
+<p>Three earlier lessons touched dtypes from three different angles: Lesson 25 shrank a low-cardinality <em>text</em> column with <code>astype("category")</code>; Lesson 41 taught <code>astype()</code>'s general raise-on-bad-data conversion; Lesson 51 taught <code>convert_dtypes()</code>'s best-guess pass across a whole table. None of them asked "how much memory does this whole table actually use, column by column, and can the <em>numeric</em> columns be shrunk the same way <code>category</code> shrinks text?" That's today's question, and it needs one measuring tool plus one shrinking technique: <code>df.memory_usage(deep=True)</code> to see where the bytes actually go, and downcasting (<code>pd.to_numeric(..., downcast=)</code> or explicit <code>astype("int32")</code>) to shrink numeric columns whose actual value range doesn't need the wide default type.</p>
+
+<h2>2 · SQL bridge: you already choose column widths in a schema — pandas doesn't, by default</h2>
+<p>Writing a <code>CREATE TABLE</code>, choosing <code>SMALLINT</code> vs <code>INTEGER</code> vs <code>BIGINT</code>, or <code>REAL</code> vs <code>DOUBLE PRECISION</code>, is a deliberate, upfront decision — the schema fixes the width once and every row is stored that way from the start. <dfn data-en="a pandas Series/DataFrame method reading a CSV/Excel/JSON file and guessing each column's dtype from the raw text values, with NO schema to consult -- unlike a SQL CREATE TABLE, every numeric column defaults to the WIDEST practical type (int64, float64) regardless of what values actually appear" data-vn="giữ nguyên 'read_csv() type inference' — đọc file rồi tự đoán dtype từng cột từ text thô, không có schema nào để tham khảo; khác CREATE TABLE trong SQL, cột số mặc định luôn lấy kiểu RỘNG nhất (int64, float64) bất kể giá trị thật nhỏ cỡ nào">pandas' <code>read_csv()</code> has no schema to consult</dfn>, so it defaults every numeric column to the widest practical type — <code>int64</code>, <code>float64</code> — regardless of whether the actual values would fit in a <code>SMALLINT</code>. An <code>order_id</code> column that will never exceed a few thousand rows still costs 8 bytes per value by default, the same width as a value near 9 quintillion. Today's tools are how you retroactively do, in pandas, what a well-designed schema would have done upfront in SQL: pick the narrowest type that actually fits the data.</p>
+
+<h2>3 · Measuring first: memory_usage(deep=True), not just df.info()</h2>
+<p>Lesson 2's <code>df.dtypes</code> tells you the type; it says nothing about bytes. <code>df.memory_usage()</code> reports per-column memory — but its default, <code>deep=False</code>, silently undercounts any column holding Python strings, because it reports only the fixed-size pointer array, not what each string object itself costs:</p>
+<pre><code>df2.memory_usage()                 <span class="cm"># deep=False (the default) -- shallow, cheap, WRONG for text columns
+-- Index            40
+-- order_id         40
+-- customer         40    &lt;- looks identical to a numeric column's cost. it is not.
+-- order_date       40
+-- amount_clean     40</span>
+
+df2.memory_usage(deep=<span class="kw">True</span>)   <span class="cm"># actually walks every string object
+-- Index            40
+-- order_id         40
+-- customer        260    &lt;- the real cost
+-- order_date      268
+-- amount_clean     40</span></code></pre>
+<p>Confirmed directly on this course's real (cleaned) <code>orders_raw.csv</code>: the shallow total across the whole frame is 240 bytes; the deep total is 915 — <strong>3.8x higher</strong>, entirely hidden in the two text columns. This is the same "looks like an answer, quietly wrong" family as Lesson 25's own gotcha: <code>deep=False</code> never raises or warns, it just reports a number that's true for numeric/bool/datetime columns and false for anything holding Python objects/strings. <dfn data-en="the required, non-default keyword to Series/DataFrame.memory_usage() that makes it actually inspect each string/object value's real size instead of just the fixed-size pointer array pandas stores internally -- omitting it silently undercounts any text column" data-vn="giữ nguyên 'deep=True' — tham số bắt buộc phải tự thêm cho memory_usage() để nó ĐẾM THẬT kích thước từng chuỗi/object, không chỉ đếm mảng con trỏ cố định; bỏ qua thì đếm THIẾU cột chữ mà không báo gì cả">deep=True</dfn> is the one rule worth internalizing: always pass it when text/object columns are present, and chain <code>.sum()</code> for a table-wide total or <code>.sort_values(ascending=False)</code> to find which column is actually the biggest cost before optimizing the wrong one.</p>
+
+<h2>4 · category dtype, revisited at scale</h2>
+<p>Lesson 25 showed the <code>category</code> win on a 4-row fixture (216 → 112 bytes). Repeated to 2,500 rows (still only 3 distinct customer names), the same conversion goes from 130,000 bytes to 2,656 — <strong>the gap widens with row count, not narrows</strong>, since the lookup table barely grows while the plain-string cost scales linearly with rows:</p>
+<pre><code>big[<span class="str">"customer"</span>].memory_usage(deep=<span class="kw">True</span>)                          <span class="cm"># 130000, as str</span>
+big[<span class="str">"customer"</span>].astype(<span class="str">"category"</span>).memory_usage(deep=<span class="kw">True</span>)      <span class="cm"># 2656, as category</span></code></pre>
+<p>Nothing new here beyond Lesson 25's own mechanism — it's the same tool, re-confirmed at a scale where the payoff is dramatic rather than marginal, which is closer to what a real "shrink this table" interview task looks like than a 4-row toy.</p>
+
+<h2>5 · Downcasting numeric columns: pd.to_numeric(..., downcast=)</h2>
+<p><dfn data-en="a keyword on pd.to_numeric() that, after doing the normal numeric conversion, ALSO shrinks the result to the smallest numeric dtype that can hold every value actually present without any loss or overflow -- 'integer' tries int8/int16/int32/int64 in order from smallest that fits, 'float' tries float32 before float64" data-vn="giữ nguyên 'downcast=' — tham số của pd.to_numeric(), sau khi ép kiểu số xong sẽ tự THU NHỎ về dtype nhỏ nhất mà vẫn chứa đủ mọi giá trị hiện có, không mất hay tràn số; 'integer' thử int8/int16/int32/int64 từ nhỏ đến vừa, 'float' thử float32 trước float64">pd.to_numeric(col, downcast="integer")</dfn> converts a column AND automatically picks the smallest safe integer type for the values actually present:</p>
+<pre><code>big[<span class="str">"order_id"</span>].dtype                                     <span class="cm"># int64, values only ever 1-6</span>
+pd.to_numeric(big[<span class="str">"order_id"</span>], downcast=<span class="str">"integer"</span>).dtype  <span class="cm"># int8 -- picked automatically, safely</span>
+<span class="cm">-- memory: 20132 bytes -&gt; 2632 bytes, same values, zero risk</span></code></pre>
+<p>Confirmed directly: <code>downcast="integer"</code> checks the real min/max of the column against each integer type's range and picks the smallest one that fits — it never produces a wrong value, because it refuses to pick a type too narrow for what's actually there. <code>downcast="float"</code> does the same for floats, landing on <code>float32</code> before falling back to <code>float64</code> if precision genuinely requires it. This is the safe, recommended path: let pandas check the range for you rather than guessing a target type by hand.</p>
+
+<h2>6 · The gotcha: explicit astype("int8") does NOT check the range — it wraps silently</h2>
+<p>The interview-relevant trap is reaching for plain <code>astype()</code> to downcast instead of <code>to_numeric(downcast=)</code>. <code>astype()</code> (Lesson 41) raises on a type it genuinely cannot represent (like text into float) — but a too-narrow <em>integer</em> type is not one of those cases; it silently wraps around instead:</p>
+<pre><code>s = pd.Series([<span class="kw">100</span>, <span class="kw">200</span>, <span class="kw">300</span>], dtype=<span class="str">"int64"</span>)
+s.astype(<span class="str">"int8"</span>).tolist()
+<span class="cm">-- [100, -56, 44]     &lt;- 200 and 300 both silently WRAPPED, no error, no warning</span>
+
+pd.to_numeric(s, downcast=<span class="str">"integer"</span>).tolist()
+<span class="cm">-- [100, 200, 300]    &lt;- same data, but downcast= checked the range first and landed on int16</span></code></pre>
+<p>Confirmed directly on pandas 3.0.5: <code>np.iinfo(np.int8)</code> reports a valid range of -128 to 127; forcing 200 and 300 into <code>int8</code> via plain <code>astype()</code> doesn't raise <code>OverflowError</code> — it wraps modulo the type's range, producing believable-looking but completely wrong integers, with no exception and no warning printed. This is the same "no crash, quietly wrong" family as Lesson 25's fixed-category gotcha and Lesson 51's string-not-Float64 trap. The fix is the same lesson every time: prefer <code>pd.to_numeric(col, downcast=...)</code>, which checks the real range first, over hand-picking an <code>astype()</code> target type from a guess about what the values "probably" look like. If <code>astype()</code> is the right tool for another reason (e.g. converting several differently-typed columns via a dict, Lesson 41), check <code>col.min()</code>/<code>col.max()</code> against <code>np.iinfo("int8")</code>/<code>np.finfo("float32")</code> by hand first.</p>
+<div class="callout"><strong>Precision loss, the float-specific version of the same trap:</strong> downcasting a float column can also silently lose precision rather than overflow — <code>pd.Series([123456789.123456]).astype("float32")</code> becomes <code>123456792.0</code>, a different number, with no error. <code>float32</code> has roughly 7 significant decimal digits versus <code>float64</code>'s ~15-17; a column of large or high-precision values (financial totals needing exact cents, scientific measurements) can genuinely change value under a careless <code>float32</code> downcast. <code>downcast="float"</code> doesn't prevent this the way it prevents integer overflow — floats are inherently approximate, so "safe" here just means picking the narrowest type that round-trips the SAME rounded value, not that no rounding ever happens. Check a sample of before/after values with <code>.equals()</code> (Lesson 54) or a tolerance-based comparison before trusting a float downcast on precision-sensitive data.</div>
+
+<div class="interview">
+<p><strong>Q: "A DataFrame is using more memory than expected. Walk me through shrinking it."</strong> A strong answer, out loud: <em>"First I'd measure, not guess — df.memory_usage(deep=True).sort_values(ascending=False) to see which columns actually cost the most, since the default deep=False silently undercounts any text/object column by only reporting a fixed-size pointer array, not the real string cost. For low-cardinality text columns repeated across many rows — status, region, category codes — astype('category') stores the distinct values once plus a small integer code per row, the same idea as a SQL ENUM or lookup table. For numeric columns, I'd check whether the actual value range needs the full int64/float64 default — pd.to_numeric(col, downcast='integer') or downcast='float' checks the real min/max and picks the smallest safe type automatically. The gotcha I'd flag: plain astype('int8') on a column with out-of-range values doesn't raise, it silently wraps around to a wrong-looking-but-plausible number, and astype('float32') can silently lose precision on large or high-precision values — so I'd always prefer to_numeric(downcast=), which checks the range first, over guessing a narrow type by hand with astype()."</em> The signal: measuring before optimizing, naming both the text (category) and numeric (downcast) halves of the technique, and flagging the silent-wraparound trap unprompted.</p>
+</div>
+
+<h2>7 · Why this matters beyond a single interview answer</h2>
+<p>This closes the loop on every prior dtype lesson: Lesson 25 (category for text), Lesson 41 (astype's raise-on-failure contract), and Lesson 51 (convert_dtypes' best-guess pass) all touch dtypes, but none of them measured whole-table memory or addressed numeric downcasting specifically. A realistic interview "optimize this pipeline" task often combines all four: profile with <code>memory_usage(deep=True)</code>, convert low-cardinality text to <code>category</code>, downcast numeric columns that don't need their default width, and use <code>convert_dtypes()</code> as a final best-guess polish — in that order, since (per Lesson 51) polishing before the real cleaning step just upgrades the container without fixing the values.</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/62_memory_and_dtype_optimization.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/62_memory_and_dtype_optimization.py</code></pre>
+<p>Reuses <code>practice/data/orders_raw.csv</code>, coerced the same way as every recent lesson, then repeated 500x (<code>pd.concat([df2] * 500, ignore_index=True)</code>) to make the memory differences large enough to see clearly — a deliberate departure from reusing the raw 6-row fixture as-is, since a 4-6 row table can't show a meaningful byte-count gap. Exercise 1 checks the shallow-vs-deep gap on <code>memory_usage()</code> (Section 3). Exercise 2 checks the <code>category</code> conversion's memory drop on the repeated <code>customer</code> column (Section 4). Exercise 3 checks <code>pd.to_numeric(..., downcast="integer")</code> picks a narrower dtype safely (Section 5). Exercise 4 reproduces the <code>astype("int8")</code> silent-wraparound gotcha with your own eyes (Section 6).</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: memory_usage()'s default deep=False reports only the fixed-size pointer array for object/string columns, not the actual string contents' size -- on this course's real fixture, the shallow total (240 bytes) undercounts the true deep total (915 bytes) by nearly 4x, entirely hidden in the two text columns.">
+    <p class="stem">Why does <code>df.memory_usage()</code> (without <code>deep=True</code>) understate a table's real memory usage?</p>
+    <button class="opt" data-ok>It skips the actual string cost of object/text columns</button>
+    <button class="opt">It always doubles every single number reported, on purpose</button>
+    <button class="opt">It literally never reports any numeric column at all</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: pd.to_numeric(col, downcast='integer') checks the column's real min/max against each integer type's valid range and picks the smallest type that safely fits every value -- it never produces a wrong value, since it refuses a type too narrow for the actual data.">
+    <p class="stem">What does <code>pd.to_numeric(col, downcast="integer")</code> do differently from picking a narrow dtype by hand?</p>
+    <button class="opt" data-ok>It checks the value range, then picks a safe type</button>
+    <button class="opt">It rounds every single value to the nearest ten automatically</button>
+    <button class="opt">It always forces the column down to plain int8 regardless</button>
+  </div>
+  <div class="q" data-why="Confirmed directly on pandas 3.0.5: astype('int8') on values outside -128..127 does not raise an error -- it silently wraps around (200 becomes -56, 300 becomes 44), producing believable-looking but completely wrong numbers with no warning printed at all.">
+    <p class="stem">What happens when <code>pd.Series([100, 200, 300]).astype("int8")</code> runs, given int8's range is -128 to 127?</p>
+    <button class="opt" data-ok>Out-of-range values silently wrap to wrong numbers, no error</button>
+    <button class="opt">pandas immediately raises an OverflowError, refusing the whole cast</button>
+    <button class="opt">Every out-of-range value quietly just becomes a NaN instead</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the pandas User Guide's <a href="https://pandas.pydata.org/docs/user_guide/scale.html">"Scaling to large datasets"</a> page (~10 min) — covers <code>memory_usage(deep=True)</code>, <code>category</code> dtype, and numeric downcasting together as one memory-reduction workflow, the same shape as today's lesson. The <a href="https://pandas.pydata.org/docs/reference/api/pandas.to_numeric.html">pandas API reference for <code>pd.to_numeric()</code></a> documents the exact <code>downcast=</code> range-checking rules in full.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>deep=True</code> and <code>downcast=</code> are new today (<code>category dtype</code> already had its own entry from Lesson 25, reused here rather than duplicated).<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-62 comes back reported as shakiest, otherwise a fresh curriculum/glossary scan for the next genuinely-uncovered pattern — this round's scan surfaced no obvious dangling candidate the way earlier teasers did, so the next round should re-scan the curriculum spine and glossary from scratch.<br><br>
+💬 Anything unclear — <code>memory_usage(deep=True)</code>, the downcast/overflow gotcha, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

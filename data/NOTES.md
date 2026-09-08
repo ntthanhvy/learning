@@ -4503,3 +4503,102 @@
   fine even though the read path (`bin/query-progress`) stayed blocked this
   round, consistent with the orchestrator's stated distinction between the
   two and every prior round's pattern.
+- 2026-09-08 generation (Lesson 62, headless run): idempotency confirmed
+  first — globbed `data/lessons/` for `0062-*.html` (none found) and grepped
+  `assets/nav.js` for `n: 62` (not found, highest registered lesson was still
+  61, dated 2026-09-07) — so this round proceeded. DB read: `bin/query-progress
+  data` was tried once from the repo root and immediately hit the same
+  generic "requires approval" gate as every round for two months, consistent
+  with the orchestrator's stated long-standing limitation; did not retry and
+  did not attempt raw `psql` at all. `data/learning-records/` still holds
+  only the single Jul 9 baseline file — no quiz/completion signal has ever
+  landed — so fell back to on-disk state (NOTES.md history + nav.js) as the
+  source of truth, per Lesson 61's own teaser: memory/dtype optimization
+  beyond Lessons 25/41/51, the one remaining MISSION.md-relevant candidate
+  with no queued pick. Overlap-check performed BEFORE writing a word: read
+  Lessons 25, 41, and 51 in full plus grepped the glossary for
+  `memory_usage|downcast|category|astype|convert_dtypes|Int64|Float64`.
+  Found already covered: Lesson 25 taught `select_dtypes()`, the `category`
+  dtype (with a single-column 4-row `memory_usage(deep=True)` comparison,
+  216→112 bytes) and the fixed-CategoricalDtype silent-NaN gotcha; Lesson 41
+  taught `astype()`'s general raise-on-bad-data contract, dict-of-columns
+  conversion, and nullable `Int64`/`Float64` (briefly mentioning
+  `astype("int32")` as a narrowing example but never exploring downcasting
+  itself or its risks); Lesson 51 taught `convert_dtypes()`'s whole-table
+  best-guess pass and its two gotchas (string-not-Float64, float64→Int64
+  promotion). None of the three taught `memory_usage(deep=True)` as a
+  whole-table profiling workflow (vs. one column), numeric downcasting
+  (`pd.to_numeric(..., downcast=)`), or the overflow/precision-loss risk of
+  a hand-picked `astype()` narrowing — confirmed genuinely new ground, so
+  Lesson 62 covers exactly that: `memory_usage(deep=True)` as a
+  shallow-vs-deep measuring habit plus `.sum()`/`.sort_values()` profiling,
+  `category` re-confirmed at scale (2,500 rows, not 4), `pd.to_numeric(...,
+  downcast="integer"/"float")` as the safe range-checked shrink, and
+  `astype("int8")`'s silent wraparound (200→-56, 300→44 confirmed directly on
+  pandas 3.0.5, no error/warning) plus `astype("float32")`'s silent precision
+  loss (123456789.123456→123456792.0 confirmed directly) as the two
+  interview-relevant gotchas contrasted against the safe `downcast=` path. A
+  scratch dir was created at `data/.scratch/lesson62/` (not `/tmp`, this
+  sandbox blocks that) with the real fixtures copied in, and every numeric
+  claim above was hand-verified there with two standalone probe scripts
+  before writing the lesson — including the shallow/deep gap on the real
+  6-row fixture (240 vs 915 bytes, 3.8x) and on a 2,500-row repeat
+  (customer column 130000→2656 bytes as category), and the `np.iinfo(int8)`
+  range (-128..127) against the wraparound example. Practice file
+  `practice/62_memory_and_dtype_optimization.py` reuses `orders_raw.csv`
+  coerced the same way as recent lessons, then repeats it 500x
+  (`pd.concat([df2] * 500, ignore_index=True)`) specifically because the raw
+  6-row fixture is too small to show a meaningful byte-count gap — a
+  deliberate, documented departure from lesson convention, called out in the
+  lesson's practice section. All four Exercise placeholders were already
+  wrapped in try/except-then-None from the first draft (following Lesson
+  61's caught bug as a standing reminder), so no crash-on-unsolved bug was
+  found this round; the shipped (unsolved) file was still run in the
+  mirrored `.scratch/lesson62/practice/` layout and printed exactly 4 ✗ with
+  no traceback, then a solved copy (`.scratch/lesson62/practice/62_solved.py`,
+  not shipped) printed all 4 ✓ on the first run. The shipped file was also
+  re-run a second time directly from its real `practice/` location
+  (`cd data && uv run --with pandas python3
+  practice/62_memory_and_dtype_optimization.py`) and printed the identical 4
+  ✗, no crash. The entire `data/.scratch/` directory was removed (`rm -rf`)
+  after verification; `git status --short` afterward showed only the
+  intended new/modified `data/` files (plus unrelated concurrent changes in
+  the `backend/`/`python/` course directories from other runs, not touched
+  by this one). Quiz options were drafted, then mechanically word-counted
+  with a small Python script isolating each `<div class="q">` block and
+  splitting each option's text on whitespace — the first draft came out
+  mismatched on Q2 (12/10/12) and Q3 (9/7/9); several rewrite+recount cycles
+  landed all three level (Q1 9/9/9, Q2 10/10/10, Q3 9/9/9), independently
+  re-verified with a second method (`Grep` raw option-text listing, counted
+  by hand), which agreed exactly — both methods confirmed all three
+  questions level and exactly one `data-ok` per question. A Python
+  regex/occurrence-count tag-balance check (not line-count) confirmed every
+  tag pair in the shipped lesson HTML balanced (`p` 22/22, `h1` 1/1, `h2`
+  10/10, `pre` 5/5, `code` 91/91, `div` 6/6, `dfn` 3/3, `button` 9/9,
+  `strong` 6/6, `em` 5/5, `a` 3/3, `span` 24/24, `head`/`body`/`title`/`html`
+  1/1 each), cross-checked with `Grep -o` occurrence counts on
+  `<dfn`/`<pre>`/`<button class="opt"` (3, 5, 9), which agreed exactly.
+  Checked the glossary for collisions before adding anything: grepped for
+  `deep=True|downcast` — the only hit was `memory_usage(deep=True)`
+  mentioned in prose inside the existing `category dtype` entry, not a
+  standalone row, so no collision; added exactly two new glossary rows,
+  `deep=True (memory_usage)` and `downcast= (to_numeric)`, placed directly
+  after Lesson 61's `groupby().apply()` entry. Confirmed the glossary
+  table's tags stayed balanced after the insert (`table` 1/1, `tr` 122/122,
+  `td` 363/363). Registered Lesson 62 in `nav.js` with today's date
+  (2026-09-08); `node --check` confirmed it still parses as valid
+  JavaScript after the edit. This closes out the "memory/dtype optimization"
+  category named in Lesson 61's teaser — the last of the two categories
+  Lesson 60 had named as remaining candidates. No single dangling candidate
+  is queued for next time; the next round should do a fresh curriculum/
+  glossary scan from scratch, unless a `lesson_completed`/quiz-outcome
+  signal has surfaced by then, in which case a focused review round on
+  Lessons 9-62 takes priority. This agent does not run `git commit` —
+  leaving working-tree changes uncommitted remains this course's established
+  convention. `bin/record-progress data lesson_generated --day 62 --lesson
+  0062-memory-and-dtype-optimization.html --detail '{"by":"headless"}'` was
+  run once from the repo root as a single standalone command as instructed
+  and succeeded on the first try (`recorded: data/lesson_generated day=62
+  lesson=0062-memory-and-dtype-optimization.html`) — the write path worked
+  fine even though the read path (`bin/query-progress`) stayed blocked this
+  round, consistent with every prior round's pattern.

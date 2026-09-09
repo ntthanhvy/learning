@@ -136,6 +136,8 @@
       file: "lessons/0064-secrets-management.html" },
     { n: 65, date: "2026-09-08", title: "Distributed tracing: one request ID, many services",
       file: "lessons/0065-distributed-tracing-and-correlation-ids.html" },
+    { n: 66, date: "2026-09-09", title: "API gateway & BFF: naming the layer in front of your services",
+      file: "lessons/0066-api-gateway-and-bff.html" },
   ];
 
   const REFS = [

@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 66 · API gateway &amp; BFF: naming the layer in front of your services</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 66 · ~20 min</p>
+<h1>API gateway &amp; BFF: naming the layer in front of your services</h1>
+<p class="byline">This course has taught rate limiting (Lesson 11), circuit breakers (28), service-to-service auth (31), and correlation-ID generation "at the edge" (65) — each time saying "the first service to see a request" without ever naming what that first service usually is. Today: the edge layer itself, the two shapes it commonly comes in, and why "just put it in every service" stops working once there's more than one service.</p>
+
+<h2>1 · The thing four lessons already pointed at</h2>
+<p>Lesson 65 put it plainly: "the first service to see a request — the one sitting at the edge, directly facing the client." Lesson 31 assumed a fleet of backends calling each other. Lesson 11 assumed rate limiting happens "at the edge," not inside every handler. Lesson 28 assumed something is watching outbound calls fail. None of those lessons said where that logic actually lives. In a real system with more than one or two services, it rarely lives duplicated inside each one — it lives once, in a dedicated process every external request passes through first, before any of your actual business logic runs. That process is an <dfn data-en="a single service that sits in front of a fleet of backend services, terminating every external client request first, and handling cross-cutting concerns -- routing, auth, rate limiting -- in one place instead of duplicating them inside every backend service" data-vn="API gateway (giữ nguyên) — 1 service đứng trước cả cụm backend, nhận request từ client trước tiên, xử lý các việc chung (routing, auth, rate limit) 1 lần duy nhất thay vì lặp lại trong từng service">API gateway</dfn>.</p>
+
+<h2>2 · What moves into the gateway, and why "once" beats "everywhere"</h2>
+<p>Picture the fleet from Lesson 31: an order service, a billing service, an inventory service, a payment provider behind that. Without a gateway, a mobile app or web client would need to know all three internal hostnames, and each of those three services would need its own copy of: checking the client's auth token, rate-limiting per client, generating a correlation ID if none arrived yet (Lesson 65), and deciding whether to even accept the request under load (Lesson 11's backpressure). Every one of those is a cross-cutting concern — not specific to orders, or billing, or inventory — so writing it three times means three chances to get it slightly wrong, and three places to update when the rule changes.</p>
+<p>An API gateway collapses that to one place. The client sends every request to one public hostname; the gateway terminates TLS, checks the auth token once, applies the rate limit once, mints the correlation ID once (exactly the "generate at the edge" rule from Lesson 65, now with a concrete home), and only then <a href="../reference/glossary.html">routes</a> it to whichever internal service owns that path — the same route-matching concept from the glossary, now happening once at the gateway instead of inside each service's own router. The three backend services go back to trusting that anything reaching them already passed those checks — the same trust boundary Lesson 31 described between services, just drawn one hop further out, at the client boundary instead of between services.</p>
+<div class="callout"><strong>Not a new mechanism — a new address for old ones.</strong> Nothing here invents a new concept. Rate limiting is still Lesson 11's token bucket. Auth is still Lesson 4/31's tokens. A correlation ID is still Lesson 65's generate-once rule. The gateway is just the one place all of them now run, instead of three or thirty places.</div>
+
+<h2>3 · The other question a gateway answers: whose shape is the response?</h2>
+<p>A plain gateway solves "one address, cross-cutting concerns handled once" but still hands back each backend's response mostly as-is. A second problem shows up once a product has more than one kind of client: a mobile app's order-history screen might need three fields from the order service and one from billing, stitched into a single small JSON payload to keep the phone's network usage low; the internal admin dashboard, hitting the same order data, might want fifteen fields across four services in one call, because the person using it is on a fast connection and wants everything visible at once. Neither shape is "the API" — they're two different client's needs pointed at the same backend data.</p>
+<p>A <dfn data-en="a dedicated backend, one per frontend/client type, that sits between that client and the underlying services, calling several of them and reshaping/aggregating their responses into exactly the payload that one client needs -- unlike a general-purpose API gateway, a BFF is intentionally client-specific, not shared" data-vn="backend-for-frontend / BFF (giữ nguyên) — 1 backend riêng cho từng loại client, gọi nhiều service nội bộ rồi gộp/định dạng lại response đúng ý client đó, khác gateway dùng chung">backend-for-frontend (BFF)</dfn> is the answer: not one shared gateway, but one small backend per client type, each calling whatever internal services it needs and reshaping the combined result into exactly what that one client wants — fewer round trips for the phone, richer payloads for the dashboard, without either client dictating the other's shape or the underlying services changing at all.</p>
+
+<h2>4 · Gateway vs. BFF: same position, different job</h2>
+<div class="cmp-wrap">
+<table class="cmp">
+<thead><tr><th>Question</th><th>API gateway</th><th>BFF</th></tr></thead>
+<tbody>
+<tr><th>How many, for how many clients</th><td>Usually one, shared by every client type</td><td>One per client type (mobile BFF, web BFF, admin BFF)</td></tr>
+<tr><th>Main job</th><td>Cross-cutting: routing, auth, rate limiting, TLS termination</td><td>Aggregation: call several services, reshape into one client-specific payload</td></tr>
+<tr><th>Knows about client-specific shape?</th><td>No — deliberately generic, forwards mostly as-is</td><td>Yes — its entire purpose is one client's ideal shape</td></tr>
+<tr><th>Where request fan-out happens</th><td>Rare — one request in, one internal request out</td><td>Common — one request in, several internal calls out, merged</td></tr>
+</tbody>
+</table>
+</div>
+<p>The two aren't mutually exclusive. A common real shape is a gateway at the very edge for TLS/auth/rate-limiting, with one or more BFFs sitting just behind it, each doing the aggregation work for one client type. Small systems often skip both and let clients call services directly; the trade-off matters once client count and service count both grow past what "everyone calls everything directly" can bear.</p>
+
+<h2>5 · A gateway in Go: the shape, not a framework</h2>
+<p>Real deployments usually reach for a dedicated product (Envoy, Kong, an API-management cloud service) rather than hand-rolling one, but the underlying shape is plain Go you already know: an <code>http.Handler</code> that checks a few things, then reverse-proxies to the right backend. This sketch composes ideas from Lessons 11, 65, and 41 into one entry point.</p>
+<pre><code><span class="cm">// routes maps a path prefix to the internal service that owns it --
+// the routing decision at the heart of any gateway.</span>
+<span class="kw">var</span> routes = <span class="kw">map</span>[<span class="kw">string</span>]*url.URL{
+    <span class="st">"/orders/"</span>:    mustParseURL(<span class="st">"http://order-svc.internal:8080"</span>),
+    <span class="st">"/billing/"</span>:   mustParseURL(<span class="st">"http://billing-svc.internal:8080"</span>),
+    <span class="st">"/inventory/"</span>: mustParseURL(<span class="st">"http://inventory-svc.internal:8080"</span>),
+}
+
+<span class="cm">// gatewayHandler runs the cross-cutting checks once, at the one place
+// every external request passes through, before any backend sees it.</span>
+<span class="kw">func</span> gatewayHandler(limiter *RateLimiter) http.Handler {
+    <span class="kw">return</span> http.HandlerFunc(<span class="kw">func</span>(w http.ResponseWriter, r *http.Request) {
+        <span class="cm">// 1. correlation id, generate-at-the-edge rule from Lesson 65</span>
+        reqID := r.Header.Get(<span class="st">"X-Request-ID"</span>)
+        <span class="kw">if</span> reqID == <span class="st">""</span> {
+            reqID = uuid.NewString()
+        }
+        r.Header.Set(<span class="st">"X-Request-ID"</span>, reqID)
+
+        <span class="cm">// 2. auth, once, per Lesson 4/31 -- backends trust this already ran</span>
+        clientID, ok := verifyToken(r.Header.Get(<span class="st">"Authorization"</span>))
+        <span class="kw">if</span> !ok {
+            http.Error(w, <span class="st">"unauthorized"</span>, http.StatusUnauthorized)
+            <span class="kw">return</span>
+        }
+
+        <span class="cm">// 3. rate limit, once, per Lesson 11's token bucket</span>
+        <span class="kw">if</span> !limiter.Allow(clientID) {
+            w.Header().Set(<span class="st">"Retry-After"</span>, <span class="st">"1"</span>)
+            http.Error(w, <span class="st">"rate limit exceeded"</span>, http.StatusTooManyRequests)
+            <span class="kw">return</span>
+        }
+
+        <span class="cm">// 4. route to the owning backend by longest matching prefix</span>
+        target, prefix := matchRoute(r.URL.Path)
+        <span class="kw">if</span> target == <span class="kw">nil</span> {
+            http.NotFound(w, r)
+            <span class="kw">return</span>
+        }
+        r.URL.Path = strings.TrimPrefix(r.URL.Path, prefix)
+        httputil.NewSingleHostReverseProxy(target).ServeHTTP(w, r)
+    })
+}</code></pre>
+<p>Every backend behind this gateway can now assume: a request that reaches it already carries a valid <code>X-Request-ID</code>, already passed auth, and already survived rate limiting. That assumption is exactly what lets Lessons 11, 31, and 65 be written once here instead of copy-pasted into the order service, the billing service, and the inventory service separately.</p>
+
+<h2>6 · The trade-off: one more hop, one more thing that can go down</h2>
+<p>A gateway adds a network hop to every single request, and it becomes a single point of failure by construction — if it's down, every backend behind it is unreachable even though each one is individually healthy. This is the same shape of trade-off Lesson 50's bulkhead pattern discussed for shared resources generally: centralizing something for consistency also centralizes its blast radius. Production gateways are run as a load-balanced fleet of identical instances for exactly this reason — the concern doesn't go away, it just gets addressed the same way Lesson 8 addressed it for any other stateless service: run more than one, behind a load balancer, none of them holding state the others don't have.</p>
+
+<div class="interview">
+<p><strong>Q: "When would you introduce an API gateway, and would you also add a BFF?"</strong> A strong answer, out loud: <em>"Once I have more than a couple of backend services and more than one kind of client, I'd want a gateway so auth, rate limiting, and request-id generation live in one place instead of being duplicated in every service — that's a pure infrastructure win, no product shape involved yet. I'd only add a BFF on top of that if different clients genuinely need different response shapes — say the mobile app wants a slim aggregated payload from three services in one round trip, and the internal dashboard wants a much richer one. If every client is happy with the same shape, a shared gateway alone is enough and a BFF would just be extra services to operate for no real benefit."</em> The signal: treating the gateway and the BFF as answers to two different questions — "where do cross-cutting concerns live" versus "whose response shape is this" — not as the same thing with two names.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Without a gateway, each backend service must implement its own copy of auth, rate limiting, and correlation-id generation, so a shared front door exists specifically to run cross-cutting concerns once instead of duplicating them across every service.">
+    <p class="stem">What problem does an API gateway solve that plain per-service logic does not?</p>
+    <button class="opt" data-ok>duplicated cross cutting auth and rate limit logic everywhere</button>
+    <button class="opt">the need for any database to ever store rows</button>
+    <button class="opt">the requirement that all Go programs must compile fast</button>
+    <button class="opt">the fact HTTP responses cannot carry a status code</button>
+  </div>
+  <div class="q" data-why="A BFF exists specifically because different client types often need different response shapes from the same underlying services -- a slim aggregated payload for mobile versus a richer one for an internal dashboard -- which a single shared gateway is deliberately generic about.">
+    <p class="stem">What does a BFF add beyond what a shared API gateway already provides?</p>
+    <button class="opt" data-ok>a response shape aggregated and tailored per client</button>
+    <button class="opt">a brand new transport protocol replacing HTTP entirely</button>
+    <button class="opt">automatic encryption of every table column at rest</button>
+    <button class="opt">a guarantee that no backend service can restart</button>
+  </div>
+  <div class="q" data-why="An API gateway is deliberately generic and forwards requests mostly as-is after handling cross-cutting concerns like auth and rate limiting; a BFF is intentionally client-specific, built to call several services and reshape their combined output for exactly one client type.">
+    <p class="stem">How does an API gateway typically differ from a BFF in scope?</p>
+    <button class="opt" data-ok>gateway stays generic while BFF targets one client shape</button>
+    <button class="opt">gateway only ever runs during local development not production</button>
+    <button class="opt">BFF must always be written in a different language</button>
+    <button class="opt">gateway requires no network hop while BFF needs extra</button>
+  </div>
+  <div class="q" data-why="Because every external request now passes through the gateway before reaching any backend, the gateway becomes a single point of failure by construction -- if it goes down, every backend behind it becomes unreachable even though each one is individually still healthy, which is why gateways are run as a load-balanced fleet rather than one instance.">
+    <p class="stem">What real cost does centralizing logic into one gateway introduce?</p>
+    <button class="opt" data-ok>the gateway becomes a single point of failure</button>
+    <button class="opt">backend services no longer need a database connection</button>
+    <button class="opt">clients must now open a raw TCP socket</button>
+    <button class="opt">rate limiting becomes permanently impossible to configure now</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> this is squarely infrastructure-pattern territory rather than an HTTP-semantics or Postgres-DDL question, so RESOURCES.md's closest fit is the request-lifecycle framing in <a href="https://github.com/alex/what-happens-when">"What happens when…"</a> — read with this lesson's lens: a gateway is simply another named hop the request passes through before reaching application code, the same "what sits between browser and handler" question this course opened with in Lesson 1. For the aggregation half specifically, Sam Newman's writing on backend-for-frontend (the term's origin, from his microservices work) is the standard primary source if you want the pattern's original framing beyond this lesson's compressed version.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> open. Still no <code>lesson_completed</code>/quiz-outcome record exists for any lesson after 66 rounds — the honest next step remains a completion signal or a user-named track.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

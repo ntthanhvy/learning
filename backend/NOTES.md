@@ -4341,3 +4341,92 @@
   breakers (28), service-to-service auth (31), and now correlation-ID
   generation "at the edge" (65) without ever naming the edge layer itself
   that commonly hosts all of them in front of a service fleet.
+- **2026-09-09 generation (Lesson 66, headless 06:00 run):** idempotency
+  check first — no `backend/lessons/0066-*.html` file and no `n: 66`/
+  `date: "2026-09-09"` entry in `nav.js` existed, so generation proceeded.
+  Read MISSION.md, RESOURCES.md, `assets/nav.js` in full, both
+  `learning-records/` files (still just the 0001 baseline and the
+  2026-07-30 concurrency-vocabulary gap — no `lesson_completed`/quiz-outcome
+  record ever added), and the tail of NOTES.md (offset-based read near the
+  4300-line end, since the file exceeds the single-read size cap). Topic:
+  API gateways / backend-for-frontend (BFF) patterns — the exact standing
+  candidate named twice at the close of Lesson 65's own entry, and
+  reconfirmed here with a fresh grep across `lessons/*.html` and
+  `reference/glossary.html` for "gateway", "backend-for-frontend", "BFF",
+  "edge layer" — zero hits anywhere, confirming the gap was real and still
+  open; used it rather than searching for a fresh topic blind, per the
+  briefing's stated default and this course's established conservative
+  pattern. Lesson 66 covers: naming the edge-layer process that Lessons 11
+  (rate limiting "at the edge"), 28 (watching for downstream failures), 31
+  (service-to-service trust boundary), and 65 (correlation-ID
+  "generate-at-the-edge") had each assumed without ever locating; the API
+  gateway as the single place cross-cutting concerns move to instead of
+  being duplicated per service; the backend-for-frontend (BFF) as a
+  separate, client-shape-specific answer to a different question
+  (aggregation/reshaping per client type, not cross-cutting concerns); a
+  comparison table contrasting the two by scope, job, and fan-out behavior;
+  a Go `gatewayHandler` sketch composing Lesson 65's correlation-id
+  generation, Lesson 4/31's auth check, and Lesson 11's rate limiter behind
+  a `httputil.NewSingleHostReverseProxy` router; and the single-point-of-
+  failure trade-off of centralizing, tied back to Lesson 50's bulkhead
+  framing and Lesson 8's stateless-fleet answer (run the gateway itself as
+  a load-balanced fleet, not one instance). Checked the glossary first for
+  three candidate terms (API gateway, backend-for-frontend/BFF, routing) —
+  "route / routing" already existed as its own row from Lesson 1's era, so
+  the lesson's `<dfn>` originally drafted around "routes" was replaced with
+  a plain link to the glossary instead, to avoid re-teaching an
+  already-glossed term under a second name; added exactly two new rows
+  (API gateway, backend-for-frontend (BFF)), both genuinely new. Verification
+  performed mechanically, matching this course's established rigor: (1)
+  quiz word-count balance via two independent Node methods on the same
+  parsed option list (`.split(/\s+/)` and a plain `.split(" ").filter
+  (Boolean)`) — first draft was uneven on all four questions (word counts
+  ranging 7-12 per option), fixed through several rewrite-and-recount
+  cycles per question, re-verified after every edit rather than by eye,
+  converged to exactly 9/9/9/9, 8/8/8/8, 9/9/9/9, 8/8/8/8 word counts across
+  the four questions respectively, both methods agreeing exactly, and
+  exactly one `data-ok` per question confirmed the same way; (2) an
+  occurrence-accurate HTML tag-balance check (lookahead-regex counting, not
+  naive substring/line counting, per this course's standing tooling-quirk
+  warning) across every tag pair used in the lesson (19 pairs incl.
+  div/p/h1/h2/table/thead/tbody/tr/th/td/pre/code/dfn/button/a/span/
+  strong/em/script) — one real bug caught and fixed this round: a stray
+  duplicated closing quote on a `data-why` attribute (`..."">`) that would
+  have broken the quiz's HTML parsing, found by the tag-balance pass and
+  corrected before shipping; also caught and fixed a stray `</p>` inside
+  the `.callout` div with no matching opening `<p>`, copied by pattern-
+  matching from Lesson 65's callout without checking it actually needed
+  one; re-ran the same tag-balance script on `glossary.html` after its
+  two-row addition (table/tr/td/th all balanced); (3) a raw-unescaped-`&`
+  regex scan across both files caught and fixed one instance in the
+  lesson's own `<title>` tag (`API gateway & BFF`, missed on first draft,
+  fixed to `&amp;`) — zero remaining after the fix, zero in glossary.html;
+  (4) Go compile check — wrote the exact shipped `gatewayHandler` snippet
+  byte-for-byte into `backend/.scratch/lesson66/main.go`, `go mod init`,
+  and (since `go get github.com/google/uuid` requires network access
+  unavailable in this headless sandbox, same constraint as Lesson 65's
+  round) vendored a minimal local `uuid.NewString() string` stub module
+  under `backend/.scratch/uuidstub/` wired in via a `replace` directive —
+  `go build ./...` and `go vet ./...` both completed with zero output
+  against the real shipped code; deleted `backend/.scratch/` entirely
+  afterward and confirmed via `git status --short` that only
+  `backend/lessons/0066-*.html`, `backend/assets/nav.js`, and
+  `backend/reference/glossary.html` show as changed/new among backend
+  files, nothing stray left behind (other repo-root changes present in that
+  status output belong to unrelated courses' own runs, not touched this
+  round). Registered Lesson 66 in `nav.js` (date 2026-09-09), confirmed
+  with `node --check backend/assets/nav.js`. DB access: `bin/record-progress
+  backend lesson_generated --day 66 --lesson 0066-api-gateway-and-bff.html
+  --detail '{"by":"headless"}'` ran as a single standalone command and
+  succeeded immediately on the first attempt; a single reconfirmation
+  attempt at `bin/query-progress backend` was made per the briefing's
+  allowance and was blocked immediately with a sandbox approval
+  requirement, consistent with the read path's standing block across every
+  prior round regardless of write-path outcome — not retried further. No
+  confirmed next-lesson gap is named with certainty for the round after
+  this one — same standing note as every prior round; a completion/quiz-
+  outcome signal or a user-named track should take priority over guessing
+  blind. Absent that, this round's own gap-search (grepping rate limiting,
+  circuit breakers, auth, tracing, and now gateways/BFF as all covered)
+  did not surface an equally strong single next candidate — worth a fresh,
+  broader gap search next round rather than assuming one is obvious.

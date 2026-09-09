@@ -4602,3 +4602,116 @@
   lesson=0062-memory-and-dtype-optimization.html`) — the write path worked
   fine even though the read path (`bin/query-progress`) stayed blocked this
   round, consistent with every prior round's pattern.
+- 2026-09-09 generation (Lesson 63, headless run): idempotency confirmed first
+  — globbed `data/lessons/` for `0063-*.html` (none found) and grepped
+  `assets/nav.js` for `n: 63`/`2026-09-09` (neither found, highest registered
+  lesson was still 62, dated 2026-09-08) — so this round proceeded. DB read:
+  `bin/query-progress data` was not attempted at all this round (the write
+  path and read path are documented as separate in every prior entry; no new
+  information expected from retrying the long-blocked read path). Per Lesson
+  62's own teaser — "no single dangling candidate is queued... the next round
+  should do a fresh curriculum/glossary scan from scratch" — this round did
+  exactly that instead of following a pre-named pick: read `MISSION.md`,
+  `RESOURCES.md`, the full glossary (`reference/glossary.html`, 122 rows), and
+  grepped every lesson (`lessons/*.html`) for a wide set of candidate
+  topics/method names (`interpolate`, `to_csv`, `sample()`, `df.eval()`,
+  `ordered=`, `NamedAgg`, `searchsorted`, `np.vectorize`, and more) before
+  picking anything. Two genuinely-uncovered candidates surfaced: the ETL
+  "output" stage (`to_csv()`/`to_parquet()`, never taught as its own topic —
+  only a passing mention in Lesson 8) and `interpolate()` (a single "not
+  needed today" aside in Lesson 38, explicitly flagged as uncovered by both
+  Lesson 47's and Lesson 48's own end-of-lesson scans and never picked up in
+  the 15 lessons since). Picked `interpolate()`: it's the natural fourth
+  sibling to Lesson 3's `fillna()`/`dropna()` and Lesson 45's `ffill()`/
+  `bfill()` — same missing-data family, genuinely different technique
+  (computed straight-line estimate vs. constant vs. copied neighbor) — and it
+  had a specific, aging, two-lesson-old dangling flag nobody had closed,
+  making it the stronger claim on "genuinely uncovered" than the output-stage
+  idea (which is real but has no prior teaser pointing at it). A scratch dir
+  was created at `data/.scratch/lesson63/` (not `/tmp`, this sandbox blocks
+  that) with the real `orders_raw.csv` fixture copied in, and every claim
+  below was hand-verified there with standalone probe scripts before writing
+  the lesson: confirmed directly that plain `interpolate()` computes a
+  genuinely new straight-line value at each gap (e.g. 20.0/30.0 between 10.0
+  and 40.0), distinct from `ffill()`'s flat copy on the identical input;
+  confirmed a leading-NaN gap stays NaN by default (same edge-case family as
+  Lesson 45's `ffill()`/`bfill()`), fixable with `limit_direction="both"` at
+  the cost of that edge cell becoming a flat extension rather than a true
+  interpolation; confirmed `method="linear"` (the default) ignores actual
+  datetime spacing while `method="time"` weights by real elapsed time,
+  producing different numbers (20.0/30.0 vs. 16.0/34.0) on a deliberately
+  unevenly-spaced 4-point DatetimeIndex fixture; confirmed a genuine
+  interview-relevant gotcha not present in Lesson 45's `ffill()` story at
+  all: `df.groupby(key)["col"].interpolate()` raises `AttributeError:
+  'SeriesGroupBy' object has no attribute 'interpolate'` outright — unlike
+  `ffill()`/`bfill()`, there is no groupby-native `interpolate()`, so the
+  working fix is `groupby(key)["col"].transform(lambda s: s.interpolate())`,
+  reaching back to Lesson 16's `transform()`; and confirmed `interpolate()`
+  on an object/text-dtype column raises `TypeError: Series cannot
+  interpolate with object dtype` immediately, a real crash rather than a
+  silent wrong guess. The practice file reuses the exact same real 4-row
+  cleaned `orders_raw.csv` slice as Lesson 45 (Binh's first amount blanked at
+  the customer boundary), so the wrong-vs-right contrast lines up directly
+  against Lesson 45's own ffill()/groupby(ffill()) exercise — confirmed
+  directly that ungrouped `interpolate()` on that fixture wrongly computes
+  111.0 for Binh's row (a straight line from An's 42.0 to Binh's 180.0) while
+  the grouped `transform()` version correctly leaves it NaN. Building the
+  practice file surfaced a real bug caught before shipping: the first draft's
+  Exercise 2/3 placeholders used `s...()` / `gapped...()` as the
+  fill-in-the-blank spelling, which is not valid Python (an Ellipsis literal
+  cannot be dot-called) — running the unsolved file in the scratch dir raised
+  `SyntaxError: invalid syntax` at import time instead of printing a clean
+  mix of ✓/✗, caught by actually running it per this round's required
+  verification step rather than assumed safe; fixed by changing both
+  placeholders to bare `...` (a valid expression) so the file parses and
+  fails at the intended `check()` calls instead. After the fix, the shipped
+  (unsolved) `practice/63_interpolate.py` was executed in a mirrored
+  `.scratch/lesson63/practice/` layout and printed exactly 5 ✗ with no
+  traceback; a solved copy (`.scratch/lesson63/practice/63_solved.py`, not
+  shipped) then printed all 5 ✓ on the first run. The shipped file was also
+  re-run a second time directly from its real `practice/` location (`cd data
+  && uv run --with pandas python3 practice/63_interpolate.py`) both before
+  and after the nav.js/glossary edits that followed, and printed the
+  identical 5 ✗, no crash, both times. The entire `data/.scratch/` directory
+  was removed (`rm -rf`) after verification; `git status --short` afterward
+  showed only the intended new/modified `data/` files (plus unrelated
+  concurrent changes in the `backend/`/`python/` course directories from
+  other runs, not touched by this one). Quiz options were drafted, mechanically
+  word-counted with a Python script isolating each `<div class="q">` block by
+  its own start offset (this course's established approach) — the first
+  draft came out mismatched on all three questions (Q1 9/10/10, Q2 7/8/10, Q3
+  9/7/10); iterated candidate option text through several rewrite+recount
+  cycles (building small word-count-only scratch scripts to pre-check
+  phrasing before editing the lesson file, rather than editing blind) until
+  all three landed level (Q1 9/9/9, Q2 9/9/9, Q3 9/9/9), then independently
+  re-verified by hand-counting the same `Grep`-extracted raw option-text
+  listing word-by-word — both methods agreed exactly, and exactly one
+  `data-ok` per question throughout. A Python regex/occurrence-count
+  tag-balance script caught a real markup bug on the first pass: an unclosed
+  `<span class="cm">` on the `method="time"` code block (opened once, then a
+  second `<span class="cm">` opened again one line later before either was
+  closed) left `span` at 26/25 — found and fixed by closing the first span
+  immediately after its own comment line, re-checked at 26/26 balanced,
+  cross-checked with `Grep -o` occurrence counts on `<dfn`/`<pre>`/`<button
+  class="opt"` (1, 6, 9), which agreed exactly both before and after the
+  quiz-text edits. Checked the glossary for a collision before adding
+  anything: grepped for `interpolate` — no existing entry — so added exactly
+  one new glossary row, `interpolate()`, placed directly after Lesson 62's
+  `downcast= (to_numeric)` entry; confirmed the glossary table's tags stayed
+  balanced after the insert (`table` 1/1, `tr` 123/123, `td` 366/366),
+  cross-checked with `Grep -c` on `<tr>`/`</tr>` (123/123 both). Registered
+  Lesson 63 in `nav.js` with today's date (2026-09-09); `node --check`
+  confirmed it still parses as valid JavaScript after the edit. The
+  output-stage (`to_csv()`/`to_parquet()`) idea from this round's scan is the
+  one named candidate for next time if no `lesson_completed`/quiz-outcome
+  signal has surfaced by then — otherwise a focused review round on Lessons
+  9-63 takes priority, per this course's standing convention. This agent does
+  not run `git commit` — leaving working-tree changes uncommitted remains
+  this course's established convention. `bin/record-progress data
+  lesson_generated --day 63 --lesson 0063-interpolate.html --detail
+  '{"by":"headless"}'` was run once from the repo root as a single standalone
+  command as instructed and succeeded on the first try (`recorded:
+  data/lesson_generated day=63 lesson=0063-interpolate.html`) — the write
+  path worked fine even though the read path (`bin/query-progress`) stayed
+  blocked (not attempted) this round, consistent with every prior round's
+  pattern.

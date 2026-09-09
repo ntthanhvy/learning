@@ -130,6 +130,8 @@
       file: "lessons/0061-groupby-apply-and-multi-agg.html" },
     { n: 62, date: "2026-09-08", title: "Memory/dtype optimization: memory_usage(deep=True) and downcasting",
       file: "lessons/0062-memory-and-dtype-optimization.html" },
+    { n: 63, date: "2026-09-09", title: "interpolate(): filling a gap by estimating between real neighbors",
+      file: "lessons/0063-interpolate.html" },
   ];
 
   const REFS = [

@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 63 · interpolate(): filling a gap by estimating between real neighbors</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 63 · ~20 min · 9 Sep 2026</p>
+<h1>interpolate(): filling a gap by estimating between real neighbors</h1>
+<p class="byline">Fresh curriculum/glossary scan this round, as Lesson 62's teaser asked for: grepped every lesson for <code>interpolate</code> and found only a single "not needed today" aside in Lesson 38 — the same gap Lesson 47's and 48's scans already flagged and nobody picked up since. Lesson 3 taught drop/constant-fill/flag; Lesson 45 added ffill()/bfill() (copy the nearest real neighbor). Today adds the fourth missing-data move none of them cover: estimating a gap's value FROM its real neighbors via straight-line math, rather than copying one of them outright.</p>
+
+<h2>1 · Recap: three fill strategies down, one to go</h2>
+<p>Lesson 3: <code>fillna(value)</code> — one constant (a median, a zero) for every gap, computed once up front. Lesson 45: <code>ffill()</code>/<code>bfill()</code> — copy the nearest real value, unchanged, from above or below. Both are honest about what they do: a constant, or an exact copy. <code>interpolate()</code> is different in kind — for a numeric column, it draws a straight line between the two real values on either side of a gap and reads off the value the line would have at the gap's position. Same family of problem, a genuinely different guess.</p>
+
+<h2>2 · SQL bridge: no built-in for this at all</h2>
+<p>SQL has <code>COALESCE</code> for a constant fill and window-function tricks for "the last non-null value" (Lesson 45 showed the <code>ROWS BETWEEN UNBOUNDED PRECEDING</code> pattern) — but straight-line interpolation between two real rows has no standard SQL equivalent; it usually needs a correlated subquery finding the nearest real value on each side, then hand-writing the linear formula. <code>interpolate()</code> is one of the clearer cases where pandas is doing genuinely more than a one-line SQL translation, not just re-spelling something SQL already has a keyword for.</p>
+
+<h2>3 · The default: linear interpolation</h2>
+<p><dfn data-en="a Series/DataFrame method that fills each missing numeric value by drawing a straight line between the nearest real value ABOVE and the nearest real value BELOW it (in current row order), then reading the gap's value off that line -- unlike fillna()'s one constant or ffill()/bfill()'s exact copy, every filled value is a genuinely NEW number, only ever appearing between the two real neighbors it was computed from" data-vn="giữ nguyên 'interpolate()' — điền số thiếu bằng cách kẻ đường thẳng nối 2 giá trị THẬT gần nhất phía trên và phía dưới (theo thứ tự hàng hiện tại), rồi lấy giá trị ứng với vị trí đang thiếu trên đường đó; khác fillna() (1 hằng số) và ffill()/bfill() (copy y nguyên giá trị có sẵn), số được điền LUÔN là số MỚI, nằm giữa 2 giá trị thật đó">interpolate()</dfn> with no arguments assumes evenly-spaced rows and fits a straight line between each gap's real neighbors:</p>
+<pre><code>s = pd.Series([<span class="num">10.0</span>, <span class="kw">None</span>, <span class="kw">None</span>, <span class="num">40.0</span>, <span class="kw">None</span>, <span class="num">60.0</span>])
+s.interpolate()
+<span class="cm">-- 0    10.0
+-- 1    20.0   &lt;- 1/3 of the way from 10 to 40
+-- 2    30.0   &lt;- 2/3 of the way from 10 to 40
+-- 3    40.0
+-- 4    50.0   &lt;- halfway from 40 to 60
+-- 5    60.0</span>
+
+s.ffill()   <span class="cm">-- for contrast: every gap just copies the value above it
+-- 0    10.0
+-- 1    10.0
+-- 2    10.0
+-- 3    40.0
+-- 4    40.0
+-- 5    60.0</span></code></pre>
+<p>Confirmed directly: rows 1 and 2 each get a genuinely different, computed value (20.0, 30.0) — never seen anywhere in the original data — while <code>ffill()</code> on the same Series just repeats 10.0 twice. Neither is "more correct" in the abstract; it depends on what the column actually measures. A steadily-changing quantity (a thermometer reading, a running balance drifting between two known checkpoints) is well modeled by a straight line; a "status as of now" column (Lesson 45's use case) is not — there's no meaningful "60% of the way between 'active' and 'cancelled.'"</p>
+
+<h2>4 · The edge gotcha: a leading NaN still stays NaN, same family as ffill()</h2>
+<p>A straight line needs a real value on <em>both</em> sides — a gap with nothing above it (or nothing below it) has no line to draw, so the default leaves it as <code>NaN</code>, silently, exactly like Lesson 45's <code>ffill()</code>/<code>bfill()</code> edge case:</p>
+<pre><code>s2 = pd.Series([<span class="kw">None</span>, <span class="num">10.0</span>, <span class="kw">None</span>, <span class="num">30.0</span>])
+s2.interpolate()                        <span class="cm"># default limit_direction="forward"
+-- 0     NaN   &lt;- nothing above it -- no line possible, stays NaN
+-- 1    10.0
+-- 2    20.0
+-- 3    30.0</span>
+
+s2.interpolate(limit_direction=<span class="str">"both"</span>)   <span class="cm"># fills the leading edge too
+-- 0    10.0   &lt;- carried flat from the nearest real value, not a true line
+-- 1    10.0
+-- 2    20.0
+-- 3    30.0</span></code></pre>
+<p>Confirmed directly: <code>limit_direction="both"</code> fills the leading edge, but not with a genuine interpolation — with nothing on one side, it just extends the single available neighbor flat (functionally an ffill/bfill for that one edge cell only). Always check <code>.isna().sum()</code> after, the same standing habit Lesson 45 already established — a table starting or ending with a real gap can still come out of <code>interpolate()</code> not fully filled.</p>
+
+<h2>5 · The groupby gotcha: worse than ffill(), because there's no groupby().interpolate() at all</h2>
+<p>Like every row-order-trusting tool before it (<code>cumsum()</code>, <code>shift()</code>, <code>rolling()</code>, <code>ffill()</code>), plain <code>interpolate()</code> only sees physical row position — it has no idea one customer's rows just ended and another's just began, so a gap sitting right at that boundary gets a line drawn straight through it from the wrong customer's data:</p>
+<pre><code><span class="cm">-- sorted by customer then order_date -- Binh's FIRST row is missing:
+--   customer order_date  amount
+-- 0       An 2026-01-05   120.0
+-- 1       An 2026-01-10    42.0
+-- 2     Binh 2026-01-06     NaN   &lt;- Binh's own first value, genuinely unknown
+-- 3     Binh 2026-01-09   180.0</span>
+clean[<span class="str">"amount"</span>].interpolate()
+<span class="cm">-- 0    120.0
+-- 1     42.0
+-- 2    111.0   &lt;- WRONG: a straight line from An's 42.0 to Binh's 180.0
+-- 3    180.0</span></code></pre>
+<p>Lesson 45's fix for <code>ffill()</code> was one word: chain <code>groupby("customer")</code> before the call. That fix does NOT exist here — confirmed directly, <code>df.groupby("customer")["amount"].interpolate()</code> raises <code>AttributeError: 'SeriesGroupBy' object has no attribute 'interpolate'</code> outright. <code>interpolate()</code> is not a recognized groupby-aggregation method the way <code>ffill()</code>/<code>bfill()</code>/<code>sum()</code>/<code>cumsum()</code> are. The working fix reaches back to Lesson 16's <code>transform()</code>:</p>
+<pre><code>clean.groupby(<span class="str">"customer"</span>)[<span class="str">"amount"</span>].transform(<span class="kw">lambda</span> s: s.interpolate())
+<span class="cm">-- 0    120.0
+-- 1     42.0
+-- 2      NaN   &lt;- correct: Binh has no earlier row of her own to draw a line from
+-- 3    180.0</span></code></pre>
+<p><code>transform()</code> runs the lambda once per group and hands back a result broadcast to each group's own rows (same row count, same order) — exactly the shape <code>interpolate()</code> needs but doesn't provide a direct per-group entry point for. <code>groupby().apply()</code> (Lesson 61) would also work here, but <code>transform()</code> is the narrower, more idiomatic tool for a same-length numeric result.</p>
+
+<div class="callout"><strong>A crash, not a silent-wrong trap this time:</strong> <code>interpolate()</code> only works on numeric dtypes. Confirmed directly: calling it on a text/object column raises <code>TypeError: Series cannot interpolate with object dtype</code> immediately — no NaN, no guess, no partial result. This is the opposite failure mode from the groupby gap above; check the column's dtype first (<code>select_dtypes</code>, Lesson 25) rather than discovering it mid-pipeline.</div>
+
+<h2>6 · method="time": respecting real elapsed time, not just row position</h2>
+<p>Plain <code>interpolate()</code> (method <code>"linear"</code>, the default) treats every row as equally spaced, regardless of the actual gap between timestamps. On a <code>DatetimeIndex</code> with irregular spacing, that can misjudge how far along the line a gap actually sits — <code>method="time"</code> fixes it by weighting the interpolation by real elapsed time instead of row count:</p>
+<pre><code><span class="cm">-- index: Jan 1, Jan 2, Jan 5, Jan 6 -- NOT evenly spaced (3-day gap in the middle)</span>
+s.interpolate()                 <span class="cm"># default "linear" -- ignores the date gap, treats rows as evenly spaced
+-- Jan 1    10.0
+-- Jan 2    20.0   &lt;- 1/3 of the way, by ROW count only
+-- Jan 5    30.0   &lt;- 2/3 of the way, by ROW count only
+-- Jan 6    40.0</span>
+
+s.interpolate(method=<span class="str">"time"</span>)   <span class="cm"># weights by ACTUAL days elapsed
+-- Jan 1    10.0
+-- Jan 2    16.0   &lt;- only 1 of 5 total days elapsed -- closer to 10 than row-based guessed
+-- Jan 5    34.0   &lt;- 4 of 5 total days elapsed
+-- Jan 6    40.0</span></code></pre>
+<p>Confirmed directly on an index spanning Jan 1/2/5/6: the two methods disagree (20.0/30.0 vs. 16.0/34.0) precisely because the middle gap spans 3 real days while the outer gaps span only 1 — <code>method="time"</code> requires the object to have a real <code>DatetimeIndex</code> to measure elapsed time against; plain <code>method="linear"</code> works on any numeric index, including a default RangeIndex.</p>
+
+<div class="interview">
+<p><strong>Q: "A numeric time series has some missing readings. Why reach for interpolate() instead of ffill() or a median fill?"</strong> A strong answer, out loud: <em>"It depends on what kind of quantity is missing. A median fill assumes the true value is close to typical, which throws away any trend. ffill() assumes nothing changed since the last reading, which is right for a 'status as of now' column but wrong for something that's steadily drifting, like a sensor value or a running balance between two known checkpoints — there, a straight-line estimate between the real value before and after the gap is a more honest guess than either a flat copy or a global average. Two things I'd flag unprompted: interpolate() only works on numeric dtypes, it raises immediately on text; and unlike ffill()/bfill(), there's no groupby().interpolate() at all — on a multi-entity table I have to use groupby(key)['col'].transform(lambda s: s.interpolate()), or a gap at a group boundary silently draws a line straight through into the wrong entity's data, same family of bug as every other row-order-trusting tool in this course."</em> The signal: picking the right fill strategy for what the column actually means, and naming the missing groupby-native method as a specific, confirmed gotcha rather than assuming it works like ffill().</p>
+</div>
+
+<h2>7 · Where this fits in the missing-data toolkit</h2>
+<p>Four tools, four different assumptions about what a gap means: <code>dropna()</code> (Lesson 3, the value truly can't be recovered), <code>fillna(constant)</code> (Lesson 3, the honest guess is one typical value), <code>ffill()</code>/<code>bfill()</code> (Lesson 45, the honest guess is whatever was last/next observed, unchanged), and <code>interpolate()</code> (today, the honest guess is a computed point on the trend between two real neighbors). None replaces the others — picking correctly, out loud, based on what the column represents is the actual interview skill; the mechanical syntax is the easy part.</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/63_interpolate.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/63_interpolate.py</code></pre>
+<p>Reuses the same real <code>orders_raw.csv</code> clean 4-row slice as Lesson 45 (Binh's first amount deliberately blanked at the customer boundary), so the wrong-vs-right contrast lines up directly with Lesson 45's own ffill()/groupby(ffill()) exercise. Exercise 1 runs plain (ungrouped) <code>interpolate()</code> and confirms it wrongly draws a line across the customer boundary. Exercise 2 runs the correct <code>groupby(...).transform(lambda s: s.interpolate())</code> version and confirms Binh's row correctly stays NaN. Exercise 3 checks the default leading-edge NaN behavior on a standalone Series. Exercise 4 checks <code>limit_direction="both"</code> filling that same leading edge.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: interpolate() draws a straight line between the two real values surrounding each gap and computes a genuinely new value at the gap's position -- unlike ffill()/bfill(), which always copy one of the real neighboring values unchanged, with no computation involved.">
+    <p class="stem">How does <code>interpolate()</code> fundamentally differ from <code>ffill()</code>/<code>bfill()</code> (Lesson 45)?</p>
+    <button class="opt" data-ok>it computes a new value between two real neighbors</button>
+    <button class="opt">it always deletes any row that shows a gap</button>
+    <button class="opt">it always copies the very first value in column</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: pandas has no groupby-native interpolate() method at all -- df.groupby(key)['col'].interpolate() raises AttributeError outright. The working fix is groupby(key)['col'].transform(lambda s: s.interpolate()), reaching back to Lesson 16's transform() rather than a direct groupby method the way ffill()/bfill() provide.">
+    <p class="stem">What happens when you call <code>df.groupby("customer")["amount"].interpolate()</code> directly?</p>
+    <button class="opt" data-ok>AttributeError -- there simply is no groupby-native interpolate method</button>
+    <button class="opt">it runs fine, exactly like ffill()'s own groupby behavior</button>
+    <button class="opt">it silently ignores the groupby, returning one big Series</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: Series(['a', None, 'c'], dtype='object').interpolate() raises TypeError: Series cannot interpolate with object dtype immediately -- a real crash, not a silent guess, since a straight line has no meaning between two strings.">
+    <p class="stem">What happens when <code>interpolate()</code> is called on a text/object dtype column?</p>
+    <button class="opt" data-ok>it raises a TypeError immediately, refusing to guess anything</button>
+    <button class="opt">it quietly interpolates the strings in alphabetical order instead</button>
+    <button class="opt">it silently turns the whole column into all NaN</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the pandas User Guide's <a href="https://pandas.pydata.org/docs/user_guide/missing_data.html#interpolation">"Interpolation"</a> section of Working with missing data (~10 min) — the same page Lessons 3 and 45 already linked, this time focused on <code>interpolate()</code>'s <code>method=</code> options (<code>"linear"</code>, <code>"time"</code>, and the polynomial/spline methods this lesson didn't need) and <code>limit</code>/<code>limit_direction</code>.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>interpolate()</code> is new today, placed right after Lesson 62's <code>downcast=</code> entry.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-63 comes back reported as shakiest, otherwise another fresh curriculum/glossary scan for the next genuinely-uncovered pattern — this round's scan turned up no other single standout candidate the way <code>interpolate()</code> stood out (flagged uncovered since Lesson 47/48, finally picked up here), so the next round should re-scan from scratch again.<br><br>
+💬 Anything unclear — the missing groupby().interpolate() gotcha, method="time", or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -934,3 +934,31 @@ by the user there; they apply here identically.
   were generated this round via delegated agents, each confirmed to have
   written only within its own course directory; see their own NOTES.md
   entries for detail.)
+- 2026-09-09 (headless 06:00 run; verified by the orchestrator directly
+  rather than a delegated agent, since this course needs no new content):
+  same as every prior post-week day — verified `daily.html`,
+  `assets/srs.js`, and `assets/quiz-bank.js` are all present and untouched
+  (8 textual `id: "k` matches in `quiz-bank.js` — the 7 real kata entries
+  `k1`-`k7` plus the commented-out example line; `day:` tags still running
+  1-7 only; `nav.js` `LESSONS` array still registers only the 7 Jul 8-14
+  lessons, unchanged). Still the correct "daily quiz+kata" for this
+  post-week phase per PLAN.md, so nothing new was generated, nav.js was
+  untouched, and no bank content was added. `bin/record-progress rust
+  note --detail '{"day":"post-week-2026-09-09","action":"verified-
+  unchanged","by":"headless"}'` was attempted from the repo root and hit
+  the generic "This command requires approval" gate with no user present
+  to approve — unlike some prior rounds where the write path succeeded,
+  this round it did not. No direct `psql`/`bin/query-progress` read
+  attempt was made this round beyond noting the standing block, per the
+  finding reproduced daily since 2026-07-16 with no exception that the
+  read path is blocked and re-attempting it does not change the outcome.
+  No new learning record beyond the Day-1 baseline. (Go skipped again per
+  its own window close, now fifty-one days past it; backend lesson 66 —
+  naming the API gateway/BFF edge layer that lessons 11, 28, 31, and 65
+  had assumed but never located — data lesson 63 — `interpolate()`, the
+  fourth missing-data fill strategy — and python Day 43 — a cross-cutting
+  review/retrieval day covering Days 1, 2, 3, 5, 7, and 12, chosen because
+  zero completion/quiz signal has ever been recorded for this course —
+  were generated this round via delegated agents, each confirmed to have
+  written only within its own course directory; see their own NOTES.md
+  entries for detail.)

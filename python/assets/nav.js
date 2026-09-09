@@ -90,6 +90,8 @@
       file: "lessons/0041-typing-extras.html" },
     { n: 42, date: "2026-09-08", title: "The walrus operator: assignment expressions",
       file: "lessons/0042-walrus-operator.html" },
+    { n: 43, date: "2026-09-09", title: "Review day: retrieval across six earlier lessons",
+      file: "lessons/0043-review-retrieval-day.html" },
   ];
 
   const REFS = [

@@ -5112,3 +5112,146 @@ fail *gracefully* so the learner sees which task failed.
   (Python interview-prep source; folding the FastAPI bigger-applications
   doc into "Knowledge — backend") if given scope to touch that file remains
   the fallback.
+- 2026-09-09 — **Day 43 generated: a cross-cutting review/retrieval day**
+  (headless run), no new mechanism taught.
+  Read this run: `MISSION.md` (untouched, read-only), `RESOURCES.md`,
+  `PLAN.md` in full, this file's tail (~4900-5115), the sole
+  `learning-records/0001-baseline-reads-python-writes-little.md`,
+  `assets/nav.js`'s LESSONS array in full, and `lessons/0042-walrus-operator.html`
+  + `practice/42_walrus_operator.py` for exact current structure/conventions.
+  Idempotency: `ls python/lessons/0043-*` and a grep across `python/` for
+  `0043`/`Day 43`/`day43`/`n: 43` both came back empty before writing
+  anything; proceeded as Day 43.
+  Topic selection: Day 41's and Day 42's own next-day notes both named the
+  same two candidates — a cross-cutting review/spaced-repetition day (since
+  zero `lesson_completed`/quiz/kata outcome has ever been recorded for any
+  day 2-42 despite 42 lessons shipped, so there is no reported weak spot to
+  target with a normal new-topic lesson), or revisiting `RESOURCES.md`'s two
+  open Gaps notes. Weighed both against `PLAN.md`: every named Phase 2a/2b
+  item is confirmed taught (re-checked the full plan text this run), so
+  there is no unnamed spine item being skipped either way. Picked the review
+  day — it directly answers the baseline record's core finding (reading ≠
+  writing; retrieval is what's untested) and is the more learner-facing of
+  the two candidates, whereas the `RESOURCES.md` Gaps are meta/curation
+  work with no immediate lesson payoff. Built it as **six short-answer
+  retrieval questions spread across Days 1, 2, 3, 5, 7, and 12** (object
+  model, comprehensions, dict/set grouping, generators, dataclasses,
+  decorators) — deliberately non-adjacent topics (interleaved, not massed on
+  one prior lesson) per the retrieval-practice/interleaving framing the
+  lesson itself teaches as its one new piece of vocabulary. No new Python
+  mechanism is taught anywhere in the lesson body — every fold-out answer
+  cites the exact prior day it came from and links directly to that lesson
+  in the "Go deeper" section instead of a single external primary source,
+  since this day's content *is* six existing primary sources revisited, not
+  a new one.
+  No-pandas rule: grepped the lesson case-insensitively for
+  `pandas`/`numpy`/`pd\.`/`np\.` — exactly one hit, the standing "Where
+  pandas goes from here" callout stating plainly that nothing pandas-
+  specific applies to a review of already-taught stdlib Python; grepped the
+  practice file the same way — zero hits.
+  Practice file `practice/43_review_retrieval.py` (6 exercises, one per
+  reviewed day, same order: return a new list without mutating the
+  original; a filtering-and-doubling list comprehension; a
+  `collections.defaultdict`-based grouping sum; a real generator function
+  using `yield` for running sums; a `@dataclass` `Point` with fields/`__eq__`/
+  `__repr__` all generated, not hand-written; a `functools.wraps`-based
+  decorator that forwards `*args`/`**kwargs` and preserves `__name__`) needed
+  no on-disk fixtures. Followed the standing defensive pattern against the
+  Ellipsis-at-module-level bug family: grepped for `...` occurrences — all
+  five live indented 4 spaces inside a function body, none at column
+  0/module scope.
+  **Bug caught during drafting, before the solved-copy verification step**:
+  probed live in a scratch dir that a function body containing only a
+  comment and a bare `...` (no actual `yield` keyword anywhere in the
+  source) is **not** a generator function at all — calling it returns
+  `None`, not a generator object, since Python decides "is this a generator
+  function" at compile time from the literal presence of `yield` in the
+  body, not from runtime behavior. Confirmed `list(None)` raises
+  `TypeError`, and confirmed the harness's existing `check()` try/except
+  wrapper already catches that cleanly as a ✗ with no traceback reaching the
+  top level — no change needed to the checker, but this shaped the accurate
+  wording of Exercise 4's docstring/TODO ("Must use `yield`, not return a
+  list") and is recorded here per this course's standing practice of
+  logging every bug caught during drafting, not just a pass/fail summary.
+  Also verified live that `@logged` decorating `add` at module import time
+  does not crash even when `logged()`'s unsolved body returns `None`
+  instead of a wrapper function — Python decorator application is just
+  `add = logged(add)`, which only requires the *result* to be callable at
+  the point `add(...)` is later invoked, not at decoration time itself; the
+  later `add(2, 3)` call inside the check correctly raises and is caught as
+  a clean ✗.
+  Verified in a scratch dir (`python/.scratch/lesson43/`, removed after use
+  along with two ad hoc top-level `.scratch_check_*.py` helper scripts used
+  for the tag/quiz checks below, also removed after use — confirmed via
+  `ls`/`git status --short` that nothing stray remained): the shipped
+  (unsolved) copy, run via plain `uv run python3` (no `--with` needed) both
+  from the scratch copy and from its real `practice/` path directly, printed
+  all seven ✗ (every exercise's stub returns `None`/no-ops) with no
+  traceback each time — a legitimate, if unusually one-sided, "mixed"
+  outcome given how the Ellipsis-only stubs happen to fail every check
+  including the two derived sub-checks (2b); a separately solved copy
+  (every TODO filled in by hand, `Point` uncommented as a real
+  `@dataclass`) printed all seven ✓ and the "All green" tally on the first
+  attempt after the generator-body fix above — no further bugs found once
+  that was in place.
+  Glossary: this lesson's byline uses one new `<dfn data-en=` term,
+  "retrieval practice" (the only new-vocabulary item today, since every
+  other concept reviewed already has its Day 1-12 glossary row and was
+  deliberately not re-added) — grepped `reference/glossary.html`
+  case-insensitively for "retrieval" first, zero collisions, then added one
+  Day 43 section with that single row; confirmed the lesson's `data-en=`
+  count (1) matches the new glossary row count (1) exactly. The lesson's own
+  closing paragraph was drafted first saying "no new terms today," caught as
+  inconsistent with the one `<dfn>` already in the byline, and corrected to
+  name the term instead of contradicting the lesson body — logged here as a
+  second drafting-time catch.
+  Quiz: 3 questions (why `b = a; b.append(...)` also changes `a`; what
+  calling a generator function returns immediately, before any `next()`;
+  what a decorator's wrapper must do to avoid breaking the wrapped
+  function). Word counts were checked with a small regex-based Python
+  script (splitting each `<button class="opt">`'s text on whitespace) and
+  cross-checked with a second, independent `html.parser.HTMLParser`-based
+  script per this course's established two-method practice — the first
+  draft mismatched on Q1 (16/12/11 by an early rough count, retuned via
+  several rounds to 13/12/11, then 12/12/11, landing at 12/12/12) and Q3
+  (8/11/10 initially, then 10/11/11 after a wording pass, landing at
+  11/11/11), re-running both scripts after every edit rather than trusting
+  hand counts — a `*args/**kwargs,` token being counted as one
+  whitespace-split "word" by both scripts was the main source of
+  miscounts during manual sanity-checks partway through, resolved by
+  trusting the scripts' counts over hand recounts, not the other way
+  around. Q2 landed at 12/12/12 on the first attempt. Both scripts agreed on
+  final counts and confirmed exactly one `data-ok` per question.
+  HTML tag-balance was checked with a stdlib `html.parser.HTMLParser`-based
+  stack checker and, independently, a regex-based open/close tag-count
+  comparator, against both the lesson file and the full `glossary.html`
+  after the Day 43 glossary addition — all four checks (two tools × two
+  files) reported fully balanced.
+  Registered in `assets/nav.js` with `date: "2026-09-09"`; confirmed
+  `node --check assets/nav.js` reports no syntax errors after the edit.
+  **DB access:** `bin/record-progress python lesson_generated --day 43
+  --lesson 0043-review-retrieval-day.html --detail '{"by":"headless"}'` was
+  attempted once this run and **succeeded** — printed `recorded:
+  python/lesson_generated day=43 lesson=0043-review-retrieval-day.html`,
+  the first observed success for this course's record-progress path in
+  several rounds of prior notes (Days 34-42 all reported the read-path
+  `bin/query-progress` gated, but write-path success wasn't always
+  explicitly re-confirmed each round). `bin/query-progress python` was
+  attempted once to reconfirm the read-path status and hit the same "This
+  command requires approval" gate as every prior round back to Day 34+ —
+  not retried further, per this run's instructions. Paced entirely from
+  on-disk state otherwise (`python/lessons/`, `python/assets/nav.js`,
+  `python/learning-records/` — still only the Day 1 baseline; no
+  `lesson_completed`/quiz outcome row is readable from this sandbox even
+  though today's `lesson_generated` write itself succeeded).
+  **Next-day note:** with the review day shipped and (for the first time)
+  a `lesson_generated` write confirmed successful, the next run should
+  first try `bin/query-progress python` again — if the read-path gate ever
+  lifts, an actual `lesson_completed`/quiz/kata signal would finally be
+  available to target a real weak spot instead of guessing. Absent that,
+  the two `RESOURCES.md` Gaps notes (Python interview-prep source; folding
+  FastAPI's bigger-applications doc into "Knowledge — backend") are the
+  next content candidate, alongside a second, differently-composed review
+  day (e.g. covering Days 16-41's FastAPI/object-model/stdlib material,
+  which today's six questions did not touch) if no new PLAN.md-named topic
+  or learner signal has appeared by then.

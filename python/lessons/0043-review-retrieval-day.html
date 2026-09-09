@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 43 · Review day: retrieval across six earlier lessons</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 43 · ~20 min · 9 Sep 2026</p>
+<h1>Review day: retrieval across six earlier lessons</h1>
+<p class="byline">Every named item on <code>PLAN.md</code>'s Phase 2a and Phase 2b spine is now taught, plus a long tail of stdlib and object-model corners through Day 42. No new mechanism today. Instead, this is a <dfn data-en="a study technique where the learner produces an answer from memory before checking it, rather than re-reading the source material - it is a stronger driver of durable learning than re-reading, especially when spaced across separated topics rather than massed on one" data-vn="giữ nguyên &quot;retrieval practice&quot; — tự nhớ lại và viết ra câu trả lời trước khi xem lại tài liệu, hiệu quả hơn hẳn việc đọc lại; càng hiệu quả khi trộn nhiều chủ đề cũ thay vì ôn 1 chủ đề liền mạch">retrieval practice</dfn> day: six ideas from across Days 1–36, deliberately spread apart rather than grouped by topic, each answered from memory before rereading anything.</p>
+
+<div class="callout"><strong>Why today, specifically:</strong> this baseline (<code>learning-records/0001-…</code>) is a reading/writing asymmetry — code that's read and agreed with is not the same as code that can be produced cold. 42 lessons have shipped and each had its own practice file, but no <code>lesson_completed</code>/quiz/kata outcome has ever come back from any of them, so there is no reported weak spot to target with a normal new-topic lesson. Mixing old topics back in, instead of only ever moving forward, is the direct answer to that gap — and it doubles as the first attempt at getting any completion signal recorded at all.</div>
+
+<h2>1 · Six questions, in the original teaching order</h2>
+<p>Answer each out loud or on paper <em>before</em> reading the fold-out answer. If one is shaky, that is exactly the point of a review day — note it, then go fix it in the practice file below rather than only rereading the old lesson.</p>
+
+<p><strong>Day 1 — names, objects &amp; mutability.</strong> <code>a = [1, 2]; b = a; b.append(3)</code> — what is <code>a</code> now, and why?</p>
+<div class="callout">Fold-out answer: <code>a</code> is <code>[1, 2, 3]</code>. <code>b = a</code> does not copy the list — it binds a second name to the exact same list object. <code>b.append(3)</code> mutates that one shared object in place, and <code>a</code> sees the change because <code>a</code> and <code>b</code> were never two different lists to begin with.</div>
+
+<p><strong>Day 2 — comprehensions.</strong> Rewrite <code>out = []; for x in nums: out.append(x * 2)</code> as one comprehension.</p>
+<div class="callout">Fold-out answer: <code>out = [x * 2 for x in nums]</code> — expression first, then the exact same <code>for x in nums</code> loop header, no <code>if</code> clause needed here.</div>
+
+<p><strong>Day 3 — dict/set grouping.</strong> Given a list of <code>(category, amount)</code> pairs, what's the one-line stdlib call that groups totals by category without writing <code>if key not in d: d[key] = 0</code> by hand?</p>
+<div class="callout">Fold-out answer: a <code>collections.defaultdict(float)</code> (or <code>int</code>), then <code>for cat, amt in pairs: totals[cat] += amt</code> — the <code>defaultdict</code> supplies the starting <code>0</code>/<code>0.0</code> automatically on first touch, so there's no manual existence check.</div>
+
+<p><strong>Day 5 — generators.</strong> What is the one keyword that turns an ordinary function into a generator function, and what does calling that function return (not what does iterating it produce)?</p>
+<div class="callout">Fold-out answer: <code>yield</code>. Calling a generator function does not run its body at all — it immediately returns a generator object, an iterator that only starts executing the body on the first <code>next()</code>, then pauses at each <code>yield</code> and resumes right after it on the following <code>next()</code>.</div>
+
+<p><strong>Day 7 — dataclasses.</strong> What does <code>@dataclass</code> generate for a class that hand-written classes don't get for free?</p>
+<div class="callout">Fold-out answer: <code>__init__</code> (from the annotated fields, in order), <code>__repr__</code> (a readable <code>ClassName(field=value, …)</code> string), and <code>__eq__</code> (field-by-field equality) — all three inferred purely from the type-annotated class body, no method bodies written by hand.</div>
+
+<p><strong>Day 12 — decorators.</strong> What two things does a decorator need to do to avoid silently breaking the function it wraps?</p>
+<div class="callout">Fold-out answer: accept <code>*args, **kwargs</code> in its inner wrapper so it works with any wrapped function's signature, and apply <code>@functools.wraps(func)</code> to that inner wrapper so the wrapped function keeps its original <code>__name__</code>/<code>__doc__</code> instead of reporting the wrapper's.</div>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> nothing pandas-specific today — this review only revisits stdlib Python already taught in Days 1–36, with no pandas/NumPy API involved at any point.</div>
+
+<h2>2 · Why spread the review out instead of grouping by topic</h2>
+<p>The six questions above are deliberately out of a single theme: object model, then syntax, then a data structure, then a control-flow idea, then a class feature, then a function feature — the opposite of a single-topic drill. Mixed, spaced retrieval (sometimes called "interleaving") is harder in the moment than re-reading one lesson start to finish, and that difficulty is the mechanism: producing an answer for Day 1's mutability rule right after producing one for Day 12's decorator rule forces the brain to actually retrieve each one from scratch, rather than riding the momentum of one topic already open in working memory.</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/43_review_retrieval.py</code>. It is six small, independent exercises — one per topic above, same order — with no new syntax anywhere; every mechanism needed was already taught in Days 1–36. Fill in each TODO from memory first; only reopen the old lesson if a fold-out answer above didn't fully land.</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/43_review_retrieval.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="b = a binds a second name to the same list object rather than copying it, so mutating through b (like .append()) changes the one shared object that a also names. Only a fresh copy - a list(a) or a[:] - would give b its own independent list.">
+    <p class="stem">After <code>a = [1, 2]; b = a; b.append(3)</code>, why does <code>a</code> also become <code>[1, 2, 3]</code>?</p>
+    <button class="opt" data-ok>b names the same list object, so mutating it changes a too</button>
+    <button class="opt">Python silently copies a into b right before the append call runs</button>
+    <button class="opt">append() always updates every other list variable defined earlier in this file</button>
+  </div>
+  <div class="q" data-why="Calling a generator function never runs its body immediately - it returns a generator object right away, an iterator whose body only starts executing on the first next() call and pauses again at the next yield. This is what makes generators lazy and memory-safe for huge sequences.">
+    <p class="stem">Calling a generator function (one containing <code>yield</code>) immediately does what?</p>
+    <button class="opt" data-ok>returns a generator object without running any of the function's body yet</button>
+    <button class="opt">runs the whole function body right away and returns a completed list</button>
+    <button class="opt">raises an error unless it is called from inside a for loop</button>
+  </div>
+  <div class="q" data-why="A decorator's inner wrapper must accept *args, **kwargs so it can forward any call to a function with any signature, and it should apply functools.wraps(func) so the wrapped function keeps reporting its own __name__/__doc__ instead of the generic wrapper's - skipping either one silently breaks something about the wrapped function.">
+    <p class="stem">What must a decorator's inner wrapper do to avoid silently breaking the function it wraps?</p>
+    <button class="opt" data-ok>forward *args/**kwargs, and apply functools.wraps to keep its own original identity</button>
+    <button class="opt">rename the wrapped function to match the decorator's own name exactly</button>
+    <button class="opt">avoid ever calling the original wrapped function from inside the wrapper</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the six lessons this review draws from are each still the primary source for their own topic — <a href="../lessons/0001-names-objects-and-mutability.html">Day 1</a>, <a href="../lessons/0002-comprehensions-and-slicing.html">Day 2</a>, <a href="../lessons/0003-dict-set-and-grouping.html">Day 3</a>, <a href="../lessons/0005-iterators-and-generators.html">Day 5</a>, <a href="../lessons/0007-dataclasses-typing-capstone.html">Day 7</a>, and <a href="../lessons/0012-decorators.html">Day 12</a>. For the retrieval-practice technique itself, <a href="https://docs.python.org/3/tutorial/">the Python Tutorial</a> stays this course's general reference (per <code>RESOURCES.md</code>); there is no dedicated stdlib doc for a study technique, so no new source is added for it.</p>
+
+<p class="next">One new term today — <a href="../reference/glossary.html#day43">retrieval practice</a> itself, added to the glossary; every other term above (mutability, comprehension, generator, dataclass, decorator) already has its Day 1–12 row and is not repeated here.<br>
+With the review complete, the next lesson can go either way depending on what came back from this one: if a specific question above was shaky, that becomes a named weak spot worth its own follow-up lesson; if all six landed clean, the next candidate is revisiting <code>RESOURCES.md</code>'s two open "Gaps" notes (a Python interview-prep source, and folding the FastAPI bigger-applications doc into "Knowledge — backend").<br><br>
+💬 Anything unclear — any of the six answers, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

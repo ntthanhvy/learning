@@ -132,6 +132,8 @@
       file: "lessons/0062-memory-and-dtype-optimization.html" },
     { n: 63, date: "2026-09-09", title: "interpolate(): filling a gap by estimating between real neighbors",
       file: "lessons/0063-interpolate.html" },
+    { n: 64, date: "2026-09-10", title: "to_csv() and to_parquet(): the ETL Load step, and its silent traps",
+      file: "lessons/0064-to-csv-and-to-parquet.html" },
   ];
 
   const REFS = [

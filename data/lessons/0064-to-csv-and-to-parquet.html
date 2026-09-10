@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 64 · to_csv() and to_parquet(): the ETL Load step, and its silent traps</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 64 · ~20 min · 10 Sep 2026</p>
+<h1>to_csv() and to_parquet(): the ETL Load step, and its silent traps</h1>
+<p class="byline">Lesson 63's teaser named this round's candidate: the ETL "output" stage, flagged uncovered back in Lesson 8's <code>to_csv</code>/<code>to_sql</code> aside but never taught on its own. Confirmed still a real gap: grepped every lesson and the glossary for <code>to_csv|to_parquet|index=False</code> and found only that one passing mention. Today closes it — not the happy path (that's one line), but the three silent traps that bite the first time someone writes real output: the default extra index column, dtype loss on the CSV round-trip, and a header/append mistake that corrupts a whole column's dtype with zero errors.</p>
+
+<h2>1 · Where Load sits, and why it isn't "just one line"</h2>
+<p>Lesson 8 named the shape: Extract (<code>read_csv</code>) → Transform (everything since) → Load, writing the finished result to its destination. The methods themselves are short — <code>df.to_csv(path)</code>, <code>df.to_parquet(path)</code> — which is exactly why this stage gets skipped over in practice: it looks too simple to have gotchas. It has three, and every one of them is silent — no exception, no warning, just a file that looks fine until something reads it back wrong.</p>
+
+<h2>2 · SQL bridge</h2>
+<p><code>to_csv()</code> is the pandas equivalent of <code>COPY table TO 'file.csv' WITH CSV HEADER</code> (or <code>\copy</code> in <code>psql</code>) — dumping query results to a flat file. There's no SQL-standard equivalent for <code>to_parquet()</code>; the closer parallel is a warehouse's native columnar export (Postgres has no built-in Parquet writer at all — that's normally an external tool like <code>pg_parquet</code> or a Spark/dbt job). The gap matters: SQL people reach for CSV by reflex because it's what <code>COPY</code> gives them, but pandas makes Parquet just as easy to write, and it avoids every trap below.</p>
+
+<h2>3 · The first trap: to_csv()'s default writes an extra column</h2>
+<p><dfn data-en="a DataFrame/Series method writing tabular data to a CSV file; index=True by default, which writes the DataFrame's row index as an unnamed extra leading column -- reading that file back with plain read_csv() re-imports it as a real data column named 'Unnamed: 0' instead of restoring it as the index" data-vn="giữ nguyên 'to_csv()' — ghi DataFrame ra file CSV; mặc định index=True nên GHI THÊM 1 cột index không tên ở đầu; đọc lại bằng read_csv() thường sẽ biến cột đó thành cột dữ liệu thật tên 'Unnamed: 0' thay vì khôi phục làm index">to_csv()</dfn> defaults to <code>index=True</code> — it writes the row index as its own unnamed leading column, every single time, unless told otherwise:</p>
+<pre><code>df = pd.DataFrame({<span class="str">"a"</span>: [<span class="num">1</span>, <span class="num">2</span>], <span class="str">"b"</span>: [<span class="str">"x"</span>, <span class="str">"y"</span>]})
+df.to_csv(<span class="str">"out.csv"</span>)             <span class="cm"># default index=True
+-- ,a,b
+-- 0,1,x
+-- 1,2,y</span>
+
+pd.read_csv(<span class="str">"out.csv"</span>).columns.tolist()
+<span class="cm">-- ['Unnamed: 0', 'a', 'b']   &lt;- the index came back as a REAL data column</span>
+
+df.to_csv(<span class="str">"out2.csv"</span>, index=<span class="kw">False</span>)   <span class="cm"># the fix
+-- a,b
+-- 1,x
+-- 2,y</span></code></pre>
+<p>Confirmed directly (pandas 3.0.5): <code>Unnamed: 0</code> is not a warning label — it's a plain, usable-looking column name, so a careless downstream <code>read_csv()</code> just quietly gains a junk column instead of erroring. <code>index=False</code> is correct almost every time the index is the default <code>RangeIndex</code> (0, 1, 2…) rather than something meaningful, like a <code>set_index()</code> key worth keeping.</p>
+
+<h2>4 · The second trap: CSV has no dtype memory</h2>
+<p>A CSV file is plain text — every value round-trips as a string on disk, with no column-type header of any kind. <code>read_csv()</code> re-guesses each column's dtype from scratch on the way back in, and that guess is not always the original dtype:</p>
+<pre><code>df2 = pd.DataFrame({
+    <span class="str">"order_id"</span>: [<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>],
+    <span class="str">"order_date"</span>: pd.to_datetime([<span class="str">"2026-01-05"</span>, <span class="str">"2026-01-06"</span>, <span class="str">"2026-01-07"</span>]),
+    <span class="str">"amount"</span>: [<span class="num">120.0</span>, <span class="num">35.5</span>, <span class="num">99.9</span>],
+})
+df2.dtypes
+<span class="cm">-- order_id        int64
+-- order_date    datetime64[us]   &lt;- a real datetime dtype
+-- amount        float64</span>
+
+df2.to_csv(<span class="str">"dates.csv"</span>, index=<span class="kw">False</span>)
+pd.read_csv(<span class="str">"dates.csv"</span>).dtypes
+<span class="cm">-- order_id        int64
+-- order_date        str          &lt;- SILENTLY demoted -- just text now
+-- amount        float64</span>
+
+pd.read_csv(<span class="str">"dates.csv"</span>, parse_dates=[<span class="str">"order_date"</span>]).dtypes
+<span class="cm">-- order_date    datetime64[us]   &lt;- back to normal, but only because we asked again</span></code></pre>
+<p>Confirmed directly: no error, no warning — <code>order_date</code> just becomes a plain <code>str</code> column, and every <code>.dt</code> accessor call on it would now fail (Lesson 39's whole toolkit gone) until <code>parse_dates=</code> is passed again on read, re-declaring something the DataFrame already knew before it was written. The same blind spot applies to <code>category</code> dtype (Lesson 25/62) and nullable <code>Int64</code>/<code>StringDtype</code> (Lesson 41) — CSV forgets all of it, every time.</p>
+
+<div class="callout"><strong>The fix: to_parquet().</strong> <dfn data-en="a DataFrame method writing data to the Parquet binary columnar file format, which stores each column's dtype (including datetime, category, and nullable types) alongside the data itself -- reading it back with read_parquet() restores dtypes exactly, unlike to_csv()'s plain-text round-trip. Requires the optional pyarrow (or fastparquet) package, not part of the pandas install itself" data-vn="giữ nguyên 'to_parquet()' — ghi ra file nhị phân dạng cột Parquet, LƯU KÈM dtype từng cột (kể cả datetime, category, kiểu nullable); đọc lại bằng read_parquet() khôi phục dtype CHÍNH XÁC, khác to_csv() (chỉ chữ thuần). Cần cài thêm gói pyarrow (hoặc fastparquet), không có sẵn trong pandas">to_parquet()</dfn> writes a binary columnar format that stores each column's dtype alongside the data. Confirmed directly: <code>df2.to_parquet("dates.parquet")</code> then <code>pd.read_parquet("dates.parquet")</code> restores every dtype exactly — <code>order_date</code> comes back <code>datetime64[us]</code> with no <code>parse_dates=</code> needed, and <code>pd.read_parquet(...).equals(df2)</code> is <code>True</code>. It needs the optional <code>pyarrow</code> package (<code>uv run --with pandas --with pyarrow</code>), not part of a plain pandas install, and it isn't human-readable — the standard trade for an interview answer: CSV for a small file a human or another tool needs to open directly, Parquet for anything staying inside a data pipeline where dtype fidelity and file size (columnar + compressed) matter more.</div>
+
+<h2>5 · The third trap: appending without turning the header off</h2>
+<p>Writing output in batches means calling <code>to_csv()</code> more than once with <code>mode="a"</code> (append). <code>header=</code> still defaults to <code>True</code> on every call — including the second one — and nothing stops it from writing the column names again as a literal data row in the middle of the file:</p>
+<pre><code>df.to_csv(<span class="str">"log.csv"</span>, index=<span class="kw">False</span>)                      <span class="cm"># first batch</span>
+df.to_csv(<span class="str">"log.csv"</span>, mode=<span class="str">"a"</span>, index=<span class="kw">False</span>)          <span class="cm"># second batch -- header=True by DEFAULT, still!
+-- a,b
+-- 1,x
+-- 2,y
+-- a,b        &lt;- the header text, written again, as a DATA row this time
+-- 1,x
+-- 2,y</span>
+
+pd.read_csv(<span class="str">"log.csv"</span>).dtypes
+<span class="cm">-- a    str    &lt;- WRONG: whole column silently demoted from int64 to str
+-- b    str       because "a"/"b" text is mixed into the numbers now</span></code></pre>
+<p>Confirmed directly (pandas 3.0.5): this raises nothing — the file parses fine, row count is simply larger than expected by one junk row per append, and the numeric column's dtype quietly becomes <code>str</code> because a text value now lives inside it. The fix is one keyword on every call after the first: <code>header=False</code>. This is the append-equivalent of Lesson 62's <code>astype("int8")</code> wraparound — a wrong-looking-but-plausible result with no error to catch it.</p>
+
+<div class="interview">
+<p><strong>Q: "You're writing a cleaned DataFrame out to a file for the next pipeline stage to read. Walk me through it."</strong> A strong answer, out loud: <em>"First question is the destination: is this a one-off a human or another tool opens directly, or does it stay inside a pipeline? For the former I'd use to_csv() with index=False explicitly — the default writes the row index as an unnamed extra column, which comes back on the next read_csv() as a real 'Unnamed: 0' column instead of an index. For the pipeline case I'd prefer to_parquet(): CSV is plain text with zero dtype memory, so anything not a plain int or float — datetime, category, nullable Int64 — round-trips as a demoted, wrong dtype unless the read side re-declares it, and that's a silent failure, not an error. Parquet stores the dtype with the data, so read_parquet() restores it exactly. And if I'm appending in batches rather than writing once, I'd flag the header= trap specifically: to_csv() defaults header=True on every call, so an append without header=False writes the column names again as a literal data row and can silently coerce a numeric column to string with no error at all."</em> The signal: naming index=False, the dtype round-trip gap, and the append/header= trap unprompted — three separate silent-failure shapes, not one.</p>
+</div>
+
+<h2>6 · Where this fits</h2>
+<p>Lesson 8 named the ETL shape in the abstract; today is the concrete Load step it pointed at but never taught. Nothing here is hard to write — <code>to_csv(path, index=False)</code> is the whole happy path — but every trap above produces a file that opens fine and looks right, which is precisely what makes this the stage worth double-checking before trusting a pipeline's final output.</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/64_to_csv_and_to_parquet.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/64_to_csv_and_to_parquet.py</code></pre>
+<p>Uses the real <code>orders_raw.csv</code> fixture, cleaned the same way as recent lessons, writing into a scratch subfolder created by the script itself. Exercise 1 writes with the correct <code>index=False</code> and confirms no <code>Unnamed: 0</code> column comes back. Exercise 2 writes with the (wrong) default index and confirms the junk column DOES appear, so the trap is seen directly rather than taken on faith. Exercise 3 round-trips the <code>order_date</code> column through plain <code>to_csv()</code>/<code>read_csv()</code> and confirms it silently comes back as <code>str</code>, not <code>datetime64</code>. Exercise 4 re-reads the same file with <code>parse_dates=</code> and confirms the dtype is restored. Only <code>to_csv</code>/<code>read_csv</code> are exercised (no <code>pyarrow</code> dependency) to stay inside this course's standard <code>uv run --with pandas</code> invocation; <code>to_parquet()</code>'s exact-dtype round-trip is demonstrated above instead.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: to_csv() defaults to index=True, writing the row index as an unnamed leading column. A plain read_csv() on that file re-imports it as a real data column named 'Unnamed: 0' rather than restoring it as the index -- index=False is the fix whenever the index is just the default RangeIndex.">
+    <p class="stem">What does <code>df.to_csv("out.csv")</code> write by default that a careless <code>read_csv()</code> later imports as a junk column?</p>
+    <button class="opt" data-ok>the row index, because index=True stays the default</button>
+    <button class="opt">the DataFrame's column dtypes, as a new row</button>
+    <button class="opt">a duplicate copy of every column that exists</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: CSV is plain text with no dtype header at all -- read_csv() re-guesses each column's type from scratch. A datetime64 column written with to_csv() comes back as plain str unless parse_dates= is passed again on the read side; to_parquet()/read_parquet() avoids this entirely because Parquet stores each column's dtype alongside the data.">
+    <p class="stem">A <code>datetime64</code> column is written with <code>to_csv()</code> then read back with plain <code>read_csv()</code>. What dtype comes back?</p>
+    <button class="opt" data-ok>str, since plain CSV keeps no dtype memory</button>
+    <button class="opt">datetime64, automatically restored with no extra argument needed</button>
+    <button class="opt">int64, because dates get stored as timestamp numbers</button>
+  </div>
+  <div class="q" data-why="Confirmed directly (pandas 3.0.5): header= defaults to True on every to_csv() call including an append (mode='a'). Without header=False on the second call, the column names get written again as a literal text row inside the numeric data, and the whole column silently becomes str dtype on the next read -- no exception, no warning.">
+    <p class="stem">Appending a second batch with <code>df.to_csv("log.csv", mode="a", index=False)</code> (no other arguments) — what goes wrong?</p>
+    <button class="opt" data-ok>the column headers get written again as data</button>
+    <button class="opt">pandas immediately raises FileExistsError, refusing to append anything</button>
+    <button class="opt">nothing at all, since mode="a" always skips headers</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the pandas User Guide's <a href="https://pandas.pydata.org/docs/user_guide/io.html#csv-text-files">"CSV &amp; text files"</a> and <a href="https://pandas.pydata.org/docs/user_guide/io.html#parquet">"Parquet"</a> sections of IO tools (~10 min) — covers every <code>to_csv()</code>/<code>to_parquet()</code> keyword this lesson didn't need (<code>compression=</code>, <code>chunksize=</code>, <code>engine=</code>) plus the full dtype-preservation table for Parquet.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>to_csv()</code> and <code>to_parquet()</code> are new today, placed right after Lesson 63's <code>interpolate()</code> entry.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-64 comes back reported as shakiest, otherwise another fresh curriculum/glossary scan for the next genuinely-uncovered pattern — this round closed out the last named candidate from Lesson 63's own scan, so the next round starts from scratch again.<br><br>
+💬 Anything unclear — the header= append trap, why Parquet needs pyarrow, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

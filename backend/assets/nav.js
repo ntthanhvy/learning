@@ -138,6 +138,8 @@
       file: "lessons/0065-distributed-tracing-and-correlation-ids.html" },
     { n: 66, date: "2026-09-09", title: "API gateway & BFF: naming the layer in front of your services",
       file: "lessons/0066-api-gateway-and-bff.html" },
+    { n: 67, date: "2026-09-10", title: "The job-status resource: how a client finds out a background job finished",
+      file: "lessons/0067-job-status-resource-pattern.html" },
   ];
 
   const REFS = [

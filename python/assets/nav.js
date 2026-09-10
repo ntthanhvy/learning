@@ -92,6 +92,8 @@
       file: "lessons/0042-walrus-operator.html" },
     { n: 43, date: "2026-09-09", title: "Review day: retrieval across six earlier lessons",
       file: "lessons/0043-review-retrieval-day.html" },
+    { n: 44, date: "2026-09-10", title: "Review day 2: retrieval across six more lessons",
+      file: "lessons/0044-review-retrieval-day-2.html" },
   ];
 
   const REFS = [

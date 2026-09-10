@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 67 · The job-status resource: how a client finds out a background job finished</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 67 · ~20 min</p>
+<h1>The job-status resource: how a client finds out a background job finished</h1>
+<p class="byline">Lesson 10 built the "enqueue now, process later" shape and stopped at the handler returning <code>202 Accepted</code>. Lesson 63 named "a job finishing" as one of the motivating examples for real-time delivery, then moved on to the four push/poll techniques in general. Neither ever answered the specific question both left open: once a client gets back "accepted, not done yet," how does it actually find out the job is finished? Today closes that gap with one concrete, commonly-tested pattern.</p>
+
+<h2>1 · The gap between "accepted" and "done"</h2>
+<p>Lesson 10's handler wrote a job row and responded <code>202 Accepted</code> immediately — a deliberate promise of "recorded, in progress," not "finished." That's the right call for the handler. But it leaves the client holding a response with no result and no way to check back. A frontend habit makes the missing piece easy to miss: a browser kicking off a slow operation often just shows a spinner tied to one in-flight <code>fetch()</code> call, because the browser's own APIs (image decode, a Web Worker) report completion back on the same call that started the work. An HTTP request that returns in milliseconds while the real work takes minutes has no such built-in channel — the connection that carried the <code>202</code> is already closed by the time the job finishes.</p>
+<p>The fix isn't a new transport — it's treating the job itself as a normal, addressable resource, the same "nouns, not verbs" instinct Lesson 3's API contract material already taught for orders or users. If a job is a resource, a client can just ask for its current state with an ordinary <code>GET</code>, the same as it would ask for an order's current state.</p>
+
+<h2>2 · The pattern: 202, a Location header, and a resource to poll</h2>
+<p>Three pieces, each doing one job:</p>
+<pre><code><span class="cm">// createReport enqueues the job (Lesson 10's pattern) and, this time,</span>
+<span class="cm">// tells the client exactly where to check on it.</span>
+<span class="kw">func</span> createReport(w http.ResponseWriter, r *http.Request) {
+    jobID, err := enqueueJob(r.Context(), <span class="st">"generate_report"</span>, parseReportRequest(r))
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        writeError(w, err)
+        <span class="kw">return</span>
+    }
+    <span class="cm">// the new piece: point the client at a resource representing THIS job</span>
+    w.Header().Set(<span class="st">"Location"</span>, <span class="st">"/jobs/"</span>+jobID)
+    w.WriteHeader(http.StatusAccepted) <span class="cm">// 202, same as Lesson 10</span>
+}
+
+<span class="cm">// getJobStatus is a plain, ordinary GET handler -- nothing special about</span>
+<span class="cm">// it except that the resource it returns happens to change over time.</span>
+<span class="kw">func</span> getJobStatus(w http.ResponseWriter, r *http.Request) {
+    job, ok := loadJob(r.Context(), jobIDFromPath(r))
+    <span class="kw">if</span> !ok {
+        http.NotFound(w, r)
+        <span class="kw">return</span>
+    }
+    <span class="kw">if</span> job.Status == <span class="st">"running"</span> {
+        w.Header().Set(<span class="st">"Retry-After"</span>, <span class="st">"2"</span>) <span class="cm">// hint: check back in ~2s</span>
+    }
+    writeJSON(w, http.StatusOK, job) <span class="cm">// {status, result_url, error} -- see below</span>
+}</code></pre>
+<p>The <dfn data-en="an HTTP response header, most commonly sent alongside 201 Created or 202 Accepted, giving the URL of a resource the client should look at next -- the newly created resource itself, or in the async case, a resource representing the job's own progress" data-vn="Location header (giữ nguyên) — header trả về URL của resource liên quan, ví dụ resource job vừa tạo, để client biết phải hỏi tiếp ở đâu">Location header</dfn> is the part Lesson 10 skipped: it turns "accepted, not done yet" into "accepted — and here is exactly where to look for the answer," instead of leaving the client to guess or hardcode a URL pattern. The client's job afterward is simple and boring: <code>GET</code> that URL, look at one field, and decide whether to ask again.</p>
+
+<h2>3 · Modeling status: a small, closed set of states, not a boolean</h2>
+<p>A tempting shortcut is a single <code>done: bool</code> column. It fails the first time the job can fail — a report generator that hits a bad row, an image resize that gets a corrupt file — because a bare boolean can't distinguish "still working" from "finished badly." The fix Lesson 60's CHECK-constraint material already previewed for a different column applies directly here: constrain the state to a known, closed set of values instead of a free-form string or a boolean pretending to be three states.</p>
+<pre><code><span class="kw">ALTER TABLE</span> jobs
+  <span class="kw">ADD CONSTRAINT</span> jobs_status_valid
+  <span class="kw">CHECK</span> (status <span class="kw">IN</span> (<span class="st">'pending'</span>, <span class="st">'running'</span>, <span class="st">'succeeded'</span>, <span class="st">'failed'</span>));</code></pre>
+<p><code>succeeded</code> and <code>failed</code> are <dfn data-en="a state in a status machine that the job will never leave once reached -- polling should stop here, since no further transition is coming" data-vn="terminal state (giữ nguyên) — trạng thái cuối, job sẽ không đổi trạng thái nữa, client nên ngừng hỏi lại">terminal states</dfn>: once a job reaches one, it will never move again, and the client polling it should stop. <code>pending</code> and <code>running</code> are not — the client keeps checking back. That single distinction is what lets a status resource answer the question a boolean can't: not just "is it done" but "did it work," with a place for the error itself to live when it didn't.</p>
+
+<h2>4 · Why polling this resource, specifically, beats the alternatives</h2>
+<p>Lesson 63 already covered four techniques for the server telling the client something changed. This is a deliberate, narrow case of the simplest one — plain polling — and it's usually the right one here, for a reason specific to jobs rather than a general endorsement of polling: most background jobs are checked by exactly one client, for a bounded, typically-short window, then never again. Holding a long-polling connection or an SSE stream open for one report generation that finishes in eight seconds spends a held connection and a blocked goroutine (Lesson 63's own cost column) on a problem plain, ordinary polling of a normal resource already solves with zero extra infrastructure. The <code>Retry-After</code> header in the handler above is the whole optimization worth adding: a hint for how long to wait before asking again, so the client isn't left guessing an interval, without needing a held connection at all. A dashboard watching many jobs at once, or a job that reliably takes minutes rather than seconds, is exactly the case where Lesson 63's SSE or WebSocket option earns its extra cost instead — the same "match the shape of the problem" rule Lesson 63 closed on, applied here to one specific shape.</p>
+<div class="callout"><strong>Not a new mechanism — a resource wearing a clock.</strong> Nothing here is new machinery: <code>Location</code> is a header this course's <code>201 Created</code> handlers already use for newly made resources (Lesson 3); a status field constrained to a known set is Lesson 60's CHECK constraint; polling is Lesson 63's simplest technique. The only genuinely new idea is treating "how is my job going" as an ordinary, addressable, gettable resource instead of inventing a special-purpose notification channel for it.</div>
+
+<h2>5 · What the client actually does with it</h2>
+<table class="cmp">
+<thead><tr><th>Response field</th><th>Client action</th></tr></thead>
+<tbody>
+<tr><th><code>status: "pending"</code> / <code>"running"</code></th><td>wait roughly <code>Retry-After</code> seconds, <code>GET</code> the same URL again</td></tr>
+<tr><th><code>status: "succeeded"</code></th><td>stop polling; follow <code>result_url</code> to fetch the actual output</td></tr>
+<tr><th><code>status: "failed"</code></th><td>stop polling; show the <code>error</code> field, don't silently retry the GET forever</td></tr>
+</tbody>
+</table>
+<p>Two failure modes are worth naming because both are easy to ship by accident. A client that never stops polling a terminal state wastes requests forever on an answer that will never change again — a smaller-scale version of Lesson 57's stampede, self-inflicted by one careless client instead of many. A status resource that returns the full result inline once large (the whole generated report body, not just its status) turns a cheap, frequent poll into an expensive one — keep the status check and the result fetch as two different resources, exactly like the table above splits them into two different client actions.</p>
+
+<div class="interview">
+<p><strong>Q: "Your API kicks off a report that takes two minutes to generate. How does the client know when it's ready?"</strong> A strong answer, out loud: <em>"The create endpoint returns 202 Accepted with a Location header pointing at a job resource — something like /jobs/{id}. That resource is a plain GET, returning a status field constrained to a small set of values: pending, running, succeeded, failed — not a boolean, because I need to represent 'finished but failed' distinctly from 'still going.' The client polls that URL, using a Retry-After hint for the interval, and stops once it hits a terminal state — succeeded gives it a link to the actual result, failed gives it an error to show. I'd only reach for something like SSE instead if this were a long-lived dashboard watching many jobs continuously rather than one client checking once."</em> The signal: naming the job as a resource with a small closed state set, not inventing a special notification mechanism for what a normal GET already handles.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="202 Accepted only promises the work was recorded and is in progress, not that it finished -- the connection that carried that response is already closed by the time the job completes, so the client has no built-in way to learn the outcome unless it is told where to check.">
+    <p class="stem">What problem does Lesson 10's plain 202 Accepted response leave unsolved?</p>
+    <button class="opt" data-ok>the client has no way to learn outcomes</button>
+    <button class="opt">Go servers cannot ever return a status code</button>
+    <button class="opt">background jobs are never ever permitted to fail</button>
+    <button class="opt">HTTP responses cannot ever carry a JSON body</button>
+  </div>
+  <div class="q" data-why="The Location header, sent alongside the 202, gives the URL of a resource representing that specific job's progress, turning 'accepted, not done yet' into 'accepted, and here is exactly where to check' instead of leaving the client to guess a URL.">
+    <p class="stem">What does the Location header returned with 202 Accepted point to in this pattern?</p>
+    <button class="opt" data-ok>a resource the client can GET to check progress</button>
+    <button class="opt">the physical server rack that is running that job</button>
+    <button class="opt">a compressed archive of the entire job queue table</button>
+    <button class="opt">the email address of whoever wrote the worker code</button>
+  </div>
+  <div class="q" data-why="A bare boolean can only say done or not done -- it cannot distinguish 'finished successfully' from 'finished badly,' so a small closed set of states (pending, running, succeeded, failed) is needed to represent failure as its own terminal outcome with room for an error.">
+    <p class="stem">Why does a job's status need more than a single done/not-done boolean column?</p>
+    <button class="opt" data-ok>a boolean cannot represent finished but also failed</button>
+    <button class="opt">Postgres does not support boolean columns at all</button>
+    <button class="opt">booleans always require twice as much disk space</button>
+    <button class="opt">HTTP GET requests cannot ever return boolean fields</button>
+  </div>
+  <div class="q" data-why="Succeeded and failed are terminal states the job will never leave, so a client should stop polling once it reaches either one -- continuing to poll a state that will never change again wastes requests on an answer that is already final, similar in shape to Lesson 57's self-inflicted stampede.">
+    <p class="stem">Why should a client stop polling once a job reaches "succeeded" or "failed"?</p>
+    <button class="opt" data-ok>those are terminal states that will never change again</button>
+    <button class="opt">the server permanently deletes that job row right after</button>
+    <button class="opt">polling a finished job crashes the backend process instantly</button>
+    <button class="opt">Retry-After headers always legally expire after one single request</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> MDN's guides on <a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Location">the Location header</a> and <a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Retry-After">Retry-After</a> (RESOURCES.md's standing HTTP-semantics arbiter) — both are ordinary, general-purpose headers; this lesson's contribution is combining them with Lesson 10's job queue and Lesson 60's CHECK-constrained status column into one named pattern, not a new protocol feature.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> open. Still no <code>lesson_completed</code>/quiz-outcome record exists for any lesson after 67 rounds — the honest next step remains a completion signal or a user-named track.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

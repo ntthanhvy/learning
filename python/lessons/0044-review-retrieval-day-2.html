@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 44 · Review day 2: retrieval across six more lessons</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 44 · ~20 min · 10 Sep 2026</p>
+<h1>Review day 2: retrieval across six more lessons</h1>
+<p class="byline">Day 43 reviewed six ideas from Days 1-12 — object model, comprehensions, grouping, generators, dataclasses, decorators — and every named item on <code>PLAN.md</code>'s spine is still fully taught through Day 42. Still no <code>lesson_completed</code>/quiz/kata signal has ever come back from any of the 43 lessons shipped so far, so there is still no reported weak spot to chase. This is a second <dfn data-en="a study technique where the learner produces an answer from memory before checking it, rather than re-reading the source material - it is a stronger driver of durable learning than re-reading, especially when spaced across separated topics rather than massed on one" data-vn="giữ nguyên &quot;retrieval practice&quot; — tự nhớ lại và viết ra câu trả lời trước khi xem lại tài liệu, hiệu quả hơn hẳn việc đọc lại; càng hiệu quả khi trộn nhiều chủ đề cũ thay vì ôn 1 chủ đề liền mạch">retrieval practice</dfn> day, differently composed: six ideas from Days 16-38, the FastAPI/object-model/stdlib territory Day 43 did not touch at all.</p>
+
+<div class="callout"><strong>Why this composition:</strong> Day 43 deliberately covered Days 1, 2, 3, 5, 7, and 12 only — the intensive week plus one Phase 2a topic. That left the entire backend phase (Days 16-26) and most of the object-model/stdlib tail (Days 27-41) with zero retrieval coverage. Today closes that gap with six non-adjacent picks: a FastAPI handler rule, a dependency-injection rule, a dunder-method rule, an <code>Enum</code> rule, a <code>match</code>/<code>case</code> rule, and a regex rule — spread across sixteen lessons rather than clustered on one.</div>
+
+<h2>1 · Six questions, in the original teaching order</h2>
+<p>Answer each out loud or on paper <em>before</em> reading the fold-out answer. If one is shaky, note it and go fix it in the practice file below rather than only rereading the old lesson.</p>
+
+<p><strong>Day 16 — FastAPI handlers.</strong> What one thing decides whether a handler parameter is a path parameter or a query parameter?</p>
+<div class="callout">Fold-out answer: whether its name appears inside <code>{}</code> in the route decorator's URL string. A path parameter (<code>{user_id}</code> in the URL) is always required — no request missing it can match that route at all. A query parameter is a plain handler parameter not named in the URL, and becomes optional exactly when it carries a default value — the same default-argument rule Day 4 already taught for ordinary functions.</div>
+
+<p><strong>Day 19 — dependency injection.</strong> A handler parameter defaults to <code>Depends(get_current_user)</code>, and <code>get_current_user</code> itself depends on <code>Depends(get_db)</code>. How many times does <code>get_db</code> run for one incoming request?</p>
+<div class="callout">Fold-out answer: exactly once. FastAPI resolves a whole sub-dependency chain before the handler runs and calls each shared dependency once per request, no matter how many other dependencies in that chain ask for it — confirmed in Day 19 by tracking call order and call count directly with <code>TestClient</code>.</div>
+
+<p><strong>Day 30 — dunder methods.</strong> A plain hand-written class defines no <code>__eq__</code> at all. What does <code>==</code> compare on two of its instances?</p>
+<div class="callout">Fold-out answer: identity, not value — the same fallback Day 1's <code>is</code> uses. Two separately constructed objects with equal field values compare unequal unless <code>__eq__</code> is defined to compare by value instead; this is exactly what <code>@dataclass</code> was generating for you automatically back on Day 7.</div>
+
+<p><strong>Day 33 — Enum.</strong> Given <code>class Status(Enum): SHIPPED = "shipped"</code>, is <code>Status.SHIPPED == "shipped"</code> ever <code>True</code>?</p>
+<div class="callout">Fold-out answer: no. An <code>Enum</code> member is a distinct object of its own type, deliberately unequal to its underlying value — that's exactly what stops a bare string typo from being silently accepted anywhere a real member is expected, the whole reason to reach for <code>Enum</code> over a plain string in the first place.</div>
+
+<p><strong>Day 34 — match/case.</strong> A guard clause's condition (the trailing <code>if</code> on a <code>case</code>) evaluates to <code>False</code>. What happens to that case?</p>
+<div class="callout">Fold-out answer: that whole case is skipped, and Python moves on to try the next <code>case</code> below it — a guard is only checked after the pattern itself has already structurally matched, and a failing guard rejects the case rather than raising an error or treating the pattern as still matched.</div>
+
+<p><strong>Day 38 — regular expressions.</strong> Why does <code>re.match(r"super", "insuperable")</code> return <code>None</code> while <code>re.search(r"super", "insuperable")</code> finds a match?</p>
+<div class="callout">Fold-out answer: <code>re.match()</code> only checks for a match starting at index 0 of the string — <code>"insuperable"</code> starts with <code>"in"</code>, not <code>"super"</code>, so it fails even though <code>"super"</code> does occur later, at index 2. <code>re.search()</code> scans the whole string for the pattern occurring anywhere, which is why it succeeds on the same input.</div>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> nothing pandas-specific today — this review only revisits Days 16-38's FastAPI, object-model, and stdlib material, with no pandas/NumPy API involved at any point.</div>
+
+<h2>2 · Why these six, spread this way</h2>
+<p>Same interleaving logic as Day 43: a backend routing rule, then a dependency-resolution rule, then an object-model rule, then a closed-choice-type rule, then a control-flow rule, then a text-pattern rule — six different mental models in a row rather than six variations on one. Producing the <code>Depends()</code> call-count answer right after the path-vs-query-parameter answer forces each one to be retrieved fresh, instead of riding the momentum of "FastAPI stuff" already loaded in working memory from the question before it.</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/44_review_retrieval_day_2.py</code>. It is six small, independent exercises — one per topic above, same order — with no new syntax anywhere; every mechanism needed was already taught in Days 16-38. Fill in each TODO from memory first; only reopen the old lesson if a fold-out answer above didn't fully land.</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/44_review_retrieval_day_2.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed, even though Days 16 and 19's own practice files needed <code>fastapi</code>/<code>httpx</code>: today's exercises test the same rules in plain Python (dicts standing in for path/query params and a dependency call-count list) rather than running a real FastAPI app.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A path parameter is written {name} inside a route's URL string and is always required - no request missing it can match that route at all. A query parameter is a plain handler parameter not named in the URL, and becomes optional exactly when it carries a default value, the same rule Day 4 already taught for ordinary functions.">
+    <p class="stem">What decides whether a FastAPI handler parameter is a path parameter or a query one?</p>
+    <button class="opt" data-ok>whether its name appears inside {} in the route's URL string</button>
+    <button class="opt">whether the parameter was given a type hint on the function</button>
+    <button class="opt">whether the request used GET instead of POST as its method</button>
+  </div>
+  <div class="q" data-why="FastAPI resolves a whole sub-dependency chain before the handler runs and calls each shared dependency exactly once per incoming request, no matter how many other dependencies in that chain also depend on it - confirmed in Day 19 by tracking call order and call count directly with TestClient.">
+    <p class="stem">In a Depends() sub-dependency chain, how many times does a shared dependency run per request?</p>
+    <button class="opt" data-ok>exactly once, reused by every dependency that needs it that request</button>
+    <button class="opt">once for each separate dependency function that happens to need it</button>
+    <button class="opt">zero times, unless a handler calls that function by name directly</button>
+  </div>
+  <div class="q" data-why="Without a custom __eq__, == falls back to comparing identity, the same fallback Day 1's is uses - two separately built objects with identical field values compare unequal unless __eq__ is defined to compare by value, exactly what @dataclass generates automatically on Day 7.">
+    <p class="stem">On a plain class with no custom <code>__eq__</code>, what does <code>==</code> actually compare?</p>
+    <button class="opt" data-ok>identity, the exact same fallback comparison that is already uses</button>
+    <button class="opt">every field's value, compared one by one fully automatically always</button>
+    <button class="opt">only the two objects' class names, compared as plain text</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the six lessons this review draws from are each still the primary source for their own topic — <a href="../lessons/0016-fastapi-handlers-and-status-codes.html">Day 16</a>, <a href="../lessons/0019-dependency-injection-and-app-structure.html">Day 19</a>, <a href="../lessons/0030-object-model-dunder-and-property.html">Day 30</a>, <a href="../lessons/0033-enum.html">Day 33</a>, <a href="../lessons/0034-match-case.html">Day 34</a>, and <a href="../lessons/0038-regular-expressions.html">Day 38</a>. For the retrieval-practice technique itself, <a href="https://docs.python.org/3/tutorial/">the Python Tutorial</a> stays this course's general reference (per <code>RESOURCES.md</code>) — there is no dedicated stdlib doc for a study technique, so no new source is added for it, matching Day 43's own note.</p>
+
+<p class="next">No new terms today — every concept reviewed above already has its own Day 16-38 glossary row, and this lesson repeats the "retrieval practice" <code>&lt;dfn&gt;</code> from Day 43 rather than adding a second row for the same term.<br>
+With two review days now shipped covering Days 1-12 and 16-38 respectively, the next candidate is <code>RESOURCES.md</code>'s two open "Gaps" notes (a Python interview-prep source, and folding the FastAPI bigger-applications doc into "Knowledge — backend") if no specific weak spot is reported back from either review, or a third review sweep targeting Days 13-15/27-29/39-41 (the remaining untouched stdlib corners) if retrieval practice keeps being the higher-value default absent any completion signal.<br><br>
+💬 Anything unclear — any of the six answers, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

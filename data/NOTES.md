@@ -4715,3 +4715,130 @@
   path worked fine even though the read path (`bin/query-progress`) stayed
   blocked (not attempted) this round, consistent with every prior round's
   pattern.
+- 2026-09-10 generation (Lesson 64, headless run): idempotency confirmed first
+  — globbed `data/lessons/` for `0064-*.html` (none found) and grepped
+  `assets/nav.js` for `n: 64`/`2026-09-10` (neither found, highest registered
+  lesson was still 63, dated 2026-09-09) — so this round proceeded. `date`
+  confirmed the sandbox clock reads 2026-09-10. DB read: `bin/query-progress
+  data` was attempted once from the repo root and immediately hit the same
+  "requires approval"/blocked gate as every prior round; not retried, per this
+  file's standing distinction between the (working) write path and the
+  (long-blocked) read path. Both files under `data/learning-records/` were
+  read in full — still only the single 2026-07-09 baseline file
+  (`0001-baseline-sql-strong-python-basic.md`); no `lesson_completed`/
+  quiz-outcome signal has ever appeared there, so no review-round override
+  applied this round either. Lesson 63's own closing note named the candidate
+  for today explicitly: the ETL "output" stage (`to_csv()`/`to_parquet()`),
+  surfaced but not picked during Lesson 63's from-scratch curriculum scan.
+  Re-confirmed it was still a genuine gap before writing anything: grepped
+  every lesson (`lessons/*.html`) and the full glossary
+  (`reference/glossary.html`) for `to_csv|to_parquet|index=False|header=False`
+  — the only hit was Lesson 8's original passing mention (`to_csv`, `to_sql`
+  named as the "Load" step in the ETL-shape aside) and an unrelated existing
+  glossary entry for the different method `to_records()`; no standalone
+  `to_csv()`/`to_parquet()` teaching or glossary entry existed anywhere, so
+  the gap was confirmed real and this round proceeded with it exactly as
+  named. A scratch dir was created at `data/.scratch/lesson64/` (not `/tmp`,
+  this sandbox blocks that) with the real `orders_raw.csv` fixture copied in,
+  and pandas 3.0.5 was reconfirmed (`uv run --with pandas python3 -c
+  "import pandas; print(pandas.__version__)"`), matching every recent lesson.
+  Every claim in the lesson was hand-verified there with standalone probe
+  scripts before writing: confirmed directly that `to_csv()` defaults to
+  `index=True`, writing an unnamed leading column that a plain `read_csv()`
+  on the same file re-imports as a real data column literally named
+  `Unnamed: 0` — `index=False` removes it cleanly; confirmed directly that a
+  `datetime64[us]` column written with `to_csv()` then re-read with plain
+  `read_csv()` (no `parse_dates=`) silently comes back as dtype `str`, fixed
+  only by re-passing `parse_dates=` on the read side, while the identical
+  column round-tripped through `to_parquet()`/`read_parquet()` (using the
+  optional `pyarrow` package, confirmed to require a real download the first
+  time — 47.8MB — and NOT part of a plain `pandas` install) comes back
+  byte-for-byte identical, `read_parquet(...).equals(original_df)` is `True`
+  with zero extra arguments; and confirmed directly the sharpest gotcha of
+  the three — appending a second `to_csv(..., mode="a", index=False)` call
+  WITHOUT also passing `header=False` writes the column names again as a
+  literal text row in the middle of the file (`header=` defaults to `True` on
+  every call, including appends), and that extra text row silently demotes an
+  entire numeric column's dtype to `str`/`object` on the next `read_csv()` —
+  no exception, no warning, confirmed directly on a real int64 column turning
+  into dtype `str` after one bad append. `to_parquet()` itself was
+  deliberately kept OUT of the practice file's required exercises (taught and
+  demonstrated in the lesson prose instead, with its exact numbers confirmed
+  live in the scratch probe) because it needs the optional `pyarrow`
+  dependency, which this course's practice files do not install by
+  convention (every practice file's shebang comment uses
+  `uv run --with pandas python3 …` only, no second `--with`) — a deliberate,
+  documented scope choice, not an oversight, called out explicitly in the
+  practice section's closing sentence. The practice file
+  (`practice/64_to_csv_and_to_parquet.py`) reuses the same real
+  `orders_raw.csv` fixture cleaned the same way as recent lessons, writing
+  into a `practice/.out64/` scratch subfolder the script creates and deletes
+  itself (`shutil.rmtree` both at the top, before writing, and at the very
+  end, after all checks run, so a `Some ✗ left` run and an `All green` run
+  both leave no stray output folder behind — confirmed directly by listing
+  `practice/` after an unsolved run). Building the solved copy caught one
+  real bug before shipping, per this round's required run-before-trust step:
+  Exercise 5's check originally asserted the appended file's row count equals
+  `2 * len(clean)` (8 rows), but the actual appended-with-bad-header file
+  correctly has 9 rows (8 real data rows plus the one literal header-as-data
+  row that's the whole point of the exercise) — running the solved copy in
+  the scratch dir surfaced the mismatch directly (`✗ Exercise 5` on an
+  otherwise-correct solved file, not a crash), fixed by correcting the
+  expected count to `2 * len(clean) + 1` in both the shipped and solved
+  files. After the fix, the shipped (unsolved) file was run in the mirrored
+  `.scratch/lesson64/practice/` layout and printed exactly 5 ✗ with no
+  traceback; the solved copy (`.scratch/lesson64/practice/64_solved.py`, not
+  shipped) then printed all 5 ✓. The shipped file was also re-run a second
+  time directly from its real `practice/` location (`cd data && uv run
+  --with pandas python3 practice/64_to_csv_and_to_parquet.py`), both before
+  and after the nav.js/glossary edits that followed, and printed the
+  identical 5 ✗, no crash, both times. Quiz options were drafted, then
+  mechanically word-counted with a Python script isolating each
+  `<div class="q">` block by its own start offset (this course's established
+  approach) — the first draft came out mismatched on all three questions (Q1
+  8/8/7, Q2 14/7/9, Q3 17/7/10); iterated through several rewrite+recount
+  cycles (re-running the same script after each edit rather than eyeballing
+  word counts) until all three landed level (Q1 8/8/8, Q2 8/8/8, Q3 8/8/8),
+  then independently re-verified by hand-counting the same `Grep`-extracted
+  raw option-text listing word-by-word — both methods agreed exactly, and
+  exactly one `data-ok` per question throughout. A Python regex/
+  occurrence-count tag-balance script caught a real markup bug on the first
+  pass, the same class of bug Lesson 63 hit: an unclosed `<span class="cm">`
+  on the header-append code block (opened once for the `# first batch`
+  comment, then a second `<span class="cm">` opened one line later before the
+  first was closed) left `span` at 42/41 — found and fixed by closing the
+  first span immediately after its own comment, re-checked at 42/42 balanced,
+  cross-checked with `Grep -o` occurrence counts on
+  `<dfn`/`<pre>`/`<button class="opt"` (2, 4, 9), which agreed exactly. The
+  same script also caught a genuine raw unescaped `&` in prose text (the
+  "Go deeper" link text "CSV & text files", not inside a `<pre><code>` shell
+  command) — fixed by escaping it to `&amp;`; the two remaining raw `&`
+  matches are both `cd ~/learning/data && uv run …` shell commands inside
+  `<pre><code>` blocks, the same established unescaped-shell-`&&`-in-code-blocks
+  precedent Lesson 63 already set, not a new bug. Checked the glossary for a
+  collision before adding anything: grepped for
+  `to_csv|to_parquet|index=False|header=False` — the only hit was the
+  unrelated existing `to_records()` entry — so added exactly two new glossary
+  rows, `to_csv() / index=False` and `to_parquet()`, placed directly after
+  Lesson 63's `interpolate()` entry; confirmed the glossary table's tags
+  stayed balanced after the insert (`table` 1/1, `tr` 125/125, `td` 372/372
+  via a Python occurrence-count script; Grep's line-based count mode
+  under-reports multi-match lines, a known false-undercount trap flagged in
+  this file before — cross-checked instead against the Python script's
+  occurrence counts, which is the authoritative method). Registered Lesson 64
+  in `nav.js` with today's date (2026-09-10); `node --check` confirmed it
+  still parses as valid JavaScript after the edit. This closes out the
+  output-stage candidate Lesson 63 named as the standing pick for next time —
+  no single dangling candidate is queued for next round; the next round
+  should do a fresh curriculum/glossary scan from scratch, unless a
+  `lesson_completed`/quiz-outcome signal has surfaced by then, in which case a
+  focused review round on Lessons 9-64 takes priority, per this course's
+  standing convention. This agent does not run `git commit` — leaving
+  working-tree changes uncommitted remains this course's established
+  convention. `bin/record-progress data lesson_generated --day 64 --lesson
+  0064-to-csv-and-to-parquet.html --detail '{"by":"headless"}'` was run once
+  from the repo root as a single standalone command as instructed and
+  succeeded on the first try (`recorded: data/lesson_generated day=64
+  lesson=0064-to-csv-and-to-parquet.html`) — the write path worked fine even
+  though the read path (`bin/query-progress`) stayed blocked on the one
+  attempt made this round, consistent with every prior round's pattern.

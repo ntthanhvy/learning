@@ -5255,3 +5255,141 @@ fail *gracefully* so the learner sees which task failed.
   day (e.g. covering Days 16-41's FastAPI/object-model/stdlib material,
   which today's six questions did not touch) if no new PLAN.md-named topic
   or learner signal has appeared by then.
+- 2026-09-10 — **Day 44 generated: a second, differently-composed
+  review/retrieval day** (headless run), no new mechanism taught.
+  Read this run: this file's tail (~5000-5257, the Day 42/43 entries in
+  full), `RESOURCES.md` in full, `PLAN.md` in full, `MISSION.md` (untouched,
+  read-only), the sole `learning-records/0001-baseline-reads-python-writes-little.md`,
+  `assets/nav.js`'s LESSONS array in full, and `lessons/0043-review-retrieval-day.html`
+  + `practice/43_review_retrieval.py` for exact current structure/conventions.
+  Confirmed `date` reports 2026-09-10 before doing anything else.
+  Idempotency: `ls python/lessons/0044-*` and a grep across `python/` for
+  `0044`/`Day 44`/`day44` both came back empty before writing anything;
+  proceeded as Day 44.
+  **DB read-path retry (per the standing next-day note):** `bin/query-progress
+  python` was attempted exactly once, as instructed, to re-check whether the
+  gate had lifted — it had not, hitting the same "This command requires
+  approval" block as every round back to Day 34+. Not retried further, per
+  this run's instructions. `python/learning-records/` still holds only the
+  Day 1 baseline — no completion/quiz/kata outcome has ever been recorded
+  for any day 2-43, so this round proceeded from on-disk state exactly like
+  Day 43 did.
+  Topic selection: Day 43's own next-day note named two candidates —
+  `RESOURCES.md`'s two open Gaps notes, or a second, differently-composed
+  review day covering Days 16-41 (the FastAPI/object-model/stdlib material
+  Day 43's six questions, drawn only from Days 1-12, never touched). Re-read
+  `RESOURCES.md`'s Gaps section in full this run: both notes (a Python
+  interview-prep source; folding FastAPI's bigger-applications doc into
+  "Knowledge — backend") are still open and still meta/curation work with no
+  immediate learner-facing lesson payoff, same assessment Day 43 made of
+  them. Re-checked `PLAN.md` in full again — every named Phase 2a/2b item is
+  still confirmed taught through Day 42, no unnamed spine item is being
+  skipped by picking a review day again. Picked the second review day for
+  the same reason Day 43 picked the first: it is the more learner-facing
+  option, and with zero completion/quiz signal ever recorded across 43
+  lessons, spaced retrieval over already-taught material remains the
+  strongest content move absent a real weak-spot signal. Selected six
+  non-adjacent topics spanning Days 16-38, deliberately spread rather than
+  clustered: Day 16 (FastAPI handlers — path vs. query param rule), Day 19
+  (dependency injection — `Depends()` sub-dependency single-call-per-request
+  guarantee), Day 30 (dunder methods — `__eq__` falls back to identity),
+  Day 33 (`Enum` — a member is never `==` its own bare value), Day 34
+  (`match`/`case` — a failing guard skips to the next case), and Day 38
+  (regular expressions — `re.match` anchors at index 0, `re.search` does
+  not). Chose these six specifically because Day 43 already covered Days 1,
+  2, 3, 5, 7, 12 — today's six sit entirely outside that set, with the
+  backend phase (Days 16-26) getting its first-ever retrieval coverage.
+  Grepped `python/` for `0044`/`day44`/`n: 44` before writing anything (see
+  idempotency above) and grepped this file's own history for any prior
+  mention of "review day 2" or similar — none found, confirming this
+  composition hadn't been attempted before.
+  No-pandas rule: grepped the lesson case-insensitively for
+  `pandas`/`numpy`/`pd\.`/`np\.` — exactly one hit, the standing "Where
+  pandas goes from here" callout stating plainly that nothing pandas-specific
+  applies to a review of already-taught FastAPI/object-model/stdlib Python;
+  grepped the practice file the same way — zero hits (stdlib `re` and `enum`
+  only, no `fastapi`/`httpx` imports even though Days 16 and 19's own
+  original practice files needed them, since today's exercises test the same
+  *rules* with plain dicts/functions standing in for a request instead of
+  running a real FastAPI app or importing it).
+  Practice file `practice/44_review_retrieval_day_2.py` (6 exercises, one per
+  reviewed day, same order: a `classify_params` function splitting path vs.
+  query param names via Day 16's `{}`-in-URL-template rule; a
+  `resolve_request` function simulating a `Depends()` sub-dependency chain
+  with a `call_log` list asserting `get_db` runs exactly once; a `Money`
+  class with no `__eq__` confirming `==` falls back to identity; a `Status`
+  `Enum` confirming a member is never `==` its own bare name/string; a
+  `classify_number` function written with `match`/`case` and a guard clause;
+  a `match_vs_search` function confirming `re.match` fails but `re.search`
+  succeeds on `"insuperable"`) needed no on-disk fixtures. Followed the
+  standing defensive pattern against the Ellipsis-at-module-level bug
+  family: grepped for `...` occurrences — all six live indented 4 spaces
+  inside a function body, none at column 0/module scope.
+  Verified in a scratch dir (`python/.scratch/lesson44/`, removed after use
+  along with three ad hoc helper scripts used for the tag/quiz checks below,
+  also removed after use — confirmed via `git status --short` that nothing
+  stray remained, only this run's two real intended `python/` files plus
+  unrelated same-day `backend/`/`data/`/`rust/` changes from parallel runs):
+  the shipped (unsolved) copy, run via plain `uv run python3` (no `--with`
+  needed) directly from its real `practice/` path, printed all eight ✗
+  (every exercise's stub returns `None`/no-ops) with no traceback — a
+  legitimate, if one-sided, "mixed" outcome given how the Ellipsis-only
+  stubs happen to fail every check, matching the same pattern Day 43's
+  practice file produced; a separately solved copy (every TODO filled in by
+  hand) printed all eight ✓ and the "All green" tally on the first attempt
+  — no bugs found during solving.
+  Glossary: no new terms today. The lesson's byline reuses Day 43's exact
+  "retrieval practice" `<dfn data-en=` tag (1 occurrence) rather than adding
+  a second row for the same term — confirmed the lesson's `data-en=` count
+  (1) matches the *existing* Day 43 glossary row exactly, with no new
+  `reference/glossary.html` section added this round; every other concept
+  reviewed (FastAPI params, `Depends()`, dunder methods, `Enum`,
+  `match`/`case`, `re.match`/`re.search`) already has its own Day 16-38
+  glossary row and was deliberately not re-added, same convention Day 43
+  established.
+  HTML tag-balance was checked with a stdlib `html.parser.HTMLParser`-based
+  stack checker and, independently, a regex-based open/close tag-count
+  comparator, against both the lesson file and the full `glossary.html` —
+  all four checks (two tools × two files) reported fully balanced, both
+  before and after the quiz word-count edits below.
+  Quiz: 3 questions (what decides path vs. query param; how many times a
+  shared `Depends()` sub-dependency runs per request; what `==` compares on
+  a plain class with no custom `__eq__`). Word counts were checked with a
+  small regex-based Python script (splitting each `<button class="opt">`'s
+  text on whitespace) and cross-checked with a second, independent
+  `html.parser.HTMLParser`-based script per this course's established
+  two-method practice — the first draft mismatched on Q2 (11/10/12) and Q3
+  (9/9/10), fixed over two rounds of single-/few-word edits (Q2's second
+  and third options lengthened by one word each, overshooting the third to
+  13 before trimming back to 11; Q3's second option lengthened by one word,
+  third option shortened by one), re-running both scripts after every edit,
+  landing at 11/11/11, 11/11/11, and 10/10/10 respectively; Q1 landed at
+  11/11/11 on the first attempt. Both scripts agreed on final counts and
+  confirmed exactly one `data-ok` per question throughout.
+  Registered in `assets/nav.js` with `date: "2026-09-10"`; confirmed
+  `node --check assets/nav.js` reports no syntax errors after the edit.
+  **DB access:** `bin/record-progress python lesson_generated --day 44
+  --lesson 0044-review-retrieval-day-2.html --detail '{"by":"headless"}'` ran
+  after this entry was drafted and **succeeded**, printing `recorded:
+  python/lesson_generated day=44 lesson=0044-review-retrieval-day-2.html` —
+  the second consecutive successful write, following Day 43's first-ever
+  confirmed success. `bin/query-progress python` remained blocked per above,
+  not retried beyond the single standing-instruction attempt.
+  **Next-day note:** two review days have now shipped (Day 43: Days 1, 2, 3,
+  5, 7, 12; Day 44: Days 16, 19, 30, 33, 34, 38) — between them, Days 4, 6,
+  8-11, 13-15, 17-18, 20-29, 31-32, 35-37, 39-42 still have zero retrieval
+  coverage, so a third differently-composed review day remains a viable
+  fallback if nothing else surfaces. The read-path gate on
+  `bin/query-progress`/`bin/record-progress`'s read equivalent has now been
+  retried on three consecutive rounds (Days 42-44) with no change — the next
+  run should feel free to stop re-attempting it every single day and instead
+  ask explicitly, if given the chance, whether the sandbox's DB read
+  approval can be granted, since the standing "try once more" instruction
+  has now been satisfied three times running with an identical result.
+  Otherwise, the next content candidate is `RESOURCES.md`'s two open Gaps
+  notes (Python interview-prep source; folding FastAPI's bigger-applications
+  doc into "Knowledge — backend") — both still untouched after two straight
+  reviews chose the more learner-facing alternative over them; a real
+  learner completion/quiz-outcome signal, if the DB read ever opens up,
+  should still take priority over all of the above the moment it's
+  available.

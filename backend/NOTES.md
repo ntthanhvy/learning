@@ -4430,3 +4430,128 @@
   circuit breakers, auth, tracing, and now gateways/BFF as all covered)
   did not surface an equally strong single next candidate — worth a fresh,
   broader gap search next round rather than assuming one is obvious.
+- **2026-09-10 generation (Lesson 67, headless 06:00 run):** idempotency
+  check first — confirmed via `ls` that no `backend/lessons/0067-*.html`
+  file existed and via grep that no `n: 67`/`date: "2026-09-10"` entry was
+  in `nav.js` (highest prior lesson was 66, dated 2026-09-09) before writing
+  anything. Read `MISSION.md`, `RESOURCES.md`, `assets/nav.js` in full, both
+  `learning-records/` files (still just the 0001 baseline and the 2026-07-30
+  concurrency-vocabulary gap — no `lesson_completed`/quiz-outcome record
+  ever recorded for this course), and the tail of `NOTES.md` via an
+  offset-based read (the file exceeds the single-read 256KB cap). One
+  `psql`/DB-read attempt was skipped per this round's fallback, consistent
+  with the standing multi-month block. Topic choice: Lesson 66's own closing
+  note explicitly said the gap-search after Lesson 66 did not surface a
+  single strong next candidate, so this round ran a fresh, broader gap
+  search rather than assuming one existed, per that note's own suggestion.
+  Compiled the full list of all 66 prior lesson titles plus a fresh read of
+  `glossary.html`'s ~130 rows, then grepped `lessons/*.html` and
+  `glossary.html` for a wide candidate batch: feature flags (confirmed
+  already covered, Lesson 21, per multiple prior rounds' own notes),
+  multi-tenancy/tenant_id (repeatedly ruled out as distributed-systems-
+  beyond-vocabulary per MISSION.md's own exclusion, most explicitly in the
+  Lesson 59 round's notes), GraphQL/gRPC/protobuf/CQRS/event-sourcing/CDN/
+  read-replicas/blue-green-canary-deploys (all zero hits, all previously and
+  again confirmed out-of-scope infra/paradigm territory per MISSION.md),
+  bulk-insert/COPY (zero hits but flagged twice in earlier rounds as a
+  narrow mechanism, passed over again for the same reason) — and the one
+  that stood out as genuinely in-scope, concrete, and uncovered: the
+  job-status/long-running-operation resource pattern (zero hits anywhere for
+  "job status", "status endpoint", "poll for completion", "long-running
+  operation", "Location header" as its own topic, or "terminal state").
+  Specifically: Lesson 10 (background jobs) stops at the handler returning
+  `202 Accepted` and never covers how the client subsequently learns the
+  job's outcome; Lesson 63 (polling/long-polling/SSE/WebSockets) names "a
+  job finishing" in its own byline as a motivating example for real-time
+  delivery, then moves on to the general four-technique framework without
+  ever resolving that specific example. Chose this gap over the ruled-out
+  candidates above for the same standing reason CORS (Lesson 52) and file
+  uploads (Lesson 53) beat their own rounds' teased-but-infra-adjacent
+  alternatives: a concrete, fully in-scope, high-frequency real API-design
+  gap outranks a topic MISSION.md's own "Out of scope" section already
+  excludes. Lesson 67 covers: the `Location` header returned alongside `202
+  Accepted`, pointing at a new `/jobs/{id}` resource representing the job's
+  own progress — turning Lesson 10's "accepted, not done yet" into "accepted
+  — here's exactly where to check"; treating a job as a plain, addressable,
+  GET-able resource rather than inventing a special notification channel,
+  tying back to Lesson 3's "nouns, not verbs" API-contract framing; modeling
+  job status as a small CHECK-constrained closed set of states (`pending`,
+  `running`, `succeeded`, `failed`) rather than a boolean, reusing Lesson
+  60's CHECK-constraint mechanism on a new column and explicitly naming why
+  a boolean can't represent "finished but failed"; terminal vs. non-terminal
+  states and why a client should stop polling once a terminal state is
+  reached; why plain polling of this one resource usually beats Lesson 63's
+  long-polling/SSE/WebSocket options specifically for the job-status case
+  (one client, one bounded check, usually short-lived), using a
+  `Retry-After` header as the cheap optimization instead of a held
+  connection, while naming when Lesson 63's heavier options do earn their
+  cost (a dashboard watching many jobs continuously); and two concrete
+  failure modes — polling a terminal state forever (tied to Lesson 57's
+  stampede framing, self-inflicted this time by one careless client), and
+  conflating the cheap status check with an expensive inline result body
+  instead of keeping them as two separate resources. Checked the glossary
+  first for every candidate `<dfn>` term before adding any: "Location
+  header", "terminal state", and "Retry-After" all had zero hits anywhere in
+  `glossary.html`, confirming genuine gaps; used `<dfn>` for exactly the
+  first two (Location header, terminal state), and left `Retry-After`,
+  `202 Accepted`, and `CHECK constraint` as plain `<code>`/prose references
+  to already-glossed or already-taught concepts (202 Accepted from Lesson
+  10, CHECK constraints from Lesson 60) rather than re-defining them under a
+  second entry point. Added exactly two new glossary rows (Location header,
+  terminal state), both genuinely new, appended after Lesson 66's
+  backend-for-frontend (BFF) row. Verification performed mechanically,
+  matching this course's established rigor: (1) quiz word-count balance via
+  a Node script parsing every `<div class="q">` block and counting each
+  `<button class="opt">`'s words two independent ways (`.split(/\s+/)` and
+  `.split(" ").filter(Boolean)`) — first draft was uneven on all four
+  questions (word counts ranging 7-11 per option), fixed through several
+  targeted rewrite-and-recount cycles per question (re-running the script
+  after every edit rather than eyeballing), converged to exactly 8/8/8/8,
+  9/9/9/9, 8/8/8/8, and 9/9/9/9 word counts across the four questions
+  respectively, both counting methods agreeing exactly, and exactly one
+  `data-ok` per question confirmed the same way; (2) an occurrence-count
+  HTML tag-balance check (regex counting per tag, not naive line/substring
+  counting, per this course's standing tooling-quirk warning) across 22 tag
+  pairs used in the lesson (div/p/h1/h2/table/thead/tbody/tr/th/td/pre/code/
+  dfn/button/a/span/strong/em/script/head/body/html) — all balanced with no
+  fixes needed this round; re-ran the same check on `glossary.html` after
+  its two-row addition (table/tr/td/th/p/html/head/body/script/a/em/code all
+  balanced, including the full 237 `<tr>`/`<td>`-pair count across the whole
+  table, confirming the new rows didn't break anything upstream); (3) a
+  raw-unescaped-`&` regex scan (matching any `&` not followed by `amp;`,
+  `lt;`, `gt;`, `quot;`, `#39;`, or `apos;`) across both the lesson and
+  `glossary.html` — zero hits in either file, no fixes needed; (4) Go
+  compile check — wrote the exact shipped `createReport`/`getJobStatus`
+  handler pair byte-for-byte into `backend/.scratch/lesson67/main.go`,
+  supplemented only with local stub types/functions the snippet itself
+  never defines (`Job`, `enqueueJob`, `loadJob`, `writeJSON`, etc., none of
+  them part of the shipped code, all outside the "exact shipped snippet"
+  markers in the scratch file) — unlike Lessons 65/66, this round's snippet
+  needed no external package, so no `replace` directive or vendored stub
+  module was required; `go mod init`, `go build ./...`, and `go vet ./...`
+  all completed with zero errors/output; deleted `backend/.scratch/`
+  entirely afterward and confirmed via `git status --short` that only
+  `backend/lessons/0067-*.html`, `backend/assets/nav.js`, and
+  `backend/reference/glossary.html` show as changed/new among backend
+  files — other repo-root changes in that status output belong to unrelated
+  courses' own same-morning runs, not touched this round. Registered Lesson
+  67 in `nav.js` (date 2026-09-10), confirmed with `node --check
+  backend/assets/nav.js`. DB access: `bin/record-progress backend
+  lesson_generated --day 67 --lesson 0067-job-status-resource-pattern.html
+  --detail '{"by":"headless"}'` ran as a single standalone command and
+  succeeded immediately on the first attempt (`recorded: backend/
+  lesson_generated day=67 lesson=0067-job-status-resource-pattern.html`); a
+  single reconfirmation attempt at `bin/query-progress backend` was made per
+  the briefing's allowance and was blocked immediately with a sandbox
+  approval requirement ("contains multiple operations"), consistent with
+  the read path's standing block across every prior round regardless of
+  write-path outcome — not retried further. No confirmed next-lesson gap is
+  named with certainty for the round after this one — same standing note as
+  every prior round; a completion/quiz-outcome signal or a user-named track
+  should take priority over guessing blind. Absent that, this round's own
+  gap-search ruled out most remaining untaught terms as genuinely
+  out-of-scope (multi-tenancy, GraphQL/gRPC/CQRS/event-sourcing, CDN, read
+  replicas, blue-green/canary deploys), leaving no obvious single strong
+  next candidate named with confidence — worth another fresh, broader gap
+  search next round, possibly widening beyond MISSION.md's four tracks'
+  usual vocabulary if the same exclusions keep recurring.

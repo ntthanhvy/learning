@@ -962,3 +962,24 @@ by the user there; they apply here identically.
   were generated this round via delegated agents, each confirmed to have
   written only within its own course directory; see their own NOTES.md
   entries for detail.)
+- 2026-09-10 (headless 06:00 run; verified by the orchestrator directly
+  rather than a delegated agent, since this course needs no new content):
+  same as every prior post-week day — verified `daily.html`,
+  `assets/srs.js`, and `assets/quiz-bank.js` are all present and untouched
+  (8 textual `id: "k` matches in `quiz-bank.js` — the 7 real kata entries
+  `k1`-`k7` plus the commented-out example line; `day:` tags still running
+  1-7 only; `nav.js` `LESSONS` array still registers only the 7 Jul 8-14
+  lessons, unchanged). Still the correct "daily quiz+kata" for this
+  post-week phase per PLAN.md, so nothing new was generated, nav.js was
+  untouched, and no bank content was added. A repo-wide search for
+  "2026-09-10" found no existing artifact for today before this check.
+  `bin/record-progress rust note --detail '{"day":"post-week-2026-09-10",
+  "action":"verified-unchanged","by":"headless"}'` succeeded on the first
+  attempt this round — the write path continues to work reliably regardless
+  of the read path's status. Direct `psql "$LEARNING_DB_URL" ...` was
+  blocked again this session ("Contains simple_expansion" — same
+  content-level block on that exact variable name as every prior round
+  since 2026-07-16, tried once per the established finding), so no
+  `course_progress` rows could be read for a scope-change signal (e.g. a
+  request to keep growing the bank past Day 7). No new learning record
+  beyond the Day-1 baseline.

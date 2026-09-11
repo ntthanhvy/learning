@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 45 · Review day 3: retrieval across six more lessons</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 45 · ~20 min · 11 Sep 2026</p>
+<h1>Review day 3: retrieval across six more lessons</h1>
+<p class="byline">Day 43 reviewed Days 1, 2, 3, 5, 7, and 12; Day 44 reviewed Days 16, 19, 30, 33, 34, and 38. Every named item on <code>PLAN.md</code>'s Phase 2a/2b spine is still fully taught, and no <code>lesson_completed</code>/quiz/kata signal has ever come back from any of the 44 lessons shipped so far — so there is still no reported weak spot to chase with a new-topic lesson. This is a third <dfn data-en="a study technique where the learner produces an answer from memory before checking it, rather than re-reading the source material - it is a stronger driver of durable learning than re-reading, especially when spaced across separated topics rather than massed on one" data-vn="giữ nguyên &quot;retrieval practice&quot; — tự nhớ lại và viết ra câu trả lời trước khi xem lại tài liệu, hiệu quả hơn hẳn việc đọc lại; càng hiệu quả khi trộn nhiều chủ đề cũ thay vì ôn 1 chủ đề liền mạch">retrieval practice</dfn> day, differently composed: six ideas from Days 4, 6, 9, 13, 20, and 36 — none of which either earlier review touched.</p>
+
+<div class="callout"><strong>Why this composition:</strong> between Days 43 and 44, Days 4, 6, 8-11, 13-15, 17-18, 20-29, 31-32, 35-37, and 39-42 still had zero retrieval coverage. Today picks six non-adjacent points from that list, spread across the intensive week, Phase 2a's stdlib corners, the backend phase, and the later object-model/stdlib tail: a <code>sorted(key=...)</code> rule, a <code>with</code>-block guarantee, a module-import rule, a <code>pathlib</code> operator, an <code>async def</code> trap, and a <code>functools</code> caching rule.</div>
+
+<h2>1 · Six questions, in the original teaching order</h2>
+<p>Answer each out loud or on paper <em>before</em> reading the fold-out answer. If one is shaky, note it and go fix it in the practice file below rather than only rereading the old lesson.</p>
+
+<p><strong>Day 4 — functions, <code>key=</code>.</strong> In <code>sorted(sales, key=lambda row: row["amount"])</code>, what does <code>sorted</code> actually do with the <code>key</code> function?</p>
+<div class="callout">Fold-out answer: calls it once per item, and orders the items by whatever it returns — not by comparing the items themselves. <code>row["amount"]</code> is never compared to another whole <code>row</code> dict; each row's <code>key</code> result becomes the value actually compared, which is exactly what makes sorting by one field of a larger structure possible at all.</div>
+
+<p><strong>Day 6 — files &amp; <code>with</code>.</strong> If an exception is raised partway through a <code>with open(path) as f:</code> block's body, does <code>f</code> still get closed?</p>
+<div class="callout">Fold-out answer: yes, always. <code>with</code>'s whole guarantee is that <code>__exit__</code> — which closes the file — runs whether the block ends normally or via an exception, unlike a manual <code>f = open(...)</code> / ... / <code>f.close()</code> sequence, where an exception between those two lines skips the <code>close()</code> call entirely and leaks the handle.</div>
+
+<p><strong>Day 9 — modules &amp; imports.</strong> A program has two separate <code>import parsing</code> statements, in two different files. How many times does <code>parsing.py</code>'s top-level code actually run?</p>
+<div class="callout">Fold-out answer: once. The first import anywhere in the program runs the module's code top to bottom and caches the result; every later <code>import parsing</code>, anywhere else, reuses that same cached module instead of re-running the file.</div>
+
+<p><strong>Day 13 — pathlib.</strong> What does the <code>/</code> operator do between two <code>Path</code> pieces, and why isn't that "division" a contradiction?</p>
+<div class="callout">Fold-out answer: it joins them into one new <code>Path</code>, using whatever separator is correct for the operating system actually running the code. It isn't a contradiction because Python always asks the object on the <em>left</em> of an operator what that operator means — the same reason <code>+</code> concatenates two strings but adds two numbers; <code>Path</code> simply defines <code>/</code> to mean "join," not division.</div>
+
+<p><strong>Day 20 — <code>async</code>/<code>await</code>.</strong> A plain blocking call like <code>time.sleep()</code> is placed inside an <code>async def</code> route handler. Does Python raise an error?</p>
+<div class="callout">Fold-out answer: no — nothing raises. The call simply never <code>await</code>s anything, so it never yields control back to the event loop, and every other in-flight request sits frozen until it finishes. Confirmed in Day 20 by timing five concurrent requests: a genuinely async version came back in ~0.05s total, the same call written as a blocking <code>time.sleep()</code> inside <code>async def</code> took ~0.25s — fully serialized, with no error anywhere to flag the mistake.</div>
+
+<p><strong>Day 36 — functools.</strong> Why is <code>@functools.lru_cache</code> unsafe to put on a function that reads the current time or hits a database?</p>
+<div class="callout">Fold-out answer: <code>lru_cache</code> only works correctly on a pure function — one whose result depends only on its arguments. A cache keyed on arguments has no way to notice that the clock moved or the database changed between two calls with the same arguments; it silently serves the first answer forever instead of a fresh one, which is worse than not caching at all because nothing signals the staleness.</div>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> nothing pandas-specific today — this review only revisits Days 4, 6, 9, 13, 20, and 36's plain-Python and FastAPI material, with no pandas/NumPy API involved at any point.</div>
+
+<h2>2 · Why these six, spread this way</h2>
+<p>Same interleaving logic as Days 43 and 44: a sorting rule, then a resource-cleanup rule, then an import-caching rule, then an operator-overloading rule, then a concurrency trap, then a caching-safety rule — six different mental models back to back rather than six variations on one. Landing on the <code>pathlib</code> <code>/</code> operator right after Day 9's import-caching question forces a fresh retrieval each time, instead of riding a "this is all file/module stuff" momentum from one question into the next.</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/45_review_retrieval_day_3.py</code>. It is six small, independent exercises — one per topic above, same order — with no new syntax anywhere; every mechanism needed was already taught in Days 4, 6, 9, 13, 20, and 36. Fill in each TODO from memory first; only reopen the old lesson if a fold-out answer above didn't fully land.</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/45_review_retrieval_day_3.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed, even though Day 20's own original practice file needed <code>fastapi</code>/<code>httpx</code>: today's exercise tests the same blocking-call-inside-a-coroutine rule with plain <code>asyncio</code> functions timed against each other, not a real running FastAPI app.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="sorted()'s key function is called exactly once per item, and the items are ordered by whatever that function returns rather than by comparing the items directly to each other - the mechanism that makes sorting by one field of a larger dict or tuple possible at all.">
+    <p class="stem">In <code>sorted(rows, key=lambda r: r["amount"])</code>, what gets compared to decide the order?</p>
+    <button class="opt" data-ok>whatever the key function returns for each item, called once</button>
+    <button class="opt">the entire row dict, compared directly against every other row</button>
+    <button class="opt">only the first row's amount, reused as a fixed threshold</button>
+  </div>
+  <div class="q" data-why="with's whole guarantee is that __exit__, which closes the file, runs whether the block ends normally or by raising - unlike manual open()/close(), where an exception between the two skips the close() line entirely and leaks the handle.">
+    <p class="stem">If a <code>with open(path) as f:</code> block's body raises an exception, does <code>f</code> get closed?</p>
+    <button class="opt" data-ok>yes, always - that guarantee is with's entire point</button>
+    <button class="opt">no, exceptions always skip __exit__, same as manual close()</button>
+    <button class="opt">only if the exception happens to get caught first</button>
+  </div>
+  <div class="q" data-why="A module's top-level code runs exactly once, on whichever import statement reaches it first anywhere in the program - Python caches the resulting module object, and every later import of that same module, from any file, reuses the cached result instead of re-running the file.">
+    <p class="stem">With two separate <code>import parsing</code> statements in two different files, how many times does <code>parsing.py</code>'s top-level code run?</p>
+    <button class="opt" data-ok>once - the second import reuses the cached module</button>
+    <button class="opt">twice - once for each separate import statement written</button>
+    <button class="opt">zero - importing only loads names, never runs code</button>
+  </div>
+  <div class="q" data-why="Path defines / to mean join, and Python always asks the object on the left of an operator what that operator should do - the same reason + concatenates two strings but adds two numbers. Path's / never hardcodes a wrong separator and never produces a double slash, unlike manual string concatenation.">
+    <p class="stem">Why does <code>Path("data") / "sales.csv"</code> join two paths instead of performing division?</p>
+    <button class="opt" data-ok>Path defines / to mean join, left side decides</button>
+    <button class="opt">Python secretly rewrites every slash into a string concatenation</button>
+    <button class="opt">division on two Path objects always errors out instead</button>
+  </div>
+  <div class="q" data-why="A blocking call like time.sleep() inside async def never awaits anything, so it never yields control back to the event loop - every other in-flight request sits frozen until it finishes, and nothing raises to flag the mistake, confirmed by timing concurrent requests at ~0.25s instead of ~0.05s.">
+    <p class="stem">What happens when a plain blocking call sits inside an <code>async def</code> route handler?</p>
+    <button class="opt" data-ok>nothing raises - it silently serializes every other request</button>
+    <button class="opt">FastAPI immediately raises a clear, quite descriptive TypeError here</button>
+    <button class="opt">Python automatically rewrites the call into an awaited coroutine</button>
+  </div>
+  <div class="q" data-why="lru_cache only works correctly on a pure function - same arguments always produce the same result, with no side effects. A cache keyed purely on arguments has no way to detect that the clock moved or a database row changed, so it silently returns a stale cached answer instead of a fresh one.">
+    <p class="stem">Why is <code>@functools.lru_cache</code> unsafe on a function that reads the current time?</p>
+    <button class="opt" data-ok>a stale cached result gets served, not a fresh read</button>
+    <button class="opt">lru_cache always raises a clear TypeError on any clock-reading call</button>
+    <button class="opt">it's perfectly safe, since lru_cache re-checks the clock every time</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the six lessons this review draws from are each still the primary source for their own topic — <a href="../lessons/0004-functions-args-and-key.html">Day 4</a>, <a href="../lessons/0006-files-formats-and-with.html">Day 6</a>, <a href="../lessons/0009-modules-imports-and-layout.html">Day 9</a>, <a href="../lessons/0013-pathlib.html">Day 13</a>, <a href="../lessons/0020-async-await-and-blocking-calls.html">Day 20</a>, and <a href="../lessons/0036-functools.html">Day 36</a>. For the retrieval-practice technique itself, <a href="https://docs.python.org/3/tutorial/">the Python Tutorial</a> stays this course's general reference (per <code>RESOURCES.md</code>) — there is no dedicated stdlib doc for a study technique, matching Days 43 and 44's own note.</p>
+
+<p class="next">No new terms today — every concept reviewed above already has its own Day 4-36 glossary row, and this lesson repeats the "retrieval practice" <code>&lt;dfn&gt;</code> from Days 43/44 rather than adding a third row for the same term.<br>
+With three review days now shipped (Days 1-12, 16-38, and today's 4/6/9/13/20/36), the remaining uncovered days are 8, 10-11, 14-15, 17-18, 21-29, 31-32, 35, 37, and 39-42 — still viable material for a future review sweep, though three review days in a row makes a new-topic lesson or a real learner completion/quiz-outcome signal (still never recorded) the stronger next move if either becomes available.<br><br>
+💬 Anything unclear — any of the six answers, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

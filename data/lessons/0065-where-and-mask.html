@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 65 · Series.where() and .mask(): conditional replace that keeps the shape</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 65 · ~20 min · 11 Sep 2026</p>
+<h1>Series.where() and .mask(): conditional replace that keeps the shape</h1>
+<p class="byline">Lesson 64 closed out its own named candidate with no fresh teaser pointing anywhere specific, so today started from a from-scratch scan of every lesson and the full glossary against MISSION.md's goals. Lesson 24 taught <code>np.where()</code>/<code>np.select()</code> as NumPy's vectorized if/else — but pandas has its own condition-preserving pair, <code>Series.where()</code> and <code>.mask()</code>, and a grep of all 64 lessons and the glossary turned up zero hits for either as a DataFrame/Series method (only prose mentions of the unrelated <code>np.where()</code>). That's a real gap: <code>.where()</code>/<code>.mask()</code> read more naturally than <code>np.where()</code> once only ONE branch needs to change, and they're the tool that makes "replace values failing a check with NaN" a one-liner instead of a full <code>np.where(cond, keep, other)</code> call.</p>
+
+<h2>1 · The shape: keep-if-true, replace-if-false</h2>
+<p><dfn data-en="a Series/DataFrame method: keeps each value where a given condition is True, and replaces it with `other` (default NaN) wherever the condition is False -- same shape/index as the caller, only failing values change" data-vn="giữ nguyên 'where()' — giữ nguyên giá trị ở chỗ điều kiện True, thay bằng other (mặc định NaN) ở chỗ điều kiện False">where()</dfn> keeps every value where a condition is <code>True</code> and replaces the rest with <code>other</code> (a NaN by default):</p>
+<pre><code>s = clean[<span class="str">"amount"</span>]
+s.tolist()                    <span class="cm"># [120.0, 42.0, 35.5, 180.0]</span>
+
+s.where(s &gt;= <span class="num">100</span>)              <span class="cm"># no `other` -- default fill is NaN
+-- [120.0, NaN, NaN, 180.0]</span>
+
+s.where(s &gt;= <span class="num">100</span>, other=<span class="num">0</span>)     <span class="cm"># explicit fill
+-- [120.0, 0.0, 0.0, 180.0]</span></code></pre>
+<p><dfn data-en="a Series/DataFrame method: the exact inverse of where() -- replaces each value with `other` wherever a given condition is True, and keeps the original value wherever it's False" data-vn="giữ nguyên 'mask()' — NGƯỢC với where(): thay giá trị bằng other ở chỗ điều kiện True, giữ nguyên ở chỗ False">mask()</dfn> is <code>where()</code>'s exact mirror image — same two arguments, opposite polarity:</p>
+<pre><code>s.mask(s &gt;= <span class="num">100</span>, other=<span class="num">0</span>)      <span class="cm"># replace where TRUE this time
+-- [0.0, 42.0, 35.5, 0.0]</span>
+
+<span class="cm"># confirmed identical to negating the condition and swapping methods:</span>
+s.mask(s &gt;= <span class="num">100</span>, <span class="num">0</span>).equals(s.where(~(s &gt;= <span class="num">100</span>), <span class="num">0</span>))   <span class="cm"># True</span></code></pre>
+<p>Confirmed directly (pandas 3.0.5) on the real <code>orders_raw.csv</code> clean 4-row slice above. Neither method filters rows out — the Series/DataFrame keeps its original length and index; only the failing cells change. That's the core difference from a boolean mask used to filter (<code>s[s >= 100]</code>, Lesson 1's WHERE), which does drop rows.</p>
+
+<h2>2 · SQL bridge</h2>
+<p><code>where()</code>/<code>mask()</code> are the pandas spelling of a single-branch <code>CASE WHEN col >= 100 THEN col ELSE 0 END</code> (that's <code>where</code>) or its flip, <code>CASE WHEN col >= 100 THEN 0 ELSE col END</code> (that's <code>mask</code>). Lesson 24's <code>np.where(cond, a, b)</code> covers the same ground but always needs both branches spelled out explicitly; <code>where()</code>/<code>mask()</code> read better the moment one branch is simply "keep what's already there" — no need to repeat the column as its own true-branch value.</p>
+
+<h2>3 · Chaining for more than one condition</h2>
+<p>Lesson 24's <code>np.select()</code> handles 3+ branches in one call with parallel condition/choice lists. <code>where()</code>/<code>mask()</code> have no multi-branch form of their own, but they chain cleanly, applying one condition at a time on top of the previous result:</p>
+<pre><code>tier = pd.Series(<span class="str">"Mid"</span>, index=s.index)
+tier = tier.mask(s &gt;= <span class="num">150</span>, <span class="str">"High"</span>).mask(s &lt; <span class="num">50</span>, <span class="str">"Low"</span>)
+tier.tolist()                 <span class="cm"># ['Mid', 'Low', 'Low', 'High']</span>
+
+<span class="cm"># confirmed identical to np.select() on the same data:</span>
+np.select([s &gt;= <span class="num">150</span>, s &lt; <span class="num">50</span>], [<span class="str">"High"</span>, <span class="str">"Low"</span>], default=<span class="str">"Mid"</span>)
+<span class="cm">-- ['Mid', 'Low', 'Low', 'High']</span></code></pre>
+<p>Confirmed directly: both approaches land on the identical result. <code>np.select()</code> is the better read once there are three or more genuinely independent branches sharing one default; chained <code>mask()</code> calls read more like "start from a baseline, then override" — closer to how the logic is usually described out loud.</p>
+
+<div class="callout"><strong>Gotcha, confirmed directly: a shorter/misaligned condition doesn't raise.</strong> <code>where()</code>/<code>mask()</code> align the condition to the caller's index first, exactly like every other pandas operation (Lesson 30's broadcasting note on label alignment). Passing a condition covering only the first two rows doesn't error — it silently treats every unmatched row as failing, filling it with <code>other</code> (or NaN):</p>
+<pre><code>s.where(s.iloc[:<span class="num">2</span>] &gt;= <span class="num">100</span>)
+<span class="cm">-- [120.0, NaN, NaN, NaN]   &lt;- rows 2-3 have no aligned condition at all, NOT an error</span></code></pre>
+<p>Row 1 (<code>42.0</code>) correctly fails the condition and becomes NaN — but rows 2-3 become NaN too, for a completely different reason: there was no condition value for them to check at all. Same output, two different causes, no exception either way. Always confirm <code>cond.index.equals(s.index)</code> before trusting a <code>where()</code>/<code>mask()</code> result on anything but the exact same Series the condition was built from.</div>
+
+<h2>4 · DataFrame.where(): cell by cell, not row by row</h2>
+<p>Called on a whole DataFrame, <code>where()</code>/<code>mask()</code> check the condition cell by cell (or align a Series condition along <code>axis=0</code>/<code>axis=1</code> first), not row by row:</p>
+<pre><code>clean.where(clean[<span class="str">"amount"</span>] &gt;= <span class="num">100</span>, other=<span class="str">"LOW"</span>)
+<span class="cm">-- order_id customer amount  order_date
+--        1       An  120.0  2026-01-05   &lt;- whole row passed its own check
+--      LOW      LOW    LOW         LOW   &lt;- every OTHER column got "LOW" too
+--      LOW      LOW    LOW         LOW      even order_id and customer, untouched by amount
+--        5     Binh  180.0  2026-01-09</span></code></pre>
+<p>Confirmed directly: the condition <code>clean["amount"] >= 100</code> is a Series, so pandas broadcasts it across every column of that row (default <code>axis=0</code>) — meaning a row that fails on <code>amount</code> gets EVERY column replaced with <code>"LOW"</code>, including <code>order_id</code> and <code>customer</code>, which had nothing to do with the check. This is rarely what's wanted; the fix that keeps other columns untouched is assigning back into just the target column with <code>.loc[]</code> or plain boolean-mask assignment (Lesson 1/26) instead of calling <code>where()</code> on the whole frame.</p>
+
+<div class="interview">
+<p><strong>Q: "What's the difference between Series.where() and np.where(), and when would you reach for each?"</strong> A strong answer, out loud: <em>"Both are vectorized if/else with no per-row Python loop, but the argument shape is different. np.where(cond, a, b) always needs both branches spelled out explicitly. Series.where(cond, other) assumes the branch that's already there is the true-case value and only asks for the replacement — so it reads better the moment one branch is just 'keep the original.' mask() is where()'s exact opposite polarity, same two arguments. Neither one filters rows out — they keep the original shape and index, only replacing the failing cells, which is the key difference from a boolean mask used to filter rows out entirely. One thing I'd watch for: the condition aligns to the caller's index first, so a condition that's missing some of the caller's rows doesn't error, it silently treats those rows as failing — I'd always check the two indexes match before trusting the result. For 3+ branches I'd reach for np.select() instead of chaining mask() calls, since it names every branch and its default in one call rather than a sequence of overrides."</em> The signal: naming the argument-shape difference from np.where(), the shape-preserving behavior vs. a filtering mask, and the index-alignment gotcha unprompted.</p>
+</div>
+
+<h2>5 · Where this fits</h2>
+<p>Lesson 24's <code>np.where()</code>/<code>np.select()</code>, Lesson 35's <code>clip()</code>, and today's <code>where()</code>/<code>mask()</code> are three different named shortcuts for the same underlying idea — a vectorized per-cell if/else — each best for a different shape of condition: <code>clip()</code> for "pull outliers back inside a range," <code>np.select()</code> for "3+ independent branches with one default," and <code>where()</code>/<code>mask()</code> for "keep what's there, replace only the failing cells" — the most common shape of all three once the check is a data-quality filter rather than a recode.</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/65_where_and_mask.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/65_where_and_mask.py</code></pre>
+<p>Uses the same real <code>orders_raw.csv</code> fixture, cleaned the same way as recent lessons (An 120.0/01-05, An 42.0/01-10, Binh 35.5/01-06, Binh 180.0/01-09). Exercise 1 is a basic <code>where()</code> with an explicit <code>other=</code>. Exercise 2 confirms <code>mask()</code> is <code>where()</code>'s exact opposite polarity on the same condition. Exercise 3 confirms the default fill (no <code>other=</code>) is NaN. Exercise 4 reproduces the misaligned-condition gotcha directly, confirming it does NOT raise. Exercise 5 chains two <code>mask()</code> calls into a 3-tier recode and checks it matches an equivalent <code>np.select()</code> call exactly.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: where() keeps every value where the condition is True and replaces the rest with `other` (NaN by default); mask() is the exact opposite polarity, replacing where the condition is True and keeping the rest. Both preserve the original shape/index -- neither one filters rows out.">
+    <p class="stem">What is the relationship between <code>Series.where(cond, other)</code> and <code>Series.mask(cond, other)</code>?</p>
+    <button class="opt" data-ok>mask() replaces where True, where() replaces where it's False</button>
+    <button class="opt">mask() only works on DataFrames, never plain Series objects</button>
+    <button class="opt">they are identical aliases for one shared underlying method</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: where()/mask() align the given condition to the caller's own index first, the same alignment rule as every other pandas operation. A condition missing some of the caller's rows doesn't raise -- those unmatched rows are silently treated as failing the check and get filled with `other` (or NaN), indistinguishable in the output from a row that genuinely failed the real condition.">
+    <p class="stem">A condition Series covers only the first two of four rows. What happens when it's passed to <code>where()</code>?</p>
+    <button class="opt" data-ok>rows 3-4 silently become failing rows too, with no error</button>
+    <button class="opt">pandas raises a ValueError for the length mismatch right away</button>
+    <button class="opt">rows 3-4 are dropped from the result, shortening the output</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: passing a Series condition to DataFrame.where() broadcasts it across every column of each row by default (axis=0) -- a row failing the check on one column gets EVERY column replaced, including columns the condition never mentioned. Assigning back into just the target column via .loc[] avoids touching unrelated columns.">
+    <p class="stem">Calling <code>clean.where(clean["amount"] >= 100, other="LOW")</code> on the whole DataFrame -- what happens to a failing row's <code>customer</code> column?</p>
+    <button class="opt" data-ok>it also becomes "LOW", though the condition never checked it</button>
+    <button class="opt">it stays untouched, since the condition only mentions the amount</button>
+    <button class="opt">pandas raises a KeyError for referencing that whole unrelated column</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the pandas User Guide's <a href="https://pandas.pydata.org/docs/user_guide/indexing.html#the-where-method-and-masking">"The where() Method and Masking"</a> section of Indexing and selecting data (~10 min) — covers <code>axis=</code>/<code>level=</code> for alignment against a MultiIndex and the <code>inplace=</code> keyword this lesson didn't need.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>where()</code> and <code>mask()</code> are new today, placed right after Lesson 64's <code>to_parquet()</code> entry.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-65 comes back reported as shakiest, otherwise another fresh curriculum/glossary scan for the next genuinely-uncovered pattern — today's scan found no other single standout candidate the way <code>where()</code>/<code>mask()</code> did (zero hits anywhere in 64 lessons), so the next round starts from scratch again.<br><br>
+💬 Anything unclear — the misaligned-condition gotcha, DataFrame.where()'s whole-row replacement, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

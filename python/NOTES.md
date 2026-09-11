@@ -5393,3 +5393,186 @@ fail *gracefully* so the learner sees which task failed.
   learner completion/quiz-outcome signal, if the DB read ever opens up,
   should still take priority over all of the above the moment it's
   available.
+- 2026-09-11 — **Day 45 generated: a third, differently-composed
+  review/retrieval day** (headless run), no new mechanism taught.
+  Read this run: `MISSION.md` (untouched, read-only) in full, `PLAN.md` in
+  full, `RESOURCES.md` in full, this file's tail (~5115-5395, the Day
+  43/44 entries in full), the sole
+  `learning-records/0001-baseline-reads-python-writes-little.md`,
+  `assets/nav.js`'s LESSONS array in full, and `lessons/0019-dependency-injection-and-app-structure.html`
+  + `lessons/0044-review-retrieval-day-2.html` +
+  `practice/44_review_retrieval_day_2.py` for exact current
+  structure/conventions. Confirmed `date` reports 2026-09-11 (Fri) before
+  doing anything else.
+  Idempotency: `ls python/lessons/0045-*` and a grep across `python/` for
+  `0045`/`Day 45`/`day45`/`n: 45` both came back empty before writing
+  anything; proceeded as Day 45.
+  **DB read-path:** per Day 44's own next-day note, the read-path gate
+  (`bin/query-progress`) had already been retried on three consecutive
+  rounds (Days 42-44) with an identical "This command requires approval"
+  result each time, and that same note explicitly said the next run should
+  stop re-attempting it daily. Did not attempt `bin/query-progress` this
+  round at all, per that instruction — this run's own task framing
+  independently confirmed the same standing guidance (three-round retry
+  already satisfied, no further value in a fourth identical attempt without
+  a live approver). `python/learning-records/` still holds only the Day 1
+  baseline; no completion/quiz/kata outcome has ever been recorded for any
+  day 2-44, so this round paced entirely from on-disk state exactly like
+  Days 43-44 did.
+  Topic selection: weighed all three candidates named across Days 41-44's
+  next-day notes. (a) Fresh PLAN.md spine content: re-checked `PLAN.md` in
+  full against `assets/nav.js`'s complete LESSONS array — every named
+  Phase 1, Phase 2a, and Phase 2b item is confirmed taught through Day 26,
+  plus a long additional tail (Days 27-42) of further stdlib/object-model
+  topics beyond the named spine; there is no unnamed/untaught spine item
+  left to pick up as "fresh content." (b) `RESOURCES.md`'s two open Gaps
+  (Python interview-prep source; folding FastAPI's bigger-applications doc
+  into "Knowledge — backend"): re-read the Gaps section in full — the
+  bigger-applications item is substantially already covered as real lesson
+  content (Day 19 teaches `APIRouter`/`include_router()`/`prefix=` directly
+  from that exact doc page and cites it by name; Day 26's capstone cites it
+  again), so folding it in is a citation/bookkeeping move with little new
+  learner-facing payoff; the interview-prep item is likewise thin ground
+  now, since Days 1, 2, and 29-42 already carry a per-lesson `<div
+  class="interview">` block modeling a strong spoken answer — adopting one
+  external interview-prep *source* would mostly duplicate a pattern already
+  built inline lesson-by-lesson, not add a new teachable mechanism. Both
+  confirmed via grep (`interview`, `bigger-applications`) across
+  `lessons/*.html` before deciding. (c) A third review day, covering the
+  large pool Day 44 flagged as still uncovered (Days 4, 6, 8-11, 13-15,
+  17-18, 20-29, 31-32, 35-37, 39-42): picked this option. Reasoning:
+  option (a) is genuinely exhausted, not just deprioritized; option (b) is
+  real but is meta/curation work this run assessed as lower learner payoff
+  than continued retrieval coverage, matching Days 43-44's own assessment
+  of it twice already; option (c) directly serves the baseline record's
+  core untested claim (reads Python, writes little — recall, not
+  recognition, is unverified) and there is still zero completion/quiz
+  signal recorded to justify skipping retrieval work in favor of something
+  else. Noted explicitly in the lesson body itself that three review days
+  in a row is a real cost, not a free default — flagged for the next run to
+  weigh a new-topic or `RESOURCES.md`-gap lesson more seriously next time
+  absent a stronger signal.
+  Selected six non-adjacent topics spanning Days 4, 6, 9, 13, 20, and 36,
+  chosen specifically because neither Day 43 (Days 1, 2, 3, 5, 7, 12) nor
+  Day 44 (Days 16, 19, 30, 33, 34, 38) touched any of them: Day 4
+  (`sorted(key=...)` calls the key function once per item, comparing its
+  return value rather than the item itself), Day 6 (`with`'s guarantee that
+  `__exit__`/close still runs on an exception inside the block), Day 9
+  (a module's top-level code runs exactly once, cached across repeated
+  imports), Day 13 (`pathlib`'s `/` operator joins paths because the left
+  operand decides what an operator means, not because of any special-cased
+  division rule), Day 20 (a blocking call inside `async def` never raises,
+  it silently serializes every other in-flight request), and Day 36
+  (`lru_cache` is unsafe on an impure function like one reading the clock,
+  since a stale cached result is served with no signal of the staleness).
+  Read each of the six source lessons in full this run (not from memory)
+  before drafting questions, to keep every claim traceable to its original
+  lesson rather than paraphrased from this file's own summaries.
+  No-pandas rule: grepped the lesson case-insensitively for
+  `pandas`/`numpy`/`pd\.`/`np\.` — exactly one hit, the standing "Where
+  pandas goes from here" callout stating plainly that nothing pandas-
+  specific applies to a review of Days 4, 6, 9, 13, 20, and 36's plain-
+  Python/FastAPI material; grepped the practice file the same way — zero
+  hits (stdlib `asyncio`, `time`, `collections`, `functools`, `pathlib`
+  only, no `fastapi`/`httpx` imports even though Day 20's own original
+  practice file needed them, since today's Exercise 5 tests the same
+  blocking-call rule with plain `asyncio` functions timed against each
+  other instead of running a real FastAPI app).
+  Practice file `practice/45_review_retrieval_day_3.py` (6 exercises, one
+  per reviewed day, same order: a `sort_by_amount_desc` function using
+  `sorted(..., key=..., reverse=True)`; a `with_survives_exception` function
+  using a small hand-written `Tracker` context manager whose `__exit__`
+  appends to a log and suppresses the exception, confirming both `"enter"`
+  and `"exit"` land in the log even though the body raised; an
+  `import_module` function simulating Python's own cache-after-first-import
+  behavior with a log list and a cache dict; a `build_sales_path` function
+  using only the `/` operator on `Path("data")`; an `asyncio.gather()`-based
+  timing check confirming three concurrent `good_task()` coroutines finish
+  in ~1x a fixed delay rather than ~3x; and a `slow_square` function needing
+  `@lru_cache(maxsize=None)` added directly, confirmed via a call-log list
+  that a repeat call with an already-seen argument does not re-run the
+  body) needed no on-disk fixtures. Followed the standing defensive pattern
+  against the Ellipsis-at-module-level bug family: grepped for `...`
+  occurrences — all six live indented 4 or 8 spaces inside a function body,
+  none at column 0/module scope (confirmed both by grep line-context and a
+  visual indentation check of each match).
+  Verified in a scratch dir (`python/.scratch/lesson45/`, removed after use
+  along with four ad hoc helper scripts used for the tag/quiz checks below,
+  also removed after use — confirmed via `git status --short` that nothing
+  stray remained, only this run's two real intended `python/` files plus
+  `python/assets/nav.js`, plus unrelated same-day `backend/`/`data/`/
+  `rust/` changes from parallel runs): the shipped (unsolved) copy, run via
+  plain `uv run python3` (no `--with` needed) both from a scratch copy and
+  directly from its real `practice/` path, printed a clean, genuinely mixed
+  result — ✓ on Exercises 3 and 5 (whose stub bodies already happen to
+  satisfy their checks: Ex 3's `if`/`else` branches are already correctly
+  shaped with only cosmetic `...` placeholders, and Ex 5's `_time_three_concurrent`
+  stub still returns a very-small elapsed time that happens to pass the
+  "< 2x delay" threshold even before `asyncio.gather` is wired in) and ✗ on
+  Exercises 1, 2, 4, 6 — with no traceback either time; a separately solved
+  copy (every TODO filled in by hand, kept in the scratch dir only, never
+  shipped) printed all six ✓ and the "All green" tally on the first attempt
+  — no bugs found during solving.
+  Glossary: no new terms today. The lesson's byline reuses Days 43/44's
+  exact "retrieval practice" `<dfn data-en=` tag (1 occurrence) rather than
+  adding a third row for the same term — confirmed the lesson's `data-en=`
+  count (1) matches the *existing* Day 43 glossary row exactly, with no new
+  `reference/glossary.html` section added this round; every other concept
+  reviewed (`sorted`/`key=`, `with`/context managers, module import
+  caching, `pathlib`'s `/` operator, `async def`/blocking calls,
+  `functools.lru_cache`) already has its own Day 4-36 glossary row and was
+  deliberately not re-added, same convention Days 43-44 established.
+  HTML tag-balance was checked with a stdlib `html.parser.HTMLParser`-based
+  stack checker and, independently, a regex-based open/close tag-count
+  comparator, against both the lesson file and the full `glossary.html`
+  (unmodified this round, checked anyway per the standing practice) — all
+  four checks (two tools × two files) reported fully balanced throughout,
+  both before and after the quiz word-count edits below.
+  Quiz: 6 questions (what `sorted`'s `key` function actually compares; the
+  `with`-block close-on-exception guarantee; how many times a twice-imported
+  module's top-level code runs; why `Path`'s `/` operator joins rather than
+  divides; why a blocking call inside `async def` doesn't raise but instead
+  serializes; why `lru_cache` is unsafe on a clock-reading function). Word
+  counts were checked with a small regex-based Python script (splitting
+  each `<button class="opt">`'s text on whitespace after stripping inner
+  tags) and cross-checked with a second, independent
+  `html.parser.HTMLParser`-based script per this course's established
+  two-method practice — the first draft mismatched on all six questions
+  (Q1 12/10/11, Q2 11/9/11, Q3 9/9/10, Q4 13/9/11, Q5 10/8/9, Q6 12/8/11)
+  and took three to four rounds of single-/few-word edits per question,
+  re-running both scripts after every edit rather than trusting hand
+  counts, before all six landed at equal counts (Q1-Q3 and Q5 at
+  9-10 words per option, Q4 at 9, Q6 at 10); both scripts agreed at every
+  intermediate step and on the final counts, and confirmed exactly one
+  `data-ok` per question throughout.
+  Registered in `assets/nav.js` with `date: "2026-09-11"`; confirmed
+  `node --check assets/nav.js` reports no syntax errors after the edit.
+  **DB access:** `bin/record-progress python lesson_generated --day 45
+  --lesson 0045-review-retrieval-day-3.html --detail '{"by":"headless"}'`
+  ran after this entry was drafted and **succeeded**, printing `recorded:
+  python/lesson_generated day=45 lesson=0045-review-retrieval-day-3.html`
+  — the third consecutive successful write (following Days 43 and 44).
+  `bin/query-progress` was **not** attempted this round at all, per Day
+  44's explicit next-day instruction to stop daily re-attempts after three
+  identical-result rounds; this is a deliberate change from every prior
+  day's practice of a single reconfirming attempt, not an oversight.
+  **Next-day note:** three review days have now shipped back to back
+  (Day 43: Days 1, 2, 3, 5, 7, 12; Day 44: Days 16, 19, 30, 33, 34, 38;
+  Day 45: Days 4, 6, 9, 13, 20, 36) — between them, Days 8, 10-11, 14-15,
+  17-18, 21-29, 31-32, 35, 37, 39-42 still have zero retrieval coverage, so
+  a fourth review sweep remains *technically* viable, but this entry
+  explicitly recommends the next run lean toward `RESOURCES.md`'s two open
+  Gaps notes instead (Python interview-prep source; folding FastAPI's
+  bigger-applications doc into "Knowledge — backend") even though this run
+  assessed both as thinner than in earlier rounds (bigger-applications
+  content is already substantially taught via Day 19; interview-prep
+  already has an inline per-lesson pattern via `<div class="interview">`
+  since Day 29) — three review days in a row is enough that variety itself
+  now has standalone value, and actually adopting/citing a named interview-
+  prep source (even a curation-only move) would close a two-month-old open
+  item rather than deferring it a fourth time. A real learner
+  completion/quiz-outcome signal, if the DB read-path gate ever lifts,
+  should still take priority over both of the above the moment it's
+  available — but per this run's own instruction, the next run should not
+  spend an attempt re-checking that gate again without some indication it
+  might have changed.

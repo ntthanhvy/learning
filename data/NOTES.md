@@ -4842,3 +4842,125 @@
   lesson=0064-to-csv-and-to-parquet.html`) — the write path worked fine even
   though the read path (`bin/query-progress`) stayed blocked on the one
   attempt made this round, consistent with every prior round's pattern.
+- 2026-09-11 generation (Lesson 65, headless run): idempotency confirmed
+  first — globbed `data/lessons/` for `0065-*.html` (none found) and grepped
+  `assets/nav.js` for `n: 65`/`2026-09-11` (neither found, highest registered
+  lesson was still 64, dated 2026-09-10) — so this round proceeded. `date`
+  confirmed the sandbox clock reads 2026-09-11. DB read: the long-blocked
+  `bin/query-progress data` path was not attempted at all this round (every
+  prior entry documents it as separately, persistently blocked from the
+  working `bin/record-progress` write path; no new information expected from
+  retrying). Both files under `data/learning-records/` were read in full —
+  still only the single 2026-07-09 baseline (`0001-baseline-sql-strong-
+  python-basic.md`); no `lesson_completed`/quiz-outcome signal has ever
+  appeared there, so pacing again fell back to file-state per this course's
+  standing convention. Lesson 64 closed out its own named candidate with no
+  fresh dangling teaser, so this round did a genuine fresh curriculum/
+  glossary scan from scratch as instructed: read `MISSION.md`, `RESOURCES.md`,
+  and the full `reference/glossary.html` (139 rows through Lesson 64), then
+  grepped all 64 lessons for a wide batch of candidate topics/method names
+  (`factorize`, `pd.eval`/`df.eval`, `sample(`, `.mask(`, `.where(` as a
+  DataFrame/Series method, `assign(`, `str.split`, `str.replace`,
+  `how="cross"`, `NamedAgg`, `Dask`/`Spark`/`Polars`, `value_vars`,
+  `transpose`, and more) before picking anything. The strongest, cleanest
+  gap: `Series`/`DataFrame.where()` and `.mask()` — a grep of every lesson
+  and the glossary for `.where(`/`.mask(` turned up zero hits as pandas
+  methods, only prose mentions of the unrelated `np.where()` (Lesson 24) in
+  Lessons 34-36. Picked it over the other candidates (`NamedAgg` as a proper
+  object form, `sample()`, the Polars/Spark/Dask vocabulary aside) because it
+  had the cleanest zero-hit signal and directly extends Lesson 24's
+  `np.where()`/`np.select()` pairing MISSION.md already calls in scope
+  ("read NumPy-flavored code... predict its output") into pandas' own
+  condition-preserving idiom. A scratch dir was created at
+  `data/.scratch/lesson65/` (not `/tmp`, this sandbox blocks that) with the
+  real `orders_raw.csv` fixture copied in, and pandas 3.0.5 was reconfirmed
+  (`uv run --with pandas python3 -c "import pandas; print(pandas.__version__)"`),
+  matching every recent lesson. Every claim in the lesson was hand-verified
+  there with standalone probe scripts before writing: confirmed directly
+  that `where(cond, other)` keeps values where `cond` is True and replaces
+  the rest with `other` (default NaN), and that `mask(cond, other)` is its
+  exact opposite polarity — `s.mask(cond, 0)` produced output identical
+  (via `.equals()`-style comparison) to `s.where(~cond, 0)` on the same real
+  4-row cleaned slice (An 120.0/42.0, Binh 35.5/180.0); confirmed
+  `where()`/`np.where()` produce byte-identical results on the same
+  condition/branches, establishing the direct sibling relationship named in
+  the lesson. Confirmed a genuine, non-obvious gotcha worth flagging:
+  passing a condition Series covering only the first two of four rows to
+  `where()` on the full Series does NOT raise — pandas aligns the condition
+  to the caller's index first (same alignment rule as Lesson 30's
+  broadcasting note), and every unmatched row is silently treated as failing
+  and filled with `other`/NaN, indistinguishable in the output from a row
+  that genuinely failed the real check; confirmed directly on the real
+  fixture that rows 2-3 both become NaN under `s.where(s.iloc[:2] >= 100)`
+  but for two different reasons (one genuinely fails, one has no aligned
+  condition at all). Confirmed `DataFrame.where()` with a Series condition
+  broadcasts across every column of a failing row by default (`axis=0`) —
+  `clean.where(clean["amount"] >= 100, other="LOW")` replaced `order_id`
+  and `customer` too on failing rows, not just `amount`, confirmed directly
+  against the real fixture. Also explored but deliberately left out of the
+  lesson body as a minor aside, not central enough to include: confirmed
+  directly that `inplace=True` on pandas 3.0.5 returns the mutated Series
+  itself rather than `None` (breaking the usual pandas `inplace=True`
+  convention) — real, but judged a lower-value/more obscure fact than the
+  three gotchas actually kept, so left out entirely rather than diluting the
+  lesson; not in the glossary or quiz either. Chained-`mask()` vs.
+  `np.select()` for 3+ branches was confirmed directly to produce identical
+  results on a 3-tier recode of the real fixture (`['Mid', 'Low', 'Low',
+  'High']` both ways), used as Section 3's contrast with Lesson 24.
+  Building the practice file went smoothly this round — no bug caught before
+  shipping, unlike the last two rounds. The shipped (unsolved)
+  `practice/65_where_and_mask.py` was executed in a mirrored
+  `.scratch/lesson65/practice/` layout and printed exactly 6 ✗ with no
+  traceback; a solved copy (`.scratch/lesson65/practice/65_solved.py`, not
+  shipped) then printed all 6 ✓ on the first run. The shipped file was also
+  re-run a second time directly from its real `practice/` location (`cd data
+  && uv run --with pandas python3 practice/65_where_and_mask.py`), both
+  before and after the nav.js/glossary edits that followed, and printed the
+  identical 6 ✗, no crash, both times. Quiz options were drafted, then
+  mechanically word-counted with a Python script isolating each
+  `<div class="q">` block by its own start offset (this course's established
+  approach) — the first draft came out mismatched on all three questions (Q1
+  11/10/9, Q2 12/8/10, Q3 11/10/8); iterated through several rewrite+recount
+  cycles (re-running the same script after each edit) until all three landed
+  level (Q1 9/9/9, Q2 10/10/10, Q3 10/10/10), then independently
+  re-verified by hand-counting the same `Grep`-extracted raw option-text
+  listing word-by-word — both methods agreed exactly, and exactly one
+  `data-ok` per question throughout. A Python regex/occurrence-count
+  tag-balance script found every tag pair already balanced on the first pass
+  this round (`p` 21/21, `div` 6/6, `span` 36/36, `pre`/`code`/`h1`/`h2`/
+  `strong`/`em`/`a`/`button` all matched) — no markup bug this time, unlike
+  Lessons 63/64's unclosed-`<span class="cm">` pattern; the same script's
+  raw-`&` scan found only the two already-established `cd ~/learning/data &&
+  uv run …` shell commands inside `<pre><code>` blocks (this course's
+  standing precedent, not a new bug), zero raw `&` in prose. Checked the
+  glossary for a collision before adding anything: grepped for
+  `>where\(\)|>mask\(\)|where\(\) / mask\(\)` — no existing entry — so added
+  exactly one new glossary row, `where() / mask()` (combined into one row,
+  matching the existing `ffill() / bfill()` paired-method precedent),
+  placed directly after Lesson 64's `to_parquet()` entry; confirmed the
+  glossary table's tags stayed balanced after the insert (`table` 1/1, `tr`
+  126/126, `td` 375/375 via the Python occurrence-count script), cross-checked
+  with `Grep -c` on `<tr>`/`</tr>` (126/126 both, matching exactly).
+  Registered Lesson 65 in `nav.js` with today's date (2026-09-11); `node
+  --check` confirmed it still parses as valid JavaScript after the edit.
+  This round's scan found no other single standout candidate the way
+  `where()`/`mask()` did (a clean zero-hit result across all 64 prior
+  lessons) — the next round should do a fresh curriculum/glossary scan from
+  scratch again, unless a `lesson_completed`/quiz-outcome signal has
+  surfaced by then, in which case a focused review round on Lessons 9-65
+  takes priority, per this course's standing convention. The entire
+  `data/.scratch/` directory was removed (`rm -rf`) after verification;
+  `git status --short` afterward showed only the intended new/modified
+  `data/` files (`data/assets/nav.js`, `data/reference/glossary.html`, new
+  `data/lessons/0065-where-and-mask.html`, new
+  `data/practice/65_where_and_mask.py`) — plus unrelated concurrent changes
+  in the `backend/`/`rust/`/`python/` course directories from other runs,
+  not touched by this one. This agent does not run `git commit` — leaving
+  working-tree changes uncommitted remains this course's established
+  convention. `bin/record-progress data lesson_generated --day 65 --lesson
+  0065-where-and-mask.html --detail '{"by":"headless"}'` was run once from
+  the repo root as a single standalone command as instructed and succeeded
+  on the first try (`recorded: data/lesson_generated day=65
+  lesson=0065-where-and-mask.html`) — the write path worked fine even though
+  the read path (`bin/query-progress`) was not attempted this round,
+  consistent with every prior round's pattern.

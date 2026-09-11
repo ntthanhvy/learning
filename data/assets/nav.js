@@ -134,6 +134,8 @@
       file: "lessons/0063-interpolate.html" },
     { n: 64, date: "2026-09-10", title: "to_csv() and to_parquet(): the ETL Load step, and its silent traps",
       file: "lessons/0064-to-csv-and-to-parquet.html" },
+    { n: 65, date: "2026-09-11", title: "Series.where() and .mask(): conditional replace that keeps the shape",
+      file: "lessons/0065-where-and-mask.html" },
   ];
 
   const REFS = [

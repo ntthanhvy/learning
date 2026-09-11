@@ -4555,3 +4555,129 @@
   next candidate named with confidence — worth another fresh, broader gap
   search next round, possibly widening beyond MISSION.md's four tracks'
   usual vocabulary if the same exclusions keep recurring.
+- **2026-09-11 generation (Lesson 68, headless 06:00 run):** idempotency
+  check first — confirmed via `ls backend/lessons/0068-*` (no match) and a
+  grep for `n: 68`/`2026-09-11` in `nav.js` (no match, highest prior entry
+  was `n: 67`, dated 2026-09-10) before writing anything. Read `MISSION.md`,
+  `RESOURCES.md`, `assets/nav.js` in full, both `learning-records/` files
+  (still just the 0001 baseline and the 2026-07-30 concurrency-vocabulary
+  gap — no `lesson_completed`/quiz-outcome record ever added), and the tail
+  of `NOTES.md` via an offset-based read (the file exceeds the single-read
+  cap). DB read (`bin/query-progress backend`) was not attempted until after
+  shipping, per this round's pacing fallback to file-state; the write path
+  was exercised at the end as usual. Topic choice: Lesson 67's own closing
+  note said its gap-search ruled out multi-tenancy, GraphQL/gRPC/CQRS/
+  event-sourcing, CDN, read replicas, and blue-green/canary deploys with no
+  confident single next candidate, and explicitly suggested widening the
+  search. Ran a fresh, broad gap search this round: compiled all 67 prior
+  lesson titles, re-read `glossary.html`'s ~140 rows, then grepped
+  `lessons/*.html` + `glossary.html` for a wide batch of concrete backend
+  terms across MISSION.md's tracks (rate-limiting internals, indexing
+  depth, HTTP/transport mechanics, TLS/mTLS, scaling/deploy vocabulary,
+  distributed-systems mechanisms, auth flows beyond OAuth, and production-
+  operations vocabulary). Confirmed several genuine zero-hit gaps
+  (`bulk insert`/`COPY` — flagged narrow in two earlier rounds' notes, passed
+  over again for the same reason; `load balancer` — used as background
+  vocabulary in Lesson 8 but never taught as its own topic, a plausible but
+  weaker candidate; `token bucket` — turned out to be a false gap, already
+  fully taught in Lesson 11, ruled out immediately) but the strongest,
+  cleanest gap was a whole uncovered cluster: SLA/SLO/error budget/on-call/
+  runbook/postmortem — zero hits anywhere for any of those six terms in
+  `lessons/*.html` or `glossary.html`. This directly continues Lesson 13
+  (logging & monitoring), which built the tools that answer "is it
+  happening now" (metrics) and "what happened" (logs) but never answered
+  what a team actually does with that signal — how bad is bad enough to
+  page someone, and what happens organizationally after the page fires.
+  Lesson 13 already cited Google's SRE Book (sre.google) for the Four
+  Golden Signals, making this an organic continuation of an already-trusted
+  source rather than a new one. Chosen over `load balancer` because it maps
+  directly onto MISSION.md's explicitly named "production operations
+  (logging, monitoring)" success criterion, is concrete and interview-
+  relevant (a very common senior/staff interview question: "how do you
+  decide when to page someone / how do you handle a recurring outage"),
+  and closes a whole cluster rather than one narrow term. Lesson 68 covers:
+  the SLA/SLI/SLO distinction (contract vs. measured indicator vs. internal
+  target, with the SLO deliberately stricter than the SLA so the team has
+  headroom before breaching the contract — tied to Lesson 61's
+  `statement_timeout` and Lesson 18's pool-sizing "headroom before the hard
+  limit" framing); the error budget as the SLO's allowance turned into a
+  spendable number, with a Go `errorBudget.remaining()` sketch shaped like
+  Lesson 11's token-bucket struct but explicitly contrasted from it in a
+  callout (a rate limiter rejects in real time; an error budget is a
+  retrospective number a human reads to decide ship-vs-stabilize, nobody's
+  request gets a 429 because of it); on-call as a rotating responsibility
+  and the runbook as a pre-written step-by-step guide for a recognized
+  failure, tied to Lesson 47's cascading restarts, Lesson 18's pool
+  exhaustion, and Lesson 57's stampede as exactly the kind of recurring,
+  nameable failure a runbook exists for; and the blameless postmortem,
+  explaining why "blameless" is a functional requirement (it keeps
+  engineers reporting problems instead of hiding them) rather than a soft
+  HR nicety. Checked the glossary first for all six candidate terms (SLA,
+  SLI, SLO, error budget, runbook, postmortem) — zero collisions for any —
+  then added exactly four new `<dfn>`-backed rows (SLO, error budget,
+  runbook, postmortem); SLA and SLI were deliberately left as plain
+  `<strong>`-marked prose terms rather than `<dfn>`/glossary entries, since
+  they're defined once inline and mostly serve as contrast points for the
+  SLO definition rather than terms tested or reused later — consistent with
+  Lesson 67's precedent of leaving some adjacent terms as plain prose when
+  a second full entry point isn't warranted. Verification performed
+  mechanically, matching this course's established rigor: (1) quiz
+  word-count balance via a Node script parsing every `<div class="q">`
+  block and counting each `<button class="opt">`'s words two independent
+  ways (`.split(/\s+/)` and `.split(" ").filter(Boolean)`) — first draft
+  was uneven on all four questions (7-9 words per option), fixed through
+  several rewrite-and-recount cycles per question, re-running the script
+  after every edit rather than eyeballing, converged to exactly 7/7/7/7,
+  8/8/8/8, 8/8/8/8, and 8/8/8/8 word counts across the four questions
+  respectively, both counting methods agreeing exactly, and exactly one
+  `data-ok` per question confirmed the same way; (2) an occurrence-count
+  HTML tag-balance check (regex counting per tag, not naive line/substring
+  counting, per this course's standing tooling-quirk warning) across 22 tag
+  pairs (div/p/h1/h2/table/thead/tbody/tr/th/td/pre/code/dfn/button/a/span/
+  strong/em/script/head/body/html) on both the lesson and `glossary.html`
+  after its four-row addition — all balanced, no fixes needed; (3) a raw-
+  unescaped-`&` regex scan (matching any `&` not followed by `amp;`, `lt;`,
+  `gt;`, `quot;`, `#39;`, or `apos;`) across both files — zero hits in
+  either, no fixes needed; (4) a real bug caught on manual re-read that the
+  mechanical passes above would not have caught: two `<dfn data-vn="...">`
+  attributes (runbook, postmortem) were first drafted with backslash-
+  escaped inner quotes (`\"database connections exhausted\"`,
+  `\"không đổ lỗi cá nhân\"`) — backslash is not a valid HTML attribute
+  escape, so this would have truncated the attribute value at the first
+  literal `\` and corrupted the popup text silently (no parse error, just
+  wrong rendered content) — caught by grepping this file for
+  `\\"` after noticing no other lesson in the whole course uses that
+  pattern, fixed by removing the inner quote marks entirely from the
+  `data-en` value and switching the `data-vn` value's Vietnamese quote to
+  plain unquoted phrasing; re-ran the tag-balance/word-count scripts after
+  the fix to confirm nothing else broke; (5) Go compile check — wrote the
+  exact shipped `errorBudget` struct and `remaining()` method byte-for-byte
+  into `backend/.scratch/lesson68/main.go`, needing no external package (no
+  `replace` directive or vendored stub required, same as Lesson 67's
+  round); `go mod init`, `go build ./...`, and `go vet ./...` all completed
+  with zero errors/output; deleted `backend/.scratch/` entirely afterward
+  and confirmed via `git status --short` that only `backend/lessons/
+  0068-*.html`, `backend/assets/nav.js`, and `backend/reference/
+  glossary.html` show as changed/new among backend files — other repo-root
+  changes in that status output (`rust/NOTES.md`, `data/reference/
+  glossary.html`, `data/lessons/0065-*`, `python/lessons/0045-*`, etc.)
+  belong to unrelated courses' own same-morning runs, not touched this
+  round. Registered Lesson 68 in `nav.js` (date 2026-09-11), confirmed with
+  `node --check backend/assets/nav.js`. DB access: `bin/record-progress
+  backend lesson_generated --day 68 --lesson
+  0068-slo-error-budgets-and-postmortems.html --detail '{"by":"headless"}'`
+  ran as a single standalone command and succeeded immediately on the first
+  attempt (`recorded: backend/lesson_generated day=68 lesson=
+  0068-slo-error-budgets-and-postmortems.html`); a single reconfirmation
+  attempt at `bin/query-progress backend` was made per the briefing's
+  allowance and was blocked immediately requiring sandbox approval,
+  consistent with the read path's standing block across every prior round
+  regardless of write-path outcome — not retried further. No confirmed
+  next-lesson gap is named with certainty for the round after this one —
+  same standing note as every prior round; a completion/quiz-outcome signal
+  or a user-named track should take priority over guessing blind. Absent
+  that, this round's own gap-search surfaced `load balancer` (used as
+  background vocabulary since Lesson 8 but never taught as its own topic —
+  what it does, algorithms, health-check integration, L4 vs L7) as the next
+  most plausible concrete candidate if no stronger signal appears, alongside
+  the previously-flagged-but-still-narrow `bulk insert`/`COPY` mechanism.

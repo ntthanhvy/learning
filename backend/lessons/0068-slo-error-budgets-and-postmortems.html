@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 68 · SLOs, error budgets, and postmortems: what you do with the signal once monitoring finds it</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 68 · ~20 min</p>
+<h1>SLOs, error budgets, and postmortems: what you do with the signal once monitoring finds it</h1>
+<p class="byline">Lesson 13 built the tools that answer "is it happening now" and "what happened" — metrics and logs. It never answered a harder pair of questions: how bad is bad enough to page someone at 3am, and what happens organizationally after that page fires? Today closes that loop: the number that defines "good enough," the budget derived from it that turns a philosophical debate into an engineering decision, and the document a team writes afterward so the same outage doesn't teach the same lesson twice.</p>
+
+<h2>1 · A promise, a number, and a budget</h2>
+<p>Three related terms get used almost interchangeably in casual conversation, but they answer three different questions. An <strong>SLA</strong> (service level agreement) is a contract, often with real financial penalties, promising a customer some level of reliability — "99.9% uptime or you get a credit." An <strong>SLI</strong> (service level indicator) is the actual measured number backing that promise — the same kind of metric Lesson 13 already taught you to graph, like "percentage of requests completed under 300ms" or "percentage of requests that didn't 5xx." A <dfn data-en="an internal target for a service level indicator -- e.g. 99.9% of requests succeed in a rolling 30-day window -- set stricter than any external SLA so there is room to notice and fix a problem before the contractual promise is actually broken" data-vn="SLO (giữ nguyên) — mục tiêu nội bộ cho một chỉ số, đặt khắt khe hơn SLA để có thời gian xử lý trước khi vi phạm hợp đồng">SLO</dfn> (service level objective) is the internal target set against that SLI — "99.9% of requests succeed in a rolling 30-day window."</p>
+<p>The SLO is deliberately the tightest of the three, and that's the whole point: if the external SLA promises 99.9% and the internal SLO also targets exactly 99.9%, the team finds out about a problem at the exact same moment the customer already has grounds for a refund. Setting the SLO stricter — or measuring it over a shorter, faster-moving window — buys the team time to notice and fix an issue before the contractual promise is actually broken. This is the same "leave headroom before the hard limit" instinct <a href="../lessons/0061-statement-timeout-and-lock-timeout.html">Lesson 61</a>'s <code>statement_timeout</code> already taught for one query and <a href="../lessons/0018-connection-pool-sizing-and-exhaustion.html">Lesson 18</a>'s pool sizing taught for a whole service — here applied to the reliability target itself.</p>
+
+<h2>2 · The error budget: turning "how careful should we be" into a number</h2>
+<p>A 99.9% SLO isn't a demand for perfection — it's an explicit admission that 0.1% of requests are allowed to fail, on purpose. Multiply that allowance out over the SLO's window and it becomes a real, spendable quantity: at 1,000,000 requests a month, a 99.9% SLO permits 1,000 failed requests before the SLO itself is breached. That permitted quantity is the <dfn data-en="the amount of allowed unreliability left in an SLO's window, computed as (1 - SLO target) times total requests -- e.g. a 99.9% SLO over 1,000,000 monthly requests permits 1,000 failures; every outage or bad deploy spends down this same number" data-vn="error budget (giữ nguyên) — lượng lỗi được phép còn lại trong SLO, dùng để quyết định có nên deploy rủi ro hay không">error budget</dfn>.</p>
+<pre><code><span class="cm">// A rolling error budget check -- the same shape as a rate limiter's</span>
+<span class="cm">// bucket (Lesson 11), spent by failures instead of by requests.</span>
+<span class="kw">type</span> errorBudget <span class="kw">struct</span> {
+    windowRequests <span class="ty">int64</span> <span class="cm">// total requests in the rolling window</span>
+    windowFailures <span class="ty">int64</span> <span class="cm">// failed requests in that same window</span>
+    sloTarget      <span class="ty">float64</span> <span class="cm">// e.g. 0.999 for a 99.9% SLO</span>
+}
+
+<span class="cm">// remaining reports how much budget is left, as a fraction from 1.0 (fresh)</span>
+<span class="cm">// down to 0.0 (fully spent) and below (SLO already breached).</span>
+<span class="kw">func</span> (b errorBudget) remaining() <span class="ty">float64</span> {
+    allowed := (<span class="fl">1.0</span> - b.sloTarget) * <span class="ty">float64</span>(b.windowRequests)
+    <span class="kw">if</span> allowed == <span class="fl">0</span> {
+        <span class="kw">return</span> <span class="fl">1.0</span>
+    }
+    <span class="kw">return</span> <span class="fl">1.0</span> - <span class="ty">float64</span>(b.windowFailures)/allowed
+}</code></pre>
+<p>The budget's real job is turning a values argument into a math problem. "Should we ship this risky migration today?" is a debate that can go in circles forever on instinct alone. "We've spent 85% of this month's error budget already, and the migration has a known failure mode" is a number two people can agree on without agreeing on much else — spend the rest of the budget shipping features and taking calculated risks; once it's gone, the team's own rule is to stop taking on new risk and spend engineering time on reliability instead, until the window rolls forward and the budget refills.</p>
+<div class="callout"><strong>Not the same shape as a rate limiter, despite the code above.</strong> Lesson 11's token bucket rejects requests in real time to protect the service right now. An error budget rejects nothing automatically — it's a retrospective, rolling count that a team consults to make a deploy/no-deploy or hire-more-SREs/ship-more-features decision. Nobody's request gets a 429 because the error budget is low; a human reads the number and changes behavior.</div>
+
+<h2>3 · When the budget runs out anyway: on-call and the runbook</h2>
+<p>Monitoring (Lesson 13) is what pages someone in the first place — a metric crossing an SLO-derived alert threshold, not just any blip. The person who gets paged is <strong>on-call</strong>: a rotating responsibility, not a permanent job, precisely so the 3am pages don't always land on the same person. What that person does next is where most of the actual value of preparation shows up: a <dfn data-en="a written, step-by-step document for a specific, recognized failure -- e.g. database connections exhausted -- telling whoever is on-call exactly what to check and do first, written calmly in advance rather than improvised under pressure during the incident itself" data-vn="runbook (giữ nguyên) — tài liệu hướng dẫn từng bước xử lý một sự cố cụ thể, viết sẵn lúc bình tĩnh để dùng khi có sự cố">runbook</dfn> is a pre-written, step-by-step guide for a specific, recognized failure mode — "connection pool exhausted: check X, restart Y, escalate to Z if that doesn't help" — written calmly in advance instead of improvised at 3am under pressure with a page blaring.</p>
+<p>A runbook works because most incidents aren't actually novel. <a href="../lessons/0047-health-checks-cascading-restarts.html">Lesson 47</a>'s cascading-restart failure, <a href="../lessons/0018-connection-pool-sizing-and-exhaustion.html">Lesson 18</a>'s pool exhaustion, and <a href="../lessons/0057-cache-stampede-thundering-herd.html">Lesson 57</a>'s stampede are exactly the kind of recurring, nameable failure a runbook exists for — the first time any of them happens it's a fire; the second time, it should be a checklist.</p>
+
+<h2>4 · After the fire is out: the blameless postmortem</h2>
+<p>Fixing the immediate outage and understanding why it happened are two different jobs, done at two different times. A <dfn data-en="a written report, produced after an incident is resolved, that reconstructs the timeline, root cause, and impact, and lists concrete follow-up action items -- explicitly blameless: it asks what in the system allowed the failure, not who to blame for it, so the next engineer in a similar spot reports problems instead of hiding them" data-vn="postmortem (giữ nguyên) — báo cáo sau sự cố, tinh thần không đổ lỗi cá nhân, tìm nguyên nhân hệ thống và đề ra hành động cụ thể">postmortem</dfn> is written after the incident is resolved, reconstructing the timeline, the root cause, the impact, and — critically — a list of concrete action items, not vague resolutions. The word "blameless" isn't a soft HR add-on: a postmortem that names which engineer to blame teaches every other engineer to hide problems and route around monitoring rather than report them, which produces a team with worse signal exactly when it needs better signal most. A blameless postmortem asks what let the failure happen — a missing runbook, an alert threshold set wrong, a migration that shipped without review — because those are the things a team can actually fix.</p>
+<table class="cmp">
+<thead><tr><th>Term</th><th>Answers</th><th>Who reads it</th></tr></thead>
+<tbody>
+<tr><th>SLA</th><td>what did we promise the customer</td><td>customer, sales, legal</td></tr>
+<tr><th>SLI</th><td>what are we actually measuring</td><td>the dashboard, same as Lesson 13's metrics</td></tr>
+<tr><th>SLO</th><td>what internal target keeps us ahead of the SLA</td><td>the team, before a customer ever notices</td></tr>
+<tr><th>error budget</th><td>how much unreliability is left to spend this window</td><td>whoever decides ship-vs-stabilize</td></tr>
+<tr><th>runbook</th><td>what do I do right now, at 3am, for this specific failure</td><td>whoever is on-call</td></tr>
+<tr><th>postmortem</th><td>why did this happen, and what changes so it doesn't again</td><td>the whole team, after the fact</td></tr>
+</tbody>
+</table>
+
+<div class="interview">
+<p><strong>Q: "Your team keeps missing its uptime target. How would you approach fixing that?"</strong> A strong answer, out loud: <em>"First I'd check whether we even have an SLO distinct from the customer-facing SLA — if the internal target isn't stricter than the promise, we're finding out about problems at the same moment the customer has grounds for a complaint. I'd want an error budget tracked against that SLO, because it turns 'should we ship this risky change' from a values argument into a number the team can actually agree on — spend the budget on calculated risk, and once it's gone, prioritize reliability work over new features until it refills. For the incidents that do happen, I'd want runbooks for the recurring, nameable failure modes so on-call isn't improvising under pressure, and a blameless postmortem after anything serious — blameless specifically so people report problems honestly instead of hiding them to avoid blame."</em> The signal: naming the SLA/SLO/error-budget chain as a decision-making tool, not just reliability trivia, and knowing why "blameless" is a functional requirement, not a nicety.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="An SLO is deliberately set stricter than the external SLA (or measured over a faster window) so the team notices and fixes a drifting metric before the customer-facing contractual promise is actually broken.">
+    <p class="stem">Why is an internal SLO usually set stricter than the external SLA?</p>
+    <button class="opt" data-ok>so problems surface before the SLA breaks</button>
+    <button class="opt">so customers never see any uptime number</button>
+    <button class="opt">because the SLA is measured in dollars</button>
+    <button class="opt">because legal contracts cannot ever mention percentages</button>
+  </div>
+  <div class="q" data-why="An error budget is the amount of allowed failure left in an SLO's window (1 - target, times total requests) -- it turns a values debate about how much risk to take into a number two people can agree on when deciding whether to ship something risky.">
+    <p class="stem">What is an error budget actually used to decide?</p>
+    <button class="opt" data-ok>whether the team should ship something risky now</button>
+    <button class="opt">the exact salary paid to the on-call engineer</button>
+    <button class="opt">which programming language a new service must use</button>
+    <button class="opt">how many database columns a table may contain</button>
+  </div>
+  <div class="q" data-why="A runbook is written calmly in advance for a specific, recognized failure mode, so whoever is on-call has step-by-step guidance instead of improvising under pressure during the incident itself.">
+    <p class="stem">What problem does a runbook solve for whoever is on-call?</p>
+    <button class="opt" data-ok>improvising a fix under pressure during an incident</button>
+    <button class="opt">choosing which programming language a team should learn</button>
+    <button class="opt">deciding the whole company's overall marketing budget strategy</button>
+    <button class="opt">writing out every single customer-facing SLA contract term</button>
+  </div>
+  <div class="q" data-why="A blameless postmortem asks what in the system allowed the failure -- a missing runbook, a bad alert threshold, an unreviewed migration -- rather than which person to blame, because naming a person to blame teaches everyone else to hide problems instead of reporting them.">
+    <p class="stem">Why must a postmortem be blameless to actually work?</p>
+    <button class="opt" data-ok>blame teaches engineers to hide problems, not report</button>
+    <button class="opt">blaming a person is against most labor laws</button>
+    <button class="opt">postmortems are legally required to omit every name</button>
+    <button class="opt">blameless postmortems always finish measurably faster than others</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> Google's <a href="https://sre.google/sre-book/service-level-objectives/">SRE Book — Service Level Objectives</a> and <a href="https://sre.google/sre-book/postmortem-culture/">Postmortem Culture</a> chapters (~15 min combined skim) — the same standing SRE Book reference Lesson 13 already pointed at for the Four Golden Signals, continued here into what a team does with the signal once it exists.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> open. Still no <code>lesson_completed</code>/quiz-outcome record exists for any lesson — the honest next step remains a completion signal or a user-named track.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

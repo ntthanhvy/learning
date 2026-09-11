@@ -140,6 +140,8 @@
       file: "lessons/0066-api-gateway-and-bff.html" },
     { n: 67, date: "2026-09-10", title: "The job-status resource: how a client finds out a background job finished",
       file: "lessons/0067-job-status-resource-pattern.html" },
+    { n: 68, date: "2026-09-11", title: "SLOs, error budgets, and postmortems: what you do with the signal once monitoring finds it",
+      file: "lessons/0068-slo-error-budgets-and-postmortems.html" },
   ];
 
   const REFS = [

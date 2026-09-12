@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 66 · pd.NamedAgg: naming multi-column aggregations without the MultiIndex dance</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 66 · ~20 min · 12 Sep 2026</p>
+<h1>pd.NamedAgg: naming multi-column aggregations without the MultiIndex dance</h1>
+<p class="byline">Lesson 65 closed out with no fresh teaser, so today started from another from-scratch scan of every lesson and the glossary against MISSION.md's goals. A clean gap surfaced: <code>pd.NamedAgg</code> — zero hits anywhere in 65 lessons or the glossary, despite two lessons standing right next to it. Lesson 4 taught named aggregation on one pre-selected column (<code>df.groupby("customer")["amount"].agg(total="sum", orders="count")</code>) — every named result pulls from the SAME source column. Lesson 61 taught multi-column <code>.agg({col: [funcs]})</code> on the whole groupby, but its output is an ugly MultiIndex that has to be flattened by hand (<code>"_".join(c) for c in result.columns</code>). <code>pd.NamedAgg</code> is the missing piece that names output columns directly while each one pulls from a <em>different</em> source column — no manual flattening required.</p>
+
+<h2>1 · The gap between Lesson 4 and Lesson 61</h2>
+<p>Lesson 4's named aggregation only works because the groupby is already narrowed to one column first:</p>
+<pre><code>df.groupby(<span class="str">"customer"</span>)[<span class="str">"amount"</span>].agg(total=<span class="str">"sum"</span>, orders=<span class="str">"count"</span>)
+<span class="cm">-- both "total" and "orders" read the SAME "amount" column</span></code></pre>
+<p>The moment two output columns need to read <em>different</em> source columns — total spend from <code>amount</code>, but order count from <code>order_id</code> — that single-column form has nowhere to say which column each name comes from. Calling <code>.agg()</code> on the whole groupby with a plain dict falls back to Lesson 61's shape: readable input, ugly MultiIndex output.</p>
+
+<h2>2 · <code>pd.NamedAgg(column=, aggfunc=)</code>: the explicit form</h2>
+<p><dfn data-en="a namedtuple-like helper, pd.NamedAgg(column=, aggfunc=), passed as a keyword value to .agg() on a whole (not pre-selected) groupby -- names the output column directly (the keyword) while choosing its own source column and function independently of every other named result in the same call" data-vn="giữ nguyên 'NamedAgg' — pd.NamedAgg(column=, aggfunc=), truyền làm giá trị keyword cho .agg() trên groupby CẢ bảng (chưa chọn cột); tên cột kết quả lấy từ keyword, còn column/aggfunc chọn nguồn và hàm tính RIÊNG cho từng kết quả">pd.NamedAgg</dfn> is a small named-tuple-like object built exactly for this: each keyword argument to <code>.agg()</code> becomes one output column name, and its value names both the source column and the function to run on it:</p>
+<pre><code>clean.groupby(<span class="str">"customer"</span>).agg(
+    total=pd.NamedAgg(column=<span class="str">"amount"</span>, aggfunc=<span class="str">"sum"</span>),
+    orders=pd.NamedAgg(column=<span class="str">"order_id"</span>, aggfunc=<span class="str">"count"</span>),
+    first_order=pd.NamedAgg(column=<span class="str">"order_date"</span>, aggfunc=<span class="str">"min"</span>),
+)
+<span class="cm">--           total  orders first_order
+-- customer
+-- An        162.0       2  2026-01-05
+-- Binh      215.5       2  2026-01-06</span></code></pre>
+<p>Confirmed directly (pandas 3.0.5) on the real <code>orders_raw.csv</code> clean 4-row slice: <code>result.columns.tolist()</code> is a plain flat <code>["total", "orders", "first_order"]</code> — no MultiIndex, no <code>"_".join()</code> step needed. Three different source columns, three different functions, one call, one pass over the data.</p>
+
+<div class="callout"><strong>Gotcha, confirmed directly: the keyword is <code>aggfunc=</code>, not <code>func=</code>.</strong> Many older tutorials and even casual pandas snippets write <code>pd.NamedAgg(column="amount", func="sum")</code> — that raises outright on this version: <code>TypeError: NamedAgg.__init__() missing 1 required positional argument: 'aggfunc'</code>. There is no silent fallback or deprecation warning; it simply refuses to construct. Worth typing <code>aggfunc=</code> from memory rather than guessing under interview pressure.</div>
+
+<h2>3 · The plain-tuple shorthand is identical, not a different feature</h2>
+<p><code>pd.NamedAgg(column="amount", aggfunc="sum")</code> and the bare tuple <code>("amount", "sum")</code> are the same thing under the hood — confirmed directly, both forms below produce byte-identical results (<code>.equals()</code> is <code>True</code>):</p>
+<pre><code>clean.groupby(<span class="str">"customer"</span>).agg(total=(<span class="str">"amount"</span>, <span class="str">"sum"</span>), orders=(<span class="str">"order_id"</span>, <span class="str">"count"</span>))
+<span class="cm">-- identical output to the pd.NamedAgg version above (minus first_order)</span></code></pre>
+<p>The tuple is shorter to type; <code>pd.NamedAgg</code> is worth naming out loud in an interview because it makes the column/function pairing self-documenting in code review, and because it also accepts a custom callable as <code>aggfunc=</code> (a lambda or named function), not just a built-in function name string — confirmed directly, <code>pd.NamedAgg(column="amount", aggfunc=lambda s: s.max() - s.min())</code> runs Lesson 61's "range" calculation in the <code>.agg()</code> form directly, no <code>groupby().apply()</code> needed for this simpler single-column case.</p>
+
+<div class="callout"><strong>Gotcha, confirmed directly: <code>pd.NamedAgg</code> only works on the WHOLE groupby, not an already column-selected one.</strong> Lesson 4's pattern — <code>df.groupby("customer")["amount"].agg(...)</code> — has already narrowed to one column, so passing a <code>NamedAgg</code> there raises <code>TypeError: func is expected but received NamedAgg in **kwargs</code>. <code>NamedAgg</code>'s whole reason to exist is naming a source column per result, which is meaningless once a single column is already selected — Lesson 4's plain <code>total="sum"</code> string form is still the right tool there, unchanged. Reach for <code>NamedAgg</code>/tuples specifically on the whole-groupby, multi-source-column case.</div>
+
+<h2>4 · SQL bridge</h2>
+<p>This is exactly <code>SELECT customer, SUM(amount) AS total, COUNT(order_id) AS orders, MIN(order_date) AS first_order FROM orders GROUP BY customer</code> — one <code>SELECT</code>, several aggregate expressions over different source columns, each given its own alias. <code>pd.NamedAgg</code>'s <code>column=</code>/<code>aggfunc=</code> pair is the pandas spelling of "which column, which aggregate, what alias" all in one place, the same three facts a <code>SELECT ... AS</code> line states.</p>
+
+<div class="interview">
+<p><strong>Q: "You need total spend, order count, and first order date per customer, in one call, with clean column names — how?"</strong> A strong answer, out loud: <em>"Call .agg() on the whole groupby object, not a pre-selected column, and pass one pd.NamedAgg per output name: column= for the source, aggfunc= for the function. Each named result can read a totally different column, and the output comes back with plain flat column names already — no MultiIndex to flatten by hand, which is what you'd get from a plain dict with list-valued functions. The tuple shorthand, (column, func), does the exact same thing with less typing; NamedAgg is worth naming because it also takes a custom callable, not just a built-in function name, and it only works once you're grouping the whole frame rather than a single already-selected column."</em> The signal: naming the exact keyword (aggfunc=, not func=), contrasting with Lesson 61's manual flatten, and knowing the whole-groupby precondition.</p>
+</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/66_namedagg.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/66_namedagg.py</code></pre>
+<p>Uses the same real <code>orders_raw.csv</code> fixture, cleaned the same way as recent lessons (An 120.0/01-05, An 42.0/01-10, Binh 35.5/01-06, Binh 180.0/01-09). Exercise 1 builds a three-column <code>pd.NamedAgg</code> result (total/orders/first_order) and confirms the columns come back flat, no MultiIndex. Exercise 2 confirms the tuple shorthand produces an identical result to Exercise 1's <code>NamedAgg</code> version. Exercise 3 uses a custom lambda as <code>aggfunc=</code> to compute the same per-customer range Lesson 61 needed <code>groupby().apply()</code> for. Exercise 4 reproduces the whole-groupby-only gotcha directly, confirming <code>NamedAgg</code> on an already column-selected groupby raises <code>TypeError</code>.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: pd.NamedAgg's second field is named aggfunc=, not func= -- passing func= raises TypeError: NamedAgg.__init__() missing 1 required positional argument: 'aggfunc', with no deprecation warning or silent fallback.">
+    <p class="stem">What keyword does <code>pd.NamedAgg</code> actually use for the aggregation function, on this pandas version?</p>
+    <button class="opt" data-ok>aggfunc=, not the func= many tutorials show</button>
+    <button class="opt">func=, exactly as most tutorials show today</button>
+    <button class="opt">callable=, a newer spelling replacing both terms</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: df.groupby(key).agg(total=pd.NamedAgg(...)) on the WHOLE groupby returns a plain flat Index of column names (no MultiIndex), unlike Lesson 61's dict-of-lists form (.agg({col: [funcs]})), which returns MultiIndex tuple columns needing a manual '_'.join() flatten.">
+    <p class="stem">Compared to Lesson 61's <code>.agg({col: [funcs]})</code> dict form, what do <code>pd.NamedAgg</code>'s result columns look like?</p>
+    <button class="opt" data-ok>Plain flat names already, no MultiIndex to flatten</button>
+    <button class="opt">The same MultiIndex tuples, just built differently here</button>
+    <button class="opt">Always numbered 0, 1, 2, ignoring names entirely</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: pd.NamedAgg only makes sense -- and only works -- on a whole (not pre-selected) groupby, since its entire point is naming a different source column= per result. Passing it to an already column-selected groupby, df.groupby(key)['col'].agg(name=pd.NamedAgg(...)), raises TypeError: func is expected but received NamedAgg in **kwargs.">
+    <p class="stem">Calling <code>df.groupby("customer")["amount"].agg(total=pd.NamedAgg(column="amount", aggfunc="sum"))</code> — what happens?</p>
+    <button class="opt" data-ok>TypeError -- NamedAgg needs a whole, not pre-selected, groupby</button>
+    <button class="opt">Runs fine, identical to Lesson 4's plain total="sum" form</button>
+    <button class="opt">Runs fine, but silently ignores the column= argument given</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the pandas User Guide's <a href="https://pandas.pydata.org/docs/user_guide/groupby.html#named-aggregation">"Named aggregation"</a> section of Group by: split-apply-combine (~10 min) — covers the exact <code>column=</code>/<code>aggfunc=</code> signature this lesson used, plus a note on ordered-dict column order in the output.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>pd.NamedAgg</code> is new today, placed right after Lesson 65's <code>where() / mask()</code> entry.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-66 comes back reported as shakiest, otherwise another fresh curriculum/glossary scan for the next genuinely-uncovered pattern — today's scan also turned up <code>df.eval()</code>/<code>pd.eval()</code>, <code>factorize()</code>, and <code>sample()</code> as zero-hit candidates, none picked yet.<br><br>
+💬 Anything unclear — the <code>aggfunc=</code> vs <code>func=</code> mix-up, the whole-groupby precondition, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

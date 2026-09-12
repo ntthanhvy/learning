@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 46 · f-strings and the format spec mini-language</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 46 · ~20 min · 12 Sep 2026</p>
+<h1>f-strings and the format spec mini-language</h1>
+<p class="byline">f-strings have appeared in nearly every lesson since Day 1 — Day 15's logging lesson, Day 21's SQL-injection demo, Day 30's <code>__repr__</code> — always as plain <code>f"{name}"</code> interpolation, never stopping to teach the part after the colon. Today closes that thread: the <dfn data-en="the mini-language written after a colon inside an f-string's or str.format()'s {} placeholder, controlling width, alignment, sign, thousands separators, decimal precision, and type presentation of the interpolated value" data-vn="giữ nguyên &quot;format spec&quot; — phần sau dấu : trong {} của f-string/str.format(), quy định độ rộng, canh lề, dấu, phân cách hàng nghìn, số chữ số thập phân, và cách hiển thị giá trị">format spec</dfn> that turns a bare value into an aligned, rounded, or padded one, plus the debug-only <code>!r</code>/<code>=</code> conversions.</p>
+
+<div class="callout"><strong>Bridge from SQL:</strong> this is the Python-side equivalent of <code>ROUND(price, 2)</code>, <code>LPAD()</code>, or <code>TO_CHAR(n, '999,999.99')</code> — formatting a value for display without changing the underlying number. SQL leaves formatting to the client or a dialect-specific function; Python puts it directly in the string literal, right where the value is interpolated.</div>
+
+<h2>1 · The placeholder has two independent parts</h2>
+<p>Every <code>{...}</code> inside an f-string is <code>{expression}</code>, optionally followed by <code>{expression:spec}</code>. The part before the colon is any Python expression — a name, a call, an attribute lookup. The part after the colon is the format spec, a small separate mini-language that never runs Python code; it only describes how to render whatever the expression already produced.</p>
+<pre><code>price = <span class="num">1234.5</span>
+<span class="kw">print</span>(f<span class="str">"{price}"</span>)        <span class="cm"># 1234.5 -- no spec, just str()</span>
+<span class="kw">print</span>(f<span class="str">"{price:.2f}"</span>)    <span class="cm"># 1234.50 -- .2f = fixed-point, 2 digits after the dot</span>
+<span class="kw">print</span>(f<span class="str">"{price:,.2f}"</span>)   <span class="cm"># 1,234.50 -- comma groups thousands, still 2 decimals</span></code></pre>
+<p>Verified live: <code>price</code> itself is untouched by any of these — it's still the float <code>1234.5</code> after all three lines. The spec only changes what gets rendered into the string, exactly the way <code>ROUND()</code> in a <code>SELECT</code> doesn't change the stored row.</p>
+
+<h2>2 · Width, alignment, and fill — building a table without pandas</h2>
+<p>A number or a minimum field width before the type letter pads the rendered value; <code>&lt;</code>, <code>&gt;</code>, and <code>^</code> force left/right/center alignment, and any single character placed right before them becomes the fill character instead of a space:</p>
+<pre><code>rows = [(<span class="str">"Hanoi"</span>, <span class="num">1200</span>), (<span class="str">"HCMC"</span>, <span class="num">980</span>)]
+<span class="kw">for</span> city, total <span class="kw">in</span> rows:
+    <span class="kw">print</span>(f<span class="str">"{city:&lt;10}{total:&gt;6,}"</span>)
+<span class="cm"># Hanoi      1,200
+# HCMC         980</span></code></pre>
+<p><code>{city:&lt;10}</code> left-aligns the string in a 10-character field; <code>{total:&gt;6,}</code> right-aligns the number in a 6-character field with a thousands separator. Strings default to left-aligned, numbers default to right-aligned — writing <code>&lt;</code>/<code>&gt;</code> explicitly is only needed to override that default or to pick a non-space fill, e.g. <code>{city:-&lt;10}</code> pads with dashes instead of spaces.</p>
+
+<h2>3 · <code>!r</code> and <code>=</code> — the two debug-only conversions</h2>
+<p>A <code>!</code> right before the colon (or with no colon at all) picks which built-in function converts the value to a string, before any spec is applied. <code>!r</code> is the one worth knowing cold: it calls <code>repr()</code> instead of the default <code>str()</code>, which is exactly the distinction Day 30's <code>__repr__</code> lesson relied on without spelling out the <code>!r</code> syntax itself:</p>
+<pre><code>name = <span class="str">"Hà Nội"</span>
+<span class="kw">print</span>(f<span class="str">"{name}"</span>)     <span class="cm"># Hà Nội       -- str(): human-facing</span>
+<span class="kw">print</span>(f<span class="str">"{name!r}"</span>)   <span class="cm"># 'Hà Nội'     -- repr(): quotes shown, unambiguous for logs/debugging</span>
+<span class="kw">print</span>(f<span class="str">"{name=}"</span>)    <span class="cm"># name='Hà Nội' -- the = specifier: prints "expr=" then repr() of its value</span></code></pre>
+<p>The trailing <code>=</code> (no space before it) is a debug-only shortcut added in Python 3.8: it expands to the literal source text of the expression, an <code>=</code>, and then that expression's value — by default formatted with <code>repr()</code>, same as <code>!r</code>. It exists specifically so a quick <code>print(f"{name=}")</code> during debugging shows both the variable's name and its value without typing either twice.</p>
+<div class="callout"><strong>Gotcha, confirmed live: <code>!r</code> and a numeric spec don't mix.</strong> <code>f"{price!r:.2f}"</code> raises <code>TypeError: unsupported format string passed to str.__format__</code> — once a value has been converted with <code>!r</code> (or <code>!s</code>/<code>!a</code>), what's left is already a plain string, and a numeric spec like <code>.2f</code> only applies to <code>__format__</code> on the original object, not to a string. Use one or the other on a given value, not both.</div>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> nothing pandas-specific — <code>df.style.format()</code> and <code>pd.options.display.float_format</code> solve the same "how should this render" problem for a whole DataFrame at once, using this exact same format-spec syntax underneath for individual cells. Not demonstrated; this is the only sentence in this lesson that names pandas.</div>
+
+<div class="interview">
+<p><strong>Q: "How would you print a number with two decimal places and a thousands separator?"</strong> A strong answer, out loud: <em>"An f-string with a format spec after the colon — <code>f'{value:,.2f}'</code>. The comma adds thousands separators, the <code>.2f</code> means fixed-point with two digits after the decimal. It only affects how the string renders; the original number is untouched. If I also needed to left- or right-align it in a fixed-width column, I'd add an alignment character and a width before that, like <code>f'{value:>10,.2f}'</code>."</em> The signal: knowing the spec is a small, composable mini-language — fill/align, then sign, then width, then grouping, then precision, then type — not a set of one-off tricks.</p>
+</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/46_fstrings_and_format_spec.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/46_fstrings_and_format_spec.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: formatting a price with two decimals and a thousands separator; right-aligning a number and left-aligning a label into fixed-width columns for a small report; using <code>!r</code> to show a string's quotes unambiguously; and using the <code>=</code> debug specifier to print an expression's source text alongside its value.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="The format spec after the colon only controls how a value renders into the string - it never mutates the original object. price stays the exact same float after f'{price:.2f}' runs as it was before, the same way SQL's ROUND() in a SELECT never changes the stored row.">
+    <p class="stem">After running <code>f"{price:.2f}"</code>, what has happened to <code>price</code> itself?</p>
+    <button class="opt" data-ok>nothing - price is still the same original float</button>
+    <button class="opt">price is now permanently rounded to two decimal places</button>
+    <button class="opt">price becomes a formatted string, fully replacing the float</button>
+  </div>
+  <div class="q" data-why="!r selects repr() instead of the default str() as the conversion applied before any spec runs - repr() shows an unambiguous, quoted form meant for debugging and logs, while str() shows the plain human-facing form with no quotes.">
+    <p class="stem">What does the <code>!r</code> conversion do differently from the default in an f-string?</p>
+    <button class="opt" data-ok>calls repr() instead of str(), showing a quoted, unambiguous form</button>
+    <button class="opt">rounds any numeric value to the nearest whole integer, always</button>
+    <button class="opt">reverses the interpolated string's whole set of characters, prints it</button>
+  </div>
+  <div class="q" data-why="Once !r (or !s/!a) converts a value, what remains is already a plain string - a numeric spec like .2f only applies to the original object's own __format__ method, not to a string, so combining them raises a TypeError rather than silently formatting anything.">
+    <p class="stem">What happens when <code>!r</code> and a numeric spec like <code>.2f</code> are combined on the same value?</p>
+    <button class="opt" data-ok>it raises a TypeError - a string can't take a spec</button>
+    <button class="opt">repr() runs first, then .2f rounds the resulting text string cleanly</button>
+    <button class="opt">the spec silently wins outright, and !r is simply ignored entirely</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the <a href="https://docs.python.org/3/library/string.html#format-specification-mini-language">Format Specification Mini-Language</a> reference (cited in <code>RESOURCES.md</code>'s Python Tutorial/Language Reference umbrella) — the exhaustive, authoritative table of every fill/align/sign/width/grouping/precision/type combination; the <a href="https://docs.python.org/3/tutorial/inputoutput.html#formatted-string-literals">Tutorial's f-string section</a> is the gentler on-ramp this lesson followed.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day46">glossary</a> under Day 46.<br>
+This closes the f-string-formatting loose thread running since Day 1 — every lesson used plain <code>f"{name}"</code> interpolation, but the mini-language after the colon had never gotten its own lesson. With Days 43-45 having covered three review sweeps in a row, today deliberately picked fresh, MISSION-aligned stdlib content instead of a fourth review day, per Day 45's own next-day note; no <code>lesson_completed</code>/quiz/kata signal has ever come back from the DB for this course, so review vs. new-material remains a judgment call each run makes from on-disk state alone.<br><br>
+💬 Anything unclear — a spec combination, alignment, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -136,6 +136,8 @@
       file: "lessons/0064-to-csv-and-to-parquet.html" },
     { n: 65, date: "2026-09-11", title: "Series.where() and .mask(): conditional replace that keeps the shape",
       file: "lessons/0065-where-and-mask.html" },
+    { n: 66, date: "2026-09-12", title: "pd.NamedAgg: naming multi-column aggregations without the MultiIndex dance",
+      file: "lessons/0066-namedagg.html" },
   ];
 
   const REFS = [

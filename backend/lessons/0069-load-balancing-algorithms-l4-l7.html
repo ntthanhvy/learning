@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 69 · Load balancing: the layer named since Lesson 8, taught for the first time</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 69 · ~20 min</p>
+<h1>Load balancing: the layer named since Lesson 8, taught for the first time</h1>
+<p class="byline">Lesson 8 put a load balancer in front of your instances on day one and moved straight to the state problem behind it. Lesson 47 had it pull an unready instance out of rotation. Lesson 66 named the API gateway as the layer that often sits right next to it. Sixty lessons later, the load balancer itself — how it actually picks an instance, and at which layer of the stack it's even operating — has never been the subject. Today it is.</p>
+
+<h2>1 · Two questions every load balancer answers differently</h2>
+<p>Every <a href="../lessons/0008-two-instances-break-your-server.html">load balancer</a> answers two separate questions, and mixing them up is the most common confusion about the term. First: <em>how much of the request does it look at</em> to make its routing decision? Second: <em>which instance does it pick</em>, given that it has to choose one? The first question is about layer; the second is about algorithm. They're independent — any layer can pair with any algorithm — but tutorials often blur them into one idea because a single product (like nginx or an AWS load balancer) usually ships one default combination.</p>
+
+<h2>2 · Layer: L4 sees a connection, L7 sees a request</h2>
+<p>A <dfn data-en="a load balancer that routes based only on IP address and TCP/UDP port, without parsing any application-layer content -- fast and protocol-agnostic, but blind to anything inside the connection, including which HTTP path was requested" data-vn="L4 load balancer (giữ nguyên) — cân bằng tải chỉ nhìn IP với port, không đọc nội dung request, nhanh nhưng không biết path/method">L4 load balancer</dfn> operates at the transport layer: it sees a TCP or UDP connection — source and destination IP, port — and forwards packets without ever opening them up to look inside. It doesn't know or care whether the payload is HTTP, gRPC, or raw binary; it's fast precisely because it isn't parsing any of that. A <dfn data-en="a load balancer that parses the application-layer request (HTTP method, path, headers, cookies) before routing, letting it make content-aware decisions -- e.g. sending /api/* to one fleet and /static/* to another -- at the cost of more per-request work than L4" data-vn="L7 load balancer (giữ nguyên) — cân bằng tải đọc luôn nội dung HTTP request (path, header, cookie) rồi mới route, làm được nhiều hơn L4 nhưng tốn công hơn">L7 load balancer</dfn> operates one layer up: it terminates the HTTP connection, actually reads the method, path, and headers, and can route on any of that — sending <code>/api/*</code> to one backend fleet and <code>/static/*</code> to a CDN-fronted one, or routing by a cookie for A/B testing. The trade-off is exactly what you'd expect from doing more work: L7 costs more CPU per request than L4's blind packet-forwarding, in exchange for decisions L4 structurally cannot make.</p>
+<p>Lesson 8's load balancer was always implicitly L7 — routing decisions there never depended on parsing HTTP content, so either layer would have worked, but a real deployment fronting a single HTTP API almost always reaches for L7 today (nginx, an ALB in HTTP mode, Envoy) specifically because content-based routing and Lesson 66's API-gateway-style path splitting need it. L4 shows up lower in the stack — in front of a raw TCP service, or as the layer distributing traffic <em>to</em> a fleet of L7 load balancers themselves.</p>
+
+<h2>3 · Algorithm: how the instance actually gets picked</h2>
+<p>Independent of layer, the load balancer needs a rule for which instance gets the next connection or request:</p>
+<table class="cmp">
+<thead><tr><th>Algorithm</th><th>Rule</th><th>Weak spot</th></tr></thead>
+<tbody>
+<tr><th>round robin</th><td>cycle through instances in fixed order</td><td>ignores that requests take very different amounts of work</td></tr>
+<tr><th>least connections</th><td>send to whichever instance has fewest active requests</td><td>needs the balancer to track live state per instance</td></tr>
+<tr><th>weighted (either above)</th><td>bias the pick toward instances flagged as more capable</td><td>weights are set by a human and go stale as capacity changes</td></tr>
+</tbody>
+</table>
+<p><dfn data-en="a load-balancing algorithm that sends each new request to the next instance in a fixed, repeating order, regardless of how busy any instance currently is" data-vn="round robin (giữ nguyên) — thuật toán chia request lần lượt theo thứ tự cố định, không quan tâm instance nào đang bận hơn">Round robin</dfn> is the simplest: instance 1, then 2, then 3, then back to 1, forever. It needs no memory of past decisions and is trivially fair by request count — but not by cost, since a request that takes 5ms and one that takes 5s count the same in the rotation, and an instance can end up starved of nothing while quietly buried in slow requests. <dfn data-en="a load-balancing algorithm that sends each new request to whichever instance currently has the fewest active connections, adapting to uneven request cost instead of assuming every request is equally cheap" data-vn="least connections (giữ nguyên) — thuật toán chọn instance đang có ít connection đang xử lý nhất, thích ứng khi request nặng nhẹ khác nhau">Least connections</dfn> fixes exactly that blind spot by tracking, in real time, how many requests each instance is currently handling and routing new ones to whichever has the fewest — better matching real load, at the cost of the balancer having to maintain that live count instead of just cycling a pointer. Either algorithm can be made <dfn data-en="a modifier on round robin or least connections that biases the routing decision toward instances flagged as having more capacity, e.g. a bigger machine getting twice the share of a smaller one" data-vn="weighted (giữ nguyên) — biến thể round robin/least-connections, ưu tiên gửi nhiều hơn cho instance mạnh hơn theo tỉ lệ đã set">weighted</dfn>, giving a beefier instance a larger share — useful on a genuinely heterogeneous fleet, but only as good as the weight a human set, and nothing updates that number automatically as real capacity shifts.</p>
+<div class="callout"><strong>Sticky sessions are a routing override, not a fourth algorithm.</strong> Lesson 8 already covered this from the state side: sticky sessions pin a client to one instance regardless of what round robin or least connections would otherwise pick, and Lesson 8's own conclusion stands unchanged here — it treats the symptom (which instance a client hits) rather than the disease (state that shouldn't have been instance-local). Nothing about today's algorithms changes that verdict.</div>
+
+<h2>4 · The one input health checks add to either algorithm</h2>
+<p>Neither round robin nor least connections is complete without an eligibility filter underneath: an instance that's down shouldn't receive a "fair share" of anything. This is exactly the <a href="../lessons/0047-health-checks-cascading-restarts.html">readiness check</a> from Lesson 47 doing double duty — the same endpoint a container orchestrator polls to decide whether to keep a process alive is also what the load balancer itself polls to decide whether an instance stays in the rotation pool at all. Round robin only cycles through instances currently passing that check; least connections only compares live counts among them. A load balancer with no health-check integration will happily keep sending traffic to an instance that's already failing every request — which is precisely the fleet-wide-restart scenario Lesson 47 walked through, just from the routing side of the same failure instead of the process-supervision side.</p>
+
+<div class="interview">
+<p><strong>Q: "Walk me through how you'd load balance a fleet of API instances."</strong> A strong answer, out loud: <em>"First I'd pick a layer: since it's a plain HTTP API, I'd use an L7 balancer — nginx, an ALB, or Envoy — so it can terminate the request and route on path or headers, not just L4's IP-and-port view. L4 only makes sense if I'm balancing raw TCP or fronting a fleet of L7 balancers themselves. For the algorithm, I'd start with least connections over plain round robin, since our requests vary a lot in cost and round robin would happily bury one instance in slow work while treating it as 'its fair share.' Either way, the balancer has to respect readiness checks — an instance failing its health check gets excluded from rotation entirely, otherwise it keeps receiving a normal share of traffic while already failing every request. And I'd avoid sticky sessions unless something forces my hand, since it just pins state that should have been externalized in the first place."</em> The signal: naming layer and algorithm as two separate decisions, and tying health checks and sticky sessions back to material already covered instead of treating load balancing as one undifferentiated black box.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="An L4 load balancer only sees IP address and port and never parses the application-layer payload, so it cannot route based on an HTTP path or header -- an L7 load balancer terminates the HTTP connection and reads that content before deciding.">
+    <p class="stem">Why can't an L4 load balancer route requests based on the HTTP path?</p>
+    <button class="opt" data-ok>it never parses any request's application-layer content at all</button>
+    <button class="opt">HTTP paths are always encrypted before reaching any balancer</button>
+    <button class="opt">every load balancer product legally must ignore all paths</button>
+    <button class="opt">TCP connections are never ever permitted to carry paths</button>
+  </div>
+  <div class="q" data-why="Round robin cycles through instances in fixed order regardless of how busy each one currently is, so a slow request and a fast request count identically -- an instance can end up quietly buried in slow work while still receiving its normal share of new traffic.">
+    <p class="stem">What is round robin's actual weak spot as a routing algorithm?</p>
+    <button class="opt" data-ok>it completely ignores how busy each instance currently is</button>
+    <button class="opt">it requires every instance to run identical CPU hardware</button>
+    <button class="opt">it can only ever route to exactly two instances</button>
+    <button class="opt">it permanently deletes an instance after ten requests total</button>
+  </div>
+  <div class="q" data-why="Least connections tracks how many requests each instance is currently handling and sends new ones to whichever has the fewest, adapting to requests that cost very different amounts of work -- the exact blind spot plain round robin has.">
+    <p class="stem">What does least connections track that plain round robin does not?</p>
+    <button class="opt" data-ok>how many requests each instance is handling right now</button>
+    <button class="opt">the exact programming language each instance was built with</button>
+    <button class="opt">the total lifetime uptime recorded for every single instance</button>
+    <button class="opt">the geographic distance between the client and each instance</button>
+  </div>
+  <div class="q" data-why="A load balancer with no health-check integration keeps sending a normal share of traffic to an instance that is already failing every request, since neither round robin nor least connections has any signal that the instance should be excluded from rotation.">
+    <p class="stem">What goes wrong if a load balancer ignores readiness/health checks?</p>
+    <button class="opt" data-ok>it keeps routing traffic to an already-failing instance still</button>
+    <button class="opt">round robin and least connections both stop working entirely</button>
+    <button class="opt">every request automatically gets a sticky session assigned now</button>
+    <button class="opt">the balancer permanently switches from L7 mode to L4</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://docs.nginx.com/nginx/admin-guide/load-balancer/http-load-balancer/">NGINX Docs — HTTP Load Balancing</a> (~15 min skim) — a widely-used L7 load balancer's own docs, showing round robin, least connections, and weighted variants as real, nameable config directives rather than abstract theory.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> open. Still no <code>lesson_completed</code>/quiz-outcome record exists for any lesson after 69 rounds — the honest next step remains a completion signal or a user-named track.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

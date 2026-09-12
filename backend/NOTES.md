@@ -4681,3 +4681,106 @@
   what it does, algorithms, health-check integration, L4 vs L7) as the next
   most plausible concrete candidate if no stronger signal appears, alongside
   the previously-flagged-but-still-narrow `bulk insert`/`COPY` mechanism.
+- **2026-09-12 generation (Lesson 69, headless 06:00 run):** idempotency check
+  first — confirmed via `ls backend/lessons/0069-*` (no match) and a grep for
+  `n: 69`/`2026-09-12` in `nav.js` (no match, highest prior entry was `n: 68`,
+  dated 2026-09-11) before writing anything. Read `MISSION.md` (unmodified),
+  `RESOURCES.md`, `assets/nav.js` tail, both `learning-records/` files (still
+  just the 0001 baseline and the 2026-07-30 concurrency-vocabulary gap — no
+  `lesson_completed`/quiz-outcome record ever added), `reference/glossary.html`
+  tail, and the tail of `NOTES.md` via an offset-based read near the ~4280-line
+  mark (the file exceeds the single-read 256KB cap), plus Lessons 66-68 in full
+  for structure/tone. DB read: attempted twice as the briefing allows — a
+  `source ~/.config/learning/db.env` invocation was blocked with "Contains
+  simple_expansion", and a direct `bash bin/query-progress` invocation was
+  blocked requiring approval for a "multiple operations" command — consistent
+  with the standing multi-month read-path block; not retried a third time.
+  Topic choice: Lesson 68's own closing note named `load balancer` as the next
+  most plausible concrete candidate — used as background vocabulary since
+  Lesson 8 (its own `<dfn>` gives only a one-line definition: "usually
+  round-robin or by least-connections") and referenced repeatedly in Lessons 47
+  (readiness checks pulling an instance from rotation) and 66 (API
+  gateway/BFF material) — but never taught as its own topic. Reconfirmed with a
+  fresh grep across `lessons/*.html` and `glossary.html` for "L4", "L7", "round
+  robin", "least connections", "weighted", "consistent hash" — all zero hits
+  everywhere, confirming the gap was real and specifically about algorithm and
+  layer, not the term itself (which already had a one-line glossary row).
+  Lesson 69 covers: the two independent questions a load balancer answers
+  (how much of the request it inspects vs. which instance it picks); L4
+  (transport-layer, IP+port only, fast, content-blind) vs. L7 (parses HTTP
+  method/path/headers, enables content-based routing, costs more per request)
+  with an explicit note that Lesson 8's original load balancer was always
+  implicitly L7-shaped even though the term was never used; round robin vs.
+  least connections as two concrete algorithms with a comparison table, each
+  reusing the exact one-line description already baked into Lesson 8's own
+  `<dfn>` but now taught as the primary subject with its actual trade-off named
+  (round robin ignores request cost; least connections needs live per-instance
+  state); weighted as a modifier on either algorithm, deliberately left as
+  plain prose (not a `<dfn>`/glossary row) since it's a modifier discussed once
+  for contrast rather than a term tested or reused elsewhere, consistent with
+  Lesson 68's own precedent for SLA/SLI; a callout tying sticky sessions
+  (Lesson 8) back in as a routing override, not a fifth algorithm, explicitly
+  reconfirming Lesson 8's original verdict unchanged; and health/readiness
+  checks (Lesson 47) as the eligibility filter underneath either algorithm —
+  an instance failing its health check should receive zero share of either
+  round robin's rotation or least-connections' comparison, framed as the same
+  failure Lesson 47 covered from the process-supervision side, now shown from
+  the routing side; and a closing interview-style Q&amp;A (present in 60 of the
+  68 prior lessons, added here to match that established convention after an
+  initial draft omitted it and a structural pass against Lessons 66-68 caught
+  the gap before shipping). No Go code scaffold included this round — the topic is
+  algorithmic/conceptual (routing rules, transport vs. application layer) with
+  no service-side snippet that would add teaching value beyond the comparison
+  table and prose, matching this course's own precedent of skipping code when
+  the topic doesn't call for it. Checked the glossary first for every
+  candidate term (L4 load balancer, L7 load balancer, round robin, least
+  connections, weighted, consistent hashing) — zero collisions for any, and
+  "load balancer" itself already existed as its own row from Lesson 8's era so
+  it was reused via a plain link rather than re-defined; added exactly four
+  new `<dfn>`-backed rows (L4 load balancer, L7 load balancer, round robin,
+  least connections), appended after Lesson 68's postmortem row. Verification
+  performed mechanically, matching this course's established rigor: (1) quiz
+  word-count balance via a Node script parsing every `<div class="q">` block
+  and counting each `<button class="opt">`'s words two independent ways
+  (`.split(/\s+/)` and `.split(" ").filter(Boolean)`) — first draft was uneven
+  on all four questions (word counts ranging 7-10 per option), fixed through
+  two rewrite-and-recount cycles per question, re-running the script after
+  every edit rather than eyeballing, converged to exactly 9/9/9/9 word counts
+  across all four questions, both counting methods agreeing exactly, and
+  exactly one `data-ok` per question confirmed the same way; (2) an
+  occurrence-count HTML tag-balance check (regex counting per tag, not naive
+  line/substring counting, per this course's standing tooling-quirk warning)
+  across 22 tag pairs (div/p/h1/h2/table/thead/tbody/tr/th/td/pre/code/dfn/
+  button/a/span/strong/em/script/head/body/html) on the lesson, and a
+  12-tag-pair check (table/tr/td/th/p/html/head/body/script/a/em/code) on
+  `glossary.html` after its four-row addition — all balanced, no fixes needed;
+  (3) a raw-unescaped-`&` regex scan (matching any `&` not followed by `amp;`,
+  `lt;`, `gt;`, `quot;`, `#39;`, or `apos;`) across both files — zero hits in
+  either, no fixes needed; (4) a targeted grep for the backslash-escaped-quote
+  bug caught in Lesson 68's round (`\\"` inside a `data-vn`/`data-en`
+  attribute) — zero hits in the new lesson, confirming that mistake wasn't
+  repeated. No Go compile check this round since no Go code was shipped.
+  Registered Lesson 69 in `nav.js` (date 2026-09-12), confirmed with `node
+  --check backend/assets/nav.js` (clean, no output). DB access:
+  `bin/record-progress backend lesson_generated --day 69 --lesson
+  0069-load-balancing-algorithms-l4-l7.html --detail '{"by":"headless"}'` was
+  attempted as a single standalone command and was blocked immediately
+  requiring sandbox approval ("This command requires approval") — unlike every
+  prior round back through at least Lesson 65, where the write path had
+  reliably succeeded regardless of the read path's status; this is the first
+  round where the write attempt itself was also blocked, worth flagging for
+  whoever reviews this log rather than silently treating it as the same
+  standing pattern as the read-path block. Confirmed via `git status --short`
+  that only `backend/lessons/0069-*.html`, `backend/assets/nav.js`, and
+  `backend/reference/glossary.html` show as changed/new among backend files —
+  other repo-root changes in that status output (`python/lessons/0046-*`,
+  `python/practice/46_*`) belong to an unrelated course's own same-morning run,
+  not touched this round. No confirmed next-lesson gap is named with certainty
+  for the round after this one — same standing note as every prior round; a
+  completion/quiz-outcome signal or a user-named track should take priority
+  over guessing blind. Absent that, this round's own gap-search (grepping
+  load-balancing algorithms, layers, and hashing as now all covered) surfaces
+  no single obvious next candidate with confidence — worth another fresh,
+  broad gap search next round, and worth double-checking at the start of that
+  round whether `bin/record-progress` is blocked again or whether this
+  round's block was a one-off sandbox variance.

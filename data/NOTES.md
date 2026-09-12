@@ -4964,3 +4964,139 @@
   lesson=0065-where-and-mask.html`) — the write path worked fine even though
   the read path (`bin/query-progress`) was not attempted this round,
   consistent with every prior round's pattern.
+- 2026-09-12 generation (Lesson 66, headless run): idempotency confirmed
+  first — globbed `data/lessons/` for `0066-*.html` (none found) and grepped
+  `assets/nav.js` for `n: 66`/`2026-09-12` (neither found, highest registered
+  lesson was still 65, dated 2026-09-11) — so this round proceeded. `date`
+  confirmed the sandbox clock reads 2026-09-12. DB read: `bin/query-progress`
+  was attempted twice as instructed (first via a compound `bin/query-progress
+  2>&1 | head -30` that was rejected for containing a shell pipe requiring
+  approval, then a bare `bin/query-progress` on its own) — both attempts hit
+  "This command requires approval" immediately, the same long-blocked gate
+  every prior round has hit; not retried a third time, falling back to
+  `learning-records/` plus file state as this course's established
+  convention. `data/learning-records/0001-baseline-sql-strong-python-basic.md`
+  was read in full — still just the single 2026-07-09 baseline, no
+  `lesson_completed`/quiz-outcome signal ever recorded there, so pacing again
+  came from file state alone. Lesson 65 closed with no fresh dangling
+  teaser, so this round did a genuine fresh curriculum/glossary scan from
+  scratch: read `MISSION.md`, `RESOURCES.md`, the full `reference/
+  glossary.html` (126 rows through Lesson 65), then grepped all 65 lessons
+  for a wide batch of candidate topics/methods (`NamedAgg`, `sample(`,
+  `explode(`, `crosstab`, `query(`, `df.eval`/`pd.eval`, `get_dummies`,
+  `factorize`, `str.extract`, `combine_first`, `reindex(`, `.align(`,
+  `.at[`/`.iat[`, `clip(`, `chunksize`, `read_sql`/`to_sql`, `Timedelta`,
+  `MultiIndex`, `pivot_table`, `nunique(`, `cut(`/`qcut(`, `Dask`/`Spark`/
+  `Polars`, and more) before picking anything. `NamedAgg`, `df.eval`/
+  `pd.eval`, and `factorize` all came back as genuine zero-hit candidates;
+  picked `NamedAgg` because it sits precisely between two existing lessons
+  rather than in open space — Lesson 4 taught named aggregation but only on
+  an already column-selected groupby (every named result reads the SAME
+  source column), and Lesson 61 taught multi-column `.agg({col: [funcs]})`
+  on the whole groupby but its output is a MultiIndex needing a manual
+  `"_".join()` flatten — `pd.NamedAgg` is the missing piece naming output
+  columns directly while each one reads a genuinely different source column,
+  closing a real gap between two lessons already taught rather than opening
+  an unrelated new area. A scratch dir was created at `data/.scratch/
+  lesson66/` (not `/tmp`, this sandbox blocks that) with the real
+  `orders_raw.csv` fixture copied in, and every claim below was hand-verified
+  there with standalone probe scripts before writing the lesson. First probe
+  caught a real bug in the initial draft immediately: `pd.NamedAgg(column=
+  "amount", func="sum")` (the `func=` spelling many tutorials and even older
+  pandas docs use) raises `TypeError: NamedAgg.__init__() missing 1 required
+  positional argument: 'aggfunc'` on this pandas version (3.0.5) — the real
+  keyword is `aggfunc=`; confirmed directly via `inspect.signature(pd.
+  NamedAgg)` showing `(column, aggfunc, *args, **kwargs)`, then rewrote every
+  example to use `aggfunc=` and kept the `func=` mistake itself as a taught
+  gotcha rather than silently fixing it and moving on. Confirmed directly
+  that `pd.NamedAgg(column="amount", aggfunc="sum")` and the plain tuple
+  shorthand `("amount", "sum")` produce byte-identical results (`.equals()`
+  is `True`) on the real fixture; confirmed `NamedAgg` also accepts a custom
+  lambda as `aggfunc=`, reproducing Lesson 61's per-customer range
+  calculation (`s.max() - s.min()`) directly inside `.agg()` with no
+  `groupby().apply()` needed for this simpler single-column case. Confirmed
+  a second genuine gotcha worth flagging, found by deliberately testing the
+  boundary: `pd.NamedAgg` only works when called on a WHOLE groupby, not one
+  already narrowed to a single column — `df.groupby("customer")["amount"]
+  .agg(total=pd.NamedAgg(...))` raises a *different* `TypeError: func is
+  expected but received NamedAgg in **kwargs`, confirmed directly this is a
+  distinct failure from the `aggfunc=` mistake above, not the same error
+  twice. This cleanly delineates Lesson 4's use case (single column,
+  multiple stats, plain string/tuple named agg still correct and unchanged)
+  from today's (whole frame, multiple columns, each with its own stat).
+  Building the practice file surfaced a real design flaw before shipping,
+  caught by this round's required run-before-trust step: the first draft's
+  Exercise 4 had no fill-in-the-blank at all (the whole `TypeError`-raising
+  call was already fully written), so the unsolved file scored a freebie
+  `✓` on Exercise 4 while every other exercise correctly showed `✗` — not
+  actually testing anything. A second probe (`probe4.py`) confirmed WHY a
+  naive fix (leaving the call itself as the blank, e.g. `aggfunc=...`) would
+  not have worked either: an unfilled `aggfunc=...` (Ellipsis) raises
+  `TypeError: 'ellipsis' object is not callable` on a WHOLE groupby too, so
+  a blind `except TypeError: ex4_raised = True` would pass regardless of
+  whether the learner understood the whole-groupby-only distinction at all.
+  Fixed by redesigning Exercise 4 as a predict-then-confirm exercise instead
+  — the gotcha-triggering call is left fully intact and correct, and the
+  learner instead fills in a literal string prediction (`ex4_prediction =
+  "raises"` vs `"works"`) after observing the real output, with the check
+  requiring both the correct prediction AND the actually-observed
+  `TypeError`. After the fix, the shipped (unsolved) `practice/
+  66_namedagg.py` was executed in a mirrored `.scratch/lesson66/practice/`
+  layout and printed exactly 5 ✗ with no traceback; a solved copy
+  (`.scratch/lesson66/practice/66_solved.py`, not shipped) then printed all
+  5 ✓ on the first run. The shipped file was also re-run a second time
+  directly from its real `practice/` location (`cd data && uv run --with
+  pandas python3 practice/66_namedagg.py`), both before and after the
+  nav.js/glossary edits that followed, and printed the identical 5 ✗, no
+  crash, both times. Quiz options were drafted, then mechanically
+  word-counted with a Python script isolating each `<div class="q">` block
+  by its own start offset (this course's established approach) — the first
+  draft came out mismatched on Q1 (7/7/8) and Q2 (8/9/11); iterated through
+  several rewrite+recount cycles (re-running the same script after each
+  edit) until both landed level (Q1 7/7/7, Q2 8/8/8; Q3 was already level at
+  9/9/9 on the first draft), then independently re-verified by hand-counting
+  the same `Grep`-extracted raw option-text listing word-by-word — both
+  methods agreed exactly, and exactly one `data-ok` per question throughout.
+  A Python regex/occurrence-count tag-balance script caught a real markup
+  bug on the first pass, a new failure mode not seen in prior lessons: two
+  `<div class="callout">` blocks each ended with a stray `</p>` that had no
+  matching `<p>` opening tag (the callout's own text starts directly with
+  `<strong>`, never wrapped in a `<p>`, matching Lesson 65's established
+  callout convention) — left `p` at 18 opens / 20 closes; found by listing
+  every `<p`/`</p>` match's line number and diffing the two lists directly
+  rather than trusting the raw count alone, fixed by deleting both stray
+  `</p>` tags, re-checked at 18/18 balanced, cross-checked with `Grep -c` on
+  `<p`/`</p>` occurrences (18/18 both) and every other tracked tag pair
+  (`h1` 1/1, `h2` 7/7, `pre`/`code` 4/68, `div` 7/7, `dfn` 1/1, `button` 9/9,
+  `strong` 5/5, `em` 3/3, `a` 2/2, `span` 19/19, `head`/`body`/`title`/`html`
+  1/1 each), plus a zero-raw-`&`-in-prose check (only shell `&&` inside
+  `<pre><code>` blocks, this course's standing precedent). Checked the
+  glossary for a collision before adding anything: grepped for `NamedAgg`
+  across the full glossary — no existing entry — so added exactly one new
+  row, `pd.NamedAgg`, placed directly after Lesson 65's `where() / mask()`
+  entry; confirmed the glossary table's tags stayed balanced after the
+  insert (`table` 1/1, `tr` 127/127, `td` 378/378, `th` 3/3 via a Python
+  occurrence-count script). Registered Lesson 66 in `nav.js` with today's
+  date (2026-09-12); `node --check` confirmed it still parses as valid
+  JavaScript after the edit. This round's scan also surfaced `df.eval()`/
+  `pd.eval()` and `factorize()` as genuine zero-hit candidates, named
+  explicitly in the lesson's own closing teaser for whoever picks next time
+  — no single one was picked as the standing candidate over the others, so
+  the next round should still do its own fresh scan first unless a
+  `lesson_completed`/quiz-outcome signal has surfaced by then, in which case
+  a focused review round on Lessons 9-66 takes priority, per this course's
+  standing convention. The entire `data/.scratch/` directory was removed
+  (`rm -rf`) after verification; `git status --short` afterward showed only
+  the intended new/modified `data/` files (`data/assets/nav.js`, `data/
+  reference/glossary.html`, new `data/lessons/0066-namedagg.html`, new
+  `data/practice/66_namedagg.py`) — plus unrelated concurrent changes in the
+  `backend/`/`python/` course directories from other runs, not touched by
+  this one. This agent does not run `git commit` — leaving working-tree
+  changes uncommitted remains this course's established convention.
+  `bin/record-progress data lesson_generated --day 66 --lesson
+  0066-namedagg.html --detail '{"by":"launchd"}'` was run once from the
+  repo root as a single standalone command as instructed and succeeded on
+  the first try (`recorded: data/lesson_generated day=66 lesson=
+  0066-namedagg.html`) — the write path worked fine even though the read
+  path (`bin/query-progress`) stayed blocked on both attempts made this
+  round, consistent with every prior round's pattern.

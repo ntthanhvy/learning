@@ -96,6 +96,8 @@
       file: "lessons/0044-review-retrieval-day-2.html" },
     { n: 45, date: "2026-09-11", title: "Review day 3: retrieval across six more lessons",
       file: "lessons/0045-review-retrieval-day-3.html" },
+    { n: 46, date: "2026-09-12", title: "f-strings and the format spec mini-language",
+      file: "lessons/0046-fstrings-and-format-spec.html" },
   ];
 
   const REFS = [

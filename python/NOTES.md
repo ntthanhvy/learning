@@ -5576,3 +5576,139 @@ fail *gracefully* so the learner sees which task failed.
   available — but per this run's own instruction, the next run should not
   spend an attempt re-checking that gate again without some indication it
   might have changed.
+- 2026-09-12 — **Day 46 generated: f-strings and the format spec
+  mini-language** (headless run) — genuinely new material, breaking the
+  three-review-day streak (Days 43-45) per Day 45's own next-day note, which
+  explicitly recommended leaning toward fresh content over a fourth review
+  sweep.
+  Read this run: `MISSION.md` (untouched, read-only) in full, `PLAN.md` in
+  full, `RESOURCES.md` in full, this file's tail (~5080-5578, the Day 43-45
+  entries in full), the sole
+  `learning-records/0001-baseline-reads-python-writes-little.md`,
+  `assets/nav.js`'s LESSONS array in full, and `lessons/0045-review-retrieval-day-3.html`
+  + `lessons/0042-walrus-operator.html` + `practice/42_walrus_operator.py`
+  for exact current structure/conventions. Confirmed `date` reports
+  2026-09-12 (Sat) before doing anything else.
+  Idempotency: `ls lessons/0046-*` and a grep across `python/` for
+  `0046`/`Day 46`/`day46`/`n: 46` all came back empty before writing
+  anything; proceeded as Day 46.
+  **DB access:** `bin/query-progress python` was not attempted this round —
+  per Day 44's explicit next-day instruction (reaffirmed by this run's own
+  task framing), the read-path gate has been retried on three consecutive
+  rounds (Days 42-44) with an identical "requires approval" result each
+  time, so daily re-attempts were told to stop absent new indication the
+  gate might have lifted. `bin/record-progress python lesson_generated
+  --day 46 --lesson 0046-fstrings-and-format-spec.html --detail
+  '{"by":"headless"}'` was attempted once and **succeeded**, printing
+  `recorded: python/lesson_generated day=46
+  lesson=0046-fstrings-and-format-spec.html` — the fourth consecutive
+  successful write (following Days 43-45). `python/learning-records/` still
+  holds only the Day 1 baseline; no completion/quiz/kata outcome has ever
+  been recorded for any day 2-45, so this round paced entirely from on-disk
+  state, same as every prior round since Day 42.
+  Topic selection: re-read `PLAN.md` in full — every named Phase 1, Phase
+  2a, and Phase 2b item is confirmed taught through Day 26, plus the long
+  Days 27-42 tail of further stdlib/object-model topics; no unnamed spine
+  item remains. Weighed Day 45's own next-day note, which named three
+  options: (a) a fourth review sweep (technically viable — Days 8, 10-11,
+  14-15, 17-18, 21-29, 31-32, 35, 37, 39-42 still uncovered), (b)
+  `RESOURCES.md`'s two open Gaps (Python interview-prep source; folding
+  FastAPI's bigger-applications doc into "Knowledge — backend"), or (c)
+  fresh content. Re-read the Gaps section again — both notes are still
+  meta/curation moves with thin new learner-facing payoff (assessed
+  identically by Days 44-45), and Day 45 explicitly flagged that three
+  review days in a row was already a real cost, recommending fresh content
+  next time. Grepped all 45 existing lesson files case-insensitively for
+  `f-string`/`f"`/`f'`/"format spec"/"Format Specification" to confirm no
+  dedicated lesson existed yet: f-strings appear in nearly every lesson
+  since Day 1 as plain `f"{name}"` interpolation (26 occurrences of `f"`/`f'`
+  across 16 files), but the format-spec mini-language after the colon
+  (`:.2f`, alignment/fill, `!r`/`!s`/`!a` conversions, the `=` debug
+  specifier) had never been taught as its own topic — confirmed via grep,
+  zero hits for "format spec" or "Format Specification" anywhere in
+  `lessons/*.html` before this round. This is a real, previously-unnamed gap
+  in a MISSION.md-adjacent stdlib/language corner (not on PLAN.md's explicit
+  spine, but squarely "the language itself" per MISSION.md's scope, and
+  useful for the interview-answer muscle Days 29-42 already build lesson by
+  lesson) — picked this over a fourth review day or the two curation-only
+  Gaps items.
+  No-pandas rule: grepped the lesson case-insensitively for
+  `pandas`/`numpy`/`pd\.`/`np\.` — exactly two hits, both a single heading
+  ("building a table without pandas") and the standing "Where pandas goes
+  from here" callout naming `df.style.format()`/`pd.options.display.float_format`
+  for one-line contrast only, explicitly marked "Not demonstrated" and "the
+  only sentence in this lesson that names pandas" — no worked pandas/NumPy
+  example anywhere, matching every prior lesson's convention. Grepped the
+  practice file the same way — zero hits.
+  Practice file `practice/46_fstrings_and_format_spec.py` (4 exercises: a
+  `format_price` function formatting a float with `:,.2f`; a `report_line`
+  function combining `:<10` and `:>6,` for a two-column report line; a
+  `debug_repr` function using `!r`; a `debug_equals` function using the `=`
+  debug specifier) needed no on-disk fixtures. Followed the standing
+  defensive pattern against the Ellipsis-at-module-level bug family:
+  grepped for `...` occurrences — all four live indented 4 spaces inside a
+  function body, none at column 0/module scope.
+  Verified in a scratch dir (`python/.scratch/lesson46/`, removed after use
+  along with a second scratch dir `python/.scratch_check/` holding two ad
+  hoc helper scripts used for the tag-balance/quiz-word-count checks below,
+  also removed after use — confirmed via `git status --short` that nothing
+  stray remained, only this run's four real intended `python/` files, plus
+  unrelated same-day `backend/`/`data/` changes from parallel runs): the
+  shipped (unsolved) copy, run via plain `uv run python3` (no `--with`
+  needed) directly from its real `practice/` path, printed all eight ✗ (four
+  exercises' stubs return `None`/no-ops) with no traceback on both the
+  first attempt and a re-run after a mid-drafting bugfix (see below); a
+  separately solved copy (every TODO filled in by hand, kept in the scratch
+  dir only, never shipped) printed all eight ✓ and the "All green" tally
+  after one bug was caught and fixed during solving.
+  **Bug caught during verification:** Exercise 2's expected string in both
+  the practice file's checks and the lesson's own worked example
+  (`f"{city:<10}{total:>6,}"` applied to `("Hanoi", 1200)`) was drafted by
+  hand as `"Hanoi          1,200"` (too many spaces) instead of the actual
+  `"Hanoi      1,200"` — caught only by actually running the format
+  expression via `uv run python3` rather than hand-counting padding, and
+  fixed in three places (the practice file's docstring comment, its
+  `results` check, and the lesson HTML's worked-example comment) before
+  shipping. Logged here per this course's standing practice of recording
+  drafting-time catches, not just final states.
+  Glossary: one new term, `format spec`, added under a new `Day 46` section
+  in `reference/glossary.html`. Confirmed the lesson's `data-en=` count (1)
+  matches the new glossary row count (1) exactly.
+  HTML tag-balance was checked with a stdlib `html.parser.HTMLParser`-based
+  stack checker and, independently, a regex-based open/close tag-count
+  comparator, against the lesson file — the first pass found a real
+  mismatch (a stray `</p>` inside the "Bridge from SQL" `<div
+  class="callout">`, which never opened a `<p>` — the div's own text was
+  written directly as the div's content, not wrapped in a `<p>`) and both
+  checks reported balanced only after removing the stray `</p>`; re-ran
+  both checks against `glossary.html` after its Day 46 addition too — all
+  checks reported fully balanced.
+  Quiz: 3 questions (whether a format spec mutates the original value;
+  what `!r` does differently from the default conversion; what happens
+  when `!r` and a numeric spec are combined). Word counts were checked with
+  a small regex-based Python script (splitting each `<button
+  class="opt">`'s stripped-tag text on whitespace) and cross-checked with a
+  second, independent `html.parser.HTMLParser`-based script per this
+  course's established two-method practice — the first draft mismatched on
+  all three questions (Q1 10/9/8, Q2 10/10/7, Q3 13/10/11) and took two to
+  three rounds of single-/few-word edits per question, re-running both
+  scripts after every edit rather than trusting hand counts, landing at
+  9/9/9, 10/10/10, and 11/11/11 respectively. Both scripts agreed at every
+  step and confirmed exactly one `data-ok` per question throughout.
+  Registered in `assets/nav.js` with `date: "2026-09-12"`; confirmed `node
+  --check assets/nav.js` reports no syntax errors after the edit.
+  **DB access:** covered above — `bin/record-progress` succeeded on the
+  first attempt; `bin/query-progress` was not attempted this round, per the
+  standing instruction to stop daily re-attempts absent new indication.
+  **Next-day note:** the f-string formatting thread is now fully closed
+  (interpolation since Day 1, the mini-language today). Remaining
+  candidates for Day 47: (a) a fourth review sweep (Days 8, 10-11, 14-15,
+  17-18, 21-29, 31-32, 35, 37, 39-42 still uncovered — now four full rounds
+  worth of material if wanted), (b) `RESOURCES.md`'s two open Gaps notes
+  (still open after three straight rounds deferring them — a genuine
+  candidate for Day 47 if no stronger signal appears), or (c) another
+  previously-unnamed stdlib/language gap in the same vein as today's (worth
+  a quick grep-based sweep of `RESOURCES.md`'s named modules against
+  `lessons/*.html` before defaulting to (a) or (b) again). A real learner
+  completion/quiz-outcome signal, if the DB read-path gate ever lifts,
+  should still take priority over all three the moment it's available.

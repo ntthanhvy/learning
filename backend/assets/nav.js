@@ -142,6 +142,8 @@
       file: "lessons/0067-job-status-resource-pattern.html" },
     { n: 68, date: "2026-09-11", title: "SLOs, error budgets, and postmortems: what you do with the signal once monitoring finds it",
       file: "lessons/0068-slo-error-budgets-and-postmortems.html" },
+    { n: 69, date: "2026-09-12", title: "Load balancing: the layer named since Lesson 8, taught for the first time",
+      file: "lessons/0069-load-balancing-algorithms-l4-l7.html" },
   ];
 
   const REFS = [

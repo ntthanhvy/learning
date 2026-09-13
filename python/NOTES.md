@@ -5712,3 +5712,185 @@ fail *gracefully* so the learner sees which task failed.
   `lessons/*.html` before defaulting to (a) or (b) again). A real learner
   completion/quiz-outcome signal, if the DB read-path gate ever lifts,
   should still take priority over all three the moment it's available.
+- 2026-09-13 — **Day 47 generated: structuring a spoken technical answer**
+  (headless/launchd run) — closes `RESOURCES.md`'s two-month-old
+  interview-prep Gap with genuinely new, learner-facing content, not a
+  curation-only move.
+  Ran `date` first: confirmed 2026-09-13 (Sun) before doing anything else.
+  Read this run: `MISSION.md` (untouched, read-only) in full, `PLAN.md` in
+  full, `RESOURCES.md` in full, this file's tail (~5300-5714, the Day
+  43-46 entries in full), the sole
+  `learning-records/0001-baseline-reads-python-writes-little.md`,
+  `assets/nav.js`'s full LESSONS array, `reference/glossary.html` in full
+  (all 46 prior Day sections, to check for term collisions before adding
+  any new row), and `lessons/0044-review-retrieval-day-2.html` +
+  `lessons/0045-review-retrieval-day-3.html` +
+  `lessons/0046-fstrings-and-format-spec.html` +
+  `practice/46_fstrings_and_format_spec.py` for exact current
+  structure/conventions. Also grepped every lesson for `class="interview"`
+  (23 hits since Day 29) and read Day 29's own closing note and Day
+  38/45's `interview` blocks directly, since today's topic builds on that
+  existing pattern rather than replacing it.
+  **Idempotency check:** `ls lessons/0047-*` and a grep across `python/`
+  for `0047`/`Day 47`/`day47`/`n: 47`/`2026-09-13` all came back empty
+  before writing anything; proceeded as Day 47.
+  Topic selection: Day 46's next-day note offered three options: (a) a
+  fourth review sweep (Days 8, 10-11, 14-15, 17-18, 21-29, 31-32, 35, 37,
+  39-42 still uncovered), (b) `RESOURCES.md`'s two open Gaps (Python
+  interview-prep source; folding FastAPI's bigger-applications doc into
+  "Knowledge — backend"), or (c) a fresh previously-unnamed stdlib gap
+  found via a grep sweep. Weighed all three: re-read `PLAN.md` against
+  `assets/nav.js` again — every named spine item through Day 26 plus the
+  Days 27-42 tail is taught, so (c) would need a genuinely new grep-found
+  gap; ran that sweep anyway (grepped `RESOURCES.md`'s named modules —
+  `itertools`, `collections`, `dataclasses`, `typing`, `pathlib`,
+  `datetime`, `logging`, `argparse`, `contextlib`, `enum`, `functools`,
+  `re`, FastAPI/pydantic/pytest/uv topics — against `lessons/*.html`) and
+  found no clean previously-unnamed gap the size of a lesson; everything
+  named in `RESOURCES.md` already has a dedicated lesson. That leaves (a)
+  vs (b). Day 46's own next-day note explicitly leaned toward (b),
+  specifically flagging the interview-prep Gap as "a genuine candidate for
+  Day 47 if no stronger signal appears" — and no stronger signal appeared:
+  `learning-records/` still holds only the Day 1 baseline, no
+  completion/quiz-outcome signal has ever landed. Chose (b), specifically
+  the interview-prep half (not the FastAPI bigger-applications half):
+  re-read Day 19's own lesson body and confirmed it already teaches
+  `APIRouter`/`include_router()`/`prefix=` directly from the
+  bigger-applications doc and cites it by name, and Day 26's capstone
+  cites it again — folding it into "Knowledge — backend" is a
+  citation/bookkeeping edit with near-zero new learner-facing payoff,
+  exactly as Days 44-45 assessed it twice already. The interview-prep item
+  was thinner ground *for a new mechanism* (Days 29-42 already model 14
+  worked interview answers inline via `class="interview"`), so today
+  avoided pure curation (just picking and citing a source) and instead
+  built a genuinely new lesson: the reusable four-part shape (claim /
+  mechanism / example / contrast) that those 14+ existing blocks already
+  follow but never had named or taught explicitly, plus finally naming and
+  citing a real source (Real Python's interview-questions guide) to close
+  the Gap on paper too. This reinforces the baseline record's core
+  untested claim (recall under pressure, not recognition) more directly
+  than a fourth review day would, without reteaching any stdlib mechanism
+  a second time — every worked example in the lesson cites back to an
+  already-taught day (1, 5, 20, 30/37, 38) rather than introducing new
+  syntax.
+  No web access was available this run (`WebFetch` required a permission
+  grant that wasn't present) to live-verify the exact current contents of
+  the Real Python URL; cited it based on established, confident prior
+  knowledge of a well-known, actively-maintained, genuinely free resource
+  matching the Gap's exact ask, rather than fabricating a URL — flagged
+  here for transparency. A future run with live web access should
+  spot-check the URL still resolves and the content still matches this
+  description.
+  No-pandas rule: grepped the lesson case-insensitively for
+  `pandas`/`numpy`/`pd\.`/`np\.` — exactly one hit, the standing "Where
+  pandas goes from here" callout stating the four-part shape applies
+  identically to a pandas/NumPy interview question but that building one
+  would be out of scope per `MISSION.md`, explicitly marked "Not
+  demonstrated." Grepped the practice file the same way — zero hits.
+  Practice file `practice/47_interview_answer_shape.py` (4 exercises: a
+  `mutable_default_argument_answer` function returning the four-part shape
+  for Day 1's mutable-default trap; a `generator_vs_list_answer` function
+  for Day 5's generator-vs-list memory question; a `property_answer`
+  function for Day 30/37's `@property`; a `blocking_call_in_async_answer`
+  function for Day 20's blocking-call-in-`async def` trap) needed no
+  on-disk fixtures. Each function returns a dict with exactly four keys
+  (`claim`/`mechanism`/`example`/`contrast`); the shared `is_well_formed()`
+  checker verifies structure only (all four keys present, each a distinct
+  sentence of at least 5 words, no two parts identical) since correctness
+  of a free-text claim can't be checked mechanically — this is a
+  deliberate, narrower verification contract than every prior practice
+  file's exact-value checks, called out explicitly in both the lesson body
+  and the practice file's own docstring so it isn't mistaken for a
+  correctness check. Followed the standing defensive pattern against the
+  Ellipsis-at-module-level bug family: grepped for `...` occurrences and
+  additionally wrote a small one-off script (run via `uv run python3`,
+  deleted after use) that walks the file line by line and confirms every
+  bare `...` line has indent > 0 — all four live indented 4 spaces inside
+  a function body (lines 25, 33, 41, 49), none at column 0/module scope.
+  Verified in a scratch dir (`python/.scratch/lesson47/`, removed
+  immediately after use, and a second helper dir `python/.scratch_check/`
+  holding the tag-balance and quiz-word-count scripts, also removed after
+  use — confirmed via `git status --short` at the end that nothing stray
+  remained, only this run's four real intended `python/` files plus
+  unrelated same-day `backend/`/`data/`/`rust/` changes from parallel
+  runs): the shipped (unsolved) copy, run via plain `uv run python3` (no
+  `--with` needed) directly from its real `practice/` path, printed all
+  four ✗ (every exercise's stub returns `None`) with no traceback; a
+  separately solved copy (every TODO filled in by hand with real four-part
+  answers, kept in the scratch dir only, never shipped) printed all four ✓
+  and the "All green" tally on the first attempt — no bugs caught during
+  solving this round.
+  Glossary: one new term, `answer shape`, added under a new `Day 47`
+  section in `reference/glossary.html`, after reading the full glossary
+  (all 46 prior sections) to confirm no collision existed. The lesson also
+  reuses Day 43's existing `retrieval practice` `<dfn data-en=` row rather
+  than adding a duplicate. Confirmed the lesson's total `data-en=` count
+  (2) matches one new glossary row + one legitimately-reused existing row,
+  not two new rows.
+  HTML tag-balance was checked with a stdlib `html.parser.HTMLParser`-based
+  stack checker and, independently, a regex-based open/close tag-count
+  comparator (both written as one throwaway script, deleted after use),
+  against both the lesson file and the full `glossary.html` (modified this
+  round) — all four checks (two tools × two files) reported fully balanced,
+  both before and after the quiz word-count edits below. Also grepped both
+  files for a raw unescaped `&` (`&(?!amp;|lt;|gt;|quot;|#39;|apos;)`) —
+  zero hits in either file.
+  Quiz: 3 questions (why the claim comes first in the four-part shape; the
+  specific job of the "contrast" step; why the shape itself isn't a
+  PLAN.md spine item). Word counts were checked with a small regex-based
+  Python script (splitting each `<button class="opt">`'s stripped-tag text
+  on whitespace) and cross-checked with a second, independent
+  `html.parser.HTMLParser`-based script per this course's established
+  two-method practice — the first draft mismatched on all three questions
+  (Q1 12/9/12, Q2 9/9/10, Q3 11/9/9) and took four to five rounds of
+  single-/few-word edits per question, re-running both scripts after every
+  edit rather than trusting hand counts, landing at 13/13/13, 9/9/9, and
+  11/11/11 respectively. Both scripts agreed at every intermediate step
+  and confirmed exactly one `data-ok` per question throughout.
+  `RESOURCES.md` updated: the interview-prep Gap line is now struck
+  through with a closure note citing Day 47 and the chosen source (Real
+  Python's interview-questions guide), added as a new bullet under
+  Practice; the FastAPI-bigger-applications Gap note was reworded (not
+  removed) to record that Day 19 already substantially covers it, per this
+  round's re-assessment, while leaving the line open pending an actual
+  dedicated project-layout reference.
+  Registered in `assets/nav.js` with `date: "2026-09-13"`; confirmed
+  `node --check assets/nav.js` reports no syntax errors after the edit.
+  **DB access:** `bin/query-progress` was not attempted this round, per
+  Day 44's explicit next-day instruction (reaffirmed by this run's own
+  task framing) to stop daily re-attempts absent new indication the gate
+  lifted — no such indication appeared. `bin/record-progress python
+  lesson_generated --day 47 --lesson 0047-interview-answer-shape.html
+  --detail '{"by":"launchd"}'` was attempted once, from the repo root, and
+  **succeeded**, printing `recorded: python/lesson_generated day=47
+  lesson=0047-interview-answer-shape.html` — the fifth consecutive
+  successful write (following Days 43-46). `python/learning-records/`
+  still holds only the Day 1 baseline; no completion/quiz/kata outcome has
+  ever been recorded for any day 2-46, so this round paced entirely from
+  on-disk state, same as every prior round since Day 42.
+  Final `git status --short` showed exactly four `python/` files changed
+  (`assets/nav.js`, `reference/glossary.html`, the new lesson, the new
+  practice file) plus one more (`RESOURCES.md`, from the Gaps-closure
+  edit) — six `python/` paths total — alongside unrelated concurrent
+  changes in `backend/`, `data/`, and `rust/` from parallel same-day runs,
+  confirmed out of scope and left untouched.
+  **Next-day note:** both original `RESOURCES.md` Gaps items are now
+  resolved or substantially addressed — interview-prep closed outright,
+  FastAPI bigger-applications reassessed as already covered. That leaves,
+  for Day 48: (a) a fourth review sweep (Days 8, 10-11, 14-15, 17-18,
+  21-29, 31-32, 35, 37, 39-42 still uncovered — unchanged from Day 46's
+  count), or (c)-style fresh content, since today's grep sweep of
+  `RESOURCES.md`'s named modules against `lessons/*.html` found no other
+  clean gap this round (everything named already has a dedicated lesson).
+  A natural next candidate in the same spirit as today: teach the *reverse*
+  skill explicitly — reading someone else's unfamiliar Python and
+  explaining it out loud (a "code walkthrough" answer shape), which is the
+  other half of technical-interview performance and hasn't been named as
+  its own lesson either; alternatively, revisit whether any of the 14+
+  `class="interview"` blocks since Day 29 would benefit from an explicit
+  cross-reference to today's four-part shape (a light-touch, low-priority
+  edit, not urgent). A real learner completion/quiz-outcome signal, if the
+  DB read-path gate ever lifts, should still take priority over both the
+  moment it's available; the read-path gate itself should still not be
+  re-attempted daily absent new indication, per Day 44's standing
+  instruction.

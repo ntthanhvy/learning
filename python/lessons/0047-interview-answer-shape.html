@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 47 · Structuring a spoken technical answer</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 47 · ~20 min · 13 Sep 2026</p>
+<h1>Structuring a spoken technical answer</h1>
+<p class="byline">Since Day 29, most lessons have ended with a <code>class="interview"</code> block modeling one strong spoken answer — but none of them ever taught <em>why</em> those answers are shaped the way they are, or gave a reusable template for building a new one on the spot. <code>RESOURCES.md</code> has flagged "no source chosen yet for Python-specific interview prep" as an open gap since this course's first week. Today closes it: a four-part <dfn data-en="a repeatable shape for answering a conceptual technical question out loud - state the claim first, name the mechanism that makes it true, give one concrete example, then contrast it with the thing an interviewer might confuse it for - so the answer is understandable even if cut off after the first sentence" data-vn="giữ nguyên &quot;answer shape&quot; — khuôn trả lời lặp lại được cho câu hỏi khái niệm: nói kết luận trước, giải thích cơ chế, cho ví dụ cụ thể, rồi so sánh với khái niệm hay bị nhầm lẫn — để câu trả lời vẫn hiểu được kể cả khi bị ngắt lời sau câu đầu">answer shape</dfn> for turning any of the 46 mechanisms already taught into a clear, structured spoken answer, plus a named source for further practice.</p>
+
+<div class="callout"><strong>Bridge from the baseline:</strong> the very first learning record on this course, from Day 1, named the core gap directly: "reads Python, writes little" — recognition without recall. An interview question is recall pressure with a stranger watching. The <code>class="interview"</code> blocks already in this course rehearse specific answers; today is the one level up — the reusable template that produces a new answer for a mechanism nobody wrote a script for in advance.</div>
+
+<h2>1 · Four parts, in a fixed order</h2>
+<p>A strong spoken technical answer is not a monologue built from nervous free-association — it is four short moves, always in the same order, each one sentence or less before moving to the next:</p>
+<ol>
+  <li><strong>Claim.</strong> The one-sentence answer to the actual question, stated first, before any explanation. If the interviewer stops listening after this sentence, they still have the right answer.</li>
+  <li><strong>Mechanism.</strong> The one sentence explaining <em>why</em> the claim is true — the rule, not just the fact. This is what separates "I've seen this work" from "I understand this."</li>
+  <li><strong>Example.</strong> One concrete line of code or a specific scenario already lived through in this course — not a hypothetical, a thing that was actually run and observed.</li>
+  <li><strong>Contrast.</strong> The thing a less careful answer would confuse this with, named explicitly. This is the signal that separates a memorized fact from a genuinely held mental model.</li>
+</ol>
+<p>Look back at Day 38's <code>class="interview"</code> block with this template in hand: <em>"When would you reach for <code>re</code> instead of plain string methods?"</em> — claim ("when the thing I'm matching is a shape rather than an exact value"), mechanism (fixed substrings don't need a pattern engine at all), example (<code>str.split()</code>/<code>.replace()</code>/<code>in</code> being faster and clearer for those cases), contrast (<code>fullmatch()</code> validating a whole field vs. <code>search()</code> finding a shape anywhere inside it). Every prior <code>interview</code> block already follows this shape; today just names it so it can be reused on a mechanism nobody scripted.</p>
+
+<h2>2 · Building one live, from a mechanism this course already taught</h2>
+<p>Take a question with no pre-written <code>interview</code> block anywhere in this course: <em>"Why does mutating a list passed into a function affect the caller's copy?"</em> (Day 1's material, no dedicated block exists for this exact phrasing). Building the four parts in order:</p>
+<pre><code><span class="cm"># Claim</span>
+<span class="str">"Because the function parameter and the caller's variable are two names bound to the same object."</span>
+
+<span class="cm"># Mechanism</span>
+<span class="str">"Python passes the object reference itself, not a copy, so any in-place mutation - append, item assignment - is visible through every name pointing at that same object."</span>
+
+<span class="cm"># Example</span>
+<span class="str">"def add_item(lst): lst.append(x) - calling it on my_list mutates my_list itself, because lst and my_list are aliases of the one list object."</span>
+
+<span class="cm"># Contrast</span>
+<span class="str">"Rebinding is different from mutating: lst = lst + [x] inside the function makes a new list and rebinds only the local name lst - the caller's my_list is untouched, because that's a rebind, not an in-place mutation."</span></code></pre>
+<p>Notice the claim alone already answers the question correctly and completely — everything after it adds confidence, not correctness. That ordering is deliberate: an interviewer who only remembers one sentence should remember the right one.</p>
+
+<h2>3 · Why this is a language skill, not a Python skill</h2>
+<p>Nothing about the four-part shape is Python-specific — it works for any conceptual question in any language, which is exactly why no dedicated "Python interview questions" mechanism belongs in <code>PLAN.md</code>'s spine. What <em>is</em> Python-specific is the raw material: the 46 mechanisms already taught (names vs. objects, comprehensions, generators, decorators, <code>async</code>/<code>await</code>, dependency injection) are the claims this shape gets applied to. Practicing the shape on old material is itself a form of <dfn data-en="a study technique where the learner produces an answer from memory before checking it, rather than re-reading the source material - it is a stronger driver of durable learning than re-reading, especially when spaced across separated topics rather than massed on one" data-vn="giữ nguyên &quot;retrieval practice&quot; — tự nhớ lại và viết ra câu trả lời trước khi xem lại tài liệu, hiệu quả hơn hẳn việc đọc lại; càng hiệu quả khi trộn nhiều chủ đề cũ thay vì ôn 1 chủ đề liền mạch">retrieval practice</dfn> (Days 43-45's technique), aimed specifically at the recall-under-pressure half of the baseline gap that quiz questions alone don't stress-test.</p>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> nothing pandas-specific — the four-part answer shape applies identically to a pandas or NumPy interview question, but building one here would mean writing a worked pandas example, which stays out of scope per <code>MISSION.md</code>. Not demonstrated.</div>
+
+<div class="interview">
+<p><strong>Q: "Walk me through how you'd prepare for a Python interview."</strong> A strong answer, out loud: <em>"I'd start from the mechanisms I actually understand rather than a list of trivia — for each one, I can state the one-sentence claim, the mechanism that makes it true, a concrete example I've actually run, and the thing it's commonly confused with. If I can't produce all four for something, that's a gap I close before the interview, not during it. For breadth beyond what I've already covered, I'd work through a structured question set like Real Python's interview guide rather than random blog posts, since it groups questions by the same fundamentals I've already built a mental model for."</em> The signal: preparation is structured retrieval, not last-minute reading.</p>
+</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/47_interview_answer_shape.py</code>. Four exercises, each asking for the four-part shape (claim / mechanism / example / contrast) applied to a mechanism from an earlier lesson — mutable default arguments (Day 1), generators vs. lists (Day 5), <code>@property</code> (Day 30/37), and blocking calls inside <code>async def</code> (Day 20). Each check only verifies structure (four non-empty parts, each a real sentence, no part just repeating the question) — it cannot judge correctness by itself, so re-read the cited lesson if a claim feels shaky.</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/47_interview_answer_shape.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="The claim goes first specifically so the answer is already correct and complete even if the interviewer only hears one sentence - everything after it (mechanism, example, contrast) adds confidence and depth, not correctness, which is why the order is fixed rather than a matter of style.">
+    <p class="stem">In the four-part answer shape, why does the claim always come first, before the mechanism?</p>
+    <button class="opt" data-ok>so the answer stays correct even if cut off after the first sentence</button>
+    <button class="opt">because interviewers always secretly prefer a much longer, slower opening line every time</button>
+    <button class="opt">there is no real reason at all, any of the four orders works</button>
+  </div>
+  <div class="q" data-why="The contrast step names the thing a less careful answer would confuse the claim with - it is specifically what separates a memorized fact from a genuinely held mental model, since confusing two related ideas is the most common way a rehearsed-sounding answer reveals it wasn't fully understood.">
+    <p class="stem">What is the specific job of the "contrast" step in the four-part shape?</p>
+    <button class="opt" data-ok>naming the concept this is commonly confused with, explicitly</button>
+    <button class="opt">repeating the claim once more using slightly different words</button>
+    <button class="opt">listing every single edge case the mechanism could hit</button>
+  </div>
+  <div class="q" data-why="The four-part shape itself is not Python-specific - it works for any conceptual technical question in any language. What is Python-specific is the raw material it gets applied to: the mechanisms already taught in this course, which is exactly why the shape itself was never added as a dedicated PLAN.md spine item.">
+    <p class="stem">Why doesn't the four-part answer shape itself belong on <code>PLAN.md</code>'s language spine?</p>
+    <button class="opt" data-ok>the shape isn't Python-specific, only the claims plugged into it are</button>
+    <button class="opt">PLAN.md considers all interview prep entirely out of scope, always, too</button>
+    <button class="opt">the shape only ever works correctly for certain asyncio-related questions specifically</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://realpython.com/python-interview-questions/">Real Python's Python Interview Questions and Answers guide</a> — closes the <code>RESOURCES.md</code> Gaps item open since Day 1; it groups questions by the same fundamentals this course already teaches (data model, comprehensions, generators, decorators), so it is now added to <code>RESOURCES.md</code>'s Practice section as the source to work through with the four-part shape from this lesson.</p>
+
+<p class="next">New term today is in the <a href="../reference/glossary.html#day47">glossary</a> under Day 47.<br>
+This closes one of <code>RESOURCES.md</code>'s two standing Gaps notes (Python interview-prep source) — the other (folding FastAPI's bigger-applications doc into "Knowledge — backend") stays open, since Day 19 already substantially teaches and cites that material directly, so folding it in would be a citation-only move with little learner-facing payoff. No new stdlib mechanism was taught today; every claim used as an example was already covered in an earlier lesson, cited by day number above.<br><br>
+💬 Anything unclear — the answer shape, or a specific mechanism's claim? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

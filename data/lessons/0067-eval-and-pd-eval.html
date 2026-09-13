@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 67 · df.eval() and pd.eval(): SELECT expressions, spelled as a string</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 67 · ~20 min · 13 Sep 2026</p>
+<h1>df.eval() and pd.eval(): SELECT expressions, spelled as a string</h1>
+<p class="byline">Lesson 66 named two zero-hit candidates for next time, <code>df.eval()</code>/<code>pd.eval()</code> and <code>factorize()</code>; a fresh grep of all 66 lessons and the glossary confirmed both are still genuinely uncovered. <code>eval()</code> won out because it sits right next to a lesson already taught: Lesson 22 gave <code>query()</code> a name as "<code>WHERE</code>, spelled as a string" — but a string-expression way to build a new <em>column</em>, the <code>SELECT amount * 2 AS doubled</code> half of the same idea, was never covered. <code>df.eval()</code> is exactly that missing half.</p>
+
+<h2>1 · query() filters rows; eval() computes columns</h2>
+<p>Lesson 22's <code>query()</code> and today's <dfn data-en="a DataFrame method that computes a new (or overwritten) column from a string expression referencing existing column names directly, like SELECT computed_expr AS new_col -- the assignment-shaped sibling of query()'s WHERE-shaped filtering" data-vn="giữ nguyên 'df.eval()' — tính cột mới (hoặc ghi đè cột cũ) từ 1 chuỗi biểu thức, được phép gọi thẳng tên cột như biến; giống SELECT bieu_thuc AS cot_moi, là 'nửa kia' của query() (query() lọc hàng kiểu WHERE, eval() tính cột kiểu SELECT)">df.eval()</dfn> are two ends of the same string-expression idea — one filters rows, the other computes a column:</p>
+<pre><code><span class="cm"># query() (Lesson 22) — WHERE, as a string</span>
+clean.query(<span class="str">"amount &gt; 100"</span>)
+
+<span class="cm"># eval() — SELECT computed_expr AS new_col, as a string</span>
+clean.eval(<span class="str">"half = amount / 2"</span>)
+<span class="cm">--    order_id customer  amount  order_date   half
+--  0        1       An   120.0  2026-01-05  60.00
+--  1        6       An    42.0  2026-01-10  21.00
+--  2        2     Binh    35.5  2026-01-06  17.75
+--  3        5     Binh   180.0  2026-01-09  90.00</span></code></pre>
+<p>Confirmed directly (pandas 3.0.5) on the real <code>orders_raw.csv</code> clean 4-row slice: <code>clean.eval("half = amount / 2")</code> returns a <strong>new</strong> DataFrame with <code>half</code> added — the original <code>clean</code> is untouched, exactly like <code>assign()</code>. Confirmed byte-identical too: <code>clean.eval("half = amount / 2").equals(clean.assign(half=clean["amount"] / 2))</code> is <code>True</code>. <code>eval()</code> isn't a new capability over <code>assign()</code> — it's a different, string-based spelling of the same computed-column idea, the same relationship <code>query()</code> has to a boolean mask.</p>
+
+<div class="callout"><strong>Gotcha, confirmed directly: <code>inplace=True</code> mutates and returns <code>None</code>, matching pandas' usual convention here (unlike Lesson 65's <code>where()</code>/<code>mask()</code> note on a different method).</strong> <code>clean.eval("half = amount / 2", inplace=True)</code> returns <code>None</code> and adds <code>half</code> directly onto <code>clean</code> itself. Forgetting <code>inplace=True</code> and just calling <code>clean.eval("half = amount / 2")</code> on its own line silently computes and discards the result — <code>clean</code> never gains the new column, no error either way.</div>
+
+<h2>2 · The real trap: pd.eval() and df.eval() resolve names completely differently</h2>
+<p>The top-level function <dfn data-en="the top-level pandas function, pd.eval(expr), evaluating a string expression against Python's own local/global variable scope -- with NO awareness of any DataFrame's column names unless the frame itself is named explicitly inside the string (clean.amount or clean['amount'])" data-vn="giữ nguyên 'pd.eval()' — hàm cấp cao nhất, tính 1 chuỗi biểu thức dựa vào biến Python local/global đang có, KHÔNG tự biết tên cột của DataFrame nào trừ khi gọi thẳng tên bảng trong chuỗi (vd clean.amount)">pd.eval()</dfn> and the DataFrame method <code>df.eval()</code> look like the same feature but resolve bare names in opposite ways — confirmed directly, this is the single easiest mistake to make:</p>
+<pre><code>threshold = <span class="num">100</span>
+
+<span class="cm"># df.eval() (method form): column names are ALREADY bare local variables</span>
+clean.eval(<span class="str">"amount &gt; @threshold"</span>)      <span class="cm"># needs @ for the Python variable
+-- [True, False, False, True]</span>
+clean.eval(<span class="str">"amount &gt; threshold"</span>)       <span class="cm"># WITHOUT @: raises UndefinedVariableError
+-- pandas looks for a column literally named "threshold", finds none</span>
+
+<span class="cm"># pd.eval() (top-level function): has NO column awareness at all</span>
+pd.eval(<span class="str">"amount &gt; threshold"</span>)          <span class="cm"># raises UndefinedVariableError too --
+-- "amount" isn't a column here, it's just an undefined Python name</span>
+pd.eval(<span class="str">"clean.amount &gt; threshold"</span>)   <span class="cm"># works -- clean and threshold are both
+-- [True, False, False, True]              plain Python names in scope, no @ needed</span></code></pre>
+<p>Confirmed directly (pandas 3.0.5): inside <code>df.eval()</code>, every column of the calling DataFrame is injected into the expression's namespace as if it were already a local variable — that's <code>eval()</code>'s whole point, matching <code>query()</code>'s same behavior. <code>@</code> is reserved for reaching past that column namespace into a genuine outside Python variable, identical to <code>query()</code>'s <code>@</code>. <code>pd.eval()</code>, called as a bare top-level function with no DataFrame receiver, has nothing to inject columns FROM — it just evaluates the string against whatever local/global Python names already exist, the same as writing the equivalent Python line directly. Naming a DataFrame's column there means spelling the DataFrame out, <code>clean.amount</code> or <code>clean["amount"]</code>, same as outside any string-expression method.</p>
+
+<div class="callout"><strong>Rule of thumb, worth saying out loud under interview pressure:</strong> reach for the <code>df.eval("col = ...")</code> method form almost always — it's column-aware and mid-chain-friendly, exactly like <code>query()</code>. <code>pd.eval()</code> the bare function is mainly for evaluating one expression against several separate DataFrames/Series by name in a single string, a rarer need; don't confuse its lack of column awareness for a bug.</div>
+
+<h2>3 · Multiple assignments in one call</h2>
+<p>A multi-line string computes several columns in a single <code>eval()</code> call, one assignment per line:</p>
+<pre><code>clean.eval(<span class="str">"""
+half = amount / 2
+doubled = amount * 2
+"""</span>)
+<span class="cm">-- adds BOTH half and doubled columns in one call</span></code></pre>
+<p>Confirmed directly: this is equivalent to two chained <code>.assign()</code> calls, or one <code>.assign(half=..., doubled=...)</code> — again, a different spelling of the same computed-column idea, not new behavior. Assigning back to an existing column name (<code>clean.eval("amount = amount * 2")</code>) overwrites that column in the result the same way a plain <code>assign()</code> would, and — confirmed directly — still leaves the original <code>clean</code> untouched without <code>inplace=True</code>.</p>
+
+<h2>4 · SQL bridge, and where performance fits</h2>
+<p><code>df.eval("half = amount / 2")</code> is <code>SELECT *, amount / 2 AS half FROM orders</code> — every existing column carried through, plus one computed expression given a name. The optional <code>engine="numexpr"</code> keyword (needs the separate <code>numexpr</code> package, not installed by default — confirmed directly, <code>engine="numexpr"</code> without it raises <code>ImportError</code>) can evaluate the string expression faster than plain vectorized pandas on a genuinely large DataFrame by avoiding intermediate array allocations, similar in spirit to a query planner choosing a faster execution path for the same logical expression. For the small/medium data this course's interview scope covers, that performance angle is a vocabulary point, not a daily tool — the readability win over <code>assign()</code> mid-chain is the real reason to reach for <code>eval()</code> day to day.</p>
+
+<div class="interview">
+<p><strong>Q: "What's the difference between pd.eval() and df.eval(), and when would each one raise on the exact same-looking expression string?"</strong> A strong answer, out loud: <em>"df.eval() is the one to reach for almost always — called as a DataFrame method, it computes a new or overwritten column from a string expression, the SELECT-shaped sibling of query()'s WHERE-shaped filtering from Lesson 22. Its column names are already injected as bare local variables in the expression, so amount alone works; an @ prefix is needed only to pull in a genuine outside Python variable, exactly like query()'s own @ rule. pd.eval(), the bare top-level function, has no DataFrame to inject columns from at all — it just evaluates the string against whatever Python locals and globals already exist, so a bare column name like amount raises UndefinedVariableError there; you'd have to spell out clean.amount instead. Both return a new object by default; inplace=True on df.eval() mutates and returns None instead."</em> The signal: naming the query()/eval() WHERE/SELECT pairing, the @ scoping rule shared with query(), and specifically that pd.eval() has zero column awareness on its own — that asymmetry is the part almost everyone gets wrong on first contact.</p>
+</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/67_eval_and_pd_eval.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/67_eval_and_pd_eval.py</code></pre>
+<p>Uses the same real <code>orders_raw.csv</code> fixture, cleaned the same way as recent lessons (An 120.0/01-05, An 42.0/01-10, Binh 35.5/01-06, Binh 180.0/01-09). Exercise 1 builds a computed column with <code>df.eval()</code> and confirms it matches an equivalent <code>assign()</code> exactly. Exercise 2 uses <code>inplace=True</code> and confirms it returns <code>None</code> while mutating the frame directly. Exercise 3 reproduces the <code>@threshold</code> requirement inside <code>df.eval()</code>, confirming the same expression WITHOUT <code>@</code> raises. Exercise 4 reproduces <code>pd.eval()</code>'s lack of column awareness directly, confirming a bare column name raises there even though the identical bare name works fine inside <code>df.eval()</code>. Exercise 5 computes two columns in one multi-line <code>eval()</code> call.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: query() (Lesson 22) filters rows via a WHERE-shaped string expression, returning a subset of existing rows. df.eval() computes a new or overwritten column via a SELECT-shaped string expression (col = expr), returning every original column plus the computed one -- the assignment-shaped sibling of query()'s filtering.">
+    <p class="stem">How does <code>df.eval("half = amount / 2")</code> relate to Lesson 22's <code>query()</code>?</p>
+    <button class="opt" data-ok>eval() computes a column; query() filters rows instead</button>
+    <button class="opt">they are exact aliases, both filtering rows identically</button>
+    <button class="opt">eval() fully replaced query() starting in pandas 3.0</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: df.eval() injects every column of the calling DataFrame into the expression namespace as bare local variables (its whole point, matching query()'s behavior) -- @ is reserved for reaching past that into a genuine outside Python variable. pd.eval(), the bare top-level function, has no DataFrame to inject columns from at all, so a bare column name raises UndefinedVariableError there regardless of @.">
+    <p class="stem">With <code>threshold = 100</code> already set, what does <code>clean.eval("amount &gt; threshold")</code> (no <code>@</code>) do?</p>
+    <button class="opt" data-ok>raises UndefinedVariableError -- pandas looks for a column named threshold</button>
+    <button class="opt">works fine, correctly treating threshold as an outside Python variable</button>
+    <button class="opt">silently returns an all-False result with no error at all</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: pd.eval(), called as a bare top-level function, has no DataFrame to inject columns from -- it evaluates the string purely against existing local/global Python names, identical to writing the equivalent Python expression directly. Naming a column there requires spelling out the DataFrame itself, e.g. clean.amount or clean['amount'], the same as anywhere outside a string-expression method.">
+    <p class="stem">Why does <code>pd.eval("amount &gt; threshold")</code> raise even when <code>clean.eval("amount &gt; @threshold")</code> works fine on the same data?</p>
+    <button class="opt" data-ok>pd.eval() has no column awareness at all -- it needs clean.amount spelled out</button>
+    <button class="opt">pd.eval() and df.eval() are identical; this must be a typo in the example</button>
+    <button class="opt">pd.eval() only ever accepts plain numeric literals, never any column reference at all</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the pandas User Guide's <a href="https://pandas.pydata.org/docs/user_guide/enhancingperf.html#expression-evaluation-via-eval">"Expression evaluation via eval()"</a> section of Enhancing performance (~10 min) — covers the <code>numexpr</code>/<code>python</code> engine choice this lesson only named, plus <code>pd.eval()</code>'s multi-DataFrame use case in full.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>df.eval() / pd.eval()</code> is new today, placed right after Lesson 66's <code>pd.NamedAgg</code> entry.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-67 comes back reported as shakiest, otherwise another fresh curriculum/glossary scan for the next genuinely-uncovered pattern — today's scan reconfirmed <code>factorize()</code> as still a clean zero-hit candidate, not picked yet.<br><br>
+💬 Anything unclear — the <code>pd.eval()</code>/<code>df.eval()</code> name-scoping asymmetry, the <code>@</code> rule shared with <code>query()</code>, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

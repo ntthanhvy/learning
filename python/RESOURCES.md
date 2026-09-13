@@ -43,6 +43,8 @@ authors for *why*. Cite inline; each lesson recommends exactly one primary sourc
   Free, mentored, idiom-focused exercises. Use for: retrieval practice after a lesson; its feedback targets idiomatic style, which suits this course's goal.
 - [Advent of Code](https://adventofcode.com/)
   Parsing-heavy puzzles solvable with the stdlib alone. Use for: realistic "messy input → structured records" drills, especially after Days 5–6.
+- [Real Python — Python Interview Questions and Answers](https://realpython.com/python-interview-questions/)
+  Groups questions by the same fundamentals this course already teaches (data model, comprehensions, generators, decorators). Use for: Day 47's four-part answer-shape drill and general interview prep — closes the interview-prep Gap noted below since Day 1.
 
 ## Wisdom — communities
 
@@ -53,5 +55,5 @@ authors for *why*. Cite inline; each lesson recommends exactly one primary sourc
 
 ## Gaps
 
-- No source chosen yet for **Python-specific interview prep** (the data/backend interview framing lives in `data/RESOURCES.md`) — find one when Phase 2b starts.
-- No canonical free text for FastAPI *architecture* beyond one file — the official docs stop at structure basics. Look for a well-regarded project-layout reference before the "structuring an app" lesson.
+- ~~No source chosen yet for **Python-specific interview prep**~~ — closed Day 47 (2026-09-13): Real Python's interview-questions guide, added to Practice above.
+- No canonical free text for FastAPI *architecture* beyond one file — the official docs stop at structure basics. Day 19 already teaches and cites `bigger-applications` directly for `APIRouter`/`include_router()`, so this is now closer to a citation nicety than an unmet learner need; still open if a dedicated project-layout reference surfaces.

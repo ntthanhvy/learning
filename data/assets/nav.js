@@ -138,6 +138,8 @@
       file: "lessons/0065-where-and-mask.html" },
     { n: 66, date: "2026-09-12", title: "pd.NamedAgg: naming multi-column aggregations without the MultiIndex dance",
       file: "lessons/0066-namedagg.html" },
+    { n: 67, date: "2026-09-13", title: "df.eval() and pd.eval(): SELECT expressions, spelled as a string",
+      file: "lessons/0067-eval-and-pd-eval.html" },
   ];
 
   const REFS = [

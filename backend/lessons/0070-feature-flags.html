@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 70 · Feature flags: separating "deployed" from "on"</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 70 · ~20 min</p>
+<h1>Feature flags: separating "deployed" from "on"</h1>
+<p class="byline">Lesson 19 walked through expand/deploy/backfill/contract because a migration and a rolling deploy can't be trusted to land at the same instant. Lesson 21 mentioned "a feature flag" once, in passing, next to a timeout value, without ever naming what it actually is. Lesson 68 built the error budget for deciding whether to ship something risky. None of that closes the actual gap: the one mechanism that makes "ship the code" and "turn the feature on" two separate, independently reversible decisions.</p>
+
+<h2>1 · The habit a frontend dev already half-has, named properly</h2>
+<p>A conditional render behind a boolean prop — <code>{isBetaUser &amp;&amp; &lt;NewCheckout /&gt;}</code> — is a feature flag's shape already sitting in frontend muscle memory. The backend version does the same job for a handler instead of a component: a runtime check that decides which code path actually runs, read from somewhere other than the code itself. A <dfn data-en="a runtime check, backed by config rather than a code change, that decides whether a given code path executes -- letting a team deploy new code disabled and enable it later without a second deploy, and disable it again the same way if it misbehaves" data-vn="feature flag (giữ nguyên) — cờ đọc lúc runtime, quyết định 1 đoạn code có chạy hay không, đổi được mà không cần deploy lại">feature flag</dfn> is exactly that check, formalized: a name, a boolean or a small set of values, read from config or a database row rather than hardcoded, gating whether new code executes for a given request.</p>
+<p>The point isn't the <code>if</code> statement — every team already has those. It's what the flag buys structurally: <strong>deploying code and releasing a feature become two different events.</strong> Lesson 19's whole four-step dance existed because a schema change and a rolling deploy can't be trusted to land at the same instant across every instance. A feature flag sidesteps that class of problem for application logic entirely — the new code can sit deployed, disabled, on every instance for days, and "turning it on" becomes a config change, not a deploy, with no rollout window where some instances have the behavior and others don't.</p>
+
+<h2>2 · What actually reads the flag, and where the value lives</h2>
+<pre><code><span class="cm">// A minimal flag check -- the interface every richer flag system</span>
+<span class="cm">// (LaunchDarkly, Unleash, a home-grown table) still boils down to.</span>
+<span class="kw">type</span> FlagSource <span class="kw">interface</span> {
+    <span class="cm">// Enabled reports whether flagName is on for this specific request's</span>
+    <span class="cm">// context (user id, cohort) -- not just globally on or off.</span>
+    Enabled(ctx context.Context, flagName <span class="ty">string</span>, userID <span class="ty">string</span>) <span class="ty">bool</span>
+}
+
+<span class="kw">func</span> checkoutHandler(w http.ResponseWriter, r *http.Request, flags FlagSource) {
+    userID := userIDFromContext(r.Context())
+    <span class="kw">if</span> flags.Enabled(r.Context(), <span class="st">"new-checkout-flow"</span>, userID) {
+        runNewCheckout(w, r)
+        <span class="kw">return</span>
+    }
+    runLegacyCheckout(w, r)
+}</code></pre>
+<p>Two design choices matter more than the syntax. First, <code>Enabled</code> takes a <code>userID</code>, not just a flag name — a real flag system decides per request, not once at process start, which is what makes a percentage rollout possible at all (below). Second, the flag's value lives outside the binary: a database row, a small managed service, a config file re-read on an interval — anything an operator can change without asking Go to recompile and every instance to restart. A constant declared in code that a deploy still has to ship is not a feature flag; it's just an early return with extra ceremony.</p>
+
+<h2>3 · Percentage rollout: the same idea Lesson 69 taught for traffic, aimed at risk instead</h2>
+<p>The plainest flag is all-or-nothing: every user gets the old path, or every user gets the new one. A <dfn data-en="a feature flag variant that enables a code path for only a configured percentage of requests or users, usually chosen by hashing a stable id so the same user consistently lands on the same side, growing the percentage over time as confidence increases" data-vn="percentage rollout / gradual rollout (giữ nguyên) — bật flag cho 1 tỉ lệ % user/request, tăng dần theo thời gian khi tự tin hơn">percentage rollout</dfn> sits between those two extremes: enable the new path for, say, 5% of users, watch error rates and latency, then widen to 25%, then 100% — the same instinct Lesson 69's weighted load balancing applied to traffic capacity, now applied to blast radius instead. The 5% isn't picked per request at random, either; it's usually a hash of a stable id (the user id) reduced mod 100, so the same user consistently lands on the same side of the flag across requests instead of flickering between old and new checkout mid-session.</p>
+<div class="callout"><strong>This is a deploy-time risk knob, not a runtime defense.</strong> Lesson 28's circuit breaker trips itself, automatically, the instant a dependency's failure count crosses a threshold — no human in the loop, reacting in milliseconds. A feature flag's rollout percentage only moves because an engineer watching a dashboard decided to move it. They can work together (a canary release watching error rates before widening a flag) but a flag is not a substitute for a breaker, and a breaker doesn't decouple deploy from release the way a flag does.</div>
+
+<h2>4 · The kill switch: a flag whose whole job is going backwards fast</h2>
+<p>Flip the percentage-rollout framing around and there's a second, distinct use: a <dfn data-en="a feature flag whose sole purpose is disabling a code path immediately in production, without a deploy or a rollback, when that path is discovered to be causing harm -- the fastest available response to an incident that a config change can reach" data-vn="kill switch (giữ nguyên) — 1 flag mà việc duy nhất là tắt ngay 1 đường code đang gây hại, không cần deploy/rollback">kill switch</dfn> is a flag whose sole purpose is turning something off immediately, in production, without a deploy. This is where Lesson 68's material comes back directly: an on-call engineer who's just paged for a bad deploy has, in order of speed, three options — revert the deploy (minutes, needs CI), roll back a migration (Lesson 19's contract step made this safe, but it's still not instant), or flip a kill switch (seconds, a config write). A kill switch is deliberately built and wired up <em>before</em> the incident it might be needed for, the same "written calmly in advance" spirit as Lesson 68's runbook — the worst time to add a kill switch to a risky code path is during the incident that just proved you needed one.</p>
+<table class="cmp">
+<thead><tr><th></th><th>Circuit breaker (Lesson 28)</th><th>Kill switch (today)</th></tr></thead>
+<tbody>
+<tr><th>Who flips it</th><td>the code itself, automatically</td><td>a human, deliberately</td></tr>
+<tr><th>Trigger</th><td>a counted run of consecutive failures</td><td>a judgment call during an incident</td></tr>
+<tr><th>Scope</th><td>one dependency's outbound calls</td><td>any code path a team chose to wire one to</td></tr>
+<tr><th>Resets</th><td>on its own, via the half-open probe</td><td>only when a human flips it back</td></tr>
+</tbody>
+</table>
+
+<h2>5 · Flag debt: the cost that shows up in review, not at runtime</h2>
+<p>A flag that's been at 100% for two months and never removed is a specific, recognizable form of decay: the <code>if</code> branch is still there, the old path is still there, and every future reader has to hold both in their head to know which one actually runs — a permanent scar in the code, similar in shape to Lesson 34's soft-delete row that never gets purged, except here it's a live branch, not a dead row. This is exactly the kind of thing Lesson 14's PR-review lens should catch and usually doesn't, because "add a flag" reads as a small, safe diff and "the flag from three months ago is still here" is nobody's diff at all — it's not new work, so it never shows up for review on its own. A team that treats flag removal as a real, trackable follow-up (not "someday") is the difference between flags as a temporary safety mechanism and flags as permanent, silently multiplying branches no test suite fully covers.</p>
+
+<div class="interview">
+<p><strong>Q: "How would you ship a risky change to a high-traffic checkout flow?"</strong> A strong answer, out loud: <em>"I'd put the new logic behind a feature flag rather than shipping it live on merge — that separates deploying the code from releasing the feature, so the rollout isn't tied to a deploy window at all. I'd start it at a small percentage, hashed on user id so the same user doesn't flip back and forth between old and new mid-session, and widen it as error rates and latency stay clean. I'd also wire up a kill switch on the new path specifically, before enabling it, not after — if something goes wrong at 2am, flipping a flag is a config write that takes seconds, versus reverting a deploy or rolling back a migration, which both take longer. And I'd put a concrete date or trigger on removing the flag once it's fully rolled out, since an old flag nobody removes is just permanent branching complexity with no test coverage guarantee."</em> The signal: naming deploy/release decoupling as the actual point, distinguishing a kill switch's human trigger from a circuit breaker's automatic one, and treating flag removal as real, trackable work instead of an afterthought.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A feature flag lets new code sit deployed but disabled across every instance, so enabling it later is a config change rather than a second deploy -- this is what separates 'the code shipped' from 'the feature is live' into two independently reversible events.">
+    <p class="stem">What does a feature flag actually decouple from what?</p>
+    <button class="opt" data-ok>deploying the new code from actually releasing that feature</button>
+    <button class="opt">database schemas from the whole application's own Go version</button>
+    <button class="opt">TCP connections from the HTTP requests carried inside them</button>
+    <button class="opt">unit tests from the whole integration test suite entirely</button>
+  </div>
+  <div class="q" data-why="A percentage rollout usually hashes a stable id like the user id and reduces it mod 100, so the same user consistently lands on the same side of the flag across requests, instead of randomly flickering between the old and new code path mid-session.">
+    <p class="stem">Why does a percentage rollout typically hash a stable user id rather than roll random odds per request?</p>
+    <button class="opt" data-ok>so a given user stays on one consistent path</button>
+    <button class="opt">because Go's random number generator cannot be seeded safely</button>
+    <button class="opt">HTTP requests are never permitted to carry an identifier</button>
+    <button class="opt">hashing is legally required for all production rollout logic</button>
+  </div>
+  <div class="q" data-why="A circuit breaker trips itself automatically once a counted run of consecutive failures crosses its threshold, with no human involved -- a kill switch is flipped deliberately by a person during an incident, which is the core distinction between the two mechanisms.">
+    <p class="stem">What is the key difference between a circuit breaker and a kill switch?</p>
+    <button class="opt" data-ok>one trips itself automatically, the other needs a person</button>
+    <button class="opt">a kill switch only exists inside frontend JavaScript code</button>
+    <button class="opt">circuit breakers can only ever protect raw database connections</button>
+    <button class="opt">kill switches always require a full production code redeploy</button>
+  </div>
+  <div class="q" data-why="A feature flag left at 100% and never removed leaves the old code path, the new code path, and the branch between them all still in the codebase, forcing every future reader to hold both possibilities in mind even though only one of them ever actually runs anymore.">
+    <p class="stem">Why is an old, fully-rolled-out feature flag that's never removed a real cost?</p>
+    <button class="opt" data-ok>readers must hold dead and live paths in mind</button>
+    <button class="opt">Postgres charges extra storage for each unused boolean column</button>
+    <button class="opt">Go refuses outright to compile programs containing any if</button>
+    <button class="opt">old flags automatically disable a whole service's health checks</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://martinfowler.com/articles/feature-toggles.html">Pete Hodgson (martinfowler.com) — Feature Toggles (aka Feature Flags)</a> (~20 min read) — the canonical, widely-cited treatment of flag categories (release, ops, experiment, permission) and the flag-debt problem this lesson closed on; not yet one of RESOURCES.md's named sources, worth adding given how directly it maps onto today's material.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> open. Still no <code>lesson_completed</code>/quiz-outcome record exists for any lesson after 70 rounds — the honest next step remains a completion signal or a user-named track.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

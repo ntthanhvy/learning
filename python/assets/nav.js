@@ -98,6 +98,8 @@
       file: "lessons/0045-review-retrieval-day-3.html" },
     { n: 46, date: "2026-09-12", title: "f-strings and the format spec mini-language",
       file: "lessons/0046-fstrings-and-format-spec.html" },
+    { n: 47, date: "2026-09-13", title: "Structuring a spoken technical answer",
+      file: "lessons/0047-interview-answer-shape.html" },
   ];
 
   const REFS = [

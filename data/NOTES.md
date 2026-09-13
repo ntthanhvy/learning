@@ -5100,3 +5100,164 @@
   0066-namedagg.html`) — the write path worked fine even though the read
   path (`bin/query-progress`) stayed blocked on both attempts made this
   round, consistent with every prior round's pattern.
+- 2026-09-13 generation (Lesson 67, headless run): idempotency confirmed
+  first — globbed `data/lessons/` for `0067-*.html` (none found) and
+  grepped `assets/nav.js` for `n: 67`/`2026-09-13` (neither found, highest
+  registered lesson was still 66, dated 2026-09-12) — so this round
+  proceeded. `date` confirmed the sandbox clock reads 2026-09-13. Per this
+  round's instructions, the long-blocked direct `psql "$LEARNING_DB_URL"`
+  read path was not attempted at all (rejected by sandbox static analysis
+  on "Contains simple_expansion" every day since mid-July per every prior
+  entry; not worth another attempt). `data/learning-records/0001-baseline-
+  sql-strong-python-basic.md` was read in full — still only the single
+  2026-07-09 baseline, no `lesson_completed`/quiz-outcome signal ever
+  recorded there, so pacing again came from file state alone, per this
+  course's standing convention. `MISSION.md`, `RESOURCES.md`, the full
+  `assets/nav.js`, and Lessons 64-66 plus their matching practice files
+  were read in full for structure/tone/rigor before writing anything new.
+  Lesson 66 closed out by naming `df.eval()`/`pd.eval()`, `factorize()`,
+  and `sample()` as zero-hit candidates with none picked yet, so this round
+  re-confirmed each with a fresh grep of all 66 lessons and the full
+  glossary rather than trusting the prior day's note blindly: `factorize`
+  and `.eval(`/`pd.eval`/`df.eval` both came back with zero real hits (the
+  only match for either was Lesson 66's own closing-teaser prose mentioning
+  them by name, not a taught use); `sample(` came back with several file
+  hits but every one was a false-positive substring match on `re` +
+  `sample()` (Lesson 38/40/59/66) or the glossary's own `resample()` entry
+  — `.sample()` the method has in fact never been taught either, but is a
+  weaker pick than the other two since it wasn't named as a candidate and a
+  substring-based re-scan needs more care before trusting it as clean.
+  Picked `df.eval()`/`pd.eval()` over `factorize()` because it sits
+  directly next to a lesson already taught, the same "closes a gap between
+  two lessons" bar Lesson 66 used to pick `NamedAgg`: Lesson 22 named
+  `query()` as "`WHERE`, spelled as a string" but never covered the
+  SELECT-shaped sibling — a string-expression way to compute a new column
+  — which is exactly what `df.eval()` is; `factorize()` is a NumPy-flavored
+  encoding utility sitting near Lesson 25 (category dtype) and Lesson 34
+  (`get_dummies()`) but with a less clean single-lesson adjacency. A
+  scratch dir was created at `data/.scratch/lesson67/` (not `/tmp`, this
+  sandbox blocks that) with the real `orders_raw.csv` fixture copied in,
+  and pandas 3.0.5 was reconfirmed (`uv run --with pandas python3 -c
+  "import pandas; print(pandas.__version__)"`), matching every recent
+  lesson. Every claim in the lesson was hand-verified there with standalone
+  probe scripts before writing: confirmed `df.eval("half = amount / 2")`
+  returns a new DataFrame byte-identical to the equivalent `assign()` call
+  (`.equals()` is `True`), leaving the original untouched; confirmed
+  `inplace=True` mutates the caller directly and returns `None`, the usual
+  pandas convention (explicitly contrasted against Lesson 65's `where()`/
+  `mask()`, which does NOT follow that convention on this pandas version —
+  noted in-lesson as a "matching pandas' usual convention here" aside so
+  the two lessons don't contradict each other in the learner's memory).
+  The central, non-obvious finding this round, confirmed directly through
+  three escalating probes: `df.eval()` (the method) injects every column
+  as a bare local name into the expression and needs `@` only for a
+  genuine outside Python variable (`clean.eval("amount > @threshold")`
+  works, `clean.eval("amount > threshold")` without `@` raises
+  `UndefinedVariableError`, exactly mirroring `query()`'s own `@` rule from
+  Lesson 22) — but `pd.eval()` (the bare top-level function, no DataFrame
+  receiver) has ZERO column awareness of its own: `pd.eval("amount >
+  threshold")` also raises `UndefinedVariableError` UNLESS some local/
+  global Python variable literally named `amount` already happens to exist
+  in scope, in which case it silently evaluates against THAT variable
+  instead — confirmed directly by deliberately re-running the probe both
+  with and without a stray local named `amount` in scope, watching the
+  same-looking call silently change meaning entirely depending on
+  unrelated code earlier in the same script. The correct top-level form,
+  `pd.eval("clean.amount > threshold")`, was confirmed to require spelling
+  the DataFrame out explicitly, same as anywhere outside a string-expression
+  method. This finding directly shaped the practice file (see below) once
+  it surfaced there too. Also confirmed directly: a multi-line `eval()`
+  string computes several columns in one call (`half`/`doubled` both
+  added), equivalent to a multi-argument `assign()`; overwriting an
+  existing column name works the same way and still doesn't mutate the
+  original without `inplace=True`; `engine="numexpr"` raises `ImportError`
+  on this sandbox since the optional `numexpr` package isn't installed —
+  kept in the lesson as a one-sentence vocabulary/performance aside per
+  MISSION.md's interview-vocabulary scope, not built out into a worked
+  example. Building the practice file surfaced the exact same scoping trap
+  as a real, shipped-file-breaking bug, caught only because the required
+  run-then-trust step runs the SOLVED file too, not just the unsolved one:
+  the shared fixture setup (copied from Lessons 65/66's pattern) defines a
+  module-level variable literally named `amount` before building `clean`;
+  Exercise 4 needs `pd.eval("amount > threshold")` to raise to prove
+  `pd.eval()`'s lack of column awareness, but with that stray `amount`
+  variable sitting in scope it silently evaluated against the WRONG object
+  (the raw uncleaned 6-row Series, not the clean 4-row column) and never
+  raised at all — the unsolved file's Exercise 4 happened to still show
+  `✗` (comparing to the wrong expected list), but the solved file printed
+  a real `✗ Exercise 4` where every other exercise showed `✓`, exposing
+  that the exercise tested nothing. Fixed by renaming the fixture's
+  intermediate variables to `amount_col`/`order_date_col` (documented
+  in-file with a comment explaining exactly why, so a learner rereading it
+  later understands the naming choice is load-bearing, not arbitrary) so
+  no bare `amount`/`order_date` local exists anywhere in the script's
+  scope by the time Exercise 4 runs — confirmed directly this makes
+  `pd.eval("amount > threshold")` raise for the intended reason (no name
+  resolves to anything at all) rather than accidentally succeeding against
+  an unrelated variable. A separate, smaller slip caught in the same
+  verification pass: an early edit to insert this fixture-rename comment
+  accidentally dropped the `df = pd.read_csv(...)` line entirely, which
+  surfaced immediately and unambiguously as a `NameError: name 'df' is not
+  defined` traceback (not a silent `✗`) the moment the file was re-run —
+  fixed by restoring the line, re-run confirmed clean. After both fixes,
+  the shipped (unsolved) `practice/67_eval_and_pd_eval.py` was executed in
+  a mirrored `.scratch/lesson67/practice/` layout and printed exactly 5 ✗
+  with no traceback; a solved copy (`.scratch/lesson67/practice/
+  67_solved.py`, not shipped, regenerated fresh from the fixed shipped file
+  rather than hand-patching the earlier broken copy) then printed all 5 ✓
+  on the first run after the fixes. The shipped file was also re-run a
+  second time directly from its real `practice/` location (`cd data &&
+  uv run --with pandas python3 practice/67_eval_and_pd_eval.py`), both
+  before and after the nav.js/glossary edits that followed, and printed
+  the identical 5 ✗, no crash, both times. Quiz options were drafted, then
+  mechanically word-counted with a Python script isolating each
+  `<div class="q">` block by its own start offset (this course's
+  established approach) — the first draft came out mismatched on all three
+  questions (Q1 11/8/8, Q2 10/9/10, Q3 13/13/9); iterated through several
+  rewrite+recount cycles (re-running the same script after each edit)
+  until all three landed level (Q1 8/8/8, Q2 10/10/10, Q3 13/13/13), then
+  independently re-verified by hand-counting the same `Grep`-extracted raw
+  option-text listing word-by-word — both methods agreed exactly, and
+  exactly one `data-ok` per question throughout. A Python regex/
+  occurrence-count tag-balance script found every tracked tag pair already
+  balanced after an earlier hand-fix (`p` 18/18, `div` 7/7, `h2` 7/7,
+  `pre`/`code` 4/92, `span` 18/18, `strong` 6/6, `em` 2/2, `a` 2/2,
+  `button` 9/9, `dfn` 2/2, `html`/`head`/`title`/`body`/`h1` 1/1 each) —
+  the same script's FIRST pass (before that hand-fix) had actually caught a
+  real markup bug of its own: a stray `</p>` left over from a callout `div`
+  that should have closed with plain `</div>` (this course's established
+  callout convention, text starting directly with `<strong>`, never wrapped
+  in `<p>`) and a duplicated `</em>` at the end of the interview blockquote
+  — both found by inspecting the raw tag counts before they were fixed,
+  re-checked balanced after. Raw-`&` scan found exactly two matches, both
+  the two `&` characters inside the single already-established `cd
+  ~/learning/data && uv run …` shell command inside a `<pre><code>` block
+  (this course's standing precedent, not a new bug), zero raw `&` in prose.
+  Checked the glossary for a collision before adding anything: grepped for
+  `df.eval|pd.eval|>eval\(\)|numexpr` across the full glossary — no
+  existing entry — so added exactly one new row, `df.eval() / pd.eval()`
+  (combined into one row, matching the `where() / mask()` and other
+  paired-method precedents), placed directly after Lesson 66's `pd.NamedAgg`
+  entry; confirmed the glossary table's tags stayed balanced after the
+  insert (`table` 1/1, `tr` 128/128, `td` 381/381, `th` 3/3 via the Python
+  occurrence-count script), zero raw `&`. Registered Lesson 67 in `nav.js`
+  with today's date (2026-09-13); `node --check` confirmed it still parses
+  as valid JavaScript after the edit. This round's re-scan confirmed
+  `factorize()` is still a clean, standing zero-hit candidate not picked
+  this time — named explicitly in the lesson's own closing teaser for
+  whoever picks next time, the same handoff pattern Lesson 66 used. The
+  entire `data/.scratch/` directory was removed (`rm -rf`) after
+  verification; `git status --short` afterward showed only the intended
+  new/modified `data/` files (`data/assets/nav.js`, `data/reference/
+  glossary.html`, new `data/lessons/0067-eval-and-pd-eval.html`, new
+  `data/practice/67_eval_and_pd_eval.py`) — plus unrelated concurrent
+  changes in the `python/`/`rust/`/`backend/` course directories from other
+  runs, not touched by this one. This agent does not run `git commit` —
+  leaving working-tree changes uncommitted remains this course's
+  established convention. `bin/record-progress data lesson_generated --day
+  67 --lesson 0067-eval-and-pd-eval.html --detail '{"by":"launchd"}'` was
+  run once from the repo root as a single standalone command as instructed
+  and succeeded on the first try (`recorded: data/lesson_generated day=67
+  lesson=0067-eval-and-pd-eval.html`) — the write path worked fine, and the
+  read path (`bin/query-progress`/direct `psql`) was not attempted this
+  round per this round's explicit instruction to skip it.

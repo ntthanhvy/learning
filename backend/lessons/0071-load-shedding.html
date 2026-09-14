@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 71 · Load shedding: choosing who gets turned away</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 71 · ~20 min</p>
+<h1>Load shedding: choosing who gets turned away</h1>
+<p class="byline">Lesson 11 taught two ways a service says "no": rate limiting caps one client before its requests even start, and backpressure rejects new work once an internal queue is already full. Both react to a fixed limit decided in advance. Neither one asks the question a service actually needs answered mid-overload: given that some requests must be turned away right now, which ones should they be?</p>
+
+<h2>1 · A fixed limit and an overloaded server are two different problems</h2>
+<p>Lesson 11's bounded queue and token bucket both work off a number chosen ahead of time — 20 requests/second, 500 queued jobs. That number protects the service from a predictable ceiling being exceeded. But real overload rarely announces itself as "over the ceiling": a slow downstream dependency, a spike in expensive queries, or a burst of legitimate traffic from many different clients (so no single client's rate limit ever trips) can all drive CPU, memory, or latency into the danger zone while every individual client is still comfortably under its own cap. At that point the service isn't asking "did this one client exceed its budget" — it's asking "am I, right now, too loaded to keep serving everyone," and none of Lesson 11's per-client machinery answers that.</p>
+<p><dfn data-en="a server actively monitoring its own health (CPU, memory, queue depth, or latency) and deliberately rejecting some fraction of incoming requests once it detects it is overloaded, so that the requests it does accept can still be served correctly, instead of accepting everything and having every request degrade together" data-vn="load shedding (giữ nguyên) — server tự theo dõi tình trạng quá tải của chính nó rồi chủ động từ chối bớt request để phần còn lại vẫn được xử lý tử tế">Load shedding</dfn> is the service watching itself, not just watching each client, and dropping some work the instant its own signals say it's in trouble — before memory runs out, before every request's latency collapses together.</p>
+
+<h2>2 · Not the same tool as three lessons that sound related</h2>
+<p>Three earlier mechanisms all touch "rejecting work," and it's worth being precise about how load shedding differs from each one, since interview answers that blur them together read as not having actually built any of them.</p>
+<table class="cmp">
+<thead><tr><th></th><th>Rate limiting (L11)</th><th>Backpressure (L11)</th><th>Bulkhead (L50)</th><th>Load shedding (today)</th></tr></thead>
+<tbody>
+<tr><th>Trigger</th><td>one client's own count</td><td>one queue reaching full</td><td>one dependency's slice full</td><td>the server's own overall health</td></tr>
+<tr><th>Signal</th><td>a per-client counter</td><td>queue depth</td><td>per-dependency pool usage</td><td>CPU, memory, latency, queue depth as a whole</td></tr>
+<tr><th>Who is affected</th><td>the one client over its limit</td><td>whoever's request arrives once full</td><td>callers of the one saturated dependency</td><td>a chosen fraction, picked by priority, across all clients</td></tr>
+</tbody>
+</table>
+<p>The distinguishing question for load shedding: even if every client is behaving and every individual queue has room, is the service itself in enough trouble that it should refuse some work anyway? Rate limiting and backpressure both assume the fixed limit is the right proxy for "in trouble." Load shedding measures "in trouble" directly.</p>
+
+<h2>3 · The part that actually requires judgment: shedding by priority, not at random</h2>
+<p>Rejecting requests arbitrarily during overload still leaves a service worse off than it needs to be — a health check dropped at random can trigger Lesson 47's cascading restart, and a checkout request dropped at random costs revenue that a dropped analytics ping never would. The useful version of load shedding rejects the <em>least</em> important work first, keeping capacity for what matters most.</p>
+<pre><code><span class="cm">// A minimal priority-aware load shedder. Real systems (gRPC's ORCA load</span>
+<span class="cm">// reporting, Envoy's overload manager) do this with richer signals, but the</span>
+<span class="cm">// shape is the same: check load, then shed low-priority work first.</span>
+<span class="kw">type</span> Priority <span class="kw">int</span>
+
+<span class="kw">const</span> (
+    Low Priority = <span class="kw">iota</span>
+    Normal
+    Critical
+)
+
+<span class="kw">type</span> Shedder <span class="kw">struct</span> {
+    loadFn <span class="kw">func</span>() <span class="ty">float64</span> <span class="cm">// e.g. current CPU or queue-depth ratio, 0.0-1.0</span>
+}
+
+<span class="cm">// Admit reports whether a request of the given priority should proceed.</span>
+<span class="cm">// As load climbs past each threshold, lower-priority work is shed first --</span>
+<span class="cm">// Critical is the last thing ever refused.</span>
+<span class="kw">func</span> (s *Shedder) Admit(p Priority) <span class="ty">bool</span> {
+    load := s.loadFn()
+    <span class="kw">switch</span> {
+    <span class="kw">case</span> load &gt; <span class="fl">0.95</span>:
+        <span class="kw">return</span> p == Critical
+    <span class="kw">case</span> load &gt; <span class="fl">0.80</span>:
+        <span class="kw">return</span> p &gt;= Normal
+    <span class="kw">default</span>:
+        <span class="kw">return</span> <span class="kw">true</span>
+    }
+}</code></pre>
+<p>Two design choices carry the whole idea. First, the signal is the service's own measured load, not a per-client count — <code>loadFn</code> could read CPU, goroutine count, or the same queue depth Lesson 11's backpressure already tracks, just aimed inward instead of at one queue. Second, priority is assigned by the caller ahead of time, at the handler or route level (a health check and an internal cron job are usually <code>Low</code>; a logged-in user's checkout is usually <code>Critical</code>) — the shedder itself makes no judgment about what any single request is worth, it only enforces the ordering it's told.</p>
+<div class="callout"><strong>Frontend-habit trap:</strong> this is the backend cousin of a low-end phone's browser deciding to skip a background image decode or pause an off-screen video to keep the main thread responsive — the page doesn't render nothing, it deliberately drops the least visible work first so scrolling and taps still feel instant. A loaded server makes the identical trade: shed the cron-job ping, keep the checkout request.</div>
+
+<h2>4 · The response has to say "try elsewhere," not "something is broken"</h2>
+<p>A shed request should return <code>503 Service Unavailable</code> with a <code>Retry-After</code> header, the same pairing Lesson 11 used for a full queue — this tells a well-behaved client the rejection is about capacity, not a bug in the request, and gives it a concrete moment to retry rather than hammering immediately. Returning a generic <code>500</code> instead would send the client (and whoever's paging on error rates) chasing an application bug that doesn't exist; the request was fine, the server just chose not to do it right now.</p>
+
+<div class="interview">
+<p><strong>Q: "Your service is falling over under a traffic spike even though no single client is hitting its rate limit. What do you do?"</strong> A strong answer, out loud: <em>"That's the gap rate limiting doesn't cover — it protects against one bad client, not against the service being overloaded by many well-behaved ones at once. I'd add load shedding: watch the service's own signals, CPU, queue depth, or latency, and once they cross a threshold, start rejecting a chosen slice of incoming requests with 503 and Retry-After. The part that matters is shedding by priority, not randomly — tag routes ahead of time so health checks and background jobs get dropped before a logged-in user's checkout does. That way the service survives the spike serving its most important traffic, instead of every request degrading together until the process falls over."</em> The signal: naming that load shedding reacts to the server's own measured state rather than a fixed per-client limit, and that priority-based shedding is what separates a useful implementation from randomly dropping requests.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Rate limiting and backpressure both react to a fixed, pre-chosen limit (a per-client count, a queue's max size). Load shedding instead watches the service's own live signals -- CPU, memory, latency, overall queue depth -- and reacts to those directly, which is what lets it catch overload even when every individual client and queue is still under its own limit.">
+    <p class="stem">What signal does load shedding react to that rate limiting and backpressure don't?</p>
+    <button class="opt" data-ok>the server's own directly measured overload state itself</button>
+    <button class="opt">the exact number of currently open TCP sockets</button>
+    <button class="opt">a single client's own assigned API key value</button>
+    <button class="opt">the total row count inside one database table</button>
+  </div>
+  <div class="q" data-why="A useful load shedder is priority-aware: it sheds the least important work first (health checks, background jobs) so that critical work (a logged-in user's checkout) keeps running as long as possible, rather than treating every request as equally disposable.">
+    <p class="stem">Why does a load shedder need request priority, not just a load threshold?</p>
+    <button class="opt" data-ok>so critical work survives longer than low-value work</button>
+    <button class="opt">because Go requires every struct to define one</button>
+    <button class="opt">so every request gets shed in arrival order</button>
+    <button class="opt">priority is only needed for encrypted HTTPS traffic</button>
+  </div>
+  <div class="q" data-why="503 with Retry-After tells a well-behaved client that the rejection is about the server's current capacity, not a bug in the request, and gives it a concrete signal for when retrying is worth attempting -- a 500 would instead suggest an application bug and could send someone chasing a nonexistent defect.">
+    <p class="stem">What should a shed request return to the client, and why?</p>
+    <button class="opt" data-ok>503 with Retry-After, signaling capacity not a bug</button>
+    <button class="opt">500, since the server failed to finish it</button>
+    <button class="opt">200, since dropping the work should look successful</button>
+    <button class="opt">404, since the requested resource no longer exists</button>
+  </div>
+  <div class="q" data-why="Bulkhead (Lesson 50) partitions a shared resource so one saturated dependency can't consume capacity meant for others -- it protects against one dependency's slowness. Load shedding instead reacts to the service's own overall measured load and rejects a chosen slice of requests across the board, independent of which dependency, if any, is involved.">
+    <p class="stem">How does load shedding differ from the bulkhead pattern (Lesson 50)?</p>
+    <button class="opt" data-ok>it reacts to overall load, not one dependency's slice</button>
+    <button class="opt">it only ever applies to outbound database connections used</button>
+    <button class="opt">bulkheads and load shedding are simply the same mechanism</button>
+    <button class="opt">it requires a second physical server just to function</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> Google's <a href="https://sre.google/sre-book/handling-overload/">SRE Book — Handling Overload</a> (~15 min) — the same standing SRE Book reference Lessons 13 and 68 already used for the Four Golden Signals and postmortem culture, continued here into how a real system decides what to drop under load (criticality-based shedding, client-side throttling with retries, and the cascading-failure risks of getting this wrong).</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> open. Still no <code>lesson_completed</code>/quiz-outcome record exists for any lesson after 71 rounds — the honest next step remains a completion signal or a user-named track.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -5261,3 +5261,158 @@
   lesson=0067-eval-and-pd-eval.html`) — the write path worked fine, and the
   read path (`bin/query-progress`/direct `psql`) was not attempted this
   round per this round's explicit instruction to skip it.
+- 2026-09-14 generation (Lesson 68, headless run): idempotency confirmed
+  first — globbed `data/lessons/` for `0068-*.html` (none found) and grepped
+  `assets/nav.js` for `2026-09-14`/lesson 68 (neither found, highest
+  registered lesson was still 67, dated 2026-09-13) — so this round
+  proceeded. Per this round's explicit instructions, the DB read path
+  (`bin/query-progress`) was not attempted at all — a known-blocked sandbox
+  restriction every prior round has hit, not worth another attempt this
+  time. `MISSION.md` (read in full, never modified), `RESOURCES.md`, the
+  full `assets/nav.js` (all 67 entries), and
+  `data/learning-records/0001-baseline-sql-strong-python-basic.md` (still
+  just the single 2026-07-09 baseline, no `lesson_completed`/quiz-outcome
+  signal ever recorded) were all read before picking anything, per this
+  course's standing convention of pacing from file state alone. Lesson 67's
+  closing teaser named `factorize()` as the standing zero-hit candidate,
+  reconfirmed across Lessons 66 and 67's own notes — but this round still
+  did a fresh independent gap search rather than trusting the teaser
+  blindly, per this round's explicit instructions: grepped all 67 lesson
+  bodies plus the full glossary for `factorize`, `\.sample\(`, `Timedelta`,
+  `MultiIndex`, `read_sql`/`to_sql`, `\.align\(`, `nlargest`/`nsmallest`,
+  `duplicated\(`, `assign\(`, and `to_numeric\(`. `factorize` came back
+  truly zero-hit (only Lessons 66/67's own closing-teaser prose mentioning
+  it by name, never an actual taught use); `.sample()` and `.align()` also
+  came back genuinely zero-hit and are named here explicitly as standing
+  candidates for a future round; `Timedelta` and `MultiIndex` are mentioned
+  in passing in a few lessons (32, 58, and MultiIndex has its own Lesson
+  52) but are not fully "uncovered" the way the others are, so were not
+  serious contenders this round. Picked `factorize()` over `.sample()`/
+  `.align()` using the same "closes a gap between two already-taught
+  lessons" bar Lessons 66/67 used: Lesson 25 named `category` dtype as "a
+  lookup table hiding inside one column," storing distinct values once
+  plus a small integer code per row, but never showed the plain
+  NumPy-flavored function that produces exactly that codes/uniques pair
+  directly — `factorize()` is precisely that missing piece, and is also
+  genuinely load-bearing for interview prep (categorical encoding is a
+  common pandas/NumPy interview topic, per `MISSION.md`'s NumPy-fluency
+  goal). A scratch dir was created at `data/.scratch/lesson68/` (not
+  `/tmp`, this sandbox blocks that) with the real `orders_raw.csv` and
+  `customers.csv` fixtures copied in, and pandas 3.0.5 was reconfirmed
+  (`uv run --with pandas python3 -c "import pandas; print(pandas.__version__)"`),
+  matching every recent lesson. Every claim in the lesson was hand-verified
+  there with standalone probe scripts before writing: confirmed
+  `pd.factorize(clean["customer"])` returns `(codes, uniques)` where codes
+  is a plain `numpy.ndarray` and uniques is a `pandas.Index`, ordered by
+  FIRST APPEARANCE in the data (`['An', 'Binh']` on the real fixture, since
+  An appears before Binh), not alphabetically. The central, non-obvious
+  finding this round, confirmed directly through an escalating pair of
+  probes: on the real `customer` column, appearance order and alphabetical
+  order happen to coincide (An sorts before Binh AND appears first), so a
+  naive single-fixture check could not actually distinguish `factorize()`'s
+  default from `category` dtype's default — a second probe using a
+  deliberately reordered Series (`["Chi", "An", "Chi", "Binh", "An"]`,
+  where Chi appears first but sorts last) exposed the real difference:
+  `pd.factorize(s)` defaults to `['Chi', 'An', 'Binh']` (appearance order)
+  while `s.astype("category").cat.categories` gives `['An', 'Binh', 'Chi']`
+  (alphabetical); confirmed directly that `pd.factorize(s, sort=True)`
+  then becomes ELEMENT-FOR-ELEMENT identical to that same Series'
+  `.cat.codes`/`.cat.categories` — the two are the same underlying
+  algorithm, `factorize()` just skips the sort step by default. A second
+  gotcha was confirmed directly and became the lesson's centerpiece: a
+  missing value gets the sentinel code `-1`, and never gets its own row in
+  `uniques` (`pd.factorize(["An", None, "Binh", "An", np.nan])` gives codes
+  `[0, -1, 1, 0, -1]` and uniques `['An', 'Binh']`, only 2 entries for 3
+  distinct-ish values). The dangerous part, confirmed directly: the natural
+  reconstruction move `uniques[codes]` does NOT raise or produce anything
+  missing-shaped for those `-1` rows — Python/NumPy negative indexing
+  treats `-1` as "the last element," so `uniques[-1]` silently returns
+  `uniques`'s last real entry (`"Binh"` here) in place of every actually-
+  missing row, with no exception and no warning, a "no crash, quietly
+  wrong" trap in the same family as Lesson 25's fixed-category silent-NaN
+  gotcha and Lesson 45's `ffill()`/`bfill()` cross-group bleed. Also
+  confirmed directly: `use_na_sentinel=False` gives the missing value its
+  own real code and slot in `uniques` instead of `-1`, sidestepping the
+  trap entirely; a plain Python list raises `TypeError: factorize requires
+  a Series, Index, ExtensionArray, np.ndarray or NumpyExtensionArray got
+  list` on pandas 3.0.5 (a plain `numpy.ndarray` works fine); and
+  `Series.factorize()` the method form returns byte-identical output to
+  the top-level `pd.factorize()` function on the same data. Building the
+  practice file surfaced a real, load-bearing design bug caught only
+  because this round's required run-then-trust step actually ran the
+  unsolved file first rather than assuming the design was sound: Exercise
+  3's first draft used a bare `pd.factorize(clean["customer"], sort=...)`
+  with the unfilled `...` (Ellipsis) as the placeholder for the boolean —
+  but Python's `Ellipsis` is truthy, so pandas silently treated the
+  UNFILLED exercise as `sort=True` and it passed as a freebie `✓` even
+  before any real edit, the same `...`-is-truthy failure shape NOTES.md
+  documented for Lesson 66's `aggfunc=...` Exercise 4. Confirmed directly
+  with a standalone probe that `pd.factorize(s, sort=...)` behaves
+  identically to `sort=True`, and separately that on the real `customer`
+  column (`['An', 'An', 'Binh', 'Binh']`) `sort=True` and `sort=False` give
+  IDENTICAL output regardless, since An/Binh already coincide alphabetically
+  and by appearance — meaning Exercise 3 needed BOTH a different fixture
+  Series (the same `Chi`/`An`/`Binh` reordered one used in the lesson body,
+  where the two orderings genuinely diverge) AND a check on the literal
+  boolean value assigned (`ex3_sort_value is True`) rather than just the
+  resulting `codes`/`uniques` shape, to close the freebie. After the fix,
+  the shipped (unsolved) `practice/68_factorize.py` was executed in a
+  mirrored `.scratch/lesson68/practice/` layout and printed exactly 5 ✗
+  with no traceback; a solved copy (`.scratch/lesson68/practice/
+  68_solved.py`, not shipped) then printed all 5 ✓ on the first run after
+  the fix. The shipped file was also re-run a second time directly from its
+  real `practice/` location (`cd data && uv run --with pandas python3
+  practice/68_factorize.py`), both before and after the nav.js/glossary
+  edits that followed, and printed the identical 5 ✗, no crash, both times.
+  Quiz options were drafted, then mechanically word-counted with a Python
+  script isolating each `<div class="q">` block by its own start offset
+  (this course's established approach) — the first draft came out
+  mismatched on all three questions (Q1 9/9/11, Q2 8/9/9, Q3 11/8/9);
+  iterated through several rewrite+recount cycles (re-running the same
+  script after each edit) until all three landed level (Q1 10/10/10, Q2
+  10/10/10, Q3 10/10/10), then independently cross-checked with a SECOND,
+  genuinely different method — per-option text extracted into individual
+  scratch files and counted with `wc -w` rather than Python's `.split()` —
+  both methods agreed exactly on every option's word count, and exactly one
+  `data-ok` per question throughout. A Python regex/occurrence-count
+  tag-balance script found every tracked tag pair already balanced on the
+  first pass this round (`html`/`head`/`title`/`body`/`h1`/`dfn` 1/1 each,
+  `h2` 7/7, `p` 19/19, `div` 6/6, `pre` 5/5, `code` 95/95, `span` 29/29,
+  `strong` 4/4, `em` 1/1, `a` 3/3, `button` 9/9) — cross-checked
+  independently with the `Grep` tool's own occurrence counts on the same
+  tag pairs (`p` 19/19, `div` 6/6, `h2` 7/7, `button` 9/9, all matching
+  exactly), no markup bug this round. Raw-`&` scan found exactly two
+  matches, both the two `&` characters inside the single already-
+  established `cd ~/learning/data && uv run …` shell command inside a
+  `<pre><code>` block (this course's standing precedent, not a new bug),
+  confirmed independently with a `Grep` search for a bare `&` showing only
+  that same one line — zero raw `&` in prose. Checked the glossary for a
+  collision before adding anything: grepped for `factorize` across the
+  full glossary — no existing entry — so added exactly one new row,
+  `factorize()`, placed directly after Lesson 67's `df.eval() / pd.eval()`
+  entry; confirmed the glossary table's tags stayed balanced after the
+  insert (`table` 1/1, `tr` 129/129, `td` 384/384, `th` 3/3 via the Python
+  occurrence-count script), cross-checked with `Grep` on `<tr>`/`</tr>`
+  (129/129 both, matching exactly) and zero raw `&`. Registered Lesson 68
+  in `nav.js` with today's date (2026-09-14); `node --check` confirmed it
+  still parses as valid JavaScript after the edit. This round's fresh gap
+  search surfaced `.sample()` and `.align()` as standing zero-hit
+  candidates for whoever picks next time, named explicitly in the lesson's
+  own closing teaser, the same handoff pattern recent lessons have used.
+  The entire `data/.scratch/` directory was removed (`rm -rf`) after
+  verification (only `lesson68/` lived there, confirmed via `ls` before
+  deleting, nothing else was at risk); `git status --short` afterward
+  showed only the intended new/modified `data/` files (`data/assets/
+  nav.js`, `data/reference/glossary.html`, new
+  `data/lessons/0068-factorize.html`, new `data/practice/68_factorize.py`)
+  — plus unrelated concurrent changes in the `backend/`/`python/` course
+  directories from other runs, not touched by this one. This agent does
+  not run `git commit` — leaving working-tree changes uncommitted remains
+  this course's established convention. `bin/record-progress data
+  lesson_generated --day 68 --lesson 0068-factorize.html --detail
+  '{"by":"headless"}'` was run once from the repo root as a single
+  standalone command as instructed and succeeded on the first try
+  (`recorded: data/lesson_generated day=68 lesson=0068-factorize.html`) —
+  the write path worked fine, and the read path (`bin/query-progress`) was
+  not attempted this round per this round's explicit instruction to skip
+  it.

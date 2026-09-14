@@ -140,6 +140,8 @@
       file: "lessons/0066-namedagg.html" },
     { n: 67, date: "2026-09-13", title: "df.eval() and pd.eval(): SELECT expressions, spelled as a string",
       file: "lessons/0067-eval-and-pd-eval.html" },
+    { n: 68, date: "2026-09-14", title: "factorize(): the integer codes hiding under category dtype",
+      file: "lessons/0068-factorize.html" },
   ];
 
   const REFS = [

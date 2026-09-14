@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 48 · Reading someone else's code out loud</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 48 · ~20 min · 14 Sep 2026</p>
+<h1>Reading someone else's code out loud</h1>
+<p class="byline">Day 47 taught the four-part shape for answering a conceptual question from memory — claim, mechanism, example, contrast. That covers half of technical-interview performance: producing an explanation for a claim already held. The other half is the mirror image and gets far less practice: handed a block of <em>unfamiliar</em> code someone else wrote, walk through it out loud and explain what it does before being asked a single question about it. This is a <dfn data-en="the skill of reading an unfamiliar block of code and narrating what it does out loud, in a fixed order - purpose first, then control flow, then the one detail that would trip up a careless reader - rather than reading it top to bottom line by line as it is laid out on the page" data-vn="giữ nguyên &quot;code walkthrough&quot; — kỹ năng đọc một đoạn code lạ và thuyết trình nó thành lời theo thứ tự cố định: mục đích trước, rồi luồng điều khiển, rồi chi tiết dễ gây nhầm lẫn nhất — chứ không đọc từ trên xuống dưới theo đúng thứ tự dòng code">code walkthrough</dfn>, and — like Day 47's answer shape — it has a reusable order that turns "let me look at this" panic into a rehearsed move.</p>
+
+<div class="callout"><strong>Bridge from the baseline:</strong> <code>learning-records/0001-…</code> names a reading/writing asymmetry — this course can read simple Python already, so a code walkthrough is close to the strong half of the baseline. The trap is different from Day 47's: it isn't recall pressure, it's <em>narration</em> pressure — silently understanding a function is not the same skill as producing a spoken explanation of it in real time, in an order a listener can actually follow. Interviewers rarely hand over blank-file problems only; "here's a snippet, talk me through it" is at least as common, and untrained narration tends to default to reading the code aloud line by line, which explains syntax but never states purpose.</div>
+
+<h2>1 · Three moves, in a fixed order — outside in, not top to bottom</h2>
+<p>A strong code walkthrough does not start at line 1 and read downward. It goes from the outside of the code toward its riskiest inside detail, in three moves:</p>
+<ol>
+  <li><strong>Purpose.</strong> One sentence on what the code is <em>for</em> — the job it does for a caller — inferred from its name, its signature, and what it returns, before explaining a single line of its body. A listener who only hears this sentence should know why the code exists.</li>
+  <li><strong>Shape.</strong> One or two sentences on the control flow that gets from input to output: is it a loop, a recursion, an early return, a generator that yields instead of returning, a context manager guarding a resource? Name the mechanism, not each line.</li>
+  <li><strong>Sharp edge.</strong> The one detail in this specific code that a careless reading would get wrong — a mutable default, a generator that only runs once, a decorator changing what the function name is bound to, an <code>except</code> clause narrower or wider than it looks. This is the payoff: it proves the code was actually understood, not just paraphrased.</li>
+</ol>
+<p>Notice the shape: purpose first is the same instinct as Day 47's claim-first rule — state the conclusion before the supporting detail, so a listener who stops listening early still walked away with the right idea. The two shapes are mirror images of the same discipline aimed at opposite directions: Day 47 builds an answer outward from a claim already held; a walkthrough builds an explanation outward from code just seen for the first time.</p>
+
+<h2>2 · Walking through unfamiliar code, live</h2>
+<p>Here is a function built entirely from mechanisms already taught (Day 12 decorators, Day 5 generators, Day 4 <code>key=</code>) but never shown together this way before — exactly the kind of "seen the pieces, not this exact shape" snippet a walkthrough needs to handle:</p>
+<pre><code><span class="kw">from</span> functools <span class="kw">import</span> wraps
+
+<span class="kw">def</span> skip_empty(fn):
+    <span class="kw">@wraps</span>(fn)
+    <span class="kw">def</span> wrapper(*args, **kwargs):
+        <span class="kw">for</span> item <span class="kw">in</span> fn(*args, **kwargs):
+            <span class="kw">if</span> item:
+                <span class="kw">yield</span> item
+    <span class="kw">return</span> wrapper
+
+<span class="kw">@skip_empty</span>
+<span class="kw">def</span> top_scores(rows, n=3):
+    ranked = sorted(rows, key=<span class="kw">lambda</span> r: r[<span class="str">"score"</span>], reverse=<span class="kw">True</span>)
+    <span class="kw">for</span> row <span class="kw">in</span> ranked[:n]:
+        <span class="kw">yield</span> row.get(<span class="str">"name"</span>, <span class="str">""</span>)</code></pre>
+<p>Three moves, out loud:</p>
+<pre><code><span class="cm"># Purpose</span>
+<span class="str">"top_scores takes a list of row-dicts and gives back the names of the
+top n by score, skipping any row whose name is blank."</span>
+
+<span class="cm"># Shape</span>
+<span class="str">"It's two generators stacked: top_scores itself sorts rows by score
+descending with key=, slices the top n, and yields each one's name;
+skip_empty wraps it and re-yields only the truthy ones, so an empty
+string never comes out the other end."</span>
+
+<span class="cm"># Sharp edge</span>
+<span class="str">"skip_empty makes wrapper a generator function too, not a plain
+function - it can only do that because it uses yield instead of return,
+looping over whatever fn(*args, **kwargs) produces. And @wraps(fn) is
+doing real work here: without it, top_scores.__name__ would report
+'wrapper' instead, which matters the moment something introspects or
+logs the function by name."</span></code></pre>
+<p>Notice the sharp edge is not "here is a fact I memorized about decorators" — it is specific to <em>this</em> code: a decorator that turns a generator's caller-facing name into the wrapper's own, on a function that itself only works because <code>wrapper</code> contains a <code>yield</code>. Reading it top to bottom line by line would explain the syntax and miss both points.</p>
+
+<h2>3 · Why this is a language skill, not a Python skill</h2>
+<p>Exactly like Day 47's shape, the three-move order (purpose, shape, sharp edge) is not Python-specific — it works for reading a walkthrough of Go, SQL, or Rust too, which is why it isn't a dedicated <code>PLAN.md</code> spine item either. What is Python-specific is the vocabulary needed to name the shape accurately: without Day 5's generators, Day 12's decorators, and Day 4's <code>key=</code>, the shape step above would collapse into "it loops and sorts things," which is true but explains nothing a listener couldn't see by reading the code themselves. The walkthrough skill is worthless without the vocabulary; the vocabulary is inert without the walkthrough skill to deploy it under time pressure.</p>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> nothing pandas-specific — the same three-move order applies identically to walking through a pandas <code>groupby</code> chain someone else wrote, but building that example here would mean writing worked pandas code, which stays out of scope per <code>MISSION.md</code>. Not demonstrated.</div>
+
+<div class="interview">
+<p><strong>Q: "Here's a function you've never seen before — walk me through it."</strong> A strong answer, out loud, before touching any specific line: <em>"Let me start with what it's for, based on the name and what it returns, then how it gets there, then anything that looks like it could bite someone — rather than reading it top to bottom."</em> Then apply the three moves. The signal: the candidate has a plan for unfamiliar code, not just the ability to eventually understand it after a long silence.</p>
+</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/48_code_walkthrough_answer_shape.py</code>. Four small, unfamiliar-looking stdlib-only functions are given, each built from mechanisms already taught in earlier lessons (cited in each exercise's comment) but combined in a way not shown before. For each, fill in a three-part dict — purpose / shape / sharp edge. As with Day 47's practice file, the checker verifies structure only (three distinct, non-trivial sentences) — it cannot judge correctness by itself, so re-read the cited lesson if a sharp edge feels shaky.</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/48_code_walkthrough_answer_shape.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A code walkthrough starts with purpose, inferred from the name/signature/return value, before any line of the body is explained - a listener who only hears that first sentence should already know why the code exists, which is the same claim-first discipline Day 47 taught for answering a conceptual question, just aimed at code instead of at a claim already held.">
+    <p class="stem">In the three-move code-walkthrough shape, what comes first, before any line of the body is explained?</p>
+    <button class="opt" data-ok>the code's purpose, inferred from its name and signature</button>
+    <button class="opt">a full line-by-line reading of the entire function body</button>
+    <button class="opt">a guess at every possible edge case it hits</button>
+  </div>
+  <div class="q" data-why="The sharp edge is the one detail in the specific code shown that a careless top-to-bottom reading would get wrong - a mutable default, a decorator changing the reported function name, a generator that only runs once - and it is the step that proves the code was genuinely understood rather than merely paraphrased back.">
+    <p class="stem">What is the specific job of the "sharp edge" step in the three-move walkthrough shape?</p>
+    <button class="opt" data-ok>naming the one detail a careless reading of the code misses</button>
+    <button class="opt">restating the function's stated purpose once more in slightly different words</button>
+    <button class="opt">listing the exact total number of lines the function body has</button>
+  </div>
+  <div class="q" data-why="Reading top to bottom line by line explains what each line of syntax does but never states why the code exists or which specific detail is easy to miss - it produces a technically accurate narration that a listener still cannot use to judge whether the code was actually understood, which is exactly the failure mode the purpose-first, outside-in order is designed to avoid.">
+    <p class="stem">Why does a top-to-bottom, line-by-line reading of unfamiliar code fall short as a walkthrough?</p>
+    <button class="opt" data-ok>it explains syntax but never states purpose or the risky detail</button>
+    <button class="opt">it is technically impossible to read any code in that direction</button>
+    <button class="opt">line-by-line reading always takes much longer than a full extra hour</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://realpython.com/python-interview-questions/">Real Python's Python Interview Questions and Answers guide</a> — the same source Day 47 cited to close <code>RESOURCES.md</code>'s interview-prep Gap; several of its questions are given as a code snippet to explain rather than a question to answer from memory, which is exactly the code-walkthrough shape taught today, so it doubles as practice material for this lesson too.</p>
+
+<p class="next">New term today is in the <a href="../reference/glossary.html#day48">glossary</a> under Day 48.<br>
+This is a fresh mechanism, not a review day: Day 47 taught the answer shape for a claim already held; today taught the mirror-image shape for code seen for the first time. No new stdlib syntax was introduced — the walkthrough example reuses decorators (Day 12), generators (Day 5), and <code>key=</code> (Day 4) exactly as already taught, cited by day number above.<br><br>
+💬 Anything unclear — the walkthrough shape, or the decorator/generator example? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

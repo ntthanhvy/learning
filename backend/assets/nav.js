@@ -146,6 +146,8 @@
       file: "lessons/0069-load-balancing-algorithms-l4-l7.html" },
     { n: 70, date: "2026-09-13", title: "Feature flags: separating \"deployed\" from \"on\"",
       file: "lessons/0070-feature-flags.html" },
+    { n: 71, date: "2026-09-14", title: "Load shedding: choosing who gets turned away",
+      file: "lessons/0071-load-shedding.html" },
   ];
 
   const REFS = [

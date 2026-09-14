@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 68 · factorize(): the integer codes hiding under category dtype</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 68 · ~20 min · 14 Sep 2026</p>
+<h1>factorize(): the integer codes hiding under category dtype</h1>
+<p class="byline">Named as a standing zero-hit candidate since Lesson 66, reconfirmed by Lesson 67's closing teaser and by a fresh grep of all 67 lessons and the glossary this round — still genuinely uncovered. Picked over the round's other zero-hit candidates (<code>.sample()</code>, <code>.align()</code>) because it sits precisely next to a lesson already taught: Lesson 25 named <code>category</code> dtype as "a lookup table hiding inside one column," storing distinct values once plus a small integer code per row — <code>factorize()</code> is the plain NumPy-flavored function that produces exactly that codes/uniques pair directly, without going through a dtype conversion first.</p>
+
+<h2>1 · category dtype's mechanism, pulled out as a standalone function</h2>
+<p>Lesson 25 showed <code>.astype("category")</code> building a small lookup table under the hood: distinct values stored once, plus one small integer code per row pointing back into it. <dfn data-en="a top-level pandas function (also available as a Series/Index method), factorize(values), that encodes an array-like of values into two pieces: an integer numpy array of codes (one per row) and an array/Index of the distinct uniques those codes point into -- the same 'store the distinct values once, reference by small code' idea as category dtype, exposed as a plain function instead of a dtype conversion" data-vn="giữ nguyên 'factorize()' — mã hoá 1 mảng giá trị thành 2 phần: mảng số nguyên codes (1 mã/hàng) và mảng uniques (các giá trị khác nhau, mã trỏ vào đây) — cùng ý tưởng với category dtype (lưu giá trị 1 lần, tham chiếu bằng mã số) nhưng ở dạng hàm thường, không cần đổi dtype">factorize()</dfn> is that exact mechanism, exposed directly as a function you can call on any array-like — no dtype conversion required:</p>
+<pre><code>clean[<span class="str">"customer"</span>].tolist()
+<span class="cm"># ['An', 'An', 'Binh', 'Binh']</span>
+
+codes, uniques = pd.factorize(clean[<span class="str">"customer"</span>])
+codes     <span class="cm"># array([0, 0, 1, 1])          -- numpy.ndarray, one int per row</span>
+uniques   <span class="cm"># Index(['An', 'Binh'])        -- the distinct values, in ORDER OF APPEARANCE</span></code></pre>
+<p>Confirmed directly (pandas 3.0.5) on the real <code>orders_raw.csv</code> clean 4-row slice. <code>factorize()</code> always returns exactly two pieces: <code>codes</code>, a plain NumPy integer array the same length as the input, and <code>uniques</code>, the distinct values each code points into. It also exists as a method — <code>clean["customer"].factorize()</code> — confirmed to return byte-identical output to the top-level <code>pd.factorize(clean["customer"])</code> call.</p>
+
+<h2>2 · The one real difference from category dtype: appearance order, not sorted order</h2>
+<p><code>category</code> dtype's <code>.cat.categories</code> sorts its lookup table alphabetically by default. <code>factorize()</code> does not — its <code>uniques</code> are ordered by when each value FIRST appears in the data, confirmed directly with a case where the two orders diverge:</p>
+<pre><code>s = pd.Series([<span class="str">"Chi"</span>, <span class="str">"An"</span>, <span class="str">"Chi"</span>, <span class="str">"Binh"</span>, <span class="str">"An"</span>])
+
+<span class="cm"># factorize(): order of FIRST APPEARANCE -- Chi, An, Binh</span>
+codes, uniques = pd.factorize(s)
+codes     <span class="cm"># [0, 1, 0, 2, 1]</span>
+uniques   <span class="cm"># ['Chi', 'An', 'Binh']</span>
+
+<span class="cm"># category dtype: ALPHABETICAL by default -- An, Binh, Chi</span>
+s.astype(<span class="str">"category"</span>).cat.codes.tolist()        <span class="cm"># [2, 0, 2, 1, 0]</span>
+s.astype(<span class="str">"category"</span>).cat.categories.tolist()  <span class="cm"># ['An', 'Binh', 'Chi']</span>
+
+<span class="cm"># sort=True makes factorize() match category dtype's codes EXACTLY</span>
+codes, uniques = pd.factorize(s, sort=<span class="kw">True</span>)
+codes     <span class="cm"># [2, 0, 2, 1, 0]   -- identical to .cat.codes</span>
+uniques   <span class="cm"># ['An', 'Binh', 'Chi']  -- identical to .cat.categories</span></code></pre>
+<p>Confirmed directly: with <code>sort=True</code>, <code>factorize()</code>'s <code>codes</code> and <code>uniques</code> become element-for-element identical to that same Series' <code>category</code>-dtype <code>.cat.codes</code> and <code>.cat.categories</code>. They are the same underlying algorithm — <code>factorize()</code> just defaults to the cheaper appearance-order pass (no sort step needed) rather than category dtype's alphabetical default.</p>
+
+<div class="callout"><strong>SQL bridge:</strong> both are the same "surrogate key" idea — assign a small integer to stand in for a repeated value, the way a normalized lookup table replaces a repeated <code>VARCHAR</code> with a small foreign key. <code>category</code> dtype keeps that mapping attached to the column as a dtype, ready for repeated use (groupby, comparisons, memory savings from Lesson 25). <code>factorize()</code> hands you the raw codes/uniques pair once, as plain NumPy/pandas objects, for a one-off encoding task — feeding a machine-learning input, or building a fast integer-keyed lookup by hand.</div>
+
+<h2>3 · The gotcha: NaN's -1 sentinel is a silent wrong-answer trap, not a crash</h2>
+<p>A missing value doesn't get its own row in <code>uniques</code> — <code>factorize()</code> gives it the sentinel code <code>-1</code> instead, confirmed directly:</p>
+<pre><code>s = pd.Series([<span class="str">"An"</span>, <span class="kw">None</span>, <span class="str">"Binh"</span>, <span class="str">"An"</span>, np.nan])
+
+codes, uniques = pd.factorize(s)
+codes     <span class="cm"># [0, -1, 1, 0, -1]     -- NaN rows get -1, not their own code</span>
+uniques   <span class="cm"># ['An', 'Binh']        -- NaN never appears here at all</span></code></pre>
+<p>That <code>-1</code> looks harmless until you try the natural reconstruction move, <code>uniques[codes]</code> — confirmed directly, this is a genuine "no crash, quietly wrong" trap, the same family as this course's other silent-failure gotchas (category dtype's fixed-list <code>NaN</code> from Lesson 25, <code>ffill()</code>'s bleed-across-groups):</p>
+<pre><code>uniques[codes]
+<span class="cm"># array(['An', 'Binh', 'Binh', 'An', 'Binh'], dtype=object)
+#           ^^^^                     ^^^^
+#      WRONG -- should be missing, not "Binh"!</span></code></pre>
+<p>NumPy/Python indexing treats <code>-1</code> as "the last element," not "missing" — so <code>uniques[-1]</code> silently returns <code>uniques</code>'s last real entry (here, <code>"Binh"</code>) for every row that was actually <code>NaN</code>. No exception, no warning, and the array even keeps a plausible-looking dtype. The safe reconstruction checks for <code>-1</code> first: <code>pd.Series(uniques[codes]).mask(codes == -1)</code>, or pass <code>use_na_sentinel=False</code> to <code>factorize()</code> so <code>NaN</code> gets a real code and its own slot in <code>uniques</code> instead of <code>-1</code>.</p>
+
+<div class="interview">
+<p><strong>Q: "What does factorize() do, and how does it relate to category dtype?"</strong> A strong answer, out loud: <em>"factorize() encodes an array-like into two pieces: an integer numpy array of codes, one per row, and a uniques array of the distinct values each code points into — the exact same surrogate-key idea as category dtype's codes/categories pair from Lesson 25, just returned directly as a function result instead of living on a dtype. The one real difference is ordering: factorize() defaults to order of first appearance, while category dtype sorts alphabetically by default — passing sort=True to factorize() makes its output match category dtype's codes and categories exactly, so they're genuinely the same algorithm underneath. The gotcha I'd flag: missing values get the sentinel code -1, not a real code, and naively reconstructing with uniques[codes] silently returns the WRONG real value for every missing row, because -1 is valid negative indexing into the last element — no crash, no warning. I'd either check for -1 before indexing, or pass use_na_sentinel=False so NaN gets its own real slot in uniques."</em> The signal: naming the category-dtype connection unprompted, the appearance-order-vs-sorted distinction, and specifically the <code>-1</code> reconstruction trap — that's the part almost everyone misses on first contact.</p>
+</div>
+
+<h2>4 · Where this actually gets used</h2>
+<p><code>factorize()</code> shows up whenever something downstream needs small dense integers instead of repeated strings/objects — feeding a NumPy/ML routine that only accepts numeric arrays, building a fast integer-keyed groupby-like count by hand (<code>np.bincount(codes)</code>, confirmed directly to match a <code>value_counts()</code> tally in appearance order), or de-duplicating a large low-cardinality column's storage the same way category dtype does, but as a one-off pass rather than an attached dtype. For anything that stays inside pandas and gets reused (repeated groupby, memory savings, filtering) — reach for <code>category</code> dtype (Lesson 25) instead; it keeps the mapping attached to the column so you never have to carry <code>codes</code>/<code>uniques</code> around by hand. Confirmed directly: a plain Python list raises <code>TypeError: factorize requires a Series, Index, ExtensionArray, np.ndarray or NumpyExtensionArray got list</code> on pandas 3.0.5 — wrap it in <code>np.array(...)</code> or a <code>pd.Series</code> first if the input isn't already array-like.</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/68_factorize.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/68_factorize.py</code></pre>
+<p>Uses the same real <code>orders_raw.csv</code> fixture, cleaned the same way as recent lessons (An 120.0/01-05, An 42.0/01-10, Binh 35.5/01-06, Binh 180.0/01-09). Exercise 1 runs <code>pd.factorize()</code> on the <code>customer</code> column and confirms the appearance-order <code>codes</code>/<code>uniques</code> pair. Exercise 2 confirms <code>uniques[codes]</code> exactly reconstructs the original column when there's no missing data. Exercise 3 uses <code>sort=True</code> and confirms it becomes identical to the same column's <code>category</code>-dtype <code>.cat.codes</code>/<code>.cat.categories</code>. Exercise 4 reproduces the <code>-1</code> sentinel gotcha directly: confirms a missing value gets code <code>-1</code>, and that naive <code>uniques[codes]</code> reconstruction silently returns the wrong real value rather than raising. Exercise 5 uses <code>use_na_sentinel=False</code> to give the missing value its own real code and slot in <code>uniques</code> instead.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: factorize() returns exactly two pieces -- codes, a numpy integer array with one code per row, and uniques, the distinct values each code points into -- the same codes/categories idea as category dtype (Lesson 25), just returned directly as a function result instead of living on a dtype.">
+    <p class="stem">What two things does <code>pd.factorize(s)</code> return?</p>
+    <button class="opt" data-ok>an integer codes array, plus the distinct uniques array itself</button>
+    <button class="opt">a boolean mask array, plus the original values unchanged entirely</button>
+    <button class="opt">a sorted copy of the input, plus row count integer</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: factorize() defaults to ordering uniques by first appearance in the data, while category dtype's .cat.categories sorts alphabetically by default. Passing sort=True to factorize() makes its codes/uniques exactly match that same column's category-dtype codes/categories.">
+    <p class="stem">By default, how does <code>factorize()</code>'s <code>uniques</code> order differ from <code>category</code> dtype's <code>.cat.categories</code>?</p>
+    <button class="opt" data-ok>appearance order by default, but versus alphabetical order by default</button>
+    <button class="opt">both are always alphabetical; there is no real difference here</button>
+    <button class="opt">factorize() reverses the row order; category dtype keeps it forward</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: a missing value gets the sentinel code -1, which never gets its own slot in uniques. Naively reconstructing with uniques[codes] silently returns uniques' LAST real element for every -1 row, since -1 is valid negative indexing -- no crash, no warning, just a wrong value in place of a missing one.">
+    <p class="stem">Why is naive <code>uniques[codes]</code> reconstruction dangerous when the input had missing values?</p>
+    <button class="opt" data-ok>-1 (the sentinel) silently indexes the LAST uniques entry instead</button>
+    <button class="opt">it always raises an IndexError immediately, stopping the whole script</button>
+    <button class="opt">missing values always get their own correct NaN slot automatically</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the pandas User Guide's <a href="https://pandas.pydata.org/docs/user_guide/categorical.html">Categorical data</a> page (this course's backbone, per <code>RESOURCES.md</code>, also cited in Lesson 25) covers the codes/categories mechanism <code>factorize()</code> exposes directly; the <a href="https://pandas.pydata.org/docs/reference/api/pandas.factorize.html">pandas API reference for <code>pandas.factorize</code></a> (~5 min) documents <code>sort=</code>, <code>use_na_sentinel=</code>, and every accepted input type in full.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>factorize()</code> is new today, placed right after Lesson 67's <code>df.eval() / pd.eval()</code> entry.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-68 comes back reported as shakiest, otherwise another fresh curriculum/glossary scan for the next genuinely-uncovered pattern — today's scan also turned up <code>.sample()</code> and <code>.align()</code> as zero-hit candidates, neither picked yet.<br><br>
+💬 Anything unclear — the <code>factorize()</code>/<code>category</code> dtype connection, the <code>-1</code> sentinel trap, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

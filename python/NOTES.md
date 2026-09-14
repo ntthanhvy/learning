@@ -5894,3 +5894,177 @@ fail *gracefully* so the learner sees which task failed.
   moment it's available; the read-path gate itself should still not be
   re-attempted daily absent new indication, per Day 44's standing
   instruction.
+- 2026-09-14 — **Day 48 generated: reading someone else's code out loud**
+  (headless run) — the mirror-image skill to Day 47's answer shape: today
+  teaches a three-move shape (purpose / shape / sharp edge) for narrating
+  unfamiliar code out loud, rather than answering a claim already held.
+  Ran `date` first: confirmed 2026-09-14 (Mon) before doing anything else.
+  Read this run: `MISSION.md` (untouched, read-only) in full, `PLAN.md` in
+  full, `RESOURCES.md` in full, this file's tail (the Day 47 entry in
+  full, plus enough of Days 44-46 to confirm the recent verification
+  methodology), the sole
+  `learning-records/0001-baseline-reads-python-writes-little.md`,
+  `assets/nav.js`'s full `LESSONS` array, `lessons/0047-interview-answer-shape.html`
+  and `practice/47_interview_answer_shape.py` in full for exact current
+  structure/conventions, `reference/glossary.html`'s tail (Days 36-47) to
+  check for term collisions, and `lessons/0012-decorators.html` +
+  `lessons/0038-regular-expressions.html` to confirm the real `<pre>` code
+  span-class convention before writing a code sample (this caught a
+  mistake early: a first draft used invented `.fn`/`.an` span classes that
+  don't exist in `course.css` — only `.kw`, `.str`, and `.cm` are real;
+  fixed before shipping, decorators use plain `.kw` on the `@name` line,
+  function names are unstyled plain text).
+  **Idempotency check:** `ls lessons/0048-*` and a grep across `python/`
+  for `0048`/`Day 48`/`day48`/`n: 48`/`2026-09-14` all came back empty
+  before writing anything; proceeded as Day 48.
+  Topic selection: Day 47's own next-day note offered two live candidates
+  — (a) a fourth review sweep (Days 8, 10-11, 14-15, 17-18, 21-29, 31-32,
+  35, 37, 39-42 still uncovered, unchanged count since Day 46), or the
+  reverse-interview "code walkthrough" skill it named explicitly as "a
+  natural next candidate in the same spirit." No new learner
+  completion/quiz-outcome signal has landed since Day 47
+  (`learning-records/` still holds only the Day 1 baseline), so there was
+  no stronger override signal favoring the review sweep over Day 47's own
+  named recommendation. Chose the code-walkthrough skill: it is genuinely
+  new content (never taught, unlike a fourth pass over already-reviewed
+  days), it completes the same "technical interview performance" pair Day
+  47 started (answering a claim already held vs. narrating code seen for
+  the first time), and it reuses only previously-taught mechanisms
+  (decorators/Day 12, generators/Day 5, `key=`/Day 4, context
+  managers/Day 6, `@property`/Day 30-37, `__eq__`/`__hash__`/Day 31,
+  `functools.lru_cache`/Day 36) as the worked examples rather than
+  introducing new stdlib syntax — consistent with Day 47's own framing
+  that this pairing reinforces the baseline's recall-under-pressure gap
+  more directly than repeating an old review day would.
+  Hard-scope-rule compliance (no pandas/NumPy): grepped the lesson
+  case-insensitively for `pandas`/`numpy`/`pd\.`/`np\.` — exactly one hit,
+  the standing "Where pandas goes from here" callout stating the same
+  three-move shape applies identically to walking through a pandas
+  `groupby` chain but that building one would be out of scope per
+  `MISSION.md`, explicitly marked "Not demonstrated," matching Day 47's
+  exact pattern. Grepped the practice file the same way — zero hits. All
+  four worked code snippets (in the lesson body and in the practice file's
+  exercise comments) are pure standard library: `functools.wraps`,
+  `functools.lru_cache`, plain generators, a context manager, `sorted(key=)`,
+  and a small hand-written class with `@property`/`__eq__` — no pandas or
+  NumPy import or API anywhere.
+  Correctness spot-check: before trusting any of the four "sharp edge"
+  claims, actually ran all four snippets standalone via `uv run python3`
+  in the scratch dir to confirm the claimed behavior is real, not just
+  plausible-sounding: (1) the mutable-default `collect_tags` does alias
+  and accumulate across calls sharing the default; (2) the generator-based
+  file reader correctly filters blank/whitespace-only lines; (3) wrapping
+  `lru_cache` around the decorator's inner function does make the `print`
+  fire only on a cache miss (`square(3)` printed once across two calls);
+  (4) a class defining `__eq__` without `__hash__` is genuinely unhashable
+  in Python — `{p1}` raised `TypeError: unhashable type: 'Point'` exactly
+  as claimed. All four checked out on the first attempt; no lesson claim
+  shipped unverified.
+  Practice file `practice/48_code_walkthrough_answer_shape.py` (4
+  exercises, each giving an unfamiliar-looking stdlib-only snippet in a
+  comment and asking for a
+  `{"purpose": ..., "shape": ..., "sharp_edge": ...}` dict): a
+  `collect_tags_walkthrough` function for the Day 1/2 mutable-default +
+  comprehension snippet; a `read_nonblank_lines_walkthrough` function for
+  the Day 5/6 generator + context-manager snippet; a
+  `log_calls_walkthrough` function for the Day 12/36 decorator +
+  `lru_cache` snippet; a `point_class_walkthrough` function for the Day
+  30-37/31 `@property` + `__eq__` snippet. Reused Day 47's
+  `is_well_formed()` checker pattern verbatim, adjusted from four required
+  parts to three (`purpose`/`shape`/`sharp_edge`) — structure only (all
+  three keys present, each a distinct sentence of at least 5 words, no two
+  parts identical), called out in both the lesson body and the practice
+  file's own docstring as a narrower contract than a correctness check,
+  matching Day 47's precedent exactly.
+  Followed the standing defensive pattern against the Ellipsis-at-module-level
+  bug family: wrote a small one-off script (run via `uv run python3`,
+  deleted after use with the rest of the scratch tree) that walks the file
+  line by line and confirms every bare `...` line has indent > 0 — all
+  four live indented 4 spaces inside a function body, none at column
+  0/module scope.
+  Verified in a scratch dir (`python/.scratch/lesson48/`, removed
+  immediately after use, and a second helper dir `python/.scratch_check/`
+  holding the tag-balance and quiz-word-count scripts, also removed after
+  use — confirmed via `git status --short` at the end that nothing stray
+  remained, only this run's four real intended `python/` files, alongside
+  unrelated same-day `backend/`/`data/` changes from parallel runs): the
+  shipped (unsolved) copy, run via plain `uv run python3` (no `--with`
+  needed) directly from its real `practice/` path, printed all four ✗
+  (every exercise's stub returns `None`) with no traceback; a separately
+  solved copy (every TODO filled in by hand with real three-part answers
+  matching the spot-checked claims above, kept in the scratch dir only,
+  never shipped) printed all four ✓ and the "All green" tally on the first
+  attempt — no bugs caught during solving this round.
+  Glossary: one new term, `code walkthrough`, added under a new `Day 48`
+  section in `reference/glossary.html`, after reading the glossary's Day
+  36-47 tail to confirm no collision existed (and confirming Day 47's
+  `answer shape` term is related but distinct, not a duplicate — this
+  lesson doesn't reuse it, since a walkthrough of code is a different
+  activity from answering a claim). Confirmed the lesson's total
+  `data-en=`/`<dfn` count (1 each) matches exactly one new glossary row,
+  no accidental duplicate row added.
+  HTML tag-balance was checked with a stdlib `html.parser.HTMLParser`-based
+  stack checker and, independently, a regex-based open/close tag-count
+  comparator (both written as one throwaway script, deleted after use),
+  against both the lesson file and the full `glossary.html` (modified this
+  round) — all four checks (two tools × two files) reported fully
+  balanced, both before and after the Day 48 glossary-row addition. Also
+  grepped both files for a raw unescaped `&`
+  (`&(?!amp;|lt;|gt;|quot;|#39;|apos;)`) — zero hits in either file.
+  Quiz: 3 questions (what comes first in the three-move shape; the
+  specific job of the "sharp edge" step; why line-by-line reading falls
+  short as a walkthrough). Word counts were checked with a small
+  regex-based Python script (splitting each `<button class="opt">`'s
+  stripped-tag text on whitespace) and cross-checked with a second,
+  independent `html.parser.HTMLParser`-based script, per this course's
+  established two-method practice — the first draft mismatched on all
+  three questions (Q1 9/9/11, Q2 13/10/11, Q3 11/11/10) and took two to
+  three rounds of few-word edits per question, re-running both scripts
+  after every edit rather than trusting hand counts (one hand-count
+  mid-round was itself wrong and only caught because the scripts, not
+  intuition, were the source of truth), landing at 9/9/9, 11/11/11, and
+  11/11/11 respectively. Both scripts agreed at every intermediate step
+  and confirmed exactly one `data-ok` per question throughout.
+  No `RESOURCES.md` change this round: today is fresh content built
+  entirely from already-cited sources (Real Python's interview-questions
+  guide, already added at Day 47) rather than a new Gap closure, so no
+  Gaps-list edit was needed or made.
+  Registered in `assets/nav.js` with `date: "2026-09-14"`; confirmed
+  `node --check assets/nav.js` reports no syntax errors after the edit.
+  **DB access:** `bin/query-progress` was not attempted this round, per
+  Day 44's standing instruction to stop daily re-attempts absent new
+  indication the gate lifted — no such indication appeared. `bin/record-progress
+  python lesson_generated --day 48 --lesson
+  0048-code-walkthrough-answer-shape.html --detail '{"by":"headless"}'`
+  was attempted once, from the repo root, and **succeeded**, printing
+  `recorded: python/lesson_generated day=48
+  lesson=0048-code-walkthrough-answer-shape.html` — the sixth consecutive
+  successful write (following Days 43-47). `python/learning-records/`
+  still holds only the Day 1 baseline; no completion/quiz/kata outcome has
+  ever been recorded for any day 2-47, so this round paced entirely from
+  on-disk state, same as every prior round since Day 42.
+  Final `git status --short` showed exactly four `python/` files changed
+  (`assets/nav.js`, `reference/glossary.html`, the new lesson, the new
+  practice file), alongside unrelated concurrent changes in `backend/` and
+  `data/` from parallel same-day runs, confirmed out of scope and left
+  untouched.
+  **Next-day note:** the two `RESOURCES.md` Gaps items remain resolved
+  (interview-prep) or substantially addressed (FastAPI bigger-applications)
+  from Day 47, and today closed the "reverse interview skill" candidate
+  Day 47 itself flagged. That leaves, for Day 49: (a) the fourth review
+  sweep (Days 8, 10-11, 14-15, 17-18, 21-29, 31-32, 35, 37, 39-42 still
+  uncovered — unchanged count, now three days running without a stronger
+  signal displacing it), or a fresh grep sweep of `RESOURCES.md`'s named
+  modules against `lessons/*.html` repeated once more in case anything
+  shifted (unlikely — three consecutive rounds have found nothing). Unlike
+  Day 47, there is no longer a specific named next candidate sitting in
+  the wings, so Day 49 should genuinely weigh the review sweep on its own
+  merits rather than deferring again — three fresh-content days in a row
+  (46, 47, 48) without ever running a fourth review day is starting to
+  look like avoidance rather than a considered choice, and the baseline's
+  core untested claim is about recall under pressure, which a review day
+  stresses directly. A real learner completion/quiz-outcome signal, if the
+  DB read-path gate ever lifts, should still take priority over both the
+  moment it's available; the read-path gate itself should still not be
+  re-attempted daily absent new indication, per Day 44's standing
+  instruction.

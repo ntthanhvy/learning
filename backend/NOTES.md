@@ -4923,3 +4923,137 @@
   infra/culture territory than this course's scope) — worth a fresh,
   broader search rather than defaulting to either, same standing
   recommendation as every prior round's close.
+- **2026-09-14 generation (Lesson 71, headless 06:00 run):** idempotency check
+  first — confirmed via `ls backend/lessons/0071-*` (no match) and a grep for
+  `n: 71`/`2026-09-14` in `nav.js` (no match, highest prior entry was `n: 70`,
+  dated 2026-09-13) before writing anything. Read `MISSION.md` (unmodified, not
+  touched), `RESOURCES.md`, `assets/nav.js` in full, both `learning-records/`
+  files (still just the 0001 baseline and the 2026-07-30 concurrency-vocabulary
+  gap — no `lesson_completed`/quiz-outcome record ever added, so no fresher
+  signal than file state), `reference/glossary.html` tail, and the tail of
+  `NOTES.md` via an offset-based read near the ~4400-4925 line range (the file
+  exceeds the single-read 256KB cap), plus Lesson 70 in full for structure/tone.
+  No DB read was attempted this round, per the briefing's explicit instruction
+  that the read path is a known-blocked path not worth spending an attempt on.
+  Topic choice: the briefing flagged two standing candidates from Lesson 70's
+  own close — `COPY`/bulk insert (flagged narrow three times already, in
+  Lessons 68, 69, and 70's own notes) and `load shedding` specifically — and
+  asked for a fresh gap search rather than defaulting to either. Ran that
+  search: a shell `for` loop over ~50 candidate terms was blocked by the
+  sandbox ("Contains simple_expansion"), consistent with every prior round back
+  through Lesson 70's own note about this same block, so candidates were
+  checked individually via the Grep tool instead, which the sandbox does not
+  block. Checked and ruled out: API deprecation lifecycle/`Sunset` header/
+  breaking-change vocabulary (looked promising at first zero-grep pass, but a
+  closer read of Lesson 16 (API versioning) showed it already covers
+  deprecation directly — a `deprecated version` glossary row already exists
+  from Lesson 16's era, and one of its own quiz questions already tests the
+  "stated sunset date" concept — so this was a false gap, not a real one); API
+  keys as an auth mechanism (zero hits as a *dedicated* topic, but Lesson 31
+  already covers static API keys in depth including constant-time comparison,
+  so a full lesson would mostly duplicate it); request coalescing/singleflight/
+  dogpile (zero hits, but Lesson 57's cache-stampede lesson already covers the
+  closely-related "many requests, one recompute" shape, making this feel like
+  a variant rather than a clean new gap); event-driven/message-queue/pub-sub
+  vocabulary (zero hits as a *named* topic, but Lessons 29/30/63 already use
+  the underlying mechanisms without naming the paradigm, and MISSION.md's
+  "distributed systems beyond vocabulary level" exclusion made a full lesson on
+  the messaging paradigm itself feel like a scope risk); `COPY`/bulk insert
+  (re-confirmed zero hits, passed over a fourth time for the same
+  narrow-mechanism reason as the prior three rounds). `load shedding` remained
+  the strongest candidate on reconfirmation: re-grepped "load shedding",
+  "graceful degradation", "priority" (in an overload sense), and "shed" across
+  `lessons/*.html` and `glossary.html` — all zero hits. Read Lesson 11 (rate
+  limiting & backpressure) and Lesson 50 (bulkhead) in full to confirm the gap
+  was real and not just a missing word for an already-taught idea: Lesson 11
+  teaches rejecting work based on a *fixed, pre-chosen* limit (a per-client
+  token bucket, a queue's max size); Lesson 50 teaches *partitioning* a shared
+  resource per dependency. Neither one teaches a server reacting to its *own*,
+  *currently measured* overload state (CPU, memory, latency) by shedding a
+  *chosen, priority-ordered* fraction of requests — confirmed as a genuinely
+  distinct mechanism, not a rename of either. Chose it over every ruled-out
+  candidate above: it's concrete, in-scope, directly continues Lesson 11's own
+  "two mechanisms that keep too much traffic from falling over" framing left
+  incomplete, ties to Lesson 47 (cascading restarts, cited as what happens when
+  a health check is shed carelessly) and Lesson 50 (bulkhead, contrasted
+  directly in a comparison table), and is squarely the kind of question that
+  shows up in senior/staff backend interviews ("your service is falling over
+  under a spike but no client is over its rate limit — what do you do").
+  Lesson 71 covers: why a fixed per-client limit (Lesson 11) and a full-queue
+  reject (Lesson 11) both miss the case where the server itself is overloaded
+  while every individual client is still under its own cap; load shedding
+  defined as the server watching its own health signals directly rather than a
+  per-client proxy; a three-way comparison table (rate limiting / backpressure
+  / bulkhead / load shedding) naming trigger, signal, and who's affected for
+  each, to keep the four mechanisms from blurring together the way the
+  briefing's own conventions warn interview answers often do; a minimal Go
+  `Shedder`/`Admit` sketch showing priority-based shedding (a `Priority`
+  enum, a `loadFn` closure reporting 0.0-1.0 load, and threshold-gated
+  admission so `Critical` is shed last) as the piece that separates a useful
+  implementation from randomly dropping requests; a frontend-habit callout
+  comparing this to a low-end browser skipping off-screen image decodes to
+  keep the main thread responsive; and the `503`+`Retry-After` response
+  contract, reusing Lesson 11's exact pairing, with an explicit note on why a
+  generic `500` would mislead whoever's watching error rates. Checked the
+  glossary first for the candidate term (`load shedding`) — zero collisions —
+  then added exactly one new `<dfn>`-backed row, appended after Lesson 70's
+  kill switch row; no other new terms needed a full glossary entry this round
+  (priority, CPU/memory/latency, and 503/Retry-After all reuse existing
+  vocabulary from Lessons 11 and elsewhere, left as plain `<code>`/prose
+  rather than re-defined under a second entry point, consistent with this
+  course's standing precedent for adjacent terms that aren't independently
+  tested). Verification performed mechanically, matching this course's
+  established rigor: (1) quiz word-count balance via a Node script parsing
+  every `<div class="q">` block and counting each `<button class="opt">`'s
+  words two independent ways (`.split(/\s+/)` and `.split(" ").filter(Boolean)`)
+  — first draft was uneven on three of four questions (word counts of 7-9
+  mixed within a question), fixed through one to two targeted rewrite-and-
+  recount cycles per question, re-running the script after every edit rather
+  than trusting a manual count, converged to exactly 8/8/8/8, 8/8/8/8, 8/8/8/8,
+  and 9/9/9/9 word counts across the four questions respectively, both
+  counting methods agreeing exactly, and exactly one `data-ok` per question
+  confirmed the same way; (2) an occurrence-count HTML tag-balance check
+  (regex counting per tag, not naive line/substring counting, per this
+  course's standing tooling-quirk warning) across the same 22 tag pairs used
+  in every prior round (div/p/h1/h2/table/thead/tbody/tr/th/td/pre/code/dfn/
+  button/a/span/strong/em/script/head/body/html) on the lesson, and the same
+  check on `glossary.html` after its one-row addition — both files fully
+  balanced on the first pass, no fixes needed; (3) a raw-unescaped-`&` regex
+  scan (matching any `&` not followed by `amp;`, `lt;`, `gt;`, `quot;`,
+  `#39;`, or `apos;`) across both files — zero hits in either, no fixes
+  needed; (4) a targeted grep for the backslash-escaped-quote bug caught in
+  Lesson 68's round (`\\"` inside a `data-vn`/`data-en` attribute) — zero hits
+  in the new lesson, confirming that mistake wasn't repeated; (5) Go compile
+  check — wrote the exact shipped `Priority`/`Shedder`/`Admit` code
+  byte-for-byte into `backend/.scratch/lesson71/main.go`, supplemented only
+  with a local `main()` calling `Admit` once to exercise the code (not part of
+  the shipped snippet, outside its "exact shipped snippet" markers), needing
+  no external package; `go mod init`, `go build ./...`, and `go vet ./...` all
+  completed with zero errors/output; deleted `backend/.scratch/` entirely
+  afterward and confirmed via `git status --short` that only
+  `backend/lessons/0071-load-shedding.html`, `backend/assets/nav.js`, and
+  `backend/reference/glossary.html` show as changed/new among backend files —
+  other repo-root changes in that status output (`data/lessons/0068-*`,
+  `python/.scratch_check/`) belong to unrelated courses' own same-morning
+  runs, not touched this round. Registered Lesson 71 in `nav.js` (date
+  2026-09-14), confirmed with `node --check backend/assets/nav.js` (clean, no
+  output). DB access: `bin/record-progress backend lesson_generated --day 71
+  --lesson 0071-load-shedding.html --detail '{"by":"headless"}'` ran as a
+  single standalone command and succeeded immediately on the first attempt
+  (`recorded: backend/lesson_generated day=71 lesson=0071-load-shedding.html`)
+  — the write path continues to be reliable, consistent with every round
+  since Lesson 69's one-off block. No DB read was attempted at all this round
+  per the briefing's explicit instruction. No confirmed next-lesson gap is
+  named with certainty for the round after this one — same standing note as
+  every prior round; a completion/quiz-outcome signal or a user-named track
+  should take priority over guessing blind. Absent that, this round's
+  gap-search leaves `COPY`/bulk insert on the table a fifth time (still
+  narrow, still passed over every round it's been raised) and surfaces one
+  fresh idea worth a closer look next round: the messaging/event-driven
+  paradigm itself (pub/sub, message queue, event-driven architecture as named
+  concepts, distinct from the outbox/webhook/polling *mechanisms* already
+  taught in Lessons 29, 30, and 63) — deliberately not chosen this round
+  because it sits close to MISSION.md's "distributed systems beyond vocabulary
+  level" exclusion, but worth a deliberate scope judgment call next round
+  rather than a default pass, since the mechanisms are already taught without
+  ever naming the paradigm they belong to.

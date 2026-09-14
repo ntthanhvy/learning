@@ -100,6 +100,8 @@
       file: "lessons/0046-fstrings-and-format-spec.html" },
     { n: 47, date: "2026-09-13", title: "Structuring a spoken technical answer",
       file: "lessons/0047-interview-answer-shape.html" },
+    { n: 48, date: "2026-09-14", title: "Reading someone else's code out loud",
+      file: "lessons/0048-code-walkthrough-answer-shape.html" },
   ];
 
   const REFS = [

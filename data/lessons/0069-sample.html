@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 69 · sample(): random rows, reproducibly</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 69 · ~20 min · 15 Sep 2026</p>
+<h1>sample(): random rows, reproducibly</h1>
+<p class="byline">Chào bạn — today's a gap-fill pick: <code>.sample()</code> was named as a standing zero-hit candidate since Lesson 68's closing teaser, reconfirmed this round by a fresh grep of all 68 lessons and the glossary (only that teaser mentioned it by name, never a taught use). Picked over the round's other candidate, <code>.align()</code>, as the more interview-load-bearing of the two — reservoir/holdout sampling and reproducible randomness come up constantly in ETL and ML-adjacent interview questions, while <code>.align()</code> is a narrower, more advanced index-alignment tool better suited to its own future lesson.</p>
+
+<h2>1 · The basics: how many rows, and can you get them again</h2>
+<p><dfn data-en="a DataFrame/Series method returning a random subset of rows (or columns, with axis=1), either an exact count (n=) or a fraction of the whole (frac=) -- never both in the same call" data-vn="giữ nguyên 'sample()' — lấy ngẫu nhiên 1 số hàng (hoặc cột), theo SỐ LƯỢNG (n=) hoặc TỈ LỆ (frac=), không được truyền cả 2 cùng lúc">sample()</dfn> returns a random subset of rows — pass <code>n=</code> for an exact count, or <code>frac=</code> for a fraction of the whole. Confirmed directly (pandas 3.0.5) on the same cleaned <code>orders_raw.csv</code> fixture recent lessons use (An 120.0/01-05, An 42.0/01-10, Binh 35.5/01-06, Binh 180.0/01-09):</p>
+<pre><code>clean.sample(n=<span class="num">2</span>, random_state=<span class="num">0</span>)
+<span class="cm">#    order_id customer  amount order_date
+#           2     Binh    35.5 2026-01-06
+#           5     Binh   180.0 2026-01-09</span>
+
+clean.sample(n=<span class="num">2</span>, random_state=<span class="num">0</span>)  <span class="cm"># same random_state -- IDENTICAL rows again</span>
+<span class="cm">#    order_id customer  amount order_date
+#           2     Binh    35.5 2026-01-06
+#           5     Binh   180.0 2026-01-09</span></code></pre>
+<p>Confirmed directly: with no <code>random_state=</code> at all, two calls generally return different rows (each a genuine fresh draw); with the SAME integer <code>random_state=</code>, two separate calls return byte-identical output — <code>.equals()</code> confirmed <code>True</code> across separate calls with <code>random_state=42</code>. This is the single habit that turns "random" into "reproducible": always pin <code>random_state=</code> in a script, a notebook, or a test fixture, so a teammate re-running the same code gets the same sample, not a different one each time.</p>
+
+<div class="callout"><strong>SQL bridge:</strong> the closest SQL equivalent is <code>ORDER BY RANDOM() LIMIT n</code> (Postgres) or <code>TABLESAMPLE</code> — but neither has a built-in, portable seed the way <code>random_state=</code> does; reproducing an exact SQL random sample usually means hand-rolling a seeded PRNG function. <code>sample()</code>'s <code>random_state=</code> makes "the same random sample twice" a one-argument guarantee.</div>
+
+<h2>2 · n= and frac= are mutually exclusive, and rows keep their original index</h2>
+<p>Passing both raises immediately rather than silently picking one — confirmed directly:</p>
+<pre><code>clean.sample(n=<span class="num">2</span>, frac=<span class="num">0.5</span>)
+<span class="cm"># ValueError: Please enter a value for `frac` OR `n`, not both</span></code></pre>
+<p>And sampled rows keep their ORIGINAL index labels, not a fresh <code>0..n-1</code> range — confirmed directly, <code>clean.sample(n=2, random_state=0).index.tolist()</code> comes back <code>[2, 3]</code>, the same row labels those rows had in <code>clean</code>, not <code>[0, 1]</code>. Chain <code>.reset_index(drop=True)</code> afterward if a clean sequential index is needed downstream — the same habit as after any row-dropping operation (Lesson 3).</p>
+
+<h2>3 · replace=True: sampling with repeats, and oversampling past the row count</h2>
+<p>By default <code>replace=False</code> — each row can appear at most once, and asking for more rows than exist raises rather than silently capping:</p>
+<pre><code>clean.sample(n=<span class="num">10</span>)  <span class="cm"># clean only has 4 rows</span>
+<span class="cm"># ValueError: Cannot take a larger sample than population when 'replace=False'</span>
+
+clean.sample(n=<span class="num">10</span>, replace=<span class="kw">True</span>, random_state=<span class="num">0</span>)  <span class="cm"># works -- rows repeat</span>
+<span class="cm"># same row (order_id 5, Binh/180.0) appears 5 separate times in the 10</span></code></pre>
+<p>Confirmed directly: with <code>replace=True</code>, the output can and does contain the same row label more than once — <code>.index.duplicated().any()</code> came back <code>True</code> on a 10-row draw from the 4-row fixture. This is the standard tool for bootstrap resampling (draw-with-replacement, a common statistics/ML-adjacent interview mention) — without <code>replace=True</code>, oversampling past the available row count is a hard error, not a silent shrink.</p>
+
+<h2>4 · Two sharper tools: weights=, and stratified sampling via groupby()</h2>
+<p><code>weights=</code> accepts a column (or array) of relative likelihoods — a row with a bigger weight is proportionally more likely to be drawn, confirmed directly by passing the <code>amount</code> column itself as weights and observing the higher-amount rows come up more often across repeated seeded draws. More interview-relevant: <code>.sample()</code> composes with <code>groupby()</code> for STRATIFIED sampling — one (or <code>n=</code>) random row per group, instead of a purely global random draw that could accidentally skip a whole customer:</p>
+<pre><code>clean.groupby(<span class="str">"customer"</span>, group_keys=<span class="kw">False</span>).sample(n=<span class="num">1</span>, random_state=<span class="num">0</span>)
+<span class="cm">#    order_id customer  amount order_date
+#           6       An    42.0 2026-01-10
+#           2     Binh    35.5 2026-01-06</span></code></pre>
+<p>Confirmed directly: exactly one row per <code>customer</code> group came back, chosen independently within each group — the random draw for An's two candidate rows and Binh's two candidate rows happen separately, so neither customer can be shut out the way a single global <code>clean.sample(n=2)</code> could (by chance) return two rows from the same customer and zero from the other. <code>group_keys=False</code> keeps the result's index as the original row labels rather than adding an extra grouping-key index level on top — the same flag <code>groupby().apply()</code> uses (Lesson 61) for the analogous reason.</p>
+
+<div class="interview">
+<p><strong>Q: "How would you take a reproducible random sample of a DataFrame, and how would you make sure every category is represented?"</strong> A strong answer, out loud: <em>"sample(n=...) or sample(frac=...) draws a random subset — never both together, that raises ValueError. The reproducibility part is random_state=: pin it to any integer and the exact same rows come back on every re-run, which matters for anything a teammate needs to reproduce, or a test fixture that can't be flaky. By default it's without replacement, so asking for more rows than exist raises rather than silently capping — replace=True allows repeats, which is the standard move for bootstrap resampling. For making sure every category shows up rather than trusting a single global draw to cover all of them by luck, I'd group first — groupby('category', group_keys=False).sample(n=1, random_state=...) draws independently within each group, which is stratified sampling, not a global draw that could skip a whole category."</em> The signal: naming <code>random_state=</code> unprompted, the <code>n=</code>/<code>frac=</code> mutual exclusivity, and specifically the <code>groupby().sample()</code> stratified pattern — that last one is the part most candidates don't think to mention.</p>
+</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/69_sample.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/69_sample.py</code></pre>
+<p>Uses the same real <code>orders_raw.csv</code> fixture, cleaned the same way as recent lessons. Exercise 1 draws a seeded 2-row sample and confirms two separate calls with the same <code>random_state</code> are identical. Exercise 2 confirms passing both <code>n=</code> and <code>frac=</code> raises <code>ValueError</code>. Exercise 3 confirms <code>replace=True</code> allows drawing more rows than exist, and that duplicate row labels show up in the result. Exercise 4 uses <code>groupby("customer", group_keys=False).sample(n=1, ...)</code> and confirms exactly one row per customer comes back.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: with no random_state=, separate sample() calls generally draw different rows; with the SAME integer random_state=, separate calls return byte-identical output -- confirmed via .equals() across two independent calls with random_state=42.">
+    <p class="stem">What does passing the same integer <code>random_state=</code> to two separate <code>sample()</code> calls guarantee?</p>
+    <button class="opt" data-ok>both calls return the exact same rows, every single time</button>
+    <button class="opt">both calls return different rows, chosen from two disjoint halves</button>
+    <button class="opt">nothing at all; random_state only affects column order, not rows</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: sample(n=10) on a 4-row DataFrame raises ValueError: Cannot take a larger sample than population when 'replace=False' -- the default is without replacement, so oversampling past the row count is a hard error, not a silent cap or a silent allowance of repeats.">
+    <p class="stem">By default, what happens calling <code>clean.sample(n=10)</code> on a DataFrame with only 4 rows?</p>
+    <button class="opt" data-ok>it raises ValueError; asking for more rows than exist needs replace=True set</button>
+    <button class="opt">it silently returns all 4 rows available, capped quietly at the max</button>
+    <button class="opt">it silently repeats rows to reach 10, as if replace=True were default</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: groupby('customer', group_keys=False).sample(n=1, ...) draws one row independently within EACH group, guaranteeing every customer is represented -- unlike a single global clean.sample(n=2), which could by chance draw two rows from the same customer and zero from another.">
+    <p class="stem">Why use <code>groupby("customer").sample(n=1)</code> instead of a single global <code>sample(n=2)</code> to represent every customer?</p>
+    <button class="opt" data-ok>a global draw could by chance skip a customer; grouping draws per-group</button>
+    <button class="opt">groupby() is strictly required syntax; sample() cannot ever run standalone by itself</button>
+    <button class="opt">there is no difference at all; both always cover every customer equally</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the <a href="https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.sample.html">pandas API reference for <code>DataFrame.sample</code></a> (per <code>RESOURCES.md</code>'s "Docs: pandas User Guide" entry, this course's authoritative-behavior source) documents <code>n=</code>, <code>frac=</code>, <code>replace=</code>, <code>weights=</code>, <code>random_state=</code>, and <code>axis=</code> in full, including the exact <code>ValueError</code> wording confirmed above.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>sample()</code> is new today, placed right after Lesson 68's <code>factorize()</code> entry.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-69 comes back reported as shakiest, otherwise another fresh curriculum/glossary scan for the next genuinely-uncovered pattern — today's scan reconfirms <code>.align()</code> as the standing zero-hit candidate, not picked this round.<br><br>
+💬 Anything unclear — <code>random_state=</code>, the <code>n=</code>/<code>frac=</code> split, stratified <code>groupby().sample()</code>, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 49 · Review day 4: retrieval across six more lessons</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 49 · ~20 min · 15 Sep 2026</p>
+<h1>Review day 4: retrieval across six more lessons</h1>
+<p class="byline">Day 43 reviewed Days 1, 2, 3, 5, 7, 12; Day 44 reviewed Days 16, 19, 30, 33, 34, 38; Day 45 reviewed Days 4, 6, 9, 13, 20, 36. Days 46-48 then ran fresh content three days straight (f-strings, then a pair of interview-performance skills) with no reported weak spot to chase, since no <code>lesson_completed</code>/quiz/kata signal has ever come back from any of the 48 lessons shipped so far. This is a fourth <dfn data-en="a study technique where the learner produces an answer from memory before checking it, rather than re-reading the source material - it is a stronger driver of durable learning than re-reading, especially when spaced across separated topics rather than massed on one" data-vn="giữ nguyên &quot;retrieval practice&quot; — tự nhớ lại và viết ra câu trả lời trước khi xem lại tài liệu, hiệu quả hơn hẳn việc đọc lại; càng hiệu quả khi trộn nhiều chủ đề cũ thay vì ôn 1 chủ đề liền mạch">retrieval practice</dfn> day, differently composed: six ideas from Days 8, 11, 17, 24, 32, and 41 — none of which any earlier review touched.</p>
+
+<div class="callout"><strong>Why today, specifically:</strong> after Day 45, the still-uncovered list was Days 8, 10-11, 14-15, 17-18, 21-29, 31-32, 35, 37, and 39-42 — 22 lessons. Day 48's own next-day note named this list again and flagged, in its own words, that "three fresh-content days in a row (46, 47, 48) without ever running a fourth review day is starting to look like avoidance rather than a considered choice," since the baseline's core untested claim (<code>learning-records/0001-…</code>) is specifically about recall under pressure — recognition without recall — which a review day stresses directly and a new-topic lesson does not. No stronger override signal appeared this round either: no completion/quiz/kata outcome has ever been recorded for any day, so there is still nothing to chase instead. Followed the steer as written, rather than deviating toward a fourth fresh-content day.</div>
+
+<h2>1 · Six questions, in the original teaching order</h2>
+<p>Answer each out loud or on paper <em>before</em> reading the fold-out answer. If one is shaky, note it and go fix it in the practice file below rather than only rereading the old lesson.</p>
+
+<p><strong>Day 8 — exceptions.</strong> Why should a real <code>except</code> clause name an exact exception type, like <code>except ValueError:</code>, instead of a bare <code>except:</code>?</p>
+<div class="callout">Fold-out answer: a bare <code>except:</code> catches literally everything — a typo'd variable name (<code>NameError</code>), a genuine bug elsewhere in the code, even <code>KeyboardInterrupt</code> — and silently turns all of them into the same quiet no-op, hiding real bugs behind whatever "recovery" code was meant for one specific, expected failure. Naming the exact type catches only what was actually planned for and lets everything else propagate loudly, where it can be noticed.</div>
+
+<p><strong>Day 11 — pytest.</strong> Inside a <code>@pytest.fixture</code> function that does <code>yield some_value</code>, what runs the code written <em>after</em> the <code>yield</code>, and when?</p>
+<div class="callout">Fold-out answer: that code is teardown, and <code>pytest</code> itself runs it once the test using that fixture finishes — success or failure, the same always-runs guarantee Day 6's context-manager <code>__exit__</code> and Day 8's <code>finally</code> both already made. Code before <code>yield</code> is setup, run once per test that names the fixture; code after it never runs until that one test is fully done.</div>
+
+<p><strong>Day 17 — pydantic models.</strong> A pydantic <code>BaseModel</code> field is typed <code>price: float</code>, and it's constructed with <code>price="12.5"</code> (a string). What happens, and is that the same thing a <code>@dataclass</code> would do?</p>
+<div class="callout">Fold-out answer: pydantic coerces the string into a real <code>float</code> — <code>12.5</code>, type <code>float</code> — because that conversion is safe and unambiguous; a <code>@dataclass</code> would instead store the string <code>"12.5"</code> completely unchanged, since Day 7 already established that type hints are documentation only and Python never enforces them at runtime. Same field, same hint, very different behavior at construction time.</div>
+
+<p><strong>Day 24 — ASGI middleware.</strong> A route raises an exception that has a registered <code>@app.exception_handler</code>. Does a middleware function's own <code>try</code>/<code>except</code> around <code>await call_next(request)</code> ever see that exception?</p>
+<div class="callout">Fold-out answer: no. The exception handler resolves the exception into a finished <code>Response</code> before <code>call_next()</code> ever returns to middleware — so middleware only ever sees a normal, completed response, never the exception itself. Middleware that wants the request's true final status code should read <code>response.status_code</code> unconditionally after <code>call_next()</code> returns, not rely on a <code>try</code>/<code>except</code> that a handled exception will never reach.</div>
+
+<p><strong>Day 32 — <code>@classmethod</code>/<code>@staticmethod</code>.</strong> Why does a <code>@classmethod</code> alternative constructor call <code>cls(...)</code> instead of hardcoding the class's own name, like <code>Money(...)</code>?</p>
+<div class="callout">Fold-out answer: so that a subclass inheriting the method unmodified still builds an instance of <em>itself</em> when called through the subclass, instead of always hardcoding back to the parent class. <code>cls</code> is whichever class the method was actually called through — the same idea behind stdlib alternative constructors like <code>dict.fromkeys(...)</code> and <code>datetime.fromtimestamp(...)</code>.</div>
+
+<p><strong>Day 41 — typing extras.</strong> A class never inherits from a given <code>Protocol</code> and never imports it. Can it still satisfy that <code>Protocol</code> for a type checker?</p>
+<div class="callout">Fold-out answer: yes — a <code>Protocol</code> is structural typing, not inheritance-based. Any class whose methods and signatures happen to match is considered to satisfy it, with zero coupling to the <code>Protocol</code> itself — confirmed in Day 41 with an <code>Employee</code> class that never mentions the <code>Named</code> protocol at all, yet still type-checks as one wherever <code>Named</code> is expected.</div>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> nothing pandas-specific today — this review only revisits Days 8, 11, 17, 24, 32, and 41's plain-Python, pytest, and FastAPI/pydantic material, with no pandas/NumPy API involved at any point.</div>
+
+<h2>2 · Why these six, spread this way</h2>
+<p>Same interleaving logic as Days 43-45: an exception-handling rule, then a testing-fixture rule, then a validation rule, then a web-middleware rule, then an object-model construction rule, then a static-typing rule — six different mental models back to back rather than six variations on one. Landing on <code>@classmethod</code>'s <code>cls(...)</code> habit right after middleware's exception-visibility gotcha forces a fresh retrieval each time, instead of riding a "this is all backend stuff" momentum from one question into the next.</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/49_review_retrieval_day_4.py</code>. It is six small, independent exercises — one per topic above, same order — with no new syntax anywhere; every mechanism needed was already taught in Days 8, 11, 17, 24, 32, and 41. Fill in each TODO from memory first; only reopen the old lesson if a fold-out answer above didn't fully land.</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/49_review_retrieval_day_4.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed, even though Days 11, 17, and 24's own original practice files needed <code>pytest</code>, <code>pydantic</code>/<code>pydantic-settings</code>, or <code>fastapi</code>/<code>httpx</code> respectively: today's exercises test the same three rules in plain Python (a hand-rolled setup/teardown log standing in for a pytest fixture, a small manual coercion function standing in for pydantic's, and a plain function chain standing in for <code>call_next</code>) rather than running real pytest, pydantic, or FastAPI, matching Days 44 and 45's own precedent for topics whose original lesson needed a third-party package.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A bare except: catches every exception type without distinction, including typos (NameError) and real bugs, silently turning all of them into the same quiet no-op. Naming the exact type, like except ValueError:, only catches the one failure actually planned for and lets anything else propagate loudly where it can be noticed.">
+    <p class="stem">Why name an exact exception type instead of writing a bare <code>except:</code>?</p>
+    <button class="opt" data-ok>a bare except hides every error type, even real bugs</button>
+    <button class="opt">a bare except runs measurably slower than a named one</button>
+    <button class="opt">a bare except cannot capture the exception object at all</button>
+  </div>
+  <div class="q" data-why="pydantic coerces a compatible string like '12.5' into the field's declared float type because the conversion is safe and unambiguous, at construction time. A plain @dataclass instead stores the string completely unchanged, since Day 7 established that type hints are documentation only and are never enforced by Python at runtime.">
+    <p class="stem">Given <code>price: float</code>, what does a pydantic <code>BaseModel</code> do with <code>price="12.5"</code> that a <code>@dataclass</code> would not?</p>
+    <button class="opt" data-ok>convert the string into a real float value there</button>
+    <button class="opt">reject the string immediately with a plain TypeError raised</button>
+    <button class="opt">store the string completely unchanged, same as a dataclass</button>
+  </div>
+  <div class="q" data-why="An exception handler resolves a matching exception into a finished Response before call_next() ever returns to middleware, so middleware's own try/except around call_next() never sees that exception at all - only the response it turned into. Reading response.status_code unconditionally is the reliable way to log the true final outcome.">
+    <p class="stem">If a route's exception has a registered <code>@app.exception_handler</code>, what does middleware's <code>try</code>/<code>except</code> around <code>call_next()</code> see?</p>
+    <button class="opt" data-ok>nothing at all — call_next() just returns a normal response</button>
+    <button class="opt">the exact same exception, caught the instant it is raised</button>
+    <button class="opt">a generic 500 error response, regardless of the handler registered</button>
+  </div>
+  <div class="q" data-why="Using cls(...) instead of hardcoding the class name means a subclass inheriting the classmethod unmodified still builds an instance of itself when called through the subclass, rather than always hardcoding back to the original defining class - the same pattern behind dict.fromkeys and datetime.fromtimestamp.">
+    <p class="stem">Why does a <code>@classmethod</code> alternative constructor call <code>cls(...)</code> rather than the class's own name?</p>
+    <button class="opt" data-ok>so a subclass calling that method inherited still builds itself</button>
+    <button class="opt">cls and the class's own name always behave identically anyway</button>
+    <button class="opt">calling the class by its own name is simply illegal</button>
+  </div>
+  <div class="q" data-why="A Protocol is structural typing: any class whose methods and signatures happen to match is considered to satisfy it for a type checker, whether or not that class inherits from the Protocol or ever imports it at all - confirmed in Day 41 with an Employee class that never mentions Named yet still satisfies it.">
+    <p class="stem">Can a class satisfy a <code>typing.Protocol</code> without ever inheriting from it or importing it?</p>
+    <button class="opt" data-ok>yes — matching method names and signatures are enough alone</button>
+    <button class="opt">no — Protocol always requires explicit inheritance to work first</button>
+    <button class="opt">no — Protocol always requires an explicit import to work</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the six lessons this review draws from are each still the primary source for their own topic — <a href="../lessons/0008-exceptions.html">Day 8</a>, <a href="../lessons/0011-testing-with-pytest.html">Day 11</a>, <a href="../lessons/0017-pydantic-models-and-validation.html">Day 17</a>, <a href="../lessons/0024-asgi-middleware.html">Day 24</a>, <a href="../lessons/0032-classmethod-and-staticmethod.html">Day 32</a>, and <a href="../lessons/0041-typing-extras.html">Day 41</a>. For the retrieval-practice technique itself, <a href="https://docs.python.org/3/tutorial/">the Python Tutorial</a> stays this course's general reference (per <code>RESOURCES.md</code>) — there is no dedicated stdlib doc for a study technique, matching Days 43-45's own note.</p>
+
+<p class="next">No new terms today — every concept reviewed above already has its own Day 8-41 glossary row, and this lesson repeats the "retrieval practice" <code>&lt;dfn&gt;</code> from Days 43-45 rather than adding a fourth row for the same term.<br>
+With four review days now shipped (Days 1-12, 16-38, 4/6/9/13/20/36, and today's 8/11/17/24/32/41), the remaining uncovered days are 10, 14-15, 18, 21-23, 25-29, 31, 35, 37, 39-40, and 42 — still viable material for a future fifth sweep, though after four review days in a row of this kind, resuming fresh content (or a real learner completion/quiz-outcome signal, still never recorded) is the stronger next move for Day 50 unless that signal changes the picture first.<br><br>
+💬 Anything unclear — any of the six answers, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

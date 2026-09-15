@@ -102,6 +102,8 @@
       file: "lessons/0047-interview-answer-shape.html" },
     { n: 48, date: "2026-09-14", title: "Reading someone else's code out loud",
       file: "lessons/0048-code-walkthrough-answer-shape.html" },
+    { n: 49, date: "2026-09-15", title: "Review day 4: retrieval across six more lessons",
+      file: "lessons/0049-review-retrieval-day-4.html" },
   ];
 
   const REFS = [

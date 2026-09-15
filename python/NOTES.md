@@ -6068,3 +6068,187 @@ fail *gracefully* so the learner sees which task failed.
   moment it's available; the read-path gate itself should still not be
   re-attempted daily absent new indication, per Day 44's standing
   instruction.
+- 2026-09-15 — **Day 49 generated: review day 4** (headless run) — a fourth
+  retrieval-practice sweep, six ideas from Days 8, 11, 17, 24, 32, and 41,
+  none of which Days 43-45's three earlier sweeps touched.
+  Ran `date` first: confirmed 2026-09-15 (Tue) before doing anything else.
+  Read this run: `MISSION.md` (untouched, read-only) in full, `PLAN.md` in
+  full, `RESOURCES.md` in full, the sole
+  `learning-records/0001-baseline-reads-python-writes-little.md`, and this
+  file's tail (the full Day 48 entry, plus enough of Days 44-47 to confirm
+  the standing verification methodology). Read all three prior review-day
+  lessons in full — `lessons/0043-review-retrieval-day.html`,
+  `0044-review-retrieval-day-2.html`, `0045-review-retrieval-day-3.html` —
+  and `practice/45_review_retrieval_day_3.py` to learn the established
+  format precisely, then the six actual source lessons being reviewed
+  today in full — `0008-exceptions.html`, `0011-testing-with-pytest.html`,
+  `0017-pydantic-models-and-validation.html`, `0024-asgi-middleware.html`,
+  `0032-classmethod-and-staticmethod.html`, `0041-typing-extras.html` —
+  plus `assets/nav.js`'s full `LESSONS` array and `reference/glossary.html`'s
+  Day 43-48 tail to confirm no term collision before deciding whether a new
+  glossary row was even needed.
+  **Idempotency check:** `ls lessons/0049-*`, `date`, and a grep across
+  `python/` for `0049`/`Day 49`/`day49`/`n: 49`/`2026-09-15` all came back
+  empty (bar the two prior next-day notes already naming "Day 49" as a
+  forward reference) before writing anything; proceeded as Day 49.
+  **Topic and format selection, and the Day 48 steer:** Day 48's own
+  next-day note explicitly flagged that three fresh-content days in a row
+  (46, 47, 48) without a fourth review day "is starting to look like
+  avoidance rather than a considered choice," since the baseline's core
+  untested claim is about recall under pressure, which a review day
+  stresses directly, and there was no longer a specific named next
+  candidate sitting in the wings the way Day 48 itself had been. This run
+  re-checked for a stronger override signal before following that steer:
+  `learning-records/` still holds only the Day 1 baseline, no
+  `lesson_completed`/quiz/kata outcome has ever been recorded for any day
+  1-48 (confirmed by re-reading the baseline file; the DB read path itself
+  was not attempted, per Day 44's standing instruction covered below), and
+  a fresh grep of `RESOURCES.md`'s named modules against `lessons/*.html`
+  turned up nothing new since Day 46's last such sweep. With no stronger
+  signal, followed the Day 48 steer as written: today is the fourth review
+  day, not a fifth fresh-content day. Topic selection within that: the
+  22-day uncovered list after Day 45 was 8, 10-11, 14-15, 17-18, 21-29,
+  31-32, 35, 37, 39-42. Picked six non-adjacent points spanning that whole
+  range the same way Days 43-45 did — an exception-handling rule (Day 8),
+  a pytest-fixture teardown rule (Day 11), a pydantic coercion rule (Day
+  17), an ASGI-middleware exception-visibility gotcha (Day 24), a
+  classmethod alternative-constructor rule (Day 32), and a Protocol
+  structural-typing rule (Day 41) — one from the intensive-week tail, one
+  from Phase 2a testing, two from the backend phase, and two from the
+  later object-model/typing tail, deliberately not clustered. Format:
+  read all three prior review lessons before writing and matched their
+  exact shape — six fold-out Q&A pairs in original teaching order, a "why
+  this composition" callout, a "why these six, spread this way" section on
+  interleaving, a practice file with six independent exercises in the same
+  order, a five-question quiz (Days 43 and 45 ran three and six questions
+  respectively depending on natural fit; five felt right for six topics
+  without overloading the quiz), and a "Go deeper" section linking back to
+  all six source lessons as the primary sources, plus the same closing
+  note that this review reuses Day 43's `retrieval practice` `<dfn>`
+  rather than adding a new glossary term. Confirmed via direct read that
+  Days 43-45 all shipped a companion practice file with the review day
+  (not curation-only), so Day 49 matched that and shipped
+  `practice/49_review_retrieval_day_4.py` too.
+  **Third-party-dependency handling (Days 11, 17, 24's own original
+  practice files needed pytest / pydantic+pydantic-settings / fastapi+httpx
+  respectively):** followed Days 44 and 45's exact precedent for this
+  situation (Day 44 reviewed FastAPI-dependent Days 16/19 in plain Python;
+  Day 45 reviewed async-dependent Day 20 the same way) — today's Exercises
+  2, 3, and 4 test the same *rules* those three days taught (fixture
+  setup/teardown ordering, coercion-vs-no-coercion, and a handled
+  exception never reaching middleware's own `try`/`except`) using only
+  stdlib Python: a hand-rolled setup/teardown log standing in for a pytest
+  fixture, a plain `float(value)` function standing in for pydantic
+  coercion, and a plain function chain standing in for `call_next`. This
+  kept the practice file genuinely standard-library-only despite drawing
+  on three lessons whose own original practice files were not.
+  Hard-scope-rule compliance (no pandas/NumPy): grepped the lesson
+  case-insensitively for `pandas`/`numpy`/`pd\.`/`np\.` — exactly one hit,
+  the standing "Where pandas goes from here" callout stating plainly that
+  nothing pandas-specific applies to today's six topics, with no pandas or
+  NumPy API demonstrated. Grepped the practice file the same way — zero
+  hits. `typing` (Exercise 6's only import) is standard library.
+  Practice file `practice/49_review_retrieval_day_4.py` (6 exercises, one
+  per topic, same order as the lesson body): `safe_parse_amount` (Day 8,
+  catch `ValueError` narrowly), `run_with_fixture` (Day 11, teardown after
+  `yield` always runs, even on an exception, checked by confirming the log
+  is exactly `["setup", "teardown"]` after the wrapped call raises),
+  `coerce_price` (Day 17, coerces a valid numeric string and raises
+  `ValueError` on a bad one), `logging_middleware` plus
+  `call_next_with_handled_exception` (Day 24, must read
+  `response["status_code"]` unconditionally rather than assuming a
+  `try`/`except` around `call_next` will ever see a handled exception),
+  `Money.from_dollars` plus a `GiftCardMoney` subclass (Day 32, `cls(...)`
+  vs. a hardcoded class name, checked by confirming the subclass's
+  inherited call returns a `GiftCardMoney` instance not a `Money` one),
+  and a `HasName` `@runtime_checkable Protocol` plus `Employee`/
+  `NoNameHere` classes (Day 41, structural typing with no inheritance).
+  Followed the standing defensive pattern against the
+  Ellipsis-at-module-level bug family: wrote a small one-off script (run
+  via `uv run python3`, deleted after use with the rest of the scratch
+  tree) that walks the file line by line and reports every line containing
+  `...` together with its indent level — the five real placeholder lines
+  (Exercises 1-4's stub bodies plus Exercise 5's stub body) are all
+  indented 4 or 8 spaces inside a function body; the only column-0 `...`
+  occurrences are inside comment text (the commented-out `def name(self)
+  -> str: ...` Protocol sketch and prose mentioning the literal token),
+  not live code.
+  Verified in a scratch dir (`python/.scratch/lesson49/`, removed
+  immediately after use, and a second helper dir `python/.scratch_check/`
+  holding the tag-balance, quiz-word-count (two independent scripts), and
+  Ellipsis-check scripts, also removed after use — confirmed via final
+  `git status --short` that nothing stray remained): the shipped
+  (unsolved) copy, run via plain `uv run python3` (no `--with` needed)
+  directly from its real `practice/` path, printed all six ✗ with no
+  traceback; a separately solved copy (every TODO filled in by hand,
+  kept in the scratch dir only, never shipped) printed all six ✓ and the
+  "All green" tally on the first attempt — no bugs caught during solving
+  this round.
+  Glossary: no new term added. This review reuses Days 43-45's existing
+  `retrieval practice` `<dfn data-en=` row rather than adding a duplicate;
+  every other concept reviewed today (exceptions, pytest fixtures,
+  pydantic coercion, middleware, classmethod, Protocol) already has its
+  own Day 8-41 glossary row from when it was first taught. Confirmed the
+  lesson's total `data-en=`/`<dfn` count (1) matches exactly one *reused*
+  term, zero new rows — `reference/glossary.html` itself was left
+  completely untouched this round (no edit made), consistent with that.
+  HTML tag-balance was checked with a stdlib `html.parser.HTMLParser`-based
+  stack checker and, independently, a regex-based open/close tag-count
+  comparator (both written as one throwaway script, deleted after use),
+  against the lesson file (157 open, 157 close, zero mismatches, zero
+  unclosed) and, since it was unmodified, `glossary.html` too as a sanity
+  check (1498 open, 1498 close, zero mismatches) — all four checks (two
+  tools × two files) reported fully balanced. Also grepped the lesson file
+  for a raw unescaped `&` (`&(?!amp;|lt;|gt;|quot;|#39;|apos;|#\d+;)`) —
+  zero hits; `glossary.html` was not re-scanned since it was not touched
+  this round.
+  Quiz: 5 questions (one per topic except Day 32, which — like the other
+  five — got exactly one; five felt like the right count for six review
+  topics without overloading the "check yourself" section, matching Day
+  44's own precedent of not always running six full questions). Word
+  counts were checked with a small regex-based Python script (splitting
+  each `<button class="opt">`'s stripped-tag text on whitespace) and
+  cross-checked with a second, independent `html.parser.HTMLParser`-based
+  script per this course's established two-method practice — the first
+  draft mismatched on four of five questions (Q2 10/8/9, Q3 10/10/9, Q4
+  9/10/11, Q5 10/9/10; only Q1 was already balanced at 10/10/10) and took
+  two to three rounds of few-word edits per question, re-running both
+  scripts after every edit — one intermediate edit actually overshot and
+  introduced a fresh 10/10/11 mismatch on Q4 that a hand count would
+  likely have missed, caught immediately by the scripts and corrected the
+  same round. Landed at 10/10/10, 9/9/9, 10/10/10, 10/10/10, and 10/10/10
+  respectively; both scripts agreed at every intermediate step, and a
+  separate grep confirmed exactly 5 `data-ok` occurrences total, one per
+  question.
+  No `RESOURCES.md` change this round: today is a review of already-cited
+  material, not a new source or Gap closure, matching Days 43-45's own
+  precedent of no `RESOURCES.md` edit on a review day.
+  Registered in `assets/nav.js` with `date: "2026-09-15"`; confirmed
+  `node --check assets/nav.js` reports no syntax errors after the edit.
+  **DB access:** `bin/query-progress` was not attempted this round, per
+  Day 44's standing instruction to stop daily re-attempts absent new
+  indication the gate lifted — no such indication appeared. `bin/record-progress
+  python lesson_generated --day 49 --lesson
+  0049-review-retrieval-day-4.html --detail '{"by":"headless"}'` was
+  attempted once, from the repo root, and **succeeded**, printing
+  `recorded: python/lesson_generated day=49
+  lesson=0049-review-retrieval-day-4.html` — the seventh consecutive
+  successful write (following Days 43-48). `python/learning-records/`
+  still holds only the Day 1 baseline; no completion/quiz/kata outcome has
+  ever been recorded for any day 2-48, so this round paced entirely from
+  on-disk state, same as every prior round since Day 42.
+  Final `git status --short` showed exactly three `python/` paths changed
+  (`assets/nav.js`, the new lesson, the new practice file) — no
+  `reference/glossary.html` edit this round, unlike Days 46-48 — alongside
+  unrelated concurrent changes in `backend/` and `data/` from parallel
+  same-day runs, confirmed out of scope and left untouched.
+  **Next-day note:** four review days have now run (Days 1-12, 16-38,
+  4/6/9/13/20/36, and today's 8/11/17/24/32/41), leaving 10, 14-15, 18,
+  21-23, 25-29, 31, 35, 37, 39-40, and 42 still uncovered (18 lessons) —
+  still viable for a fifth sweep, but after four review days in a row of
+  this kind, Day 50 should genuinely default back to fresh content (the
+  natural next candidate per `PLAN.md`'s spine, or revisiting whether any
+  `RESOURCES.md` gap has newly opened) unless a real learner
+  completion/quiz-outcome signal changes the picture first — the DB
+  read-path gate should still not be re-attempted daily absent new
+  indication, per Day 44's standing instruction.

@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 72 · Event-driven architecture: naming the paradigm behind the mechanisms</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 72 · ~20 min</p>
+<h1>Event-driven architecture: naming the paradigm behind the mechanisms</h1>
+<p class="byline">Lesson 29 built the outbox pattern, Lesson 30 verified a webhook's signature, and Lesson 63 chose between polling and a push channel — three lessons that all move an "X happened" notice from one system to another, without ever naming the paradigm they're all instances of. Today isn't a new mechanism. It's the vocabulary that was missing underneath three mechanisms you already have: event-driven architecture, message queue, and pub/sub.</p>
+
+<h2>1 · Two shapes a system can be built in</h2>
+<p>Every lesson so far has quietly assumed one shape: a client sends a request, a handler runs, a response comes back, done. Call that <dfn data-en="a system built around a caller directly asking a specific receiver to do something and waiting for its answer — the shape every request/response lesson in this course has assumed by default" data-vn="request-driven (giữ nguyên) — hệ thống mà bên gọi trực tiếp yêu cầu 1 bên nhận cụ thể làm gì đó rồi chờ trả lời">request-driven</dfn>: the caller knows exactly who it's talking to. The other shape is <dfn data-en="a system built around producers announcing that something happened, without knowing or caring who (if anyone) is listening, versus consumers reacting to announcements they subscribed to" data-vn="event-driven architecture (giữ nguyên) — hệ thống mà bên phát chỉ báo &quot;việc X đã xảy ra&quot;, không biết và không cần biết ai đang nghe, còn bên nhận tự đăng ký lắng nghe rồi phản ứng">event-driven architecture</dfn>: a producer announces "this happened" into the system and moves on, with no idea who's listening or whether anyone is. Zero, one, or ten consumers might react. The producer's job ends at the announcement — that's the whole trade: request-driven couples the caller to a specific callee and gets a direct answer back; event-driven decouples them and gets no answer back, only a fact broadcast into the system for whoever cares to pick up.</p>
+
+<h2>2 · The word for what Lesson 29 built without naming it</h2>
+<p>An <dfn data-en="a fact something happened, described as data, with no expectation of a reply -- a row inserted, an order placed, a payment captured -- as opposed to a command, which tells a specific receiver to do something and expects a result" data-vn="event (giữ nguyên) — dữ kiện rằng 1 việc đã xảy ra, không chờ ai trả lời -- khác với command, vốn ra lệnh cho 1 bên cụ thể làm gì đó và chờ kết quả">event</dfn> is the unit that gets announced: "order 4471 was placed," not "please charge this card." Lesson 29's outbox table held events. The relay process that Lesson 29 taught was, without the name, a tiny <dfn data-en="a producer that only announces events with no target receiver in mind, as opposed to a request-driven caller that addresses one specific service and waits for it" data-vn="publisher (giữ nguyên) — bên chỉ phát event ra, không nhắm tới 1 bên nhận cụ thể nào, khác với bên gọi request-driven luôn nhắm tới 1 service cụ thể và chờ nó trả lời">publisher</dfn> — it published rows into a message queue, and every downstream service that read from that queue was a <dfn data-en="a consumer that reacts to events matching a topic or category it registered interest in, as opposed to a server that only responds when a specific client addresses it directly" data-vn="subscriber (giữ nguyên) — bên nhận, tự đăng ký quan tâm 1 loại event nào đó rồi phản ứng khi nó xảy ra, khác với server chỉ trả lời khi có client gọi trực tiếp tới">subscriber</dfn>. That publisher/subscriber relationship, generalized beyond any one outbox, is <dfn data-en="the general architecture pattern where publishers announce events without addressing any specific receiver, and subscribers register interest in a category of events and receive every one that matches, with the two sides never directly aware of each other" data-vn="pub/sub (giữ nguyên) — kiểu kiến trúc mà publisher chỉ phát event không nhắm ai, subscriber tự đăng ký quan tâm 1 loại event rồi nhận hết những cái khớp, 2 bên không biết trực tiếp về nhau">pub/sub</dfn>. Lesson 30's webhook was one specific, narrow delivery mechanism for the same idea: a single subscriber, hard-coded as a URL, getting a direct HTTP push per event — pub/sub with the "many possible subscribers" part stripped down to exactly one.</p>
+
+<h2>3 · The thing events sit inside while nobody has read them yet</h2>
+<p>An event a publisher announces has to live somewhere between being published and being read — email works the same way, a message sits in your inbox between being sent and being opened. That holding structure is a <dfn data-en="a durable, ordered holding area that events sit in after being published and before being read, decoupling how fast a producer publishes from how fast (or whether) a consumer is currently running to read them" data-vn="message queue (giữ nguyên) — nơi lưu event bền vững, có thứ tự, sau khi publish và trước khi được đọc, tách rời tốc độ publish khỏi tốc độ (hoặc việc có đang chạy hay không) của consumer">message queue</dfn>, and the piece of infrastructure that runs it — durably storing events, tracking which subscriber has read which, handling retries — is called a <dfn data-en="the piece of infrastructure that stores published events durably and delivers them to subscribers, tracking delivery and retries so producers and consumers never talk to each other directly" data-vn="broker (giữ nguyên) — hạ tầng lưu event bền vững rồi giao cho subscriber, tự theo dõi việc giao và retry, để producer và consumer không bao giờ nói chuyện trực tiếp với nhau">broker</dfn> (Kafka, RabbitMQ, SQS, and Postgres itself — acting as a queue — are all brokers with different trade-offs; which one to run and operate is out of scope here, same as Lesson 8 named "the database is shared state" without teaching how to run one). The queue is what makes the decoupling in Section 1 actually durable: if every subscriber is offline, the events aren't lost, they're waiting.</p>
+
+<h2>4 · Same three mechanisms, now placed on the paradigm they belong to</h2>
+<table class="cmp">
+<thead><tr><th></th><th>Outbox (L29)</th><th>Webhook (L30)</th><th>Polling/SSE/WS (L63)</th></tr></thead>
+<tbody>
+<tr><th>Paradigm</th><td>event-driven, own DB as queue</td><td>event-driven, one hard-coded subscriber</td><td>client pulls or server pushes to one known caller</td></tr>
+<tr><th>Who initiates delivery</th><td>relay publishes when ready</td><td>publisher pushes via HTTP POST</td><td>client asks (polling), or server pushes to a live connection it already holds</td></tr>
+<tr><th>How many subscribers</th><td>any number reading the queue</td><td>exactly one URL per registration</td><td>exactly the one connected client</td></tr>
+</tbody>
+</table>
+<p>The point of this table isn't that one mechanism beats another — it's that "outbox," "webhook," and "polling/SSE/WebSockets" were never competing solutions to the same problem. Outbox and webhook are both event-driven; polling/SSE/WS is request-driven (or its push variant) aimed at one specific, already-known client. Naming the paradigm is what lets you tell, in a design conversation, whether two options are actually alternatives or solving different problems wearing similar names.</p>
+
+<div class="callout"><strong>Frontend-habit bridge:</strong> you already have pub/sub on the client — a DOM <code>addEventListener("click", ...)</code> is a subscriber registering interest in an event type without knowing or caring which code, if any, dispatched it, and the browser is the broker in between. Backend event-driven architecture is the identical relationship, just with a message queue standing in for the DOM's event loop, and "order placed" standing in for "click."</div>
+
+<h2>5 · Where MISSION.md draws the line here</h2>
+<p>This course's scope excludes distributed systems "beyond vocabulary level" — running a Kafka cluster, choosing partition counts, or reasoning about exactly-once delivery guarantees stays out. This lesson stops at exactly the line the outbox and webhook lessons already stood on: what to call the shape you're building, not how to operate the infrastructure underneath it. If a future PR review comment says "should this be event-driven instead of a direct call," today's vocabulary is what lets you evaluate the question instead of just nodding.</p>
+
+<div class="interview">
+<p><strong>Q: "What's the difference between a webhook and a message queue?"</strong> A strong answer, out loud: <em>"Both are event-driven — a publisher announces something happened without waiting for a reply. The difference is delivery. A webhook is a direct HTTP push to one hard-coded URL, so if that receiver is down the publisher has to retry the push itself. A message queue durably holds the event and lets any number of subscribers read it whenever they're ready, so a subscriber being offline doesn't lose anything — it just reads the backlog once it's back. I built the outbox pattern, which uses the database itself as a lightweight queue, and a webhook, which is really pub/sub narrowed down to a single fixed subscriber."</em> The signal: naming pub/sub and message queue as the general vocabulary, then placing the two mechanisms you've actually built as specific points inside it, rather than treating them as unrelated tools.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="In event-driven architecture a publisher announces that something happened and does not know or care who, if anyone, is listening -- it gets no direct reply. A request-driven caller addresses one specific receiver and waits for its answer, which is the shape every prior request/response lesson in this course assumed.">
+    <p class="stem">What distinguishes event-driven architecture from the request-driven shape most lessons assume?</p>
+    <button class="opt" data-ok>the publisher never addresses or waits on anyone</button>
+    <button class="opt">event-driven systems can never use any database table</button>
+    <button class="opt">event-driven requests must always be sent as POST</button>
+    <button class="opt">request-driven systems can never return a status code</button>
+  </div>
+  <div class="q" data-why="A message queue is the durable, ordered holding area an event sits in between being published and being read, which is exactly what let Lesson 29's outbox row survive until the relay process picked it up -- decoupling the publisher's speed from the subscriber's speed or uptime.">
+    <p class="stem">What role does a message queue play that a direct function call doesn't?</p>
+    <button class="opt" data-ok>it holds events durably between publishing and reading</button>
+    <button class="opt">it converts every event into a SQL index</button>
+    <button class="opt">it guarantees the publisher a synchronous reply back</button>
+    <button class="opt">it deletes an event the instant it publishes</button>
+  </div>
+  <div class="q" data-why="Lesson 30's webhook is pub/sub with the subscriber side narrowed to exactly one hard-coded URL: the publisher still just announces an event, but delivery is a direct HTTP push to that one registered receiver, rather than any number of subscribers reading from a shared queue.">
+    <p class="stem">How does a webhook (Lesson 30) relate to pub/sub?</p>
+    <button class="opt" data-ok>it is pub/sub narrowed to exactly one subscriber</button>
+    <button class="opt">a webhook is entirely unrelated to event-driven architecture</button>
+    <button class="opt">webhooks always require running a message broker cluster</button>
+    <button class="opt">pub/sub is only ever possible without any HTTP</button>
+  </div>
+  <div class="q" data-why="MISSION.md excludes distributed systems beyond vocabulary level -- running or tuning a broker like Kafka is out of scope, matching how Lesson 29 and Lesson 30 already stopped at pattern-level, not infrastructure-operation depth. Today's lesson names the paradigm the same way, without teaching cluster operation.">
+    <p class="stem">Per MISSION.md's stated scope, what does this lesson deliberately leave out?</p>
+    <button class="opt" data-ok>operating or tuning real broker infrastructure like Kafka</button>
+    <button class="opt">the exact words "event," "publisher," and "subscriber" alone</button>
+    <button class="opt">mention of the outbox pattern from Lesson 29</button>
+    <button class="opt">comparing event-driven delivery to the request/response shape today</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> Martin Kleppmann's <a href="https://dataintensive.net">Designing Data-Intensive Applications</a>, ch. 11 "Stream Processing" (the section on message brokers and pub/sub, ~15 min of the chapter) — this course's standing data-modeling reference, continued here into how events move between systems once they leave the database Lessons 2 and 6 grounded everything in.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> open. Still no <code>lesson_completed</code>/quiz-outcome record exists for any lesson after 72 rounds — the honest next step remains a completion signal or a user-named track.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

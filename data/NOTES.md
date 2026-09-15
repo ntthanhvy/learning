@@ -5416,3 +5416,142 @@
   the write path worked fine, and the read path (`bin/query-progress`) was
   not attempted this round per this round's explicit instruction to skip
   it.
+- 2026-09-15 generation (Lesson 69, headless run): confirmed no lesson
+  dated/tagged 2026-09-15 existed yet (last lesson was day 68,
+  `0068-factorize.html`, dated 2026-09-14) before proceeding, per this
+  round's confirmed-facts brief. Read `MISSION.md` (in full, never
+  modified), `RESOURCES.md`, `data/learning-records/0001-baseline-sql-
+  strong-python-basic.md` (still just the single 2026-07-09 baseline), and
+  the tail of `NOTES.md` before picking anything. The DB read path
+  (`bin/query-progress`/direct `psql`) was not attempted this round per
+  this round's explicit "known standing limitation, don't retry" brief.
+  Did a fresh independent gap-check rather than trusting Lesson 68's
+  teaser blindly: grepped all 68 lesson bodies for `\.sample\(` and
+  `\.align\(` — both came back genuinely zero-hit (only Lesson 68's own
+  closing-teaser prose named them, never an actual taught use), and
+  grepped the glossary for both, also zero-hit; `RESOURCES.md` names
+  neither by method, only the general pandas User Guide/SQL-comparison
+  docs. Picked `.sample()` over `.align()`: more interview-load-bearing
+  (reproducible random sampling, bootstrap resampling, and stratified-by-
+  group sampling are common ETL/ML-adjacent interview vocabulary per
+  `MISSION.md`'s interview-prep framing) and a cleaner single-lesson scope
+  than `.align()`, which is a narrower, more advanced index-alignment tool
+  better saved for its own future lesson — named explicitly in this
+  lesson's own closing teaser as the standing candidate for whoever picks
+  next. A scratch dir was created at `data/.scratch/lesson69/` (not
+  `/tmp`, this sandbox blocks that) with the real `orders_raw.csv` fixture
+  copied in, pandas 3.0.5 reconfirmed. Every claim was hand-verified there
+  with standalone probe scripts before writing: confirmed `n=`/`frac=` are
+  mutually exclusive (`ValueError: Please enter a value for \`frac\` OR
+  \`n\`, not both`, regardless of the actual values passed — a detail that
+  mattered later for the practice file); confirmed `random_state=` makes
+  two separate calls byte-identical (`.equals()` `True` with
+  `random_state=42` across independent calls) while unseeded calls
+  generally differ; confirmed default `replace=False` raises `ValueError:
+  Cannot take a larger sample than population when 'replace=False'` when
+  `n=` exceeds the row count, while `replace=True` both allows the
+  oversample and produces genuine duplicate row labels in the output
+  (`.index.duplicated().any()` `True`); confirmed sampled rows keep their
+  ORIGINAL index labels, not a fresh range; confirmed `weights=` biases
+  the draw toward higher-weight rows; and confirmed
+  `groupby("customer", group_keys=False).sample(n=1, random_state=0)`
+  draws independently within each group, returning exactly one row per
+  customer — the stratified-sampling pattern that became the lesson's
+  centerpiece alongside `random_state=` reproducibility. Building the
+  practice file surfaced two real freebie-pass bugs, both caught only
+  because this round's required run-then-trust step actually ran the
+  unsolved file first: (1) Exercise 2's first draft used a bare
+  `clean.sample(n=2, frac=...)` with unfilled `...` as the placeholder —
+  but pandas' `n=`/`frac=` conflict check only tests "is frac not `None`",
+  so the truthy-but-wrong `Ellipsis` value still triggered the intended
+  `ValueError` and passed as a freebie before any real edit, the same
+  `...`-is-truthy failure shape NOTES.md documented for Lessons 66 and 68;
+  (2) Exercise 3's first draft used `clean.sample(n=10, replace=...,
+  random_state=0)` — confirmed directly that unfilled `replace=...` is
+  ALSO truthy enough for pandas to treat as `True`, so it silently
+  oversampled successfully and passed as a second freebie. Both fixed the
+  same way Lesson 68 fixed its analogous `sort=...` freebie: introduced
+  named intermediate variables (`ex2_frac_value`, `ex3_replace_value`) and
+  checks requiring the literal correct value (`ex2_frac_value == 0.5`,
+  `ex3_replace_value is True`), not just the resulting behavior. A third,
+  smaller bug surfaced in the same verification pass: Exercise 3's dupe-
+  check used `ex3_has_dupes is True`, but `.duplicated().any()` returns
+  `numpy.bool`, not a Python `bool`, so identity comparison against the
+  literal `True` failed even on the fully-solved file — confirmed directly
+  with a standalone probe (`type(...) == <class 'numpy.bool'>`) and fixed
+  by wrapping in `bool(ex3_has_dupes) is True`. Exercise 4's `group_keys=`
+  keyword was deliberately NOT left as a blank after probing directly that
+  it doesn't change `.sample()`'s output shape at all (unlike its effect
+  on `.apply()`, Lesson 61) — so it was fixed to `group_keys=False` in the
+  lesson text, and the exercise's real blank is `n=...` instead (unfilled
+  `Ellipsis` there raises `TypeError` immediately inside groupby's
+  internal comparison, confirmed directly, so no freebie risk). After all
+  three fixes, the shipped (unsolved) `practice/69_sample.py` was executed
+  in a mirrored `.scratch/lesson69/practice/` layout and printed exactly 4
+  ✗ with no traceback; a solved copy (`.scratch/lesson69/practice/
+  69_solved.py`, not shipped) then printed all 4 ✓ on the first run after
+  the fixes. The shipped file was also re-run a second time directly from
+  its real `practice/` location (`cd data && uv run --with pandas python3
+  practice/69_sample.py`), both before and after the nav.js/glossary edits
+  that followed, and printed the identical 4 ✗, no crash, both times.
+  Quiz options were drafted, then mechanically word-counted with a Python
+  script isolating each `<div class="q">` block by its own start offset
+  (this course's established approach) — the first draft came out
+  mismatched on all three questions (Q1 10/9/10, Q2 11/12/12, Q3 12/9/12);
+  iterated through rewrite+recount cycles until all three landed level (Q1
+  10/10/10, Q2 12/12/12, Q3 12/12/12), then independently cross-checked
+  with a SECOND, genuinely different method — per-option text extracted
+  into individual scratch files and counted with `wc -w` rather than
+  Python's `.split()` — both methods agreed exactly on every option's word
+  count, and exactly one `data-ok` per question throughout. A Python
+  regex/occurrence-count tag-balance script found one real markup bug on
+  its first pass: `p` came back 19/20 (one extra closing tag) — traced to
+  a stray `</p>` left over from a callout `div` that should have closed
+  with plain `</div>` (this course's established callout convention, text
+  starting directly with `<strong>`, never wrapped in `<p>`, confirmed
+  against Lesson 68's own callout as precedent) — fixed, re-checked and
+  every tracked tag pair balanced (`html`/`head`/`title`/`body`/`h1`/`dfn`
+  1/1 each, `h2` 7/7, `p` 19/19, `div` 6/6, `pre` 5/5, `code` 76/76,
+  `span` 23/23, `strong` 4/4, `em` 1/1, `a` 2/2, `button` 9/9), cross-
+  checked independently with the `Grep` tool's own occurrence counts on
+  `<p>`/`</p>` (19/19, matching exactly) and `<tr>`/`</tr>` in the
+  glossary after the term insert (130/130, matching exactly). Raw-`&`
+  scan found exactly one match, the `&` inside the single already-
+  established `cd ~/learning/data && uv run …` shell command inside a
+  `<pre><code>` block (this course's standing precedent, not a new bug),
+  zero raw `&` in prose and zero in the glossary. Checked the glossary for
+  a collision before adding anything: grepped for `sample\(\)`/
+  `\.sample\(` across the full glossary — the only hits were substring
+  matches inside `resample()` entries, not a real collision — so added
+  exactly one new row, `sample()`, placed directly after Lesson 68's
+  `factorize()` entry; confirmed the glossary table's tags stayed balanced
+  after the insert (`table` 1/1, `tr` 130/130, `td` 387/387, `th` 3/3 via
+  the Python occurrence-count script), cross-checked with `Grep` on
+  `<tr>`/`</tr>` (130/130 both, matching exactly) and zero raw `&`.
+  Registered Lesson 69 in `nav.js` with today's date (2026-09-15);
+  `node --check` confirmed it still parses as valid JavaScript after the
+  edit. This round's fresh gap search reconfirms `.align()` as the
+  standing zero-hit candidate for whoever picks next time, named
+  explicitly in the lesson's own closing teaser. The entire
+  `data/.scratch/` directory was removed (`rm -rf`) after verification
+  (only `lesson69/` lived there, confirmed via `ls` before deleting,
+  nothing else was at risk); `git status --short` afterward showed only
+  the intended new/modified `data/` files (`data/assets/nav.js`,
+  `data/reference/glossary.html`, new `data/lessons/0069-sample.html`,
+  new `data/practice/69_sample.py`) — plus unrelated concurrent changes in
+  the `backend/`/`python/` course directories from other runs, not
+  touched by this one (nothing alarming: `backend/NOTES.md`,
+  `backend/assets/nav.js`, `backend/reference/glossary.html`, a new
+  `backend/lessons/0072-event-driven-architecture-vocabulary.html`,
+  `python/assets/nav.js`, a new
+  `python/lessons/0049-review-retrieval-day-4.html`, and a new
+  `python/practice/49_review_retrieval_day_4.py` — all outside this
+  session's scope). This agent does not run `git commit` — leaving
+  working-tree changes uncommitted remains this course's established
+  convention. `bin/record-progress data lesson_generated --day 69 --lesson
+  0069-sample.html --detail '{"by":"headless"}'` was run once from the
+  repo root as a single standalone command as instructed and succeeded on
+  the first try (`recorded: data/lesson_generated day=69
+  lesson=0069-sample.html`) — the write path worked fine, and the read
+  path (`bin/query-progress`) was not attempted this round per this
+  round's explicit instruction to skip it.

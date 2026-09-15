@@ -142,6 +142,8 @@
       file: "lessons/0067-eval-and-pd-eval.html" },
     { n: 68, date: "2026-09-14", title: "factorize(): the integer codes hiding under category dtype",
       file: "lessons/0068-factorize.html" },
+    { n: 69, date: "2026-09-15", title: "sample(): random rows, reproducibly",
+      file: "lessons/0069-sample.html" },
   ];
 
   const REFS = [

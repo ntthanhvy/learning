@@ -148,6 +148,8 @@
       file: "lessons/0070-feature-flags.html" },
     { n: 71, date: "2026-09-14", title: "Load shedding: choosing who gets turned away",
       file: "lessons/0071-load-shedding.html" },
+    { n: 72, date: "2026-09-15", title: "Event-driven architecture: naming the paradigm behind the mechanisms",
+      file: "lessons/0072-event-driven-architecture-vocabulary.html" },
   ];
 
   const REFS = [

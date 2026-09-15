@@ -5057,3 +5057,133 @@
   level" exclusion, but worth a deliberate scope judgment call next round
   rather than a default pass, since the mechanisms are already taught without
   ever naming the paradigm they belong to.
+- **2026-09-15 generation (Lesson 72, headless 06:00 run):** idempotency check
+  first — confirmed via `ls backend/lessons/0072-*` (no match) and a grep for
+  `n: 72`/`2026-09-15` in `nav.js` (no match, highest prior entry was `n: 71`,
+  dated 2026-09-14) before writing anything. Read `MISSION.md` (unmodified,
+  not touched), `RESOURCES.md` in full, both `learning-records/` files (still
+  just the 0001 baseline and the 2026-07-30 concurrency-vocabulary gap — no
+  fresher `lesson_completed`/quiz-outcome record exists), `reference/
+  glossary.html` tail, and the tail of `NOTES.md` via an offset-based read
+  near the ~4850-5059 line range (the file exceeds the single-read 256KB cap),
+  plus Lesson 71 in full for structure/tone/markup conventions (callout div
+  has no inner `<p>` wrapper — noted and matched). No DB read was attempted,
+  per the briefing's explicit instruction that the read path is a
+  known-blocked path not worth spending an attempt on. Topic choice: the
+  briefing surfaced two standing candidates — `COPY`/bulk insert (flagged
+  narrow five times running, in Lessons 68 through 71's own notes) and the
+  messaging/event-driven paradigm as named vocabulary (pub/sub, message
+  queue, event-driven architecture), distinct from the outbox/webhook/polling
+  *mechanisms* already taught in Lessons 29, 30, and 63 — and asked for a
+  deliberate scope judgment call against MISSION.md rather than a default
+  pass. Read MISSION.md's exact exclusion text: "NoSQL, sharding,
+  replication, distributed systems beyond vocabulary level." The phrase
+  "beyond vocabulary level" is a scoped exclusion, not a blanket one — it
+  rules out operating/tuning distributed infrastructure (running a Kafka
+  cluster, partition counts, delivery-guarantee semantics) while explicitly
+  leaving vocabulary-level treatment in scope. Confirmed the gap was real,
+  not assumed: grepped "message queue", "pub/sub", "event-driven",
+  "publisher", "subscriber", "broker" across `lessons/*.html` and
+  `glossary.html` — "message queue" appeared only as incidental prose inside
+  Lesson 29's own outbox-pattern glossary rows (`dual-write problem`, `relay /
+  poller`), never defined as its own term; every other candidate word was a
+  zero-hit as a *named, defined* concept. Read Lesson 29 (outbox pattern) and
+  Lesson 63 (polling/SSE/WebSockets) in full to confirm this mirrors the
+  exact shape of `learning-records/0002` (concurrency: mechanism taught
+  thoroughly across 14 lessons, vocabulary underneath it never pinned down,
+  named as a general risk for "any topic with a contested or overloaded
+  vocabulary") — Lesson 29 built a publisher/broker/subscriber relationship
+  end-to-end without ever using those three words, and Lesson 63 solves a
+  request-driven/push problem for one known client, a genuinely different
+  shape from event-driven's "broadcast, unknown audience," but the two were
+  never explicitly distinguished either. Chose the messaging/event-driven
+  vocabulary over `COPY`/bulk insert (passed over a sixth time, same narrow-
+  mechanism reasoning as every prior round): it directly closes a
+  vocabulary gap of the same shape this course has already treated as
+  serious once before (Lesson 25), ties concretely to three existing lessons
+  rather than introducing an isolated new mechanism, and is squarely a
+  "vocabulary level" treatment per MISSION.md's own wording, not a step past
+  it — no broker was chosen, configured, or compared; no delivery-guarantee
+  or ordering semantics were taught. Lesson 72 covers: the request-driven vs.
+  event-driven distinction as the two basic shapes a system can be built in;
+  `event`, `publisher`, and `subscriber` as the vocabulary underneath what
+  Lesson 29's outbox and relay already built without naming; `pub/sub` as the
+  general pattern, with Lesson 30's webhook reframed as pub/sub narrowed to
+  exactly one hard-coded subscriber; `message queue` and `broker` as the
+  durable holding structure and the infrastructure running it, with an
+  explicit line drawn that choosing/operating a real broker (Kafka, RabbitMQ,
+  SQS) stays out of scope; a three-row comparison table placing outbox,
+  webhook, and polling/SSE/WS on the paradigm each actually belongs to
+  (event-driven vs. request-driven-or-its-push-variant), so the three
+  mechanisms stop reading as competing solutions to the same problem; a
+  frontend-habit bridge comparing pub/sub to a DOM `addEventListener`
+  listener (subscriber) and dispatcher (publisher/broker) relationship
+  the user already has; and an explicit "where MISSION.md draws the line"
+  section naming exactly what stays out (broker operation, partitioning,
+  delivery-guarantee depth) so the scope judgment call is visible in the
+  lesson itself, not just in this note. No Go snippet was shipped this round
+  — the lesson is pure vocabulary/paradigm, consistent with treating this as
+  a "vocabulary level" topic rather than an implementation one, so no
+  `.scratch/` compile-check was needed. Checked the glossary first for all
+  eight candidate terms (`request-driven`, `event-driven architecture`,
+  `event`, `publisher`, `subscriber`, `pub/sub`, `message queue`, `broker`)
+  — zero collisions, confirmed above — then appended all eight as new
+  `<dfn>`-backed rows after Lesson 71's load-shedding row; no existing row
+  needed editing. Verification performed mechanically, matching this
+  course's established rigor: (1) quiz word-count balance via a Node script
+  parsing every `<div class="q">` block and counting each `<button
+  class="opt">`'s words two independent ways (`.split(/\s+/)` and
+  `.split(" ").filter(Boolean)`) — first draft was uneven on all four
+  questions (word counts scattered 7-11 within a question, one clear
+  drafting miss repeated from muscle memory rather than counting), fixed
+  through three to four targeted rewrite-and-recount cycles per question,
+  re-running the script after every edit rather than trusting a manual
+  count (manual counting proved unreliable this round, especially around
+  hyphenated compounds like "event-driven" and multi-token phrases like
+  "Lesson 29" that read as fewer words than they tokenize to), converged to
+  exactly 8/8/8/8 word counts across all four questions, both counting
+  methods agreeing exactly, and exactly one `data-ok` per question confirmed
+  the same way; (2) an occurrence-count HTML tag-balance check (regex
+  counting per tag, not naive line/substring counting, per this course's
+  standing tooling-quirk warning) across the same 22 tag pairs used in every
+  prior round (div/p/h1/h2/table/thead/tbody/tr/th/td/pre/code/dfn/button/a/
+  span/strong/em/script/head/body/html) on the lesson, and the same check on
+  `glossary.html` after its eight-row addition — both files fully balanced,
+  one early miss caught and fixed (a stray `</p>` left inside the
+  `callout` div from a first-draft copy/paste, since this course's callout
+  markup wraps text directly in the `<div>` with no inner `<p>`, matching
+  Lesson 71's exact convention) before the check was re-run clean; (3) a
+  raw-unescaped-`&` regex scan (matching any `&` not followed by `amp;`,
+  `lt;`, `gt;`, `quot;`, `#39;`, or `apos;`) across both files — zero hits in
+  either, no fixes needed; (4) a targeted grep for the backslash-escaped-
+  quote bug caught in Lesson 68's round (`\\"` inside a `data-vn`/`data-en`
+  attribute) — zero hits in the new lesson or the glossary addition,
+  confirming that mistake wasn't repeated. No Go compile-check was run this
+  round since no Go snippet was shipped (see above). Confirmed via `git
+  status --short` that only `backend/lessons/0072-event-driven-architecture-
+  vocabulary.html`, `backend/assets/nav.js`, and `backend/reference/
+  glossary.html` show as changed/new among backend files — other repo-root
+  changes in that status output (`data/lessons/0069-sample.html`, `data/
+  practice/69_sample.py`, `python/.scratch_check/`, `python/lessons/
+  0049-review-retrieval-day-4.html`, `python/practice/
+  49_review_retrieval_day_4.py`) belong to unrelated courses' own
+  same-morning runs, not touched this round. Registered Lesson 72 in
+  `nav.js` (date 2026-09-15), confirmed with `node --check backend/
+  assets/nav.js` (clean, no output). DB access: `bin/record-progress backend
+  lesson_generated --day 72 --lesson
+  0072-event-driven-architecture-vocabulary.html --detail
+  '{"by":"headless"}'` ran as a single standalone command and succeeded
+  immediately on the first attempt (`recorded: backend/lesson_generated
+  day=72 lesson=0072-event-driven-architecture-vocabulary.html`) — the write
+  path continues to be reliable, consistent with every round since Lesson
+  69's one-off block. No DB read was attempted at all this round per the
+  briefing's explicit instruction. No confirmed next-lesson gap is named
+  with certainty for the round after this one — same standing note as every
+  prior round; a completion/quiz-outcome signal or a user-named track should
+  take priority over guessing blind. Absent that, this round's gap-search
+  leaves `COPY`/bulk insert on the table a sixth time (still narrow, still
+  passed over every round it's been raised — worth either finally committing
+  to it next round precisely because it keeps recurring, or doing one fresh
+  broad search to find whatever has been causing it to keep losing out) and
+  notes the messaging/event-driven paradigm gap is now closed (Lesson 72),
+  so future rounds should search fresh rather than re-surfacing it.

@@ -9,6 +9,7 @@
     // Phase 1 — date-locked, filenames pre-assigned in PLAN.md. Register each
     // lesson here on its day, never ahead of it. Example shape:
     // { n: 1, date: "2026-09-15", title: "…", file: "lessons/0001-….html" },
+    { n: 1, date: "2026-09-15", title: "The pipeline map & the repo", file: "lessons/0001-pipeline-map-and-repo.html" },
   ];
 
   const REFS = [

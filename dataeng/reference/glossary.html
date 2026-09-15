@@ -19,6 +19,19 @@
 </table>
 -->
 
+<h2 id="day1">Day 1 — The pipeline map &amp; the repo</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>pipeline</td><td>giữ nguyên "pipeline" — chuỗi bước tự động di chuyển/biến đổi dữ liệu</td><td>A scheduled, repeatable sequence of steps that moves and transforms data from a source to somewhere it can be used — the umbrella term for the whole thing this course builds.</td></tr>
+  <tr><td>ETL</td><td>giữ nguyên "ETL" — biến đổi TRƯỚC khi load vào đích</td><td>Extract, Transform, Load — data is transformed in a separate processing engine before it ever reaches the destination, so the destination only ever sees clean, final-shaped data.</td></tr>
+  <tr><td>ELT</td><td>giữ nguyên "ELT" — load THÔ trước, biến đổi SAU ngay trong warehouse</td><td>Extract, Load, Transform — raw data is loaded into the destination first, untransformed, and transformation happens afterward inside that same destination using its own compute. This course's approach; dbt is the T.</td></tr>
+  <tr><td>raw layer</td><td>giữ nguyên "raw layer" — dữ liệu thô, y nguyên lúc mới vào, chưa xử lý gì</td><td>The schema holding data exactly as it arrived from its source, before any cleaning or reshaping — the permanent, replayable starting point every transformation can be re-run from.</td></tr>
+  <tr><td>dbt</td><td>giữ nguyên "dbt" — công cụ biến đổi dữ liệu bằng SQL, chạy ngay trong warehouse</td><td>A SQL-based transformation tool: you write <code>SELECT</code> statements, it compiles and runs them inside the warehouse, tracks which model depends on which via <code>ref()</code>, and can test the results — the T in this course's ELT.</td></tr>
+  <tr><td>Kafka</td><td>giữ nguyên "Kafka" — hệ thống log phân tán, nhận sự kiện liên tục theo thời gian thực</td><td>A distributed append-only log system: producers write events to topics, consumers read them in order, and it's built for continuously arriving data rather than periodic batches.</td></tr>
+  <tr><td>Airflow</td><td>giữ nguyên "Airflow" — công cụ lập lịch và điều phối, tự nó không xử lý dữ liệu</td><td>A scheduler and orchestrator: it runs a defined sequence of tasks (a DAG) on a schedule, retries failures, and tracks whether each run succeeded — it does not transform or move data itself, it triggers the tools that do.</td></tr>
+  <tr><td>idempotent</td><td>giữ nguyên "idempotent" — làm 1 lần hay N lần, kết quả như nhau</td><td>An operation that produces the same end state whether performed once or many times — safe to retry blindly, which matters wherever a step might run twice. Same idea as backend/'s idempotency keys, applied to a pipeline.</td></tr>
+</table>
+
 <script src="../assets/nav.js"></script>
 </body>
 </html>

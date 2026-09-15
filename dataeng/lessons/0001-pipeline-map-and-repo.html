@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 1 · The pipeline map &amp; the repo</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 1 · ~30–45 min · 15 Sep 2026</p>
+<h1>The pipeline map &amp; the repo: why ELT, and where each tool sits</h1>
+<p class="byline">Day 1 of the intensive week. Before writing a single dbt model, before touching Kafka, before an Airflow DAG exists: what is this pipeline actually shaped like, and why does data flow through it in this particular order? By the end of today you'll have a public repo, a running Postgres warehouse, and a script that fills it with realistic — and deliberately slightly broken — food-delivery data.</p>
+
+<div class="callout"><strong>Why this is Day 1:</strong> every later lesson assumes this shape exists. Day 2's <code>ref()</code> only makes sense once there's a warehouse to build inside. Day 5's Kafka producer only matters because it feeds the same warehouse. Get today's map right and the rest of the week is "fill in one box at a time," not "learn four unrelated tools."</p></div>
+
+<h2>1 · The domain and the four raw pieces</h2>
+<p>This course builds one thing: a food-delivery platform's data warehouse, in a public repo called <code>food-delivery-pipeline</code>. Every lesson from here on uses these exact names — don't rename anything later.</p>
+<table class="gloss">
+  <tr><th>Raw table / topic</th><th>One row per…</th><th>Arrives via</th></tr>
+  <tr><td><code>raw.restaurants</code></td><td>restaurant (name, cuisine, city, commission_rate)</td><td>batch — today's script</td></tr>
+  <tr><td><code>raw.couriers</code></td><td>courier (vehicle, city, joined_at)</td><td>batch — today's script</td></tr>
+  <tr><td><code>raw.orders</code></td><td>order (customer_id, restaurant_id, courier_id, subtotal, delivery_fee, placed_at)</td><td>batch — today's script</td></tr>
+  <tr><td><code>raw.order_events</code></td><td>order status change (placed → accepted → picked_up → delivered/cancelled)</td><td>streaming — Kafka, Day 5–6</td></tr>
+</table>
+<p>Today only builds the first three. <code>raw.order_events</code> gets its empty table today (so the warehouse's shape is complete) but stays empty until Day 5's Kafka consumer starts writing to it.</p>
+
+<h2>2 · The pipeline map</h2>
+<p>Here is the whole course, in one picture. Nothing on it is optional — every box is a real lesson.</p>
+<pre><code>generate_raw_data.py ──▶ raw.restaurants
+      (batch, Day 1)      raw.couriers          ┐
+                           raw.orders            │
+                                                  ▼
+Kafka producer ──▶ topic:order_events   ┌──────────────────────┐
+  (stream, Day 5)         │             │   Postgres warehouse │
+                           ▼             │                      │
+              Kafka consumer ──────────▶│  raw → staging →     │
+               (Day 5–6, at-least-once, │  intermediate → marts│
+                ON CONFLICT DO NOTHING) │  (dbt builds this,   │
+                                        │   Day 2–4, deep in    │
+                                        │   Phase 2a)           │
+                                        └──────────┬───────────┘
+                                                    │ orchestrated by
+                                                    ▼
+                                              Airflow DAG
+                                          (Day 7: load → dbt build,
+                                           daily, retries, safe re-run)</code></pre>
+<p>Three <dfn data-en="a scheduled, repeatable sequence of steps that moves and transforms data from a source to somewhere it can be used — the umbrella term for the whole thing this course builds" data-vn="giữ nguyên &quot;pipeline&quot; — chuỗi bước tự động di chuyển/biến đổi dữ liệu">pipelines</dfn> land in one place, get shaped by one tool, and run on one schedule. That's the whole course.</p>
+
+<h2>3 · Why ELT, not ETL</h2>
+<p>Older data platforms did <dfn data-en="Extract, Transform, Load — data is transformed in a separate processing engine BEFORE it ever reaches the destination, so the destination only ever sees clean, final-shaped data" data-vn="giữ nguyên &quot;ETL&quot; — biến đổi TRƯỚC khi load vào đích">ETL</dfn>: pull data out, transform it in a dedicated processing engine, then load only the finished result. This course does <dfn data-en="Extract, Load, Transform — raw data is loaded into the destination FIRST, untransformed, and transformation happens afterward inside that same destination using its own compute" data-vn="giữ nguyên &quot;ELT&quot; — load THÔ trước, biến đổi SAU ngay trong warehouse">ELT</dfn> instead: land the raw rows in Postgres exactly as they arrived — messy rows and all — and transform them afterward, in place, using Postgres's own query engine. That's literally what dbt is: SQL <code>SELECT</code>s that run inside the warehouse and materialize their results as new tables or views.</p>
+<div class="callout"><strong>Why this order wins here:</strong> the raw layer becomes a permanent, replayable source of truth. If a transformation has a bug, the raw data is still sitting there untouched — rerun the transform, don't re-extract from the source. This is also why Day 3's planted bad rows matter: in ETL they'd get caught (or silently dropped) before landing anywhere; in ELT they land in <code>raw.orders</code> on purpose, and it's dbt's tests, not the loader, that are responsible for catching them.</div>
+<p>The <dfn data-en="the schema holding data exactly as it arrived from its source, before any cleaning or reshaping — the permanent, replayable starting point every transformation can be re-run from" data-vn="giữ nguyên &quot;raw layer&quot; — dữ liệu thô, y nguyên lúc mới vào, chưa xử lý gì">raw layer</dfn> you build today is the foundation everything else in this course sits on top of.</p>
+
+<h2>4 · Where each tool actually sits</h2>
+<p>Three new names, three narrow jobs — depth comes later, but the job of each is fixed from today:</p>
+<ul>
+<li><dfn data-en="a SQL-based transformation tool: you write SELECT statements, it compiles and runs them inside the warehouse, tracks which model depends on which via ref(), and can test the results — the T in this course's ELT" data-vn="giữ nguyên &quot;dbt&quot; — công cụ biến đổi dữ liệu bằng SQL, chạy ngay trong warehouse">dbt</dfn> transforms. It never extracts and never loads — it only turns raw tables into tested, modeled ones, entirely with SQL that runs inside Postgres.</li>
+<li><dfn data-en="a distributed append-only log system: producers write events to topics, consumers read them in order, and it's built for continuously arriving data rather than periodic batches" data-vn="giữ nguyên &quot;Kafka&quot; — hệ thống log phân tán, nhận sự kiện liên tục theo thời gian thực">Kafka</dfn> moves continuously-arriving events (order status changes) from where they happen to the warehouse. It's the only piece in this course that isn't Postgres-shaped — a topic is a log, not a table.</li>
+<li><dfn data-en="a scheduler and orchestrator: it runs a defined sequence of tasks (a DAG) on a schedule, retries failures, and tracks whether each run succeeded — it does not transform or move data itself, it triggers the tools that do" data-vn="giữ nguyên &quot;Airflow&quot; — công cụ lập lịch và điều phối, tự nó không xử lý dữ liệu">Airflow</dfn> orchestrates. It doesn't transform or move data itself — it runs <em>other</em> things (the loader, <code>dbt build</code>) on a schedule and retries them when they fail.</li>
+</ul>
+<p>One-line bridges, so today doesn't re-teach courses you've already done: the Python you'll write below is exactly the <a href="../python/index.html">Python Intensive</a> language, no new syntax. The idempotent write pattern Day 6's Kafka consumer uses is the same <dfn data-en="an operation that produces the same end state whether performed once or many times — safe to retry blindly, which matters wherever a step might run twice" data-vn="giữ nguyên &quot;idempotent&quot; — làm 1 lần hay N lần, kết quả như nhau">idempotent</dfn> idea from <a href="../backend/index.html">Backend Foundations</a>'s idempotency keys, applied to a consumer instead of an API. And this course never uses pandas — that stays in <a href="../data/index.html">Data Wrangling</a>; the loader and consumer here are plain Python plus <code>psycopg</code>.</p>
+
+<h2>5 · Build: create the repo</h2>
+<p>On GitHub, create a new <strong>public</strong> repository named <code>food-delivery-pipeline</code>, then clone it locally and lay out today's three files:</p>
+<pre><code>food-delivery-pipeline/
+├── docker-compose.yml
+├── scripts/
+│   └── generate_raw_data.py
+└── README.md</code></pre>
+
+<h2>6 · Build: Postgres via docker compose</h2>
+<p>Create <code>docker-compose.yml</code> with exactly this — the pinned <code>postgres:17</code> image, not <code>latest</code>:</p>
+<pre><code>services:
+  postgres:
+    image: postgres:17
+    container_name: fdp-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: fdp
+      POSTGRES_PASSWORD: fdp_dev_password
+      POSTGRES_DB: fdp
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fdp -d fdp"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdata:</code></pre>
+<p>Start it:</p>
+<pre><code>docker compose up -d
+docker compose ps    <span class="cm"># wait until STATUS shows (healthy)</span></code></pre>
+<p>On macOS via colima, <code>colima start</code> is enough for Postgres alone today — Day 5 will ask you to give it more memory once Kafka joins the stack.</p>
+
+<h2>7 · Build: seed the raw schema</h2>
+<p>Create <code>scripts/generate_raw_data.py</code> with exactly this. It's scaffolding, not the day's skill — read it once so you know what it does, but there are no TODOs here:</p>
+<pre><code><span class="cm">"""Seed the raw.* tables in the food-delivery-pipeline warehouse.
+
+Deterministic (fixed seed) so re-running produces the exact same rows --
+including the two planted bad rows Day 3's dbt tests are built to catch.
+Drops and recreates the `raw` schema each time, so it is always safe to
+run again from scratch.
+"""</span>
+<span class="kw">import</span> random
+<span class="kw">from</span> datetime <span class="kw">import</span> datetime, timedelta, timezone
+
+<span class="kw">import</span> psycopg
+
+DSN = <span class="str">"postgresql://fdp:fdp_dev_password@localhost:5432/fdp"</span>
+SEED = <span class="kw">20260915</span>
+
+CITIES = [<span class="str">"Hanoi"</span>, <span class="str">"Ho Chi Minh City"</span>, <span class="str">"Da Nang"</span>, <span class="str">"Hue"</span>]
+CUISINES = [<span class="str">"Vietnamese"</span>, <span class="str">"Japanese"</span>, <span class="str">"Italian"</span>, <span class="str">"Korean"</span>, <span class="str">"Fast Food"</span>, <span class="str">"Vegetarian"</span>]
+VEHICLES = [<span class="str">"motorbike"</span>, <span class="str">"bicycle"</span>, <span class="str">"car"</span>]
+
+
+<span class="kw">def</span> build_schema(cur):
+    cur.execute(<span class="str">"DROP SCHEMA IF EXISTS raw CASCADE"</span>)
+    cur.execute(<span class="str">"CREATE SCHEMA raw"</span>)
+    cur.execute(<span class="str">"""
+        CREATE TABLE raw.restaurants (
+            restaurant_id   INT PRIMARY KEY,
+            name            TEXT NOT NULL,
+            cuisine         TEXT NOT NULL,
+            city            TEXT NOT NULL,
+            commission_rate NUMERIC(4,3) NOT NULL,
+            updated_at      TIMESTAMPTZ NOT NULL
+        )
+    """</span>)
+    cur.execute(<span class="str">"""
+        CREATE TABLE raw.couriers (
+            courier_id INT PRIMARY KEY,
+            vehicle    TEXT NOT NULL,
+            city       TEXT NOT NULL,
+            joined_at  TIMESTAMPTZ NOT NULL
+        )
+    """</span>)
+    cur.execute(<span class="str">"""
+        CREATE TABLE raw.orders (
+            order_id      INT PRIMARY KEY,
+            customer_id   INT NOT NULL,
+            restaurant_id INT NOT NULL,
+            courier_id    INT NOT NULL,
+            subtotal      NUMERIC(10,2) NOT NULL,
+            delivery_fee  NUMERIC(10,2) NOT NULL,
+            placed_at     TIMESTAMPTZ NOT NULL
+        )
+    """</span>)
+    <span class="cm"># Day 5's Kafka consumer is what actually inserts rows here -- Day 1</span>
+    <span class="cm"># only creates the empty table so the warehouse shape is complete.</span>
+    cur.execute(<span class="str">"""
+        CREATE TABLE raw.order_events (
+            event_id    TEXT PRIMARY KEY,
+            order_id    INT NOT NULL,
+            status      TEXT NOT NULL,
+            occurred_at TIMESTAMPTZ NOT NULL
+        )
+    """</span>)
+
+
+<span class="kw">def</span> seed_restaurants(cur, rng, n=<span class="kw">40</span>):
+    now = datetime.now(timezone.utc)
+    rows = [
+        (
+            rid,
+            <span class="str">f"Restaurant {rid}"</span>,
+            rng.choice(CUISINES),
+            rng.choice(CITIES),
+            round(rng.uniform(<span class="kw">0.10</span>, <span class="kw">0.25</span>), <span class="kw">3</span>),
+            now - timedelta(days=rng.randint(<span class="kw">0</span>, <span class="kw">400</span>)),
+        )
+        <span class="kw">for</span> rid <span class="kw">in</span> range(<span class="kw">1</span>, n + <span class="kw">1</span>)
+    ]
+    cur.executemany(<span class="str">"INSERT INTO raw.restaurants VALUES (%s,%s,%s,%s,%s,%s)"</span>, rows)
+    <span class="kw">return</span> n
+
+
+<span class="kw">def</span> seed_couriers(cur, rng, n=<span class="kw">15</span>):
+    now = datetime.now(timezone.utc)
+    rows = [
+        (cid, rng.choice(VEHICLES), rng.choice(CITIES), now - timedelta(days=rng.randint(<span class="kw">0</span>, <span class="kw">300</span>)))
+        <span class="kw">for</span> cid <span class="kw">in</span> range(<span class="kw">1</span>, n + <span class="kw">1</span>)
+    ]
+    cur.executemany(<span class="str">"INSERT INTO raw.couriers VALUES (%s,%s,%s,%s)"</span>, rows)
+    <span class="kw">return</span> n
+
+
+<span class="kw">def</span> seed_orders(cur, rng, n_restaurants, n_couriers, n=<span class="kw">500</span>):
+    now = datetime.now(timezone.utc)
+    rows = []
+    <span class="kw">for</span> oid <span class="kw">in</span> range(<span class="kw">1</span>, n + <span class="kw">1</span>):
+        restaurant_id = rng.randint(<span class="kw">1</span>, n_restaurants)
+        subtotal = round(rng.uniform(<span class="kw">3.0</span>, <span class="kw">40.0</span>), <span class="kw">2</span>)
+
+        <span class="cm"># Plant a few bad rows on purpose -- Day 3's dbt tests exist to</span>
+        <span class="cm"># catch exactly these two.</span>
+        <span class="kw">if</span> oid == <span class="kw">13</span>:
+            restaurant_id = <span class="kw">9999</span>  <span class="cm"># orphan: no such restaurant</span>
+        <span class="kw">if</span> oid == <span class="kw">27</span>:
+            subtotal = -subtotal  <span class="cm"># negative subtotal</span>
+
+        rows.append((
+            oid,
+            rng.randint(<span class="kw">1000</span>, <span class="kw">1999</span>),
+            restaurant_id,
+            rng.randint(<span class="kw">1</span>, n_couriers),
+            subtotal,
+            round(rng.uniform(<span class="kw">0.5</span>, <span class="kw">3.0</span>), <span class="kw">2</span>),
+            now - timedelta(hours=rng.randint(<span class="kw">0</span>, <span class="kw">24</span> * <span class="kw">14</span>)),
+        ))
+    cur.executemany(<span class="str">"INSERT INTO raw.orders VALUES (%s,%s,%s,%s,%s,%s,%s)"</span>, rows)
+    <span class="kw">return</span> n
+
+
+<span class="kw">def</span> main():
+    rng = random.Random(SEED)
+    <span class="kw">with</span> psycopg.connect(DSN, autocommit=<span class="kw">True</span>) <span class="kw">as</span> conn:
+        <span class="kw">with</span> conn.cursor() <span class="kw">as</span> cur:
+            build_schema(cur)
+            n_r = seed_restaurants(cur, rng)
+            n_c = seed_couriers(cur, rng)
+            n_o = seed_orders(cur, rng, n_r, n_c)
+            <span class="kw">print</span>(<span class="str">f"raw.restaurants: {n_r}"</span>)
+            <span class="kw">print</span>(<span class="str">f"raw.couriers:    {n_c}"</span>)
+            <span class="kw">print</span>(
+                <span class="str">f"raw.orders:      {n_o}  "</span>
+                <span class="str">"(2 bad rows planted: order 13 orphan restaurant_id, order 27 negative subtotal)"</span>
+            )
+
+
+<span class="kw">if</span> __name__ == <span class="str">"__main__"</span>:
+    main()</code></pre>
+<p>Run it (no project setup needed — <code>uv run --with</code> installs <code>psycopg</code> on the fly for this one command):</p>
+<pre><code>uv run --with "psycopg[binary]" python3 scripts/generate_raw_data.py</code></pre>
+
+<h2>8 · Verify</h2>
+<p>Expected output, exactly:</p>
+<pre><code>raw.restaurants: 40
+raw.couriers:    15
+raw.orders:      500  (2 bad rows planted: order 13 orphan restaurant_id, order 27 negative subtotal)</code></pre>
+<p>Confirm the two planted rows landed as raw data, unfiltered — this is ELT in action, and it's exactly what Day 3's tests will catch:</p>
+<pre><code>docker compose exec -T postgres psql -U fdp -d fdp -c \
+  "SELECT order_id, restaurant_id, subtotal FROM raw.orders WHERE order_id IN (13,27) ORDER BY order_id;"</code></pre>
+<pre><code> order_id | restaurant_id | subtotal
+----------+---------------+----------
+       13 |          9999 |     9.32
+       27 |            36 |   -16.86
+(2 rows)</code></pre>
+<p>(Your own <code>subtotal</code> values will match exactly, since the seed is fixed — <code>restaurant_id 9999</code> and the negative number are the two intentional breaks, not bugs.)</p>
+<p>Re-run the seed script once more — same output both times is the point: a script you can re-run without fear is what "safe to re-run" (Day 7's Airflow requirement) actually means in practice.</p>
+<p>Add a short <code>README.md</code> now — two or three sentences on what this repo is and the architecture map from section 2. You'll extend it into a full write-up on Day 7.</p>
+
+<div class="interview">
+<p><strong>Q: "Walk me through this pipeline's architecture."</strong> A strong answer, out loud: <em>"It's ELT, not ETL — raw restaurant, courier and order data lands in Postgres untransformed, either by batch script or, for order status events, through Kafka. dbt then transforms that raw layer into tested staging models and marts entirely with SQL running inside the warehouse. Airflow's only job is orchestration: it runs the loader and <code>dbt build</code> on a schedule and retries on failure. Nothing here is a general-purpose ETL engine — each tool does exactly one job, and Postgres is where the actual transformation compute happens."</em> The signal: naming what each tool does <em>not</em> do is as important as what it does — that's what shows you understand the boundaries, not just the buzzwords.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="ELT loads data into the destination first, exactly as it arrived, and transforms it afterward using the destination's own compute. ETL does the transforming beforehand, in a separate engine, before anything is loaded.">
+    <p class="stem">What does ELT do differently from ETL?</p>
+    <button class="opt" data-ok>Loads raw data, then transforms it</button>
+    <button class="opt">Transforms raw data, then loads it</button>
+    <button class="opt">Loads clean data, skips transforming it</button>
+  </div>
+  <div class="q" data-why="dbt is a SQL transformation tool: it compiles and runs SELECT statements inside the warehouse itself. It never extracts from a source or loads raw data — that's the loader script's and Kafka consumer's job.">
+    <p class="stem">In this course's pipeline, where does dbt do its transforming?</p>
+    <button class="opt" data-ok>Inside the Postgres warehouse, via SQL</button>
+    <button class="opt">Inside the Kafka broker, via topics</button>
+    <button class="opt">Inside the Airflow scheduler, via DAGs</button>
+  </div>
+  <div class="q" data-why="The two bad rows (an orphan restaurant_id and a negative subtotal) are planted on purpose so Day 3 has something real for dbt's data tests to fail on, then pass once fixed.">
+    <p class="stem">Why does Day 1 plant two deliberately bad rows in raw.orders?</p>
+    <button class="opt" data-ok>So Day 3's dbt tests catch them</button>
+    <button class="opt">So Day 5's Kafka consumer catches them</button>
+    <button class="opt">So Day 7's Airflow DAG catches them</button>
+  </div>
+  <div class="q" data-why="random.Random(SEED) makes every random choice reproducible, so running the script again drops and rebuilds the same schema and produces byte-for-byte identical rows — including the same two planted bad rows.">
+    <p class="stem">What makes this seed script safe to re-run?</p>
+    <button class="opt" data-ok>A fixed random seed, deterministic output</button>
+    <button class="opt">A fixed Kafka topic, no partitions</button>
+    <button class="opt">A fixed Airflow schedule, daily catchup</button>
+  </div>
+  <div class="q" data-why="Per the pipeline map, Kafka's consumer writes order status events straight into raw.order_events — the raw layer — leaving dbt to build everything downstream (staging, marts like fct_orders and dim_restaurants) from that landed data.">
+    <p class="stem">Which layer does Kafka feed directly, per the pipeline map?</p>
+    <button class="opt" data-ok>raw.order_events, landing before any dbt</button>
+    <button class="opt">fct_orders, landing after all dbt</button>
+    <button class="opt">dim_restaurants, landing inside the warehouse</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> Joe Reis &amp; Matt Housley's <a href="https://www.oreilly.com/library/view/fundamentals-of-data/9781098108295/"><em>Fundamentals of Data Engineering</em></a> (cited in RESOURCES.md) frames the whole lifecycle — generation → ingestion → storage → transformation → serving — that today's pipeline map is a concrete instance of. For the dbt side specifically, dbt's own <a href="https://docs.getdbt.com/docs/introduction">"What is dbt?"</a> doc is a 5-minute read that says the same "SQL that runs inside the warehouse" idea in dbt's own words.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — every term on this page is new today, since this is Lesson 1.<br>
+<strong>Next lesson (16 Sep):</strong> dbt sources, staging models and <code>ref()</code> — turning today's raw tables into <code>stg_orders</code>, <code>stg_restaurants</code> and <code>stg_couriers</code>, and reading the lineage graph dbt builds from them.<br><br>
+💬 Anything unclear — ELT vs ETL, the docker compose setup, or the seed script? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

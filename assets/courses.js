@@ -71,6 +71,20 @@ window.COURSES = [
     ],
   },
   {
+    id: "dataeng",
+    accent: "#9d174d",
+    title: "Data Pipelines: dbt · Kafka · Airflow",
+    desc: "Build a food-delivery data platform in your own public repo: Kafka order events land in Postgres, dbt models them into tested marts, and Airflow runs it on a schedule. dbt in depth, Kafka and Airflow at working level. One intensive week, then open-ended.",
+    start: "2026-09-15",
+    end: "2026-09-21",
+    days: 7,
+    after: { label: "Open-ended track continues", href: "dataeng/index.html" },
+    links: [
+      { label: "Open course", href: "dataeng/index.html" },
+      { label: "Glossary", href: "dataeng/reference/glossary.html" },
+    ],
+  },
+  {
     id: "data",
     accent: "#5a3d99",
     title: "Data Wrangling",

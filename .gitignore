@@ -12,3 +12,9 @@ rust/project/**/target/
 # NEVER commit credentials. The DB URL lives in ~/.config/learning/db.env
 # (outside this repo) locally, and in GitHub Actions secrets in CI.
 *.env
+
+# Agent worktrees. CI's `git add -A` once committed one of these as a bare
+# gitlink with no .gitmodules, which broke every GitHub Pages build
+# (2026-09-16) until it was removed — the lessons were pushed but never
+# deployed. Keep .claude/ out of the repo entirely.
+.claude/

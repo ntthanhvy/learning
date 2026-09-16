@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 70 · align(): making two mismatched frames line up on purpose</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 70 · ~20 min · 16 Sep 2026</p>
+<h1>align(): making two mismatched frames line up on purpose</h1>
+<p class="byline">Chào bạn — closing the last standing gap from the last two lessons' teasers: <code>.align()</code> was named twice (Lesson 68's and Lesson 69's closing lines) as the round's other zero-hit candidate but never picked. A fresh grep of all 69 lessons and the glossary confirms it: still zero taught uses. Today's the day — this is a narrower, more advanced tool than <code>.sample()</code>, but it's the method that explains WHY pandas arithmetic between two mismatched DataFrames "just works," which is exactly the kind of under-the-hood question that separates a candidate who's used pandas from one who understands it.</p>
+
+<h2>1 · Two DataFrames with different index labels AND different columns</h2>
+<p><dfn data-en="a DataFrame/Series method that takes two objects with possibly-different index/columns and returns a new pair, both reindexed onto a shared label set -- the same reindexing pandas does automatically inside every arithmetic operation, but exposed as an explicit, callable step" data-vn="giữ nguyên 'align()' — nhận 2 object (index/columns có thể khác nhau), trả về CẶP MỚI đã reindex về chung 1 bộ nhãn; đúng là bước reindex mà pandas tự làm ngầm mỗi khi tính toán số học (vd a + b), nhưng ở đây được gọi ra tường minh, chủ động">align()</dfn> takes two objects — call it on one, pass the other — and returns a NEW pair, both reindexed onto a shared label set. Confirmed directly (pandas 3.0.5), two slices of the cleaned <code>orders_raw.csv</code> fixture recent lessons use, indexed by <code>order_id</code>, with different rows present AND different columns:</p>
+<pre><code>left  = clean.set_index(<span class="str">"order_id"</span>)[[<span class="str">"customer"</span>, <span class="str">"amount"</span>]].loc[[<span class="num">1</span>, <span class="num">2</span>, <span class="num">5</span>]]
+right = clean.set_index(<span class="str">"order_id"</span>)[[<span class="str">"amount"</span>, <span class="str">"order_date"</span>]].loc[[<span class="num">2</span>, <span class="num">5</span>, <span class="num">6</span>]]
+
+a, b = left.align(right)
+<span class="cm"># a and b BOTH come back with index [1, 2, 5, 6] and
+# columns ['amount', 'customer', 'order_date'] -- the UNION of each side,
+# missing cells filled with NaN</span></code></pre>
+<p>Confirmed directly: <code>a.index.tolist()</code> and <code>b.index.tolist()</code> both come back <code>[1, 2, 5, 6]</code> — the union of <code>left</code>'s <code>[1, 2, 5]</code> and <code>right</code>'s <code>[2, 5, 6]</code> — and both frames' <code>.columns.tolist()</code> come back the same three-column union too, even though neither original frame had all three. Row 1 exists only in <code>left</code>, so in the returned <code>b</code> every one of its cells is <code>NaN</code>; row 6 exists only in <code>right</code>, so the returned <code>a</code> is all-<code>NaN</code> there. This default behavior — union on BOTH axes, gaps as <code>NaN</code> — is exactly what pandas does silently inside <code>left + right</code>; <code>align()</code> just does the same reindex step by itself, as an explicit, inspectable operation, before any math happens.</p>
+
+<div class="callout"><strong>SQL bridge:</strong> there's no single-clause SQL equivalent — the closest mental model is a <code>FULL OUTER JOIN</code> on the shared key, except <code>align()</code> works on labels already sitting in an Index, not on a join column, and it aligns COLUMN NAMES too, which a JOIN never does. Two tables with different column sets don't "align" in SQL at all; you'd write out an explicit column list per side. <code>align()</code>'s job is closer to what a spreadsheet does lining up two ranges by their row/column headers before you subtract one from the other.</div>
+
+<h2>2 · join= controls which labels survive: outer (default), inner, left, right</h2>
+<p>The default is <code>join="outer"</code> — every label from both sides survives, gaps become <code>NaN</code>, as shown above. <code>join="inner"</code> keeps only labels present on BOTH sides — no gaps, because nothing missing survives at all:</p>
+<pre><code>a, b = left.align(right, join=<span class="str">"inner"</span>)
+<span class="cm"># a.index.tolist() == [2, 5]      -- only rows in BOTH left and right
+# a.columns.tolist() == ['amount'] -- only the column in BOTH</span></code></pre>
+<p>Confirmed directly: with <code>join="inner"</code>, the returned index is <code>[2, 5]</code> (dropping row 1, only in <code>left</code>, and row 6, only in <code>right</code>) and the returned columns are just <code>['amount']</code> (dropping <code>customer</code>, only in <code>left</code>, and <code>order_date</code>, only in <code>right</code>) — no <code>NaN</code> anywhere in the result, because every surviving label existed on both sides already. <code>join="left"</code> keeps exactly <code>left</code>'s own labels (both frames come back re-indexed to match <code>left</code>'s <code>[1, 2, 5]</code>, confirmed directly); <code>join="right"</code> is the mirror, keeping <code>right</code>'s labels. This is the same four-way vocabulary as SQL join types (Lesson 5) — outer/inner/left/right mean the same "which rows survive" thing here, just applied to labels instead of a join key.</p>
+
+<h2>3 · axis= restricts alignment to just rows, or just columns</h2>
+<p>By default <code>align()</code> reindexes BOTH the index and the columns, as seen above. <code>axis=0</code> aligns only the row index and leaves each frame's own columns untouched; <code>axis=1</code> aligns only the columns and leaves each frame's own index untouched. Confirmed directly:</p>
+<pre><code>a, b = left.align(right, axis=<span class="num">0</span>)
+<span class="cm"># a.columns.tolist() == ['customer', 'amount']        -- left's own, unchanged
+# b.columns.tolist() == ['amount', 'order_date']       -- right's own, unchanged
+# BOTH a.index and b.index == [1, 2, 5, 6]              -- rows still aligned</span></code></pre>
+<p>This is the version most likely to show up in real code: two frames that are meant to share a row axis (e.g. a metrics frame and a targets frame, both keyed by <code>order_id</code>) but legitimately have different, unrelated columns — <code>axis=0</code> row-matches them without inventing a nonsense column union neither frame ever had.</p>
+
+<h2>4 · fill_value=, and the dtype trap it walks into</h2>
+<p><code>fill_value=</code> replaces the default <code>NaN</code> gaps with a chosen value instead — but confirmed directly, this only works cleanly when every surviving column can actually hold that value's type:</p>
+<pre><code>left_num, right_num = left[[<span class="str">"amount"</span>]], right[[<span class="str">"amount"</span>]]
+a, b = left_num.align(right_num, fill_value=<span class="num">0</span>)
+<span class="cm"># a["amount"] at row 6 (missing from left) becomes 0.0, not NaN -- works,
+# because 'amount' is already a numeric (float) column</span>
+
+left.align(right, fill_value=<span class="num">0</span>)
+<span class="cm"># TypeError: Invalid value '0' for dtype 'str' -- 'customer' is a string
+# column, and 0 (an int) cannot fill a string column's gaps</span></code></pre>
+<p>Confirmed directly: <code>fill_value=0</code> on the numeric-only <code>amount</code>-column subset works exactly as expected, turning the row-6 gap into a real <code>0.0</code>. But calling it on the original mixed-dtype frames — where the union of columns includes the string <code>customer</code> column — raises a real <code>TypeError</code>, because <code>0</code> is not a valid fill for a string dtype. This is the same "one fill value can't serve every column" trap <code>fillna()</code> hits with a scalar across mixed dtypes (Lesson 3) — <code>align()</code> inherits it exactly, since <code>fill_value=</code> is applied uniformly across the whole result.</p>
+
+<div class="interview">
+<p><strong>Q: "Why would you ever call align() explicitly, if pandas already auto-aligns on arithmetic?"</strong> A strong answer, out loud: <em>"Direct arithmetic like left + right does auto-align internally, on a union of both axes by default — that part's true. But align() is what you reach for when the two objects need to stay LABEL-MATCHED across more than one separate operation, not just one math expression — for example, computing several different columns' differences one at a time, or feeding both frames into two different function calls that each need the same row order. Calling align() once up front, usually with join='inner' and axis=0 to row-match without inventing a nonsense column union, gives back two objects guaranteed to share the same index — after that, every later operation on either one is safe without pandas silently re-aligning (or silently introducing NaN) each time. It's also the tool that makes the 'why does arithmetic between two DataFrames sometimes fill in NaN out of nowhere' question answerable: that NaN is align()'s default outer join happening invisibly."</em> The signal: naming that arithmetic ALREADY does this implicitly (most candidates don't know that), and specifically naming <code>join=</code>/<code>axis=</code> as the controls for choosing what survives instead of just accepting the default outer-join-everywhere behavior.</p>
+</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/70_align.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/70_align.py</code></pre>
+<p>Uses the same real <code>orders_raw.csv</code> fixture, cleaned the same way as recent lessons, split into two overlapping-but-not-identical slices keyed by <code>order_id</code>. Exercise 1 calls the default <code>align()</code> and confirms both returned frames share the union index <code>[1, 2, 5, 6]</code> and the union columns. Exercise 2 uses <code>join="inner"</code> and confirms only the shared rows/columns survive, with no <code>NaN</code> left anywhere. Exercise 3 uses <code>axis=0</code> and confirms each side keeps its own original columns while the row index still lines up. Exercise 4 confirms <code>fill_value=0</code> works on a numeric-only subset but raises <code>TypeError</code> on the original mixed-dtype frames.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: left.align(right) with defaults returns two frames both reindexed onto the UNION of each side's index AND the union of each side's columns, with every cell that didn't exist on one original side filled with NaN.">
+    <p class="stem">With no extra arguments, what do the two frames returned by <code>left.align(right)</code> share?</p>
+    <button class="opt" data-ok>the union of both sides' index labels, and the union of both sides' columns</button>
+    <button class="opt">only the row labels that already existed identically on both original sides</button>
+    <button class="opt">nothing structural; align() only renames columns, index stays untouched</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: join='inner' keeps only labels present on BOTH sides for both the index and the columns, dropping anything only on one side -- since nothing missing survives, no NaN appears anywhere in the inner-join result.">
+    <p class="stem">What changes when calling <code>left.align(right, join="inner")</code> instead of the default?</p>
+    <button class="opt" data-ok>only labels present on both sides survive; no NaN gaps appear at all</button>
+    <button class="opt">every label from both sides survives, exactly like the outer default does</button>
+    <button class="opt">inner has no effect on align(); it is only a valid argument to merge()</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: fill_value=0 works cleanly on the numeric-only amount column, but raises TypeError on the original frames because the union of columns also includes the string customer column, and an int fill_value cannot fill a string-dtype column's gaps.">
+    <p class="stem">Why does <code>left.align(right, fill_value=0)</code> raise <code>TypeError</code> on frames whose union of columns includes a string column?</p>
+    <button class="opt" data-ok>0 is an int; it cannot fill a string-dtype column's missing cells</button>
+    <button class="opt">fill_value only accepts NaN itself; any other literal always raises</button>
+    <button class="opt">it never raises; string columns silently become numeric zero instead</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the <a href="https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.align.html">pandas API reference for <code>DataFrame.align</code></a> (per <code>RESOURCES.md</code>'s "Docs: pandas User Guide" entry, this course's authoritative-behavior source) documents <code>join=</code>, <code>axis=</code>, and <code>fill_value=</code> in full, including the same outer/inner/left/right join vocabulary confirmed above.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>align()</code> is new today, placed right after Lesson 69's <code>sample()</code> entry.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-70 comes back reported as shakiest, otherwise another fresh curriculum/glossary scan for the next genuinely-uncovered pattern — both of this round's standing zero-hit candidates are now taught, so the next pick starts from a clean scan.<br><br>
+💬 Anything unclear — the outer/inner/left/right <code>join=</code> choices, <code>axis=</code>, the <code>fill_value=</code> dtype trap, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

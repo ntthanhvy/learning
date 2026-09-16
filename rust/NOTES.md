@@ -1049,3 +1049,34 @@ by the user there; they apply here identically.
   python Day 49 — the fourth cross-cutting review/retrieval day — were all
   generated this round via delegated agents; see their own NOTES.md
   entries for detail.)
+- 2026-09-16 (headless 06:00 run; verified by the orchestrator directly
+  rather than a delegated agent, since this course needs no new content):
+  same as every prior post-week day — verified `daily.html`, `assets/srs.js`,
+  and `assets/quiz-bank.js` are all present and untouched (8 `id: "k`
+  matches — 7 real kata entries `k1`-`k7` plus the commented-out example
+  line; `nav.js` still registers exactly 7 `file: "lessons` entries, only
+  the 7 Jul 8-14 lessons). Still the correct "daily quiz+kata" for this
+  post-week phase per PLAN.md, so nothing new was generated, nav.js was
+  untouched, and no bank content was added. A repo-wide grep for
+  "2026-09-16" found no existing rust/ artifact for today before this
+  check. Direct `psql "$LEARNING_DB_URL" ...` and `bin/query-progress` were
+  both tried once this round and both blocked ("Contains simple_expansion"
+  / requires-approval respectively — same two-class block reproduced daily
+  since 2026-07-16), so no `course_progress` rows could be read for a
+  scope-change signal. `bin/record-progress rust note --detail
+  '{"day":"post-week-2026-09-16","action":"verified-unchanged",
+  "by":"headless"}'` succeeded on the first attempt
+  (`recorded: rust/note day=∅ lesson=∅`) — the write path continues to be
+  reliable. No new learning record beyond the Day-1 baseline. (Go skipped
+  again per its own window close, now fifty-eight days past it; backend
+  lesson 73 — COPY and bulk insert, closing a gap flagged since lesson 68 —
+  data lesson 70 — `.align()` — python Day 50 — abstract base classes,
+  closing a loose thread from Day 41's Protocol lesson — and dataeng
+  lesson 2 — dbt sources & staging, Day 2 of its Phase 1 intensive — were
+  all generated this round via delegated agents; see their own NOTES.md
+  entries for detail. One delegated agent, for the backend lesson, initially
+  ran under worktree isolation by mistake — its nav.js/glossary/NOTES.md
+  edits landed in an isolated git worktree rather than the main checkout;
+  the orchestrator caught this by diffing the worktree against main and
+  applying the same edits directly to the main checkout, then re-ran the
+  remaining courses without isolation.)

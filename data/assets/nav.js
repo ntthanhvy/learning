@@ -144,6 +144,8 @@
       file: "lessons/0068-factorize.html" },
     { n: 69, date: "2026-09-15", title: "sample(): random rows, reproducibly",
       file: "lessons/0069-sample.html" },
+    { n: 70, date: "2026-09-16", title: "align(): making two mismatched frames line up on purpose",
+      file: "lessons/0070-align.html" },
   ];
 
   const REFS = [

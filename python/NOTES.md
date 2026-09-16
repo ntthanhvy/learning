@@ -6252,3 +6252,117 @@ fail *gracefully* so the learner sees which task failed.
   completion/quiz-outcome signal changes the picture first — the DB
   read-path gate should still not be re-attempted daily absent new
   indication, per Day 44's standing instruction.
+- 2026-09-16 — **Day 50 generated: abstract base classes** (headless run),
+  fresh content, following Day 49's own next-day note to default back to
+  fresh content after four review days in a row (43-45, 49). Read
+  `MISSION.md` (untouched, read-only), `NOTES.md`'s head and tail,
+  `PLAN.md`, `RESOURCES.md`, the sole
+  `learning-records/0001-baseline-reads-python-writes-little.md`, and
+  `assets/nav.js`'s full `LESSONS` array to confirm every `PLAN.md`
+  Phase 2a/2b spine item (Days 8-42) plus three meta-skill lessons
+  (46-48) and four review days (43-45, 49) were already taught, with no
+  gap left in the named spine. Read `lessons/0048-…` and
+  `0042-walrus-operator.html` in full to confirm exact current structural
+  conventions (dfn markup, `.callout`/`.interview` div classes, `<pre>`
+  code span classes `.kw`/`.str`/`.cm` only, closing pattern) before
+  writing. Topic selection: since the named spine is exhausted, grepped
+  all 49 lessons for `abstractmethod`/`abc.ABC`, plain `str` methods as a
+  dedicated topic, `json`, and `heapq`/`bisect` — only abstract base
+  classes had zero coverage and a clean setup already in place: Day 41's
+  own interview-answer div named "inheriting from an abstract base class"
+  as the contrast to `Protocol` without ever teaching it, so Day 50 closes
+  that exact loose thread the same way Day 42 closed Day 38's walrus
+  thread. Built directly on Day 30 (dunders/`@property`), Day 32
+  (`@classmethod`/`@staticmethod`), Day 37 (descriptors), and Day 41
+  (`Protocol`) — section 3 stacks `@abstractmethod` under `@property` to
+  reuse Day 30/37's mechanism, and section 4 is a direct nominal-vs-
+  structural comparison table against Day 41's `Protocol`.
+  No-pandas rule: grepped the lesson and practice file case-insensitively
+  for `pandas`/`numpy`/`pd\.`/`np\.` — exactly one hit, the standing
+  "Where pandas goes from here" callout stating `abc` is a general
+  mechanism, not demonstrating any pandas API; zero hits in the practice
+  file.
+  Correctness spot-check: ran every worked snippet standalone via `uv run
+  python3` before shipping. This caught two real bugs during drafting: (1)
+  the lesson's section 2 sample called `CardPayment(10)` as if `charge`'s
+  argument were a constructor argument — `CardPayment` has no `__init__`
+  override, so this actually raises `TypeError: CardPayment() takes no
+  arguments`; fixed to `CardPayment().charge(10)`, then re-run to confirm
+  the corrected snippet and its neighboring `BrokenPayment()`/
+  `PaymentMethod()` TypeErrors all behave exactly as claimed, and the
+  in-comment error text was rewritten to match Python 3.12's actual
+  message ("Can't instantiate abstract class BrokenPayment without an
+  implementation for abstract method 'charge'") instead of a paraphrase;
+  (2) the identical bug was independently present in the practice file's
+  Exercise 1 test (`CardPayment(10).charge(10)`), caught only because the
+  *solved* copy still printed a ✗ on Ex 1 during verification even after
+  every TODO was filled in correctly — traced to the same no-`__init__`
+  mismatch and fixed the same way in both the shipped and scratch copies.
+  Section 3's `Shape`/`Square` `@property`-stacked snippet was also run
+  standalone and confirmed `Square(4).area == 16`.
+  Practice file `practice/50_abstract_base_classes.py` (4 exercises): a
+  `PaymentMethod(ABC)`/`CardPayment`/`BrokenPayment` set testing that an
+  incomplete subclass raises `TypeError` at construction while a complete
+  one works normally; confirming the ABC itself can never be instantiated
+  directly even when fully declared; a `Shape`/`Square`
+  `@property`-stacked `@abstractmethod` case; and a small `register(cls)`
+  registry function distinguishing complete from incomplete subclasses by
+  catching `TypeError`. Followed the standing defensive pattern against
+  the Ellipsis-at-module-level bug family: a one-off line-by-line scan
+  confirmed every bare `...` line sits at indent 4 or 8 (inside a class or
+  function body), none at column 0.
+  Verified in a scratch dir (`.scratch-python-verify/` under the repo
+  root, removed after use): the shipped (unsolved) copy, run via plain
+  `uv run python3` with no `--with` flag, printed all four ✗ with no
+  traceback (Exercise 1's ✗ came from `BrokenPayment()` not yet raising,
+  since the unsolved `PaymentMethod` class body is just `...` with no
+  `@abstractmethod` declared yet — still a clean ✗, not a crash); a
+  separately solved copy printed all four ✓ and the "All green" tally
+  after the two `CardPayment(10)`-argument bugs above were fixed.
+  Glossary: one new term, `abstract base class`, added under a new
+  `Day 50` section in `reference/glossary.html`, after confirming no
+  collision with Day 41's `Protocol`-family terms. HTML tag-balance was
+  checked with a stdlib `html.parser.HTMLParser`-based stack checker
+  against both the lesson file and the full (now-modified) glossary —
+  both reported zero unclosed tags and zero mismatches; a raw-`&` grep
+  found only one hit in the lesson, `&nbsp;` inside the new comparison
+  table, a false positive against the checker's own incomplete entity
+  allowlist (confirmed real and correctly escaped, same as Day 1's
+  existing `&nbsp;` usage in its own comparison table).
+  Quiz: 3 questions. Word counts were checked with a small regex-based
+  script splitting each `<button class="opt">`'s stripped-tag text on
+  whitespace (em dashes counted as their own token, consistent with how
+  the split naturally works) — the first draft mismatched on two of three
+  questions (Q1 8/9/9, Q2 10/11/10) and took two short rounds of few-word
+  edits, re-running the script after each, landing at 9/9/9, 10/10/10, and
+  10/10/10 with exactly one `data-ok` per question throughout.
+  `RESOURCES.md`: added one new citation, the `abc` stdlib docs, to the
+  "Knowledge — the language" section, since this is a newly named module
+  with no prior citation in the file.
+  Registered in `assets/nav.js` with `date: "2026-09-16"`; confirmed
+  `node --check assets/nav.js` reports no syntax errors after the edit.
+  **DB access:** `bin/query-progress` was not attempted this round, per
+  Day 44's standing instruction to stop daily re-attempts absent new
+  indication the gate lifted. `bin/record-progress python lesson_generated
+  --day 50 --lesson 0050-abstract-base-classes.html --detail
+  '{"by":"headless"}'` was attempted once, from the repo root, and
+  **succeeded**, printing `recorded: python/lesson_generated day=50
+  lesson=0050-abstract-base-classes.html` — the ninth consecutive
+  successful write (following Days 42-49). `python/learning-records/`
+  still holds only the Day 1 baseline; no completion/quiz/kata outcome has
+  ever been recorded for any day 2-49.
+  Final `git status --short` showed exactly five `python/` paths changed
+  (`assets/nav.js`, `reference/glossary.html`, `RESOURCES.md`, the new
+  lesson, the new practice file), alongside unrelated concurrent changes
+  in `backend/` and `data/` and a stray `.progress_query.sh`/
+  `.scratch-data-verify/` from parallel same-day runs, confirmed out of
+  scope and left untouched.
+  **Next-day note:** the named `PLAN.md` spine, meta-skill lessons, and
+  the Day 41/Day 50 nominal-vs-structural pairing are now all closed. The
+  18-lesson fifth-review-sweep candidate list (10, 14-15, 18, 21-23,
+  25-29, 31, 35, 37, 39-40, 42) is unchanged and still viable, but Day 51
+  should weigh it on its own merits rather than defaulting either way —
+  three fresh-content-or-meta days (46-48) followed by one review (49)
+  followed by one more fresh day (50) has kept a roughly 1:1 balance so
+  far, which seems healthy without a real learner signal yet to pull it
+  either direction.

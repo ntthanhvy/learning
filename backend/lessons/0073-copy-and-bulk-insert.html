@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 73 · COPY and bulk insert: loading a million rows without a million round trips</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 73 · ~20 min</p>
+<h1>COPY and bulk insert: loading a million rows without a million round trips</h1>
+<p class="byline">Every write this course has taught so far — Lesson 35's upsert, Lesson 6's transaction, Lesson 33's optimistic lock — assumes one row (or a handful) per statement, because that's what a request handler does. A CSV import, a nightly data sync, or a one-off backfill script is a different shape entirely: thousands to millions of rows, loaded once, with no client waiting on a response. Looping an <code>INSERT</code> per row is the naive answer, and it's slow for a specific, nameable reason.</p>
+
+<h2>1 · The cost a loop hides: one round trip per row</h2>
+<p>A single <code>INSERT</code> inside a request handler is fast because it's one row riding one network round trip between your app and Postgres — milliseconds, unnoticeable. A loop that calls <code>INSERT</code> once per row for 500,000 rows pays that same round-trip cost 500,000 times over, plus Postgres parsing and planning the same statement shape 500,000 times, plus (if each insert is its own implicit transaction) 500,000 separate commits each forcing a disk flush. None of that is a bug — it's the correct cost model for request/response traffic, applied to a workload it was never designed for.</p>
+<p><dfn data-en="loading many rows in a small number of statements or one dedicated command, instead of issuing one INSERT per row, so the per-statement overhead (round trip, parse, plan, commit) is paid once or a few times instead of once per row" data-vn="bulk insert (giữ nguyên) — nạp nhiều dòng trong ít câu lệnh, thay vì 1 INSERT cho từng dòng, để đỡ tốn round trip/parse/commit lặp lại theo từng dòng">Bulk insert</dfn> is the general fix: pay the per-statement overhead once (or a handful of times), not once per row. Postgres offers two levels of this, and picking between them is today's actual decision.</p>
+
+<h2>2 · Level one: batch the INSERT itself</h2>
+<p>The first, smallest fix needs no new command — a single <code>INSERT</code> already accepts multiple <code>VALUES</code> rows:</p>
+<pre><code>INSERT INTO events (user_id, kind, occurred_at) VALUES
+  (101, 'signup', '2026-09-16 08:00:00'),
+  (102, 'signup', '2026-09-16 08:01:00'),
+  (103, 'login',  '2026-09-16 08:02:00');
+<span class="cm">-- one round trip, one parse, one commit -- for all three rows, not three</span></code></pre>
+<p>This is the right move at the scale a Go handler naturally produces batches at — a few dozen to a few hundred rows per call, e.g. inserting all line items for one order at once instead of one <code>INSERT</code> per item in a loop. Past roughly a few thousand rows in a single statement, the win flattens out and the statement itself gets unwieldy (a huge parameter list, a large parse tree) — that's the point where the second level takes over.</p>
+
+<h2>3 · Level two: COPY, a different protocol entirely</h2>
+<p><dfn data-en="a Postgres command that streams row data directly into or out of a table over a dedicated bulk-data protocol, bypassing per-row SQL statement parsing entirely -- the standard tool for loading large files and the fastest way to get many rows into a table" data-vn="COPY (giữ nguyên) — lệnh Postgres stream dữ liệu thẳng vào/ra bảng qua 1 protocol riêng cho dữ liệu lớn, không phải parse SQL từng dòng -- cách nhanh nhất để nạp nhiều dòng vào bảng">COPY</dfn> isn't a batched <code>INSERT</code> — it's a separate protocol path. Instead of Postgres parsing SQL syntax for every row, the client streams raw row data (commonly CSV or a binary format) straight into the table, and the server reads it as a stream rather than as N statements. From <code>psql</code>, loading a CSV file is one line:</p>
+<pre><code>\copy events (user_id, kind, occurred_at) FROM 'events.csv' WITH (FORMAT csv, HEADER true);</code></pre>
+<p><code>\copy</code> (the <code>psql</code> client-side wrapper, backslash and all) reads the file from wherever <code>psql</code> is running and streams it to the server; the server-side <code>COPY</code> command reads a file path on the database server's own disk instead — <code>\copy</code> is almost always the one an application actually wants, since the app server and the database server are rarely the same machine.</p>
+
+<h2>4 · Doing it from Go: pgx's CopyFrom</h2>
+<p>An application loading rows it already has in memory — not a CSV file — uses the same underlying protocol through the driver. <code>pgx</code> exposes it as <code>CopyFrom</code>, taking a source that yields rows one at a time rather than a slice, so the whole batch is never required to sit fully materialized:</p>
+<pre><code><span class="cm">// rows is already in memory here for clarity; CopyFromSlice works the same
+// way for any [][]any. For a truly large load, implement pgx.CopyFromSource
+// yourself so rows stream from a file or channel instead of a slice.</span>
+rows := [][]any{
+    {101, "signup", time.Now()},
+    {102, "signup", time.Now()},
+    {103, "login", time.Now()},
+}
+
+count, err := conn.CopyFrom(
+    ctx,
+    pgx.Identifier{"events"},
+    []string{"user_id", "kind", "occurred_at"},
+    pgx.CopyFromSlice(len(rows), func(i int) ([]any, error) {
+        return rows[i], nil
+    }),
+)
+<span class="cm">// count == 3, err == nil on success; one round trip regardless of row count</span></code></pre>
+<p>The signature makes the trade explicit: <code>CopyFrom</code> takes a table name and a column list, not a query string — there's no SQL to parse per row because there is no per-row SQL at all.</p>
+
+<h2>5 · What COPY gives up to go this fast</h2>
+<table class="cmp">
+<thead><tr><th></th><th>Looped INSERT</th><th>Batched INSERT (§2)</th><th>COPY (§3–4)</th></tr></thead>
+<tbody>
+<tr><th>Round trips</th><td>one per row</td><td>one per batch</td><td>one for the whole load</td></tr>
+<tr><th>ON CONFLICT / upsert</th><td>yes, per row</td><td>yes, per statement</td><td>no — plain load only</td></tr>
+<tr><th>RETURNING generated ids</th><td>yes, per row</td><td>yes, per statement</td><td>no</td></tr>
+<tr><th>Triggers, CHECK constraints</th><td>run per row</td><td>run per row</td><td>still run per row</td></tr>
+</tbody>
+</table>
+<p>The missing row is the real decision: <code>COPY</code> has no <code>ON CONFLICT</code> clause and no <code>RETURNING</code>. If duplicate rows need to be skipped or merged (Lesson 35's upsert territory) or the caller needs the generated ids back, the standard pattern is <code>COPY</code>ing into an empty staging table first, then a single set-based <code>INSERT ... SELECT ... ON CONFLICT</code> or <code>MERGE</code> from staging into the real table — full COPY speed for the load, full conflict handling for the merge, as two statements instead of one. CHECK constraints (Lesson 60) and triggers still fire per row either way — COPY skips SQL parsing overhead, not row-level rule enforcement, so a bad row still fails the whole COPY.</p>
+<div class="callout"><strong>Frontend-habit bridge:</strong> this is the same trade as batching a hundred individual <code>fetch()</code> calls into one request with an array body — each network round trip has fixed overhead independent of payload size, so collapsing N round trips into one is a win long before the payload itself gets big. COPY takes that same idea one step further: not just fewer round trips, but a transfer format with no per-row parsing cost at all.</div>
+
+<h2>6 · When this actually comes up</h2>
+<p>Not in a request handler — a client waiting on an HTTP response for a 500,000-row COPY is its own problem (Lesson 10's background job is the right container for that work). This is the tool for: a one-off data migration, a nightly sync job pulling a vendor's export, a test-fixture loader seeding a database before an integration test suite runs. The signal that it's time to reach for COPY instead of a batched INSERT isn't a row-count threshold memorized in advance — it's noticing the load step, not the rest of the job, is what's slow.</p>
+
+<div class="interview">
+<p><strong>Q: "How would you load a 2 million row CSV into Postgres?"</strong> A strong answer, out loud: <em>"Not a loop of INSERTs — that pays a full round trip and statement parse per row, which at that scale dominates the run time. I'd use COPY, either \copy from psql for a one-off, or pgx's CopyFrom from Go if it's part of an application job, since both stream the data in over a dedicated protocol instead of parsing SQL per row. The catch is COPY has no ON CONFLICT and no RETURNING, so if I need to dedupe against existing rows or get generated ids back, I'd COPY into an empty staging table first and do a single set-based INSERT ... SELECT ... ON CONFLICT from staging into the real table — full COPY speed for the bulk load, full conflict handling in one final statement."</em> The signal: naming COPY as a different protocol, not just "INSERT but faster," and knowing the staging-table pattern for when conflict handling is still required.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A looped INSERT pays a full network round trip, SQL parse, and plan for every single row, which is the correct cost model for one request-handler write but becomes the dominant cost once the row count reaches the thousands or millions.">
+    <p class="stem">Why is a loop of one INSERT per row slow for a large bulk load?</p>
+    <button class="opt" data-ok>it repeats round trip and parse cost per-row</button>
+    <button class="opt">Postgres refuses more than a thousand rows total</button>
+    <button class="opt">INSERT statements never run inside a transaction block</button>
+    <button class="opt">round trips only happen for SELECT queries ever</button>
+  </div>
+  <div class="q" data-why="COPY streams row data directly into the table over a dedicated bulk-data protocol, so the server never parses SQL syntax per row the way it does for an INSERT -- that is what makes it the fastest path for loading many rows, at the cost of losing ON CONFLICT and RETURNING.">
+    <p class="stem">What makes COPY faster than even a batched multi-row INSERT?</p>
+    <button class="opt" data-ok>it skips per-row SQL parsing over a dedicated protocol</button>
+    <button class="opt">it silently disables every CHECK constraint on a table</button>
+    <button class="opt">it always runs across several parallel connections at once</button>
+    <button class="opt">it stores rows in a compressed format nothing reads</button>
+  </div>
+  <div class="q" data-why="COPY has no ON CONFLICT clause and no RETURNING -- the standard pattern for a bulk load that still needs deduping or generated ids is to COPY into an empty staging table first, then run one set-based INSERT ... SELECT ... ON CONFLICT (or MERGE) from staging into the real table.">
+    <p class="stem">How do you get COPY's speed while still handling duplicate rows on conflict?</p>
+    <button class="opt" data-ok>COPY into staging, then merge with one ON CONFLICT INSERT</button>
+    <button class="opt">add an ON CONFLICT clause directly onto the COPY command</button>
+    <button class="opt">run COPY twice so the second call overwrites the first</button>
+    <button class="opt">conflicts are simply always impossible to hit while using COPY</button>
+  </div>
+  <div class="q" data-why="COPY and batched INSERT both skip per-statement overhead, not row-level rule enforcement -- CHECK constraints and triggers still evaluate against every row being loaded either way, so a row violating a rule still fails the load exactly like a normal INSERT would.">
+    <p class="stem">Do CHECK constraints and triggers still run during a COPY load?</p>
+    <button class="opt" data-ok>yes, they still evaluate against every row loaded</button>
+    <button class="opt">no, COPY bypasses every constraint on the table</button>
+    <button class="opt">only triggers run, and CHECK never once does</button>
+    <button class="opt">only CHECK runs, and triggers never once do</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://www.postgresql.org/docs/current/sql-copy.html">PostgreSQL Manual — COPY</a> (~15 min) — this course's standing Postgres DDL reference (already used for Lessons 5, 19, 60), continued here into COPY's own syntax, format options, and the exact list of clauses (ON CONFLICT among them) it does not support.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> open. Still no <code>lesson_completed</code>/quiz-outcome record exists for any lesson after 73 rounds — the honest next step remains a completion signal or a user-named track.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

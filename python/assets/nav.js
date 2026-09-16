@@ -104,6 +104,8 @@
       file: "lessons/0048-code-walkthrough-answer-shape.html" },
     { n: 49, date: "2026-09-15", title: "Review day 4: retrieval across six more lessons",
       file: "lessons/0049-review-retrieval-day-4.html" },
+    { n: 50, date: "2026-09-16", title: "Abstract base classes: enforcing a shape by inheritance",
+      file: "lessons/0050-abstract-base-classes.html" },
   ];
 
   const REFS = [

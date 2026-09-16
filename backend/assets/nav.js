@@ -150,6 +150,8 @@
       file: "lessons/0071-load-shedding.html" },
     { n: 72, date: "2026-09-15", title: "Event-driven architecture: naming the paradigm behind the mechanisms",
       file: "lessons/0072-event-driven-architecture-vocabulary.html" },
+    { n: 73, date: "2026-09-16", title: "COPY and bulk insert: loading a million rows without a million round trips",
+      file: "lessons/0073-copy-and-bulk-insert.html" },
   ];
 
   const REFS = [

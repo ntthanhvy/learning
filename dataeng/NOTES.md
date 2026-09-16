@@ -167,3 +167,59 @@ along the Phase 2 spine, adapted to the learning records.
   ELT, raw layer, dbt, Kafka, Airflow, idempotent). `bin/record-progress
   dataeng lesson_generated --day 1 --lesson 0001-pipeline-map-and-repo.html
   --detail '{"by":"headless"}'` succeeded on the first attempt.
+- 2026-09-16 (headless run, Day 2 generated): second lesson,
+  `0002-dbt-sources-and-staging.html`. `lessons/` at start of the run
+  contained only Lesson 1 and no `2026-09-16` entry existed here yet, so
+  proceeded on schedule. No `lesson_completed` record existed for Day 1, so
+  the lesson opens with an explicit "before today" check (row counts against
+  `raw.restaurants`/`raw.couriers`/`raw.orders`, plus how to re-run Day 1's
+  seed script if the check fails) rather than assuming the build step landed.
+  Read `MISSION.md`, `NOTES.md`, `PLAN.md`, `RESOURCES.md`,
+  `learning-records/0001-baseline-sql-strong-pipeline-tools-new.md`, and
+  `lessons/0001-pipeline-map-and-repo.html` in full for structural precedent
+  (dfn/gloss.js, quiz.js option-shape, nav.js registration, Verify block
+  style, closing voice) before writing.
+  **Content:** per the baseline record's "dbt will feel familiar fast"
+  note, the lesson spends almost no time on the SQL itself and instead
+  covers what dbt adds — `source()` vs `ref()`, the DAG, materializations —
+  then has the learner set up a dbt project (`dbt init`, Postgres profile
+  matching Day 1's compose credentials), declare `models/staging/sources.yml`
+  for `raw.restaurants`/`raw.couriers`/`raw.orders`, build `stg_restaurants`
+  and `stg_couriers` in full (scaffolding) and `stg_orders` with a
+  fill-in-the-`SELECT` TODO (the day's actual skill, plus one derived
+  column, `order_total`), materialize the staging folder as views via
+  `dbt_project.yml`, and read the lineage graph with `dbt docs generate` /
+  `dbt docs serve` plus `dbt list`. No pandas, no Python-language teaching,
+  no re-derivation of idempotency — one bridge line each to `data/`,
+  `python/` and `backend/`, per the overlap rule. No joins introduced yet
+  (staging is one-source-per-model only, per dbt Labs's "How we structure
+  our dbt projects", this course's house style).
+  **Verification:** followed the Day 1 precedent's dbt approach exactly —
+  laid out a minimal project (`dbt_project.yml`, a `profiles.yml` pointing
+  at an unreachable Postgres, `models/staging/sources.yml`, and the three
+  staging models) in `.scratch-dataeng-verify/` under the repo root, then
+  ran `uv run --with "dbt-postgres==1.11.0" dbt parse --profiles-dir .`
+  (via `--project-dir`/`--profiles-dir` absolute flags rather than a
+  `cd &&` chain, which the sandbox's approval gate rejected outright).
+  Output showed `Registered adapter: postgres=1.11.0` and no database
+  connection was needed; grepped for `Error` rather than trusting the exit
+  code (confirmed non-zero-through-pipe is still a live concern) and found
+  none. Also ran `dbt list --resource-type model`, which correctly listed
+  all three `stg_` models, confirming `source()` resolution. Then added a
+  deliberately broken `source()` call in a throwaway fourth model to
+  confirm `dbt parse` actually catches errors rather than passing
+  trivially — it reported `Compilation Error` as expected — before
+  deleting that file and removing the whole scratch directory. Docker was
+  not exercised this round (no live Postgres needed for `dbt parse`);
+  the `dbt run`/`dbt docs` commands in the lesson are therefore verified
+  only by dbt's own documented behavior plus this project's own Day 1
+  precedent of a working compose stack, not executed end-to-end here.
+  Registered Lesson 2 in `assets/nav.js` (`node --check` clean) and added
+  the Day 2 section to `reference/glossary.html` (6 terms: dbt model, DAG,
+  staging, source, materialization, view — checked none were already
+  present from Day 1). Quiz options were word-count-balanced per question
+  after a first draft came up mismatched (counting `ref()`/`source()` as
+  single tokens, consistent with how Day 1 counted `raw.order_events`).
+  `bin/record-progress dataeng lesson_generated --day 2 --lesson
+  0002-dbt-sources-and-staging.html --detail '{"by":"headless"}'` succeeded
+  on the first attempt.

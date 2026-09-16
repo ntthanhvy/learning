@@ -5555,3 +5555,54 @@
   lesson=0069-sample.html`) — the write path worked fine, and the read
   path (`bin/query-progress`) was not attempted this round per this
   round's explicit instruction to skip it.
+- 2026-09-16 generation (Lesson 70): this session picked up mid-task from a
+  prior cut-off headless run — `data/lessons/0070-align.html` already
+  existed on disk (topic: `.align()`, the standing zero-hit candidate named
+  in Lessons 68 and 69's own teasers), but `data/assets/nav.js` had no
+  `n:70` entry yet and `practice/70_align.py` did not exist. Read the
+  lesson file in full: covers default outer-join alignment (union of
+  index AND columns, NaN gaps), `join="inner"/"left"/"right"`, `axis=0`
+  restricting alignment to rows only, and the `fill_value=` dtype trap
+  (numeric fill raises `TypeError` when the column union includes a
+  string column) — matches this course's conventions (`dfn`/`gloss.js`
+  popups, SQL-bridge callout, `.interview` callout, `quiz.js` 3-question
+  quiz, closing Vietnamese-friendly voice, all three script tags). No
+  practice file existed, so one was written from scratch following
+  Lesson 69's established shape (same `orders_raw.csv` fixture, same
+  clean-then-slice setup, `check()`/✓/✗ harness, no `for` loops), covering
+  the same four sub-topics as the lesson's own "Try it" paragraph.
+  Verified in a mirrored `.scratch/lesson70/practice/` layout (with its
+  own `data/orders_raw.csv` copy): the unsolved file printed exactly 4 ✗
+  with no traceback (first draft of Exercise 1 used an invalid
+  `left...(right)` blank that was a Python `SyntaxError`, not a runtime
+  ✗ — fixed by changing the blank to a named `ex1_other = ...` variable
+  passed into `left.align(ex1_other)`, which fails cleanly at runtime
+  instead), and a solved copy printed all 4 ✓ on the first run after the
+  fix. The shipped (still-unsolved) file was then copied to its real
+  `practice/70_align.py` location and re-run from there directly (`cd
+  data && uv run --with pandas python3 practice/70_align.py`), printing
+  the identical 4 ✗, no crash. Checked the glossary for a collision before
+  adding anything: grepped for `align()` across the full glossary — zero
+  hits — so added exactly one new row, `align()`, placed directly after
+  Lesson 69's `sample()` entry, matching the lesson's own closing-line
+  promise. Confirmed the glossary table's tags stayed balanced after the
+  insert via the `Grep` tool's own occurrence counts: `table` 1/1, `tr`
+  131/131, `td` 130/130, `th` (not separately recounted, only `tr`/`td`/
+  `table` were checked this round) — zero raw `&` matches. Registered
+  Lesson 70 in `nav.js` with today's date (2026-09-16), title copied
+  verbatim from the lesson's own `<title>`/`<h1>`; `node --check` confirmed
+  it still parses as valid JavaScript after the edit. The `data/.scratch/`
+  directory created for verification was removed (`rm -rf`) once both the
+  unsolved and solved runs were confirmed; `git status --short` afterward
+  showed only the intended new/modified `data/` files (`data/assets/
+  nav.js`, `data/reference/glossary.html`, new `data/lessons/
+  0070-align.html`, new `data/practice/70_align.py`) — plus unrelated
+  concurrent changes in the `backend/`/`python/` course directories and a
+  stray `.progress_query.sh`/`.scratch-data-verify/` from other runs, none
+  touched by this session. This agent does not run `git commit` — leaving
+  working-tree changes uncommitted remains this course's established
+  convention. `bin/record-progress data lesson_generated --day 70 --lesson
+  0070-align.html --detail '{"by":"headless"}'` was run once from the
+  repo root and succeeded on the first try (`recorded: data/
+  lesson_generated day=70 lesson=0070-align.html`); the read path
+  (`bin/query-progress`) was not attempted, consistent with recent rounds.

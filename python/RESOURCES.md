@@ -23,6 +23,8 @@ authors for *why*. Cite inline; each lesson recommends exactly one primary sourc
   Careful, beginner-aware writing on comprehensions, unpacking, and looping idioms. Use for: Day 2 — good at explaining *when not to* use a comprehension.
 - [Docs: `dataclasses`](https://docs.python.org/3/library/dataclasses.html) · [`typing`](https://docs.python.org/3/library/typing.html)
   Use for: Day 7 — structuring records and reading annotated signatures.
+- [Docs: `abc`](https://docs.python.org/3/library/abc.html)
+  Use for: Day 50 — abstract base classes, `@abstractmethod`, and how they differ from Day 41's structural `Protocol`.
 - [PEP 8 — Style Guide for Python Code](https://peps.python.org/pep-0008/)
   Use for: naming and layout conventions, so written code looks like the ecosystem's.
 

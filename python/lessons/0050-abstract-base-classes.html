@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 50 · Abstract base classes: enforcing a shape by inheritance</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 50 · ~20 min · 16 Sep 2026</p>
+<h1>Abstract base classes: <code>abc.ABC</code> and <code>@abstractmethod</code></h1>
+<p class="byline">Day 41's <code>Protocol</code> answered "any object shaped like this, no inheritance needed" — structural typing. Today's is the other half of the same interview question, finally taught rather than only named: <dfn data-en="a class hierarchy, built from Python's abc module, that requires a subclass to implement certain methods before it can be instantiated at all - inheritance is explicit (a subclass must say which base it implements), and Python enforces the requirement at instantiation time, not just in a type checker" data-vn="giữ nguyên &quot;abstract base class / ABC&quot; — class cha bắt buộc subclass phải cài đặt đúng method đã khai báo mới được tạo instance; phải kế thừa rõ ràng, Python tự kiểm tra lúc tạo instance chứ không chỉ lúc type-check">abstract base class</dfn> (ABC): "any object that explicitly inherits from this and fills in the required methods" — nominal typing, enforced by Python itself the moment an instance is created, not just by a type checker reading hints.</p>
+
+<div class="callout"><strong>Bridge from SQL:</strong> an ABC is closer to a <code>CHECK</code> constraint than a schema: it doesn't just describe a shape, it actively refuses to let a broken row (an incomplete subclass) exist at all. <code>Protocol</code> was the schema-as-documentation version — checked by a linter, never enforced at runtime, exactly like a comment claiming a column "should" be non-null. An ABC is the real constraint: violate it and the database (Python) rejects the insert (the instantiation) outright.</div>
+
+<h2>1 · The problem: an interface with nothing stopping you from skipping it</h2>
+<p>Say every payment method in a system needs a <code>charge(amount)</code> method — that's the whole contract. Nothing in plain Python stops a subclass from forgetting to define it:</p>
+<pre><code><span class="kw">class</span> PaymentMethod:
+    <span class="kw">def</span> charge(self, amount):
+        <span class="kw">raise</span> NotImplementedError
+
+<span class="kw">class</span> CardPayment(PaymentMethod):
+    <span class="kw">def</span> charge(self, amount):
+        <span class="kw">return</span> <span class="str">f"charged ${amount} to card"</span>
+
+<span class="kw">class</span> BrokenPayment(PaymentMethod):
+    <span class="kw">pass</span>   <span class="cm"># forgot to override charge() -- nothing stops this</span>
+
+BrokenPayment()          <span class="cm"># creates fine -- no error yet</span>
+BrokenPayment().charge(<span class="kw">10</span>)  <span class="cm"># NotImplementedError -- but only NOW, at call time, maybe in production</span></code></pre>
+<p>The base class's <code>raise NotImplementedError</code> is a convention, not an enforcement — <code>BrokenPayment()</code> instantiates without complaint, and the missing method only surfaces the moment something finally calls <code>.charge(...)</code>, which could be long after the class was written and far from where the mistake was made.</p>
+
+<h2>2 · <code>abc.ABC</code> and <code>@abstractmethod</code>: the same contract, enforced at instantiation</h2>
+<p>The standard library's <code>abc</code> module turns that convention into a real rule. Inherit from <code>ABC</code> and mark required methods <code>@abstractmethod</code>; Python then refuses to create an instance of any subclass that hasn't overridden every one of them:</p>
+<pre><code><span class="kw">from</span> abc <span class="kw">import</span> ABC, abstractmethod
+
+<span class="kw">class</span> PaymentMethod(ABC):
+    <span class="kw">@abstractmethod</span>
+    <span class="kw">def</span> charge(self, amount):
+        ...   <span class="cm"># body is never used -- subclasses must supply their own</span>
+
+<span class="kw">class</span> CardPayment(PaymentMethod):
+    <span class="kw">def</span> charge(self, amount):
+        <span class="kw">return</span> <span class="str">f"charged ${amount} to card"</span>
+
+<span class="kw">class</span> BrokenPayment(PaymentMethod):
+    <span class="kw">pass</span>   <span class="cm"># still forgot to override charge()</span>
+
+CardPayment().charge(<span class="kw">10</span>)  <span class="cm"># "charged $10 to card" -- works fine</span>
+BrokenPayment()             <span class="cm"># TypeError: Can't instantiate abstract class BrokenPayment</span>
+                             <span class="cm">#   without an implementation for abstract method 'charge'</span>
+PaymentMethod()              <span class="cm"># TypeError too -- the ABC itself can never be instantiated directly</span></code></pre>
+<p>Verified live: <code>BrokenPayment()</code> raises <code>TypeError</code> the instant it's constructed — not on the first call to <code>.charge(...)</code>, which might be seconds, days, or a deploy later. The mistake is caught at the exact line that created the broken object, with a message naming the specific missing method. <code>PaymentMethod</code> itself is also uninstantiable, on purpose: it exists only to be inherited from, never used directly — unlike section 1's plain-class version, which happily instantiated with no complaint at all.</p>
+
+<h2>3 · <code>@abstractmethod</code> can require more than plain methods</h2>
+<p>Stacking <code>@abstractmethod</code> under Day 32's <code>@classmethod</code>/<code>@staticmethod</code> or Day 30/37's <code>@property</code> requires those too — the enforcement isn't limited to ordinary instance methods:</p>
+<pre><code><span class="kw">from</span> abc <span class="kw">import</span> ABC, abstractmethod
+
+<span class="kw">class</span> Shape(ABC):
+    <span class="kw">@property</span>
+    <span class="kw">@abstractmethod</span>
+    <span class="kw">def</span> area(self) -> <span class="kw">float</span>:
+        ...
+
+<span class="kw">class</span> Square(Shape):
+    <span class="kw">def</span> __init__(self, side):
+        self.side = side
+
+    <span class="kw">@property</span>
+    <span class="kw">def</span> area(self) -> <span class="kw">float</span>:
+        <span class="kw">return</span> self.side ** <span class="kw">2</span>
+
+Square(<span class="kw">4</span>).area   <span class="cm"># 16 -- area reads like an attribute, enforced like a method</span></code></pre>
+<p>A subclass that defines <code>area</code> as a plain attribute instead of a <code>@property</code>, or omits it entirely, still fails to instantiate — the ABC checks that the name is filled in and overridden, regardless of which kind of member fills it.</p>
+
+<h2>4 · Nominal vs. structural: choosing between an ABC and a <code>Protocol</code></h2>
+<p>Both answer "does this object satisfy the contract?" but check it in opposite ways, and Day 41's own interview answer named the distinction without the ABC half being taught yet — this closes that loop:</p>
+<table class="gloss">
+<tr><th>&nbsp;</th><th>ABC (today)</th><th>Protocol (Day 41)</th></tr>
+<tr><td>relationship required</td><td>explicit — subclass must inherit from it</td><td>none — any matching shape qualifies</td></tr>
+<tr><td>when it's checked</td><td>at instantiation, by Python itself, always</td><td>only if a type checker runs, or <code>@runtime_checkable</code> + <code>isinstance()</code> is used</td></tr>
+<tr><td>coupling</td><td>every implementer imports and inherits the ABC</td><td>zero — implementers never import the Protocol</td></tr>
+<tr><td>best for</td><td>a shared library defining its own plugin contract</td><td>accepting objects from code you don't own or control</td></tr>
+</table>
+<p>Reach for an ABC when a class hierarchy is genuinely yours to define and you want Python itself to refuse an incomplete subclass the moment it's built — a plugin system, a base class in your own package. Reach for a <code>Protocol</code> when the objects satisfying the shape come from elsewhere and forcing them all to inherit from a common base isn't realistic or desirable.</p>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> nothing pandas-specific — <code>abc</code> is a general language mechanism. pandas itself uses ABC-like base classes internally (e.g. its extension-array interface), but building one here would mean writing pandas-internals code, out of scope per <code>MISSION.md</code>. Not demonstrated; this is the only sentence in this lesson naming pandas.</div>
+
+<div class="interview">
+<p><strong>Q: "What's the difference between an abstract base class and a Protocol in Python?"</strong> A strong answer, out loud: <em>"Both describe a required shape, but an ABC is nominal and enforced — a subclass has to explicitly inherit from it, and Python refuses to instantiate it if an <code>@abstractmethod</code> is left unimplemented. A Protocol is structural and, without <code>@runtime_checkable</code>, only checked by a static type checker — any object with matching method names satisfies it, no inheritance or import required. I'd use an ABC for a plugin contract I own and want enforced at object-creation time; a Protocol for accepting objects from code I don't own, where forcing a shared base class isn't realistic."</em> The signal: naming both the enforcement-timing difference and the coupling difference, not just "one uses inheritance."</p>
+</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/50_abstract_base_classes.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/50_abstract_base_classes.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: defining an ABC with one <code>@abstractmethod</code> and confirming a complete subclass instantiates while an incomplete one raises <code>TypeError</code> at construction time, confirming the ABC itself can't be instantiated directly, stacking <code>@abstractmethod</code> under <code>@property</code> and confirming a subclass must override it as a property, and writing a small registry function that only accepts fully-implemented subclasses.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Verified live: a subclass of an ABC that hasn't overridden every @abstractmethod raises TypeError the instant it's constructed, naming the missing method - not later, when that method finally gets called, the way a plain NotImplementedError convention only fails at call time.">
+    <p class="stem">When does Python raise an error for a subclass missing a required <code>@abstractmethod</code>?</p>
+    <button class="opt" data-ok>immediately at instantiation time, before any call ever happens</button>
+    <button class="opt">only the first time that missing method gets called</button>
+    <button class="opt">never — Python silently skips any unwritten method entirely</button>
+  </div>
+  <div class="q" data-why="An ABC itself, even with every abstractmethod correctly declared, can never be instantiated directly - PaymentMethod() raises TypeError the same as an incomplete subclass would, because an ABC exists only to be inherited from and completed, not used on its own.">
+    <p class="stem">Can the abstract base class itself (not a subclass) ever be instantiated directly?</p>
+    <button class="opt" data-ok>no — it raises TypeError, same as an incomplete subclass</button>
+    <button class="opt">yes, as long as it defines at least one method</button>
+    <button class="opt">yes, but only inside the exact same module it defines</button>
+  </div>
+  <div class="q" data-why="An ABC requires explicit inheritance and is enforced by Python itself at instantiation time for every subclass, unconditionally. A Protocol requires no inheritance at all - any structurally matching object satisfies it - and is only checked by a static type checker unless @runtime_checkable plus isinstance() is used, matching Day 41's own framing of nominal vs. structural typing.">
+    <p class="stem">How does an ABC's enforcement differ from a <code>Protocol</code>'s, by default?</p>
+    <button class="opt" data-ok>ABC enforces at instantiation always; Protocol needs a type checker</button>
+    <button class="opt">they enforce identically; only the import statement differs at all</button>
+    <button class="opt">Protocol enforces at instantiation; ABC needs a type checker instead</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the <a href="https://docs.python.org/3/library/abc.html"><code>abc</code></a> standard-library docs (added to <code>RESOURCES.md</code> this run) — cover <code>ABC</code>, <code>ABCMeta</code>, <code>@abstractmethod</code>, and the rarer <code>@abstractproperty</code>-style stacking shown in section 3 in full.</p>
+
+<p class="next">New term today is in the <a href="../reference/glossary.html#day50">glossary</a> under Day 50.<br>
+This closes the nominal-vs-structural pairing Day 41's interview answer named but couldn't teach both halves of yet — <code>Protocol</code> (Day 41) and <code>ABC</code> (today) are now both covered. With four review days (43-45, 49) behind this course and every named <code>PLAN.md</code> spine item, meta-skill lesson, and this closing thread now taught, the next lesson is open: a fifth review sweep of the 18 still-review-uncovered days (10, 14-15, 18, 21-23, 25-29, 31, 35, 37, 39-40, 42), or fresh content if another genuine gap surfaces first.<br><br>
+💬 Anything unclear — ABCs, the <code>Protocol</code> contrast, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

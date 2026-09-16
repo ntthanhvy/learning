@@ -32,6 +32,17 @@
   <tr><td>idempotent</td><td>giữ nguyên "idempotent" — làm 1 lần hay N lần, kết quả như nhau</td><td>An operation that produces the same end state whether performed once or many times — safe to retry blindly, which matters wherever a step might run twice. Same idea as backend/'s idempotency keys, applied to a pipeline.</td></tr>
 </table>
 
+<h2 id="day2">Day 2 — dbt: sources, staging &amp; ref()</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>dbt model</td><td>giữ nguyên "dbt model" — 1 file .sql chứa 1 câu SELECT, dbt biên dịch và chạy để tạo ra 1 view/table</td><td>A single dbt model — one <code>.sql</code> file containing one <code>SELECT</code> statement, compiled and run by dbt, that produces one view or table in the warehouse.</td></tr>
+  <tr><td>DAG</td><td>giữ nguyên "DAG" — sơ đồ phụ thuộc dbt tự dựng từ ref()/source(), quyết định thứ tự build</td><td>The directed acyclic graph dbt builds from every <code>ref()</code> and <code>source()</code> call in a project — which model depends on which, and therefore the only valid build order.</td></tr>
+  <tr><td>staging</td><td>giữ nguyên "staging" — lớp model đầu tiên trên raw, mỗi model ứng với 1 bảng nguồn, chỉ dọn nhẹ, không join</td><td>The dbt layer immediately above raw sources — one model per source table, doing only light cleanup (renaming, casting, light derivations), never joining across sources.</td></tr>
+  <tr><td>source</td><td>giữ nguyên "source" — khai báo trỏ tới bảng raw có sẵn, model gọi qua source() thay vì viết tên schema.table cứng</td><td>A dbt-declared pointer at a raw table that already exists in the warehouse (not built by dbt) — lets models reference it via <code>source()</code> instead of a hardcoded <code>schema.table</code> name, and is what freshness checks attach to.</td></tr>
+  <tr><td>materialization</td><td>giữ nguyên "materialization" — cách SELECT của model biến thành đối tượng trong warehouse: view, table, hay incremental</td><td>dbt's setting for how a model's <code>SELECT</code> becomes warehouse objects — view (query re-runs every time it's read, always fresh, no storage), table (query runs once at build time, stored, stale until next run), or incremental (Day 4).</td></tr>
+  <tr><td>view</td><td>giữ nguyên "view" — dbt bọc SELECT trong CREATE VIEW, không lưu dữ liệu, luôn mới nhất</td><td>A materialization where dbt wraps the <code>SELECT</code> in <code>CREATE VIEW</code> — no data is stored, the query re-runs on every read, always reflects current raw data, cheapest to build.</td></tr>
+</table>
+
 <script src="../assets/nav.js"></script>
 </body>
 </html>

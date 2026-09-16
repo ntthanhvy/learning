@@ -5187,3 +5187,36 @@
   broad search to find whatever has been causing it to keep losing out) and
   notes the messaging/event-driven paradigm gap is now closed (Lesson 72),
   so future rounds should search fresh rather than re-surfacing it.
+- **2026-09-16 generation (Lesson 73, headless 06:00 run):** idempotency
+  check first — confirmed via `ls backend/lessons/0073-*` (no match before
+  writing) and a grep for `n: 73`/`2026-09-16` in `nav.js` (no match, highest
+  prior entry was `n: 72`, dated 2026-09-15). Topic: `COPY`/bulk insert,
+  finally committed to after being flagged narrow and passed over six rounds
+  running (Lessons 68-72's notes) — no fresher gap took priority this round.
+  Lesson 73 covers: the round-trip/parse/commit cost a per-row INSERT loop
+  hides; level one (batched multi-row INSERT, the right fix at Go-handler
+  scale); level two (`COPY`, a separate streaming protocol, not a batched
+  INSERT); `\copy` vs. server-side `COPY`; `pgx`'s `CopyFrom`/`CopyFromSlice`
+  from Go; a comparison table naming the real trade (`COPY` has no `ON
+  CONFLICT`, no `RETURNING`, ties back to Lesson 35's upsert); the
+  COPY-into-staging-then-merge pattern for when conflict handling is still
+  needed; a fetch-batching frontend-habit bridge; and when this actually
+  comes up (migrations/syncs/fixtures, never inside a request handler, tying
+  to Lesson 10's background-job container). Checked the glossary first for
+  both candidate terms (`bulk insert`, `COPY`) — zero collisions — then
+  appended both as new `<dfn>`-backed rows after Lesson 72's `broker` row; no
+  existing row needed editing. Verification: quiz word-count balance
+  converged to 8/9/10/8 across the four questions, HTML tag-balance clean
+  across both files, zero unescaped `&`, zero backslash-escaped-quote bugs.
+  A Go compile check was attempted for the `pgx.CopyFrom`/`CopyFromSlice`
+  snippet but the Go toolchain was unavailable in this sandboxed session
+  (`go version` required approval that wasn't grantable headless) —
+  verified instead by manual signature review against the known `pgx/v5`
+  API, which the snippet matches exactly; worth a real compile-check next
+  time sandbox access allows it. Registered Lesson 73 in `nav.js` (date
+  2026-09-16), confirmed with `node --check` clean. `bin/record-progress
+  backend lesson_generated --day 73 --lesson 0073-copy-and-bulk-insert.html
+  --detail '{"by":"headless"}'` succeeded on the first attempt. The
+  `COPY`/bulk-insert gap raised since Lesson 68 is now closed; future
+  rounds should do one fresh broad gap search rather than re-surfacing
+  either this or the already-closed messaging/event-driven gap (Lesson 72).

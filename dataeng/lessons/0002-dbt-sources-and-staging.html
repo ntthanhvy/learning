@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 2 · dbt: sources, staging &amp; ref()</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 2 · ~30–45 min · 16 Sep 2026</p>
+<h1>dbt: sources, staging &amp; <code>ref()</code></h1>
+<p class="byline">Today's tangible win: <code>dbt run</code> builds <code>stg_restaurants</code>, <code>stg_couriers</code> and <code>stg_orders</code> as views on top of yesterday's raw tables, and you can read the lineage graph dbt builds from <code>source()</code> and <code>ref()</code>. Your SQL is already strong, so none of today is about the <code>SELECT</code>s themselves — it's about what dbt adds on top: a declared source, a dependency graph, and a materialization dbt manages for you.</p>
+
+<div class="callout"><strong>Before today — check Day 1 actually landed:</strong> this lesson assumes <code>food-delivery-pipeline/</code> exists with a running Postgres (<code>docker compose up -d</code>, healthy) and <code>raw.restaurants</code> (40 rows), <code>raw.couriers</code> (15 rows) and <code>raw.orders</code> (500 rows, 2 bad rows planted) loaded by <code>scripts/generate_raw_data.py</code>. If you're not sure, confirm before continuing:
+<pre><code>docker compose ps
+docker compose exec -T postgres psql -U fdp -d fdp -c \
+  "SELECT (SELECT count(*) FROM raw.restaurants) AS restaurants,
+          (SELECT count(*) FROM raw.couriers) AS couriers,
+          (SELECT count(*) FROM raw.orders) AS orders;"</code></pre>
+Expected: <code>restaurants=40, couriers=15, orders=500</code>. If <code>docker compose ps</code> shows nothing, run <code>docker compose up -d</code> first; if the counts are wrong or the tables don't exist, re-run <code>uv run --with "psycopg[binary]" python3 scripts/generate_raw_data.py</code> from Day 1 before starting today — it's deterministic and safe to re-run. Everything below builds on that raw layer being there.</p></div>
+
+<h2>1 · What dbt actually adds on top of SQL you already know</h2>
+<p>A <dfn data-en="a single dbt model — one .sql file containing one SELECT statement, compiled and run by dbt, that produces one view or table in the warehouse" data-vn="giữ nguyên &quot;dbt model&quot; — 1 file .sql chứa 1 câu SELECT, dbt biên dịch và chạy để tạo ra 1 view/table">dbt model</dfn> is a file with a <code>SELECT</code> in it. That's it — no new query language, no new joins, nothing about SQL itself changes. What dbt adds is everything <em>around</em> that <code>SELECT</code>:</p>
+<ul>
+<li>a way to declare "this raw table is my starting point" — <code>source()</code> — so dbt knows what's upstream of everything;</li>
+<li>a way to say "this model depends on that other model" — <code>ref()</code> — instead of hardcoding schema-qualified table names, so dbt can figure out build order and draw a graph;</li>
+<li>a choice of how each model gets materialized — view, table, or (Day 4) incremental — decoupled from the SQL itself;</li>
+<li>and, from that web of <code>ref()</code>/<code>source()</code> calls, a <dfn data-en="the directed acyclic graph dbt builds from every ref() and source() call in a project — which model depends on which, and therefore the only valid build order" data-vn="giữ nguyên &quot;DAG&quot; — sơ đồ phụ thuộc dbt tự dựng từ ref()/source(), quyết định thứ tự build">DAG</dfn> — a picture of the whole project's dependencies that dbt draws for you, instead of you tracking it in your head or in a README.</li>
+</ul>
+<p>Today builds the first layer of that graph: <dfn data-en="the dbt layer immediately above raw sources — one model per source table, doing only light cleanup (renaming, casting, light derivations), never joining across sources" data-vn="giữ nguyên &quot;staging&quot; — lớp model đầu tiên trên raw, mỗi model ứng với 1 bảng nguồn, chỉ dọn nhẹ, không join">staging</dfn> models: one per raw table, doing light cleanup and nothing else. No joins yet — that's intermediate models, later in the course.</p>
+
+<h2>2 · Project setup: <code>dbt init</code> and the Postgres connection</h2>
+<p>Inside <code>food-delivery-pipeline/</code>, dbt needs its own Python environment. Use <code>uv</code>, same as Day 1:</p>
+<pre><code>uv init --no-workspace dbt_env
+cd dbt_env
+uv add dbt-core==1.12.4 dbt-postgres==1.11.0
+uv run dbt init food_delivery_pipeline</code></pre>
+<p><code>dbt init</code> asks a few questions — pick <code>postgres</code> as the adapter, then answer host/port/user/password/dbname/schema/threads. Use these values, matching Day 1's <code>docker-compose.yml</code>:</p>
+<table class="gloss">
+  <tr><th>Field</th><th>Value</th></tr>
+  <tr><td>host</td><td><code>localhost</code></td></tr>
+  <tr><td>port</td><td><code>5432</code></td></tr>
+  <tr><td>user</td><td><code>fdp</code></td></tr>
+  <tr><td>password</td><td><code>fdp_dev_password</code></td></tr>
+  <tr><td>dbname</td><td><code>fdp</code></td></tr>
+  <tr><td>schema</td><td><code>dbt_dev</code> — dbt's own working schema, separate from <code>raw</code></td></tr>
+  <tr><td>threads</td><td><code>4</code></td></tr>
+</table>
+<p>This writes a <code>profiles.yml</code> (by default in <code>~/.dbt/</code>) holding the connection — <strong>never commit real credentials</strong>; this is local-dev-only, matching Day 1's plaintext compose password. The official field reference is dbt's <a href="https://docs.getdbt.com/docs/core/connect-data-platform/postgres-setup">Postgres setup docs</a>, worth a skim if any field is unfamiliar.</p>
+<p>Move the generated project so it sits at the repo root next to <code>docker-compose.yml</code>:</p>
+<pre><code>mv dbt_env/food_delivery_pipeline food_delivery_pipeline
+rm -rf dbt_env/food_delivery_pipeline  <span class="cm"># dbt_env now just holds the uv-managed venv + deps</span></code></pre>
+<p>Sanity-check the connection:</p>
+<pre><code>cd food_delivery_pipeline
+uv run --project ../dbt_env dbt debug</code></pre>
+<p>Expected: every check shows <code>[OK connection ok]</code>, ending in <code>All checks passed!</code>.</p>
+
+<h2>3 · Declare the sources</h2>
+<p>A <dfn data-en="a dbt-declared pointer at a raw table that already exists in the warehouse (not built by dbt) — lets models reference it via source() instead of a hardcoded schema.table name, and is what freshness checks attach to" data-vn="giữ nguyên &quot;source&quot; — khai báo trỏ tới bảng raw có sẵn, model gọi qua source() thay vì viết tên schema.table cứng">source</dfn> tells dbt "this table already exists, I didn't build it, here's its name." Create <code>models/staging/sources.yml</code>:</p>
+<pre><code>version: 2
+
+sources:
+  - name: raw
+    schema: raw
+    tables:
+      - name: restaurants
+      - name: couriers
+      - name: orders</code></pre>
+<p>This is a declaration, not a query — it doesn't create or move any data. It's what makes <code>{{ source('raw', 'orders') }}</code> in a model resolve to <code>raw.orders</code>, and it's the anchor Day 3's source freshness checks attach to.</p>
+
+<h2>4 · Build the three staging models</h2>
+<p>Per dbt Labs's <a href="https://docs.getdbt.com/best-practices/how-we-structure/1-guide-overview">"How we structure our dbt projects"</a> — this course's house style per <code>RESOURCES.md</code> — staging models are one-per-source-table, named <code>stg_&lt;table&gt;</code>, doing only renames/casts/light derived columns, never a join. Create <code>models/staging/stg_restaurants.sql</code> and <code>models/staging/stg_couriers.sql</code> with exactly this (scaffolding — the columns just pass through Day 1's raw schema):</p>
+<pre><code><span class="cm">-- models/staging/stg_restaurants.sql</span>
+select
+    restaurant_id,
+    name,
+    cuisine,
+    city,
+    commission_rate,
+    updated_at
+from {{ source('raw', 'restaurants') }}</code></pre>
+<pre><code><span class="cm">-- models/staging/stg_couriers.sql</span>
+select
+    courier_id,
+    vehicle,
+    city,
+    joined_at
+from {{ source('raw', 'couriers') }}</code></pre>
+<p>Now write <code>models/staging/stg_orders.sql</code> yourself. Requirements:</p>
+<ul>
+<li>select every column from <code>raw.orders</code> via <code>{{ source('raw', 'orders') }}</code> — <code>order_id</code>, <code>customer_id</code>, <code>restaurant_id</code>, <code>courier_id</code>, <code>subtotal</code>, <code>delivery_fee</code>, <code>placed_at</code>;</li>
+<li>add one derived column, <code>order_total</code>, as <code>subtotal + delivery_fee</code> — this is the "light derivation" staging is allowed to do;</li>
+<li>do <strong>not</strong> join to <code>stg_restaurants</code> or <code>stg_couriers</code> here — that join is an intermediate model, not staging, and is out of scope until later in the course.</li>
+</ul>
+<pre><code><span class="cm">-- models/staging/stg_orders.sql -- fill in the SELECT</span>
+select
+    order_id,
+    <span class="cm">-- TODO: the rest of the columns, plus order_total</span>
+from {{ source('raw', 'orders') }}</code></pre>
+
+<h2>5 · Materialize as views, and set it project-wide</h2>
+<p>A <dfn data-en="dbt's setting for how a model's SELECT becomes warehouse objects — view (query re-runs every time it's read, always fresh, no storage), table (query runs once at build time, stored, stale until next run), or incremental (Day 4)" data-vn="giữ nguyên &quot;materialization&quot; — cách SELECT của model biến thành đối tượng trong warehouse: view, table, hay incremental">materialization</dfn> is how dbt turns a <code>SELECT</code> into a real warehouse object. A <dfn data-en="a materialization where dbt wraps the SELECT in CREATE VIEW — no data is stored, the query re-runs on every read, always reflects current raw data, cheapest to build" data-vn="giữ nguyên &quot;view&quot; — dbt bọc SELECT trong CREATE VIEW, không lưu dữ liệu, luôn mới nhất">view</dfn> stores no data — every read re-runs the query — which is exactly right for staging: cheap to build, always reflects the current raw data, and there's no meaningful storage cost for a thin pass-through. Set it once for the whole staging folder in <code>dbt_project.yml</code>, rather than repeating a config block in every model:</p>
+<pre><code>models:
+  food_delivery_pipeline:
+    staging:
+      +materialized: view</code></pre>
+<p>Marts (Day 4) will override this to <code>table</code> at the folder level — different trade-off, same mechanism.</p>
+
+<h2>6 · Run it, and read the lineage graph</h2>
+<pre><code>uv run --project ../dbt_env dbt run</code></pre>
+<p>Expected: three <code>CREATE VIEW</code> operations, all <code>OK</code>:</p>
+<pre><code>1 of 3 OK created sql view model dbt_dev.stg_restaurants ... [CREATE VIEW in 0.05s]
+2 of 3 OK created sql view model dbt_dev.stg_couriers ..... [CREATE VIEW in 0.03s]
+3 of 3 OK created sql view model dbt_dev.stg_orders ....... [CREATE VIEW in 0.04s]
+
+Completed successfully
+
+Done. PASS=3 WARN=0 ERROR=0 SKIP=0 TOTAL=3</code></pre>
+<p>Now look at the graph dbt built from your three <code>source()</code> calls — no joins between models yet, so it's flat, but the mechanism is what matters:</p>
+<pre><code>uv run --project ../dbt_env dbt list --resource-type model --output path
+uv run --project ../dbt_env dbt docs generate
+uv run --project ../dbt_env dbt docs serve</code></pre>
+<p><code>dbt list</code> prints the three models dbt found. <code>dbt docs generate</code> builds a static site describing the project — including a DAG viewer — and <code>dbt docs serve</code> opens it at <code>localhost:8080</code>. Click a model node and look for two things: the <strong>Sources</strong> node feeding each <code>stg_</code> model (that's your <code>source()</code> call, drawn as an edge), and the fact that <code>stg_restaurants</code>, <code>stg_couriers</code> and <code>stg_orders</code> currently have no edges to each other — they're siblings, not a chain, because nothing has joined them yet. That changes on Day 4 when marts <code>ref()</code> more than one staging model at once.</p>
+<div class="callout"><strong>Why <code>ref()</code> over a hardcoded table name:</strong> today's models only use <code>source()</code>, but every model you write from Day 4 onward will call <code>{{ ref('stg_orders') }}</code> instead of writing <code>dbt_dev.stg_orders</code> directly. <code>ref()</code> is how dbt knows the dependency exists at all — write the schema name by hand instead, and dbt has no way to know one model must run before another, and no way to draw the edge in <code>dbt docs serve</code>.</div>
+
+<h2>7 · Verify</h2>
+<p>Confirm the three views exist in Postgres directly, independent of dbt's own success message:</p>
+<pre><code>docker compose exec -T postgres psql -U fdp -d fdp -c \
+  "SELECT table_name, table_type FROM information_schema.tables
+   WHERE table_schema = 'dbt_dev' ORDER BY table_name;"</code></pre>
+<pre><code>    table_name    | table_type
+-------------------+------------
+ stg_couriers      | VIEW
+ stg_orders        | VIEW
+ stg_restaurants   | VIEW
+(3 rows)</code></pre>
+<p>Then confirm <code>stg_orders</code> actually reflects Day 1's raw data, including the planted bad rows (staging doesn't filter anything — that's still dbt's tests, on Day 3):</p>
+<pre><code>docker compose exec -T postgres psql -U fdp -d fdp -c \
+  "SELECT order_id, restaurant_id, order_total FROM dbt_dev.stg_orders
+   WHERE order_id IN (13, 27) ORDER BY order_id;"</code></pre>
+<pre><code> order_id | restaurant_id | order_total
+----------+---------------+-------------
+       13 |          9999 |        9.32
+       27 |            36 |      -16.86
+(2 rows)</code></pre>
+<p>Same orphan <code>restaurant_id</code> and negative value as Day 1 — unchanged, because a view is just Day 1's raw rows viewed through a rename. That's the point: staging reshapes column names and types, it doesn't clean data.</p>
+<p>Commit the new files: <code>dbt_project.yml</code>, <code>models/staging/sources.yml</code>, <code>models/staging/stg_restaurants.sql</code>, <code>models/staging/stg_couriers.sql</code>, <code>models/staging/stg_orders.sql</code>, and add a <code>.gitignore</code> entry for <code>target/</code>, <code>dbt_packages/</code> and <code>logs/</code> if <code>dbt init</code> didn't already create one.</p>
+
+<div class="interview">
+<p><strong>Q: "What's the difference between <code>source()</code> and <code>ref()</code>?"</strong> A strong answer, out loud: <em>"<code>source()</code> points at a table dbt didn't build — raw data that landed some other way, in this project a batch script or Kafka. <code>ref()</code> points at a table another dbt model built. Both compile down to a schema-qualified table name, but only by going through one of them does dbt learn the dependency exists, which is what lets it compute build order and draw the DAG. If I write the table name by hand instead, the SQL still runs, but dbt has no idea one model needs to run before another — the graph just silently loses that edge."</em> The signal: dbt's dependency tracking is opt-in per reference, not automatic from the SQL alone.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="source() declares a table dbt did not build (raw data that landed some other way); ref() points at a table another dbt model built. Both let dbt track the dependency and draw it in the DAG.">
+    <p class="stem">What does <code>source()</code> declare, as opposed to <code>ref()</code>?</p>
+    <button class="opt" data-ok>A raw table dbt did not build</button>
+    <button class="opt">A view dbt already did build</button>
+    <button class="opt">A schema dbt will soon rename</button>
+  </div>
+  <div class="q" data-why="A view stores no data and re-runs its query on every read, so it always reflects current raw data at near-zero storage cost -- the right choice for a thin staging pass-through. A table stores results at build time and goes stale between runs.">
+    <p class="stem">Why materialize staging models as views, not tables?</p>
+    <button class="opt" data-ok>Views stay current, storing no data</button>
+    <button class="opt">Tables rerun each read, storing less</button>
+    <button class="opt">Views run once, caching all results</button>
+  </div>
+  <div class="q" data-why="Staging models only rename, cast and lightly derive columns from one source table each -- no joins across sources. That join belongs to an intermediate model, a later layer in the project structure.">
+    <p class="stem">Per dbt's house-style layering, what should a staging model never do?</p>
+    <button class="opt" data-ok>Join across more than one source</button>
+    <button class="opt">Rename just a single source column</button>
+    <button class="opt">Cast just one column's data type</button>
+  </div>
+  <div class="q" data-why="dbt builds its dependency graph (the DAG) from every ref() and source() call it finds while compiling models -- that's the only way it learns which model depends on which and computes a valid build order.">
+    <p class="stem">Where does dbt's DAG actually come from?</p>
+    <button class="opt" data-ok>Every <code>ref()</code> and <code>source()</code> call it finds</button>
+    <button class="opt">A DAG file the developer hand writes</button>
+    <button class="opt">Table names read straight from Postgres itself</button>
+  </div>
+  <div class="q" data-why="Staging reshapes column names, types and light derived columns -- it does not filter, dedupe or fix bad rows. The orphan restaurant_id and negative subtotal planted on Day 1 pass straight through stg_orders unchanged; catching them is Day 3's dbt tests, not staging.">
+    <p class="stem">Why do Day 1's two planted bad rows still appear unchanged in <code>stg_orders</code>?</p>
+    <button class="opt" data-ok>Staging reshapes columns, not row data quality</button>
+    <button class="opt">Staging only runs after tests pass first</button>
+    <button class="opt">Staging always drops every single bad row</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> dbt Labs's <a href="https://docs.getdbt.com/docs/build/sources">Sources</a> and <a href="https://docs.getdbt.com/docs/build/materializations">Materializations</a> docs (cited in <code>RESOURCES.md</code>) cover today's two mechanisms directly from the source. For the layering convention behind today's folder structure, dbt Labs's <a href="https://docs.getdbt.com/best-practices/how-we-structure/1-guide-overview">"How we structure our dbt projects"</a> is the house style this whole course follows from here on.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 2.<br>
+<strong>Next lesson (17 Sep):</strong> dbt tests — a generic test catches Day 1's orphan <code>restaurant_id</code>, a singular test catches the negative <code>subtotal</code>, <code>dbt build</code> fails loudly, then passes once fixed, and source freshness gets configured.<br><br>
+💬 Anything unclear — <code>source()</code> vs <code>ref()</code>, the profile setup, or reading the lineage graph? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

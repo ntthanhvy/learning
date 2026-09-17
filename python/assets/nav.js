@@ -106,6 +106,8 @@
       file: "lessons/0049-review-retrieval-day-4.html" },
     { n: 50, date: "2026-09-16", title: "Abstract base classes: enforcing a shape by inheritance",
       file: "lessons/0050-abstract-base-classes.html" },
+    { n: 51, date: "2026-09-17", title: "heapq & bisect: sorted-order structures without re-sorting",
+      file: "lessons/0051-heapq-and-bisect.html" },
   ];
 
   const REFS = [

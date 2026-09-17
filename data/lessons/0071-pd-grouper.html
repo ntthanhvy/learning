@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 71 · pd.Grouper(): grouping by a date frequency, not just a column's values</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 71 · ~20 min · 17 Sep 2026</p>
+<h1>pd.Grouper(): grouping by a date frequency, not just a column's values</h1>
+<p class="byline">Chào bạn — Lesson 70's teaser named no single dangling candidate, so this round is a fresh curriculum/glossary scan. Lesson 4 taught <code>groupby()</code> by an existing column's own values, and Lesson 38 taught <code>resample()</code> for fixed time buckets off a <code>DatetimeIndex</code> — but neither one covers "monthly revenue, per customer," the single most common real-world report shape, because that needs a date-frequency bucket AND a category column grouped together in the SAME call. A fresh grep of all 70 lessons and the glossary confirms <code>pd.Grouper</code> is still genuinely zero-hit — it is exactly that missing piece.</p>
+
+<h2>1 · The gap: resample() has no room for a second grouping column</h2>
+<p>Lesson 38's <code>resample()</code> buckets a <code>DatetimeIndex</code> into fixed periods, gaps included — but it only groups by time. Asking "revenue per day, per customer" needs a second key, and <code>resample()</code> takes none:</p>
+<pre><code>indexed = clean.set_index(<span class="str">"order_date"</span>)
+indexed.groupby(<span class="str">"customer"</span>).resample(<span class="str">"D"</span>)[<span class="str">"amount"</span>].sum()
+<span class="cm"># works, but requires set_index() first, and chains two separate group
+# operations together rather than expressing "group by these two keys
+# at once" -- awkward, and the two-step chain has its own MultiIndex
+# quirks resample() alone doesn't have</span></code></pre>
+<p>That chain technically works, but it is not what <code>groupby()</code>'s own multi-key syntax looks like everywhere else in this course (<code>groupby(["customer", "region"])</code>, Lesson 4) — and it still demands <code>set_index()</code> first, the same setup <code>resample()</code> always required.</p>
+
+<h2>2 · pd.Grouper(key=, freq=): a date frequency as an ordinary groupby key</h2>
+<p><dfn data-en="a pandas helper object passed as one element of a groupby() key list (or alone), specifying a column (key=) or index level (level=) to group by a fixed time frequency (freq=) -- turns a date-frequency bucket into an ordinary groupby key, so it can sit alongside other columns in one groupby([...]) call the way resample() alone cannot" data-vn="giữ nguyên 'pd.Grouper' — đối tượng truyền vào groupby([...]) (hoặc dùng riêng), gom theo MỐC THỜI GIAN cố định (freq=) trên 1 cột (key=) hoặc mức index (level=); biến việc gom theo tần suất thời gian thành 1 khoá groupby bình thường, đứng CHUNG với cột khác trong 1 lệnh groupby duy nhất, điều resample() một mình không làm được">pd.Grouper(key=..., freq=...)</dfn> turns a date-frequency bucket into an ordinary groupby key — it can sit directly inside a normal <code>groupby([...])</code> list, right alongside a plain column name, with no <code>set_index()</code> required first. Confirmed directly (pandas 3.0.5), on this course's cleaned <code>orders_raw.csv</code> fixture (An 120.0/01-05, An 42.0/01-10, Binh 35.5/01-06, Binh 180.0/01-09):</p>
+<pre><code>clean.groupby([<span class="str">"customer"</span>, pd.Grouper(key=<span class="str">"order_date"</span>, freq=<span class="str">"D"</span>)])[<span class="str">"amount"</span>].sum()
+<span class="cm"># customer  order_date
+# An        2026-01-05    120.0
+#           2026-01-10     42.0
+# Binh      2026-01-06     35.5
+#           2026-01-09    180.0</span></code></pre>
+<p>Confirmed directly: <code>order_date</code> is still a plain column, untouched by <code>set_index()</code> — <code>pd.Grouper(key="order_date", freq="D")</code> reads it directly off the DataFrame and buckets it by the given frequency, exactly one key among the list passed to <code>groupby()</code>. If the date column is already the index instead, use <code>level=</code> in place of <code>key=</code> — <code>pd.Grouper(level="order_date", freq="D")</code> — confirmed directly that passing <code>key=</code> to a <code>Grouper</code> when that same name is already the index raises <code>KeyError: 'The grouper name order_date is not found'</code>, because <code>key=</code> looks for a column, not an index level.</p>
+
+<div class="callout"><strong>SQL bridge:</strong> the closest SQL shape is <code>GROUP BY customer, DATE_TRUNC('day', order_date)</code> — bucketing one column by its own values, and a timestamp column by a truncated time unit, in the same <code>GROUP BY</code> clause. <code>pd.Grouper(freq=...)</code> is pandas' spelling of that <code>DATE_TRUNC</code>-style time bucket, sitting in the same key list as any other column, the same multi-key <code>groupby([...])</code> syntax Lesson 4 already covered.</div>
+
+<h2>3 · The gap-filling nuance: it depends on whether Grouper is alone or combined</h2>
+<p>Confirmed directly, and the sharpest interview point in this lesson: a SOLO <code>pd.Grouper</code> — the only key in the call — fills empty calendar periods with <code>0</code>/<code>NaN</code>, exactly like <code>resample()</code>:</p>
+<pre><code>clean.groupby(pd.Grouper(key=<span class="str">"order_date"</span>, freq=<span class="str">"D"</span>))[<span class="str">"amount"</span>].sum()
+<span class="cm"># order_date
+# 2026-01-05    120.0
+# 2026-01-06     35.5
+# 2026-01-07      0.0   -- no orders that day, but the day still appears
+# 2026-01-08      0.0   -- same
+# 2026-01-09    180.0
+# 2026-01-10     42.0</span></code></pre>
+<p>But COMBINED with another groupby key, that gap-filling disappears — confirmed directly, the <code>["customer", pd.Grouper(...)]</code> result from Section 2 has exactly 4 rows, one per real (customer, day) combination that actually occurred, with no zero-filled row for a day a given customer didn't order. Grouping by <code>customer</code> first partitions the data into per-customer groups before the date frequency ever applies, so there is no whole-calendar range left to fill gaps against — each customer's own date range is sparse on its own. This is a real trap: code that reads "uses <code>pd.Grouper(freq=...)</code>, so it must include every day" is only true when <code>pd.Grouper</code> is the SOLE key, not when it rides alongside another column.</p>
+
+<h2>4 · One frequency-string trap, and why key= beats resample()'s setup cost</h2>
+<p>Confirmed directly (pandas 3.0.5): the once-common month-end alias <code>freq="M"</code> is dead — it now raises outright, not merely a deprecation warning:</p>
+<pre><code>clean.groupby(pd.Grouper(key=<span class="str">"order_date"</span>, freq=<span class="str">"M"</span>))[<span class="str">"amount"</span>].sum()
+<span class="cm"># ValueError: Invalid frequency: M. Failed to parse with error message:
+# ValueError("'M' is no longer supported for offsets. Please use 'ME' instead.")</span></code></pre>
+<p><code>freq="ME"</code> (month end) is the current spelling, alongside <code>"D"</code> (day), <code>"W"</code> (week), and <code>"QE"</code> (quarter end) — the same frequency-alias vocabulary <code>resample()</code> already uses (Lesson 38), since both are built on the same offset machinery underneath. The practical reason to reach for <code>pd.Grouper</code> over chaining <code>groupby().resample()</code>: no <code>set_index()</code> setup step, and the result reads as one ordinary multi-key <code>groupby([...])</code> call instead of two stacked group operations with their own MultiIndex interaction quirks.</p>
+
+<div class="interview">
+<p><strong>Q: "How would you get monthly revenue per customer out of a raw orders table?"</strong> A strong answer, out loud: <em>"groupby(['customer', pd.Grouper(key='order_date', freq='ME')])['amount'].sum() — Grouper turns the date-frequency bucket into an ordinary groupby key, so it sits right alongside the customer column in one call, and the date column stays a plain column, no set_index() needed first. The one thing I'd flag: with two keys like this, a customer's month with zero orders just doesn't appear as a row at all — Grouper only backfills empty calendar periods when it's the SOLE key in the call, the same gap-filling resample() does alone. If a report genuinely needs every customer-month combination present, even the zero ones, that needs an explicit reindex onto the full cross-product afterward, not just trusting Grouper to have filled it in already."</em> The signal: naming that <code>Grouper</code> composes with an ordinary column in one <code>groupby([...])</code> call (most candidates only know the <code>resample()</code>-alone shape), and specifically flagging that gap-filling is NOT guaranteed once a second key is added.</p>
+</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/71_pd_grouper.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/71_pd_grouper.py</code></pre>
+<p>Uses the same real <code>orders_raw.csv</code> fixture, cleaned the same way as recent lessons. Exercise 1 uses a solo <code>pd.Grouper(key="order_date", freq="D")</code> and confirms the empty 01-07/01-08 days come back as real <code>0.0</code> rows, not missing. Exercise 2 combines <code>["customer", pd.Grouper(...)]</code> in one <code>groupby()</code> call and confirms the result has exactly 4 rows — no gap-filled row for a day a given customer didn't order. Exercise 3 confirms <code>freq="M"</code> raises <code>ValueError</code> on this pandas version, while <code>freq="ME"</code> works. Exercise 4 uses <code>level=</code> instead of <code>key=</code> on a frame already indexed by <code>order_date</code>, and confirms it matches Exercise 1's totals exactly.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: pd.Grouper(key='order_date', freq='D') reads a plain, still-there column directly and buckets it by frequency -- no set_index() needed first, unlike resample(), which requires a DatetimeIndex to call at all.">
+    <p class="stem">What does <code>pd.Grouper(key="order_date", freq="D")</code> let you skip, compared to <code>resample()</code>?</p>
+    <button class="opt" data-ok>calling set_index() first; Grouper just reads the plain column directly</button>
+    <button class="opt">writing a frequency string at all; Grouper infers one automatically</button>
+    <button class="opt">nothing at all; both require an identical set_index() step beforehand</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: a solo pd.Grouper as the only groupby key fills empty calendar periods with zero, exactly like resample() -- but combined with another key like customer, that gap-filling disappears, since grouping by customer first leaves no whole-calendar range to fill gaps against.">
+    <p class="stem">Why does <code>groupby(["customer", pd.Grouper(key="order_date", freq="D")])</code> NOT produce a zero-filled row for a day a customer had no order, even though a solo <code>pd.Grouper</code> would?</p>
+    <button class="opt" data-ok>combined with another key, there is no whole-calendar range left to fill</button>
+    <button class="opt">gap-filling only turns off when a frac= value gets passed into groupby()</button>
+    <button class="opt">it still gap-fills identically here; both cases return the same row count</button>
+  </div>
+  <div class="q" data-why="Confirmed directly (pandas 3.0.5): freq='M' now raises ValueError outright ('M is no longer supported for offsets'), not merely a deprecation warning -- freq='ME' (month end) is the current spelling for the same monthly bucket.">
+    <p class="stem">On pandas 3.0.5, what happens passing <code>freq="M"</code> to <code>pd.Grouper</code>?</p>
+    <button class="opt" data-ok>it now raises ValueError outright; freq="ME" is the current spelling instead</button>
+    <button class="opt">it works exactly as before, with only a silent deprecation warning</button>
+    <button class="opt">it works fine, but silently buckets by minute instead of month</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the <a href="https://pandas.pydata.org/docs/reference/api/pandas.Grouper.html">pandas API reference for <code>pandas.Grouper</code></a> (per <code>RESOURCES.md</code>'s "Docs: pandas User Guide" entry, this course's authoritative-behavior source) documents <code>key=</code>, <code>level=</code>, and <code>freq=</code> in full, including the current frequency-alias table referenced above.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>pd.Grouper</code> is new today, placed right after Lesson 70's <code>align()</code> entry.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-71 comes back reported as shakiest, otherwise another fresh curriculum/glossary scan for the next genuinely-uncovered pattern — this round's scan found no other clean standing candidate worth naming yet, so the next pick starts from a clean scan too.<br><br>
+💬 Anything unclear — <code>key=</code> vs <code>level=</code>, the combined-vs-solo gap-filling difference, the <code>freq="M"</code>→<code>"ME"</code> change, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

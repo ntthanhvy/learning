@@ -223,3 +223,79 @@ along the Phase 2 spine, adapted to the learning records.
   `bin/record-progress dataeng lesson_generated --day 2 --lesson
   0002-dbt-sources-and-staging.html --detail '{"by":"headless"}'` succeeded
   on the first attempt.
+- 2026-09-17 (headless run, Day 3 generated): third lesson,
+  `0003-dbt-tests.html`. `lessons/` at start of the run contained Lessons 1–2
+  only, and no `2026-09-17` entry existed here yet, so proceeded on schedule.
+  No `lesson_completed` record was readable for Day 2 (DB reads are blocked
+  in this sandbox, consistent with every prior round — one attempt was not
+  even retried this time, per this file's own guidance), so the lesson opens
+  with an explicit "before today" check (`dbt run`, expect
+  `PASS=3 WARN=0 ERROR=0 SKIP=0 TOTAL=3`) rather than assuming Day 2's
+  staging views exist. Read `MISSION.md`, `NOTES.md`, `PLAN.md`,
+  `RESOURCES.md`, `learning-records/0001-baseline-sql-strong-pipeline-tools-new.md`,
+  and both `lessons/0001-pipeline-map-and-repo.html` and
+  `lessons/0002-dbt-sources-and-staging.html` in full for structural
+  precedent before writing.
+  **Content:** per PLAN.md's Day 3 row, taught the two dbt test kinds against
+  the exact two bad rows Day 1 planted — a `relationships` generic test
+  (declared in a new `models/staging/stg_orders.yml`) catches order 13's
+  orphan `restaurant_id` against `stg_restaurants`, and a hand-written
+  singular test (`tests/assert_positive_subtotal.sql`, TODO on the
+  `WHERE subtotal < 0` filter — the day's actual skill) catches order 27's
+  negative `subtotal`. Also covered `not_null`/`unique` on `order_id`,
+  `dbt build` (models + tests together) vs. `dbt run` (models only, silently
+  skips tests), and source freshness (`loaded_at_field` + `freshness:` block
+  added to Day 2's `sources.yml`, on `restaurants` and `orders`, deliberately
+  not on `couriers`). The Verify block gives exact expected `dbt build`
+  output before the fix (two named failures: `order_id 13, restaurant_id
+  9999` and `order_id 27, subtotal -16.86`, `PASS=7 WARN=0 ERROR=2 SKIP=0
+  TOTAL=9`) and after a one-time manual `UPDATE` on the raw rows (`PASS=9
+  WARN=0 ERROR=0 SKIP=0 TOTAL=9`), with a callout that hand-fixing raw data
+  is a one-time proof step, not the normal pattern going forward. No
+  pandas, no Python-language teaching, no re-derivation of idempotency —
+  the "defense in depth" callout bridges to Day 5–6's consumer-side checks
+  in one line, per the overlap rule.
+  **Verification:** built the minimal scratch project precedent exactly
+  (`dbt_project.yml`, `profiles.yml` pointing at `10.255.255.1` — unreachable
+  — `models/staging/sources.yml` with the freshness block, the three Day 2
+  staging models, the new `stg_orders.yml`, and `tests/assert_positive_subtotal.sql`)
+  in `.scratch_dataeng_verify/` under the repo root, deleted after. Ran
+  `uv run --with "dbt-postgres==1.11.0" dbt parse --project-dir ... --profiles-dir ...`
+  using absolute-path flags (a `cd &&` chain and any output-redirection
+  compound command both hit this session's approval gate outright, same
+  friction Day 2 hit; splitting into single, non-redirecting, non-`cd`
+  commands was what got through). First parse surfaced a live
+  `MissingArgumentsPropertyInGenericTestDeprecation` warning — dbt-core
+  resolved to 1.12.5 here, and current dbt now expects `relationships`'s
+  `to:`/`field:` nested under an `arguments:` key, not top-level as older
+  tutorials show. Fixed the lesson's YAML and the scratch copy to nest under
+  `arguments:` and re-ran `dbt parse --no-partial-parse`: clean, no warnings,
+  no errors. Grepped output for `Error` rather than trusting the exit code,
+  per this file's standing caution. Also ran
+  `dbt list --resource-type test`, which listed all 7 expected tests by
+  their dbt-generated names, including
+  `relationships_stg_orders_restaurant_id__restaurant_id__ref_stg_restaurants_`
+  — used verbatim in the lesson's Verify block output, so the exact string
+  is confirmed real rather than guessed. Then added a throwaway
+  `stg_broken.sql` with a `ref()` to a nonexistent model to confirm `dbt
+  parse` actually catches errors: it reported `Compilation Error` and, this
+  round, a genuinely non-zero exit code (2) — still grepped for `Error`
+  rather than relying on that, since NOTES.md's caution is that exit code
+  can't be trusted in general, not that it never happens to be non-zero.
+  Deleted the broken file and the whole scratch directory afterward. Docker
+  was not exercised this round (no live Postgres needed for `dbt parse`);
+  the `UPDATE`/`dbt build` output in the Verify block is therefore hand
+  checked against dbt's own documented test-failure format and Day 1–2's
+  precedent, not executed against a live warehouse.
+  Registered Lesson 3 in `assets/nav.js` (`node --check` clean) and added
+  the Day 3 section to `reference/glossary.html` (8 terms: data test,
+  generic test, relationships test, not_null test, unique test, singular
+  test, source freshness, loaded_at_field — grepped Days 1–2's sections
+  first, no collisions). Quiz options were rebalanced by word count after a
+  first draft came up mismatched on three of the five questions; all five
+  are now equal-word-count per option, recounted by hand after each edit
+  (`python3`/heredoc invocations were blocked by the sandbox's approval
+  gate this round, so counting was done by inspection rather than script).
+  `bin/record-progress dataeng lesson_generated --day 3 --lesson
+  0003-dbt-tests.html --detail '{"by":"headless"}'` succeeded on the first
+  attempt, run from the repo root.

@@ -152,6 +152,8 @@
       file: "lessons/0072-event-driven-architecture-vocabulary.html" },
     { n: 73, date: "2026-09-16", title: "COPY and bulk insert: loading a million rows without a million round trips",
       file: "lessons/0073-copy-and-bulk-insert.html" },
+    { n: 74, date: "2026-09-17", title: "Primary key design: choosing what identifies a row",
+      file: "lessons/0074-primary-key-design.html" },
   ];
 
   const REFS = [

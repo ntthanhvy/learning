@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 3 · dbt: tests catch bad data</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 3 · ~30–45 min · 17 Sep 2026</p>
+<h1>dbt: tests catch bad data</h1>
+<p class="byline">Today's tangible win: <code>dbt build</code> fails on purpose — naming Day 1's two planted bad rows by number — then passes once you fix them. Along the way, source freshness gets configured so a stale <code>raw.orders</code> load would also show up as a failure, not a silent gap.</p>
+
+<div class="callout"><strong>Before today — check Day 2 actually landed:</strong> this lesson assumes <code>stg_restaurants</code>, <code>stg_couriers</code> and <code>stg_orders</code> exist as views in the <code>dbt_dev</code> schema. If you're not sure, confirm before continuing:
+<pre><code>cd food_delivery_pipeline
+uv run --project ../dbt_env dbt run</code></pre>
+Expected: <code>Done. PASS=3 WARN=0 ERROR=0 SKIP=0 TOTAL=3</code>, all three models <code>OK created sql view model dbt_dev.stg_…</code>. If any model errors, re-check Day 2's <code>sources.yml</code> and the three staging <code>SELECT</code>s before starting today — everything below assumes those views build cleanly.</p></div>
+
+<h2>1 · Two bad rows, still sitting in the warehouse</h2>
+<p>Day 1's seed script planted two bad rows in <code>raw.orders</code> on purpose, and Day 2 confirmed they pass straight through <code>stg_orders</code> unchanged, because staging only reshapes columns:</p>
+<table class="gloss">
+  <tr><th>Order</th><th>What's wrong</th></tr>
+  <tr><td><code>order_id = 13</code></td><td><code>restaurant_id = 9999</code> — no restaurant with that id exists in <code>raw.restaurants</code></td></tr>
+  <tr><td><code>order_id = 27</code></td><td><code>subtotal</code> is negative — a subtotal can never be less than zero</td></tr>
+</table>
+<p>Nothing has caught either one yet. In ELT that's expected — the raw layer takes data exactly as it arrived, mess included. Today's job is to give dbt a way to <em>notice</em> the mess: a <dfn data-en="a dbt-run assertion against real warehouse data, expressed as a query — it fails if the query returns any rows, and runs alongside models via dbt build" data-vn="giữ nguyên &quot;data test&quot; — phép kiểm tra dbt chạy trên dữ liệu thật, query trả về hàng nào là fail hàng đó">data test</dfn> is a query that should return zero rows; if it returns any, the test fails. That's the entire mechanism — no new query language, same as Day 2's "a dbt model is just a <code>SELECT</code>."</p>
+
+<h2>2 · Generic tests: <code>not_null</code>, <code>unique</code>, <code>relationships</code></h2>
+<p>A <dfn data-en="a reusable, parameterized dbt test defined once (built into dbt or a package) and applied to any column via YAML — not_null, unique, relationships and accepted_values are the four that ship with dbt itself" data-vn="giữ nguyên &quot;generic test&quot; — test dùng lại được, khai báo trong YAML, áp cho cột nào cũng được">generic test</dfn> is written once and reused across columns by declaring it in YAML — you never write the underlying SQL yourself. dbt ships four built in; the one that catches order 13's orphan <code>restaurant_id</code> is <dfn data-en="a generic dbt test asserting that every value in a column exists as a value in another model or source's column — the relational-integrity check, e.g. every stg_orders.restaurant_id must exist in stg_restaurants.restaurant_id" data-vn="giữ nguyên &quot;relationships test&quot; — kiểm tra khóa ngoại, giá trị cột này phải tồn tại ở cột kia">relationships</dfn>, dbt's foreign-key check: every value in the child column must exist in the parent column, or the test fails and names the orphan.</p>
+<p>Create <code>models/staging/stg_orders.yml</code> (a schema file — declares tests and docs for an existing model, doesn't change the model's SQL):</p>
+<pre><code><span class="cm">-- models/staging/stg_orders.yml</span>
+version: 2
+
+models:
+  - name: stg_orders
+    columns:
+      - name: order_id
+        tests:
+          - unique
+          - not_null
+      - name: restaurant_id
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_restaurants')
+                field: restaurant_id
+      - name: courier_id
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_couriers')
+                field: courier_id</code></pre>
+<p><dfn data-en="a generic dbt test asserting every value in a column is non-NULL" data-vn="giữ nguyên &quot;not_null test&quot; — kiểm tra cột không có giá trị NULL">not_null</dfn> and <dfn data-en="a generic dbt test asserting every value in a column is distinct — no duplicates" data-vn="giữ nguyên &quot;unique test&quot; — kiểm tra cột không có giá trị trùng">unique</dfn> are the other two in play here: <code>order_id</code> should be both, since it's the grain of the model. Note two things about <code>relationships</code>: its options nest under <code>arguments:</code> (current dbt syntax — older tutorials show <code>to:</code>/<code>field:</code> unnested, which now prints a deprecation warning), and <code>to:</code> takes a <code>ref()</code>, not a hardcoded table name — same reasoning as Day 2's <code>ref()</code> vs. hand-written names, so dbt can order tests after the models they depend on.</p>
+
+<h2>3 · Singular tests: one SQL file, one specific rule</h2>
+<p>Not every rule fits the four generic shapes. Order 27's negative <code>subtotal</code> needs a rule specific to this business: subtotal can never be less than zero. That's a <dfn data-en="a one-off dbt test written as a single .sql SELECT file in tests/ — fails if the query returns any rows, for a business rule too specific to express as a generic test" data-vn="giữ nguyên &quot;singular test&quot; — test viết riêng bằng 1 file .sql trong tests/, không dùng lại được cho cột khác">singular test</dfn>: a plain <code>.sql</code> file in the <code>tests/</code> directory, containing a <code>SELECT</code> that should return nothing. No YAML wiring needed — dbt discovers any <code>.sql</code> file under <code>tests/</code> automatically and treats it as a test.</p>
+<p>Create <code>tests/assert_positive_subtotal.sql</code> yourself. Requirements:</p>
+<ul>
+<li>select from <code>{{ ref('stg_orders') }}</code> — never query <code>raw.orders</code> directly in a test, same <code>ref()</code>-over-hardcoded-name reasoning as everywhere else in the project;</li>
+<li>return the rows that are wrong, not a count — a test fails when its query returns <strong>any</strong> row, and returning the actual offending rows makes a failure's output tell you exactly which order broke it;</li>
+<li>the rule: <code>subtotal</code> must not be less than zero.</li>
+</ul>
+<pre><code><span class="cm">-- tests/assert_positive_subtotal.sql -- fill in the WHERE</span>
+select
+    order_id,
+    subtotal
+from {{ ref('stg_orders') }}
+<span class="cm">-- TODO: filter down to rows where subtotal is negative</span></code></pre>
+
+<h2>4 · <code>dbt build</code> vs <code>dbt run</code></h2>
+<p>Day 2 only ever ran <code>dbt run</code>, which builds models and nothing else — tests don't run, so a test failure would never have shown up even if one existed. <code>dbt build</code> runs models <em>and</em> tests <em>and</em> snapshots <em>and</em> seeds, in dependency order, and — critically — if a test on a model fails, dbt still finishes building everything that doesn't depend on the bad result, then reports the failure clearly at the end. From today on, use <code>dbt build</code>, not <code>dbt run</code>: a green <code>dbt run</code> only proves the SQL compiled, not that the data is trustworthy.</p>
+<pre><code>uv run --project ../dbt_env dbt build</code></pre>
+
+<h2>5 · Source freshness: is the raw data even current?</h2>
+<p>Tests catch bad <em>values</em>. <dfn data-en="a dbt check on a source's timestamp column comparing its most recent value to now — warns or errors if the data is older than a configured threshold, catching a stalled loader before anyone notices missing rows" data-vn="giữ nguyên &quot;source freshness&quot; — kiểm tra dữ liệu nguồn có bị cũ/trễ không, dựa vào cột thời gian">source freshness</dfn> catches a different failure mode entirely: the loader silently stopped running, and nobody noticed because the row counts still look plausible. Freshness compares a source's most-recent timestamp to now and warns or errors if it's stale. Add a <code>freshness:</code> block plus <code>loaded_at_field</code> to Day 2's <code>models/staging/sources.yml</code>:</p>
+<pre><code><span class="cm">-- models/staging/sources.yml</span>
+version: 2
+
+sources:
+  - name: raw
+    schema: raw
+    tables:
+      - name: restaurants
+        loaded_at_field: updated_at
+        freshness:
+          warn_after: {count: 24, period: hour}
+          error_after: {count: 48, period: hour}
+      - name: couriers
+      - name: orders
+        loaded_at_field: placed_at
+        freshness:
+          warn_after: {count: 24, period: hour}
+          error_after: {count: 48, period: hour}</code></pre>
+<p><dfn data-en="the sources.yml field naming which timestamp column freshness should read from — required for any source with a freshness block configured" data-vn="giữ nguyên &quot;loaded_at_field&quot; — tên cột thời gian dùng để tính độ mới của dữ liệu">loaded_at_field</dfn> names which column holds "when did this row show up" — <code>updated_at</code> for restaurants, <code>placed_at</code> for orders. <code>couriers</code> has no freshness block: not every source needs one, and a batch dimension that barely changes isn't worth alerting on yet. Check it separately from <code>dbt build</code>:</p>
+<pre><code>uv run --project ../dbt_env dbt source freshness</code></pre>
+<p>Expected, since Day 1's seed data is recent: both configured sources report <code>PASS</code>. If you don't touch the warehouse for a couple of days, re-running this will start reporting <code>WARN</code> on <code>orders</code> — that's the mechanism doing its job, not a bug.</p>
+
+<h2>6 · Verify: watch it fail, then fix it</h2>
+<p>Run the full build. Because <code>order_id 13</code> and <code>27</code> are still sitting in <code>raw.orders</code> unfixed, expect real failures, naming both rows:</p>
+<pre><code>uv run --project ../dbt_env dbt build</code></pre>
+<pre><code>1 of 6 OK created sql view model dbt_dev.stg_restaurants ... [CREATE VIEW in 0.05s]
+2 of 6 OK created sql view model dbt_dev.stg_couriers ..... [CREATE VIEW in 0.03s]
+3 of 6 OK created sql view model dbt_dev.stg_orders ....... [CREATE VIEW in 0.04s]
+4 of 6 FAIL 1 relationships_stg_orders_restaurant_id__restaurant_id__ref_stg_restaurants_ ... [FAIL 1 in 0.08s]
+5 of 6 PASS not_null_stg_orders_order_id .................. [PASS in 0.03s]
+6 of 6 FAIL 1 assert_positive_subtotal ................... [FAIL 1 in 0.05s]
+
+Failure in test relationships_stg_orders_restaurant_id__restaurant_id__ref_stg_restaurants_
+  Got 1 result, configured to fail if != 0
+  -- order_id 13, restaurant_id 9999
+
+Failure in test assert_positive_subtotal
+  Got 1 result, configured to fail if != 0
+  -- order_id 27, subtotal -16.86
+
+Done. PASS=7 WARN=0 ERROR=2 SKIP=0 TOTAL=9</code></pre>
+<p>That is the win, before any fix: two tests, two specific orders named, zero guessing about which row broke what. Now fix the data — not the tests. In a real ELT pipeline you never edit a test to make bad data disappear; you fix the row, in the raw layer, at its source:</p>
+<pre><code>docker compose exec -T postgres psql -U fdp -d fdp -c \
+  "UPDATE raw.orders SET restaurant_id = 7 WHERE order_id = 13;
+   UPDATE raw.orders SET subtotal = 9.32 WHERE order_id = 27;"</code></pre>
+<p>Re-run the build:</p>
+<pre><code>uv run --project ../dbt_env dbt build</code></pre>
+<pre><code>1 of 6 OK created sql view model dbt_dev.stg_restaurants ... [CREATE VIEW in 0.05s]
+2 of 6 OK created sql view model dbt_dev.stg_couriers ..... [CREATE VIEW in 0.03s]
+3 of 6 OK created sql view model dbt_dev.stg_orders ....... [CREATE VIEW in 0.04s]
+4 of 6 PASS relationships_stg_orders_restaurant_id__restaurant_id__ref_stg_restaurants_ ... [PASS in 0.06s]
+5 of 6 PASS not_null_stg_orders_order_id .................. [PASS in 0.03s]
+6 of 6 PASS assert_positive_subtotal ................... [PASS in 0.04s]
+
+Completed successfully
+
+Done. PASS=9 WARN=0 ERROR=0 SKIP=0 TOTAL=9</code></pre>
+<p><code>PASS=9 WARN=0 ERROR=0</code> — every model and every test, clean. Commit <code>models/staging/stg_orders.yml</code>, <code>tests/assert_positive_subtotal.sql</code>, and the updated <code>models/staging/sources.yml</code> with the freshness blocks.</p>
+<div class="callout"><strong>Editing raw data by hand won't happen again after today:</strong> this is a one-time fix to prove the tests work end to end. From Day 5 onward, bad rows get caught by the Kafka consumer's own checks before landing, and dbt's tests stay as the last line of defense, not the first — the same "defense in depth" idea, applied at each stage a row passes through.</div>
+
+<div class="interview">
+<p><strong>Q: "How would you catch bad data in a dbt project?"</strong> A strong answer, out loud: <em>"Two kinds of test. Generic tests — <code>not_null</code>, <code>unique</code>, <code>relationships</code>, <code>accepted_values</code> — are declared in YAML against a column and cover the common shapes, especially referential integrity between models. Singular tests are a one-off SQL file for a business rule specific to this data, like a subtotal that can never go negative — the query returns the offending rows, and any row returned is a failure. Run both together with <code>dbt build</code>, not <code>dbt run</code>, since <code>run</code> only builds models and never executes a single test. On top of that, source freshness checks whether the raw data is even current, which catches a stalled loader that tests on the data itself can't — the rows that did land might all be perfectly valid, and freshness is the only thing that notices new ones stopped arriving."</em> The signal: naming both test kinds without being asked, plus knowing freshness solves a different problem than a data test.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="relationships is dbt's foreign-key generic test: it asserts every value in a column exists in another model or source's column. Order 13's restaurant_id of 9999 has no match in stg_restaurants, so relationships is exactly the test that catches it.">
+    <p class="stem">Which generic test catches order 13's orphan <code>restaurant_id</code>?</p>
+    <button class="opt" data-ok><code>relationships</code></button>
+    <button class="opt"><code>not_null</code></button>
+    <button class="opt"><code>unique</code></button>
+  </div>
+  <div class="q" data-why="A singular test is a one-off .sql file in tests/ for a rule too specific to be one of dbt's four generic shapes -- 'subtotal can never be negative' is exactly that kind of business-specific rule, so it needs its own query rather than a reusable generic test.">
+    <p class="stem">Why does the negative-<code>subtotal</code> rule need a singular test, not a generic one?</p>
+    <button class="opt" data-ok>No generic test expresses this specific business rule</button>
+    <button class="opt">Every generic test expresses this specific business rule</button>
+    <button class="opt">No singular test expresses this specific business rule</button>
+  </div>
+  <div class="q" data-why="dbt build runs models, tests, snapshots and seeds together in dependency order and reports test failures clearly. dbt run only builds models -- it never executes a single test, so a real data problem would build successfully and show green.">
+    <p class="stem">Why use <code>dbt build</code> instead of <code>dbt run</code> from today onward?</p>
+    <button class="opt" data-ok><code>run</code> skips tests entirely; <code>build</code> runs both</button>
+    <button class="opt"><code>run</code> skips models entirely; <code>build</code> runs both</button>
+    <button class="opt"><code>run</code> skips sources entirely; <code>build</code> runs both</button>
+  </div>
+  <div class="q" data-why="A dbt data test fails when its query returns any row at all -- the returned rows are the specific records that broke the rule, which is why the singular test selects the offending order_id and subtotal instead of just a count.">
+    <p class="stem">When does a dbt data test count as failed?</p>
+    <button class="opt" data-ok>Its query returns one or more rows</button>
+    <button class="opt">Its query returns exactly zero rows total</button>
+    <button class="opt">Its query takes longer than one minute</button>
+  </div>
+  <div class="q" data-why="Source freshness compares a source's most recent timestamp to now and flags staleness -- a problem no test on the data's values can see, since a stalled loader can leave every already-landed row perfectly valid while new rows simply stop arriving.">
+    <p class="stem">What does source freshness catch that a data test on values cannot?</p>
+    <button class="opt" data-ok>A stalled loader, with no new rows</button>
+    <button class="opt">A missing column, with no default value</button>
+    <button class="opt">A slow query, with no index available</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> dbt Labs's <a href="https://docs.getdbt.com/docs/build/data-tests">Data tests</a> doc (cited in <code>RESOURCES.md</code> as this course's primary source for today) covers generic and singular tests plus <code>dbt build</code> directly from the source. For source freshness specifically, the <a href="https://docs.getdbt.com/docs/build/sources">Sources</a> doc's freshness section has the full <code>loaded_at_field</code> and threshold reference used above.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 3.<br>
+<strong>Next lesson (18 Sep):</strong> dbt marts — <code>fct_orders</code> and <code>dim_restaurants</code>, joining staging models for the first time, one model built incremental with a <code>unique_key</code>, and defending view vs. table vs. incremental out loud.<br><br>
+💬 Anything unclear — generic vs. singular tests, <code>dbt build</code>'s output, or source freshness thresholds? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

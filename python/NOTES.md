@@ -6366,3 +6366,113 @@ fail *gracefully* so the learner sees which task failed.
   followed by one more fresh day (50) has kept a roughly 1:1 balance so
   far, which seems healthy without a real learner signal yet to pull it
   either direction.
+- 2026-09-17 — **Day 51 generated: `heapq` & `bisect`** (headless run),
+  fresh content again, weighing Day 50's own next-day note on its merits
+  rather than defaulting either way. Read `MISSION.md` (untouched,
+  read-only), `NOTES.md`'s tail (~last 15 entries, since the full file now
+  exceeds the read-tool's single-read size limit at 6368 lines/437KB —
+  read with an explicit offset instead), `PLAN.md`, `RESOURCES.md`, the
+  sole `learning-records/0001-baseline-reads-python-writes-little.md`, and
+  `assets/nav.js`'s full `LESSONS` array to reconfirm the named spine
+  (Days 8-42), meta-skill lessons (46-48), and four review days (43-45,
+  49) were all already taught with no gap in the named spine, matching Day
+  50's own findings. Read `lessons/0050-abstract-base-classes.html` and
+  `practice/50_abstract_base_classes.py` in full to confirm exact current
+  structural conventions (dfn markup, `.callout`/`.interview` div classes,
+  `<pre>` code span classes `.kw`/`.str`/`.cm`/`.num`, closing pattern)
+  before writing.
+  Topic selection: since the named spine is exhausted, grepped all 50
+  lessons case-insensitively for `heapq`/`bisect`, `json`, `csv`,
+  `deepcopy`/`copy.copy`, and a dedicated string-methods topic — `heapq`
+  and `bisect` had zero prior coverage anywhere, while `json`/`csv` are
+  already touched inside Days 5-9 and `copy.deepcopy` already has a solid
+  standalone treatment on Day 1 (including its own quiz question), so
+  `heapq`/`bisect` was the cleanest genuine gap: a real stdlib module,
+  commonly asked about in interviews (priority queues, binary search), and
+  unambiguously language/stdlib rather than pandas/NumPy territory. Built
+  on Day 4's `sorted(key=...)` as the explicit point of contrast (today is
+  "what to reach for instead of re-sorting on every change") and Day 28's
+  tuple-unpacking to explain why `(priority, task)` tuples sort correctly
+  in a heap without a separate `key=`.
+  No-pandas rule: grepped the lesson and practice file case-insensitively
+  for `pandas`/`numpy`/`pd\.`/`np\.` — exactly one hit, a "Where pandas
+  goes from here" callout noting pandas' `Series.nlargest()`/`nsmallest()`
+  exist but are backed by NumPy's sort rather than a heap, not
+  demonstrating any pandas/NumPy API; zero hits in the practice file.
+  Correctness spot-check: every worked snippet (the naive re-sort-on-every-
+  append opener; `heapq.heappush`/`heappop` on `(priority, task)` tuples;
+  the negate-for-a-max-heap idiom; `heapq.nlargest`/`nsmallest`;
+  `bisect.bisect_right` for grade-banding; `bisect.insort`) was run
+  standalone via `uv run python3` before shipping, using the `Write` tool
+  to create each scratch script rather than bash heredocs after a chained
+  `mkdir && cat <<EOF` command silently produced no file (the shell
+  reported a parser error and the directory never appeared — worked
+  around by creating the directory and each script as separate tool
+  calls). All six snippets matched their in-lesson comments exactly on
+  first run — no correctness bugs caught this round, unlike Day 50's
+  constructor-argument bug.
+  Practice file `practice/51_heapq_and_bisect.py` (4 exercises): pushing
+  three `(priority, name)` tuples onto a list with `heapq.heappush` and
+  popping them back with `heapq.heappop` to confirm ascending-priority
+  order; `heapq.nlargest` for a top-3 without a full sort; `bisect_right`
+  to bucket a score into a letter-grade band; `bisect.insort` to insert
+  into a sorted list in place. Verified in a scratch dir
+  (`.scratch-python-verify/` under the repo root, removed after use): the
+  shipped (unsolved) copy, run via plain `uv run python3` with no `--with`
+  flag, printed all four ✗ with no traceback; a separately solved copy
+  printed all four ✓ and the "All green" tally on the first attempt — no
+  bugs caught during solving this round. Copied the verified shipped copy
+  to the real `practice/51_heapq_and_bisect.py` path and re-ran it from
+  there directly, confirming the same all-✗-no-traceback result outside
+  the scratch dir.
+  Glossary: three new terms — `heap`, `priority queue`, `binary search` —
+  added under a new `Day 51` section in `reference/glossary.html`, after
+  grepping for and confirming zero collisions with any existing row.
+  HTML tag-balance was checked with a stdlib `html.parser.HTMLParser`-
+  based stack checker (written as a throwaway script via the `Write`
+  tool since an inline bash heredoc with embedded quotes was rejected by
+  the sandbox, deleted after use) against both the lesson file and the
+  full (now-modified) glossary — both reported zero unclosed tags and
+  zero mismatches (open/close tag counts differed by exactly the number
+  of void elements — `<meta>`/`<link>` — with no close tag, as expected,
+  not a real imbalance). A raw-unescaped-`&` grep
+  (`&(?!amp;|lt;|gt;|quot;|#39;|apos;|#\d+;)`) against the lesson found
+  only already-escaped entities matching the allowlist — zero true
+  positives.
+  Quiz: 3 questions, one per module/concept (heap pop semantics, heap
+  order vs. full sort, bisect's sorted-input requirement). Word counts
+  were checked with a small regex-based script splitting each
+  `<button class="opt">`'s stripped-tag text on whitespace, cross-checked
+  with a second independent `html.parser.HTMLParser`-based script per
+  this course's established two-method practice — the first draft
+  mismatched on all three questions (Q1 7/7/8, Q2 11/14/11, Q3 11/10/12)
+  and took two to three rounds of few-word edits per question, re-running
+  both scripts after every edit (one intermediate Q1 edit only swapped
+  word order without changing the count, caught immediately and corrected
+  the same round). Landed at 7/7/7, 11/11/11, and 11/11/11 respectively;
+  both scripts agreed at every step, and a separate check confirmed
+  exactly 3 `data-ok` occurrences total, one per question.
+  `RESOURCES.md`: added one new citation, the `heapq` and `bisect`
+  stdlib docs, to the "Knowledge — the language" section, since these are
+  newly named modules with no prior citation in the file.
+  Registered in `assets/nav.js` with `date: "2026-09-17"`; confirmed
+  `node --check assets/nav.js` reports no syntax errors after the edit.
+  **DB access:** `bin/query-progress` was not attempted this round, per
+  Day 44's standing instruction to stop daily re-attempts absent new
+  indication the gate lifted — no such indication appeared. `bin/record-
+  progress python lesson_generated --day 51 --lesson
+  0051-heapq-and-bisect.html --detail '{"by":"headless"}'` was attempted
+  once, from the repo root, and **succeeded**, printing `recorded:
+  python/lesson_generated day=51 lesson=0051-heapq-and-bisect.html` — the
+  tenth consecutive successful write (following Days 42-50).
+  `python/learning-records/` still holds only the Day 1 baseline; no
+  completion/quiz/kata outcome has ever been recorded for any day 2-50,
+  so this round paced entirely from on-disk state, same as every prior
+  round since Day 42.
+  **Next-day note:** the 18-lesson fifth-review-sweep candidate list (10,
+  14-15, 18, 21-23, 25-29, 31, 35, 37, 39-40, 42) remains unchanged and
+  still viable. Two fresh-content days in a row now (50-51) since Day 49's
+  review — Day 52 should weigh a review sweep more seriously unless
+  another clean, zero-collision stdlib gap surfaces first (this round's
+  search also turned up `json`/`csv` as already-touched-but-never-
+  dedicated topics worth a closer look if fresh content is chosen again).

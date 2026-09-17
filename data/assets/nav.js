@@ -146,6 +146,8 @@
       file: "lessons/0069-sample.html" },
     { n: 70, date: "2026-09-16", title: "align(): making two mismatched frames line up on purpose",
       file: "lessons/0070-align.html" },
+    { n: 71, date: "2026-09-17", title: "pd.Grouper(): grouping by a date frequency, not just a column's values",
+      file: "lessons/0071-pd-grouper.html" },
   ];
 
   const REFS = [

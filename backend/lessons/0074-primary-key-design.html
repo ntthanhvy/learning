@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 74 · Primary key design: choosing what identifies a row</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 74 · ~20 min</p>
+<h1>Primary key design: choosing what identifies a row</h1>
+<p class="byline">Lesson 2's glossary entry for <code>primary key</code> has sat unchanged since day two: "the column that uniquely identifies one row — usually an id." Every lesson since has used one without ever asking which kind. Lesson 15 built cursor pagination on the assumption that a row's key is naturally ordered; Lesson 39 explained MVCC's insert-a-new-version-never-overwrite storage without asking where in the table that new version lands. Both questions trace back to one decision made once, at table-creation time, that this course never actually taught: what should the key <em>be</em>?</p>
+
+<h2>1 · The default nobody questions: a sequential integer</h2>
+<p>The unglamorous default is a database-generated counter — Postgres calls it an <dfn data-en="a column that gets its value automatically from an increasing counter the database owns, guaranteeing every row gets a distinct, ascending integer without the application ever choosing one" data-vn="identity column / auto-increment (giữ nguyên) — cột tự sinh giá trị tăng dần từ 1 counter database giữ, không cần app tự chọn giá trị">identity column</dfn>:</p>
+<pre><code><span class="kw">CREATE TABLE</span> orders (
+    id <span class="kw">BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY</span>,
+    customer_id <span class="kw">BIGINT NOT NULL</span>,
+    created_at <span class="kw">TIMESTAMPTZ NOT NULL DEFAULT now()</span>
+);
+<span class="cm">-- INSERT never names id; Postgres hands back 1, 2, 3, ... in insert order</span></code></pre>
+<p>(The older <code>SERIAL</code> pseudo-type does the same thing through a backing sequence; <code>GENERATED ALWAYS AS IDENTITY</code> is the SQL-standard spelling and the one current Postgres docs recommend.) Three properties fall out of "the database just counts": the value is small (8 bytes as <code>BIGINT</code>), it's dense and ascending — row 1,000,001 was inserted right after row 1,000,000 — and it's <em>guessable</em>. That last property is usually harmless and occasionally isn't, which is where the alternative enters.</p>
+
+<h2>2 · The alternative: a UUID</h2>
+<p>A <dfn data-en="Universally Unique Identifier -- a 128-bit value, usually shown as 32 hex digits, generated independently by any client or server with a vanishingly small chance of two ever colliding, without any of them coordinating or checking a shared counter" data-vn="UUID (giữ nguyên) — số 128-bit gần như chắc chắn không trùng, tự sinh được ở bất cứ đâu, không cần hỏi 1 bộ đếm chung">UUID</dfn> is generated independently, by the application, the database, or even the client, with no shared counter to check in with:</p>
+<pre><code><span class="kw">CREATE TABLE</span> orders (
+    id <span class="kw">UUID PRIMARY KEY DEFAULT gen_random_uuid</span>(),
+    customer_id <span class="kw">BIGINT NOT NULL</span>,
+    created_at <span class="kw">TIMESTAMPTZ NOT NULL DEFAULT now()</span>
+);
+<span class="cm">-- e.g. 8f14e45f-ceea-467e-bd3c-33bd8e6ee2d0 -- unrelated to insertion order</span></code></pre>
+<p>That independence is the whole appeal: a client can generate an order's id before ever talking to the server (useful for Lesson 26's idempotency keys, and for offline-first writes that sync later), and merging rows from two databases never collides the way two counters both starting at 1 would. The classic <code>gen_random_uuid()</code> flavor (UUIDv4) pays for that independence with pure randomness — and randomness in a primary key is a cost, not a neutral fact, once you look at what the key touches.</p>
+
+<h2>3 · What randomness costs: index locality</h2>
+<p>Lesson 39 established that Postgres never overwrites a row — an <code>INSERT</code> adds a new version, and the table's primary-key index has to record where every version lives. A B-tree index (Lesson 5) stores its entries in key order across fixed-size pages. A sequential integer key inserts its entries in the same order the index already stores them in — every new row lands on the same "rightmost" page until it fills, then a fresh page opens. A UUIDv4 key inserts in effectively random order across the entire keyspace — every new row has to land on a random existing page, scattered across however many pages the table already has.</p>
+<div class="callout"><strong>Ties to Lesson 39:</strong> this is the same "new version, not overwrite" mechanism, viewed from the index's side. An ascending key keeps writes concentrated on whichever page is currently the newest — that page tends to already be in memory (cache-hot) from the last insert. A random key spreads writes across pages that were written long ago and likely aren't in memory anymore, forcing Postgres to read a cold page off disk before it can insert into it. Same storage engine, same row-versioning; the key's ordering decides whether an index insert is a cache hit or a disk read.</div>
+<p>Concretely, that means a UUIDv4-keyed table's primary-key index grows more fragmented and cache-unfriendly than a sequential-keyed one at the same row count — a real, measurable write-throughput cost, not a theoretical one. It doesn't make UUIDs wrong; it means "UUID vs. integer" is a genuine trade-off, not a style preference.</p>
+
+<h2>4 · What sequential keys cost: guessability</h2>
+<p>The cost runs the other way too. Lesson 23 named <code>excessive data exposure</code> as an internal model's fields leaking into a response body it was never meant to reach. A guessable primary key opens a narrower but related door: <dfn data-en="a security weakness where an attacker discovers valid resource identifiers -- and therefore other callers' resources -- by guessing or incrementing a predictable id, rather than by any field leaking in a response body" data-vn="ID enumeration (giữ nguyên) — kẻ tấn công đoán/tăng dần id để dò ra resource của người khác, khác với lộ field trong response body">ID enumeration</dfn>. <code>GET /orders/1048</code> tells anyone watching the network tab that order 1048 exists, and that trying 1047 or 1049 will very likely hit a real row too — the id is a hint about how many orders exist in total and an open invitation to enumerate every one of them. Lesson 12's authorization check (does this caller own order 1048?) still has to run either way, so a guessable id is never a substitute for that check — but it turns a single missing authorization check into a table-scan-by-hand vulnerability instead of a one-off mistake, and it hands a competitor your order volume for free just by watching one response header. A UUID closes that specific leak: seeing id <code>8f14e45f-...</code> gives an attacker nothing to increment.</p>
+
+<h2>5 · The newer answer: sortable UUIDs</h2>
+<p>The two costs above — an index that likes ascending keys, an API that dislikes guessable ones — used to be a real either/or choice. <dfn data-en="a UUID variant (version 7) that encodes the current timestamp in its leading bits, so values generated later always sort after values generated earlier, while the trailing bits stay random like an ordinary UUID" data-vn="UUIDv7 (giữ nguyên) — UUID có phần đầu là timestamp nên sinh ra sau thì luôn lớn hơn/sort sau, phần đuôi vẫn random như UUID thường">UUIDv7</dfn> (and the similar, non-UUID-standard <dfn data-en="Universally Unique Lexicographically Sortable Identifier -- a 128-bit id, like UUIDv7, that encodes a timestamp in its leading characters so ids sort in creation order, predating UUIDv7's standardization" data-vn="ULID (giữ nguyên) — id 128-bit sort được theo thời gian tạo, giống ý tưởng UUIDv7 nhưng có trước khi UUIDv7 thành chuẩn">ULID</dfn>) split the difference: the leading bits are a millisecond timestamp, the trailing bits are random. The result sorts in creation order — restoring the index locality that section 1's sequential key had — while staying unguessable enough in the trailing bits that an attacker can't enumerate neighboring rows the way a bare counter allows. It isn't a strict win: a UUIDv7 still costs 16 bytes against an 8-byte <code>BIGINT</code>, and its leading timestamp bits do reveal roughly when a row was created, which a pure UUIDv4 doesn't. It's the option worth defaulting to today for a new table where both index write-locality (restoring section 1's ascending, cache-hot insert pattern) and id guessability (section 4's concern) both matter, which in practice is most public-facing tables.</p>
+
+<table class="cmp">
+<thead><tr><th></th><th>Sequential integer</th><th>UUIDv4</th><th>UUIDv7 / ULID</th></tr></thead>
+<tbody>
+<tr><th>Size</th><td>8 bytes</td><td>16 bytes</td><td>16 bytes</td></tr>
+<tr><th>Index insert pattern</th><td>ascending, cache-hot</td><td>random, cache-cold</td><td>ascending, cache-hot</td></tr>
+<tr><th>Guessable by a caller</th><td>yes -- plain counter</td><td>no</td><td>no -- random tail</td></tr>
+<tr><th>Generatable client-side</th><td>no -- needs the DB</td><td>yes</td><td>yes</td></tr>
+</tbody>
+</table>
+
+<div class="callout"><strong>Frontend-habit bridge:</strong> this is the same trade-off as choosing a React <code>key</code> prop. An array index is free and already ordered, but it's meaningless once the list reorders or an item is removed from the middle. A stable, content-derived id costs a little more to generate and carries no ordering information of its own — exactly like a UUIDv4's randomness. UUIDv7 is the "best of both" option a key prop rarely gets: stable identity <em>and</em> an ordering baked in for free.</div>
+
+<h2>6 · Where this actually gets decided</h2>
+<p>This is a schema-design call made once, at <code>CREATE TABLE</code> time, and expensive to reverse later — Lesson 19's migration lesson covers the mechanics of changing a column's type on a live table, and a primary key's type is exactly the kind of column that touches every foreign key pointing at it. The practical default: an internal, request-scoped table with no public-facing id (an audit log row, an internal join table) rarely needs anything more than a plain sequential key — nobody outside the service ever sees the value. A table whose id appears in a URL, a webhook payload, or any response body a client can inspect is the one where guessability and sortability both start to matter, and UUIDv7 earns its extra 8 bytes.</p>
+
+<div class="interview">
+<p><strong>Q: "Would you use an auto-increment integer or a UUID for a new table's primary key?"</strong> A strong answer, out loud: <em>"It depends on whether the id is ever exposed outside the service. A sequential integer is smaller and inserts are cache-friendly — Postgres's B-tree just appends to the newest page — but it's guessable, so if this id shows up in a URL or API response, a caller can enumerate neighboring rows just by incrementing it, which turns any missed authorization check into an easy scan. A UUIDv4 fixes the guessability but inserts in random order, which fragments the index and turns cache-hot writes into cold disk reads at scale. My default for anything public-facing now is UUIDv7 — it sorts in creation order like the integer does, so the index stays cache-friendly, while the random trailing bits keep it unguessable. I'd only reach for a plain sequential key on a purely internal table nothing outside the service ever sees."</em> The signal: naming the index-locality cost specifically, not just "UUIDs are more secure," and knowing UUIDv7 exists as the answer to both costs at once.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A sequential integer key inserts new entries in the same ascending order the B-tree index already stores, so writes land on the same recently-used page -- cache-hot. A UUIDv4 key inserts in random order across the whole keyspace, so writes scatter across older pages that likely aren't in memory, forcing cold disk reads.">
+    <p class="stem">Why does a UUIDv4 primary key tend to fragment a B-tree index more than a sequential integer key?</p>
+    <button class="opt" data-ok>random inserts scatter writes across cold table pages</button>
+    <button class="opt">Postgres simply refuses to index any UUID column</button>
+    <button class="opt">UUID values always get stored as raw text</button>
+    <button class="opt">sequential integers can never be indexed at all</button>
+  </div>
+  <div class="q" data-why="A sequential id is a plain counter, so seeing one value (order 1048) tells a caller that nearby values very likely exist too -- an open invitation to enumerate every row by incrementing, unlike a UUID which reveals nothing about neighboring rows.">
+    <p class="stem">Why does a sequential integer id create an ID enumeration risk in a public API?</p>
+    <button class="opt" data-ok>a visible id lets a caller enumerate other rows</button>
+    <button class="opt">integers cannot ever be serialized into a JSON body</button>
+    <button class="opt">Postgres caps every sequence at one thousand rows total</button>
+    <button class="opt">sequential ids always expose a user's stored plaintext password</button>
+  </div>
+  <div class="q" data-why="UUIDv7 encodes a millisecond timestamp in its leading bits, so values generated later always sort after earlier ones -- restoring the ascending, cache-friendly insert pattern a sequential integer has -- while its trailing bits stay random, keeping it as unguessable as an ordinary UUID.">
+    <p class="stem">What does UUIDv7 add on top of an ordinary random UUID?</p>
+    <button class="opt" data-ok>leading timestamp bits that make it sort in order</button>
+    <button class="opt">a guarantee that no two rows ever once collide</button>
+    <button class="opt">automatic encryption applied to every other stored data column</button>
+    <button class="opt">a fixed eight byte size matching a plain integer</button>
+  </div>
+  <div class="q" data-why="A purely internal table -- one no request outside the service ever reads an id from, like an internal join table or an audit row referenced only by other backend code -- gets no benefit from UUID's unguessability, since nothing external ever sees the value to enumerate in the first place.">
+    <p class="stem">When does this lesson suggest a plain sequential key is still the reasonable default?</p>
+    <button class="opt" data-ok>a purely internal table no outside caller ever reads</button>
+    <button class="opt">any table that a public API response ever returns</button>
+    <button class="opt">any table referenced by at least one foreign key</button>
+    <button class="opt">a table storing more than one million total rows</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://www.postgresql.org/docs/current/ddl-generated-columns.html">PostgreSQL Manual — Data Definition</a>, specifically the <code>GENERATED ... AS IDENTITY</code> section under column definitions (~10 min) — RESOURCES.md's standing primary source for schema/DDL questions; read alongside the <a href="https://www.postgresql.org/docs/current/datatype-uuid.html">UUID Type</a> page for <code>gen_random_uuid()</code>'s exact behavior.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> open. Still no <code>lesson_completed</code>/quiz-outcome record exists for any lesson after 74 rounds — the honest next step remains a completion signal or a user-named track.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -25,6 +25,8 @@ authors for *why*. Cite inline; each lesson recommends exactly one primary sourc
   Use for: Day 7 — structuring records and reading annotated signatures.
 - [Docs: `abc`](https://docs.python.org/3/library/abc.html)
   Use for: Day 50 — abstract base classes, `@abstractmethod`, and how they differ from Day 41's structural `Protocol`.
+- [Docs: `heapq`](https://docs.python.org/3/library/heapq.html) · [`bisect`](https://docs.python.org/3/library/bisect.html)
+  Use for: Day 51 — priority queues and binary search over a plain Python list, without a full re-sort on every change.
 - [PEP 8 — Style Guide for Python Code](https://peps.python.org/pep-0008/)
   Use for: naming and layout conventions, so written code looks like the ecosystem's.
 

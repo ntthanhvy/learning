@@ -43,6 +43,19 @@
   <tr><td>view</td><td>giữ nguyên "view" — dbt bọc SELECT trong CREATE VIEW, không lưu dữ liệu, luôn mới nhất</td><td>A materialization where dbt wraps the <code>SELECT</code> in <code>CREATE VIEW</code> — no data is stored, the query re-runs on every read, always reflects current raw data, cheapest to build.</td></tr>
 </table>
 
+<h2 id="day3">Day 3 — dbt: tests catch bad data</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>data test</td><td>giữ nguyên "data test" — phép kiểm tra dbt chạy trên dữ liệu thật, query trả về hàng nào là fail hàng đó</td><td>A dbt-run assertion against real warehouse data, expressed as a query — it fails if the query returns any rows, and runs alongside models via <code>dbt build</code>.</td></tr>
+  <tr><td>generic test</td><td>giữ nguyên "generic test" — test dùng lại được, khai báo trong YAML, áp cho cột nào cũng được</td><td>A reusable, parameterized dbt test defined once (built into dbt or a package) and applied to any column via YAML — <code>not_null</code>, <code>unique</code>, <code>relationships</code> and <code>accepted_values</code> are the four that ship with dbt itself.</td></tr>
+  <tr><td>relationships test</td><td>giữ nguyên "relationships test" — kiểm tra khóa ngoại, giá trị cột này phải tồn tại ở cột kia</td><td>A generic dbt test asserting that every value in a column exists as a value in another model or source's column — the relational-integrity check, e.g. every <code>stg_orders.restaurant_id</code> must exist in <code>stg_restaurants.restaurant_id</code>.</td></tr>
+  <tr><td>not_null test</td><td>giữ nguyên "not_null test" — kiểm tra cột không có giá trị NULL</td><td>A generic dbt test asserting every value in a column is non-NULL.</td></tr>
+  <tr><td>unique test</td><td>giữ nguyên "unique test" — kiểm tra cột không có giá trị trùng</td><td>A generic dbt test asserting every value in a column is distinct — no duplicates.</td></tr>
+  <tr><td>singular test</td><td>giữ nguyên "singular test" — test viết riêng bằng 1 file .sql trong tests/, không dùng lại được cho cột khác</td><td>A one-off dbt test written as a single <code>.sql</code> <code>SELECT</code> file in <code>tests/</code> — fails if the query returns any rows, for a business rule too specific to express as a generic test.</td></tr>
+  <tr><td>source freshness</td><td>giữ nguyên "source freshness" — kiểm tra dữ liệu nguồn có bị cũ/trễ không, dựa vào cột thời gian</td><td>A dbt check on a source's timestamp column comparing its most recent value to now — warns or errors if the data is older than a configured threshold, catching a stalled loader before anyone notices missing rows.</td></tr>
+  <tr><td>loaded_at_field</td><td>giữ nguyên "loaded_at_field" — tên cột thời gian dùng để tính độ mới của dữ liệu</td><td>The <code>sources.yml</code> field naming which timestamp column freshness should read from — required for any source with a <code>freshness</code> block configured.</td></tr>
+</table>
+
 <script src="../assets/nav.js"></script>
 </body>
 </html>

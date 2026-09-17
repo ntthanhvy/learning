@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 51 · heapq &amp; bisect: sorted-order structures without re-sorting</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 51 · ~20 min · 17 Sep 2026</p>
+<h1><code>heapq</code> &amp; <code>bisect</code>: sorted order without re-sorting</h1>
+<p class="byline">Day 4 taught <code>sorted(key=...)</code> for "give me everything, in order, once." Today is the other half: what to reach for when the data keeps arriving, or the question is only ever "what's smallest?" or "where would this fit?" — a <dfn data-en="a binary heap: a list kept in an order where the smallest element is always at index 0, letting a program grow or shrink the collection while always reading the current minimum in constant time, without ever fully sorting the rest" data-vn="giữ nguyên &quot;heap&quot; — cấu trúc list được giữ theo thứ tự đặc biệt sao cho phần tử nhỏ nhất luôn ở đầu, cho phép thêm/lấy phần tử liên tục mà không cần sắp xếp lại toàn bộ mỗi lần">heap</dfn> via <code>heapq</code>, and <dfn data-en="the algorithm of repeatedly halving a sorted sequence to find where a value is or would belong, in logarithmic rather than linear time" data-vn="giữ nguyên &quot;binary search&quot; — thuật toán chia đôi liên tục một dãy đã sắp xếp để tìm vị trí của một giá trị, nhanh hơn nhiều so với dò tuần tự từng phần tử">binary search</dfn> on an already-sorted list via <code>bisect</code>.</p>
+
+<div class="callout"><strong>Bridge from SQL:</strong> <code>heapq</code>'s job is what <code>ORDER BY x LIMIT 1</code> does incrementally — the database never fully sorts the table just to hand you the smallest row, and a heap gives Python the same trick as data streams in. <code>bisect</code> is closer to an index lookup on a sorted column: instead of scanning every row, it jumps straight to where a value belongs.</div>
+
+<h2>1 · The problem both modules solve: don't re-sort what's already (mostly) sorted</h2>
+<p>The obvious way to track "the 3 smallest values seen so far" is to keep appending to a list and calling <code>sorted()</code> every time a new value needs checking:</p>
+<pre><code>seen = [42, 17, 8, 91, 23]
+seen.append(<span class="num">5</span>)
+seen.sort()               <span class="cm"># re-sorts EVERYTHING, every single time</span>
+three_smallest = seen[:<span class="num">3</span>]</code></pre>
+<p>That works, but it throws away the fact that the list was already in order a moment ago — <code>sort()</code> is <code>O(n log n)</code> on the whole collection, paid again on every insert. When data keeps arriving, or the collection is large and only the extreme values matter, that's wasted work repeated over and over.</p>
+
+<h2>2 · <code>heapq</code>: always know the smallest, without sorting the rest</h2>
+<p><code>heapq</code> turns a plain list into a <dfn data-en="a data structure specialized for one question — repeatedly reading and removing the smallest (or, with negation, largest) item — answered in logarithmic time per operation instead of needing the whole collection sorted" data-vn="giữ nguyên &quot;priority queue&quot; — cấu trúc dữ liệu chuyên trả lời câu hỏi lấy phần tử nhỏ nhất (hoặc lớn nhất) liên tục, nhanh hơn nhiều so với sắp xếp cả tập">priority queue</dfn>: a collection specialized for one question, "what's smallest right now?", answered fast even as items keep coming and going:</p>
+<pre><code><span class="kw">import</span> heapq
+
+tasks = []
+heapq.heappush(tasks, (<span class="num">3</span>, <span class="str">"write report"</span>))
+heapq.heappush(tasks, (<span class="num">1</span>, <span class="str">"fix outage"</span>))
+heapq.heappush(tasks, (<span class="num">2</span>, <span class="str">"review PR"</span>))
+
+tasks[<span class="num">0</span>]                    <span class="cm"># (1, 'fix outage') -- smallest is always at index 0</span>
+heapq.heappop(tasks)         <span class="cm"># (1, 'fix outage') -- removes and returns it</span>
+heapq.heappop(tasks)         <span class="cm"># (2, 'review PR')</span></code></pre>
+<p>Verified live: after the two pops, <code>tasks == [(3, 'write report')]</code>. Each <code>heappush</code>/<code>heappop</code> costs <code>O(log n)</code>, not <code>O(n log n)</code> for a full re-sort — the list is kept in <em>heap order</em> (a weaker condition than fully sorted: only "each parent ≤ its children" holds), which is just enough structure to make "give me the smallest" and "put this back in order" both cheap. <code>heapq</code> is a <strong>min-heap only</strong> — the smallest item comes out first. Tuples like <code>(priority, task)</code> compare element-by-element (Day 28's unpacking, working in reverse here), so the first tuple slot doubles as the sort key without needing <code>key=</code> at all.</p>
+
+<h2>3 · Wanting the largest instead: negate, don't reinvent</h2>
+<p>There's no separate max-heap type in the standard library — the documented idiom is to push negated numbers, so the mathematically smallest negated value is the actual largest:</p>
+<pre><code><span class="kw">import</span> heapq
+
+scores = []
+<span class="kw">for</span> s <span class="kw">in</span> [<span class="num">88</span>, <span class="num">95</span>, <span class="num">71</span>, <span class="num">99</span>, <span class="num">60</span>]:
+    heapq.heappush(scores, -s)   <span class="cm"># push the negation</span>
+
+top_score = -heapq.heappop(scores)   <span class="cm"># negate back on the way out -- 99</span></code></pre>
+<p>Verified live: <code>top_score == 99</code>. For the common case of just "the N largest/smallest of a collection I already have," skip manual pushing entirely — <code>heapq.nlargest(n, iterable)</code> and <code>heapq.nsmallest(n, iterable)</code> do this in one call, more efficiently than sorting the whole thing when <code>n</code> is small relative to the collection:</p>
+<pre><code><span class="kw">import</span> heapq
+
+scores = [<span class="num">88</span>, <span class="num">95</span>, <span class="num">71</span>, <span class="num">99</span>, <span class="num">60</span>]
+heapq.nlargest(<span class="num">2</span>, scores)    <span class="cm"># [99, 95]</span>
+heapq.nsmallest(<span class="num">2</span>, scores)   <span class="cm"># [60, 71]</span></code></pre>
+
+<h2>4 · <code>bisect</code>: finding a spot in a sorted list without scanning it</h2>
+<p><code>bisect</code> answers a different question: given a list that is <em>already sorted</em>, where does a new value belong, or where does an existing value live — without checking every element:</p>
+<pre><code><span class="kw">import</span> bisect
+
+grades = [<span class="num">60</span>, <span class="num">70</span>, <span class="num">80</span>, <span class="num">90</span>]   <span class="cm"># cutoffs, already sorted</span>
+labels = [<span class="str">"F"</span>, <span class="str">"D"</span>, <span class="str">"C"</span>, <span class="str">"B"</span>, <span class="str">"A"</span>]
+
+<span class="kw">def</span> grade_for(score):
+    i = bisect.bisect_right(grades, score)
+    <span class="kw">return</span> labels[i]
+
+grade_for(<span class="num">85</span>)   <span class="cm"># "B" -- 85 falls in the (80, 90] bucket</span>
+grade_for(<span class="num">90</span>)   <span class="cm"># "A" -- bisect_right puts an exact match after equal values</span></code></pre>
+<p>Verified live: both calls match the comments. <code>bisect_right(grades, score)</code> returns how many cutoffs are <code>&lt;= score</code> — a binary search over the list, <code>O(log n)</code> instead of checking each cutoff in turn. <code>bisect_left</code> is the sibling that breaks a tie the other way, putting an exact match <em>before</em> equal existing values; the difference only matters when duplicates are possible. <code>bisect.insort(seq, value)</code> inserts a value into a sorted list at the correct position in one call, keeping it sorted without a full re-sort:</p>
+<pre><code><span class="kw">import</span> bisect
+
+scores = [<span class="num">60</span>, <span class="num">75</span>, <span class="num">90</span>]
+bisect.insort(scores, <span class="num">82</span>)
+scores   <span class="cm"># [60, 75, 82, 90] -- inserted in place, still sorted</span></code></pre>
+<p>Verified live: matches the comment exactly.</p>
+
+<h2>5 · Picking between them</h2>
+<p><code>heapq</code> is for a collection that keeps changing and where only the extreme end (smallest, or largest via negation) is ever asked for — a live leaderboard, a task queue, "top N so far" over a stream too large to hold sorted. <code>bisect</code> is for a collection that's sorted and mostly stable, where the question is "where does X belong" or "what's the closest cutoff to X" — grade bands, rate-limit tiers, keeping a sorted list of timestamps. Neither replaces <code>sorted()</code> for the everyday "give me the whole thing in order, once" case Day 4 already covers — both exist for the narrower jobs where re-sorting on every change would be wasted work.</p>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> nothing pandas-specific — a pandas <code>Series</code> has its own <code>nlargest()</code>/<code>nsmallest()</code> methods for the whole-column version of this question, backed by NumPy's sort rather than a heap; <code>heapq</code>/<code>bisect</code> are for plain Python lists and streaming data instead, not demonstrated here since that would mean showing a pandas API, out of scope per <code>MISSION.md</code>.</div>
+
+<div class="interview">
+<p><strong>Q: "How would you efficiently track the top 3 values from a stream of numbers too large to hold in memory sorted?"</strong> A strong answer, out loud: <em>"Keep a small min-heap of size 3 with <code>heapq</code>. For each new number, if the heap has fewer than 3 items, push it; otherwise compare it to the heap's smallest, at index 0, and only push-and-pop if the new number is bigger. That keeps the heap at exactly 3 items and each operation is <code>O(log 3)</code>, so the whole stream costs <code>O(n log k)</code> for a stream of n and a top-k of k — never sorting the full stream, and never holding more than k items at once."</em> The signal: naming that the heap size stays bounded at k, not growing with the stream, which is the actual memory win.</p>
+</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/51_heapq_and_bisect.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/51_heapq_and_bisect.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: pushing and popping a min-heap of <code>(priority, name)</code> tuples in the right order, finding the top-N of a list with <code>heapq.nlargest</code>, using <code>bisect.bisect_right</code> to bucket a score into a grade band, and using <code>bisect.insort</code> to insert into a sorted list while keeping it sorted.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="heapq only implements a min-heap directly - heappop always returns the smallest item. Getting the largest first requires negating values on the way in and negating again on the way out, or using heapq.nlargest, which does this internally.">
+    <p class="stem">By default, what does <code>heapq.heappop()</code> return from a heap?</p>
+    <button class="opt" data-ok>the smallest item currently in the heap</button>
+    <button class="opt">the largest item currently in the heap</button>
+    <button class="opt">the item most recently pushed onto it</button>
+  </div>
+  <div class="q" data-why="Heap order only guarantees each parent is less than or equal to its children - it is a weaker condition than full sorted order, which is exactly what makes push and pop cheap (O(log n)) instead of requiring an O(n log n) full re-sort after every change.">
+    <p class="stem">Why is a list kept in heap order not the same as a fully sorted list?</p>
+    <button class="opt" data-ok>heap order only guarantees each parent is smaller than its children</button>
+    <button class="opt">a heap actually stores its items in a dict, fully unordered</button>
+    <button class="opt">heap order sorts every element, identically to calling sorted() each time</button>
+  </div>
+  <div class="q" data-why="bisect requires the sequence to already be sorted - it works by repeatedly halving the search range, which only finds the correct answer when the list's order is already correct. Running it on an unsorted list returns a meaningless index with no warning or error.">
+    <p class="stem">What does <code>bisect.bisect_right()</code> require of the list it searches?</p>
+    <button class="opt" data-ok>the list must already be sorted, or the result is meaningless</button>
+    <button class="opt">the list must contain only unique values, with no duplicates allowed</button>
+    <button class="opt">nothing — it silently sorts a fresh copy before searching it</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the <a href="https://docs.python.org/3/library/heapq.html"><code>heapq</code></a> standard-library docs (added to <code>RESOURCES.md</code> this run) — the "Basic Examples" and "Priority Queue Implementation Notes" sections cover today's material plus the tie-breaking subtlety of storing raw tuples in a heap. <a href="https://docs.python.org/3/library/bisect.html"><code>bisect</code></a>'s docs are short enough to read in full in a couple of minutes.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day51">glossary</a> under Day 51.<br>
+Both modules close a real gap: every prior lesson's "keep things in order" answer was <code>sorted(key=...)</code> (Day 4) — today adds the two cases where sorting the whole collection every time would be the wrong tool.<br><br>
+💬 Anything unclear — heaps, binary search, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

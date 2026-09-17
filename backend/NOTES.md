@@ -5220,3 +5220,140 @@
   `COPY`/bulk-insert gap raised since Lesson 68 is now closed; future
   rounds should do one fresh broad gap search rather than re-surfacing
   either this or the already-closed messaging/event-driven gap (Lesson 72).
+- **2026-09-17 generation (Lesson 74, headless 06:00 run):** idempotency
+  check first — confirmed via `ls backend/lessons/0074-*` (no match before
+  writing) and a grep for `n: 74`/`2026-09-17` in `nav.js` (no match,
+  highest prior entry was `n: 73`, dated 2026-09-16). Read `MISSION.md`
+  (unmodified, not touched), `RESOURCES.md` in full, both `learning-records/`
+  files (still just the 0001 baseline and the 2026-07-30 concurrency-
+  vocabulary gap — no fresher `lesson_completed`/quiz-outcome record
+  exists), `assets/nav.js` in full, and the tail of `NOTES.md` (lines
+  ~4926-5222, the file exceeds the single-read 256KB cap) covering Lessons
+  71-73's own notes in full, plus Lesson 73 in full for structure/tone/
+  markup conventions. A single `bin/query-progress backend` read attempt
+  was blocked by the sandbox approval requirement, consistent with every
+  prior round's note that the read path is unavailable headless — not
+  retried, per the briefing's explicit one-attempt guidance. Topic choice:
+  Lesson 73's note closed the `COPY`/bulk-insert gap and found no standing
+  flagged-but-open gap, so this round ran a fresh gap search rather than
+  defaulting to anything. The Grep tool (not a shell `for` loop, which the
+  sandbox blocks with "Contains simple_expansion" per every prior round's
+  note) checked ~25 candidate terms across `lessons/*.html`: sharding, read
+  replicas, GraphQL, and gRPC ruled out as MISSION.md-excluded or
+  out-of-stack; leaky/token bucket, covering/composite indexes,
+  VACUUM/autovacuum, blue-green/canary deploys, saga/two-phase-commit/CAP
+  theorem, and prepared statements all already had at least incidental
+  coverage or sat close to an explicit MISSION.md exclusion; PgBouncer
+  turned up zero hits as a *dedicated* topic but is only ever named as an
+  external pointer inside Lesson 18's connection-pooling lesson, and reads
+  as infra-operations-adjacent (bordering the "cloud-provider specifics"
+  exclusion) rather than a clean vocabulary gap. The candidate that held up:
+  primary key *design* — auto-increment/identity vs. UUID vs. sortable UUID
+  (UUIDv7/ULID). Confirmed real via targeted greps: `SERIAL`/`BIGSERIAL`/
+  `GENERATED...IDENTITY`/`surrogate key`/`natural key` all zero-hit as a
+  *topic* (existing hits were all incidental uses of the syntax inside
+  other lessons' examples, e.g. Lesson 60's CHECK constraints), and `UUID`
+  itself appears exactly once in the whole corpus, incidentally, inside
+  Lesson 53's file-uploads lesson. Read Lesson 2 (entities/tables) and
+  found its glossary row for `primary key` has sat at "the column that
+  uniquely identifies one row" since day two, never revisited; read Lesson
+  15 (cursor pagination) in full and confirmed it builds its entire
+  `WHERE (created_at, id) > (...)` argument on an unstated assumption that
+  a row's key is naturally ordered, without ever asking where that
+  ordering comes from; read Lesson 39 (MVCC) and confirmed its "Postgres
+  never overwrites a row" mechanism was taught purely from the row's side,
+  never from the index's side (what a new row version costs the index that
+  has to record it) — both a real, foundational schema-design gap
+  (MISSION.md's "design the schema... entities, relationships,
+  constraints" criterion) and a natural continuation of two already-taught
+  lessons that had silently assumed an answer neither one gave. Chose it
+  over PgBouncer for the reasons above (cleaner MISSION.md fit, no
+  infra-ops-adjacency risk) and over the six-times-flagged-then-closed
+  `COPY` topic (no longer open). Lesson 74 covers: the identity-column
+  default (small, dense, ascending, guessable) as a direct callback to
+  Lesson 2's un-examined glossary row; UUID as the independently-generated
+  alternative (ties to Lesson 26's idempotency keys for client-generated
+  ids); index locality as the real cost of UUIDv4 randomness, explicitly
+  tied to Lesson 39's MVCC mechanism from the index's side (ascending
+  inserts stay cache-hot on the newest B-tree page per Lesson 5; random
+  inserts scatter across cold pages); a new `ID enumeration` term for the
+  cost sequential keys carry (deliberately distinguished from Lesson 23's
+  existing `excessive data exposure` term rather than reusing or
+  shadowing it, since one is about response-body fields leaking and the
+  other is about the identifier itself being guessable) with an explicit
+  note that Lesson 12's authorization check is still required either way;
+  UUIDv7/ULID as the sortable-and-unguessable synthesis, named as today's
+  practical default for any public-facing table; a comparison table
+  (size/insert pattern/guessability/client-generatable) across all three
+  options; a React `key`-prop frontend-habit bridge; and a closing section
+  naming where the decision is actually made (`CREATE TABLE` time, cross-
+  linked to Lesson 19's migration-mechanics lesson for how expensive it is
+  to reverse). No Go snippet was shipped — the lesson's code is pure SQL
+  DDL (`CREATE TABLE` with `GENERATED ALWAYS AS IDENTITY` and
+  `gen_random_uuid()`), so no compile-check container applied; verified
+  instead by manual review against current PostgreSQL DDL/UUID-type docs,
+  both of which the shipped syntax matches exactly. Checked the glossary
+  first for all five candidate terms (`identity column`, `UUID`,
+  `ID enumeration`, `UUIDv7`, `ULID`) — zero collisions — then appended all
+  five as new `<dfn>`-backed rows after Lesson 73's `COPY` row; no existing
+  row needed editing (in particular, `primary key`'s Lesson-2-era row was
+  left untouched rather than rewritten, since it's still correct as a
+  definition — this lesson adds the design decision on top of it, it
+  doesn't replace it). One drafting mistake caught during writing, before
+  any mechanical check: an early draft's section 5 sentence read "Lesson
+  3's sequential key" where it meant this lesson's own section 1 — Lesson 3
+  is "The API contract," unrelated — caught by rereading the draft for
+  cross-reference accuracy and fixed to point at "section 1" instead, since
+  a wrong lesson citation is exactly the kind of error a `<dfn>`/tag/quiz
+  mechanical check can't catch. Verification performed mechanically,
+  matching this course's established rigor: (1) quiz word-count balance via
+  a Node script parsing every `<div class="q">` block and counting each
+  `<button class="opt">`'s words two independent ways (`.split(/\s+/)` and
+  `.split(" ").filter(Boolean)`) — first draft was uneven on three of four
+  questions (7-10 words scattered within a question), fixed through two to
+  three targeted rewrite-and-recount cycles per question, re-running the
+  script after every edit rather than trusting a manual count, converged to
+  exactly 8/8/8/8 on question one and 9/9/9/9 on questions two through
+  four, both counting methods agreeing exactly, and exactly one `data-ok`
+  per question confirmed the same way; (2) an occurrence-count HTML
+  tag-balance check (regex counting per tag, not naive line/substring
+  counting, per this course's standing tooling-quirk warning) across the
+  same 22 tag pairs used in every prior round (div/p/h1/h2/table/thead/
+  tbody/tr/th/td/pre/code/dfn/button/a/span/strong/em/script/head/body/
+  html) on the lesson, and the same check on `glossary.html` after its
+  five-row addition — both files fully balanced, one early miss caught and
+  fixed (a first draft dropped the closing `</p>` at the end of section 3,
+  before the `<h2>` for section 4) before the check was re-run clean; (3) a
+  raw-unescaped-`&` regex scan (matching any `&` not followed by `amp;`,
+  `lt;`, `gt;`, `quot;`, `#39;`, or `apos;`) across both files — zero hits
+  in either, no fixes needed; (4) a targeted grep for the backslash-
+  escaped-quote bug caught in Lesson 68's round (`\\"` inside a `data-vn`/
+  `data-en` attribute) — zero hits in the new lesson or the glossary
+  addition, confirming that mistake wasn't repeated. Registered Lesson 74
+  in `nav.js` (date 2026-09-17), confirmed with `node --check
+  backend/assets/nav.js` (clean, no output). DB access:
+  `bin/record-progress backend lesson_generated --day 74 --lesson
+  0074-primary-key-design.html --detail '{"by":"headless"}'` ran as a
+  single standalone command and succeeded immediately on the first attempt
+  (`recorded: backend/lesson_generated day=74
+  lesson=0074-primary-key-design.html`) — the write path continues to be
+  reliable. No DB read was attempted beyond the single blocked try noted
+  above. Confirmed via `git status --short` that only
+  `backend/lessons/0074-primary-key-design.html`, `backend/assets/nav.js`,
+  and `backend/reference/glossary.html` show as changed/new among backend
+  files — other repo-root changes in that status output (`dataeng/assets/
+  nav.js`, `dataeng/reference/glossary.html`, `dataeng/lessons/
+  0003-dbt-tests.html`, `python/NOTES.md`, `python/RESOURCES.md`, `python/
+  assets/nav.js`, `python/reference/glossary.html`, `python/lessons/
+  0051-heapq-and-bisect.html`, `python/practice/51_heapq_and_bisect.py`,
+  `rust/NOTES.md`, `data/lessons/0071-pd-grouper.html`, `data/practice/
+  71_pd_grouper.py`) belong to unrelated courses' own same-morning runs,
+  not touched this round. No confirmed next-lesson gap is named with
+  certainty for the round after this one — same standing note as every
+  prior round; a completion/quiz-outcome signal or a user-named track
+  should take priority over guessing blind. Absent that, this round leaves
+  PgBouncer/external connection pooling on the table as a possible future
+  candidate (passed over once, for the infra-ops-adjacency reason above,
+  not yet flagged narrow the way `COPY` was) and otherwise found no other
+  standing gap — the next round should run its own fresh search rather
+  than assume either of these.

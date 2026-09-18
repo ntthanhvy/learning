@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 72 · .ewm(): the moving average that never forgets, just discounts</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 72 · ~20 min · 18 Sep 2026</p>
+<h1>.ewm(): the moving average that never forgets, just discounts</h1>
+<p class="byline">Chào bạn — Lesson 71's teaser named no single dangling candidate, so this round is a fresh curriculum/glossary scan again. Lesson 13 taught <code>.rolling()</code> (a fixed-size sliding window) and <code>.expanding()</code> (a window that grows from the start) — but a fresh grep of all 71 lessons and the glossary confirms their third sibling, <code>.ewm()</code> (exponentially weighted moving average), is still genuinely zero-hit. It closes that trio, and it is the actual smoothing method behind "EWMA" in time-series and finance interview questions.</p>
+
+<h2>1 · The gap: rolling forgets sharply, expanding never forgets at all</h2>
+<p>Lesson 13's <code>.rolling(window=N)</code> only looks at the last N rows — row N+1 falls off a cliff, weighted zero, the instant it exits the window. Lesson 13's <code>.expanding()</code> is the opposite extreme: every row ever seen counts equally forever, no matter how old. Real smoothing (a stock's moving average, a rolling conversion-rate estimate) usually wants a middle ground: recent rows should matter MORE than old ones, but old rows should never be discarded outright — just discounted. Neither <code>.rolling()</code> nor <code>.expanding()</code> can express that.</p>
+
+<h2>2 · .ewm(): a running average where every past row still counts, less and less</h2>
+<p><dfn data-en="a Series/DataFrame method computing an exponentially weighted moving average -- unlike rolling() (fixed window, old rows drop to zero weight) or expanding() (every row weighted equally forever), every past row keeps SOME weight forever, shrinking geometrically the further back it is; exactly one of com=, span=, halflife=, or alpha= sets the decay rate, and adjust= (default True) changes the exact early-row math" data-vn="giữ nguyên '.ewm()' — tính trung bình động có TRỌNG SỐ GIẢM DẦN theo cấp số nhân; khác rolling() (cửa sổ cố định, dòng cũ rớt khỏi cửa sổ thì trọng số về 0 NGAY) và expanding() (mọi dòng trọng số BẰNG NHAU mãi mãi), ở đây dòng càng cũ trọng số càng nhỏ dần theo cấp số nhân nhưng KHÔNG BAO GIỜ về 0 hẳn; phải truyền ĐÚNG 1 trong com=, span=, halflife=, alpha= để set tốc độ giảm; adjust= (mặc định True) đổi công thức tính ở các dòng đầu">.ewm()</dfn> ("exponentially weighted moving average," often shortened to EWMA in interviews) is that middle ground: every row ever seen keeps some weight forever, but the weight shrinks geometrically the further back it is — recent rows dominate, ancient rows fade toward (but never quite reach) zero. Confirmed directly (pandas 3.0.6), on this course's real <code>orders_raw.csv</code> fixture, An's two cleaned orders (120.0 on 01-05, 42.0 on 01-10):</p>
+<pre><code>an[<span class="str">"amount"</span>].ewm(span=<span class="num">2</span>, adjust=<span class="kw">False</span>).mean()
+<span class="cm"># 0    120.0   -- first row: nothing to average yet, so it's just itself
+# 1     68.0   -- NOT a plain average of 120 and 42 (that would be 81.0,
+#               -- rolling(2).mean()'s answer); 42 counts more than 120 here</span></code></pre>
+<p>Exactly one of <code>com=</code>, <code>span=</code>, <code>halflife=</code>, or <code>alpha=</code> must be passed to pick the decay rate — <code>span=2</code> above means "decay roughly like a 2-row rolling window would," internally converted to <code>alpha = 2 / (span + 1)</code>. Confirmed directly: passing two of them together, or none at all, both raise <code>ValueError</code> — pandas will not guess which decay parameterization you meant.</p>
+
+<div class="callout"><strong>SQL bridge:</strong> plain SQL has no built-in EWMA — it isn't expressible as a fixed window frame like <code>ROWS BETWEEN N PRECEDING AND CURRENT ROW</code> (Lesson 13's <code>.rolling()</code> analog), because every prior row contributes forever, just at a shrinking weight. The honest answer in an interview: "SQL doesn't have a direct equivalent; you'd hand-roll the recursive formula with a window function and a running product, or just do this step in pandas/Python instead." Naming that gap accurately is itself a signal.</div>
+
+<h2>3 · The gap-filling nuance: adjust=True vs adjust=False give DIFFERENT numbers</h2>
+<p>Confirmed directly, and the sharpest interview point in this lesson: <code>adjust=</code> is not cosmetic — it changes the actual output on early rows. With <code>span=2</code> (so <code>alpha = 2/3</code>) on An's two values (120.0, 42.0):</p>
+<pre><code>an[<span class="str">"amount"</span>].ewm(span=<span class="num">2</span>, adjust=<span class="kw">True</span>).mean()   <span class="cm"># default</span>
+<span class="cm"># 0    120.0
+# 1     61.5   -- bias-corrected: divides by the sum of weights SEEN so far</span>
+
+an[<span class="str">"amount"</span>].ewm(span=<span class="num">2</span>, adjust=<span class="kw">False</span>).mean()
+<span class="cm"># 0    120.0
+# 1     68.0   -- pure recursive form: y_t = (1-alpha)*y_(t-1) + alpha*x_t</span></code></pre>
+<p><code>adjust=False</code> is the textbook recursive EWMA formula, unrolled one row at a time from the actual previous OUTPUT. <code>adjust=True</code> (the default) instead computes a weighted average of every raw INPUT seen so far, dividing by the sum of the weights actually present — a bias correction that matters most on the first few rows, before the weights have "caught up." The two formulas converge as more rows accumulate, but on a short Series — exactly the kind an interview fixture uses — the gap is large: 61.5 vs 68.0, over 10% apart, from the identical two input numbers.</p>
+
+<h2>4 · No leading NaN by default, and it still chains after groupby()</h2>
+<p>Confirmed directly: unlike <code>.rolling(window=N)</code>, whose first N-1 rows are NaN because fewer than N rows exist yet, <code>.ewm()</code> never has that problem — the very first row's output is just itself (there's nothing to discount against yet), so row 0 is never NaN by default. <code>min_periods=</code> can reintroduce a leading NaN on purpose, if a report shouldn't trust an average built from just one data point. And exactly like every other row-order-sensitive method this course has covered, <code>.ewm()</code> chains cleanly after <code>groupby()</code> to keep each entity's smoothing separate:</p>
+<pre><code>clean.groupby(<span class="str">"customer"</span>)[<span class="str">"amount"</span>].apply(<span class="kw">lambda</span> s: s.ewm(span=<span class="num">2</span>, adjust=<span class="kw">False</span>).mean())
+<span class="cm"># customer
+# An    0    120.000000
+#       1     68.000000
+# Binh  2     35.500000
+#       3    131.833333</span></code></pre>
+<p>Skipping <code>groupby()</code> on a multi-entity table has the same failure mode Lesson 23's <code>shift()</code> and Lesson 13's <code>.rolling()</code> already warned about: it silently bleeds one customer's early weight into another customer's smoothed average, computed on whatever the current row order happens to be — <code>.ewm()</code> trusts row order only, with no ORDER BY argument of its own.</p>
+
+<div class="interview">
+<p><strong>Q: "How would you compute a smoothed 30-day moving average that doesn't just drop old data the instant it exits a window?"</strong> A strong answer, out loud: <em>"That's exactly what .ewm() is for — an exponentially weighted moving average. Unlike rolling(window=30), which gives full weight to the last 30 rows and zero weight the instant a row falls outside that window, ewm() lets every row ever seen keep some weight forever, just shrinking geometrically the further back it is — so it never has a hard cliff. I'd pick the decay with span= to match roughly the same feel as a 30-row rolling window, or halflife= if I want to reason directly in 'time to decay to half weight.' One thing I'd flag: adjust=True, the default, and adjust=False give genuinely different numbers on the early rows — adjust=False is the textbook recursive formula, adjust=True bias-corrects by dividing by the weights actually accumulated so far — so I'd pick one deliberately and say which, not leave it as an unexamined default, especially since they can differ by 10%+ near the start of a short series."</em> The signal: naming that <code>.ewm()</code> has no fixed-window cliff (most candidates only know <code>.rolling()</code>), and specifically flagging that <code>adjust=</code> changes actual numbers, not just style.</p>
+</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/72_ewm.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/72_ewm.py</code></pre>
+<p>Uses the same real <code>orders_raw.csv</code> fixture, cleaned the same way as recent lessons. Exercise 1 computes <code>span=2, adjust=False</code> on An's two amounts and confirms row 1 is <code>68.0</code>, not the plain average <code>81.0</code> a <code>rolling(2).mean()</code> would give. Exercise 2 computes the SAME <code>span=2</code> with <code>adjust=True</code> instead and confirms row 1 comes out <code>61.5</code> — a different number from Exercise 1's <code>68.0</code>, proving <code>adjust=</code> is not cosmetic. Exercise 3 confirms passing both <code>span=</code> and <code>alpha=</code> together raises <code>ValueError</code>. Exercise 4 chains <code>.ewm()</code> after <code>groupby("customer")</code> and confirms Binh's smoothed series stays independent of An's.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: .rolling(window=N) gives a row full weight only while inside the last N rows, then zero weight the instant it exits -- a hard cliff. .ewm() has no such cliff: every row ever seen keeps SOME weight forever, just shrinking geometrically the further back it is.">
+    <p class="stem">What is the core difference between <code>.rolling(window=N)</code> and <code>.ewm()</code>?</p>
+    <button class="opt" data-ok>rolling zeroes a row's weight at the window edge; ewm shrinks it, never zero</button>
+    <button class="opt">rolling always requires groupby() first; ewm works fine with no grouping step at all</button>
+    <button class="opt">they always compute an identical result; ewm is merely a faster internal implementation now</button>
+  </div>
+  <div class="q" data-why="Confirmed directly (pandas 3.0.6): with span=2 on the two values 120.0 and 42.0, adjust=False (the recursive formula) gives 68.0 for row 1, while adjust=True (the default, bias-corrected by weights seen so far) gives 61.5 for the SAME inputs -- a real double-digit-percent difference, not a cosmetic one.">
+    <p class="stem">On the same two input values with the same <code>span=</code>, why can <code>adjust=True</code> and <code>adjust=False</code> produce different numbers for row 1?</p>
+    <button class="opt" data-ok>adjust=False uses the plain recursive formula; adjust=True bias-corrects by weights already seen</button>
+    <button class="opt">adjust=False only changes decimal formatting; the actual underlying float stays identical always</button>
+    <button class="opt">adjust=True is simply the old, now-deprecated spelling of that same exact computation</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: .rolling(window=N)'s first N-1 rows are NaN, since fewer than N rows exist yet to fill the fixed window. .ewm() has no such minimum -- the very first row's output is just itself, since there's nothing prior to discount against, so row 0 is never NaN by default (min_periods= can force one back in on purpose).">
+    <p class="stem">Why does <code>.ewm(span=2).mean()</code>'s FIRST row come back as a real number, not NaN, unlike <code>.rolling(window=2).mean()</code>'s first row?</p>
+    <button class="opt" data-ok>ewm has no minimum window; the first row is just itself, nothing to discount</button>
+    <button class="opt">ewm always silently fills its first row via bfill() using the second row's value</button>
+    <button class="opt">it is only a coincidence on this fixture; both methods behave identically in general</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the <a href="https://pandas.pydata.org/docs/user_guide/window.html#exponentially-weighted-window">pandas User Guide's "Exponentially weighted window" section</a> (per <code>RESOURCES.md</code>'s "Docs: pandas User Guide" entry, this course's authoritative-behavior source) documents <code>com=</code>/<code>span=</code>/<code>halflife=</code>/<code>alpha=</code> and the <code>adjust=</code> formula difference in full.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>.ewm()</code> is new today, placed right after Lesson 71's <code>pd.Grouper</code> entry.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-72 comes back reported as shakiest, otherwise another fresh curriculum/glossary scan for the next genuinely-uncovered pattern — this round's scan turned up a few other zero-hit candidates (<code>np.unique</code>, <code>argsort</code>, <code>searchsorted</code>) not yet picked, so the next round can start from those instead of a fully blank scan.<br><br>
+💬 Anything unclear — <code>adjust=True</code> vs <code>adjust=False</code>, why there's no SQL equivalent, <code>span=</code> vs <code>halflife=</code>, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

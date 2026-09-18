@@ -299,3 +299,96 @@ along the Phase 2 spine, adapted to the learning records.
   `bin/record-progress dataeng lesson_generated --day 3 --lesson
   0003-dbt-tests.html --detail '{"by":"headless"}'` succeeded on the first
   attempt, run from the repo root.
+- 2026-09-18 (headless run, Day 4 generated): fourth lesson,
+  `0004-dbt-marts-and-incremental.html`. `lessons/` at start of the run
+  contained Lessons 1–3 only, and no `2026-09-18` entry existed here yet, so
+  proceeded on schedule. DB reads (for a `lesson_completed` check on Day 3)
+  were not attempted this round given three straight prior rounds all
+  documented that path as blocked in this sandbox; the lesson instead opens
+  with an explicit "before today" `dbt build` check (expect
+  `PASS=9 WARN=0 ERROR=0 SKIP=0 TOTAL=9`) per this file's standing guidance
+  to never assume a prior day's build step landed. Read `MISSION.md`,
+  `RESOURCES.md`, `reference/glossary.html`, `PLAN.md`, and this file in
+  full, all three prior lessons
+  (`0001-pipeline-map-and-repo.html`/`0002-dbt-sources-and-staging.html`/
+  `0003-dbt-tests.html`) for structural precedent, and
+  `learning-records/0001-baseline-sql-strong-pipeline-tools-new.md` for the
+  learner profile, before writing.
+  **Content:** per PLAN.md's Day 4 row, taught the staging→marts boundary
+  (marts are allowed to join across staging models; staging never is), the
+  fact/dimension distinction via Kimball's grain-first framing (`fct_orders`
+  grained one row per order with `subtotal`/`delivery_fee`/`order_total` as
+  measures and `restaurant_id`/`courier_id` as foreign keys; `dim_restaurants`
+  grained one row per restaurant with `cuisine`/`city` as the attributes a
+  "top cuisines by city" query would group by), and all three
+  materializations side by side in one table (view/table/incremental — reruns
+  on read? storage? default use case?). Built `dim_restaurants` in full as
+  scaffolding (a `table`, joining `stg_restaurants` to `stg_orders` with a
+  `left join` + `count()` so a zero-order restaurant still gets a row — the
+  first model in the project depending on two staging models at once) and had
+  the learner fill in `fct_orders`'s `config()` block themselves (the day's
+  actual skill: `materialized='incremental'`, `unique_key='order_id'`, and an
+  `{% if is_incremental() %}` filter on `placed_at` against `{{ this }}`).
+  `unique_key` is bridged to `backend/`'s idempotency-key concept in one line
+  ("same input processed twice, same end state," applied to a batch re-run
+  instead of an API request) without re-deriving it, per the overlap rule. No
+  pandas, no Python-language teaching. The Verify block shows both the first
+  build (`INSERT 0 500` into the new `fct_orders`, `PASS=15` across 8 models
+  + tests) and a second build with no new orders landed (`INSERT 0 0`), to
+  make the incremental payoff concretely visible rather than asserted.
+  **Verification:** built the minimal scratch project precedent exactly —
+  `dbt_project.yml`, a `profiles.yml` pointing at `10.255.255.1`
+  (unreachable), Day 2–3's three staging models plus `stg_orders.yml` and
+  `sources.yml` with freshness, `tests/assert_positive_subtotal.sql`, and
+  the two new Day 4 files (`models/marts/fct_orders.sql`,
+  `models/marts/dim_restaurants.sql`, `models/marts/marts.yml`) — in
+  `.scratch_dataeng_verify_d4/` at the repo root, deleted after. Ran
+  `uv run --with "dbt-postgres==1.11.0" dbt parse --project-dir <abs>
+  --profiles-dir <abs> --no-partial-parse` using absolute-path flags in
+  single, non-compound, non-`cd`, non-redirecting commands — a compound
+  `... > file 2>&1` capture-and-grep in one call was rejected outright by
+  this session's approval gate before it even ran, same friction Days 2–3
+  hit, so output was read directly from each single command's own return
+  instead of redirected to a file and grepped. dbt-core again resolved to
+  1.12.5 (matching Day 3, not the 1.12.4 pinned in MISSION.md/RESOURCES.md
+  on creation day) with no live database needed; output was clean on both
+  the initial parse and a `--no-partial-parse` re-run, and this file's
+  Day 3-documented `relationships` `arguments:` nesting requirement was
+  already satisfied by copying Day 3's `stg_orders.yml` verbatim rather than
+  rediscovered fresh. Confirmed no live-Postgres features were used in the
+  new marts (`is_incremental()`/`{{ this }}` are purely compile-time/Jinja
+  constructs dbt resolves without a connection during `parse`). Ran
+  `dbt list --resource-type model` and `--resource-type test`, which listed
+  all 5 models (3 staging + `fct_orders` + `dim_restaurants`) and all 11
+  tests by their dbt-generated names, including
+  `unique_fct_orders_order_id` and `unique_dim_restaurants_restaurant_id` —
+  both used verbatim in the lesson's build-output tables so the exact
+  strings are confirmed real rather than guessed. Then added a throwaway
+  `models/marts/broken_mart.sql` with a `ref()` to a nonexistent model to
+  confirm `dbt parse` still catches errors: it reported `Compilation Error`
+  and, this round, exit code 2 (consistent with Day 3's finding that the
+  non-zero exit sometimes does happen, just not reliably enough to trust
+  instead of grepping); deleted the broken file, re-ran to confirm clean
+  again, then deleted the whole scratch directory. Docker was not exercised
+  this round (no live Postgres needed for `dbt parse`); the `dbt build`
+  row/pass counts and `INSERT 0 500` / `INSERT 0 0` output in the lesson's
+  Verify block are hand-derived from Day 1's fixed seed (500 orders, 40
+  restaurants) and dbt's own documented incremental/build output format,
+  not executed against a live warehouse.
+  Registered Lesson 4 in `assets/nav.js` (`node --check` clean) and added
+  the Day 4 section to `reference/glossary.html` (6 terms: mart, fact table,
+  dimension table, grain, table (materialization), incremental model —
+  grepped Days 1–3's sections first for "mart/fact table/dimension
+  table/grain/incremental model", no collisions; Day 2 already has a `view`
+  and generic `materialization` row, left untouched). Quiz options were
+  word-count-balanced by hand with single-line `echo | wc -w` checks per
+  option (`python3`/heredoc invocations were blocked by the sandbox's
+  approval gate again this round, consistent with Day 3, so no script did
+  the counting); the first draft came up mismatched on three of the five
+  questions (9/8/8, 7/8/8, and 5/6/4 word splits) and was rebalanced to
+  8/8/8, 7/7/7 and 6/6/6 respectively, treating dotted/underscored
+  identifiers (`raw.orders`, `fct_orders`) as single tokens, consistent with
+  how Days 1–2 counted `raw.order_events`/`ref()`/`source()`.
+  `bin/record-progress dataeng lesson_generated --day 4 --lesson
+  0004-dbt-marts-and-incremental.html --detail '{"by":"headless"}'` succeeded
+  on the first attempt, run from the repo root.

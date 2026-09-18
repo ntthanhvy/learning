@@ -56,6 +56,17 @@
   <tr><td>loaded_at_field</td><td>giữ nguyên "loaded_at_field" — tên cột thời gian dùng để tính độ mới của dữ liệu</td><td>The <code>sources.yml</code> field naming which timestamp column freshness should read from — required for any source with a <code>freshness</code> block configured.</td></tr>
 </table>
 
+<h2 id="day4">Day 4 — dbt: marts, facts, dimensions &amp; incremental</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>mart</td><td>giữ nguyên "mart" — lớp model trên cùng, join nhiều staging model lại thành bảng người dùng cuối thực sự truy vấn</td><td>The dbt layer built on top of staging, joining across staging models into the shapes a dashboard, analyst or downstream consumer actually queries — the layer this course's headline tables (<code>fct_orders</code>, <code>dim_restaurants</code>, <code>dim_couriers</code>, <code>mart_delivery_sla</code>) live in.</td></tr>
+  <tr><td>fact table</td><td>giữ nguyên "fact table" — 1 dòng/sự kiện, chứa khóa ngoại tới dimension và các số liệu để tính tổng/trung bình</td><td>A mart table holding one row per business event, at a fixed grain, with foreign keys to its dimensions and the numeric measures analysts aggregate — <code>fct_orders</code> is one row per order, the event this whole pipeline exists to track.</td></tr>
+  <tr><td>dimension table</td><td>giữ nguyên "dimension table" — 1 dòng/thực thể, chứa các thuộc tính để filter hoặc group by</td><td>A mart table holding one row per real-world entity, with the descriptive attributes people filter or group by — <code>dim_restaurants</code> is one row per restaurant, the entity orders reference by foreign key.</td></tr>
+  <tr><td>grain</td><td>giữ nguyên "grain" — mức chi tiết 1 dòng đại diện, phải nói rõ ràng (ví dụ "mỗi dòng = 1 order")</td><td>The level of detail one row of a table represents — stating it explicitly (e.g. "one row per order") is what lets anyone check a model is right without reading its SQL.</td></tr>
+  <tr><td>table (materialization)</td><td>giữ nguyên "table" — dbt lưu kết quả SELECT thành bảng thật, đọc nhanh hơn view nhưng phải build lại mới cập nhật</td><td>A materialization where dbt runs the <code>SELECT</code> once at build time and stores the result as a real table — faster to query than a view, but stale until the next <code>dbt run</code> rebuilds it from scratch.</td></tr>
+  <tr><td>incremental model</td><td>giữ nguyên "incremental model" — sau lần build đầu, dbt chỉ xử lý dòng mới/thay đổi, không build lại toàn bộ</td><td>A materialization where, after the first build, dbt only processes new or changed rows instead of rebuilding the whole table from scratch — the right default for a large, append-heavy table where reprocessing everything every run wastes time.</td></tr>
+</table>
+
 <script src="../assets/nav.js"></script>
 </body>
 </html>

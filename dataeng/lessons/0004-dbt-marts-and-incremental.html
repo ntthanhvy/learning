@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 4 · dbt: marts, facts, dimensions &amp; incremental</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 4 · ~30–45 min · 18 Sep 2026</p>
+<h1>dbt: marts, facts, dimensions &amp; incremental</h1>
+<p class="byline">Today's tangible win: <code>fct_orders</code> and <code>dim_restaurants</code> built as your first marts — the first models in this project that join more than one staging model into something a dashboard or analyst would actually query. <code>fct_orders</code> is also your first <code>materialized='incremental'</code> model, with a <code>unique_key</code> so re-runs never duplicate a row. By the end you can defend view vs. table vs. incremental out loud, with a real reason for each.</p>
+
+<div class="callout"><strong>Before today — check Day 3 actually landed:</strong> this lesson assumes <code>stg_restaurants</code>, <code>stg_couriers</code> and <code>stg_orders</code> exist as views, with the tests and source freshness from Day 3 wired up and passing. If you're not sure, confirm before continuing:
+<pre><code>cd food_delivery_pipeline
+uv run --project ../dbt_env dbt build</code></pre>
+Expected: <code>Done. PASS=9 WARN=0 ERROR=0 SKIP=0 TOTAL=9</code>. If you still see <code>ERROR=2</code> naming <code>order_id 13</code> or <code>27</code>, go back and run Day 3's two <code>UPDATE</code> statements before starting today — everything below assumes the staging layer is clean.</p></div>
+
+<h2>1 · What a mart actually is</h2>
+<p>Staging is one model per raw table, no joins. A <dfn data-en="the dbt layer built on top of staging, joining across staging models into the shapes a dashboard, analyst or downstream consumer actually queries — the layer this course's headline tables (fct_orders, dim_restaurants, dim_couriers, mart_delivery_sla) live in" data-vn="giữ nguyên &quot;mart&quot; — lớp model trên cùng, join nhiều staging model lại thành bảng người dùng cuối thực sự truy vấn">mart</dfn> is the opposite: it's allowed — expected — to join across staging models, because a mart's job is to answer a real question ("which restaurant is this order from, and what's that restaurant's commission rate?"), not to mirror one raw table. Today's two marts sit directly on top of Day 2's staging layer:</p>
+<pre><code>raw.restaurants ──▶ stg_restaurants ──┐
+raw.couriers    ──▶ stg_couriers      ├──▶ fct_orders
+raw.orders      ──▶ stg_orders      ──┘
+                     stg_restaurants ────▶ dim_restaurants</code></pre>
+<p>This is the first time in the course two staging models feed the same downstream model — the DAG stops being flat siblings (Day 2's <code>dbt docs serve</code> picture) and starts actually branching.</p>
+
+<h2>2 · Facts vs. dimensions</h2>
+<p>Dimensional modelling splits a warehouse into two kinds of table, a distinction from Kimball's data warehouse toolkit that predates dbt by two decades and still organizes almost every analytics warehouse built today:</p>
+<ul>
+<li>A <dfn data-en="a mart table holding one row per business event, at a fixed grain, with foreign keys to its dimensions and the numeric measures analysts aggregate — fct_orders is one row per order, the event this whole pipeline exists to track" data-vn="giữ nguyên &quot;fact table&quot; — 1 dòng/sự kiện, chứa khóa ngoại tới dimension và các số liệu để tính tổng/trung bình">fact table</dfn> holds one row per business event, at a declared <dfn data-en="the level of detail one row of a table represents — stating it explicitly (e.g. 'one row per order') is what lets anyone check a model is right without reading its SQL" data-vn="giữ nguyên &quot;grain&quot; — mức chi tiết 1 dòng đại diện, phải nói rõ ràng (ví dụ 'mỗi dòng = 1 order')">grain</dfn>, carrying foreign keys to its dimensions plus the numeric measures people aggregate. <code>fct_orders</code>' grain is one row per order — <code>subtotal</code>, <code>delivery_fee</code> and <code>order_total</code> are its measures, <code>restaurant_id</code> and <code>courier_id</code> are its foreign keys.</li>
+<li>A <dfn data-en="a mart table holding one row per real-world entity, with the descriptive attributes people filter or group by — dim_restaurants is one row per restaurant, the entity orders reference by foreign key" data-vn="giữ nguyên &quot;dimension table&quot; — 1 dòng/thực thể, chứa các thuộc tính để filter hoặc group by">dimension table</dfn> holds one row per real-world entity, with the descriptive attributes people filter or group by. <code>dim_restaurants</code>' grain is one row per restaurant — <code>cuisine</code> and <code>city</code> are exactly the columns a "top cuisines by city" query groups by.</li>
+</ul>
+<p>Naming the grain out loud before writing a single line of SQL is the actual skill here — Kimball's own framing is "declare the grain first," and getting it wrong (say, accidentally producing two rows per order) is the single most common mart bug, always caught by a <code>unique</code> test on the grain column, which is exactly why both models below get one.</p>
+
+<h2>3 · Materialization, the third option: incremental</h2>
+<p>Day 2 covered <dfn data-en="dbt's setting for how a model's SELECT becomes warehouse objects — view (query re-runs every time it's read, always fresh, no storage), table (query runs once at build time, stored, stale until next run), or incremental (Day 4)" data-vn="giữ nguyên &quot;materialization&quot; — cách SELECT của model biến thành đối tượng trong warehouse: view, table, hay incremental">view</dfn> and mentioned <dfn data-en="a materialization where dbt runs the SELECT once at build time and stores the result as a real table — faster to query than a view, but stale until the next dbt run rebuilds it from scratch" data-vn="giữ nguyên &quot;table&quot; — dbt lưu kết quả SELECT thành bảng thật, đọc nhanh hơn view nhưng phải build lại mới cập nhật">table</dfn> in passing. A table stores its result at build time — faster to query than a view, since nothing re-runs on read, but it goes stale until the next full rebuild, and a full rebuild means re-running the <code>SELECT</code> over <em>every</em> row, every time, even the 499 that haven't changed since yesterday.</p>
+<p>An <dfn data-en="a materialization where, after the first build, dbt only processes new or changed rows instead of rebuilding the whole table from scratch — the right default for a large, append-heavy table where reprocessing everything every run wastes time" data-vn="giữ nguyên &quot;incremental model&quot; — sau lần build đầu, dbt chỉ xử lý dòng mới/thay đổi, không build lại toàn bộ">incremental model</dfn> fixes exactly that: after the first build, dbt only processes rows that are new or changed, appending or merging them into the existing table instead of rebuilding it from scratch. That trade costs something too — incremental logic is more code to get right, and a badly written incremental filter can silently miss late-arriving rows — so it's not the default for every table, only for ones where "reprocess everything, every time" actually hurts.</p>
+<table class="gloss">
+  <tr><th>Materialization</th><th>Query re-runs on read?</th><th>Storage</th><th>Default choice for</th></tr>
+  <tr><td>view</td><td>yes, every read</td><td>none</td><td>thin, cheap staging — Day 2's <code>stg_*</code> models</td></tr>
+  <tr><td>table</td><td>no, only at build</td><td>full result</td><td>small-to-medium marts, rebuilt fully each run — today's <code>dim_restaurants</code></td></tr>
+  <tr><td>incremental</td><td>no, only at build</td><td>full result, built incrementally</td><td>large, append-heavy fact tables — today's <code>fct_orders</code></td></tr>
+</table>
+<p><code>raw.orders</code> is the one table in this domain that only grows — restaurants and couriers barely change, but every day adds new orders. That append-heavy shape is exactly the signal to reach for incremental, and it's why <code>fct_orders</code>, not <code>dim_restaurants</code>, is today's incremental model.</p>
+
+<h2>4 · Build: <code>dim_restaurants</code> as a table</h2>
+<p>Create <code>models/marts/dim_restaurants.sql</code>. It's a dimension: one row per restaurant, joining in a measure worth denormalizing onto it (how many orders it's had), computed with a <code>left join</code> so a restaurant with zero orders still gets a row:</p>
+<pre><code><span class="cm">-- models/marts/dim_restaurants.sql</span>
+select
+    r.restaurant_id,
+    r.name,
+    r.cuisine,
+    r.city,
+    r.commission_rate,
+    count(o.order_id) as total_orders
+from {{ ref('stg_restaurants') }} as r
+left join {{ ref('stg_orders') }} as o
+    on o.restaurant_id = r.restaurant_id
+group by
+    r.restaurant_id,
+    r.name,
+    r.cuisine,
+    r.city,
+    r.commission_rate</code></pre>
+<p>Note the two <code>ref()</code> calls: this is the first model in the project that depends on <em>two</em> staging models at once — the branch Section 1's DAG sketch showed.</p>
+
+<h2>5 · Build: <code>fct_orders</code>, incremental with a <code>unique_key</code></h2>
+<p>Now write <code>models/marts/fct_orders.sql</code> yourself. Requirements:</p>
+<ul>
+<li>a <code>config()</code> block at the top setting <code>materialized='incremental'</code> and <code>unique_key='order_id'</code> — the grain column, so dbt knows which existing row a re-run's new data should replace rather than duplicate;</li>
+<li>select <code>order_id</code>, <code>customer_id</code>, <code>restaurant_id</code>, <code>courier_id</code>, <code>subtotal</code>, <code>delivery_fee</code>, <code>order_total</code> and <code>placed_at</code> from <code>{{ ref('stg_orders') }}</code>;</li>
+<li>an <code>{% if is_incremental() %}</code> block that filters to only rows placed after the current max <code>placed_at</code> already in <code>{{ this }}</code> — on the very first run the table doesn't exist yet, so this whole block is skipped and every row is selected; on every later run, it's skipped only for rows already loaded.</li>
+</ul>
+<pre><code><span class="cm">-- models/marts/fct_orders.sql -- fill in the config() and the incremental filter</span>
+{{
+    config(
+        materialized=<span class="cm">'TODO'</span>,
+        unique_key=<span class="cm">'TODO'</span>
+    )
+}}
+
+select
+    order_id,
+    customer_id,
+    restaurant_id,
+    courier_id,
+    subtotal,
+    delivery_fee,
+    order_total,
+    placed_at
+from {{ ref('stg_orders') }}
+
+<span class="cm">-- TODO: {% if is_incremental() %} ... {% endif %}, filtering to placed_at</span>
+<span class="cm">-- newer than the current max already in {{ this }}</span></code></pre>
+<p><code>{{ this }}</code> is dbt's name for "the table this model itself is building" — the only way an incremental model's own SQL can refer to what it already contains, since <code>ref()</code> only points at <em>other</em> models. <code>is_incremental()</code> is <code>true</code> only when the target table already exists and this isn't a <code>--full-refresh</code>, which is exactly the condition under which "only new rows" is the correct thing to ask for.</p>
+<div class="callout"><strong>Why <code>unique_key</code>, specifically:</strong> without it, an incremental run just <code>INSERT</code>s whatever the <code>SELECT</code> returns — if a late-arriving update to an existing order slipped past the <code>placed_at</code> filter, or you ever ran the model twice on the same new data by accident, that <code>order_id</code> would appear in the table twice. With <code>unique_key='order_id'</code> set, dbt instead merges: a row whose key already exists gets updated in place, not duplicated. This is the exact same idea as <a href="../backend/index.html">backend/</a>'s idempotency keys — same input processed twice, same end state — just applied to a batch model's re-run instead of an API request. One-line bridge only; that concept isn't re-derived here.</div>
+
+<h2>6 · Test the grain, on both new marts</h2>
+<p>Add <code>models/marts/marts.yml</code>, testing the column each model's grain is declared on — the same <code>unique</code> + <code>not_null</code> pair Day 3 put on <code>stg_orders.order_id</code>, now on the marts:</p>
+<pre><code><span class="cm">-- models/marts/marts.yml</span>
+version: 2
+
+models:
+  - name: fct_orders
+    columns:
+      - name: order_id
+        tests:
+          - unique
+          - not_null
+  - name: dim_restaurants
+    columns:
+      - name: restaurant_id
+        tests:
+          - unique
+          - not_null</code></pre>
+<p>Set the marts folder's default materialization in <code>dbt_project.yml</code>, next to Day 2's staging block — <code>table</code> as the folder default, with <code>fct_orders</code>'s own <code>config()</code> above overriding it to <code>incremental</code>:</p>
+<pre><code>models:
+  food_delivery_pipeline:
+    staging:
+      +materialized: view
+    marts:
+      +materialized: table</code></pre>
+
+<h2>7 · Build it, and watch incremental behave differently on run 2</h2>
+<pre><code>uv run --project ../dbt_env dbt build</code></pre>
+<p>Expected, first run — <code>fct_orders</code> builds as a full table (no existing data to compare against yet), <code>dim_restaurants</code> builds as a table, all tests pass:</p>
+<pre><code>1 of 8 OK created sql view model dbt_dev.stg_restaurants ....... [CREATE VIEW in 0.05s]
+2 of 8 OK created sql view model dbt_dev.stg_couriers ........... [CREATE VIEW in 0.03s]
+3 of 8 OK created sql view model dbt_dev.stg_orders ............. [CREATE VIEW in 0.04s]
+4 of 8 OK created sql incremental model dbt_dev.fct_orders ...... [INSERT 0 500 in 0.09s]
+5 of 8 OK created sql table model dbt_dev.dim_restaurants ....... [SELECT 40 in 0.06s]
+6 of 8 PASS relationships_stg_orders_restaurant_id__restaurant_id__ref_stg_restaurants_ ... [PASS in 0.05s]
+7 of 8 PASS unique_fct_orders_order_id ......................... [PASS in 0.04s]
+8 of 8 PASS unique_dim_restaurants_restaurant_id ................ [PASS in 0.03s]
+
+Completed successfully
+
+Done. PASS=15 WARN=0 ERROR=0 SKIP=0 TOTAL=15</code></pre>
+<p>Now run it again, with no new orders landed:</p>
+<pre><code>uv run --project ../dbt_env dbt build</code></pre>
+<p>Expected — <code>fct_orders</code> is now genuinely incremental: it only scans for rows newer than its current max <code>placed_at</code>, finds none, and inserts zero rows rather than rebuilding all 500 from scratch:</p>
+<pre><code>4 of 8 OK created sql incremental model dbt_dev.fct_orders ...... [INSERT 0 0 in 0.04s]</code></pre>
+<p><code>INSERT 0 0</code> on the second run, versus <code>INSERT 0 500</code> on the first, is the whole payoff: an incremental model does less work every run after the first, and re-running it never duplicates a row because of <code>unique_key</code>.</p>
+
+<h2>8 · Verify</h2>
+<p>Confirm both marts landed as the right kind of object, and the row counts match the domain:</p>
+<pre><code>docker compose exec -T postgres psql -U fdp -d fdp -c \
+  "SELECT table_name, table_type FROM information_schema.tables
+   WHERE table_schema = 'dbt_dev' AND table_name IN ('fct_orders','dim_restaurants');"</code></pre>
+<pre><code>   table_name    | table_type
+------------------+------------
+ dim_restaurants  | BASE TABLE
+ fct_orders       | BASE TABLE
+(2 rows)</code></pre>
+<p>(Both show as <code>BASE TABLE</code> in Postgres — incremental and table materializations are both real tables under the hood; the difference is in how dbt <em>populates</em> them, not what kind of object results.)</p>
+<pre><code>docker compose exec -T postgres psql -U fdp -d fdp -c \
+  "SELECT count(*) FROM dbt_dev.fct_orders;"
+docker compose exec -T postgres psql -U fdp -d fdp -c \
+  "SELECT count(*) FROM dbt_dev.dim_restaurants;"</code></pre>
+<pre><code> count
+-------
+   500
+(1 row)
+
+ count
+-------
+    40
+(1 row)</code></pre>
+<p>500 orders, 40 restaurants — same counts as Day 1's seed, confirming no rows were dropped or duplicated across two builds. Commit <code>models/marts/dim_restaurants.sql</code>, <code>models/marts/fct_orders.sql</code>, <code>models/marts/marts.yml</code>, and the updated <code>dbt_project.yml</code>.</p>
+
+<div class="interview">
+<p><strong>Q: "Walk me through view vs. table vs. incremental — how do you choose?"</strong> A strong answer, out loud: <em>"Start with view, because it's free — no storage, always current, and fine for anything cheap to compute, which is why every staging model in this project is a view. Move to table when a model is either expensive to recompute or queried often enough that paying the query cost on every single read stops being worth it — table trades staleness (it's only as fresh as the last run) for read speed. Move to incremental when a table's inputs are large and append-heavy enough that rebuilding the whole thing every run wastes real time — it needs a unique_key so a re-run merges into existing rows instead of duplicating them, and an is_incremental() filter so it only processes what's actually new. In this project, raw.orders only grows, so fct_orders is incremental; raw.restaurants barely changes and is small, so dim_restaurants stays a plain table."</em> The signal: choosing based on data shape and query pattern, not defaulting to incremental because it sounds more advanced — Kimball's own dimensional modelling guidance treats most dimensions as small enough that a full rebuild is simply not a problem worth solving.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A fact table holds one row per business event with foreign keys to its dimensions plus numeric measures to aggregate. A dimension table holds one row per real-world entity with descriptive attributes to filter or group by. fct_orders is grained on the order event; dim_restaurants is grained on the restaurant entity.">
+    <p class="stem">What is the core difference between a fact table and a dimension table?</p>
+    <button class="opt" data-ok>Fact rows are events; dimension rows are entities</button>
+    <button class="opt">Fact rows are entities; dimension rows are events</button>
+    <button class="opt">Fact rows are views; dimension rows are tables</button>
+  </div>
+  <div class="q" data-why="raw.orders only grows over time -- every day adds new rows, while restaurants and couriers barely change. That append-heavy shape is exactly the case where reprocessing every row on every run wastes time, which is why incremental is the right default for fct_orders specifically.">
+    <p class="stem">Why is <code>fct_orders</code>, not <code>dim_restaurants</code>, today's incremental model?</p>
+    <button class="opt" data-ok><code>raw.orders</code> only grows; restaurants barely change</button>
+    <button class="opt"><code>raw.restaurants</code> only grows; orders barely change</button>
+    <button class="opt"><code>raw.couriers</code> only grows; orders barely change</button>
+  </div>
+  <div class="q" data-why="unique_key tells dbt which column identifies an existing row, so a re-run merges new data into that row instead of blindly inserting a second copy of it. Without it, an incremental run is a plain append, and any row processed twice becomes a duplicate.">
+    <p class="stem">What does setting <code>unique_key='order_id'</code> actually prevent?</p>
+    <button class="opt" data-ok>A re-run inserting a duplicate row for order</button>
+    <button class="opt">A re-run inserting one new row for order</button>
+    <button class="opt">A re-run inserting zero new rows for order</button>
+  </div>
+  <div class="q" data-why="is_incremental() is only true once the target table already exists and the run is not a --full-refresh. On a model's very first run there is nothing to compare against yet, so the whole is_incremental() block is skipped and every row from the source query is selected.">
+    <p class="stem">On an incremental model's very first run, what does <code>is_incremental()</code> return?</p>
+    <button class="opt" data-ok><code>false</code> — nothing to compare against yet</button>
+    <button class="opt"><code>true</code> — the table has all rows</button>
+    <button class="opt"><code>true</code> — but every row still skipped</button>
+  </div>
+  <div class="q" data-why="{{ this }} is dbt's way of referring to the table the current model itself is building -- the only way an incremental model's SQL can check what it already contains, since ref() only ever points at other models, never at the model currently being compiled.">
+    <p class="stem">What does <code>{{ this }}</code> refer to inside <code>fct_orders.sql</code>?</p>
+    <button class="opt" data-ok>The <code>fct_orders</code> table itself, right now</button>
+    <button class="opt">The <code>stg_orders</code> view it selects from</button>
+    <button class="opt">The <code>dim_restaurants</code> table, built separately nearby</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> dbt Labs's <a href="https://docs.getdbt.com/docs/build/incremental-models">Incremental models</a> doc (cited in <code>RESOURCES.md</code> as this course's primary source for today) covers <code>is_incremental()</code>, <code>unique_key</code> and strategies directly from the source — Phase 2a returns to the <code>merge</code>/<code>delete+insert</code> strategy choice in depth. For the fact/dimension distinction itself, the <a href="https://www.kimballgroup.com/data-warehouse-business-intelligence-resources/kimball-techniques/dimensional-modeling-techniques/">Kimball Group's Dimensional Modeling Techniques</a> is the primary source dimensional modelling traces back to, decades before any of today's tools existed.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 4.<br>
+<strong>Next lesson (19 Sep):</strong> Kafka — topics, partitions, keys and offsets, running Kafka in compose and writing a Python producer for <code>order_events</code>. This is the difficulty spike the baseline record flagged: the first genuinely new mental model in the course, an append-only log rather than a table.<br><br>
+💬 Anything unclear — fact vs. dimension, the incremental filter, or why <code>unique_key</code> matters? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

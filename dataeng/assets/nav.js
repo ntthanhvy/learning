@@ -12,6 +12,7 @@
     { n: 1, date: "2026-09-15", title: "The pipeline map & the repo", file: "lessons/0001-pipeline-map-and-repo.html" },
     { n: 2, date: "2026-09-16", title: "dbt: sources, staging & ref()", file: "lessons/0002-dbt-sources-and-staging.html" },
     { n: 3, date: "2026-09-17", title: "dbt: tests catch bad data", file: "lessons/0003-dbt-tests.html" },
+    { n: 4, date: "2026-09-18", title: "dbt: marts, facts, dimensions & incremental", file: "lessons/0004-dbt-marts-and-incremental.html" },
   ];
 
   const REFS = [

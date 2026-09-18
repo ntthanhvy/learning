@@ -154,6 +154,8 @@
       file: "lessons/0073-copy-and-bulk-insert.html" },
     { n: 74, date: "2026-09-17", title: "Primary key design: choosing what identifies a row",
       file: "lessons/0074-primary-key-design.html" },
+    { n: 75, date: "2026-09-18", title: "Database triggers: code that runs without anyone calling it",
+      file: "lessons/0075-database-triggers.html" },
   ];
 
   const REFS = [

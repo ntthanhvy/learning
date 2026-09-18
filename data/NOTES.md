@@ -5755,3 +5755,132 @@
   was run once from the repo root as a single standalone command; the
   read path (`bin/query-progress`) was not attempted, consistent with
   recent rounds.
+- 2026-09-18 generation (Lesson 72, headless run): idempotency confirmed
+  first — globbed `data/lessons/` for `0072-*.html` (none found) and
+  grepped `assets/nav.js` for `n: 72`/`2026-09-18` (neither found, highest
+  registered lesson was still 71, dated 2026-09-17) — so this round
+  proceeded. Read `MISSION.md` (in full, never modified), `RESOURCES.md`,
+  the full `reference/glossary.html`, the tail of `NOTES.md`, Lesson 71's
+  own HTML body as structural precedent, and
+  `data/learning-records/0001-baseline-sql-strong-python-basic.md` (still
+  just the single 2026-07-09 baseline). The DB read path
+  (`bin/query-progress`) was not attempted this round, consistent with
+  the documented known-blocked status. Lesson 71's own closing teaser
+  named no single standing candidate ("this round's fresh gap search
+  found no other single standing zero-hit candidate clean enough to name
+  for next time"), so this round ran a fresh gap scan with the `Grep`
+  tool directly against every lesson body under `data/lessons/` and the
+  full glossary: checked `melt()` (covered, Lessons 6/14/28), `.rolling()`
+  (covered, Lesson 13), `.explode()` (covered, Lesson 19), `np.unique`,
+  `.ewm()`, `argsort`, `searchsorted`, `.T`/`transpose` — the last four
+  and `.ewm()` all came back genuinely zero-hit across every lesson body
+  AND the glossary. Explicitly double-checked Lesson 13's own body for
+  any passing mention of `ewm`/`exponential`/`decay`/`halflife`/`com=`/
+  `span=` before committing to the pick — none found, ruling out a
+  false-positive "already touched in passing" pick. Picked `.ewm()`
+  using this course's established "closes a gap between two
+  already-taught siblings" bar: Lesson 13 taught `.rolling()` (fixed
+  window, hard cliff at the edge) and `.expanding()` (unbounded, every
+  row weighted equally forever) as a pair, but never their natural third
+  sibling — a decaying-but-never-zero weighted average — which is
+  `.ewm()` exactly, and it is genuinely interview-load-bearing (EWMA is
+  the standard vocabulary term for this in time-series/finance-flavored
+  data roles, per `MISSION.md`'s interview-prep framing); `np.unique`/
+  `argsort`/`searchsorted` were left as noted-but-unpicked candidates for
+  a future round, named in this lesson's own closing teaser so the next
+  round doesn't have to re-discover them from scratch. A scratch dir was
+  created at `data/.scratch/lesson72/` (not `/tmp`, this sandbox blocks
+  that) with the real `orders_raw.csv` fixture copied in; pandas
+  reconfirmed at version 3.0.6 this round (one patch newer than the
+  3.0.5 several recent lessons cited — noted in the lesson body as the
+  version actually confirmed against, not silently left at the old
+  number). Every claim was hand-verified there with standalone probe
+  scripts before writing: confirmed `.ewm(span=2, adjust=False).mean()`
+  on An's real two cleaned amounts (120.0, then 42.0) gives row 1 =
+  `68.0`, NOT the plain two-value average `81.0` a `rolling(2).mean()`
+  would give on the same data — confirming the more recent value counts
+  more heavily; confirmed the SAME `span=2` with `adjust=True` (the
+  default) instead gives a genuinely DIFFERENT row 1 = `61.5`, over 10%
+  apart from `adjust=False`'s `68.0` on identical inputs — the round's
+  central, non-obvious finding, double-checked by hand-deriving both
+  formulas independently in a separate scratch script
+  (`alpha = 2/(span+1) = 2/3`; `adjust=False`'s recursive
+  `y1 = (1-alpha)*y0 + alpha*x1 = 68.0`; `adjust=True`'s bias-corrected
+  weighted average `y1 = (w1*x1 + w0*x0)/(w1+w0) = 61.5` using weights
+  `w0=(1-alpha)^1`, `w1=(1-alpha)^0`) and confirming the hand-derived
+  numbers matched pandas' own output exactly on both formulas before
+  trusting either number in the lesson text. Also confirmed directly:
+  passing both `span=` and `alpha=` together raises `ValueError`
+  ("com, span, halflife, and alpha are mutually exclusive"), and passing
+  none of `com=`/`span=`/`halflife=`/`alpha=` at all raises a different
+  `ValueError` ("Must pass one of comass, span, halflife, or alpha");
+  `.ewm()`'s first row is never `NaN` by default (checked directly on
+  both `adjust=True` and `adjust=False`, neither produced a leading NaN,
+  unlike `.rolling(2).mean()`'s confirmed leading NaN on the identical
+  data), and `min_periods=2` reintroduces a leading NaN on purpose, also
+  confirmed directly; confirmed `.ewm()` chains correctly after
+  `groupby("customer")` via `.apply(lambda s: s.ewm(...).mean())`,
+  keeping Binh's smoothed values (`35.5`, then `131.833...`) fully
+  independent of An's own smoothing. Before writing the practice file,
+  ran this course's now-standard freebie-risk probe — checking whether a
+  bare unfilled `...` placed at any blank in this lesson's design would
+  silently pass instead of raising or being caught by an `is True`/
+  `is False`/`== value` check: `ex1_span_value`/`ex1_adjust_value`/
+  `ex2_adjust_value` are checked with `== 2` and `is False`/`is True`
+  respectively (not bare truthiness), `ex3_alpha_value` with `== 0.5`,
+  and `ex4_group_key` with `== "customer"` — every blank fails closed if
+  left as `...`, confirmed by running the shipped file unmodified before
+  any exercise was solved. The shipped (unsolved) `practice/72_ewm.py`
+  was executed in a mirrored `.scratch/verify72/practice/` layout and
+  printed exactly 4 ✗ with no traceback on the first attempt (no bugs
+  needed fixing this round); a solved copy (`72_solved.py`, not shipped)
+  then printed all 4 ✓ on the first run. The shipped file was also
+  re-run directly from its real `practice/` location (`cd data && uv run
+  --with pandas python3 practice/72_ewm.py`), both before and after the
+  glossary/nav.js edits that followed, and printed the identical 4 ✗, no
+  crash, both times. Quiz options were drafted, then mechanically
+  word-counted with a Python script isolating each `<div class="q">`
+  block by its own regex span (this course's established approach) — the
+  first draft came out mismatched on all three questions (Q1 19/13/12,
+  Q2 14/11/12, Q3 17/14/15); iterated through several rewrite+recount
+  cycles (re-running the same script after each edit) until all three
+  landed level (Q1 14/14/14, Q2 12/12/12, Q3 14/14/14), with exactly one
+  `data-ok` per question throughout, confirmed by the same script. A
+  separate mechanical tag-balance script (checking every open/closed tag
+  pair by regex occurrence count) caught one real markup bug this round:
+  the initial draft's `<div class="callout">` closed with a stray extra
+  `</p>` before `</div>` even though — confirmed by checking Lesson 71's
+  own callout div directly — this course's established callout markup
+  never wraps its content in a `<p>` at all, just plain text directly
+  inside the `<div>`; fixed by removing the stray `</p>`, re-ran the
+  tag-balance script afterward and confirmed `p` open/close counts
+  matched exactly (18/18) along with every other tracked tag. Raw-`&`
+  scan found exactly two matches, both the two `&` characters inside the
+  single already-established `cd ~/learning/data && uv run …` shell
+  command inside a `<pre><code>` block (this course's standing
+  precedent, not a new bug), zero raw `&` in prose. Checked the glossary
+  for a collision before adding anything: grepped for `ewm`/`EWMA`/
+  `exponential` across the full glossary — no existing entry — so added
+  exactly one new row, `.ewm()`, placed directly after Lesson 71's
+  `pd.Grouper` entry; confirmed the glossary table's tags stayed balanced
+  after the insert. Registered Lesson 72 in `nav.js` with today's date
+  (2026-09-18); `node --check` confirmed it still parses as valid
+  JavaScript after the edit. This round's fresh gap search surfaced
+  three other zero-hit candidates not picked this time — `np.unique`,
+  `argsort`, `searchsorted` — named in this lesson's own closing teaser
+  so the next round can start from those instead of a fully blank scan.
+  The entire `data/.scratch/` directory (and a separate
+  `data/.scratch_check/` used only for the tag-balance script) was
+  removed (`rm -rf`) after verification; `git status --short` afterward
+  showed only the intended new/modified `data/` files (`data/assets/
+  nav.js`, `data/reference/glossary.html`, new
+  `data/lessons/0072-ewm.html`, new `data/practice/72_ewm.py`) — other
+  course directories (`backend/`, `dataeng/`, `python/`) showed unrelated
+  pending changes from other sessions, confirmed untouched by this round.
+  This agent does not run `git commit` — leaving working-tree changes
+  uncommitted remains this course's established convention.
+  `bin/record-progress data lesson_generated --day 72 --lesson
+  0072-ewm.html --detail '{"by":"headless"}'` was run once from the repo
+  root as a single standalone command; the read path
+  (`bin/query-progress`) was not attempted, consistent with recent
+  rounds.

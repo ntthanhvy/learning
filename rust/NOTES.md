@@ -1104,3 +1104,32 @@ by the user there; they apply here identically.
   past it; backend, data, python, and dataeng lessons were generated this
   round via delegated agents run WITHOUT worktree isolation, per the
   2026-09-16 lesson learned — see their own NOTES.md entries for detail.)
+- 2026-09-18 (headless 06:00 run; verified by the orchestrator directly
+  rather than a delegated agent, since this course needs no new content):
+  same as every prior post-week day — verified `daily.html`, `assets/srs.js`,
+  and `assets/quiz-bank.js` are all present and untouched (8 `id: "k`
+  matches — 7 real kata entries `k1`-`k7` plus the commented-out example
+  line, `day:` tags still running 1-7 only; `nav.js` still registers exactly
+  7 `file: "lessons` entries, only the 7 Jul 8-14 lessons). Still the
+  correct "daily quiz+kata" for this post-week phase per PLAN.md, so
+  nothing new was generated, nav.js was untouched, and no bank content was
+  added. Both DB-read paths were blocked again in this sandbox: a direct
+  `psql "$LEARNING_DB_URL" ...` hit "Contains simple_expansion" and
+  `bin/query-progress` hit a generic "requires approval" gate with no user
+  present to approve it — same two-class block reproduced every day since
+  2026-07-16, so no `course_progress` rows could be read for a scope-change
+  signal. `bin/record-progress rust note --detail
+  '{"day":"post-week-2026-09-18","action":"verified-unchanged",
+  "by":"headless"}'` succeeded on the first attempt — the write path
+  continues to be reliable. No new learning record beyond the Day-1
+  baseline. (Go skipped again per its own window close, now sixty days past
+  it; backend lesson 75 — database triggers, closing a gap left as a bare
+  foil in lessons 29/54/73 — data lesson 72 — `.ewm()`, the decaying-weight
+  middle ground between `.rolling()` and `.expanding()` — python Day 52 — a
+  review/retrieval day covering Days 10, 14, 27, 31, 39, and 42, chosen over
+  fresh content per Day 51's own steer against three fresh-content days in
+  a row — and dataeng lesson 4 — Day 4 of its Phase 1 intensive, dbt marts
+  and one incremental model — were all generated this round via delegated
+  agents run WITHOUT worktree isolation; see their own NOTES.md entries for
+  detail. `git status --short` after all four returned confirmed each
+  agent wrote only within its own course directory.)

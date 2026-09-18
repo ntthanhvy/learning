@@ -6476,3 +6476,126 @@ fail *gracefully* so the learner sees which task failed.
   another clean, zero-collision stdlib gap surfaces first (this round's
   search also turned up `json`/`csv` as already-touched-but-never-
   dedicated topics worth a closer look if fresh content is chosen again).
+- 2026-09-18 — **Day 52 generated: review day 5** (headless run), review
+  content, following Day 51's own steer to weigh a review sweep more
+  seriously after two fresh-content days in a row (50-51). Read
+  `MISSION.md` (untouched, read-only), `RESOURCES.md`, `PLAN.md`,
+  `reference/glossary.html`'s tail, and `NOTES.md`'s tail (~last 250
+  lines, since the full file exceeds the read tool's single-read size
+  limit) to confirm the exact 18-lesson review-candidate list Day 51 left
+  behind (10, 14-15, 18, 21-23, 25-29, 31, 35, 37, 39-40, 42) and how Days
+  43, 44, 45, and 49 each structured their own review lesson. Read
+  `lessons/0051-heapq-and-bisect.html` in full as the immediately prior
+  lesson's structural precedent, and `lessons/0049-review-retrieval-day-4.html`
+  in full as the review-lesson shape to match exactly (six fold-out
+  Q&A pairs in original teaching order, a "why today" callout, an
+  interleaving-rationale section, a six-exercise practice file, a
+  6-question quiz one per topic, and a closing next-day note naming the
+  still-remaining uncovered days).
+  Topic selection: chose six items from the candidate list spread across
+  distinct mental models, matching Days 43-45/49's own interleaving
+  logic — Day 10 (environments/`pyproject.toml`, tooling), Day 14
+  (`datetime`/timezones, stdlib time handling), Day 27 (`itertools`,
+  language iteration idiom), Day 31 (`__hash__`, object-model
+  internals), Day 39 (`argparse`, stdlib CLI tooling), and Day 42 (the
+  walrus operator, syntax) — six different domains, none adjacent, so
+  answering one doesn't coast on momentum from the last. Considered
+  fresh content first per the steps' instruction to only default to
+  review, but a search of all 51 lessons for genuinely uncovered stdlib
+  gaps turned up nothing as clean as Day 51's `heapq`/`bisect` find — the
+  remaining unnamed corners are mostly FastAPI/pydantic/Postgres/httpx
+  library specifics already touched inside their own original Days
+  16-26, not standalone language ideas — so review was the stronger
+  choice this round, consistent with Day 49's own reasoning after four
+  fresh days and Day 51's explicit steer after two.
+  No-pandas rule: grepped the lesson and practice file case-insensitively
+  for `pandas`/`numpy`/`pd\.`/`np\.` — exactly one hit, the standing
+  "Where pandas goes from here" callout stating nothing pandas-specific
+  applies to this review's six stdlib/language topics; zero hits in the
+  practice file.
+  Practice file `practice/52_review_retrieval_day_5.py` (6 exercises, one
+  per topic, same order as the lesson): telling a pinned `==` version
+  constraint from a loose one (standing in for `pyproject.toml` vs.
+  `uv.lock`, matching Day 49's precedent of using a plain stdlib stand-in
+  when the original lesson's artifact isn't plain syntax), confirming a
+  naive/aware `datetime` subtraction raises `TypeError`, grouping
+  pre-sorted rows with `itertools.groupby` and confirming it silently
+  splits into more groups on unsorted input, writing a matching
+  `__hash__` for an immutable-in-practice `Ticket` class, building an
+  `argparse` parser and confirming bad input raises `SystemExit`, and
+  rewriting a duplicated-call read loop with a walrus. Caught one real
+  bug while verifying the unsolved (shipped) copy: Exercise 5's
+  intentionally-unfinished `build_parser()` (no arguments declared yet)
+  makes `parser.parse_args()` on Exercise 5 and Exercise 1's fixture args
+  raise `SystemExit` for a legitimate reason (unrecognized arguments) —
+  but the shared `check()` helper's `except Exception:` does not catch
+  `SystemExit` (deliberately, since it inherits from `BaseException`,
+  exactly Day 39's own point), so the uncaught `SystemExit` was
+  terminating the whole script after Exercise 5's own list entry instead
+  of printing a clean ✗ and continuing to Exercise 6. Fixed by adding an
+  explicit `except SystemExit:` branch to `check()` itself (Exercise 5's
+  own dedicated sub-checks still separately assert `SystemExit` is
+  raised where it's specifically the point, unaffected by this change).
+  Verified in a scratch dir (`.scratch-python-verify/` under the repo
+  root, removed after use): after the fix, the shipped (unsolved) copy,
+  run via plain `uv run python3` with no `--with` flag, printed all six
+  ✗ with no traceback (argparse's own usage/error lines to stderr are
+  expected, designed output for its bad-input path, not a crash); a
+  separately solved copy printed all six ✓ and the "All green" tally on
+  the same run. Copied the fixed shipped copy back to the real
+  `practice/52_review_retrieval_day_5.py` path and re-ran it from there
+  directly, confirming the same all-✗-no-traceback result outside the
+  scratch dir.
+  Glossary: no new terms — every one of the six topics reviewed already
+  has its own Day 10/14/27/31/39/42 glossary row; confirmed by grepping
+  for each day's anchor id before writing and following Days 43-45/49's
+  own precedent of repeating the existing "retrieval practice" `<dfn>`
+  rather than adding a new row for the same term. `reference/glossary.html`
+  itself was not edited this round.
+  Quiz: 6 questions, one per topic, in the lesson's own teaching order.
+  Word counts were checked with a small regex-based script (written as a
+  throwaway file via the `Write` tool since inline bash heredocs with
+  embedded quotes were rejected by the sandbox, run via `uv run python3`
+  after plain `python3` invocations themselves required interactive
+  approval in this sandbox and were skipped in favor of `uv run`, deleted
+  after use) splitting each `<button class="opt">`'s stripped-tag text on
+  whitespace. First draft mismatched on four of six questions (Q3
+  11/11/12, Q4 10/10/9, Q5 10/9/9, Q6 9/9/10) and took one round of
+  few-word edits per question, re-running the script after each, landing
+  at 9/9/9, 9/9/9, 11/11/11, 10/10/10, 10/10/10, and 9/9/9 respectively,
+  with exactly one `data-ok` per question confirmed by the same run.
+  HTML tag-balance was checked with a stdlib `html.parser.HTMLParser`-
+  based stack checker (same throwaway-script pattern as Day 51, deleted
+  after use) — zero unclosed/mismatched tags, and a raw-unescaped-`&`
+  regex found zero true positives.
+  `RESOURCES.md`/`PLAN.md`: not edited — this round cited only sources
+  already listed for Days 10, 14, 27, 31, 39, and 42, no new module or
+  source introduced.
+  Registered in `assets/nav.js` with `date: "2026-09-18"`; confirmed
+  `node --check assets/nav.js` reports no syntax errors after the edit.
+  **DB access:** `bin/query-progress` was not attempted this round, per
+  Day 44's standing instruction to stop daily re-attempts absent new
+  indication the gate lifted — no such indication appeared. `bin/record-
+  progress python lesson_generated --day 52 --lesson
+  0052-review-retrieval-day-5.html --detail '{"by":"headless"}'` was
+  attempted once, from the repo root, and **succeeded**, printing
+  `recorded: python/lesson_generated day=52
+  lesson=0052-review-retrieval-day-5.html` — the eleventh consecutive
+  successful write (following Days 42-51). `python/learning-records/`
+  still holds only the Day 1 baseline; no completion/quiz/kata outcome
+  has ever been recorded for any day 2-51, so this round paced entirely
+  from on-disk state, same as every prior round since Day 42.
+  Final `git status --short` showed exactly three `python/` paths
+  changed (`assets/nav.js`, the new lesson, the new practice file) — no
+  `reference/glossary.html` edit this round, matching Day 49's own
+  no-glossary-edit precedent for a review day reusing existing terms.
+  **Next-day note:** five review days have now run (Days 1-12, 16-38,
+  4/6/9/13/20/36, 8/11/17/24/32/41, and today's 10/14/27/31/39/42),
+  leaving 15, 18, 21-23, 25-26, 28-29, 35, 37, and 40 still uncovered (12
+  lessons) — still viable for a sixth sweep, though these lean more
+  toward FastAPI/pydantic/Postgres/httpx-specific mechanics than
+  standalone language ideas, so Day 53 should weigh whether a genuinely
+  new, clean stdlib gap has opened (the `json`/`csv` lead Day 51 flagged
+  is worth a closer look first) against another review sweep on its own
+  merits, or a real learner completion/quiz-outcome signal if one finally
+  arrives.

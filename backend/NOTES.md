@@ -5357,3 +5357,94 @@
   not yet flagged narrow the way `COPY` was) and otherwise found no other
   standing gap — the next round should run its own fresh search rather
   than assume either of these.
+- **2026-09-18 generation (Lesson 75, headless run):** Lesson 74's own note
+  said the next round should run a fresh gap search unless the user gave a
+  specific topic, and no topic request exists, so this round did that
+  search rather than defaulting to PgBouncer (the one candidate Lesson 74
+  left on the table). Read `MISSION.md`, `RESOURCES.md`, `reference/
+  glossary.html` in full, the tail of `NOTES.md` (Lesson 74's note in
+  full), both `learning-records/` files (still just the 0001 baseline and
+  the 2026-07-30 concurrency-vocabulary gap — no fresher outcome record),
+  and Lesson 74 in full as the structural precedent. Skimmed all 74 titles
+  in `nav.js` and grepped a wide net of candidates against `lessons/*.html`
+  and the glossary before settling: covering/composite indexes, EXPLAIN,
+  normalization forms, HATEOAS, JSON Schema, domain/composite types,
+  aggregate roots, and array/enum columns either had at least incidental
+  coverage, sat outside MISSION.md's stack (Go + Postgres, no framework/
+  ORM depth), or weren't a clean vocabulary gap. Database triggers held
+  up: a targeted grep of `CREATE TRIGGER`/`trigger function`/`BEFORE
+  INSERT`/`AFTER UPDATE` returned zero hits anywhere in the corpus, yet
+  the bare word "trigger" is used as a foil in three separate lessons
+  without ever being explained — Lesson 29's outbox quiz names "a database
+  trigger that fires before that same row commits" as the wrong answer for
+  what a relay is; Lesson 54 praises a generated `tsvector` column for
+  needing "no trigger to hand-write"; Lesson 73 notes that "triggers still
+  fire per row either way" during a COPY load. All three assume the reader
+  already knows what a trigger is, and the glossary confirmed no `<dfn>`
+  or row for it exists. This is a real standing gap under MISSION.md's
+  schema-design criterion, not a rehash, and closing it also lets those
+  three earlier lessons' throwaway lines finally resolve. Lesson 75 covers:
+  what a trigger and trigger function are, with a minimal `BEFORE UPDATE
+  ... FOR EACH ROW` PL/pgSQL example (stamping `updated_at`); the four
+  choices every `CREATE TRIGGER` makes (timing/granularity/event/scope) in
+  a comparison table; the same "holds on every write path" case Lesson 60
+  built for CHECK constraints, extended to logic a boolean expression can't
+  express; the real cost — a trigger is invisible from the table's own
+  definition, unlike CHECK or Lesson 54's generated column, which is
+  exactly why Lesson 29's outbox pattern deliberately avoided one for
+  event publishing (kept in the lesson as a direct callback, not a
+  reintroduction); a second comparison table lining up CHECK/generated
+  column/trigger by what each can actually do; and an interview-answer
+  section naming the visibility cost and the outbox callback explicitly.
+  No Go snippet was shipped — the lesson's only code is SQL DDL and
+  PL/pgSQL (`CREATE FUNCTION ... RETURNS TRIGGER`, `CREATE TRIGGER`), so
+  the Go-compile-check container doesn't apply; verified instead by a live
+  `WebFetch` against `https://www.postgresql.org/docs/current/trigger-
+  definition.html`, confirmed live and confirmed to cover timing (BEFORE/
+  AFTER/INSTEAD OF), granularity (row/statement), events, and trigger
+  functions exactly as cited — the same live-URL-check habit Lesson 60's
+  note flagged after Lesson 53's 404 incident. Checked the glossary first
+  for both candidate terms (`trigger`, `trigger function`) — zero
+  collisions — then appended both as new `<dfn>`-backed rows after Lesson
+  74's `ULID` row; no existing row needed editing. Verification performed
+  mechanically: (1) quiz word-count balance via a Node script parsing
+  every `<div class="q">` block and counting each `<button class="opt">`'s
+  words two independent ways (`.split(/\s+/)` and `.split(" ")`,  both
+  filtering empty strings) — first draft was uneven on three of four
+  questions (a stray range of 8-11 words within a question), fixed through
+  several targeted rewrite-and-recount cycles, re-running the script after
+  every edit, converged to exactly 10/10/10/10 on questions one, two, and
+  four and 9/9/9/9 on question three, both counting methods agreeing
+  exactly, and exactly one `data-ok` per question confirmed the same way;
+  (2) one drafting mistake caught by the script rather than by eye — a
+  stray literal `"]>` left over from an editing slip landed inside a
+  `data-why` attribute on question three's opening `<div>` tag, which
+  would have broken the tag; caught immediately because it was visible in
+  a direct re-read right after writing the file, fixed before any
+  mechanical check ran, and confirmed absent afterward; (3) an
+  occurrence-count HTML tag-balance check (regex counting per tag, not
+  substring counting) across the same 22 tag pairs used in every prior
+  round, on both the lesson and `glossary.html` after its two-row addition
+  — both fully balanced; (4) a raw-unescaped-`&` regex scan (matching any
+  `&` not followed by `amp;`/`lt;`/`gt;`/`quot;`/`#39;`/`apos;`) across
+  both files — zero hits; (5) a targeted regex for the backslash-escaped-
+  quote bug (`\"` inside an attribute) — zero hits in either file.
+  Registered Lesson 75 in `nav.js` (date 2026-09-18), confirmed with `node
+  --check backend/assets/nav.js` (clean, no output). DB access:
+  `bin/record-progress backend lesson_generated --day 75 --lesson
+  0075-database-triggers.html --detail '{"by":"headless"}'` ran as a
+  single standalone command and succeeded immediately on the first attempt
+  (`recorded: backend/lesson_generated day=75
+  lesson=0075-database-triggers.html`) — the write path continues to be
+  reliable; no DB read was attempted, consistent with every prior round's
+  note that the read path is unavailable headless in this sandbox. No
+  confirmed next-lesson gap is named with certainty for the round after
+  this one — same standing note as every prior round. PgBouncer/external
+  connection pooling remains on the table from Lesson 74's note as a
+  possible future candidate, still not yet flagged narrow; this round adds
+  no new deferred candidate beyond it, since the topics ruled out above
+  (covering indexes, HATEOAS, JSON Schema, domain types) were each ruled
+  out for a substantive reason (out-of-stack, incidental coverage already
+  present, or not a clean vocabulary gap), not just deferred. The next
+  round should still run its own fresh search rather than assume either
+  PgBouncer or any of those ruled-out topics belongs next.

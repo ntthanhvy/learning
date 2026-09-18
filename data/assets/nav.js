@@ -148,6 +148,8 @@
       file: "lessons/0070-align.html" },
     { n: 71, date: "2026-09-17", title: "pd.Grouper(): grouping by a date frequency, not just a column's values",
       file: "lessons/0071-pd-grouper.html" },
+    { n: 72, date: "2026-09-18", title: ".ewm(): the moving average that never forgets, just discounts",
+      file: "lessons/0072-ewm.html" },
   ];
 
   const REFS = [

@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 75 · Database triggers: code that runs without anyone calling it</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 75 · ~20 min</p>
+<h1>Database triggers: code that runs without anyone calling it</h1>
+<p class="byline">Three earlier lessons have already used the word "trigger" as a foil without ever explaining it. Lesson 29's outbox quiz asked you to rule out "a database trigger that fires before that same row commits" as the wrong answer for what a relay is. Lesson 54's generated <code>tsvector</code> column was praised for needing "no trigger to hand-write." Lesson 73's <code>COPY</code> lesson noted that "triggers still fire per row either way." Every one of those sentences assumed you already knew what a trigger actually is. Today closes that gap.</p>
+
+<h2>1 · What a trigger actually is</h2>
+<p>A <dfn data-en="a named rule attached to a table that tells Postgres to automatically run a specific function whenever a given kind of write happens to that table, with no calling code involved at all" data-vn="trigger (giữ nguyên) — luật gắn vào bảng, bảo Postgres tự chạy 1 function mỗi khi có write khớp điều kiện, không ai gọi cả">trigger</dfn> is a rule, attached to a table, that tells Postgres: whenever a write of this kind happens to this table, automatically run this function first (or after). Nobody calls it. No handler, no migration script, no line of Go decides "now I should run the trigger" — the write itself is the call.</p>
+<p>The function a trigger runs is a <dfn data-en="a function written to be called only by a trigger, taking no arguments and returning the special type TRIGGER instead of an ordinary value, since what it returns controls whether and how the write proceeds rather than being handed back to any caller" data-vn="trigger function (giữ nguyên) — function chỉ được gọi bởi trigger, không nhận argument, trả về kiểu đặc biệt TRIGGER để quyết định write có tiếp tục hay không">trigger function</dfn>, written in a procedural language like PL/pgSQL. A minimal example: keeping an <code>updated_at</code> column honest without trusting every future caller to remember to set it.</p>
+<pre><code><span class="kw">CREATE FUNCTION</span> set_updated_at() <span class="kw">RETURNS TRIGGER AS</span> $$
+<span class="kw">BEGIN</span>
+    NEW.updated_at := now();
+    <span class="kw">RETURN</span> NEW;
+<span class="kw">END</span>;
+$$ <span class="kw">LANGUAGE</span> plpgsql;
+
+<span class="kw">CREATE TRIGGER</span> orders_set_updated_at
+    <span class="kw">BEFORE UPDATE ON</span> orders
+    <span class="kw">FOR EACH ROW</span>
+    <span class="kw">EXECUTE FUNCTION</span> set_updated_at();
+<span class="cm">-- any UPDATE to orders, from anywhere, now stamps updated_at automatically</span></code></pre>
+<p><code>NEW</code> is the row as the write is about to leave it; a <code>BEFORE</code> trigger can still edit it before it lands, exactly what this one does. <code>OLD</code> is the row as it existed before the write — available in <code>UPDATE</code> and <code>DELETE</code> triggers for comparing the two.</p>
+
+<h2>2 · The four choices every trigger makes</h2>
+<p>A <code>CREATE TRIGGER</code> statement always answers four questions, and each one changes what the trigger function is allowed to see or do:</p>
+<table class="cmp">
+<thead><tr><th></th><th>Choice A</th><th>Choice B</th></tr></thead>
+<tbody>
+<tr><th>Timing</th><td><code>BEFORE</code> — can edit or cancel the write</td><td><code>AFTER</code> — write already happened, can only react</td></tr>
+<tr><th>Granularity</th><td><code>FOR EACH ROW</code> — runs once per affected row</td><td><code>FOR EACH STATEMENT</code> — runs once for the whole statement</td></tr>
+<tr><th>Event</th><td><code>INSERT</code> / <code>UPDATE</code> / <code>DELETE</code></td><td>can combine more than one, e.g. <code>INSERT OR UPDATE</code></td></tr>
+<tr><th>Scope</th><td>a specific table</td><td>a view, via <code>INSTEAD OF</code> (redirects a write on a non-updatable view)</td></tr>
+</tbody>
+</table>
+<p>The <code>updated_at</code> example above is <code>BEFORE</code> + <code>FOR EACH ROW</code> + <code>UPDATE</code>: it needs to edit the row before it lands, and it needs to run separately for every row a multi-row <code>UPDATE</code> touches, since each row's own <code>updated_at</code> is independent.</p>
+
+<h2>3 · What a trigger buys: the same "every write path" guarantee as CHECK</h2>
+<p>Lesson 60's <code>CHECK</code> constraint earned its keep by holding even for writes that skip the handler entirely — a backfill script, a console query, next year's admin tool. A trigger earns its keep the same way, for logic a boolean expression can't express. <code>CHECK (price > 0)</code> can reject a bad value; it can't <em>compute</em> a new one, and it can't look at other rows. A trigger can do both — stamp a timestamp, maintain a denormalized counter (Lesson 2's example: keep <code>orders.item_count</code> in sync every time a row is added to <code>order_items</code>, without every caller remembering to update both tables), or block a write based on a check spanning more than the row being written.</p>
+
+<h2>4 · What a trigger costs: logic no one can see by reading the code</h2>
+<div class="callout"><strong>The real trade-off:</strong> a <code>CHECK</code> constraint sits right next to the column it guards in the <code>CREATE TABLE</code> statement — anyone reading the schema sees it. A trigger lives as a separate object, attached to the table but invisible from the table's own definition; Lesson 14's PR-review lesson would flag exactly this as a substance issue, not a style nit. An engineer reading application code that runs a plain <code>UPDATE orders SET status = 'shipped'</code> has no way to know, from that line alone, that a trigger is about to also silently touch <code>updated_at</code> or a denormalized counter on another table. That's precisely why Lesson 29's outbox pattern deliberately avoided a trigger for publishing events: a trigger firing inside the same transaction as the row write would make the event write atomic with the row write, which sounds appealing, but it means the actual message-publishing logic — retries, serialization, what payload shape to send — lives inside a database function instead of ordinary application code any engineer can read, test, and step through a debugger on. The relay pattern (a separate polling process) trades that invisibility for an extra moving part, on purpose.</div>
+
+<h2>5 · Trigger vs. the other row-level guards this course already taught</h2>
+<p>Four mechanisms now sit at the same "the database enforces this, not just the handler" layer. Lining them up by what each one can actually do:</p>
+<table class="cmp">
+<thead><tr><th></th><th>CHECK (L60)</th><th>Generated column (L54)</th><th>Trigger</th></tr></thead>
+<tbody>
+<tr><th>Can reject a write</th><td>yes</td><td>no</td><td>yes, from BEFORE</td></tr>
+<tr><th>Can compute a new value</th><td>no</td><td>yes, from that row only</td><td>yes, from anywhere</td></tr>
+<tr><th>Can touch other tables</th><td>no</td><td>no</td><td>yes</td></tr>
+<tr><th>Visible in table definition</th><td>yes</td><td>yes</td><td>no — separate object</td></tr>
+</tbody>
+</table>
+<p>Lesson 54's <code>tsvector</code> column used <code>GENERATED ALWAYS ... STORED</code> specifically because the job was "compute a new value from this row's own columns," nothing more — the narrowest tool that could do the job, which is also why that lesson could say "no trigger to hand-write" as a genuine advantage. Reach for a full trigger only once the job needs something a generated column structurally cannot do: touching another table, or rejecting the write outright rather than just deriving a column.</p>
+
+<div class="interview">
+<p><strong>Q: "When would you reach for a database trigger instead of handling something in application code?"</strong> A strong answer, out loud: <em>"Almost never, as a first choice — a trigger hides logic from anyone reading a plain UPDATE statement, which is exactly the kind of thing I'd flag in a PR review. I'd reach for one only when a rule genuinely has to hold no matter which code path writes the row, the same bar Lesson 60 set for CHECK constraints, and the logic itself needs more than a boolean expression can express — computing a value, or touching a second table, like keeping a denormalized counter in sync. Even then I'd prefer a generated column if the job is only 'derive a value from this row's own columns,' since that stays visible in the table definition instead of living as a separate hidden object. I'd never reach for a trigger to publish an event to a queue — that's exactly the dual-write problem Lesson 29 solved with an outbox and a separate relay process instead, on purpose, so the actual publishing logic stays in ordinary application code."</em> The signal: naming the visibility cost specifically, not just "triggers are magic," and knowing the outbox pattern already answered the one case a trigger looks most tempting for.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A trigger is attached directly to the table and Postgres runs its function automatically whenever a matching write happens, with no application code, handler, or script ever calling it -- the write itself is what invokes it.">
+    <p class="stem">What makes a database trigger different from a function your application code calls directly?</p>
+    <button class="opt" data-ok>Postgres runs it on its own on a matching write</button>
+    <button class="opt">it only ever runs once, on the very first row</button>
+    <button class="opt">it must always be written only in plain raw SQL</button>
+    <button class="opt">it can only ever read data, never change any value</button>
+  </div>
+  <div class="q" data-why="A BEFORE trigger runs before the write is finalized, so its function can still edit the NEW row (or cancel the write entirely) before Postgres commits it -- an AFTER trigger only sees a write that has already happened and can react to it, not change it.">
+    <p class="stem">Why does the `updated_at` example use a `BEFORE` trigger rather than an `AFTER` one?</p>
+    <button class="opt" data-ok>a BEFORE trigger can still edit the row before landing</button>
+    <button class="opt">a BEFORE trigger always runs faster than an AFTER one</button>
+    <button class="opt">an AFTER trigger cannot ever be attached to any UPDATE</button>
+    <button class="opt">a BEFORE trigger never once runs inside an open transaction</button>
+  </div>
+  <div class="q" data-why="A trigger is a separate object attached to a table, invisible from the table's own CREATE TABLE definition -- someone reading a plain UPDATE statement has no way to tell, from that line alone, that a trigger will also silently run and touch other columns or tables, unlike a CHECK constraint which sits right in the schema.">
+    <p class="stem">What cost did Lesson 14's PR-review framing highlight about relying on a trigger?</p>
+    <button class="opt" data-ok>its logic stays invisible from a plain UPDATE statement</button>
+    <button class="opt">it always runs measurably slower than equivalent Go code</button>
+    <button class="opt">it cannot ever be tested by any test suite</button>
+    <button class="opt">it silently ignores every single constraint on the table</button>
+  </div>
+  <div class="q" data-why="Lesson 29's outbox pattern deliberately keeps event-publishing logic in an ordinary application process (the relay) rather than a trigger, specifically so retries, serialization, and payload shape stay in code an engineer can read, test, and step through -- a trigger firing inside the same transaction would hide that same logic inside a database function instead.">
+    <p class="stem">Why did Lesson 29's outbox pattern avoid publishing events with a trigger?</p>
+    <button class="opt" data-ok>it keeps the publishing logic in ordinary, readable application code</button>
+    <button class="opt">Postgres triggers can never once run inside any open transaction</button>
+    <button class="opt">a trigger is never able to insert any new row</button>
+    <button class="opt">a trigger would make the outbox table impossible to query</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://www.postgresql.org/docs/current/trigger-definition.html">PostgreSQL Manual — Overview of Trigger Behavior</a> (~15 min) — RESOURCES.md's standing "Data Definition" primary source extended into the trigger chapter specifically, the same extend-an-existing-citation pattern Lesson 60 used for CHECK constraints; covers timing, granularity, the OLD/NEW row variables, and PL/pgSQL trigger functions in full.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> open. Still no <code>lesson_completed</code>/quiz-outcome record exists for any lesson after 75 rounds — the honest next step remains a completion signal or a user-named track.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

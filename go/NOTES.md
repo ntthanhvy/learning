@@ -602,3 +602,30 @@
   `k1`-`k7` plus the commented-out example line — `day:` tags still
   running 1-7 only, `nav.js` `LESSONS` still registers only the 7 Jul
   8-14 lessons) — see rust/NOTES.md's own 2026-09-15 entry for detail.
+- 2026-09-18 (headless 06:00 run): skipped again per the same rule — the
+  course window closed 2026-07-20, now sixty days past it. All 14 lessons
+  (`0001`-`0014`) re-confirmed present on disk and registered in
+  `assets/nav.js` — moot either way. Direct `psql "$LEARNING_DB_URL" ...`
+  and `bin/query-progress` were both blocked again this session (content-
+  level "Contains simple_expansion" block on the raw variable reference,
+  and a generic "requires approval" gate with no user present to approve
+  it) — same two classes of block as every prior round — so no
+  `course_progress` rows could be read; fell back to file-state +
+  learning-records alone per the standing fallback rule, as noted in the
+  final summary. Moot for this course since it's a pure skip regardless of
+  DB state. Backend lesson 75 (database triggers, closing a gap left as a
+  bare foil in lessons 29, 54, and 73), data lesson 72 (`.ewm()`, the
+  decaying-weight middle ground between `.rolling()` and `.expanding()`),
+  and python Day 52 (a review/retrieval day covering Days 10, 14, 27, 31,
+  39, and 42, chosen over fresh content per Day 51's own steer against
+  three fresh-content days in a row) were generated this round via
+  delegated agents, each confirmed via `git status --short` to have
+  written only within its own course directory; see their own NOTES.md
+  entries for detail. Dataeng lesson 4 (Day 4 of its Phase 1 intensive —
+  dbt marts, facts/dimensions, and one incremental model) was also
+  generated this round, its own Phase 1 window still open through
+  2026-09-21. Rust's post-week daily quiz+kata infra was re-verified
+  unchanged (8 textual `id: "k` matches — 7 real kata entries `k1`-`k7`
+  plus the commented-out example line — `day:` tags still running 1-7
+  only, `nav.js` `LESSONS` still registers only the 7 Jul 8-14 lessons) —
+  see rust/NOTES.md's own 2026-09-18 entry for detail.

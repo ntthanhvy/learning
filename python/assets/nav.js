@@ -108,6 +108,8 @@
       file: "lessons/0050-abstract-base-classes.html" },
     { n: 51, date: "2026-09-17", title: "heapq & bisect: sorted-order structures without re-sorting",
       file: "lessons/0051-heapq-and-bisect.html" },
+    { n: 52, date: "2026-09-18", title: "Review day 5: retrieval across six more lessons",
+      file: "lessons/0052-review-retrieval-day-5.html" },
   ];
 
   const REFS = [

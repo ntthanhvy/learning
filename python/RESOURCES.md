@@ -16,7 +16,7 @@ authors for *why*. Cite inline; each lesson recommends exactly one primary sourc
 - [Docs: Sorting HOW TO](https://docs.python.org/3/howto/sorting.html)
   Official guide to `sorted()`, `key=`, and stability. Use for: Day 4 — the shortest path to sorting fluency.
 - [Docs: `itertools`](https://docs.python.org/3/library/itertools.html) · [`collections`](https://docs.python.org/3/library/collections.html)
-  The two stdlib modules that replace most hand-written data-munging loops. Use for: Days 3 and 5; the `itertools` recipes section is lesson-grade on its own.
+  The two stdlib modules that replace most hand-written data-munging loops. Use for: Days 3, 5, and 53; the `itertools` recipes section is lesson-grade on its own.
 - [Talk/course: "Generators: The Final Frontier" — David Beazley](https://www.dabeaz.com/generators/)
   Deep, practical treatment of generators as data-pipeline building blocks. Use for: Day 5's lazy-pipeline framing.
 - [Blog: Trey Hunner](https://treyhunner.com/blog/archives/)

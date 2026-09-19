@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 5 · Kafka: topics, partitions, keys &amp; offsets</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 5 · ~30–45 min · 19 Sep 2026</p>
+<h1>Kafka: topics, partitions, keys &amp; offsets</h1>
+<p class="byline">Today's tangible win: Kafka running in your compose stack, a Python producer writing real <code>order_events</code> messages keyed by <code>order_id</code>, and a consumer group whose offsets you inspect with the Kafka CLI. By the end you can explain — with your own terminal output as proof — why keying by <code>order_id</code> is what keeps one order's status changes in order.</p>
+
+<div class="callout"><strong>Before today — check Day 4 actually landed:</strong> this lesson doesn't touch dbt, but it assumes the same Postgres compose stack from Days 1–4 exists and still runs. Confirm before continuing:
+<pre><code>docker compose up -d
+docker compose ps</code></pre>
+Expected: a <code>postgres</code> service showing <code>(healthy)</code>. If it's missing or you're starting from a fresh clone, re-run Day 1's <code>docker compose up -d</code> first — today only <em>adds</em> a Kafka service next to it, it doesn't replace anything.</div>
+
+<div class="callout"><strong>Give Docker enough memory first.</strong> Per <code>PLAN.md</code>: Kafka's JVM plus Postgres fit comfortably in 16 GB of host RAM, but colima's own VM defaults to less than that. Before debugging anything else today, check or raise colima's allocation:
+<pre><code>colima status               <span class="cm"># shows current memory, if colima is already running</span>
+colima stop
+colima start --memory 6     <span class="cm"># 6 GB for the colima VM; restart is required, a running VM can't be resized live</span></code></pre>
+If Kafka's container exits immediately or logs an out-of-memory error later today, this is the first thing to check — not your compose file or your Python.</div>
+
+<h2>1 · Why a log, not a queue and not a table</h2>
+<p>Every table in this course so far — <code>raw.orders</code>, <code>stg_orders</code>, <code>fct_orders</code> — is something you can <code>UPDATE</code> or re-query at any offset into its rows and get the current truth. A <dfn data-en="the append-only, ordered sequence of records inside one Kafka partition — records are never updated or deleted in place, only appended, and each one gets a permanent position number" data-vn="giữ nguyên &quot;log&quot; — chuỗi record chỉ được append, có thứ tự, không sửa/xoá tại chỗ">log</dfn> is different on purpose: it only ever appends. Nothing already written is edited or deleted in place (retention aside, which is Phase 2b). Order status changes are a perfect fit for that shape — <code>placed</code> doesn't get overwritten by <code>accepted</code>, it's a new fact that happened after <code>placed</code> and should stay on the record next to it.</p>
+<p>Kafka is a distributed system built entirely around this one idea. A <dfn data-en="a named, durable feed of records in Kafka that producers write to and consumers read from — the basic unit of organization, roughly Kafka's answer to a table name, except it holds an ordered log rather than queryable rows" data-vn="giữ nguyên &quot;topic&quot; — luồng dữ liệu có tên trong Kafka, producer ghi vào, consumer đọc ra">topic</dfn> is a named feed — this course has exactly one, <code>order_events</code>, matching the domain table in <code>PLAN.md</code>. A <dfn data-en="a producer that writes records to a topic" data-vn="giữ nguyên &quot;producer&quot; — bên ghi record vào topic">producer</dfn> appends records to a topic; a <dfn data-en="a consumer that reads records from a topic, in order, tracking its own position" data-vn="giữ nguyên &quot;consumer&quot; — bên đọc record từ topic, đọc theo thứ tự, tự theo dõi vị trí đã đọc">consumer</dfn> reads them back, one at a time, tracking its own position. Nobody deletes a record when it's read — unlike a queue such as RabbitMQ or SQS, a Kafka record can be read by many different consumers, each keeping its own separate position in the same log.</p>
+
+<h2>2 · A topic is actually several logs: partitions</h2>
+<p>A topic isn't one giant log — it's split into a fixed number of <dfn data-en="one of the ordered, append-only logs a Kafka topic is split into — Kafka guarantees order only within a single partition, never across partitions of the same topic" data-vn="giữ nguyên &quot;partition&quot; — 1 trong các log con của topic, Kafka chỉ đảm bảo thứ tự TRONG 1 partition, không đảm bảo giữa các partition">partitions</dfn>, decided when the topic is created. Splitting matters for two reasons: it's how Kafka distributes a topic's throughput across multiple brokers in a real cluster (out of scope here — this course runs one broker), and it's the unit Kafka's ordering guarantee actually applies to. Kafka promises order <em>within one partition</em>, full stop. It makes zero promise about order <em>across</em> partitions of the same topic.</p>
+<p>That single sentence is the crux of today. If <code>order_events</code> had 3 partitions and every event were scattered across them at random, an order's <code>placed</code> event could land on partition 0 and its <code>delivered</code> event could land on partition 2 — and nothing would guarantee the consumer sees <code>placed</code> first. For a status sequence, that's not a subtle bug, it's the whole thing broken.</p>
+
+<h2>3 · The key decides the partition</h2>
+<p>Kafka's fix is the <dfn data-en="the string a producer attaches to a message that Kafka hashes to pick which partition the message goes to — every message with the same key always lands on the same partition, which is what makes per-key ordering possible" data-vn="giữ nguyên &quot;key&quot; — chuỗi gắn vào message để Kafka hash ra partition; cùng key luôn vào cùng 1 partition">key</dfn>: a string attached to every produced message. Kafka hashes the key and uses that hash to pick the partition — deterministically, so the exact same key always maps to the exact same partition, every time, for as long as the partition count doesn't change. This course's rule, matching <code>PLAN.md</code>'s domain table exactly: <strong>key every <code>order_events</code> message with <code>order_id</code></strong>. Every status change for order 101 — <code>placed</code>, <code>accepted</code>, <code>picked_up</code>, <code>delivered</code> — hashes to the same partition and is written there in send order, so a consumer reading that partition sees them in the order they happened. A message with no key (or a null key) round-robins across partitions instead — fine for data with no ordering requirement, wrong for this topic.</p>
+<div class="callout"><strong>What the key does not do:</strong> it says nothing about order <em>across</em> different orders. Order 101's events and order 102's events can interleave freely, land on different partitions, arrive in any relative sequence — and that's fine, because nothing in this domain ever needs to compare order 101's status to order 102's. The key's job is narrow and exact: keep <em>one order's own</em> events in order. That's the whole guarantee, not a stronger one.</div>
+
+<h2>4 · Offsets: a partition's bookmark</h2>
+<p>Every record in a partition gets a permanent, ever-increasing position number: its <dfn data-en="a record's permanent position number within one partition, starting at 0 and increasing by 1 per record — a consumer group tracks the next offset it needs to read as its bookmark into that partition" data-vn="giữ nguyên &quot;offset&quot; — số thứ tự cố định của record trong 1 partition, bắt đầu từ 0">offset</dfn>, starting at 0. Offsets are local to a partition — partition 0's offset 5 and partition 2's offset 5 are two unrelated records. A consumer's job is to remember, per partition, the next offset it hasn't read yet, and that remembered position is called a <dfn data-en="the offset a consumer group has confirmed processing up to, for one partition — persisted by Kafka itself so a consumer that restarts resumes from here instead of from the beginning" data-vn="giữ nguyên &quot;committed offset&quot; — offset mà consumer group đã xác nhận xử lý xong, Kafka tự lưu lại">committed offset</dfn>. This should feel familiar: it's the same idea as keyset pagination's cursor from earlier courses — "give me everything after this bookmark," not "give me page 6."</p>
+<p>Consumers don't commit offsets alone — they belong to a <dfn data-en="a named set of consumers that coordinate to split a topic's partitions between them and share one committed-offset bookmark per partition — the unit Kafka scales consumption with, and the unit today's CLI command inspects" data-vn="giữ nguyên &quot;consumer group&quot; — tập consumer cùng group.id, chia nhau đọc các partition, dùng chung offset đã commit">consumer group</dfn>, identified by a <code>group.id</code>. Kafka assigns each partition in a topic to exactly one consumer within a group at a time, and the group's committed offsets are what let a consumer that dies and restarts — or a brand-new process that takes over — resume exactly where the group left off, instead of re-reading everything or skipping ahead. Day 6's consumer will lean on this directly: killing it mid-stream and restarting it must not create duplicate warehouse rows, and committed offsets are half of how that's arranged (the other half is the <code>ON CONFLICT</code> write itself).</p>
+
+<h2>5 · Build: add Kafka to your compose stack</h2>
+<p>Add a <code>kafka</code> service to <code>docker-compose.yml</code>, next to Day 1's <code>postgres</code> service — don't replace it, append to the same <code>services:</code> block. This is <code>apache/kafka:4.3.1</code>, Kafka 4.x's KRaft mode (no separate ZooKeeper container — the broker manages its own metadata):</p>
+<pre><code><span class="cm">services:
+  postgres:
+    # ... unchanged from Day 1 ...
+
+  kafka:</span>
+    image: apache/kafka:4.3.1
+    container_name: fdp-kafka
+    restart: unless-stopped
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1</code></pre>
+<p>Bring it up and wait for the broker to accept connections:</p>
+<pre><code>docker compose up -d
+docker compose exec kafka /opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092</code></pre>
+<p>Expected: a block of API names and version ranges, starting <code>localhost:9092 (id: 1 rack: null isFenced: false) -&gt; (</code>. That output is the broker confirming it's reachable — no error means it's up. All CLI tools in this lesson use <code>--bootstrap-server</code>, Kafka 4.x's flag now that ZooKeeper is gone; older Kafka tutorials use <code>--zookeeper</code>, which no longer applies.</p>
+
+<h2>6 · Build: create the <code>order_events</code> topic, with 3 partitions</h2>
+<p>Topics aren't created implicitly here — create it explicitly so the partition count is a deliberate choice, not whatever a default happens to be:</p>
+<pre><code>docker compose exec kafka /opt/kafka/bin/kafka-topics.sh \
+  --bootstrap-server localhost:9092 \
+  --create --topic order_events \
+  --partitions 3 --replication-factor 1</code></pre>
+<p>Expected: <code>Created topic order_events.</code> (Replication factor 1 because this is a single broker — real clusters use 3, out of scope per <code>MISSION.md</code>'s "running Kafka in production" exclusion.) Confirm the partition layout:</p>
+<pre><code>docker compose exec kafka /opt/kafka/bin/kafka-topics.sh \
+  --bootstrap-server localhost:9092 --describe --topic order_events</code></pre>
+<pre><code>Topic: order_events	TopicId: &lt;...&gt;	PartitionCount: 3	ReplicationFactor: 1	Configs: min.insync.replicas=1
+	Topic: order_events	Partition: 0	Leader: 1	Replicas: 1	Isr: 1
+	Topic: order_events	Partition: 1	Leader: 1	Replicas: 1	Isr: 1
+	Topic: order_events	Partition: 2	Leader: 1	Replicas: 1	Isr: 1</code></pre>
+
+<h2>7 · Build: a Python producer, keyed by <code>order_id</code></h2>
+<p>Create <code>scripts/produce_order_events.py</code> using <code>confluent-kafka</code> (this course's pinned client — no pandas, plain Python plus this one library, per the overlap rule). It's scaffolding: read it, then run it as-is today — Day 6 is where you'll adapt a version of this shape into the consumer's counterpart:</p>
+<pre><code><span class="cm">"""Produce a batch of order_events messages, keyed by order_id.
+
+Keying by order_id (not event_id) is today's point: every event for one
+order lands on the same partition, in send order.
+"""</span>
+<span class="kw">import</span> json
+<span class="kw">import</span> uuid
+<span class="kw">from</span> datetime <span class="kw">import</span> datetime, timezone
+
+<span class="kw">from</span> confluent_kafka <span class="kw">import</span> Producer
+
+BOOTSTRAP = <span class="str">"localhost:9092"</span>
+TOPIC = <span class="str">"order_events"</span>
+
+<span class="cm"># One order's full lifecycle, in the order it actually happened -- this is</span>
+<span class="cm"># the sequence that must arrive at the consumer in this exact order.</span>
+STATUSES = [<span class="str">"placed"</span>, <span class="str">"accepted"</span>, <span class="str">"picked_up"</span>, <span class="str">"delivered"</span>]
+
+
+<span class="kw">def</span> delivery_report(err, msg):
+    <span class="kw">if</span> err <span class="kw">is</span> <span class="kw">not</span> <span class="kw">None</span>:
+        <span class="kw">print</span>(<span class="str">f"delivery failed: {err}"</span>)
+    <span class="kw">else</span>:
+        <span class="kw">print</span>(
+            <span class="str">f"delivered to {msg.topic()} [partition {msg.partition()}] "</span>
+            <span class="str">f"@ offset {msg.offset()}, key={msg.key().decode()}"</span>
+        )
+
+
+<span class="kw">def</span> make_event(order_id: <span class="kw">int</span>, status: <span class="kw">str</span>) -&gt; <span class="kw">dict</span>:
+    <span class="kw">return</span> {
+        <span class="str">"event_id"</span>: <span class="kw">str</span>(uuid.uuid4()),
+        <span class="str">"order_id"</span>: order_id,
+        <span class="str">"status"</span>: status,
+        <span class="str">"occurred_at"</span>: datetime.now(timezone.utc).isoformat(),
+    }
+
+
+<span class="kw">def</span> main():
+    producer = Producer({<span class="str">"bootstrap.servers"</span>: BOOTSTRAP})
+
+    <span class="kw">for</span> order_id <span class="kw">in</span> (<span class="kw">101</span>, <span class="kw">102</span>, <span class="kw">103</span>):
+        <span class="kw">for</span> status <span class="kw">in</span> STATUSES:
+            event = make_event(order_id, status)
+            producer.produce(
+                TOPIC,
+                key=<span class="kw">str</span>(order_id),
+                value=json.dumps(event),
+                callback=delivery_report,
+            )
+            producer.poll(<span class="kw">0</span>)
+
+    producer.flush()
+
+
+<span class="kw">if</span> __name__ == <span class="str">"__main__"</span>:
+    main()</code></pre>
+<p>The <code>key=str(order_id)</code> argument on <code>producer.produce()</code> is the one line that matters today — everything else is the confluent-kafka boilerplate any producer needs (a <code>delivery_report</code> callback confirming each write, <code>flush()</code> blocking until every message is actually sent). Run it:</p>
+<pre><code>uv run --with confluent-kafka python3 scripts/produce_order_events.py</code></pre>
+<p>Expected — read the partition column carefully, it's the whole lesson in one terminal output: every event for the same <code>order_id</code> lands on the same partition number, and within that partition the offsets are sequential:</p>
+<pre><code>delivered to order_events [partition 2] @ offset 0, key=101
+delivered to order_events [partition 2] @ offset 1, key=101
+delivered to order_events [partition 2] @ offset 2, key=101
+delivered to order_events [partition 2] @ offset 3, key=101
+delivered to order_events [partition 0] @ offset 0, key=102
+delivered to order_events [partition 0] @ offset 1, key=102
+delivered to order_events [partition 0] @ offset 2, key=102
+delivered to order_events [partition 0] @ offset 3, key=102
+delivered to order_events [partition 0] @ offset 4, key=103
+delivered to order_events [partition 0] @ offset 5, key=103
+delivered to order_events [partition 0] @ offset 6, key=103
+delivered to order_events [partition 0] @ offset 7, key=103</code></pre>
+<p>Your own partition numbers may differ from this listing (the hash-to-partition mapping depends on the key's hash, not on run order) — what must match is that every row for <code>key=101</code> shares one partition number, every row for <code>key=102</code> shares one (possibly the same one <code>103</code> lands on, as above — two different keys can legally hash to the same partition), and each partition's own offsets count up without gaps.</p>
+
+<h2>8 · Build: a Python consumer, and read the ordering back</h2>
+<p>Create <code>scripts/inspect_order_events.py</code> — a small consumer that joins a named group and prints what it reads, so the ordering claim is something you see, not just something you're told:</p>
+<pre><code><span class="cm">"""Consume a few order_events messages to see per-partition ordering."""</span>
+<span class="kw">import</span> json
+
+<span class="kw">from</span> confluent_kafka <span class="kw">import</span> Consumer
+
+BOOTSTRAP = <span class="str">"localhost:9092"</span>
+TOPIC = <span class="str">"order_events"</span>
+GROUP_ID = <span class="str">"inspect-group"</span>
+
+
+<span class="kw">def</span> main():
+    consumer = Consumer(
+        {
+            <span class="str">"bootstrap.servers"</span>: BOOTSTRAP,
+            <span class="str">"group.id"</span>: GROUP_ID,
+            <span class="str">"auto.offset.reset"</span>: <span class="str">"earliest"</span>,
+            <span class="str">"enable.auto.commit"</span>: <span class="kw">True</span>,
+        }
+    )
+    consumer.subscribe([TOPIC])
+
+    <span class="kw">try</span>:
+        seen = <span class="kw">0</span>
+        <span class="kw">while</span> seen &lt; <span class="kw">12</span>:
+            msg = consumer.poll(timeout=<span class="kw">5.0</span>)
+            <span class="kw">if</span> msg <span class="kw">is</span> <span class="kw">None</span>:
+                <span class="kw">break</span>
+            <span class="kw">if</span> msg.error():
+                <span class="kw">print</span>(<span class="str">f"consumer error: {msg.error()}"</span>)
+                <span class="kw">continue</span>
+            event = json.loads(msg.value())
+            <span class="kw">print</span>(
+                <span class="str">f"partition={msg.partition()} offset={msg.offset()} "</span>
+                <span class="str">f"key={msg.key().decode()} status={event['status']}"</span>
+            )
+            seen += <span class="kw">1</span>
+    <span class="kw">finally</span>:
+        consumer.close()
+
+
+<span class="kw">if</span> __name__ == <span class="str">"__main__"</span>:
+    main()</code></pre>
+<p><code>auto.offset.reset: "earliest"</code> tells this consumer to start from the beginning of the topic the first time <code>inspect-group</code> has ever run (a group with no prior committed offset has nowhere else to start from). <code>enable.auto.commit: True</code> means the client library commits offsets for you periodically — fine for today's read-only inspection; Day 6 turns this off and commits manually, on purpose, right after the warehouse write succeeds, not before.</p>
+<pre><code>uv run --with confluent-kafka python3 scripts/inspect_order_events.py</code></pre>
+<p>Expected — <code>key=101</code>'s four rows appear consecutively with consecutive offsets on one partition, and likewise for <code>102</code>/<code>103</code>, matching whatever partition layout section 7 printed for your run:</p>
+<pre><code>partition=2 offset=0 key=101 status=placed
+partition=2 offset=1 key=101 status=accepted
+partition=2 offset=2 key=101 status=picked_up
+partition=2 offset=3 key=101 status=delivered
+partition=0 offset=0 key=102 status=placed
+partition=0 offset=1 key=102 status=accepted
+partition=0 offset=2 key=102 status=picked_up
+partition=0 offset=3 key=102 status=delivered
+partition=0 offset=4 key=103 status=placed
+partition=0 offset=5 key=103 status=accepted
+partition=0 offset=6 key=103 status=picked_up
+partition=0 offset=7 key=103 status=delivered</code></pre>
+
+<h2>9 · Verify: inspect the consumer group's offsets from the CLI</h2>
+<p>The Kafka CLI can describe any consumer group's committed offsets without writing a line of Python — this is the tool you'll reach for on Day 6 to check whether a restarted consumer resumed where it should have:</p>
+<pre><code>docker compose exec kafka /opt/kafka/bin/kafka-consumer-groups.sh \
+  --bootstrap-server localhost:9092 --describe --group inspect-group</code></pre>
+<p>Expected — one row per partition <code>inspect-group</code> has touched, <code>CURRENT-OFFSET</code> equal to <code>LOG-END-OFFSET</code> (it has read everything currently in the topic) and <code>LAG</code> of 0 on each:</p>
+<pre><code>GROUP           TOPIC           PARTITION  CURRENT-OFFSET  LOG-END-OFFSET  LAG   CONSUMER-ID  HOST  CLIENT-ID
+inspect-group   order_events    0          8               8               0     -            -     -
+inspect-group   order_events    2          4               4               0     -            -     -
+
+Consumer group 'inspect-group' has no active members.</code></pre>
+<p>Only the partitions that actually received messages appear (here, 0 and 2 — partition 1 never got a key that hashed to it in this run, which is fine and expected with only 3 keys produced). "No active members" just means the consumer process already exited — the group and its committed offsets persist in Kafka regardless, which is the entire point: nothing about this bookmark depends on the consumer still running.</p>
+<div class="callout"><strong>LAG is the metric to watch going forward.</strong> <code>LAG = LOG-END-OFFSET − CURRENT-OFFSET</code>: how many records a group hasn't caught up to yet. Zero lag means fully caught up. A consistently growing lag on Day 6's consumer would mean the warehouse write is falling behind the producer — the single most useful health signal for any real Kafka consumer, and out of scope to alert on today, but worth knowing where it comes from.</p></div>
+<p>Commit <code>docker-compose.yml</code>, <code>scripts/produce_order_events.py</code> and <code>scripts/inspect_order_events.py</code>.</p>
+
+<div class="interview">
+<p><strong>Q: "Why key Kafka messages by order_id here, and what does that actually buy you?"</strong> A strong answer, out loud: <em>"Kafka only guarantees message order within a single partition, never across partitions of the same topic. A topic's partition count is chosen for throughput, but that means a topic with more than one partition needs some way to keep related messages together, in order — that's what the key is for. Kafka hashes the key to deterministically pick a partition, so every message with the same key always lands on the same partition, in send order. For order_events, keying by order_id means every status change for one order — placed, accepted, picked_up, delivered — is guaranteed to arrive at any consumer in that same order, because they're all on one partition's one append-only log. It says nothing about ordering between different orders, which this domain never needs anyway."</em> The signal: naming the guarantee precisely — per-partition order, not global order — rather than a vague "keys keep things in order."</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Kafka guarantees message order only within a single partition. It makes no ordering promise at all across different partitions of the same topic, even though they belong to one topic.">
+    <p class="stem">Within what unit does Kafka guarantee message order?</p>
+    <button class="opt" data-ok>One partition, never across partitions</button>
+    <button class="opt">One topic, never across brokers</button>
+    <button class="opt">One broker, never across topics</button>
+  </div>
+  <div class="q" data-why="Kafka hashes the message key to deterministically choose a partition. The same key always hashes to the same partition, which is exactly what keeps one order's events together and in order.">
+    <p class="stem">How does a message's key decide which partition it lands on?</p>
+    <button class="opt" data-ok>Kafka hashes the key to pick a partition</button>
+    <button class="opt">Kafka hashes the value to pick a partition</button>
+    <button class="opt">Kafka round-robins every key to any free partition</button>
+  </div>
+  <div class="q" data-why="Keying every order_events message by order_id means all of one order's status changes hash to the same partition, so a consumer reading that partition sees placed before accepted before picked_up before delivered -- in the order they actually happened.">
+    <p class="stem">Why key <code>order_events</code> by <code>order_id</code> specifically?</p>
+    <button class="opt" data-ok>One order's own events stay in order</button>
+    <button class="opt">All orders in the topic stay ordered</button>
+    <button class="opt">One event's own fields stay in order</button>
+  </div>
+  <div class="q" data-why="An offset is a record's permanent position number within one partition, starting at 0. Offsets in different partitions are unrelated numbers -- partition 0's offset 5 and partition 2's offset 5 are two different, unconnected records.">
+    <p class="stem">What does a Kafka offset number identify?</p>
+    <button class="opt" data-ok>A record's position within one partition</button>
+    <button class="opt">A record's position across all partitions</button>
+    <button class="opt">A consumer's position across all topics</button>
+  </div>
+  <div class="q" data-why="LAG is LOG-END-OFFSET minus CURRENT-OFFSET: how many records already written to the partition a consumer group has not yet processed. Zero means fully caught up; a growing lag means the consumer is falling behind the producer.">
+    <p class="stem">What does a consumer group's <code>LAG</code> value, from <code>kafka-consumer-groups.sh --describe</code>, measure?</p>
+    <button class="opt" data-ok>Records written but not yet read by it</button>
+    <button class="opt">Records read but not yet written by it</button>
+    <button class="opt">Seconds since the group last read a record</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official <a href="https://kafka.apache.org/quickstart/">Apache Kafka Quickstart</a> (cited in <code>RESOURCES.md</code> as today's primary source) walks the same single-node KRaft setup and CLI tools used above, straight from the source, and its <a href="https://kafka.apache.org/documentation/#design">Design</a> chapter is the authoritative explanation of the log, partitions and delivery semantics behind today's claims. For a first pass in video form, Confluent's <a href="https://developer.confluent.io/courses/apache-kafka/events/">Kafka 101</a> course covers the same events/topics/partitions/consumer-groups ground — skip its Confluent Cloud sign-up steps, since this course runs entirely locally.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 5.<br>
+<strong>Next lesson (20 Sep):</strong> the consumer's counterpart to today's inspector script actually lands events into <code>raw.order_events</code>, with <code>INSERT ... ON CONFLICT (event_id) DO NOTHING</code> and a manual offset commit placed <em>after</em> the write succeeds — so killing and restarting the consumer mid-stream creates zero duplicate rows. Then <code>stg_order_events</code> and <code>mart_delivery_sla</code> get built in dbt on top of it.<br><br>
+💬 Anything unclear — why partitions instead of just more topics, what the key hash actually does, or the offset/committed-offset difference? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

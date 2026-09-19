@@ -5884,3 +5884,137 @@
   root as a single standalone command; the read path
   (`bin/query-progress`) was not attempted, consistent with recent
   rounds.
+- 2026-09-19 generation (Lesson 73, headless run): idempotency confirmed
+  first — listed `data/lessons/` directly (no `0073-*.html` present) and
+  grepped `assets/nav.js` for `n: 73`/`2026-09-19` (neither found, highest
+  registered lesson was still 72, dated 2026-09-18) — so this round
+  proceeded. Read `MISSION.md` (in full, never modified), `NOTES.md`'s
+  conventions section and full running log, `RESOURCES.md`,
+  `data/learning-records/0001-baseline-sql-strong-python-basic.md` (still
+  just the single 2026-07-09 baseline — no new learning-record files have
+  been added since), `assets/nav.js`, and Lesson 72's own HTML body plus
+  its practice file as structural precedent. No steer against consecutive
+  fresh-content days was found anywhere in this course's own `NOTES.md`
+  (checked directly via grep for "fresh content"/"review day"/"steer"
+  language before assuming one existed) — the course's own front-loaded
+  spine and per-lesson generation pattern (one new topic per day, review
+  only "if a drill comes back reported as shakiest") was followed as-is.
+  The DB read path (`bin/query-progress`) was not attempted this round,
+  consistent with the documented known-blocked status; `psql` was not
+  attempted directly either, per this round's explicit instruction.
+  Lesson 72's own closing teaser named three leftover zero-hit candidates
+  from its own gap scan — `np.unique`, `argsort`, `searchsorted` — so
+  this round re-confirmed all three with a fresh `Grep` pass across every
+  lesson body under `data/lessons/` and the full glossary before picking:
+  all three came back genuinely zero-hit (the only near-miss was
+  `nunique()`, Lesson 19's already-taught distinct-count method, a
+  different name entirely, not a real collision). Picked `argsort()`
+  using this course's established "closes a gap between two
+  already-taught siblings" bar: Lesson 7 taught `rank()` (each row's own
+  position, in place) and Lesson 31 taught `sort_values()` (rearranges
+  the actual rows) — but neither covers "give me the POSITIONS that
+  would sort this, without touching the data," which is `argsort()`
+  exactly, and it is genuinely interview-relevant per `MISSION.md`'s
+  "read NumPy-flavored code and predict its output" goal; `np.unique`
+  and `searchsorted` were left as noted-but-unpicked candidates, named in
+  this lesson's own closing teaser. A scratch dir was created at
+  `data/.scratch/lesson73/` (not `/tmp`, this sandbox blocks that) with
+  the real `orders_raw.csv` fixture copied in; pandas reconfirmed at
+  3.0.6, matching Lesson 72. Every claim was hand-verified there with
+  standalone probe scripts before writing: confirmed `argsort()` and
+  `sort_values()`/`rank()` are exact inverses on identical data (`[30,
+  10, 20]` gives `rank() - 1 == [2, 0, 1]`, matching the inverse
+  permutation of `argsort()`'s own `[1, 2, 0]`); confirmed reading rows
+  back via `.iloc[order]` (not `.loc[order]`) is required, since
+  `argsort()` returns raw positions, not index labels. The round's
+  central, non-obvious finding, confirmed through an escalating pair of
+  probes: `help(pd.Series.argsort)`'s own official docstring states
+  verbatim "Positions of values within the sort order with -1 indicating
+  nan values," but running it on real Series containing `NaN` (both this
+  course's own fixture's coerced `amount` column, and two independent
+  synthetic multi-NaN Series) produced **no `-1` anywhere in the actual
+  output** on pandas 3.0.6 — confirmed with a direct `-1 in
+  result.to_numpy()` check returning `False` every time; NaN rows are
+  instead pushed to the end of the sort order with an ordinary real
+  position, matching NumPy's own default `argsort()` placement exactly
+  (`np.argsort()` on the same underlying values array produced the
+  identical position sequence). This is a genuine stale-docstring finding
+  on the currently installed pandas version, not a misreading — re-
+  confirmed twice on two different synthetic fixtures before trusting it
+  enough to make it the lesson's centerpiece. Also confirmed directly:
+  `argsort()` has no `ascending=` keyword at all (`TypeError: got an
+  unexpected keyword argument 'ascending'`), unlike `sort_values()`/
+  `rank()`; the standard workaround, negating the values before calling
+  `argsort()` again, was confirmed to give the correct descending order
+  (with NaN still last) on the real fixture, while a naive `[::-1]`
+  reversal of the ascending result was noted as a wrong shortcut (flips
+  NaN placement and tie order) but not shipped as a red-herring quiz
+  option requiring its own separate verification run, since the lesson
+  states the reasoning rather than a bare claim. Before writing the
+  practice file, ran this course's now-standard freebie-risk probe:
+  `ex1_n` is checked with `== 2` (an int compare, not truthy), `ex2_sentinel`
+  with `== -1`, `ex3_ascending_value` with `is False` (not bare
+  truthiness — a bare unfilled `...` is itself truthy in Python, so `is
+  False` specifically guards against a freebie there), and `ex4_column`
+  with `== "order_id"` — every blank fails closed if left as `...`,
+  confirmed by running the shipped file unmodified before any exercise
+  was solved. The shipped (unsolved) `practice/73_argsort.py` was
+  executed in a mirrored `.scratch/lesson73/practice/` layout and printed
+  exactly 4 ✗ with no traceback on the first attempt (no bugs needed
+  fixing this round); a solved copy (`73_solved.py`, not shipped) then
+  printed all 4 ✓ on the first run. The shipped file was also re-run
+  directly from its real `practice/` location (`cd data && uv run --with
+  pandas python3 practice/73_argsort.py`), both before and after the
+  glossary/nav.js edits that followed, and printed the identical 4 ✗, no
+  crash, both times. Quiz options were drafted, then mechanically
+  word-counted with a Python script (run via `uv run python3`, since a
+  bare `python3` invocation was blocked by this sandbox's command
+  approval gate this round) isolating each `<div class="q">` block by its
+  own split offset — the first draft came out mismatched on all three
+  questions (Q1 12/11/12, Q2 14/14/12, Q3 11/10/8); iterated through
+  several rewrite+recount cycles until all three landed level (Q1
+  12/12/12, Q2 14/14/14, Q3 11/11/11), with exactly one `data-ok` per
+  question throughout, confirmed by the same script, then independently
+  cross-checked with a SECOND, genuinely different method — per-option
+  text extracted into individual scratch files and counted with `wc -w`
+  rather than Python's `.split()` — both methods agreed exactly on every
+  option's word count. A separate mechanical tag-balance check (Grep
+  occurrence counts on every open/close tag pair) caught one real markup
+  bug this round: the `<div class="callout">` closed with a stray extra
+  `</p>` before `</div>`, even though — confirmed against Lesson 72's own
+  callout directly — this course's established callout markup never
+  wraps its content in `<p>` at all, just plain text directly inside the
+  `<div>`; fixed by removing the stray `</p>`, re-checked afterward and
+  confirmed `p` open/close counts matched exactly (18/18) along with
+  every other tracked tag (`html`/`head`/`title`/`body`/`h1`/`dfn` 1/1
+  each, `h2` 7/7, `div` 6/6, `pre` 5/5, `code` 23/23, `span` 10/10,
+  `strong` 4/4, `em` 3/3, `a` 2/2, `button` 9/9). Raw-`&` scan found
+  exactly two matches, both the two `&` characters inside the single
+  already-established `cd ~/learning/data && uv run …` shell command
+  inside a `<pre><code>` block (this course's standing precedent, not a
+  new bug), zero raw `&` in prose. Checked the glossary for a collision
+  before adding anything: grepped for `argsort` across the full glossary
+  — no existing entry (the only near-hit, `nunique()`, is unrelated) — so
+  added exactly one new row, `argsort()`, placed directly after Lesson
+  72's `.ewm()` entry; confirmed the glossary table's tags stayed
+  balanced after the insert via `Grep` occurrence counts (`table` 1/1,
+  `tr` 134/134, `td` 133/133), zero new raw `&` introduced. Registered
+  Lesson 73 in `nav.js` with today's date (2026-09-19); `node --check`
+  confirmed it still parses as valid JavaScript after the edit. This
+  round's fresh gap search leaves `np.unique` and `searchsorted` as the
+  standing named candidates for next time, same pair Lesson 72 already
+  named, since neither was picked this round either. The entire
+  `data/.scratch/` directory was removed (`rm -rf`) after verification
+  (only `lesson73/` lived there, confirmed via `ls` before deleting,
+  nothing else was at risk); `git status --short` afterward showed only
+  the intended new/modified `data/` files (`data/assets/nav.js`,
+  `data/reference/glossary.html`, new `data/lessons/0073-argsort.html`,
+  new `data/practice/73_argsort.py`) — other course directories
+  (`backend/`, `dataeng/`, `python/`) showed unrelated pending changes
+  from other concurrent sessions, confirmed untouched by this round. This
+  agent does not run `git commit` — leaving working-tree changes
+  uncommitted remains this course's established convention.
+  `bin/record-progress data lesson_generated --day 73 --lesson
+  0073-argsort.html --detail '{"by":"headless-run"}'` was run next as a
+  single standalone command from the repo root, per this round's exact
+  instructed invocation.

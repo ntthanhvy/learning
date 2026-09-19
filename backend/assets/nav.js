@@ -156,6 +156,8 @@
       file: "lessons/0074-primary-key-design.html" },
     { n: 75, date: "2026-09-18", title: "Database triggers: code that runs without anyone calling it",
       file: "lessons/0075-database-triggers.html" },
+    { n: 76, date: "2026-09-19", title: "Window functions and CTEs: SQL that sees more than one row at a time",
+      file: "lessons/0076-window-functions-and-ctes.html" },
   ];
 
   const REFS = [

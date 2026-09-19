@@ -150,6 +150,8 @@
       file: "lessons/0071-pd-grouper.html" },
     { n: 72, date: "2026-09-18", title: ".ewm(): the moving average that never forgets, just discounts",
       file: "lessons/0072-ewm.html" },
+    { n: 73, date: "2026-09-19", title: "argsort(): positions, not values — and a stale docstring to catch",
+      file: "lessons/0073-argsort.html" },
   ];
 
   const REFS = [

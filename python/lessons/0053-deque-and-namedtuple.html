@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 53 · collections.deque &amp; namedtuple</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 53 · ~20 min · 19 Sep 2026</p>
+<h1><code>collections.deque</code> &amp; <code>namedtuple</code>: the two corners <code>collections</code> left uncovered</h1>
+<p class="byline">Day 3 already spent <code>defaultdict</code> and <code>Counter</code> from the <code>collections</code> module on grouping and counting. Today closes the module out with its other two everyday exports: <dfn data-en="collections.deque (double-ended queue) is a list-like sequence optimized for adding and removing from BOTH ends in constant time, O(1), unlike a plain list which is only fast at the right end" data-vn="giữ nguyên &quot;deque&quot; (double-ended queue) — cấu trúc giống list nhưng thêm/xóa ở CẢ HAI đầu đều nhanh, O(1), trong khi list chỉ nhanh ở đầu bên phải">deque</dfn>, a list that's fast at both ends instead of just one, and <dfn data-en="collections.namedtuple(name, fields) builds a tuple subclass whose elements can also be read by name (p.x) as well as by position (p[0]) - a lightweight, immutable record, one step before reaching for a dataclass" data-vn="giữ nguyên &quot;namedtuple&quot; — tuple có thể đọc theo tên field (p.x) chứ không chỉ theo vị trí (p[0]), là bản ghi immutable nhẹ, bước trước khi cần đến dataclass">namedtuple</dfn>, a tuple whose fields you can call by name instead of remembering their position.</p>
+
+<div class="callout"><strong>Bridge from SQL:</strong> a <code>deque</code> is the plain-Python shape of a message queue or a sliding window over the last N rows — the two ends matter, not random access into the middle, the same way a queue table is only ever read from the front and written at the back. A <code>namedtuple</code> is the shape of a query result row before an ORM wraps it: fixed, named columns, read-only once built — exactly what <code>cursor.fetchone()</code> hands back from many database drivers.</div>
+
+<h2>1 · The problem <code>deque</code> solves: a list is only fast at one end</h2>
+<p>Appending to the <em>right</em> end of a list, <code>lst.append(x)</code>, is <code>O(1)</code> — cheap, no matter how long the list is. But working at the <em>left</em> end is a different story: <code>lst.insert(0, x)</code> and <code>lst.pop(0)</code> are both <code>O(n)</code>, because every remaining element has to shift over by one to close or open the gap at index 0. That cost is invisible on a short list and brutal on a long one:</p>
+<pre><code><span class="kw">import</span> time
+<span class="kw">from</span> collections <span class="kw">import</span> deque
+
+big_list = <span class="kw">list</span>(<span class="kw">range</span>(<span class="num">200_000</span>))
+big_deque = deque(<span class="kw">range</span>(<span class="num">200_000</span>))
+
+<span class="cm"># popping 20,000 items from the FRONT of each</span>
+<span class="cm"># big_list.pop(0)      -- measured ~0.39s : every pop reshuffles ~200,000 items</span>
+<span class="cm"># big_deque.popleft()  -- measured ~0.001s: no shifting, ends are O(1)</span></code></pre>
+<p>Verified live: popping 20,000 items from the front measured roughly 0.39s for <code>list.pop(0)</code> against roughly 0.001s for <code>deque.popleft()</code> — a ~400x gap on this run, growing with list size since <code>list.pop(0)</code> is <code>O(n)</code> per call and <code>deque.popleft()</code> stays <code>O(1)</code> regardless of length. A <code>deque</code> (say "deck") is built for exactly this: a sequence kept as a doubly-linked structure under the hood so both ends are equally cheap.</p>
+
+<h2>2 · Working at both ends</h2>
+<p><code>deque</code> mirrors <code>list</code>'s right-end methods and adds a left-end sibling for each one:</p>
+<pre><code><span class="kw">from</span> collections <span class="kw">import</span> deque
+
+queue = deque([<span class="str">"a"</span>, <span class="str">"b"</span>, <span class="str">"c"</span>])
+queue.append(<span class="str">"d"</span>)        <span class="cm"># deque(['a', 'b', 'c', 'd'])      -- right end, like list.append</span>
+queue.appendleft(<span class="str">"z"</span>)    <span class="cm"># deque(['z', 'a', 'b', 'c', 'd'])  -- left end, list has no equivalent</span>
+queue.popleft()          <span class="cm"># 'z' -- removes and returns the left end</span>
+queue.pop()               <span class="cm"># 'd' -- removes and returns the right end, same as list</span></code></pre>
+<p>Verified live: after both pops, <code>queue == deque(['a', 'b', 'c'])</code>, matching the four-line trace above. Indexing (<code>queue[1]</code>) and iteration still work like a list, but random access into the <em>middle</em> — indexing or inserting anywhere except the two ends — is <code>O(n)</code> on a <code>deque</code>, same cost as a list; a <code>deque</code> is a trade, not a strict upgrade. Reach for it specifically when the two ends are what matter: a work queue (push tasks on the right, take them off the left, first in first out), a browser-history-style undo stack, or a sliding window.</p>
+
+<h2>3 · <code>maxlen</code>: a deque that forgets its own tail</h2>
+<p>A <code>deque</code> built with <code>maxlen=</code> caps its own size — once full, adding to one end silently drops from the other, no manual trimming needed:</p>
+<pre><code><span class="kw">from</span> collections <span class="kw">import</span> deque
+
+recent = deque(maxlen=<span class="num">3</span>)
+<span class="kw">for</span> i <span class="kw">in</span> [<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>, <span class="num">4</span>, <span class="num">5</span>]:
+    recent.append(i)
+    <span class="kw">print</span>(<span class="kw">list</span>(recent))
+<span class="cm"># [1]
+# [1, 2]
+# [1, 2, 3]
+# [2, 3, 4]   -- 4 pushes out 1 to stay at maxlen 3
+# [3, 4, 5]   -- 5 pushes out 2</span></code></pre>
+<p>Verified live: matches the comment exactly. This is the standard shape for "keep the last N log lines," "last N requests for a rolling error rate," or any fixed-size sliding window — no separate length check, no manual <code>pop(0)</code> to trim.</p>
+
+<h2>4 · <code>namedtuple</code>: a tuple you can read by name</h2>
+<p>Day 4's tuples already let you unpack <code>(x, y) = point</code>, but reading a field back later means remembering which position held what — <code>point[0]</code> means nothing on its own. <code>namedtuple</code> builds a tuple subclass with named fields, so both spellings work:</p>
+<pre><code><span class="kw">from</span> collections <span class="kw">import</span> namedtuple
+
+Point = namedtuple(<span class="str">"Point"</span>, [<span class="str">"x"</span>, <span class="str">"y"</span>])
+p = Point(<span class="num">3</span>, <span class="num">4</span>)
+
+p.x, p.y      <span class="cm"># (3, 4) -- by name</span>
+p[<span class="num">0</span>], p[<span class="num">1</span>]      <span class="cm"># (3, 4) -- still a real tuple, positional access still works</span>
+x, y = p      <span class="cm"># unpacking still works exactly like a plain tuple</span>
+p             <span class="cm"># Point(x=3, y=4) -- readable repr for free</span></code></pre>
+<p>Verified live: all four lines match their comments. <code>namedtuple("Point", ["x", "y"])</code> reads as "build a new tuple subclass named <code>Point</code>, with fields <code>x</code> and <code>y</code>, in that order" — the string name and the field list are both required, and the string name should match the variable it's assigned to (Python won't enforce that, but mismatched names make tracebacks confusing). Because it's still a genuine tuple, a <code>namedtuple</code> is immutable — <code>p.x = 10</code> raises <code>AttributeError: can't set attribute</code>, the same guarantee Day 1's tuple immutability already promised.</p>
+
+<div class="callout"><strong>Where this sits next to a dataclass:</strong> Day 7's <code>dataclass</code> is the heavier, more flexible tool — mutable by default, supports type hints, methods, and defaults. <code>namedtuple</code> is the lighter one: immutable, tuple-compatible (unpacks, compares, hashes, works anywhere a plain tuple is expected), and zero-boilerplate for a small fixed record. Reach for <code>namedtuple</code> when a function returns a small, immutable bundle of values — <code>divmod()</code>-style — and a <code>dataclass</code> when the record needs to change after creation or grow real behavior.</div>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> nothing pandas-specific — <code>DataFrame.itertuples()</code> happens to hand back each row as a namedtuple-like object, but that's a detail of iterating an existing DataFrame, not something to demonstrate here; today's <code>deque</code>/<code>namedtuple</code> are plain-list and plain-tuple tools with no DataFrame involved, per <code>MISSION.md</code>.</div>
+
+<div class="interview">
+<p><strong>Q: "How would you implement a fixed-size cache of the last 100 events, most-recent-first, with cheap inserts?"</strong> A strong answer, out loud: <em>"<code>collections.deque(maxlen=100)</code>. Every new event goes in with <code>appendleft()</code> so the newest is always at index 0; once the deque fills up, each further <code>appendleft()</code> automatically drops the oldest event off the right end — no manual length check or trimming. Both ends are <code>O(1)</code>, so this stays cheap no matter how many events flow through, unlike a plain list where trimming from one end would be <code>O(n)</code> per insert."</em> The signal: naming <code>maxlen</code> specifically, not just "a deque," and knowing which end to push into to get "most-recent-first" for free.</p>
+</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/53_deque_and_namedtuple.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/53_deque_and_namedtuple.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: building a <code>deque</code> and working both ends with <code>append</code>/<code>appendleft</code>/<code>pop</code>/<code>popleft</code>, using <code>maxlen</code> to keep only the last N items seen, building a <code>namedtuple</code> and reading a field both by name and by position, and confirming a <code>namedtuple</code> raises <code>AttributeError</code> on an attempted mutation.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A plain list stores elements contiguously, so removing or inserting anywhere except the rightmost end requires shifting every remaining element over by one, which costs O(n) per call. A deque is built so both ends are equally cheap, O(1), regardless of length.">
+    <p class="stem">Why is <code>list.pop(0)</code> slow on a long list, but <code>deque.popleft()</code> is not?</p>
+    <button class="opt" data-ok>list must shift every remaining item over</button>
+    <button class="opt">list stores items out of order internally</button>
+    <button class="opt">list uses much more memory per item</button>
+  </div>
+  <div class="q" data-why="A deque built with maxlen caps its own length automatically -- once full, each further append on one end silently drops the oldest item off the opposite end, with no manual length check or explicit pop needed.">
+    <p class="stem">What happens when you keep appending to a <code>deque(maxlen=3)</code> that is already full?</p>
+    <button class="opt" data-ok>the oldest item drops off the end</button>
+    <button class="opt">it raises an exception, refusing the append</button>
+    <button class="opt">it grows past 3 items, ignoring maxlen</button>
+  </div>
+  <div class="q" data-why="namedtuple builds a real tuple subclass, so every plain-tuple operation still works -- indexing by position, unpacking, comparison -- while also allowing attribute-style access by field name. It is not a replacement mechanism, it is tuple plus names.">
+    <p class="stem">Why can a <code>namedtuple</code>'s fields be read both as <code>p.x</code> and as <code>p[0]</code>?</p>
+    <button class="opt" data-ok>it is a real tuple; position works</button>
+    <button class="opt">Python silently converts it to a dict</button>
+    <button class="opt">namedtuple ignores position; keeps only the names</button>
+  </div>
+  <div class="q" data-why="namedtuple is a genuine tuple under the hood, and tuples are immutable -- attempting p.x = 10 raises AttributeError: can't set attribute, the same immutability guarantee a plain tuple already has, just surfaced through attribute-assignment syntax instead of item-assignment syntax.">
+    <p class="stem">Why does <code>p.x = 10</code> raise <code>AttributeError</code> on a <code>namedtuple</code> instance?</p>
+    <button class="opt" data-ok>a namedtuple is still a tuple underneath, and tuples are immutable</button>
+    <button class="opt">field names can only be set once, during class definition only</button>
+    <button class="opt">x is a reserved word that namedtuple always refuses to use</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the <a href="https://docs.python.org/3/library/collections.html#collections.deque"><code>collections.deque</code></a> and <a href="https://docs.python.org/3/library/collections.html#collections.namedtuple"><code>collections.namedtuple</code></a> stdlib docs (both already cited generally in <code>RESOURCES.md</code> via the <code>collections</code> module link added Day 3) — the <code>deque</code> section's "Recipes" subsection is worth a skim for the sliding-window pattern.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day53">glossary</a> under Day 53.<br>
+That closes out <code>collections</code>' four everyday exports across two lessons — <code>defaultdict</code>/<code>Counter</code> (Day 3) for grouping and counting, <code>deque</code>/<code>namedtuple</code> (today) for queues and lightweight records.<br><br>
+💬 Anything unclear — <code>deque</code>'s two ends, <code>namedtuple</code> vs <code>dataclass</code>, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

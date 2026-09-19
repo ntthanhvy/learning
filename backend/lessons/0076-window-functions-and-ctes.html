@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 76 · Window functions and CTEs: SQL that sees more than one row at a time</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 76 · ~20 min</p>
+<h1>Window functions and CTEs: SQL that sees more than one row at a time</h1>
+<p class="byline">MISSION.md says SQL syntax and joins were never in question here — and 75 lessons of <code>WHERE</code>, <code>JOIN</code>, and <code>GROUP BY</code> have proven that true. But one whole shape of query has stayed off the table the entire time: a query that ranks, numbers, or compares a row <em>against its neighbors</em> without collapsing them the way <code>GROUP BY</code> does. That shape has a name, and it's one every backend interview and every "top N per group" feature request will eventually ask for.</p>
+
+<h2>1 · The gap GROUP BY can't close</h2>
+<p><code>GROUP BY</code> answers "one row per group" — total orders per customer, average price per category. It cannot answer "rank each order within its customer's own order history" and still return every order, because the moment you group, the individual rows are gone. A <dfn data-en="a SQL function that computes a value across a set of related rows -- the row's own window -- without collapsing those rows into one, unlike GROUP BY which merges every row in a group into a single output row" data-vn="window function (giữ nguyên) — hàm tính toán dựa trên 1 tập row liên quan (window), nhưng không gộp các row đó lại thành 1 row như GROUP BY">window function</dfn> is the fix: it looks across a set of related rows to compute its answer, but keeps every row in the output.</p>
+<pre><code><span class="kw">SELECT</span> customer_id, id, created_at,
+       <span class="kw">ROW_NUMBER() OVER</span> (
+           <span class="kw">PARTITION BY</span> customer_id
+           <span class="kw">ORDER BY</span> created_at
+       ) <span class="kw">AS</span> order_seq
+<span class="kw">FROM</span> orders;
+<span class="cm">-- every order row survives; order_seq restarts at 1 for each customer</span></code></pre>
+<p><code>PARTITION BY</code> is doing the job <code>GROUP BY</code> would do — splitting rows into buckets by <code>customer_id</code> — but instead of collapsing each bucket to one row, <code>OVER (...)</code> tells Postgres "compute this function per row, using only the other rows in its own bucket." <code>ORDER BY</code> inside the parentheses controls the order the function walks the bucket in, which is exactly what <code>ROW_NUMBER()</code> needs to count 1, 2, 3, ....</p>
+
+<h2>2 · The functions worth knowing by name</h2>
+<table class="cmp">
+<thead><tr><th>Function</th><th>What it returns</th></tr></thead>
+<tbody>
+<tr><th><code>ROW_NUMBER()</code></th><td>1, 2, 3, ... within the partition — no ties, ever</td></tr>
+<tr><th><code>RANK()</code></th><td>same rule as a race: tied rows share a rank, next rank skips ahead</td></tr>
+<tr><th><code>LAG(col)</code> / <code>LEAD(col)</code></th><td>the same column's value from the previous / next row in the ordering</td></tr>
+<tr><th><code>SUM()/AVG() OVER (...)</code></th><td>any existing aggregate, but per-row instead of per-group — a running total</td></tr>
+</tbody>
+</table>
+<p><code>LAG</code> is the one that solves a problem this course has never had a clean answer for: "how long between this order and the customer's previous one?" Without a window function that's a self-join against a slower row; with one, it's one column:</p>
+<pre><code><span class="kw">SELECT</span> customer_id, created_at,
+       created_at - <span class="kw">LAG</span>(created_at) <span class="kw">OVER</span> (
+           <span class="kw">PARTITION BY</span> customer_id <span class="kw">ORDER BY</span> created_at
+       ) <span class="kw">AS</span> gap_since_last_order
+<span class="kw">FROM</span> orders;
+<span class="cm">-- first order per customer: gap_since_last_order is NULL, no previous row exists</span></code></pre>
+
+<h2>3 · The classic use: top N per group</h2>
+<p>"The 3 most recent orders per customer" is a request-shaped query no plain <code>GROUP BY</code> or <code>LIMIT</code> answers alone — <code>LIMIT</code> caps the whole result set, not each customer's slice of it. <code>ROW_NUMBER()</code> makes it a two-step query: number the rows, then filter on the number. Filtering can't happen in the same <code>SELECT</code> a window function appears in (the numbering has to exist before <code>WHERE</code> can check it), so it needs a place to put the first step's result — which is exactly what a CTE is for.</p>
+
+<h2>4 · Naming the intermediate step: CTEs</h2>
+<p>A <dfn data-en="a named, temporary result set defined with WITH ... AS (...) at the start of a query, that the main query can then reference by name as if it were a table, making a multi-step query readable top to bottom instead of nested inside itself" data-vn="CTE / common table expression (giữ nguyên) — kết quả tạm có tên, định nghĩa bằng WITH ... AS (...), query chính dùng lại như 1 bảng, giúp query nhiều bước đọc từ trên xuống thay vì lồng nhau">CTE</dfn> (common table expression) is a named subquery declared up front with <code>WITH</code>, so the rest of the query can refer to it by name instead of nesting one query inside another:</p>
+<pre><code><span class="kw">WITH</span> ranked <span class="kw">AS</span> (
+    <span class="kw">SELECT</span> customer_id, id, created_at,
+           <span class="kw">ROW_NUMBER() OVER</span> (
+               <span class="kw">PARTITION BY</span> customer_id
+               <span class="kw">ORDER BY</span> created_at <span class="kw">DESC</span>
+           ) <span class="kw">AS</span> rn
+    <span class="kw">FROM</span> orders
+)
+<span class="kw">SELECT</span> customer_id, id, created_at
+<span class="kw">FROM</span> ranked
+<span class="kw">WHERE</span> rn <span class="kw">&lt;=</span> 3;
+<span class="cm">-- the 3 most recent orders per customer, no self-join required</span></code></pre>
+<p>Nothing here is new SQL power a nested subquery couldn't already do — a CTE is a readability feature, not a performance feature. <code>WITH ranked AS (...)</code> names the intermediate step in the order a person actually thinks about the problem ("first number them, then keep the top 3"), instead of forcing that same logic to be read inside-out the way a nested <code>FROM (SELECT ...) AS ranked</code> subquery does.</p>
+
+<h2>5 · Where this connects to what Lesson 15 already built</h2>
+<div class="callout"><strong>Ties to Lesson 15:</strong> keyset/cursor pagination's <code>WHERE (created_at, id) &gt; (...)</code> trick works because rows have a stable, total order — the same property <code>ORDER BY</code> inside a window function's <code>OVER (...)</code> depends on. Lesson 15 never needed a window function because it paginates the <em>whole</em> table; the moment a feature needs pagination or ranking scoped <em>per group</em> — "page through each customer's own orders separately," "show each product's rank within its category" — that's the window-function shape, not the plain cursor shape. Recognizing which one a feature request actually needs is the point, not memorizing more syntax.</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="GROUP BY merges every row in a group into a single output row, so the individual orders are gone once grouped -- a window function instead computes its value using the rows in a partition but keeps every original row in the output, which is exactly what per-row ranking needs.">
+    <p class="stem">Why can't a plain `GROUP BY` query rank each order within its own customer's history?</p>
+    <button class="opt" data-ok>GROUP BY collapses each group down to one row</button>
+    <button class="opt">Postgres simply forbids any ORDER BY inside GROUP BY</button>
+    <button class="opt">ranking one row always needs a second full database</button>
+    <button class="opt">GROUP BY can only ever operate on numeric columns</button>
+  </div>
+  <div class="q" data-why="PARTITION BY splits rows into buckets the same way GROUP BY would, but instead of collapsing each bucket into one row, the window function computes its value per row using only the other rows already inside that same row's bucket.">
+    <p class="stem">What job does `PARTITION BY` do inside a window function's `OVER (...)` clause?</p>
+    <button class="opt" data-ok>splits rows into buckets the function computes within</button>
+    <button class="opt">deletes every row that fails one WHERE condition</button>
+    <button class="opt">permanently sorts the whole underlying table on disk</button>
+    <button class="opt">merges two separate tables into one new table</button>
+  </div>
+  <div class="q" data-why="A window function's numbering has to exist as its own column before a WHERE clause can filter on it, and a window function's result can't be filtered in the same SELECT it appears in -- so the numbering step is done first inside a CTE, then the outer query filters on that named result.">
+    <p class="stem">Why does "top 3 orders per customer" need a CTE around `ROW_NUMBER()` rather than filtering directly?</p>
+    <button class="opt" data-ok>the row number must exist before WHERE filters it</button>
+    <button class="opt">a CTE is the only way to sort rows</button>
+    <button class="opt">ROW_NUMBER can only ever run once per whole database</button>
+    <button class="opt">WITH blocks always execute faster than any given subquery</button>
+  </div>
+  <div class="q" data-why="A CTE is a readability feature: WITH ranked AS (...) names an intermediate step so the query reads top to bottom in the order a person thinks about the problem, instead of nesting one query inside another's FROM clause. It doesn't add SQL capability a nested subquery lacked.">
+    <p class="stem">What does wrapping a subquery in `WITH ... AS (...)` actually buy over a plain nested subquery?</p>
+    <button class="opt" data-ok>a named, readable version of that same nested query</button>
+    <button class="opt">a guaranteed faster query plan in every single case</button>
+    <button class="opt">the power to skip writing any FROM clause here</button>
+    <button class="opt">automatic caching of a result across every future query</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://www.postgresql.org/docs/current/tutorial-window.html">PostgreSQL Manual — Window Functions</a> (~15 min) — RESOURCES.md's standing "Data Definition" primary source extended into the tutorial chapter specifically; covers <code>PARTITION BY</code>, <code>ORDER BY</code> inside <code>OVER</code>, and the full ranking-function family. Read alongside the <a href="https://www.postgresql.org/docs/current/queries-with.html">WITH Queries (CTEs)</a> page for recursive CTEs, which this lesson deliberately left out to stay inside ~20 minutes.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially.<br><br>
+<em>Next lesson:</em> open. Still no <code>lesson_completed</code>/quiz-outcome record exists for any lesson after 76 rounds — the honest next step remains a completion signal or a user-named track.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -110,6 +110,8 @@
       file: "lessons/0051-heapq-and-bisect.html" },
     { n: 52, date: "2026-09-18", title: "Review day 5: retrieval across six more lessons",
       file: "lessons/0052-review-retrieval-day-5.html" },
+    { n: 53, date: "2026-09-19", title: "collections.deque & namedtuple: queues and lightweight records",
+      file: "lessons/0053-deque-and-namedtuple.html" },
   ];
 
   const REFS = [

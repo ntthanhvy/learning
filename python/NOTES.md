@@ -6599,3 +6599,122 @@ fail *gracefully* so the learner sees which task failed.
   is worth a closer look first) against another review sweep on its own
   merits, or a real learner completion/quiz-outcome signal if one finally
   arrives.
+- 2026-09-19 — **Day 53 generated: `collections.deque` & `namedtuple`**
+  (headless run), fresh content, following one review day (52) after two
+  fresh days (50-51) — comfortably inside the "avoid three fresh days in a
+  row" rule. Read `MISSION.md` (untouched, read-only), `PLAN.md`,
+  `RESOURCES.md`, the sole `learning-records/0001-baseline-reads-python-
+  writes-little.md`, and `NOTES.md`'s tail (~last 250 lines, since the
+  full file exceeds the read tool's single-read size limit) to confirm
+  Day 52's own next-day note: 12 review-candidate lessons remain (15,
+  18, 21-23, 25-26, 28-29, 35, 37, 40) but lean FastAPI/pydantic/Postgres/
+  httpx-specific, and Day 51's `json`/`csv` gap lead was flagged as worth
+  a closer look before defaulting to another review sweep. Read
+  `assets/nav.js`'s full `LESSONS` array and `lessons/0051-heapq-and-
+  bisect.html` in full as the immediately prior fresh-content lesson's
+  structural precedent (dfn markup, callout/interview divs, code span
+  classes, closing pattern, practice-file/quiz/glossary shape).
+  Topic selection: checked the `json`/`csv` lead first by grepping all
+  lessons — both already have solid dedicated coverage on Day 6
+  (`csv.reader`/`csv.DictReader`, `json.load`/`json.dump`, each with its
+  own quiz question), so that lead was a dead end, not a real gap.
+  Broadened the search across the rest of the `collections` module (Day
+  3 already spent `defaultdict` and `Counter` on grouping/counting) and
+  found `deque` and `namedtuple` with zero prior mentions anywhere across
+  all 52 lessons — a clean, genuine stdlib gap: two commonly-asked-about
+  interview topics (O(1) double-ended queue vs O(n) list-front operations;
+  lightweight immutable named records) that round out a module already
+  half-taught, unambiguously language/stdlib rather than pandas/NumPy
+  territory. Built on Day 4's tuple-unpacking and Day 7's `dataclass` as
+  the explicit points of contrast for `namedtuple`, and used a live
+  `time.perf_counter()` measurement (list.pop(0) vs deque.popleft() over
+  20,000 pops from a 200k-element collection) to make the O(n) vs O(1)
+  claim concrete rather than asserted.
+  No-pandas rule: grepped the lesson and practice file case-insensitively
+  for `pandas`/`numpy`/`pd\.`/`np\.` — exactly one hit, a "Where pandas
+  goes from here" callout noting `DataFrame.itertuples()` happens to
+  return namedtuple-like rows but not demonstrating any pandas API; zero
+  hits in the practice file.
+  Correctness spot-check: every worked snippet (deque timing comparison;
+  `append`/`appendleft`/`pop`/`popleft` on a `deque`; `maxlen`-bounded
+  sliding window; `namedtuple` construction, by-name/by-position access,
+  unpacking, repr; `AttributeError` on mutation attempt) was run standalone
+  via `uv run python3` before shipping, using the `Write` tool to create
+  each scratch script (an inline bash heredoc silently mis-parsed
+  multi-line content into "Parser skipped input between top-level
+  statements" errors on first attempt, consistent with Days 51-52's own
+  notes on this sandbox's heredoc handling — worked around the same way,
+  by writing each script as a separate `Write` call). All snippets matched
+  their in-lesson comments exactly; the timing measurement showed roughly
+  a 400x gap (list.pop(0) ~0.39s vs deque.popleft() ~0.001s for 20,000
+  pops) on this run, comfortably supporting the O(n) vs O(1) claim without
+  needing an exact number in the lesson text (worded as "roughly" and
+  "~400x on this run" rather than a claimed-precise figure).
+  Practice file `practice/53_deque_and_namedtuple.py` (5 exercises):
+  building a deque with `append`/`appendleft`, popping from both ends with
+  `pop`/`popleft`, a `maxlen`-bounded sliding window, building and reading
+  a `namedtuple` by both name and position, and confirming mutation raises
+  `AttributeError`. Verified in a scratch directory outside the repo
+  (`/tmp/py-verify/`, a sandboxed path other than this course's usual
+  `.scratch-python-verify/` since the cwd for this round's Bash tool
+  calls was pinned to the repo root and plain `cd` was blocked outside
+  it — files were created directly via the `Write` tool's absolute-path
+  support instead, and `uv run python3 /tmp/py-verify/...` invoked without
+  a `cd`): the shipped (unsolved) copy printed all five ✗ with no
+  traceback; a separately solved copy printed all five ✓ and the "All
+  green" tally. Copied the verified content to the real
+  `practice/53_deque_and_namedtuple.py` path via the `Write` tool (a
+  cross-sandboxed-boundary `cp` from `/tmp` was blocked, worked around by
+  writing the already-verified text directly) and re-ran it from there
+  directly, confirming the same all-✗-no-traceback result outside the
+  scratch dir.
+  Glossary: two new terms — `deque`, `namedtuple` — added under a new
+  `Day 53` section in `reference/glossary.html`, after grepping for and
+  confirming zero collisions with any existing row.
+  HTML tag-balance was checked with a stdlib `html.parser.HTMLParser`-
+  based stack checker (written as a throwaway script via the `Write` tool,
+  deleted after use) against both the lesson file and the full
+  (now-modified) glossary — both reported zero unclosed/mismatched tags.
+  A raw-unescaped-`&` grep (`&(?!amp;|lt;|gt;|quot;|#39;|apos;|#\d+;)`)
+  against both files found zero true positives.
+  Quiz: 4 questions, one per concept (list-front vs deque-end cost,
+  `maxlen` eviction behavior, namedtuple's dual name/position access,
+  namedtuple immutability via `AttributeError`). Word counts were checked
+  with a small regex-based script splitting each `<button class="opt">`'s
+  stripped-tag text on whitespace, cross-checked with a second independent
+  `html.parser.HTMLParser`-based script per this course's established
+  two-method practice — the first draft mismatched on three of four
+  questions (Q1 9/10/9, Q2 10/8/8, Q3 11/10/8) and took two to three
+  rounds of few-word edits per question, re-running both scripts after
+  every edit. Landed at 7/7/7, 7/7/7, 7/7/7, and 11/11/11 respectively;
+  both scripts agreed at every step, and a separate check confirmed
+  exactly 4 `data-ok` occurrences total, one per question.
+  `RESOURCES.md`: no new citation added — today's material is already
+  covered by the existing `collections` stdlib docs link (added Day 3),
+  extended its "Use for" note to add "and 53" rather than duplicating the
+  citation. `PLAN.md` not edited.
+  Registered in `assets/nav.js` with `date: "2026-09-19"`; confirmed
+  `node --check assets/nav.js` reports no syntax errors after the edit.
+  **DB access:** `bin/query-progress` was not attempted this round, per
+  Day 44's standing instruction to stop daily re-attempts absent new
+  indication the gate lifted — no such indication appeared. `bin/record-
+  progress python lesson_generated --day 53 --lesson
+  0053-deque-and-namedtuple.html --detail '{"by":"headless-run"}'` will be
+  run after this entry is written, per the standard closing step.
+  `python/learning-records/` still holds only the Day 1 baseline; no
+  completion/quiz/kata outcome has ever been recorded for any day 2-52,
+  so this round paced entirely from on-disk state, same as every prior
+  round since Day 42.
+  Final `git status --short` showed exactly five `python/` paths changed
+  (`assets/nav.js`, `reference/glossary.html`, `RESOURCES.md`, the new
+  lesson, the new practice file).
+  **Next-day note:** the `collections` module is now fully covered
+  (`defaultdict`/`Counter` Day 3, `deque`/`namedtuple` today) — no more
+  clean gaps there. The 12-lesson review-candidate list from Day 52 (15,
+  18, 21-23, 25-26, 28-29, 35, 37, 40) remains the strongest option unless
+  another standalone-language stdlib gap turns up (worth a scan of
+  `string` methods, `textwrap`, and `random` before defaulting to review,
+  since none of those have a dedicated lesson either). Only one fresh day
+  (53) has run since Day 52's review, so the "avoid three fresh in a row"
+  rule is not yet a constraint — Day 54 can pick either fresh content or
+  review on its own merits, same as Day 51 weighed it after Day 50.

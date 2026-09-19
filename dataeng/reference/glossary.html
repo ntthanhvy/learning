@@ -67,6 +67,20 @@
   <tr><td>incremental model</td><td>giữ nguyên "incremental model" — sau lần build đầu, dbt chỉ xử lý dòng mới/thay đổi, không build lại toàn bộ</td><td>A materialization where, after the first build, dbt only processes new or changed rows instead of rebuilding the whole table from scratch — the right default for a large, append-heavy table where reprocessing everything every run wastes time.</td></tr>
 </table>
 
+<h2 id="day5">Day 5 — Kafka: topics, partitions, keys &amp; offsets</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>log</td><td>giữ nguyên "log" — chuỗi record chỉ được append, có thứ tự, không sửa/xoá tại chỗ</td><td>The append-only, ordered sequence of records inside one Kafka partition — records are never updated or deleted in place, only appended, and each one gets a permanent position number.</td></tr>
+  <tr><td>topic</td><td>giữ nguyên "topic" — luồng dữ liệu có tên trong Kafka, producer ghi vào, consumer đọc ra</td><td>A named, durable feed of records in Kafka that producers write to and consumers read from — the basic unit of organization, roughly Kafka's answer to a table name, except it holds an ordered log rather than queryable rows. This course's one topic is <code>order_events</code>.</td></tr>
+  <tr><td>producer</td><td>giữ nguyên "producer" — bên ghi record vào topic</td><td>A client that writes records to a topic.</td></tr>
+  <tr><td>consumer</td><td>giữ nguyên "consumer" — bên đọc record từ topic, đọc theo thứ tự, tự theo dõi vị trí đã đọc</td><td>A client that reads records from a topic, in order, tracking its own position.</td></tr>
+  <tr><td>partition</td><td>giữ nguyên "partition" — 1 trong các log con của topic, Kafka chỉ đảm bảo thứ tự TRONG 1 partition, không đảm bảo giữa các partition</td><td>One of the ordered, append-only logs a Kafka topic is split into — Kafka guarantees order only within a single partition, never across partitions of the same topic.</td></tr>
+  <tr><td>key</td><td>giữ nguyên "key" — chuỗi gắn vào message để Kafka hash ra partition; cùng key luôn vào cùng 1 partition</td><td>The string a producer attaches to a message that Kafka hashes to pick which partition the message goes to — every message with the same key always lands on the same partition, which is what makes per-key ordering possible. This course keys every <code>order_events</code> message by <code>order_id</code>.</td></tr>
+  <tr><td>offset</td><td>giữ nguyên "offset" — số thứ tự cố định của record trong 1 partition, bắt đầu từ 0</td><td>A record's permanent position number within one partition, starting at 0 and increasing by 1 per record — a consumer group tracks the next offset it needs to read as its bookmark into that partition.</td></tr>
+  <tr><td>committed offset</td><td>giữ nguyên "committed offset" — offset mà consumer group đã xác nhận xử lý xong, Kafka tự lưu lại</td><td>The offset a consumer group has confirmed processing up to, for one partition — persisted by Kafka itself so a consumer that restarts resumes from here instead of from the beginning.</td></tr>
+  <tr><td>consumer group</td><td>giữ nguyên "consumer group" — tập consumer cùng group.id, chia nhau đọc các partition, dùng chung offset đã commit</td><td>A named set of consumers that coordinate to split a topic's partitions between them and share one committed-offset bookmark per partition — the unit Kafka scales consumption with, and the unit the <code>kafka-consumer-groups.sh --describe</code> CLI command inspects.</td></tr>
+</table>
+
 <script src="../assets/nav.js"></script>
 </body>
 </html>

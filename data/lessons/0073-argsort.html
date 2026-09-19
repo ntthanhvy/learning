@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 73 · argsort(): positions, not values — and a stale docstring to catch</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 73 · ~20 min · 19 Sep 2026</p>
+<h1>argsort(): positions, not values — and a stale docstring to catch</h1>
+<p class="byline">Chào bạn — Lesson 72's teaser named three leftover zero-hit candidates: <code>np.unique</code>, <code>argsort</code>, <code>searchsorted</code>. A fresh grep of all 72 lessons and the glossary reconfirms all three are still genuinely untaught. <code>argsort()</code> is the pick today: it closes a real gap next to Lesson 7's <code>rank()</code> and Lesson 31's <code>sort_values()</code>, and — the reason it earns its own lesson rather than a footnote — its own official docstring turns out to describe behavior pandas no longer has.</p>
+
+<h2>1 · The gap: rank() and sort_values() answer "what," argsort() answers "where"</h2>
+<p>Lesson 7's <code>rank()</code> gives each row its own position number, in the row's own place. Lesson 31's <code>sort_values()</code> rearranges the actual rows into sorted order. <code>argsort()</code> does neither — it returns, for each OUTPUT position, which ORIGINAL row index belongs there. It never touches the values or the row order itself; it only computes the recipe for sorting them.</p>
+<pre><code>s = pd.Series([<span class="num">30</span>, <span class="num">10</span>, <span class="num">20</span>])
+s.rank()          <span class="cm"># 0  3.0   1  1.0   2  2.0   -- each row's OWN rank</span>
+s.argsort()        <span class="cm"># 0  1     1  2     2  0     -- position 0 in sorted order is ORIGINAL row 1</span></code></pre>
+<p><dfn data-en="a Series/Index method returning the integer POSITIONS (not labels, not values) that would put the data into sorted order -- the position at output index 0 is which original row belongs first, at output index 1 which original row belongs second, and so on; the values themselves are never rearranged, only the recipe for rearranging them is returned" data-vn="giữ nguyên 'argsort()' — trả về DÃY VỊ TRÍ (không phải nhãn, không phải giá trị) để sắp dữ liệu theo thứ tự tăng dần; vị trí ở ô kết quả thứ 0 là CHỈ SỐ GỐC của hàng đứng đầu sau khi sắp, KHÔNG tự sắp lại dữ liệu, chỉ trả về công thức sắp">argsort()</dfn> is genuinely the mechanism <code>sort_values()</code> and <code>rank()</code> build on internally — confirmed directly: the two are exact inverses of each other on the same data (<code>rank() - 1</code> equals the inverse permutation of <code>argsort()</code>, both giving <code>[2, 0, 1]</code> for <code>[30, 10, 20]</code>). Reaching for <code>argsort()</code> directly matters when you need the POSITIONS themselves as data — e.g. to apply the same sort order to a second, unrelated array — not just the sorted values.</p>
+
+<div class="callout"><strong>SQL bridge:</strong> plain SQL has no equivalent to asking for "the positions that would sort this," because SQL never exposes row position as a first-class value to compute with — the closest SQL gets is <code>ROW_NUMBER() OVER (ORDER BY col)</code>, which is actually closer to pandas' <code>rank(method="first")</code> (each row's own new position) than to <code>argsort()</code> (which output position holds which original row). In an interview, naming that <code>argsort()</code> is the "reverse direction" of <code>ROW_NUMBER()</code> is the sharp, correct distinction.</div>
+
+<h2>2 · Using it on this course's real fixture: sort by amount without sort_values()</h2>
+<p>Confirmed directly (pandas 3.0.6) on this course's real <code>orders_raw.csv</code>, using the raw <code>amount</code> column coerced with <code>pd.to_numeric(errors="coerce")</code> (the "unknown" string in row 2 becomes <code>NaN</code>, untouched by <code>dropna()</code> here on purpose):</p>
+<pre><code>amt = pd.to_numeric(df[<span class="str">"amount"</span>], errors=<span class="str">"coerce"</span>)
+order = amt.argsort()
+order.tolist()          <span class="cm"># [1, 5, 3, 0, 4, 2]</span>
+df.iloc[order][<span class="str">"order_id"</span>].tolist()   <span class="cm"># [2, 6, 4, 1, 5, 3] -- ascending by amount</span></code></pre>
+<p>Reading rows back out needs <code>.iloc[order]</code>, never <code>.loc[order]</code> — <code>argsort()</code> returns raw integer POSITIONS, not the DataFrame's own index labels, so <code>.loc</code> would silently look up the wrong rows (or raise <code>KeyError</code>) the moment the index isn't a plain <code>0, 1, 2, ...</code> range.</p>
+
+<h2>3 · The catch: the official docstring says "-1 indicating nan values" — it does not, anymore</h2>
+<p>This is the round's central, non-obvious finding, and the reason this lesson exists rather than a one-line glossary entry. Pandas' own <code>help(pd.Series.argsort)</code> states, verbatim: <em>"Positions of values within the sort order with -1 indicating nan values."</em> Confirmed directly (pandas 3.0.6) that this is stale — no <code>-1</code> appears anywhere in the actual output:</p>
+<pre><code>s = pd.Series([<span class="num">30.0</span>, float(<span class="str">"nan"</span>), <span class="num">10.0</span>, float(<span class="str">"nan"</span>), <span class="num">20.0</span>])
+s.argsort().tolist()     <span class="cm"># [2, 4, 0, 1, 3] -- NOT [2, -1, 0, -1, 1]</span>
+-<span class="num">1</span> in s.argsort().to_numpy()   <span class="cm"># False</span></code></pre>
+<p>Actual current behavior: NaN rows are pushed to the END of the sort order (same as NumPy's own default), and their real original position appears in the output completely normally — no <code>-1</code> sentinel anywhere. On this course's fixture, the <code>NaN</code> row (order_id 4, the missing amount) ends up last in <code>order</code> above, at real position <code>2</code>, not flagged with any special value. Trusting the docstring's literal wording — writing code that checks <code>if pos == -1: skip it</code> — would silently never trigger, because that branch is unreachable on this pandas version. The correct, verified statement for an interview: <em>"NaNs sort to the end and keep an ordinary integer position — don't rely on -1 as a NaN marker; check the source Series for NaN directly if you need to filter it out."</em></p>
+
+<h2>4 · No ascending= keyword — negate the values instead</h2>
+<p>Confirmed directly: unlike <code>sort_values()</code> and <code>rank()</code>, <code>argsort()</code> takes no <code>ascending=</code> argument at all — passing one raises <code>TypeError: Series.argsort() got an unexpected keyword argument 'ascending'</code>. Simply reversing the output array afterward (<code>argsort()[::-1]</code>) is a common but wrong instinct: it also flips the NaN-last placement to NaN-first, and flips tie order, neither of which is the same as a genuine descending sort. The standard, correct trick — confirmed directly to give the right order on this fixture — is to negate the numeric values first, then argsort the negation:</p>
+<pre><code>(-amt).argsort().tolist()   <span class="cm"># [4, 0, 3, 5, 1, 2] -- descending by amount, NaN still last</span></code></pre>
+
+<div class="interview">
+<p><strong>Q: "What's the difference between rank(), sort_values(), and argsort() — and when would you reach for argsort() specifically?"</strong> A strong answer, out loud: <em>"All three are related to ordering, but they answer different questions. sort_values() rearranges the actual rows into sorted order — I'd use it when I want the sorted DATA. rank() gives each row its own position number, in place — I'd use it for 'what percentile/place is this row in its group,' often after a groupby(). argsort() is the odd one out: it doesn't touch the data at all, it returns the POSITIONS that would sort it — I'd reach for it specifically when I need to apply the same computed order to a second, separate array or column, not just re-sort the one I called it on. One thing I'd flag from hands-on testing: its own docstring says NaN gets encoded as -1, but on the pandas version I checked that's not actually true anymore — NaNs just sort to the end with an ordinary position, so I wouldn't trust that detail without verifying it directly first."</em> The signal: distinguishing "reorder the data" from "compute the reorder recipe," and specifically flagging a stale docs claim instead of repeating it — that's the same "verify, don't assume" instinct interviewers want to see applied to any library, not just this one.</p>
+</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/73_argsort.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/73_argsort.py</code></pre>
+<p>Uses the same real <code>orders_raw.csv</code> fixture. Exercise 1 uses <code>argsort()</code> plus <code>.iloc[]</code> to read out the two smallest <code>amount</code> rows' <code>order_id</code>s, and confirms it matches what <code>nsmallest(2)</code> would give (Lesson 10). Exercise 2 confirms no <code>-1</code> ever appears in <code>argsort()</code>'s output even though a <code>NaN</code> is present, catching the exact stale-docstring claim from section 3. Exercise 3 confirms passing <code>ascending=</code> raises <code>TypeError</code>. Exercise 4 gets a descending order via negation and confirms the largest-amount row comes out first.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: sort_values() rearranges the actual rows/values into sorted order; rank() gives each row its own position number, in its own original place; argsort() returns, for each OUTPUT position, which ORIGINAL row index belongs there -- it changes neither the values nor their order, only computes the recipe for a sort.">
+    <p class="stem">What does <code>argsort()</code> return, compared to <code>sort_values()</code>?</p>
+    <button class="opt" data-ok>the original row positions that would produce sorted order, not sorted rows</button>
+    <button class="opt">the exact same sorted rows that sort_values() gives, just computed much faster</button>
+    <button class="opt">a boolean mask marking every row already sitting in correct sort order</button>
+  </div>
+  <div class="q" data-why="Confirmed directly (pandas 3.0.6): help(pd.Series.argsort) states verbatim that -1 indicates nan values, but running it on a real Series containing NaN produces no -1 anywhere in the output -- NaN rows simply sort to the end and keep an ordinary real position, same as NumPy's own default placement.">
+    <p class="stem">What did hands-on testing find wrong with <code>argsort()</code>'s own official docstring?</p>
+    <button class="opt" data-ok>it claims -1 marks NaN rows, but no -1 ever appears in real output</button>
+    <button class="opt">it claims argsort() cannot handle any NaN at all, yet NaN never crashes it</button>
+    <button class="opt">it claims results always come back fully unsorted, yet output is always fully sorted</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: calling argsort(ascending=False) raises TypeError, since no such keyword exists on this method (unlike sort_values() and rank(), which both accept ascending=). Negating the values first, then calling argsort() on the negation, produces the correct descending order (with NaN still placed last); reversing the ascending result with [::-1] is a common but wrong shortcut, since it also flips NaN placement and tie order.">
+    <p class="stem">How do you get a DESCENDING order out of <code>argsort()</code>, which has no <code>ascending=</code> keyword?</p>
+    <button class="opt" data-ok>negate the values first, then call argsort() on that negated series</button>
+    <button class="opt">call argsort() as normal, then reverse the output array with [::-1]</button>
+    <button class="opt">pass the keyword kind="descending" instead of using the usual default kind="quicksort"</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the <a href="https://pandas.pydata.org/docs/reference/api/pandas.Series.argsort.html">pandas API reference for <code>Series.argsort()</code></a> (per <code>RESOURCES.md</code>'s "Docs: pandas User Guide" entry, this course's authoritative-behavior source) — read it with today's lesson in hand and confirm the <code>-1</code> claim yourself; docs drift from actual behavior sometimes, and catching that is a real skill, not a nitpick.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>argsort()</code> is new today, placed right after Lesson 72's <code>.ewm()</code> entry.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-73 comes back reported as shakiest, otherwise <code>np.unique</code> or <code>searchsorted</code> — both named in Lesson 72's teaser and still untouched — or a fresh curriculum/glossary scan if neither fits the moment.<br><br>
+💬 Anything unclear — <code>argsort()</code> vs <code>rank()</code> vs <code>sort_values()</code>, the stale docstring, <code>.iloc</code> vs <code>.loc</code> here, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -5448,3 +5448,90 @@
   present, or not a clean vocabulary gap), not just deferred. The next
   round should still run its own fresh search rather than assume either
   PgBouncer or any of those ruled-out topics belongs next.
+- **2026-09-19 generation (Lesson 76, headless run):** Lesson 75's note said
+  the next round should run its own fresh search rather than default to
+  PgBouncer (left on the table since Lesson 74, still ruled out for the same
+  infra-ops-adjacency reason). Read `MISSION.md`, `RESOURCES.md`, both
+  `learning-records/` files (still just the 0001 baseline and the 2026-07-30
+  concurrency-vocabulary gap — no fresher outcome record), the tail of
+  `NOTES.md` (Lessons 74–75's notes in full), and Lesson 75 in full as the
+  structural precedent, plus Lesson 74 for the quiz/glossary conventions.
+  Grepped a wide net of candidates against `lessons/*.html`: covering/
+  composite indexes, EXPLAIN, normalization, read replicas, dataloader/
+  N+1-adjacent batching, CDC, sagas, and sharding either had at least
+  incidental coverage already, sat outside MISSION.md's stack (framework/
+  ORM depth, or sharding/replication explicitly out of scope beyond
+  vocabulary), or weren't a clean gap. Window functions and CTEs held up:
+  a targeted grep of `window function`/`PARTITION BY`/`ROW_NUMBER`/`OVER (`/
+  `CTE`/`common table expression`/`WITH ... AS` returned zero hits anywhere
+  in the corpus, despite MISSION.md explicitly saying SQL syntax and joins
+  were never in question — this is a distinct, more advanced SQL capability
+  than joins that 75 lessons of `WHERE`/`JOIN`/`GROUP BY` never once touched,
+  and the glossary confirmed no `<dfn>` or row for either term exists. A
+  real, clean gap under MISSION.md's runtime-reasoning criterion (spotting
+  which query shape a feature request actually needs), not a rehash, and a
+  natural next step after Lesson 15's cursor pagination (which already
+  depends on rows having a stable total order — the same property window
+  functions' `ORDER BY` inside `OVER (...)` needs) and Lesson 39's MVCC
+  lesson (aggregate functions already exist in this course; window functions
+  are the "per-row instead of per-group" variant of the same idea). Lesson
+  76 covers: the gap `GROUP BY` can't close (per-row ranking without
+  collapsing rows) via a minimal `ROW_NUMBER() OVER (PARTITION BY ... ORDER
+  BY ...)` example; a comparison table of `ROW_NUMBER`/`RANK`/`LAG`/`LEAD`/
+  running-aggregate window functions; `LAG` solving the "gap since this
+  customer's previous order" problem this course never had a clean answer
+  for; the classic "top N per group" use case and why it needs a CTE (a
+  window function's result can't be filtered in the same `SELECT` it
+  appears in); CTEs as a readability feature over nested subqueries, not a
+  performance feature (said explicitly, to avoid a common misconception);
+  and a closing tie-back to Lesson 15's cursor pagination, framed as
+  recognizing which query shape a feature actually needs (whole-table cursor
+  vs. per-group window function) rather than memorizing more syntax. No Go
+  snippet was shipped — the lesson's only code is SQL (`SELECT ... OVER
+  (...)`, `WITH ... AS (...)`), so the Go-compile-check container doesn't
+  apply; verified instead by two live `WebFetch` calls against
+  `https://www.postgresql.org/docs/current/tutorial-window.html` and
+  `https://www.postgresql.org/docs/current/queries-with.html`, both
+  confirmed live, the first confirmed to cover `PARTITION BY`, `ORDER BY`
+  inside `OVER`, and `row_number()` exactly as cited, the second confirmed
+  to cover non-recursive and recursive CTEs (recursive CTEs deliberately
+  left out of the lesson itself to stay inside ~20 minutes, but named in the
+  "Go deeper" link) — the same live-URL-check habit every round since
+  Lesson 53's 404 incident has followed. Checked the glossary first for both
+  candidate terms (`window function`, `CTE`/`common table expression`) —
+  zero collisions — then appended both as new `<dfn>`-backed rows after
+  Lesson 75's `trigger function` row; no existing row needed editing.
+  Verification performed mechanically: (1) quiz word-count balance via a
+  Node script parsing every `<div class="q">` block and counting each
+  `<button class="opt">`'s words two independent ways (`.split(/\s+/)` and
+  `.split(" ")`, both filtering empty strings) — first draft was uneven on
+  all four questions (an 8-13 word spread with multi-word tokens like
+  `ORDER BY`/`ROW_NUMBER` throwing off manual counting), fixed through
+  several targeted rewrite-and-recount cycles, re-running the script after
+  every edit rather than trusting a manual count, converged to exactly
+  9/9/9/9 on questions one and four, 8/8/8/8 on question two, and 9/9/9/9 on
+  question three, both counting methods agreeing exactly, and exactly one
+  `data-ok` per question confirmed the same way; (2) an occurrence-count
+  HTML tag-balance check (regex counting per tag, not substring counting)
+  across the same 22 tag pairs used in every prior round, on both the lesson
+  and `glossary.html` after its two-row addition — both fully balanced, no
+  fixes needed this round; (3) a raw-unescaped-`&` regex scan (matching any
+  `&` not followed by `amp;`/`lt;`/`gt;`/`quot;`/`#39;`/`apos;`) across both
+  files — zero hits; (4) a targeted regex for the backslash-escaped-quote
+  bug (`\"` inside an attribute) — zero hits in either file. Registered
+  Lesson 76 in `nav.js` (date 2026-09-19), confirmed with `node --check
+  backend/assets/nav.js` (clean, no output). DB access: ran exactly
+  `bin/record-progress backend lesson_generated --day 76 --lesson
+  0076-window-functions-and-ctes.html --detail '{"by":"headless-run"}'` per
+  this round's task instructions (raw `psql` against the Neon DB remains a
+  known, expected sandbox limitation, not attempted) — result recorded
+  below this note once run. No confirmed next-lesson gap is named with
+  certainty for the round after this one — same standing note as every
+  prior round; a completion/quiz-outcome signal or a user-named track
+  should take priority over guessing blind. PgBouncer/external connection
+  pooling remains on the table from Lesson 74's note as a possible future
+  candidate, still not yet flagged narrow; recursive CTEs (deliberately cut
+  from this lesson to stay inside ~20 minutes) are a new, narrower deferred
+  candidate this round adds, closer to a natural Lesson 77 pick than
+  PgBouncer if no fresher signal exists by then. The next round should
+  still run its own fresh search rather than assume either.

@@ -152,6 +152,8 @@
       file: "lessons/0072-ewm.html" },
     { n: 73, date: "2026-09-19", title: "argsort(): positions, not values — and a stale docstring to catch",
       file: "lessons/0073-argsort.html" },
+    { n: 74, date: "2026-09-20", title: "np.unique(): sorted, richer, and a stricter cousin of Series.unique()",
+      file: "lessons/0074-np-unique.html" },
   ];
 
   const REFS = [

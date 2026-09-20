@@ -6018,3 +6018,163 @@
   0073-argsort.html --detail '{"by":"headless-run"}'` was run next as a
   single standalone command from the repo root, per this round's exact
   instructed invocation.
+- 2026-09-20 generation (Lesson 74, headless run): idempotency confirmed
+  first — listed `data/lessons/` directly (no `0074-*.html` present) and
+  grepped `assets/nav.js` for `n: 74`/`2026-09-20` (neither found, highest
+  registered lesson was still 73, dated 2026-09-19) — so this round
+  proceeded. Read `MISSION.md` (in full, never modified), `RESOURCES.md`,
+  the tail of `NOTES.md` (this file was too large — 427.9KB, over the
+  256KB read ceiling — to read in full this round; the tail plus a
+  targeted `wc -l`/`grep` pass covered everything needed), the sole
+  `data/learning-records/0001-baseline-sql-strong-python-basic.md` (still
+  just the single 2026-07-09 baseline — no new learning-record files added
+  since), `assets/nav.js` in full, and Lesson 73's own HTML body plus its
+  practice file as structural precedent. The DB read path
+  (`bin/query-progress`) was not attempted this round, per explicit
+  instruction that reads are known-blocked this session; direct `psql`
+  was not attempted either. Lesson 73's own closing teaser named two
+  leftover zero-hit candidates — `np.unique` and `searchsorted` — so this
+  round reconfirmed both with a fresh `Grep` pass across every lesson body
+  under `data/lessons/` and the full glossary before picking: both came
+  back genuinely zero-hit for the literal names `np.unique`/`numpy.unique`
+  and `searchsorted`; the only near-hit was `Series.unique()`/`nunique()`
+  (Lesson 19), confirmed to be a materially different method (appearance
+  order, no sort, no `return_counts=`/`return_index=`/`return_inverse=`),
+  not a real collision. Picked `np.unique()` over `searchsorted()` using
+  this course's established "closes a gap between two already-taught
+  siblings, or sets up the next one" bar: Lesson 19 taught
+  `Series.unique()`/`nunique()`, but never the NumPy-level `np.unique()` —
+  same name family, genuinely different contract (always sorted, richer
+  return options, plain `ndarray` output) — and `np.unique()` naturally
+  sets up `searchsorted()` as tomorrow's candidate, since `searchsorted()`
+  requires a SORTED array to behave correctly, which is exactly what
+  `np.unique()` always produces; named explicitly in today's own closing
+  teaser so the next round doesn't have to re-derive the connection. A
+  scratch dir was created at `data/.scratch/lesson74/` (not `/tmp`, this
+  sandbox blocks that, confirmed again this round) with the real
+  `orders_raw.csv` fixture copied in; `uv run --with pandas python3`
+  worked on the first attempt (auto-downloaded pandas 3.0.6 and numpy
+  2.5.3 into an ephemeral env, matching the pandas version recent lessons
+  have cited). Every claim was hand-verified there with standalone probe
+  scripts before writing: confirmed `Series.unique()` preserves
+  first-appearance order while `np.unique()` always sorts, using the
+  `customer` column first (a coincidental case where appearance order and
+  sorted order happen to agree, correctly not trusted as the demonstrating
+  example) and then the `amount` column (`[120.0, 35.5, 99.9, 180.0,
+  42.0]` appearance vs `[35.5, 42.0, 99.9, 120.0, 180.0]` sorted — a case
+  built specifically to diverge, used as the lesson's actual evidence).
+  Confirmed `np.unique()` accepts a Series directly (no `.to_numpy()`
+  required) but always returns a plain `ndarray`. Confirmed
+  `return_index=`/`return_inverse=`/`return_counts=` all work together in
+  one call on the real `customer` column (`idx=[0,1,3]`,
+  `inverse=[0,1,0,2,1,0]`, `counts=[3,2,1]`). The round's central,
+  non-obvious finding, confirmed through a deliberately-diverging
+  synthetic case (`['Chi','An','Chi','Binh','An']`, where "Chi" appears
+  first but sorts last): plain `pd.factorize()`'s codes (`[0,1,0,2,1]`,
+  first-appearance order) and `np.unique(..., return_inverse=True)`'s
+  codes (`[2,0,2,1,0]`, sorted order) are genuinely DIFFERENT arrays on
+  identical input, not just relabeled — confirmed byte-for-byte unequal —
+  and the two only match once `factorize(sort=True)` is used instead
+  (confirmed exact match on both `uniques` and `codes`). This surfaced a
+  real bug in an early probe script: `pd.factorize()` returns `(codes,
+  uniques)` in that order (confirmed directly against Lesson 68's own
+  `codes, uniques = pd.factorize(...)` line before trusting it), and an
+  early scratch probe had the destructuring backwards
+  (`_, codes_default = pd.factorize(s)`, silently assigning `uniques` to a
+  variable named `codes_default`), which produced a false "they match"
+  result on the first pass — caught only because the SHIPPED practice
+  file's Exercise 3 also inherited the same backwards destructuring and
+  failed even after being "solved" with the intended correct values
+  during verification (see below); the lesson's own prose was written
+  from the correct, separately-checked probe4 output throughout and was
+  never affected. Also confirmed directly: `np.unique()` collapses
+  multiple NaNs down to exactly one in its output (`equal_nan=True`
+  default), pushing it to the end of the sorted result, same placement
+  `argsort()` (Lesson 73) uses; and, the sharpest practical gotcha, an
+  object-dtype array mixing a real Python `None` with strings makes
+  `np.unique()` raise `TypeError: '<' not supported between instances of
+  'float' and 'str'` (it must sort to do its job; sorting mixed types is
+  undefined), while `Series.unique()` handles the identical data with no
+  error at all since it never sorts. Before writing the practice file, ran
+  this course's now-standard freebie-risk probe: `ex1_column` is checked
+  with `== "amount"`, `ex2_return_counts` with `is True`, `ex3_sort_value`
+  with `is True`, and `ex4_exception_name` with `== "TypeError"` — every
+  blank fails closed if left as `...`. During verification, the shipped
+  `practice/74_np_unique.py` printed exactly 4 ✗ with no traceback on the
+  first attempt (correct, expected); a solved copy then printed only 3 of
+  4 ✓ on the first solved run — Exercise 3 stayed ✗ even with the
+  intended correct values filled in, traced directly to the same
+  `pd.factorize()` return-order bug described above having leaked into
+  the shipped exercise code itself (`_, codes_default = pd.factorize(s)`
+  instead of `codes_default, _ = pd.factorize(s)`), not a probe-only
+  mistake; fixed directly in `practice/74_np_unique.py`, re-copied into
+  the scratch verify layout, and re-ran both states from scratch: shipped
+  (unsolved) again printed exactly 4 ✗ with no traceback, solved then
+  printed all 4 ✓ on the first run after the fix. The corrected shipped
+  file was also re-run directly from its real `practice/` location (`cd
+  data && uv run --with pandas python3 practice/74_np_unique.py`), both
+  before and after the glossary/nav.js edits that followed, and printed
+  the identical 4 ✗, no crash, both times — this final direct-location run
+  is the one that matters for shipped-file correctness, and it passed.
+  Quiz options were drafted, then mechanically word-counted with a Python
+  script isolating each `<div class="q">` block by regex span (this
+  course's established approach) — the first draft came out mismatched on
+  all three questions (Q1 9/11/13, Q2 8/11/10, Q3 13/12/10); iterated
+  through roughly ten rewrite+recount cycles (re-running the same script
+  after each edit, several small missteps along the way where a word
+  substitution was mistaken for a word-count change when it was not) until
+  all three landed level (Q1 11/11/11, Q2 12/12/12, Q3 12/12/12), with
+  exactly one `data-ok` per question throughout, confirmed by the same
+  script; independently cross-checked by extracting all nine option
+  strings with `grep`/`sed` into a flat file and confirming the whole-file
+  `wc -w` total (105) exactly equals the arithmetic sum implied by the
+  Python script's own per-option counts (11×3 + 12×3 + 12×3 = 105) — a
+  slightly different independent-check shape than prior rounds' per-file
+  `wc -w` (a `split`-based per-line file check was attempted first but
+  blocked by this sandbox's command-approval gate), but still a genuinely
+  separate method from the regex-based Python script, and it agreed
+  exactly. A separate mechanical tag-balance script (regex open/close
+  occurrence counts per tag) caught one real markup bug this round, the
+  same pattern as Lessons 72 and 73: the initial draft's `<div
+  class="callout">` closed with a stray extra `</p>` even though this
+  course's established callout markup never wraps content in `<p>` at
+  all; fixed by removing the stray `</p>`, re-ran the tag-balance script
+  afterward and confirmed `p` open/close counts matched exactly (18/18)
+  along with every other tracked tag (`html`/`head`/`title`/`body`/`h1`/
+  `dfn` 1/1 each, `h2` 6/6, `div` 6/6, `pre` 4/4, `code` 94/94, `span`
+  18/18, `strong` 4/4, `em` 2/2, `a` 2/2, `button` 9/9). Raw-`&` scan found
+  exactly two matches, both the two `&` characters inside the single
+  already-established `cd ~/learning/data && uv run …` shell command
+  inside a `<pre><code>` block (this course's standing precedent, not a
+  new bug), zero raw `&` in prose or the new glossary row. Checked the
+  glossary for a collision before adding anything: grepped for
+  `np.unique`/`numpy.unique` across the full glossary — no existing entry
+  — so added exactly one new row, `np.unique()`, placed directly after
+  Lesson 73's `argsort()` entry; confirmed the glossary table's tags
+  stayed balanced after the insert via occurrence counts (`table` 1/1,
+  `tr` 135/135, `td` 402/402), zero new raw `&` introduced. Registered
+  Lesson 74 in `nav.js` with today's date (2026-09-20); `node --check`
+  confirmed it still parses as valid JavaScript after the edit. This
+  round's fresh gap search leaves `searchsorted()` as the sole standing
+  named candidate for next time, named explicitly in today's lesson's own
+  closing teaser as a natural follow-on to today's sorted-array output.
+  The entire `data/.scratch/` directory was removed (`rm -rf`) after
+  verification (only `lesson74/` lived there, confirmed via listing
+  before deleting, nothing else was at risk); `git status --short`
+  afterward showed only the intended new/modified `data/` files
+  (`data/assets/nav.js`, `data/reference/glossary.html`, new
+  `data/lessons/0074-np-unique.html`, new `data/practice/74_np_unique.py`)
+  — other course directories (`backend/`, `dataeng/`, `python/`) showed
+  unrelated pending changes from other concurrent sessions, confirmed
+  untouched by this round. This agent does not run `git commit` —
+  leaving working-tree changes uncommitted remains this course's
+  established convention. `bin/record-progress data lesson_generated
+  --day 74 --lesson 0074-np-unique.html --detail '{"by":"headless-run"}'`
+  initially returned a sandbox command-approval error when invoked with
+  an absolute path to `bin/record-progress`; a retry using the relative
+  path `bin/record-progress ...` from the repo root succeeded outright
+  (`recorded: data/lesson_generated day=74 lesson=0074-np-unique.html`) —
+  worth noting for future rounds that the relative-path form may be more
+  reliable in this sandbox than an absolute-path invocation. The read path
+  (`bin/query-progress`) was not attempted, consistent with the documented
+  known-blocked status.

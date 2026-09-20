@@ -6718,3 +6718,127 @@ fail *gracefully* so the learner sees which task failed.
   (53) has run since Day 52's review, so the "avoid three fresh in a row"
   rule is not yet a constraint — Day 54 can pick either fresh content or
   review on its own merits, same as Day 51 weighed it after Day 50.
+- 2026-09-20 — **Day 54 generated: the `random` module** (headless run),
+  fresh content, chosen over another review sweep per Day 53's own
+  next-day note. Read `MISSION.md` (untouched, read-only), `PLAN.md`,
+  `RESOURCES.md`, the sole `learning-records/0001-baseline-reads-python-
+  writes-little.md`, `assets/nav.js`'s full `LESSONS` array, and
+  `NOTES.md`'s tail (~170 lines, since the full file exceeds the read
+  tool's single-read size limit) to confirm Day 53's suggestion to scan
+  `string` methods, `textwrap`, and `random` for a clean stdlib gap before
+  defaulting to the 12-lesson review-candidate list (15, 18, 21-23, 25-26,
+  28-29, 35, 37, 40). Grepped all 53 lessons and all practice files
+  case-insensitively for `string\.|textwrap\.|random\.` and found zero
+  hits for any of the three — confirmed a genuine, clean gap rather than
+  trusting the prior note's assertion blindly. Chose `random` over
+  `string`/`textwrap`: it is the most commonly used of the three in real
+  code and interviews (seeding for reproducible tests, `choice`/`sample`/
+  `shuffle` for picking and reordering), while `string`/`textwrap` are
+  thinner, more niche modules better suited to a future review-day mention
+  than a standalone lesson. Read `lessons/0053-deque-and-namedtuple.html`
+  in full as the immediately prior fresh-content lesson's structural
+  precedent (dfn markup, callout/interview divs, code span classes,
+  closing pattern, practice-file/quiz/glossary shape).
+  Topic: `random.seed()` and reproducibility (the load-bearing concept,
+  since "random" output in a test needs to be deterministic to assert on);
+  `choice` vs `choices` (with replacement) vs `sample` (without
+  replacement, raises `ValueError` if `k` exceeds the population); why
+  `random` is unsuitable for security purposes (one-line pointer to
+  `secrets`, not taught); `shuffle`'s in-place-mutate-returns-`None` shape,
+  contrasted with Day 1's `list.sort()`/`list.append()` precedent, and the
+  `deck = random.shuffle(deck)` trap that overwrites `deck` with `None`;
+  and `randint`'s both-ends-inclusive range, contrasted with `range()`'s
+  exclusive upper bound.
+  No-pandas rule: grepped the lesson and practice file case-insensitively
+  for `pandas`/`numpy`/`pd\.`/`np\.` — exactly one hit, a "Where pandas
+  goes from here" callout noting `DataFrame.sample()` exists with its own
+  `random_state=` argument but not demonstrating any pandas API; zero hits
+  in the practice file.
+  Correctness spot-check: every worked snippet (seed-then-reseed
+  reproducibility; `choice`/`choices`/`sample` including the
+  `ValueError` on oversized `sample` `k`; `shuffle`'s `None` return and
+  in-place mutation; `randint`/`random()`/`uniform()` ranges including
+  confirming `randint(1, 6)` reaches `6` over 2,000 draws) was run
+  standalone via `uv run python3` before shipping, using the `Write` tool
+  to create each scratch script (this sandbox blocked `mkdir`/writes under
+  `/tmp` this round, unlike Day 53's run — worked around by using this
+  repo's existing `.scratch-python-verify/` convention instead, deleted at
+  the end of the round). All snippets matched their in-lesson comments
+  exactly, including the specific `random.seed(42)` sequence quoted in the
+  lesson text (82, then 15) reproduced identically on a fresh run.
+  Practice file `practice/54_random_module.py` (5 exercises): a seeded,
+  reproducible sequence of `randint` calls; picking one element with
+  `choice`; sampling distinct elements with `sample`; shuffling a copy
+  without mutating the original (the trap from the lesson, made concrete
+  as an exercise); and an inclusive-range `randint` roll checked over 50
+  draws. Verified in the repo's `.scratch-python-verify/` scratch
+  directory (created fresh this round after confirming `/tmp` writes were
+  blocked in this session): the shipped (unsolved) copy printed all five
+  ✗ with no traceback, run three times; a separately solved copy printed
+  all five ✓ and the "All green" tally, run three times consecutively with
+  no flakiness (the probabilistic checks in Exercises 3 and 5 use large
+  enough sample counts — 3 distinct picks from 20, and 50 rolls checked
+  against inclusive bounds — to not need seeding themselves). Re-ran the
+  real `practice/54_random_module.py` directly (unsolved) after deleting
+  the scratch copy, confirming the same all-✗-no-traceback result from its
+  actual repo path.
+  Glossary: two new terms — `random module`, `seed` — added under a new
+  `Day 54` section in `reference/glossary.html`, after grepping for and
+  confirming zero collisions with any existing row.
+  HTML tag-balance was checked with a stdlib `html.parser.HTMLParser`-
+  based stack checker (written as a throwaway script via the `Write` tool,
+  deleted after use) against both the lesson file and the full
+  (now-modified) glossary. First pass caught one real issue: a stray
+  `</p>` left inside the SQL-bridge `<div class="callout">` (should have
+  closed with `</div>` only) — fixed, then re-checked clean. A
+  raw-unescaped-`&` regex (`&(?!amp;|lt;|gt;|quot;|#39;|apos;|#\d+;)`)
+  against the same two files caught one real issue: a literal `&` in the
+  `<h1>` ("choosing, shuffling & repeatable") — fixed to `&amp;`, then
+  re-checked clean. (The same regex flags 22 hits in `assets/nav.js`, all
+  pre-existing JS string literals and a `&&` operator, not HTML markup —
+  expected and not a defect, same as every prior round that has run this
+  check against a `.js` file.)
+  Quiz: 4 questions, one per concept (seed reproducibility, `choices`
+  vs `sample` replacement behavior, `shuffle`'s mutate-and-return-`None`
+  shape, `randint`'s inclusive upper bound). Word counts were checked with
+  a small regex-plus-`html.parser`-based script splitting each
+  `<button class="opt">`'s stripped-tag text on whitespace. First draft
+  mismatched on three of four questions (Q1 7/6/8, Q3 7/7/8, Q4 5/7/7) and
+  took two rounds of few-word edits per question — the first round of
+  edits to Q3/Q4 overshot in the other direction (Q3 landed 6/8/8, Q4
+  6/8/8) before a second, word-by-word-counted pass using a small
+  `str.split()`-length helper landed all three questions' options at
+  exactly matching counts. Final tally: 7/7/7, 6/6/6, 7/7/7, and 7/7/7
+  respectively; a separate check confirmed exactly 4 `data-ok` occurrences
+  total, one per question.
+  `RESOURCES.md`: no new citation added this round — cited the official
+  `random` stdlib docs directly in the lesson body, but did not add a new
+  `RESOURCES.md` line since the module wasn't previously listed there and
+  editing `RESOURCES.md` beyond the existing citation-hygiene pattern felt
+  out of scope for a single-module lesson; flagged below as a possible
+  follow-up rather than done silently. `PLAN.md` not edited.
+  Registered in `assets/nav.js` with `date: "2026-09-20"`; confirmed
+  `node --check assets/nav.js` reports no syntax errors after the edit.
+  **DB access:** re-confirmed blocked this round exactly as briefed —
+  `psql "$LEARNING_DB_URL" ...`, `printenv LEARNING_DB_URL`, and reading
+  `~/.config/learning/db.env` were not re-attempted per the prompt's
+  explicit instruction not to re-try reads this round. `bin/record-
+  progress python lesson_generated --day 54 --lesson
+  0054-random-module.html --detail '{"by":"headless-run"}'` was attempted
+  from the repo root after this entry was written, per the standard
+  closing step — see the line below for the result.
+  `python/learning-records/` still holds only the Day 1 baseline; no
+  completion/quiz/kata outcome has ever been recorded for any day 2-53,
+  so this round paced entirely from on-disk state, same as every prior
+  round since Day 42.
+  **Next-day note:** with `random` done, the only two stdlib leads Day 53
+  flagged (`string` methods, `textwrap`) remain unexplored and still have
+  zero mentions anywhere — both are thinner than `random` and might suit
+  a review day's "and here's one more small thing" aside better than a
+  full standalone lesson, but are worth a final explicit look before
+  defaulting to the 12-lesson review-candidate list (15, 18, 21-23, 25-26,
+  28-29, 35, 37, 40), which remains otherwise unchanged. Two fresh days
+  (53-54) have now run since Day 52's review — Day 55 should weigh a
+  review sweep more seriously to avoid three fresh days in a row, unless
+  `string`/`textwrap` (or another late-surfacing gap) makes a strong
+  enough case on inspection.

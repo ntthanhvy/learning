@@ -158,6 +158,8 @@
       file: "lessons/0075-database-triggers.html" },
     { n: 76, date: "2026-09-19", title: "Window functions and CTEs: SQL that sees more than one row at a time",
       file: "lessons/0076-window-functions-and-ctes.html" },
+    { n: 77, date: "2026-09-20", title: "Recursive CTEs: querying a tree without knowing how deep it goes",
+      file: "lessons/0077-recursive-ctes.html" },
   ];
 
   const REFS = [

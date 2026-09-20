@@ -14,6 +14,7 @@
     { n: 3, date: "2026-09-17", title: "dbt: tests catch bad data", file: "lessons/0003-dbt-tests.html" },
     { n: 4, date: "2026-09-18", title: "dbt: marts, facts, dimensions & incremental", file: "lessons/0004-dbt-marts-and-incremental.html" },
     { n: 5, date: "2026-09-19", title: "Kafka: topics, partitions, keys & offsets", file: "lessons/0005-kafka-topics-partitions-offsets.html" },
+    { n: 6, date: "2026-09-20", title: "Kafka → warehouse: at-least-once, landed safely", file: "lessons/0006-kafka-consumer-to-warehouse.html" },
   ];
 
   const REFS = [

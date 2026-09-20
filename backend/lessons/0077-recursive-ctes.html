@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 77 · Recursive CTEs: querying a tree without knowing how deep it goes</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 77 · ~20 min</p>
+<h1>Recursive CTEs: querying a tree without knowing how deep it goes</h1>
+<p class="byline">Lesson 76 named the plain <code>WITH ... AS (...)</code> CTE and deliberately stopped one step short: what happens when the thing you're querying is a tree — a manager's whole reporting chain, a category and every subcategory beneath it, a comment and every reply to a reply to a reply — and you don't know in advance how many levels deep it goes? A plain CTE names one fixed step. This lesson covers the variant built for "keep going until there's nothing left to find."</p>
+
+<h2>1 · Why a fixed number of joins doesn't work</h2>
+<p>Lesson 76's CTE ran once and stopped: name a step, use it, done. A self-referencing table — an <code>employees</code> table where each row has a <code>manager_id</code> pointing at another row in the same table — breaks that assumption. "Everyone who reports up to Alice, at any depth" could be one join (her direct reports) or six (a report's report's report...), and the query can't hardcode a join count without silently going wrong the day the org chart grows one level deeper.</p>
+<pre><code><span class="cm">-- employees(id, name, manager_id) -- manager_id is NULL for the top of the chart</span>
+<span class="kw">SELECT</span> id, name, manager_id <span class="kw">FROM</span> employees <span class="kw">WHERE</span> manager_id = 1;
+<span class="cm">-- only Alice's direct reports -- their own reports are still invisible</span></code></pre>
+<p>A <dfn data-en="a CTE defined with WITH RECURSIVE that refers to its own output inside its own definition, run repeatedly until a run adds zero new rows, used to walk a self-referencing table (e.g. an employee's manager_id, a category's parent_id) to an unknown depth" data-vn="recursive CTE (giữ nguyên) — CTE định nghĩa bằng WITH RECURSIVE, tự tham chiếu kết quả của chính nó, chạy lặp tới khi không còn row mới, dùng để duyệt bảng tự tham chiếu (vd manager_id, parent_id) mà không cần biết trước độ sâu">recursive CTE</dfn> fixes exactly this: instead of naming one step, it names a step that can refer to its own prior output, and Postgres reruns it until a run produces nothing new.</p>
+
+<h2>2 · The two-part shape every recursive CTE has</h2>
+<p>Every <code>WITH RECURSIVE</code> query has exactly two parts joined by <code>UNION</code> or <code>UNION ALL</code>, and the split is not optional:</p>
+<table class="cmp">
+<thead><tr><th>Part</th><th>Job</th></tr></thead>
+<tbody>
+<tr><th>base case (non-recursive term)</th><td>runs once — the starting row(s), e.g. "the employee with no manager"</td></tr>
+<tr><th>recursive case (recursive term)</th><td>runs repeatedly, joining the CTE's own name against the base table — "find rows whose manager_id matches a row already found"</td></tr>
+</tbody>
+</table>
+<pre><code><span class="kw">WITH RECURSIVE</span> org_chart <span class="kw">AS</span> (
+    <span class="cm">-- base case: the top of the chart, runs once</span>
+    <span class="kw">SELECT</span> id, name, manager_id, 1 <span class="kw">AS</span> depth
+    <span class="kw">FROM</span> employees <span class="kw">WHERE</span> manager_id <span class="kw">IS NULL</span>
+
+    <span class="kw">UNION ALL</span>
+
+    <span class="cm">-- recursive case: joins org_chart's own growing output against employees</span>
+    <span class="kw">SELECT</span> e.id, e.name, e.manager_id, oc.depth + 1
+    <span class="kw">FROM</span> employees e
+    <span class="kw">JOIN</span> org_chart oc <span class="kw">ON</span> e.manager_id = oc.id
+)
+<span class="kw">SELECT</span> * <span class="kw">FROM</span> org_chart <span class="kw">ORDER BY</span> depth;
+<span class="cm">-- every employee at every depth, no fixed join count written anywhere</span></code></pre>
+<p>Only the recursive term is allowed to reference <code>org_chart</code> by name — that self-reference is what makes it recursive at all. Postgres runs the base case once, then reruns the recursive case using only the rows the <em>previous</em> run added, stopping automatically the first time a run adds zero new rows.</p>
+
+<h2>3 · UNION vs UNION ALL here means something sharper than usual</h2>
+<p>Lesson 76 never needed this distinction, but a recursive CTE lives or dies by it. <code>UNION</code> discards duplicate rows every single run, which costs a comparison against everything found so far — <code>UNION ALL</code> keeps every row, no comparison. For a real tree (an org chart, a category tree) rows never repeat anyway, so <code>UNION ALL</code> is both correct and cheaper. <code>UNION</code> only earns its cost when the underlying data could cycle back to a row already seen — and in that case, deduplication is doing real work, not just tidying: it's the only thing standing between the query and an infinite loop.</p>
+
+<h2>4 · The termination condition is your job, not Postgres's</h2>
+<p>Postgres stops a recursive CTE automatically once a run adds zero new rows — but nothing forces that to happen quickly, or ever. A self-referencing table with a cycle in it (row A points to B, B points back to A) paired with <code>UNION ALL</code> will run forever, since a row that points back around always looks "new" to a query that never checks for duplicates. This is the one place a query bug becomes an availability incident instead of a wrong answer: a runaway recursive CTE consumes a connection and keeps producing rows until something outside the query kills it. Real production usage adds an explicit depth cap as insurance regardless of whether the data is expected to have cycles:</p>
+<pre><code><span class="kw">SELECT</span> e.id, e.name, e.manager_id, oc.depth + 1
+<span class="kw">FROM</span> employees e
+<span class="kw">JOIN</span> org_chart oc <span class="kw">ON</span> e.manager_id = oc.id
+<span class="kw">WHERE</span> oc.depth &lt; 20;  <span class="cm">-- insurance: stop even if the data has an unexpected cycle</span></code></pre>
+
+<h2>5 · Where this fits what the course already covers</h2>
+<div class="callout"><strong>Ties to Lessons 60 and 75:</strong> a <code>CHECK</code> constraint (Lesson 60) or a trigger (Lesson 75) could enforce "no cycles allowed" at write time — but neither can answer "show me everyone under Alice" at read time; that's a query-shape problem, and a recursive CTE is the query shape built for it. It's also the direct answer to a gap Lesson 76 left open on purpose: that lesson's plain CTE named one fixed intermediate step precisely because "top 3 per group" only needed one step — a self-referencing hierarchy is the case where one step was never going to be enough, at any fixed number.</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A fixed number of joins hardcodes a depth, and a self-referencing hierarchy like an org chart can be arbitrarily deep -- the query would silently miss anyone below whatever depth it hardcoded, the day the chart grows one level further.">
+    <p class="stem">Why can't a fixed number of plain joins answer "everyone under Alice at any depth"?</p>
+    <button class="opt" data-ok>the hierarchy's actual depth isn't known in advance</button>
+    <button class="opt">Postgres simply forbids joining a table to itself</button>
+    <button class="opt">manager_id columns can never be indexed at all</button>
+    <button class="opt">only recursive CTEs are permitted to use JOIN</button>
+  </div>
+  <div class="q" data-why="The base case runs exactly once and supplies the starting row or rows. The recursive case is the only part allowed to reference the CTE's own name, and Postgres reruns just that part against the previous run's new rows until a run adds nothing new.">
+    <p class="stem">What is the base case's job in a WITH RECURSIVE query?</p>
+    <button class="opt" data-ok>supply the starting row, running just once</button>
+    <button class="opt">delete every row already inside the table</button>
+    <button class="opt">count the maximum depth before it runs</button>
+    <button class="opt">reference the CTE's own output right away</button>
+  </div>
+  <div class="q" data-why="UNION ALL keeps every row with no duplicate check, which is both correct and cheaper for a real tree where rows never repeat. UNION discards duplicates on every single run, which costs a comparison -- that cost only earns its keep when the data could cycle back to an already-seen row.">
+    <p class="stem">Why does a real tree query typically prefer UNION ALL over plain UNION here?</p>
+    <button class="opt" data-ok>tree rows never repeat, so dedup just wastes work</button>
+    <button class="opt">UNION ALL is the only variant Postgres ever permits</button>
+    <button class="opt">plain UNION cannot legally appear inside any single CTE</button>
+    <button class="opt">UNION ALL always automatically sorts every single output row</button>
+  </div>
+  <div class="q" data-why="Postgres only stops automatically once a run adds zero new rows. A cycle in the underlying data paired with UNION ALL means a row can keep looking new forever, so the query runs indefinitely, holding a connection open -- an explicit depth cap in the recursive term's WHERE clause is insurance against exactly that.">
+    <p class="stem">Why can an unexpected cycle in the data make a recursive CTE run forever?</p>
+    <button class="opt" data-ok>a cyclic row keeps looking new with no check</button>
+    <button class="opt">Postgres always re-reads the entire table from disk again</button>
+    <button class="opt">WITH RECURSIVE always disables every single WHERE clause entirely</button>
+    <button class="opt">a cycle forces the base case to run forever</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://www.postgresql.org/docs/current/queries-with.html">PostgreSQL Manual — WITH Queries (CTEs)</a>, the "Recursive Queries" section (~10 min) — the same page Lesson 76 cited for plain CTEs, read this time for the <code>WITH RECURSIVE</code> section specifically: the base-case/recursive-case split, the <code>UNION</code>/<code>UNION ALL</code> distinction, the parts-explosion worked example, and the explicit warning that a recursive term must eventually return no rows or the query loops indefinitely.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially. Nếu chỗ nào chưa rõ, cứ hỏi lại bằng tiếng Việt cũng được.<br><br>
+<em>Next lesson:</em> open. Still no <code>lesson_completed</code>/quiz-outcome record exists for any lesson after 77 rounds — the honest next step remains a completion signal or a user-named track.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

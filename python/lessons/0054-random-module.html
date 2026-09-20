@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 54 · the random module</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 54 · ~20 min · 20 Sep 2026</p>
+<h1>The <code>random</code> module: choosing, shuffling &amp; repeatable "randomness"</h1>
+<p class="byline">Every language needs a way to pick, shuffle, or sample — test fixtures, shuffled quiz options (like the ones on this very page), sampling a subset of rows for a spot-check. Today's tool is <dfn data-en="random is Python's standard-library module for pseudo-random number generation - not truly random, but statistically random-looking output produced by a deterministic algorithm from a starting number called a seed" data-vn="giữ nguyên &quot;random module&quot; — module chuẩn của Python để sinh số giả-ngẫu-nhiên (pseudo-random): không thực sự ngẫu nhiên, mà là thuật toán xác định (deterministic) sinh ra chuỗi số trông giống ngẫu nhiên, xuất phát từ một số khởi tạo gọi là seed">the <code>random</code> module</dfn>, plus the one word that makes its output <dfn data-en="a seed is the starting number that random's underlying algorithm uses to produce its entire sequence of pseudo-random values - the same seed always produces the exact same sequence, which is what makes a test run reproducible" data-vn="giữ nguyên &quot;seed&quot; — số khởi tạo mà thuật toán bên trong random dùng để sinh ra toàn bộ chuỗi giá trị giả-ngẫu-nhiên; cùng một seed luôn cho ra đúng cùng một chuỗi, đó là lý do giúp test chạy lại được y hệt (reproducible)">reproducible</dfn> on demand instead of different every run.</p>
+
+<div class="callout"><strong>Bridge from SQL:</strong> <code>random.sample(rows, 20)</code> is the plain-Python shape of <code>ORDER BY RANDOM() LIMIT 20</code> — pick 20 distinct rows at random, no repeats. The difference is where it runs: SQL's version asks the database to shuffle server-side; Python's version shuffles a list already sitting in memory.</div>
+
+<h2>1 · Why "random" needs a second word: pseudo</h2>
+<p><code>random</code> does not read real-world noise (like a die roll) — it runs a deterministic formula that, given a starting number, produces a long sequence of values that <em>look</em> statistically random but are fully determined by that starting number. That starting number is the <strong>seed</strong>. Leave it alone and Python picks one from the OS for you (different every run); set it explicitly and the entire sequence that follows becomes repeatable:</p>
+<pre><code><span class="kw">import</span> random
+
+random.seed(<span class="num">42</span>)
+<span class="kw">print</span>(random.randint(<span class="num">1</span>, <span class="num">100</span>))   <span class="cm"># 82 -- same every time seed(42) runs first</span>
+<span class="kw">print</span>(random.randint(<span class="num">1</span>, <span class="num">100</span>))   <span class="cm"># 15 -- same second call too</span>
+
+random.seed(<span class="num">42</span>)                <span class="cm"># reset back to the same starting point</span>
+<span class="kw">print</span>(random.randint(<span class="num">1</span>, <span class="num">100</span>))   <span class="cm"># 82 -- identical sequence repeats from scratch</span></code></pre>
+<p>Verified live: reseeding with the same value reproduces the exact same sequence of calls, in order — this is the whole point of a seed. A test that asserts on "random" output would be flaky without one; call <code>random.seed(some_fixed_number)</code> at the top of the test (or fixture) and the "random" values become as predictable as any other input, which is exactly why <code>pytest</code> fixtures for randomized test data almost always seed first.</p>
+
+<div class="callout"><strong>Not for security:</strong> <code>random</code>'s algorithm is predictable if an attacker can observe enough of its output — never use it for passwords, tokens, or anything security-sensitive. That job belongs to <code>secrets</code> (stdlib, cryptographically secure, out of scope today) — mentioned here only so the boundary is clear, not as a second module to learn.</div>
+
+<h2>2 · Picking: <code>choice</code>, <code>choices</code>, and <code>sample</code></h2>
+<p>Three functions answer three different "pick from this" questions, and mixing them up is the most common mistake:</p>
+<pre><code><span class="kw">import</span> random
+
+fruits = [<span class="str">"apple"</span>, <span class="str">"banana"</span>, <span class="str">"cherry"</span>, <span class="str">"date"</span>]
+
+random.choice(fruits)             <span class="cm"># one random element, e.g. "cherry" -- picks ONE, with replacement doesn't apply (single pick)</span>
+random.choices(fruits, k=<span class="num">3</span>)     <span class="cm"># 3 elements, WITH repeats allowed, e.g. ["date", "date", "apple"]</span>
+random.sample(fruits, k=<span class="num">3</span>)      <span class="cm"># 3 DISTINCT elements, no repeats, e.g. ["banana", "date", "apple"]</span></code></pre>
+<p>Verified live (seeded): <code>choice</code> returns a single element. <code>choices</code> samples <em>with replacement</em> — the same element can appear more than once in the result, which is why it needs a count via <code>k=</code> rather than being capped at the list's length. <code>sample</code> samples <em>without replacement</em> — every element in the result is distinct, and asking for <code>k</code> larger than the list's length raises <code>ValueError</code>. "Pick a random quiz answer to highlight" is <code>choice</code>; "simulate 100 dice rolls" is <code>choices</code>; "pick 5 distinct winners from 200 entries" is <code>sample</code>.</p>
+
+<h2>3 · Shuffling in place: <code>shuffle</code></h2>
+<p><code>random.shuffle()</code> reorders a list's elements randomly — and, like <code>list.sort()</code>, it mutates the list in place and returns <code>None</code>, not a new shuffled list:</p>
+<pre><code><span class="kw">import</span> random
+
+deck = [<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>, <span class="num">4</span>, <span class="num">5</span>]
+result = random.shuffle(deck)
+result       <span class="cm"># None -- shuffle returns nothing</span>
+deck          <span class="cm"># e.g. [3, 1, 5, 2, 4] -- the ORIGINAL list, reordered in place</span></code></pre>
+<p>Verified live: <code>result is None</code> while <code>deck</code> itself ends up reordered — the same "mutate, return <code>None</code>" shape Day 1 already flagged for <code>list.sort()</code> and <code>list.append()</code>. Writing <code>deck = random.shuffle(deck)</code> is a classic trap: it silently overwrites <code>deck</code> with <code>None</code>. To shuffle a <em>copy</em> and keep the original untouched, shuffle a copy explicitly: <code>shuffled = deck[:]; random.shuffle(shuffled)</code>.</p>
+
+<h2>4 · Numbers: <code>randint</code>, <code>random()</code>, and <code>uniform</code></h2>
+<p>Three more functions cover the common numeric ranges:</p>
+<pre><code><span class="kw">import</span> random
+
+random.randint(<span class="num">1</span>, <span class="num">6</span>)        <span class="cm"># int in [1, 6], BOTH ends inclusive -- a die roll</span>
+random.random()             <span class="cm"># float in [0.0, 1.0), e.g. 0.37454...</span>
+random.uniform(<span class="num">1.5</span>, <span class="num">4.5</span>)    <span class="cm"># float in [1.5, 4.5], both ends inclusive</span></code></pre>
+<p>Verified live: <code>randint(1, 6)</code> can return <code>6</code> itself — both bounds are inclusive, unlike <code>range(1, 6)</code>'s exclusive upper end, a mismatch worth double-checking against off-by-one errors. <code>random()</code> takes no arguments and always returns a float from 0 up to (but never reaching) 1 — the building block every other function in the module is ultimately implemented on top of.</p>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> nothing pandas-specific to teach — <code>DataFrame.sample()</code> exists and takes its own <code>random_state=</code> seeding argument, but that is a DataFrame method with its own API, not today's stdlib <code>random</code> module; not demonstrated here, per <code>MISSION.md</code>.</div>
+
+<div class="interview">
+<p><strong>Q: "How would you write a test for a function that shuffles a hand of cards?"</strong> A strong answer, out loud: <em>"I'd call <code>random.seed()</code> with a fixed number at the top of the test, before calling the function under test. That makes the 'random' shuffle deterministic — the exact same sequence every run — so I can assert on the specific resulting order instead of writing a weaker test like 'the length didn't change' or 'it's not sorted anymore.' Without seeding, the test would be flaky: it might pass 999 times and then fail once by chance, or worse, pass even when the shuffle logic is broken."</em> The signal: naming <code>seed()</code> specifically, and explaining reproducibility as the reason, not just "make it not random."</p>
+</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/54_random_module.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/54_random_module.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: seeding for a reproducible sequence, picking one element with <code>choice</code>, sampling distinct elements with <code>sample</code>, shuffling a copy without mutating the original, and generating an inclusive-range integer with <code>randint</code>.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="random's algorithm is a deterministic formula driven by a starting number, the seed. Calling seed() with the same value resets that starting point, so every random call that follows reproduces the identical sequence -- this is what lets a test assert on specific 'random' output without being flaky.">
+    <p class="stem">Why does calling <code>random.seed(42)</code> twice, with the same calls after each, produce the same two sequences?</p>
+    <button class="opt" data-ok>the seed fixes the deterministic starting point</button>
+    <button class="opt">random caches results across separate program runs</button>
+    <button class="opt">seed turns off randomness inside the module</button>
+  </div>
+  <div class="q" data-why="random.choices samples WITH replacement, so the same element can be picked more than once, which is why it takes a k= count rather than being capped at the sequence length. random.sample samples WITHOUT replacement -- every result is distinct, and it raises ValueError if k exceeds the sequence length.">
+    <p class="stem">What is the key difference between <code>random.choices(seq, k=3)</code> and <code>random.sample(seq, k=3)</code>?</p>
+    <button class="opt" data-ok>choices allows repeats; sample does not</button>
+    <button class="opt">choices returns floats; sample returns ints</button>
+    <button class="opt">sample always returns the full sequence</button>
+  </div>
+  <div class="q" data-why="random.shuffle mutates the given list in place and returns None, the same 'mutate then return None' shape as list.sort() and list.append(). Writing deck = random.shuffle(deck) overwrites deck with None instead of a shuffled list, since shuffle's return value is never the shuffled list itself.">
+    <p class="stem">Why does <code>deck = random.shuffle(deck)</code> leave <code>deck</code> equal to <code>None</code>?</p>
+    <button class="opt" data-ok>shuffle mutates the given list, returning None</button>
+    <button class="opt">shuffle only works on tuples, never lists</button>
+    <button class="opt">shuffle clears any list under five items</button>
+  </div>
+  <div class="q" data-why="random.randint(a, b) includes both endpoints, so randint(1, 6) can return 6 itself -- unlike range(1, 6), whose upper bound is exclusive. Assuming the same exclusive-upper-bound rule for randint is a common source of off-by-one errors.">
+    <p class="stem">Can <code>random.randint(1, 6)</code> ever return <code>6</code>?</p>
+    <button class="opt" data-ok>yes, randint here always includes both endpoints</button>
+    <button class="opt">no, the bound is always exclusive here</button>
+    <button class="opt">only if seed() had never been called</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the <a href="https://docs.python.org/3/library/random.html">official <code>random</code> stdlib docs</a> — the "Functions for sequences" section covers <code>choice</code>/<code>choices</code>/<code>sample</code>/<code>shuffle</code> side by side, which is the fastest way to keep the three picking functions straight.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day54">glossary</a> under Day 54.<br>
+💬 Anything unclear — seeding, <code>choices</code> vs <code>sample</code>, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

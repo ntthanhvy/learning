@@ -81,6 +81,15 @@
   <tr><td>consumer group</td><td>giữ nguyên "consumer group" — tập consumer cùng group.id, chia nhau đọc các partition, dùng chung offset đã commit</td><td>A named set of consumers that coordinate to split a topic's partitions between them and share one committed-offset bookmark per partition — the unit Kafka scales consumption with, and the unit the <code>kafka-consumer-groups.sh --describe</code> CLI command inspects.</td></tr>
 </table>
 
+<h2 id="day6">Day 6 — Kafka → warehouse: at-least-once, landed safely</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>at-least-once</td><td>giữ nguyên "at-least-once" — consumer có thể xử lý lại 1 message (sau khi crash/restart) nhưng không bao giờ mất message</td><td>A delivery guarantee where a consumer may process the same message more than once (after a crash and restart, for example) but never loses a message outright — the default a plain manual-commit Kafka consumer gives you, and the one this course's consumer is built around.</td></tr>
+  <tr><td>idempotent write</td><td>giữ nguyên "idempotent write" — ghi lại nhiều lần với cùng input vẫn ra kết quả như ghi 1 lần</td><td>An operation safe to perform more than once with the same input, because repeating it produces no different end state than performing it once — the property that makes an at-least-once delivery guarantee safe to build on.</td></tr>
+  <tr><td>ON CONFLICT DO NOTHING</td><td>giữ nguyên "ON CONFLICT DO NOTHING" — nếu INSERT đụng unique constraint thì bỏ qua, không báo lỗi, không ghi đè</td><td>A Postgres <code>INSERT</code> clause that, when the row being inserted would violate a uniqueness constraint, does nothing instead of raising an error — the standard way to make a Postgres write idempotent on a natural or surrogate key.</td></tr>
+  <tr><td>manual offset commit</td><td>giữ nguyên "manual offset commit" — tắt auto-commit, tự gọi commit() đúng lúc mình muốn, thường là sau khi ghi xong</td><td>A Kafka consumer setting (<code>enable.auto.commit=False</code>) where the client library never commits an offset on its own timer — the application calls <code>commit()</code> explicitly, at the exact moment it chooses, which is what lets this lesson's consumer guarantee the write happens first.</td></tr>
+</table>
+
 <script src="../assets/nav.js"></script>
 </body>
 </html>

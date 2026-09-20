@@ -112,6 +112,8 @@
       file: "lessons/0052-review-retrieval-day-5.html" },
     { n: 53, date: "2026-09-19", title: "collections.deque & namedtuple: queues and lightweight records",
       file: "lessons/0053-deque-and-namedtuple.html" },
+    { n: 54, date: "2026-09-20", title: "The random module: choosing, shuffling & repeatable randomness",
+      file: "lessons/0054-random-module.html" },
   ];
 
   const REFS = [

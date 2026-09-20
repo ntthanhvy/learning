@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 74 · np.unique(): sorted, richer, and a stricter cousin of Series.unique()</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 74 · ~20 min · 20 Sep 2026</p>
+<h1>np.unique(): sorted, richer, and a stricter cousin of Series.unique()</h1>
+<p class="byline">Chào bạn — Lesson 73's teaser named two leftover zero-hit candidates: <code>np.unique</code> and <code>searchsorted</code>. A fresh grep of all 73 lessons and the glossary reconfirms both are still genuinely untaught. <code>np.unique()</code> is the pick today: Lesson 19 already taught <code>Series.unique()</code> and <code>nunique()</code>, but never its NumPy-level cousin — same name, genuinely different contract, and a natural setup for <code>searchsorted()</code> next time (which needs a SORTED array to work correctly, exactly what <code>np.unique()</code> always hands back).</p>
+
+<h2>1 · The gap: Series.unique() keeps appearance order, np.unique() always sorts</h2>
+<p>Lesson 19's <code>Series.unique()</code> answers "what are the distinct values" and returns them in the order they FIRST appear in the data — it never sorts. <code>np.unique()</code> looks like the same question but answers it differently: it always returns the distinct values SORTED, and it always returns a plain NumPy <code>ndarray</code>, never a Series or Index, even when called directly on a Series.</p>
+<pre><code>s = pd.Series([<span class="str">"Chi"</span>, <span class="str">"An"</span>, <span class="str">"Chi"</span>, <span class="str">"Binh"</span>, <span class="str">"An"</span>])
+s.unique()          <span class="cm"># ['Chi' 'An' 'Binh']  -- order of FIRST APPEARANCE</span>
+np.unique(s)        <span class="cm"># ['An' 'Binh' 'Chi']  -- always SORTED, plain ndarray</span></code></pre>
+<p><dfn data-en="a top-level NumPy function, np.unique(array), that returns the DISTINCT values of an array-like ALWAYS SORTED (never in appearance order) as a plain ndarray -- unlike Series.unique() (Lesson 19), which preserves first-appearance order and returns a Series-flavored array; optional return_index=, return_inverse=, and return_counts= keywords add, respectively, each unique value's first-occurrence position, the codes needed to reconstruct the original array, and how many times each unique value occurred" data-vn="giữ nguyên 'np.unique()' — hàm NumPy trả về các giá trị PHÂN BIỆT của 1 mảng, LUÔN SẮP XẾP (không theo thứ tự xuất hiện), kết quả là ndarray thường -- khác Series.unique() (Lesson 19), giữ nguyên thứ tự XUẤT HIỆN ĐẦU TIÊN; các tham số tuỳ chọn return_index=, return_inverse=, return_counts= lần lượt thêm: vị trí xuất hiện đầu tiên của mỗi giá trị, mã số để dựng lại mảng gốc, và số lần mỗi giá trị xuất hiện">np.unique()</dfn> is genuinely the NumPy-level version of the same idea — confirmed directly (NumPy 2.5.3) that it accepts a Series directly (no <code>.to_numpy()</code> needed), but always hands back a plain <code>ndarray</code>, dropping any pandas-specific wrapper.</p>
+
+<div class="callout"><strong>SQL bridge:</strong> both <code>Series.unique()</code> and <code>np.unique()</code> answer the same question plain <code>SELECT DISTINCT col</code> answers, with no guaranteed row order in SQL either — but SQL gives you no built-in way to ask "and which original row was each distinct value's first occurrence," which is exactly what <code>np.unique()</code>'s <code>return_index=</code> adds for free, closer to a windowed <code>ROW_NUMBER()</code> trick than to plain <code>DISTINCT</code>.</div>
+
+<h2>2 · The four extra returns: index, inverse, counts — and how inverse differs from factorize()</h2>
+<p>Confirmed directly on this course's real <code>orders_raw.csv</code> <code>customer</code> column (<code>['An','Binh','An','Chi','Binh','An']</code>):</p>
+<pre><code>vals, idx, inverse, counts = np.unique(
+    df[<span class="str">"customer"</span>].to_numpy(),
+    return_index=<span class="kw">True</span>, return_inverse=<span class="kw">True</span>, return_counts=<span class="kw">True</span>,
+)
+vals      <span class="cm"># ['An' 'Binh' 'Chi']      -- sorted distinct values</span>
+idx       <span class="cm"># [0, 1, 3]                -- FIRST position each value appears at</span>
+inverse   <span class="cm"># [0, 1, 0, 2, 1, 0]       -- codes that rebuild the original array</span>
+counts    <span class="cm"># [3, 2, 1]                -- how many times each value occurs</span></code></pre>
+<p><code>return_inverse=</code> looks identical to Lesson 68's <code>factorize()</code> — both hand back integer codes plus the distinct values they point into — but they disagree on ORDER whenever appearance order and sorted order differ. Confirmed directly with a case built specifically to diverge (<code>['Chi','An','Chi','Binh','An']</code>, where "Chi" appears first but sorts last):</p>
+<pre><code>pd.factorize(s)                          <span class="cm"># uniques ['Chi','An','Binh'], codes [0,1,0,2,1] -- FIRST-APPEARANCE order</span>
+np.unique(s.to_numpy(), return_inverse=<span class="kw">True</span>)  <span class="cm"># uniques ['An','Binh','Chi'], codes [2,0,2,1,0] -- SORTED order</span></code></pre>
+<p>The codes are genuinely different arrays, not just relabeled — confirmed directly, byte-for-byte unequal. They only match when <code>factorize(s, sort=True)</code> is used instead: confirmed directly that <code>factorize(sort=True)</code>'s <code>uniques</code> and <code>codes</code> then equal <code>np.unique(..., return_inverse=True)</code>'s output exactly. The practical rule: default <code>factorize()</code> and <code>Series.unique()</code> agree with each other (both appearance order); <code>np.unique()</code> and <code>factorize(sort=True)</code> agree with each other (both sorted) — never assume the two families' plain defaults match.</p>
+
+<h2>3 · NaN handling: collapsed to one, and a real crash on mixed object arrays</h2>
+<p>Confirmed directly (NumPy 2.5.3) on the real fixture's <code>amount</code> column (coerced with <code>pd.to_numeric(errors="coerce")</code>, one real <code>NaN</code>): <code>np.unique()</code> pushes <code>NaN</code> to the very END of the sorted output, same placement <code>argsort()</code> used in Lesson 73 — and collapses EVERY <code>NaN</code> down to a single occurrence, even though <code>NaN != NaN</code> normally. Confirmed with a synthetic array containing two separate <code>NaN</code>s (<code>[3.0, 1.0, nan, 2.0, nan, 1.0]</code>): the output contains exactly one <code>nan</code>, not two, controlled by the <code>equal_nan=True</code> default.</p>
+<p>The real gotcha, confirmed directly: on an <em>object-dtype</em> array — a pandas string column containing a genuine Python <code>None</code>, not a numeric <code>NaN</code> — <code>np.unique()</code> raises outright: <code>TypeError: '&lt;' not supported between instances of 'float' and 'str'</code>, because sorting mixed types is undefined. <code>Series.unique()</code> handles the exact same data without complaint (it never sorts, so it never needs to compare a float <code>NaN</code> against a string). This is the sharpest practical reason to reach for <code>Series.unique()</code> over <code>np.unique()</code> on real messy string columns: sorting is not optional in <code>np.unique()</code>, and messy columns are exactly where that assumption breaks.</p>
+
+<div class="interview">
+<p><strong>Q: "Series.unique() and np.unique() sound like the same thing — what's actually different, and when would picking the wrong one bite you?"</strong> A strong answer, out loud: <em>"They answer the same question — what are the distinct values — but with two real differences I've verified hands-on. First, order: Series.unique() keeps first-appearance order, np.unique() always sorts, so if I need appearance order preserved I can't just swap one for the other. Second, and the one that's actually bitten real code: np.unique() has to sort to do its job, so on an object-dtype column with mixed types — say a string column with a real None in it rather than a numeric NaN — it raises a TypeError trying to compare a float to a string. Series.unique() never sorts, so it sails through the same data fine. I'd default to Series.unique() on raw, possibly-messy columns, and reach for np.unique() specifically when I want the sorted order, or need return_counts=/return_index=/return_inverse= in one call instead of chaining separate methods."</em> The signal: naming the sort-triggered TypeError as a concrete failure mode, not just reciting "one sorts, one doesn't" — that's the same "know where the abstraction leaks" instinct as Lesson 73's stale-docstring catch.</p>
+</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/74_np_unique.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/74_np_unique.py</code></pre>
+<p>Uses the same real <code>orders_raw.csv</code> fixture. Exercise 1 confirms <code>np.unique()</code> on the (numeric, NaN-dropped) <code>amount</code> column comes back sorted, unlike <code>Series.unique()</code>'s first-appearance (raw row) order. Exercise 2 uses <code>return_counts=</code> to confirm each customer's row count. Exercise 3 confirms <code>np.unique(..., return_inverse=True)</code>'s codes genuinely differ from plain <code>pd.factorize()</code>'s codes on the same data, then confirms <code>factorize(sort=True)</code> matches instead. Exercise 4 confirms the object-array-with-<code>None</code> <code>TypeError</code> from section 3, and that <code>Series.unique()</code> survives the identical data untouched.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: Series.unique() (Lesson 19) preserves first-appearance order and never sorts; np.unique() always returns the distinct values sorted, and always as a plain ndarray rather than a Series-flavored array, regardless of what was passed in.">
+    <p class="stem">What is the main behavioral difference between <code>Series.unique()</code> and <code>np.unique()</code>?</p>
+    <button class="opt" data-ok>np.unique() always sorts its own result; Series.unique() keeps first-appearance order instead</button>
+    <button class="opt">np.unique() drops every NaN value; Series.unique() always keeps every single NaN</button>
+    <button class="opt">np.unique() only works on numeric columns; Series.unique() works on any dtype</button>
+  </div>
+  <div class="q" data-why="Confirmed directly with a case built to diverge (['Chi','An','Chi','Binh','An']): plain pd.factorize() returns codes in FIRST-APPEARANCE order (matching Series.unique()), while np.unique(..., return_inverse=True) returns codes in SORTED order -- genuinely different arrays on the same input. They only match once factorize(sort=True) is used instead.">
+    <p class="stem">Plain <code>pd.factorize()</code> and <code>np.unique(..., return_inverse=True)</code> both return integer codes. When do their codes actually match?</p>
+    <button class="opt" data-ok>only when factorize(sort=True) is explicitly passed, exactly matching np.unique()'s own sorted order</button>
+    <button class="opt">always, since both functions compute their integer codes the exact same way</button>
+    <button class="opt">never, since the two functions stay fundamentally incompatible on any shared input</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: np.unique() on an object-dtype array mixing a real Python None with strings raises TypeError, since sorting mixed float/str types is undefined -- np.unique() must sort to do its job. Series.unique() never sorts, so it handles the identical mixed data with no error at all.">
+    <p class="stem">Why does <code>np.unique()</code> raise <code>TypeError</code> on a string column containing a real <code>None</code>, while <code>Series.unique()</code> handles the same data fine?</p>
+    <button class="opt" data-ok>np.unique() must sort, and comparing float NaN to a string is undefined</button>
+    <button class="opt">np.unique() cannot ever accept any column that contains even one missing value</button>
+    <button class="opt">Series.unique() quietly converts every single None value into the string "None" first</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the <a href="https://numpy.org/doc/stable/reference/generated/numpy.unique.html">NumPy API reference for <code>numpy.unique()</code></a> (per <code>RESOURCES.md</code>'s "Docs: NumPy fundamentals" entry) — read the <code>return_index=</code>/<code>return_inverse=</code>/<code>return_counts=</code>/<code>equal_nan=</code> keyword list in full; this lesson covers the interview-relevant core, not every keyword.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>np.unique()</code> is new today, placed right after Lesson 73's <code>argsort()</code> entry.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-74 comes back reported as shakiest, otherwise <code>searchsorted()</code> — named in Lesson 72's original teaser and still untouched, and now a natural follow-on since it needs a SORTED array, exactly what today's <code>np.unique()</code> always produces — or a fresh curriculum/glossary scan if it doesn't fit the moment.<br><br>
+💬 Anything unclear — <code>np.unique()</code> vs <code>Series.unique()</code>, the <code>factorize()</code> ordering mismatch, the object-array <code>TypeError</code>, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 6 · Kafka → warehouse: at-least-once, landed safely</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 6 · ~30–45 min · 20 Sep 2026</p>
+<h1>Kafka → warehouse: at-least-once, landed safely</h1>
+<p class="byline">Today's tangible win: a real consumer that lands <code>order_events</code> into <code>raw.order_events</code> with <code>INSERT ... ON CONFLICT (event_id) DO NOTHING</code>, committing its offset only after the write succeeds. You'll kill it mid-stream on purpose, restart it, and prove — from your own terminal — that the warehouse ends up with exactly one row per event, never two. Then <code>stg_order_events</code> and <code>mart_delivery_sla</code> turn those landed rows into the pipeline's first real business metric.</p>
+
+<div class="callout"><strong>Before today — check Day 5 actually landed:</strong> this lesson's consumer replaces yesterday's read-only inspector, so confirm Kafka is still up and the topic still exists:
+<pre><code>docker compose up -d
+docker compose exec kafka /opt/kafka/bin/kafka-topics.sh \
+  --bootstrap-server localhost:9092 --describe --topic order_events</code></pre>
+Expected: <code>PartitionCount: 3</code>, same as Day 5 left it. If the topic is missing, re-run Day 5's <code>kafka-topics.sh --create</code> before continuing — today builds directly on it, it doesn't recreate it.</div>
+
+<h2>1 · Why "lands events safely" is the whole day</h2>
+<p>Day 5 built a read-only inspector: it printed messages, it never wrote anything permanent, so if it crashed halfway through, nothing was lost or duplicated — you'd just run it again. Today's consumer is different in one way that changes everything: it writes to Postgres, a side effect that outlives the process. That side effect is exactly what makes crash recovery a real problem instead of a hypothetical one.</p>
+<p>Kafka's own delivery guarantee, undecorated, is <dfn data-en="a delivery guarantee where a consumer may process the same message more than once (after a crash and restart, for example) but never loses a message outright — the default a plain manual-commit Kafka consumer gives you, and the one this course's consumer is built around" data-vn="giữ nguyên &quot;at-least-once&quot; — consumer có thể xử lý lại 1 message (sau khi crash/restart) nhưng không bao giờ mất message">at-least-once</dfn>: a message might be processed more than once, but it is never silently dropped. That's not a bug to eliminate — it's the trade Kafka makes so that "did this write actually happen?" never has a worse answer than "maybe twice," only ever "at least once." The alternative extremes both cost more than they're worth here: at-most-once (commit the offset before writing, so a crash after commit but before write loses the message forever) is wrong for financial-adjacent data like orders, and true exactly-once across a message queue and an external database needs distributed transactions or Kafka-specific transactional APIs — Phase 2b vocabulary, out of scope for a single Postgres sink. At-least-once plus a write that doesn't mind being repeated is simpler and is what real pipelines actually run.</p>
+<div class="callout">This is the backend course's idempotency-key idea, applied one level down the stack: <a href="../backend/index.html">backend/</a> already covers designing an API so the same request retried twice produces the same end state. Today applies that identical principle to a consumer instead of an HTTP handler — same input processed twice, same end state — without re-deriving the concept itself.</div>
+
+<h2>2 · The write that doesn't mind being repeated</h2>
+<p>An <dfn data-en="an operation safe to perform more than once with the same input, because repeating it produces no different end state than performing it once — the property that makes an at-least-once delivery guarantee safe to build on" data-vn="giữ nguyên &quot;idempotent write&quot; — ghi lại nhiều lần với cùng input vẫn ra kết quả như ghi 1 lần">idempotent write</dfn> is what makes at-least-once safe rather than dangerous: if the same event arrives twice, the second write must be a no-op, not a second row. Postgres gives you this directly, and it's why Day 1 made <code>event_id</code> the primary key of <code>raw.order_events</code>:</p>
+<pre><code>INSERT INTO raw.order_events (event_id, order_id, status, occurred_at)
+VALUES (%(event_id)s, %(order_id)s, %(status)s, %(occurred_at)s)
+ON CONFLICT (event_id) DO NOTHING</code></pre>
+<p><dfn data-en="a Postgres INSERT clause that, when the row being inserted would violate a uniqueness constraint, does nothing instead of raising an error — the standard way to make a Postgres write idempotent on a natural or surrogate key" data-vn="giữ nguyên &quot;ON CONFLICT DO NOTHING&quot; — nếu INSERT đụng unique constraint thì bỏ qua, không báo lỗi, không ghi đè">ON CONFLICT (event_id) DO NOTHING</dfn> means: if a row with this <code>event_id</code> already exists, skip the insert silently instead of raising a duplicate-key error. Redeliver the exact same message ten times and the table still has exactly one row for it. This only works because <code>event_id</code> is a real, stable identity generated once by the producer (Day 5's <code>uuid.uuid4()</code>) — if the table were keyed on something that changes per attempt, or had no unique constraint at all, <code>ON CONFLICT</code> would have nothing to key off and every redelivery would insert a fresh duplicate.</p>
+
+<h2>3 · Commit order is the other half</h2>
+<p>The idempotent write only protects you if the offset commit happens <em>after</em> it, never before. Two orderings, one correct:</p>
+<table class="gloss">
+  <tr><th>Order</th><th>Crash between the two steps</th><th>Result</th></tr>
+  <tr><td>commit offset, <em>then</em> write</td><td>write never happens</td><td>event silently lost — this is at-most-once, wrong for order data</td></tr>
+  <tr><td>write, <em>then</em> commit offset</td><td>offset not yet advanced</td><td>event redelivered on restart, <code>ON CONFLICT</code> absorbs it — correct</td></tr>
+</table>
+<p>That second row is today's whole consumer, in one sentence: write first, commit second, and let the primary key absorb whatever the gap between them redelivers. This needs <dfn data-en="a Kafka consumer setting (enable.auto.commit=False) where the client library never commits an offset on its own timer — the application calls commit() explicitly, at the exact moment it chooses, which is what lets this lesson's consumer guarantee the write happens first" data-vn="giữ nguyên &quot;manual offset commit&quot; — tắt auto-commit, tự gọi commit() đúng lúc mình muốn, thường là sau khi ghi xong">manual offset commit</dfn> — Day 5's inspector used <code>enable.auto.commit: True</code> because it had nothing to protect; today's consumer sets it to <code>False</code> and calls <code>consumer.commit()</code> itself, on the line right after the database transaction commits.</p>
+
+<h2>4 · Build: <code>stg_order_events</code></h2>
+<p>Before the consumer, give it somewhere in dbt to be read from later — a source declaration and one staging model, same shape as every staging model since Day 2 (one source, no joins). Add <code>order_events</code> to <code>models/staging/sources.yml</code>, next to <code>restaurants</code>/<code>couriers</code>/<code>orders</code>:</p>
+<pre><code><span class="cm"># models/staging/sources.yml -- add this table under the existing raw source</span>
+      - name: order_events
+        loaded_at_field: occurred_at
+        freshness:
+          warn_after: {count: 6, period: hour}
+          error_after: {count: 24, period: hour}</code></pre>
+<p>Then create <code>models/staging/stg_order_events.sql</code> in full — it's scaffolding, the same light pass-through every staging model has been:</p>
+<pre><code><span class="cm">-- models/staging/stg_order_events.sql</span>
+select
+    event_id,
+    order_id,
+    status,
+    occurred_at
+from {{ source('raw', 'order_events') }}</code></pre>
+<p>And <code>models/staging/stg_order_events.yml</code>, testing the same two things Day 3 tested on <code>stg_orders.order_id</code> — a unique, non-null identity column — plus one new generic test on <code>status</code>, since this is the first column in the project with a fixed, known set of legal values:</p>
+<pre><code><span class="cm">-- models/staging/stg_order_events.yml</span>
+version: 2
+
+models:
+  - name: stg_order_events
+    columns:
+      - name: event_id
+        tests:
+          - unique
+          - not_null
+      - name: status
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['placed', 'accepted', 'picked_up', 'delivered', 'cancelled']</code></pre>
+<div class="callout"><strong>Note the nesting:</strong> <code>values:</code> sits under an <code>arguments:</code> key, not directly under <code>accepted_values:</code>. Older dbt tutorials show generic-test arguments flat — current dbt (1.12.x, resolved by this course's pin during today's verification) deprecates that shape and expects <code>arguments:</code> explicitly, the same nesting Day 3's <code>relationships</code> test already uses.</div>
+
+<h2>5 · Build: the consumer, <code>scripts/consume_order_events.py</code></h2>
+<p>This is today's actual skill, adapted from Day 5's producer/inspector shapes you already have — given in full because the <code>ON CONFLICT</code> SQL and the commit-after-write ordering are precise enough that getting them slightly wrong defeats the whole lesson, per this course's "give full code for scaffolding, partial code only for the day's skill" rule; today's skill is understanding <em>why</em> this shape is correct, which the quiz and interview question below test directly:</p>
+<pre><code><span class="cm">"""Consume order_events and land them in raw.order_events, at-least-once
+made safe by an idempotent write.
+
+Manual offset commit happens *after* the INSERT commits, never before --
+that ordering is the whole lesson. If this process dies between the INSERT
+and the commit, Kafka redelivers the same message on restart; ON CONFLICT
+(event_id) DO NOTHING makes redelivery a no-op instead of a duplicate row.
+"""</span>
+<span class="kw">import</span> json
+
+<span class="kw">import</span> psycopg
+<span class="kw">from</span> confluent_kafka <span class="kw">import</span> Consumer
+
+BOOTSTRAP = <span class="str">"localhost:9092"</span>
+TOPIC = <span class="str">"order_events"</span>
+GROUP_ID = <span class="str">"warehouse-loader"</span>
+PG_DSN = <span class="str">"host=localhost dbname=fdp user=fdp password=fdp"</span>
+
+INSERT_SQL = <span class="str">"""
+    INSERT INTO raw.order_events (event_id, order_id, status, occurred_at)
+    VALUES (%(event_id)s, %(order_id)s, %(status)s, %(occurred_at)s)
+    ON CONFLICT (event_id) DO NOTHING
+"""</span>
+
+
+<span class="kw">def</span> main():
+    consumer = Consumer(
+        {
+            <span class="str">"bootstrap.servers"</span>: BOOTSTRAP,
+            <span class="str">"group.id"</span>: GROUP_ID,
+            <span class="str">"auto.offset.reset"</span>: <span class="str">"earliest"</span>,
+            <span class="str">"enable.auto.commit"</span>: <span class="kw">False</span>,
+        }
+    )
+    consumer.subscribe([TOPIC])
+
+    conn = psycopg.connect(PG_DSN, autocommit=<span class="kw">False</span>)
+
+    <span class="kw">try</span>:
+        <span class="kw">while</span> <span class="kw">True</span>:
+            msg = consumer.poll(timeout=<span class="kw">5.0</span>)
+            <span class="kw">if</span> msg <span class="kw">is</span> <span class="kw">None</span>:
+                <span class="kw">break</span>
+            <span class="kw">if</span> msg.error():
+                <span class="kw">print</span>(<span class="str">f"consumer error: {msg.error()}"</span>)
+                <span class="kw">continue</span>
+
+            event = json.loads(msg.value())
+            <span class="kw">with</span> conn.cursor() <span class="kw">as</span> cur:
+                cur.execute(INSERT_SQL, event)
+            conn.commit()
+
+            <span class="cm"># Offset commit happens only after the write is durable in
+            # Postgres -- if the process dies before this line, the next
+            # start re-reads this message and the ON CONFLICT clause
+            # absorbs the duplicate.</span>
+            consumer.commit(message=msg, asynchronous=<span class="kw">False</span>)
+            <span class="kw">print</span>(
+                <span class="str">f"landed event_id={event['event_id']} order_id={event['order_id']} "</span>
+                <span class="str">f"status={event['status']} (partition={msg.partition()} offset={msg.offset()})"</span>
+            )
+    <span class="kw">finally</span>:
+        consumer.close()
+        conn.close()
+
+
+<span class="kw">if</span> __name__ == <span class="str">"__main__"</span>:
+    main()</code></pre>
+<p>Two choices worth naming out loud, because they're both the kind of thing an interviewer asks about directly: <code>conn.commit()</code> happens on its own line, separate from the <code>INSERT</code>, so the Postgres transaction is fully durable before the code even reaches the Kafka commit call — and <code>consumer.commit(message=msg, asynchronous=False)</code> blocks until Kafka confirms the offset is stored, rather than firing it and moving on, so "the commit happened" is something the code actually knows, not something it assumes.</p>
+<p>Run it against whatever Day 5 already produced into the topic:</p>
+<pre><code>uv run --with confluent-kafka --with "psycopg[binary]" python3 scripts/consume_order_events.py</code></pre>
+<p>Expected — one line per event, offsets increasing per partition, and the process exits on its own once it's caught up (a 5-second poll timeout with nothing new to read):</p>
+<pre><code>landed event_id=&lt;uuid&gt; order_id=101 status=placed (partition=2 offset=0)
+landed event_id=&lt;uuid&gt; order_id=101 status=accepted (partition=2 offset=1)
+landed event_id=&lt;uuid&gt; order_id=101 status=picked_up (partition=2 offset=2)
+landed event_id=&lt;uuid&gt; order_id=101 status=delivered (partition=2 offset=3)
+...</code></pre>
+<pre><code>docker compose exec -T postgres psql -U fdp -d fdp -c "SELECT count(*) FROM raw.order_events;"</code></pre>
+<p>Expected: a count matching however many events Day 5's producer sent (12, if you used it as given — 3 orders × 4 statuses).</p>
+
+<h2>6 · Verify: kill it mid-stream, restart it, count rows</h2>
+<p>This is the actual proof, not a claim to take on faith. Produce a fresh batch, start the consumer, and kill it — hard, <code>kill -9</code>, no graceful shutdown — partway through:</p>
+<pre><code>uv run --with confluent-kafka python3 scripts/produce_order_events.py   <span class="cm"># Day 5's producer, a fresh batch</span>
+uv run --with confluent-kafka --with "psycopg[binary]" python3 scripts/consume_order_events.py &amp;
+sleep 1 &amp;&amp; kill -9 %1   <span class="cm"># kill it mid-stream, on purpose</span></code></pre>
+<p>This round's verification did exactly this against a real broker and a real Postgres, with a script that force-exits (<code>os._exit()</code>, the hardest stop short of <code>kill -9</code> from outside) right after its 3rd write lands but before that 3rd message's offset commits — the precise gap the whole lesson is about. The killed run's own output, verbatim:</p>
+<pre><code>landed event_id=25c575e3-0acb-4c61-9dbb-de5f68562ff2 order_id=403 status=placed
+landed event_id=63505dcb-227c-4446-ac70-52985f265f9d order_id=403 status=accepted
+landed event_id=a3f11fe9-338b-4f06-bf3e-2fffa9d38177 order_id=403 status=picked_up
+SIMULATED CRASH after 3rd write, before its offset commit</code></pre>
+<p>Checking the consumer group at that exact moment shows the gap directly — <code>CURRENT-OFFSET</code> is 2 behind what was actually written, meaning the 3rd message (<code>picked_up</code>, the one just landed) will be redelivered:</p>
+<pre><code>GROUP              TOPIC          PARTITION  CURRENT-OFFSET  LOG-END-OFFSET  LAG
+warehouse-loader-3 order_events   1          2               4               2</code></pre>
+<p>Now restart the same consumer, same <code>group.id</code>. It resumes from the committed offset, redelivers message index 2 (<code>picked_up</code>, <code>event_id=a3f11fe9-...</code> — already in the table), and every remaining message:</p>
+<pre><code>landed event_id=a3f11fe9-338b-4f06-bf3e-2fffa9d38177 order_id=403 status=picked_up (partition=1 offset=2)
+landed event_id=13b5fbde-cb8e-424c-98ad-98048c893a54 order_id=403 status=delivered (partition=1 offset=3)
+landed event_id=9ab0df0c-5d91-4817-9e85-2bf5416f36ff order_id=401 status=placed (partition=0 offset=0)
+...</code></pre>
+<p>The redelivered row (<code>a3f11fe9-...</code>) prints again on restart — the consumer doesn't know it's a repeat, and it doesn't need to. <code>ON CONFLICT DO NOTHING</code> is what makes that ignorance safe. The final count is what actually matters:</p>
+<pre><code>docker compose exec -T postgres psql -U fdp -d fdp -c \
+  "SELECT count(*) AS total, count(DISTINCT event_id) AS distinct_events FROM raw.order_events;"</code></pre>
+<pre><code> total | distinct_events
+-------+-----------------
+    12 |              12
+(1 row)</code></pre>
+<p><strong>12 and 12 — no duplicates</strong>, despite a hard kill mid-write and one message being redelivered. That equality, not the absence of an error message, is the actual proof. Confirm the group caught all the way up, lag zero on every partition it touched:</p>
+<pre><code>docker compose exec kafka /opt/kafka/bin/kafka-consumer-groups.sh \
+  --bootstrap-server localhost:9092 --describe --group warehouse-loader</code></pre>
+<pre><code>GROUP              TOPIC          PARTITION  CURRENT-OFFSET  LOG-END-OFFSET  LAG
+warehouse-loader   order_events   0          8               8               0
+warehouse-loader   order_events   1          4               4               0</code></pre>
+
+<h2>7 · Build: <code>mart_delivery_sla</code></h2>
+<p>With events landing safely, build the mart <code>PLAN.md</code> names as this phase's second headline table: minutes from <code>placed</code> to <code>delivered</code>, and the share of orders over 45 minutes, per city per day. Its grain is one row per city per day — declare that out loud before reading the SQL, per Day 4's Kimball framing. Create <code>models/marts/mart_delivery_sla.sql</code>:</p>
+<pre><code><span class="cm">-- models/marts/mart_delivery_sla.sql</span>
+with placed as (
+    select order_id, occurred_at as placed_at
+    from {{ ref('stg_order_events') }}
+    where status = <span class="str">'placed'</span>
+),
+
+delivered as (
+    select order_id, occurred_at as delivered_at
+    from {{ ref('stg_order_events') }}
+    where status = <span class="str">'delivered'</span>
+),
+
+order_durations as (
+    select
+        o.order_id,
+        o.restaurant_id,
+        r.city,
+        p.placed_at,
+        d.delivered_at,
+        extract(epoch from (d.delivered_at - p.placed_at)) / 60 as minutes_to_deliver
+    from {{ ref('stg_orders') }} as o
+    inner join placed as p on p.order_id = o.order_id
+    inner join delivered as d on d.order_id = o.order_id
+    inner join {{ ref('stg_restaurants') }} as r on r.restaurant_id = o.restaurant_id
+)
+
+select
+    city,
+    date_trunc(<span class="str">'day'</span>, placed_at)::date as order_date,
+    count(*) as delivered_orders,
+    avg(minutes_to_deliver) as avg_minutes_to_deliver,
+    sum(case when minutes_to_deliver > <span class="kw">45</span> then <span class="kw">1</span> else <span class="kw">0</span> end)::numeric
+        / count(*) as share_over_45_min
+from order_durations
+group by
+    city,
+    date_trunc(<span class="str">'day'</span>, placed_at)::date</code></pre>
+<p>Both <code>inner join</code>s to <code>placed</code>/<code>delivered</code> are deliberate, not an oversight: an order with no <code>delivered</code> event yet (still in flight, or <code>cancelled</code>) has nothing to compute a duration from, so it's correctly excluded from an SLA metric rather than forced into a null-filled row. That's a real modelling choice worth being able to defend — a cancelled-order rate is a different metric, for a different mart, not a row in this one with a null duration.</p>
+<p>Add the grain test to <code>models/marts/marts.yml</code>, alongside Day 4's two entries:</p>
+<pre><code><span class="cm">  - name: mart_delivery_sla
+    columns:
+      - name: city
+        tests:
+          - not_null</span></code></pre>
+<pre><code>uv run --project ../dbt_env dbt build</code></pre>
+<p>This round's verification ran this for real, against the events actually landed by the kill/restart test above (3 delivered orders in one city, all placed and delivered within the same test run — so <code>avg_minutes_to_deliver</code> reads near zero here; with realistically spaced timestamps this is where the actual SLA numbers show up):</p>
+<pre><code>...
+14 of 19 OK created sql table model dbt_dev.mart_delivery_sla .................. [SELECT 1 in 0.02s]
+...
+19 of 19 PASS not_null_mart_delivery_sla_city .................................. [PASS in 0.01s]
+
+Done. PASS=19 WARN=0 ERROR=0 SKIP=0 NO-OP=0 REUSED=0 TOTAL=19</code></pre>
+<p>Commit <code>models/staging/stg_order_events.sql</code>, <code>models/staging/stg_order_events.yml</code>, the <code>sources.yml</code> addition, <code>models/marts/mart_delivery_sla.sql</code>, the <code>marts.yml</code> addition, and <code>scripts/consume_order_events.py</code>.</p>
+
+<div class="interview">
+<p><strong>Q: "Your Kafka consumer crashes and restarts mid-stream. Walk me through why the warehouse doesn't end up with duplicate rows."</strong> A strong answer, out loud: <em>"Kafka's own guarantee here is at-least-once — a manual-commit consumer might process a message more than once after a crash, but it never silently drops one. That's fine as long as the write on the other end is idempotent. My consumer commits the database write first, then commits the Kafka offset — never the reverse — so if it dies in between, the write already happened and only the offset bookmark is behind. On restart, the consumer group resumes from that stale offset and redelivers the message it already wrote. The INSERT uses ON CONFLICT (event_id) DO NOTHING keyed on the producer-generated event_id, so the redelivered write is a no-op instead of a second row. The result is exactly one row per event no matter how many times a crash forces a redelivery — I tested this directly by killing the consumer mid-write and confirming the final row count matched the distinct event_id count exactly."</em> The signal: naming the two halves separately (commit ordering, then the idempotent key) instead of waving at "idempotency" as one vague fact, and having actually watched a restart redeliver and get absorbed rather than asserting it would.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="At-least-once means a message may be processed more than once (typically after a crash and restart) but is never silently dropped. At-most-once is the opposite trade (never duplicated, can be lost); exactly-once end-to-end needs distributed transactions or Kafka's own transactional APIs, out of scope for a single Postgres sink.">
+    <p class="stem">What does Kafka's at-least-once delivery guarantee actually promise?</p>
+    <button class="opt" data-ok>A message may repeat, but never drops silently</button>
+    <button class="opt">A message may drop, but never repeats silently</button>
+    <button class="opt">A message never repeats and never drops, ever</button>
+  </div>
+  <div class="q" data-why="ON CONFLICT (event_id) DO NOTHING relies on event_id being a real, stable primary key generated once by the producer. If the same event_id is redelivered, the insert is skipped rather than raising a duplicate-key error or inserting a second row -- that's what makes the write idempotent.">
+    <p class="stem">Why does <code>ON CONFLICT (event_id) DO NOTHING</code> make the consumer's write idempotent?</p>
+    <button class="opt" data-ok>A repeated <code>event_id</code> only inserts once, ever</button>
+    <button class="opt">A repeated <code>event_id</code> always errors loudly instead</button>
+    <button class="opt">A new <code>event_id</code> always replaces the row</button>
+  </div>
+  <div class="q" data-why="Committing the offset before the write means a crash between the two steps loses the event forever -- the offset already says it was handled, so a restart never retries it. Writing first and committing the offset after is the only ordering where a crash in the gap leads to at-most a harmless redelivery, never a silent loss.">
+    <p class="stem">Why must the offset commit happen <em>after</em> the database write, not before?</p>
+    <button class="opt" data-ok>Before it, a crash loses the event, forever</button>
+    <button class="opt">Before it, a crash always duplicates the event</button>
+    <button class="opt">Commit order never matters for the outcome here</button>
+  </div>
+  <div class="q" data-why="enable.auto.commit=False turns off the client library's own timer-based commits so the application decides exactly when an offset is considered handled -- calling commit() explicitly right after the database transaction commits, never before and never on an unrelated schedule.">
+    <p class="stem">What does setting <code>enable.auto.commit: False</code> let the consumer do?</p>
+    <button class="opt" data-ok>Commit the offset at its chosen moment</button>
+    <button class="opt">Commit the offset before every single poll</button>
+    <button class="opt">Skip committing any offset ever, at all</button>
+  </div>
+  <div class="q" data-why="mart_delivery_sla inner joins an order to both its placed and delivered events, so an order with no delivered event yet (still in flight, or cancelled) has no duration to compute and is correctly excluded -- an SLA metric about delivery time has nothing meaningful to say about an order that was never delivered.">
+    <p class="stem">Why does <code>mart_delivery_sla</code> use <code>inner join</code>s to the <code>placed</code>/<code>delivered</code> event CTEs, not <code>left join</code>s?</p>
+    <button class="opt" data-ok>An undelivered order has no duration yet</button>
+    <button class="opt">An undelivered order needs one null row</button>
+    <button class="opt">An <code>inner join</code> simply runs faster here</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> per <code>RESOURCES.md</code>'s noted gap, there is no single high-trust source specifically on testing a Kafka consumer's idempotency locally — today's claims are grounded in the <a href="https://kafka.apache.org/documentation/#design">Apache Kafka Design docs</a> (delivery semantics, consumer offsets) plus the <a href="https://www.postgresql.org/docs/current/sql-insert.html#SQL-ON-CONFLICT">Postgres <code>INSERT ... ON CONFLICT</code> docs</a> (the exact semantics of <code>DO NOTHING</code> against a primary-key conflict), cited together as this course's primary source for the pairing. Kleppmann's <em>Designing Data-Intensive Applications</em>, ch. 11, is the deeper read on why exactly-once end-to-end is so much harder than it sounds, for whenever that question comes up in an interview.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 6.<br>
+<strong>Next lesson (21 Sep):</strong> Airflow orchestrates the batch side — a DAG that runs the raw load and <code>dbt build</code> daily with retries, a manual re-run that's safe to repeat, and the README/architecture diagram that ships Phase 1.<br><br>
+💬 Anything unclear — the commit-order argument, why <code>ON CONFLICT</code> needs a real unique key to work, or the <code>inner join</code> choice in <code>mart_delivery_sla</code>? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

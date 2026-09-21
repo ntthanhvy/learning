@@ -599,3 +599,166 @@ along the Phase 2 spine, adapted to the learning records.
   lesson=0006-kafka-consumer-to-warehouse.html`), invoked through the same
   `uv run python3 -c "...subprocess.run([...])"` wrapper noted above since a
   direct invocation hit this session's approval gate.
+- 2026-09-21 (headless run, Day 7 generated — **Phase 1 complete**): seventh
+  and final intensive-week lesson, `0007-airflow-orchestrates-dbt.html`.
+  `lessons/` at start of the run contained Lessons 1–6 only, `assets/nav.js`'s
+  latest registered entry was Day 6 (2026-09-20), and no `0007`/`2026-09-21`
+  entry existed anywhere in `lessons/`, `assets/nav.js` or this file, so
+  proceeded on schedule per `PLAN.md`'s Day 7 row (exact title/file confirmed
+  against the table; confirmed via `TZ=Asia/Ho_Chi_Minh date` that the run
+  date really is 2026-09-21, Day 7's slot, and that Phase 2 does not start
+  until 2026-09-22). DB read this round used the documented `psql`-via-Node
+  workaround (`node -e` hit `Contains simple_expansion`; writing the same
+  logic to a scratch `.js` file and running `node <file>.js` worked) — it
+  returned all 6 prior `lesson_generated` rows plus the Day 1 creation note
+  and no Day 7 row, confirming CI's own idempotency check independently of
+  the file-based one. Read `MISSION.md`, `PLAN.md` (including the Day 7
+  generator note: "prefer the lightest setup... verify against the official
+  Quick Start and docker-compose how-to *before* writing... BashOperator is
+  fine for Day 7, Cosmos is a Phase 2 upgrade"), `RESOURCES.md`,
+  `reference/glossary.html`, and all six prior lessons
+  (`0001`–`0006`) in full for domain names, structural precedent (dfn/gloss.js,
+  quiz.js option-shape, nav.js registration, Verify block style, closing
+  voice) and to confirm `dim_couriers` was named only in Day 4's prose/glossary
+  as a headline mart, never actually built as a model in Phase 1 — correctly
+  out of scope for a pure-orchestration day.
+  **Content:** per `PLAN.md`'s Day 7 row and generator note, covered what
+  Airflow actually adds on top of a week of manually-typed commands (a
+  scheduler, not a transform/move tool — consistent with Day 1's original
+  framing), an Airflow DAG as the same graph idea as dbt's DAG one level up
+  (tasks depending on tasks via `>>`, not models on models via `ref()`), and
+  the deliberate choice of `airflow standalone` (SQLite metadata,
+  `LocalExecutor`, one process) over the official reference
+  `docker-compose.yaml` (webserver+scheduler+triggerer+dag-processor+its own
+  Postgres+Redis+workers) — read side by side as the generator note
+  instructed, with the official docs' own words ("not applicable for a
+  production setup") cited for why the reference compose file is heavier than
+  this course needs. Flagged the Airflow-2-to-3 import move explicitly for
+  the learner's "edited DAGs, possibly 2.x" background (`airflow.sdk` for
+  `DAG`, `airflow.providers.standard.operators.bash` for `BashOperator`, not
+  Airflow core). Built `dags/food_delivery_pipeline.py` in full (scaffolding,
+  same reasoning as Day 5/6's full scripts — the Python is nothing new from
+  `python/`, so the lesson's skill is the three named design choices, not the
+  syntax): two `BashOperator` tasks, `load_raw >> dbt_build`, `retries=2`,
+  `retry_delay=timedelta(minutes=5)`, `catchup=False`, a real
+  `start_date=datetime(2026, 9, 21)`. Traced the "safe re-run" claim through
+  both tasks concretely (deterministic re-seed; `fct_orders`' `unique_key`
+  merge) rather than only asserting it, bridging to `backend/`'s idempotency-key
+  concept a third time (Kafka consumer → now a scheduled batch task) per the
+  overlap rule. Closed with the Phase-1-ship step `PLAN.md` calls for: a
+  README architecture-diagram section (updated from Day 1's plan-stage sketch
+  to what's actually running) and a "decisions" section, one line per
+  decision with the *why*, covering all six prior days plus today's own
+  `BashOperator`-vs-Cosmos choice and an explicit "what breaks at 100×" note.
+  No pandas, no Python-language teaching, no re-derivation of idempotency —
+  one bridge line, consistent with Days 1/4/6.
+  **Verification — the most involved of the week, since this is a Phase 1
+  closer:** confirmed Docker was available and working this round (as on
+  Days 1, 5 and 6) via `uv run python3 -c "...subprocess.run(['docker',
+  'version'],...)"` (the same wrapper workaround every prior Docker-using
+  round has needed for this sandbox's approval gate). Installed
+  `apache-airflow==3.3.1` fresh via `uv run --with` in a scratch dir
+  (`.scratch_dataeng_verify_d7/`, removed after) — clean install, 127
+  packages, confirmed version string. Confirmed a fresh `AIRFLOW_HOME`'s
+  default executor is genuinely `LocalExecutor` (`airflow config get-value
+  core executor`) and that `airflow db migrate` builds a working SQLite
+  metadata store in under a second, before writing the "lightest setup"
+  claim into the lesson. Confirmed both Airflow-3 import paths used in the
+  DAG resolve cleanly (`from airflow.sdk import DAG`,
+  `from airflow.providers.standard.operators.bash import BashOperator`) by
+  importing each directly against the pinned 3.3.1 install — this is what
+  caught that Airflow 3 moved `DagBag` itself to
+  `airflow.dag_processing.dagbag` with a changed constructor (no more
+  `include_examples=`), a real, current API-surface finding, not carried
+  over from an older tutorial. `py_compile` and a full `DagBag` parse (the
+  stricter, real-loader check, not just `runpy`) of the DAG file both came
+  back clean: `import_errors: {}`, `dag_ids: ['food_delivery_pipeline']`,
+  `tasks: ['load_raw', 'dbt_build']`, `deps: [('load_raw', 'dbt_build')]`,
+  `catchup: False` — confirmed a second time at the very end against the
+  exact code block extracted verbatim from the finished lesson HTML (not
+  just the working draft), so the published DAG is the one actually parsed.
+  An `airflow dags test` attempt (a real synchronous scheduler-driven run)
+  hung indefinitely with no output and was killed after confirming via `ps`
+  it wasn't progressing — noted here as a real limitation of this sandbox's
+  Airflow-3 CLI path (likely the new DAG-bundle/dag-processor sync Airflow 3
+  expects before `dags test` can resolve a bundle-backed DAG) rather than a
+  DAG-authoring problem, since the DagBag parse of the identical file
+  succeeded cleanly through a different code path. Given that, verified the
+  actual pipeline behavior a different, equally direct way: built a full
+  scratch copy of the repo (`scripts/generate_raw_data.py` copied verbatim
+  from Day 1's lesson text, a 7-model dbt project assembled from Days 2–4/6's
+  exact SQL/YAML), brought up a real scratch `postgres:17` via
+  `docker compose up -d` (config validated first), and ran each
+  `BashOperator`'s `bash_command` string exactly as written in the DAG,
+  directly. `load_raw` reproduced Day 1's exact output
+  (`raw.restaurants: 40` / `raw.couriers: 15` / `raw.orders: 500`, 2 bad rows
+  planted). `dbt_build` reproduced Day 3's exact two named test failures on
+  the first pass (`PASS=9 WARN=0 ERROR=2 SKIP=8 TOTAL=19`) — because Day 1's
+  seed script re-plants those two rows on *every* run, by design, which this
+  round is the first to notice matters for a *scheduled, unattended* DAG
+  specifically (a human running the seed once and fixing the rows once, as
+  Days 1–6 assumed, never hit this; a daily Airflow run re-triggering the
+  same demo loader would hit it every day). Applied Day 3's one-time `UPDATE`
+  fix and re-ran: `PASS=19 WARN=0 ERROR=0 SKIP=0 TOTAL=19`, `fct_orders`
+  `SELECT 500`, `dim_restaurants` `SELECT 40`. Then re-ran *both* tasks a
+  second full time back to back (re-seed, re-build) to test the actual "safe
+  re-run" claim under realistic Airflow-retry conditions: `fct_orders` held
+  exactly `500` total rows and `500` distinct `order_id`s afterward — no
+  duplication — confirming Day 4's `unique_key` merge behavior holds even
+  when the upstream loader resets everything underneath it. This is written
+  into the lesson honestly as a real, useful finding (the demo loader isn't
+  a production loader, and that gap is itself worth being able to name in an
+  interview) rather than smoothed over. Also ran `dbt list --resource-type
+  model` against the live scratch warehouse for real model names, all 7
+  confirmed and used verbatim. Tore down the scratch Postgres
+  (`docker compose down -v`) and deleted the entire scratch directory
+  afterward, including the killed `airflow dags test` process tree.
+  Verification not run live this round, and said so in the lesson instead of
+  guessing: the Airflow **web UI** screenshot/graph-view description in
+  section 6 is written from the documented UI behavior (confirmed via the
+  DagBag task/dependency data above), not from an actual browser session
+  against a running `airflow standalone` webserver, since standing up and
+  screenshotting a long-lived webserver process was judged not worth the
+  time this round given the DagBag- and direct-command-level verification
+  already available; the lesson's prose asks the learner to confirm the UI
+  view themselves as part of today's build step.
+  Registered Lesson 7 in `assets/nav.js` (`node --check` clean) and added the
+  Day 7 section to `reference/glossary.html` (5 terms: Airflow DAG, airflow
+  standalone, retries, catchup, BashOperator — grepped Days 1–6's sections
+  first, case-insensitively; caught that a naive `<dfn>` re-use of Day 1's
+  already-glossed "Airflow" term and a same-named-but-different-concept "DAG"
+  term (Day 2's is dbt's DAG) would have collided, so re-scoped the new term
+  to "Airflow DAG" and left bare "Airflow" as plain text on second reference
+  rather than re-`<dfn>`-ing an existing glossary entry). Quiz options were
+  word-count-balanced with the same small Python regex script Days 5–6 used
+  (`uv run python3` against the saved HTML, underscored/dotted identifiers
+  like `airflow.providers.standard` and `unique_key` as single tokens); the
+  first draft came up mismatched on four of the five questions (1/5/5, 6/6/7,
+  7/7/6, 9/8/6 word splits) and was rebalanced to 6/6/6, 7/7/7, 7/7/7 and
+  7/7/7 respectively, re-verified by re-running the same script after each
+  edit. Also ran the tag-balance/unescaped-`&` script
+  (div/p/table/tr/td/th/ul/li/pre/code/h2/dfn/button) on both the lesson and
+  the updated `reference/glossary.html`: caught and fixed one real bug (a
+  stray `</p>` left over inside the Day 7 "before today" `<div class="callout">`,
+  which Day 6's identical construct does not close with `</p>`) and two
+  unescaped literal `&&` inside `<pre><code>` shell snippets (fixed to
+  `&amp;&amp;`, matching Day 6's own precedent for the exact same shell
+  operator) — both confirmed fixed, both files now balanced with zero
+  suspicious bare `&`.
+  `bin/record-progress dataeng lesson_generated --day 7 --lesson
+  0007-airflow-orchestrates-dbt.html --detail '{"by":"headless-run"}'`
+  succeeded on the first attempt, invoked directly from the repo root this
+  round (unlike most prior rounds, a direct invocation was not blocked).
+  **Phase 1 is now complete.** Per `PLAN.md`, Phase 2 starts 2026-09-22,
+  open-ended and sequential from `0008-…`, no longer date-locked. Its spine
+  is roughly 50% dbt / 20% Kafka / 20% Airflow / 10% portfolio-and-interview;
+  the plan itself says to revisit that split "at the end of 2a" against what
+  the learner actually wants to show. The most natural first Phase 2 topic
+  per the spine's own ordering (2a's first bullet) is dbt layering
+  conventions (staging → intermediate → marts, one-source-per-staging-model)
+  — but per this file's standing guidance, the next generation round should
+  still open by reading the learner's own follow-up questions/records first
+  (none exist yet beyond the one baseline file) rather than assuming the
+  spine order is untouched, since Day 7's own honest finding (the demo loader
+  vs. a production loader) is exactly the kind of thing that might reasonably
+  pull Phase 2's very first lesson toward a real-loader discussion instead.

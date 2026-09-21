@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 75 · searchsorted(): binary search on data you already sorted</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 75 · ~20 min · 21 Sep 2026</p>
+<h1>searchsorted(): binary search on data you already sorted</h1>
+<p class="byline">Chào bạn — Lesson 74's teaser named <code>searchsorted()</code> as the one leftover zero-hit candidate, and framed the setup exactly: it needs a SORTED array to behave correctly, which is exactly what <code>np.unique()</code> always hands back. A fresh grep of all 74 lessons and the glossary reconfirms it is still genuinely untaught. Today closes that loop.</p>
+
+<h2>1 · What it answers: "where would this value go?" — not "is it there?"</h2>
+<p><dfn data-en="a NumPy/pandas method, searchsorted(sorted_array, value), that returns the INSERTION POSITION where value would need to go to keep the array sorted -- using binary search, which REQUIRES the array to already be sorted; it does not search for a value's existing position or confirm membership, and it never raises or warns if the input isn't actually sorted, it just silently returns a wrong position" data-vn="giữ nguyên 'searchsorted()' — tìm VỊ TRÍ CHÈN để mảng vẫn còn sắp xếp, dùng binary search (tìm kiếm nhị phân) -- BẮT BUỘC mảng đầu vào phải ĐÃ SẮP XẾP SẴN; không phải tìm xem giá trị có tồn tại hay không, và không hề báo lỗi/cảnh báo nếu mảng chưa sắp xếp, nó chỉ âm thầm trả về vị trí SAI">searchsorted()</dfn> answers a specific question: given a sorted array, at what integer position would a new value need to be inserted to keep it sorted? It is binary search — <code>O(log n)</code> per query — not a linear scan, and that speed is the entire reason it exists as its own method rather than a filter-and-count one-liner.</p>
+<pre><code>sorted_vals = np.unique(amt.to_numpy())     <span class="cm"># [35.5, 42.0, 99.9, 120.0, 180.0] -- Lesson 74's guarantee</span>
+np.searchsorted(sorted_vals, <span class="num">100</span>)          <span class="cm"># 3 -- 100 belongs at position 3 (between 99.9 and 120.0)</span></code></pre>
+<p>Confirmed directly (NumPy 2.5.3): calling it on today's real <code>orders_raw.csv</code> <code>amount</code> column, fed through Lesson 74's <code>np.unique()</code> to guarantee sorted input first, gives exactly this. <code>Series.searchsorted()</code> exists too, with the identical contract on a Series instead of a raw array.</p>
+
+<div class="callout"><strong>SQL bridge:</strong> there is no single SQL keyword for this — the closest mental model is a window function like <code>RANK()</code> or a manual <code>COUNT(*) WHERE right_col &lt;= value</code> correlated subquery, run once per lookup value. <code>searchsorted()</code> is the vectorized, binary-search version of that same "how many/which position" question, answered for an entire array of query values in one call instead of one row at a time.</div>
+
+<h2>2 · side="left" vs side="right": where ties land</h2>
+<p>When the query value already exists exactly in the array, <code>side=</code> decides whether the returned position is before or after the existing matches. Confirmed directly on <code>sorted_vals</code> above with the exact value <code>99.9</code> (at index 2):</p>
+<pre><code>np.searchsorted(sorted_vals, <span class="num">99.9</span>, side=<span class="str">"left"</span>)   <span class="cm"># 2 -- insert BEFORE the existing 99.9</span>
+np.searchsorted(sorted_vals, <span class="num">99.9</span>, side=<span class="str">"right"</span>)  <span class="cm"># 3 -- insert AFTER the existing 99.9</span></code></pre>
+<p>The default is <code>side="left"</code>. This is not a cosmetic detail: <code>side="right"</code> is exactly "how many elements are <code>&lt;= value</code>," confirmed directly by comparing it against a plain boolean-mask count (<code>(sorted_vals &lt;= 99.9).sum()</code> also gives <code>3</code>, matching <code>side="right"</code> exactly) — the vectorized binary-search version of a pattern you'd otherwise write as a mask-and-sum.</p>
+
+<h2>3 · The real gotcha: unsorted input gives a silently wrong answer, no error</h2>
+<p>The single most important fact about this method, confirmed directly with a deliberately-diverging case: <code>searchsorted()</code> never checks whether its input is actually sorted. Feed it the raw, unsorted <code>amount</code> column instead of <code>np.unique()</code>'s guaranteed-sorted output, and it returns a number every time — just the wrong one, with no exception, no warning:</p>
+<pre><code>unsorted = np.array([<span class="num">120.0</span>, <span class="num">35.5</span>, <span class="num">99.9</span>, <span class="num">180.0</span>, <span class="num">42.0</span>])  <span class="cm"># raw appearance order</span>
+sorted_vals = np.sort(unsorted)                             <span class="cm"># [35.5, 42.0, 99.9, 120.0, 180.0]</span>
+
+np.searchsorted(unsorted, <span class="num">40</span>)   <span class="cm"># 2  -- WRONG, no error</span>
+np.searchsorted(sorted_vals, <span class="num">40</span>) <span class="cm"># 1  -- correct</span></code></pre>
+<p>Confirmed directly across six probe values (40, 50, 60, 100, 130, 150): three of the six (40, 130, 150) gave genuinely different — and wrong — positions on the unsorted array versus the correctly-sorted one, with zero indication anything went wrong. This is the sharp edge that makes this method dangerous in practice: <code>np.unique()</code> (Lesson 74), <code>sort_values()</code> (Lesson 31), or an explicit <code>np.sort()</code> must run first, every time, and there is no safety net if you forget.</p>
+
+<h2>4 · Two real uses: manual binning, and how merge_asof() works under the hood</h2>
+<p>First, manual bucketing without <code>pd.cut()</code>: given sorted bin edges, <code>searchsorted(edges, values, side="right") - 1</code> gives the bucket index for each value in one vectorized call. Confirmed directly against <code>pd.cut()</code>'s own bucket codes on the same edges and values — both produced the identical bucket assignment array, byte-for-byte, on a 6-value test set spanning every edge case (including a value exactly on a boundary).</p>
+<p>Second — and this is the payoff for having sat through Lesson 58's <code>merge_asof()</code> — its "nearest prior match" behavior is exactly a <code>searchsorted()</code> call under the hood. Confirmed directly by hand-replicating <code>merge_asof(..., direction="backward")</code> (the default) using nothing but <code>np.searchsorted(right_times, left_times, side="right") - 1</code> to find each left row's matching right-row position: the manually-computed match and <code>pd.merge_asof()</code>'s own official output agreed exactly on a 3-row/4-row test case. <code>merge_asof()</code>'s core requirement — both sides must be sorted on the join key — is the exact same requirement <code>searchsorted()</code> has, because it's the same algorithm underneath.</p>
+
+<div class="interview">
+<p><strong>Q: "When would you reach for searchsorted() instead of just filtering with a boolean mask?"</strong> A strong answer, out loud: <em>"searchsorted() is binary search — O(log n) — versus a linear O(n) mask-and-count, so it matters once the array is large or I'm running many lookups against the same sorted reference array, like bucketing a big column into bins or replicating what merge_asof() does internally for an as-of join. The catch I'd flag immediately: it never checks that its input is actually sorted — feed it unsorted data and it returns a number with zero error, just the wrong one. I verified this myself: three out of six test values gave a different, wrong position on an unsorted array versus the same array correctly sorted first. So I'd always sort explicitly, or run np.unique() first if I also want deduplication, right before calling it — never assume upstream data is already sorted just because it looks that way."</em> The signal: naming the silent-wrong-answer failure mode with a verified number, not just "make sure it's sorted" as a vague caveat — the same "know where the abstraction leaks" instinct as Lessons 73 and 74.</p>
+</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/75_searchsorted.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/75_searchsorted.py</code></pre>
+<p>Uses the same real <code>orders_raw.csv</code> fixture, chained onto Lesson 74's <code>np.unique()</code> output. Exercise 1 confirms the basic insertion-position contract on the sorted, deduplicated <code>amount</code> column. Exercise 2 confirms the <code>side="left"</code> vs <code>side="right"</code> split on an exact match, and that <code>side="right"</code> equals a plain <code>&lt;=</code> mask count. Exercise 3 reproduces today's central finding: calling it on the RAW unsorted column gives a wrong position that differs from the correctly-sorted call. Exercise 4 manually buckets values with bin edges and cross-checks the result against <code>pd.cut()</code>.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: searchsorted() runs binary search assuming the array is already sorted and returns the position a new value would need to keep it sorted -- it does not check membership and does not verify the array is actually sorted first.">
+    <p class="stem">What question does <code>searchsorted()</code> actually answer?</p>
+    <button class="opt" data-ok>the position a value needs to keep a sorted array sorted</button>
+    <button class="opt">whether a given value already exists somewhere inside the whole array</button>
+    <button class="opt">how many total distinct values currently exist inside the whole array</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: feeding searchsorted() an unsorted array never raises or warns -- it silently returns a position, and that position can be genuinely wrong. Three of six tested query values (40, 130, 150) diverged from the correct sorted-array answer.">
+    <p class="stem">What happens when <code>searchsorted()</code> is called on an array that is NOT actually sorted?</p>
+    <button class="opt" data-ok>it silently returns a position anyway, no error, possibly a wrong one</button>
+    <button class="opt">it always raises a ValueError immediately, refusing any unsorted input at all</button>
+    <button class="opt">it automatically sorts the array first, then quietly searches the sorted copy</button>
+  </div>
+  <div class="q" data-why="Confirmed directly by hand-replicating merge_asof(direction='backward') using np.searchsorted(right_times, left_times, side='right') - 1: the manual result matched pd.merge_asof()'s own official output exactly, on the same test data. Both share the same underlying requirement that the join key be sorted.">
+    <p class="stem">Which Lesson 58 method's "nearest prior match" behavior was confirmed to be a <code>searchsorted()</code> call under the hood?</p>
+    <button class="opt" data-ok>merge_asof(), confirmed by hand-replicating its default backward match exactly</button>
+    <button class="opt">merge(), confirmed by hand-replicating its default inner-join match exactly</button>
+    <button class="opt">concat(), confirmed by hand-replicating its default row-stacking behavior exactly</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the <a href="https://numpy.org/doc/stable/reference/generated/numpy.searchsorted.html">NumPy API reference for <code>numpy.searchsorted()</code></a> (per <code>RESOURCES.md</code>'s "Docs: NumPy fundamentals" entry) — read the <code>side=</code> and vectorized-query (<code>sorter=</code>) sections in full; this lesson covers the interview-relevant core, not every keyword.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>searchsorted()</code> is new today, placed right after Lesson 74's <code>np.unique()</code> entry.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-75 comes back reported as shakiest, otherwise a fresh curriculum/glossary scan for the next genuinely-uncovered pattern — today's own gap scan found no further named-but-unpicked candidates left over from the np.unique/argsort/searchsorted trio, so the next round starts from a blank scan.<br><br>
+💬 Anything unclear — the insertion-position idea, <code>side=</code>, the unsorted-input gotcha, the <code>merge_asof()</code> connection, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

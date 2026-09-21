@@ -15,6 +15,7 @@
     { n: 4, date: "2026-09-18", title: "dbt: marts, facts, dimensions & incremental", file: "lessons/0004-dbt-marts-and-incremental.html" },
     { n: 5, date: "2026-09-19", title: "Kafka: topics, partitions, keys & offsets", file: "lessons/0005-kafka-topics-partitions-offsets.html" },
     { n: 6, date: "2026-09-20", title: "Kafka → warehouse: at-least-once, landed safely", file: "lessons/0006-kafka-consumer-to-warehouse.html" },
+    { n: 7, date: "2026-09-21", title: "Airflow orchestrates the batch & ship it", file: "lessons/0007-airflow-orchestrates-dbt.html" },
   ];
 
   const REFS = [

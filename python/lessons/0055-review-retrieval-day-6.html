@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 55 · Review day 6: retrieval across six more lessons</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 55 · ~20 min · 21 Sep 2026</p>
+<h1>Review day 6: retrieval across six more lessons</h1>
+<p class="byline">Day 43 reviewed Days 1, 2, 3, 5, 7, 12; Day 44 reviewed Days 16, 19, 30, 33, 34, 38; Day 45 reviewed Days 4, 6, 9, 13, 20, 36; Day 49 reviewed Days 8, 11, 17, 24, 32, 41; Day 52 reviewed Days 10, 14, 27, 31, 39, 42. Days 53-54 then ran fresh content two days straight (<code>collections.deque</code>/<code>namedtuple</code>, then the <code>random</code> module) with no reported weak spot to chase, since no <code>lesson_completed</code>/quiz/kata signal has ever come back from any of the 54 lessons shipped so far. This is a sixth <dfn data-en="a study technique where the learner produces an answer from memory before checking it, rather than re-reading the source material - it is a stronger driver of durable learning than re-reading, especially when spaced across separated topics rather than massed on one" data-vn="giữ nguyên &quot;retrieval practice&quot; — tự nhớ lại và viết ra câu trả lời trước khi xem lại tài liệu, hiệu quả hơn hẳn việc đọc lại; càng hiệu quả khi trộn nhiều chủ đề cũ thay vì ôn 1 chủ đề liền mạch">retrieval practice</dfn> day, differently composed: six ideas from Days 15, 28, 29, 35, 37, and 40 — none of which any earlier review touched.</p>
+
+<div class="callout"><strong>Why today, specifically:</strong> Day 54's own next-day note flagged that two fresh-content days in a row (53-54) since Day 52's last review meant Day 55 "should weigh a review sweep more seriously to avoid three fresh days in a row, unless <code>string</code>/<code>textwrap</code> (or another late-surfacing gap) makes a strong case." Both were checked properly rather than taking the earlier note on faith: grepping all 54 lessons and every practice file for <code>string\.</code> (the module's actual constants and helpers, not the English word "string" that shows up constantly elsewhere) and <code>textwrap\.</code> found zero real hits for either. That confirms a genuine gap exists — but the same conclusion two prior days independently reached still holds up: both modules are thin enough (a handful of constants and three or four wrapping functions) to earn a paragraph, not a full 20-minute lesson competing for a tangible win. Weighed against that, the review-candidate list Day 52 left behind (15, 18, 21-23, 25-26, 28-29, 35, 37, 40) has six genuinely pure-language entries — logging, unpacking, writing a context manager, <code>__slots__</code>, descriptors, <code>contextlib</code> extras — with no FastAPI/Postgres/httpx dependency at all, so review isn't forced into thin backend-specific material this round. Between a third fresh day built on two thin modules and a review day with six strong, independent mental models to interleave, review wins on its own merits today, not just by default. The <code>string</code>/<code>textwrap</code> gap is closed below as the aside the note suggested, so it stops recurring in every future next-day note.</div>
+
+<h2>1 · Six questions, in the original teaching order</h2>
+<p>Answer each out loud or on paper <em>before</em> reading the fold-out answer. If one is shaky, note it and go fix it in the practice file below rather than only rereading the old lesson.</p>
+
+<p><strong>Day 15 — <code>logging</code>.</strong> A log call passes an f-string as the message, versus <code>%s</code>-style formatting with the value as a separate argument. Why does that choice matter for a DEBUG-level call in a program running at WARNING level?</p>
+<div class="callout">Fold-out answer: an f-string is fully built <em>before</em> <code>logging</code> ever sees it, so the formatting cost is paid even if the record never clears the WARNING threshold and gets thrown away. <code>%s</code>-style formatting passes the raw value separately, and <code>logging</code> only interpolates it if the record actually clears the handler's level — so an expensive-to-format DEBUG message costs nothing at all when DEBUG output is filtered out, while the f-string version already paid the full cost regardless.</div>
+
+<p><strong>Day 28 — unpacking.</strong> <code>header, *rows = lines</code> peels one item off the front of a list. What type is <code>rows</code> afterward, and what happens if <code>lines</code> has only one element total?</p>
+<div class="callout">Fold-out answer: <code>rows</code> is always a <code>list</code>, even if only zero or one items are "left over" — star-unpacking doesn't require any minimum count on its own side, it just collects however many remain. With a one-element <code>lines</code>, <code>header</code> gets that single item and <code>rows</code> comes back as an empty list, not an error — the exact-count <code>ValueError</code> rule only applies to the non-starred names, not the starred one.</div>
+
+<p><strong>Day 29 — writing a context manager.</strong> A hand-written <code>__exit__</code> method has no explicit <code>return</code> statement at all. What happens to an exception raised inside that <code>with</code> block?</p>
+<div class="callout">Fold-out answer: it propagates normally. A function with no <code>return</code> statement returns <code>None</code>, which is falsy — and <code>__exit__</code> only suppresses an in-flight exception when it returns something truthy. Falling off the end silently is exactly equivalent to writing <code>return False</code>, so omitting <code>return</code> is safe here, not a bug, though writing <code>return False</code> explicitly is more obviously intentional to a reader.</div>
+
+<p><strong>Day 35 — <code>__slots__</code>.</strong> <code>Base</code> declares <code>__slots__ = ("a",)</code> and <code>Child(Base)</code> declares no <code>__slots__</code> of its own. Does <code>Child</code> still get the memory and typo-safety benefit?</p>
+<div class="callout">Fold-out answer: no — silently. A subclass that doesn't declare its own <code>__slots__</code> gets a real instance <code>__dict__</code> back, even though its parent declared slots, and nothing announces that the benefit is gone. The fix is for <code>Child</code> to declare its own <code>__slots__</code> too, listing only the new fields it adds (not <code>a</code>, which already lives in <code>Base</code>'s slots) — every class in the inheritance chain has to opt in separately.</div>
+
+<p><strong>Day 37 — descriptors.</strong> <code>property</code> and a plain <code>@staticmethod</code> are both descriptors. Which one wins when an instance's own <code>__dict__</code> has an entry under the same attribute name, and why?</p>
+<div class="callout">Fold-out answer: <code>property</code> wins, always, because it's a <em>data</em> descriptor — it defines both <code>__get__</code> and <code>__set__</code>, and data descriptors are checked before the instance's own <code>__dict__</code> in the attribute lookup order. A <code>@staticmethod</code> is a <em>non-data</em> descriptor — <code>__get__</code> only, no <code>__set__</code> — so a same-named instance <code>__dict__</code> entry is found first and wins instead. That asymmetry is exactly what makes a validated <code>@property</code> setter impossible to bypass by writing straight into <code>self.__dict__</code>.</div>
+
+<p><strong>Day 40 — <code>contextlib</code>.</strong> Why can't a fixed <code>with a, b, c:</code> chain handle "close however many files happen to be in this list," and what closes them in the right order when the count is only known at runtime?</p>
+<div class="callout">Fold-out answer: <code>with a, b, c:</code> requires every name to be written directly in the source, so the count is fixed at write time — there's no syntax for "however many, decided later." <code>contextlib.ExitStack()</code> solves it: call <code>stack.enter_context(cm)</code> once per item in a runtime-built list, and <code>ExitStack</code> guarantees every one of them gets <code>__exit__</code> called, in reverse order of opening, even if the block raises partway through — the same all-or-nothing guarantee a fixed chain gives, just for a count decided at runtime.</div>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> nothing pandas-specific today — this review only revisits Days 15, 28, 29, 35, 37, and 40's plain-Python and stdlib-tooling material, with no pandas/NumPy API involved at any point.</div>
+
+<h2>2 · Closing the gap: <code>string</code> and <code>textwrap</code>, in one paragraph each</h2>
+<p>Two small stdlib corners were flagged as unexplored since Day 53's next-day note and confirmed still untaught by today's grep — thin enough for an aside rather than their own lesson, but worth naming so the gap actually closes. The <dfn data-en="a small standard-library module holding pre-built character-class constants (ascii_letters, digits, punctuation) and a few text helpers like capwords() and Template - most of its historical string-manipulation functions moved onto str methods long ago, so what's left is mainly the constants" data-vn="giữ nguyên &quot;string module&quot; — module chuẩn chứa hằng số nhóm ký tự (ascii_letters, digits, punctuation) và vài helper nhỏ, phần lớn hàm xử lý string cũ đã chuyển thành str method">string</dfn> module is mostly a handful of ready-made character-class constants — <code>string.ascii_letters</code>, <code>string.digits</code>, <code>string.punctuation</code> — handy as the alphabet for <code>random.choice()</code>-based token generation (Day 54) instead of typing out <code>"abcdefg..."</code> by hand; most of its historical string-manipulation functions moved onto plain <code>str</code> methods (<code>.strip()</code>, <code>.split()</code>, <code>.join()</code>) long before this course started, which is exactly why it's never come up. The <dfn data-en="a small standard-library module for reflowing and shortening plain text to a fixed width - textwrap.fill() wraps a long string into multiple lines, textwrap.shorten() truncates with a placeholder, and textwrap.dedent() strips a shared leading-whitespace prefix from every line, the opposite of indent()" data-vn="giữ nguyên &quot;textwrap module&quot; — module chuẩn để bọc dòng hoặc rút gọn text về 1 độ rộng cố định">textwrap</dfn> module reflows plain text to a fixed width — <code>textwrap.fill(text, width=30)</code> wraps a long string into multiple lines at word boundaries, <code>textwrap.shorten(text, width=25, placeholder="...")</code> truncates with a marker instead of cutting mid-word, and <code>textwrap.dedent(text)</code> strips a shared leading-whitespace prefix off every line — useful for a multi-line string written indented inside a function body, matching the surrounding code's indentation rather than starting at column zero.</p>
+<pre><code><span class="kw">import</span> string, textwrap
+
+<span class="kw">print</span>(string.ascii_letters[:10])   <span class="cm"># 'abcdefghij'</span>
+<span class="kw">print</span>(string.digits)             <span class="cm"># '0123456789'</span>
+
+<span class="kw">print</span>(textwrap.fill(
+    <span class="str">"This is a long sentence that needs wrapping to a narrower width."</span>,
+    width=<span class="num">30</span>,
+))
+<span class="cm"># This is a long sentence that
+# needs wrapping to a narrower
+# width.</span></code></pre>
+<p>Both snippets above were run standalone before writing this paragraph, confirming the exact output shown. Neither module earns more room than this today — the review-candidate list still has genuinely new mental models left (18, 21-23, 25-26, the FastAPI/Postgres/httpx-specific lessons) for a future sweep, which is a better use of a 20-minute slot than expanding two already-thin modules further.</p>
+
+<h2>3 · Why these six, spread this way</h2>
+<p>Same interleaving logic as Days 43-45, 49, and 52: a production-logging performance rule, then a syntax-level unpacking edge case, then a context-manager return-value convention, then an inheritance gotcha in the object model, then a descriptor-priority rule, then a runtime-count resource-cleanup tool — six different mental models back to back rather than six variations on one. Landing on <code>__slots__</code>'s silent-inheritance-regression right after the context-manager return-value question forces a fresh retrieval each time, instead of riding a "this is all object-model internals" momentum from one question into the next.</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/55_review_retrieval_day_6.py</code>. It is six small, independent exercises — one per topic above, same order — with no new syntax anywhere; every mechanism needed was already taught in Days 15, 28, 29, 35, 37, and 40. Fill in each TODO from memory first; only reopen the old lesson if a fold-out answer above didn't fully land.</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/55_review_retrieval_day_6.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: confirming a lazy <code>%s</code>-style log call skips formatting work below the configured level while an f-string call always pays it, star-unpacking a single-element list without a <code>ValueError</code>, writing an <code>__exit__</code> with no explicit <code>return</code> and confirming an exception still propagates through it, fixing a two-class <code>__slots__</code> inheritance chain so a subclass doesn't silently regain a <code>__dict__</code>, confirming a data descriptor wins over a same-named instance <code>__dict__</code> entry while a non-data one loses, and using <code>ExitStack</code> to close a runtime-built list of resources in reverse order.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="An f-string is fully built before logging ever receives it, so the formatting cost is paid even if the record never clears the configured level and gets discarded. %s-style formatting passes the raw value separately, and logging only interpolates it if the record actually clears the handler's level, so a filtered-out DEBUG call costs nothing.">
+    <p class="stem">Why does an f-string log message cost more than <code>%s</code>-style formatting for a filtered-out DEBUG call?</p>
+    <button class="opt" data-ok>the f-string always builds before logging can even filter it</button>
+    <button class="opt">f-strings are simply slower than %s at every single level</button>
+    <button class="opt">logging refuses f-strings entirely and always raises an error here</button>
+  </div>
+  <div class="q" data-why="Star-unpacking has no minimum-count requirement on the starred name's own side - it just collects however many items remain, including zero. With a one-element list, header takes that one item and rows comes back as an empty list, not a ValueError, since the exact-count rule only applies to the plain, non-starred names.">
+    <p class="stem"><code>header, *rows = lines</code> runs where <code>lines</code> has exactly one element. What happens?</p>
+    <button class="opt" data-ok>header gets that item, rows becomes an empty list, no error</button>
+    <button class="opt">Python raises ValueError since rows would end up totally empty here</button>
+    <button class="opt">rows silently receives a full copy of that single header item</button>
+  </div>
+  <div class="q" data-why="A function with no return statement returns None, which is falsy - and __exit__ only suppresses an in-flight exception when it returns something truthy. Falling off the end with no return is exactly equivalent to writing return False, so the exception propagates normally either way.">
+    <p class="stem">A hand-written <code>__exit__</code> has no <code>return</code> statement at all. What happens to an exception raised in its <code>with</code> block?</p>
+    <button class="opt" data-ok>it propagates normally, same as an explicit return False would</button>
+    <button class="opt">it is silently swallowed, since missing a return means suppress</button>
+    <button class="opt">Python raises TypeError, since __exit__ always requires one to return</button>
+  </div>
+  <div class="q" data-why="A subclass that declares no __slots__ of its own gets a real instance __dict__ back, silently, even though its parent class declared slots - the memory and typo-safety benefit is lost for that subclass unless it also declares its own __slots__ listing only the fields it newly adds.">
+    <p class="stem"><code>Child(Base)</code> declares no <code>__slots__</code> of its own, though <code>Base</code> does. What happens?</p>
+    <button class="opt" data-ok>Child silently gets a real instance __dict__ back regardless still</button>
+    <button class="opt">Child simply just inherits the exact same slots Base declared</button>
+    <button class="opt">Python raises an error right at Child's own class-definition time</button>
+  </div>
+  <div class="q" data-why="property is a data descriptor - it defines both __get__ and __set__, which are checked before an instance's own __dict__ in attribute lookup, so it always wins. A staticmethod is a non-data descriptor, __get__ only, so a same-named instance __dict__ entry is found first and wins instead.">
+    <p class="stem">Between a <code>property</code> and a same-named instance <code>__dict__</code> entry, which wins on attribute access?</p>
+    <button class="opt" data-ok>the property always wins, since data descriptors are checked first</button>
+    <button class="opt">the instance dict entry always wins over any descriptor whatsoever</button>
+    <button class="opt">whichever one happens to have been assigned most recently wins</button>
+  </div>
+  <div class="q" data-why="A fixed with a, b, c: chain requires every name to be written directly in the source, so it cannot handle a count only known at runtime. ExitStack solves this: stack.enter_context(cm) once per item in a runtime-built list, guaranteeing every one gets __exit__ called in reverse order, even if the block raises partway through.">
+    <p class="stem">Why can't a fixed <code>with a, b, c:</code> chain close "however many files are in this list," decided at runtime?</p>
+    <button class="opt" data-ok>every name in that chain must be written directly in the source</button>
+    <button class="opt">with statements can only ever open exactly one resource at a time</button>
+    <button class="opt">Python has no mechanism at all for closing more than one file</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the six lessons this review draws from are each still the primary source for their own topic — <a href="../lessons/0015-logging.html">Day 15</a>, <a href="../lessons/0028-unpacking.html">Day 28</a>, <a href="../lessons/0029-writing-context-managers.html">Day 29</a>, <a href="../lessons/0035-slots.html">Day 35</a>, <a href="../lessons/0037-descriptors.html">Day 37</a>, and <a href="../lessons/0040-contextlib-utilities.html">Day 40</a>. For <code>string</code> and <code>textwrap</code>, the <a href="https://docs.python.org/3/library/string.html">string</a> and <a href="https://docs.python.org/3/library/textwrap.html">textwrap</a> stdlib docs are the primary reference — both are short enough to read end to end in a few minutes if more than today's paragraph is ever needed. For the retrieval-practice technique itself, <a href="https://docs.python.org/3/tutorial/">the Python Tutorial</a> stays this course's general reference (per <code>RESOURCES.md</code>) — there is no dedicated stdlib doc for a study technique, matching every prior review day's own note.</p>
+
+<p class="next">New terms today: two — <code>string module</code>, <code>textwrap module</code> — added under a new <a href="../reference/glossary.html#day55">Day 55</a> section, for the gap-closing aside in section 2; every concept in section 1's six review questions already has its own Day 15-40 glossary row and isn't repeated here.<br>
+With six review days now shipped (Days 1-12, 16-38, 4/6/9/13/20/36, 8/11/17/24/32/41, 10/14/27/31/39/42, and today's 15/28/29/35/37/40), the remaining uncovered days from Day 52's list are 18, 21-23, 25-26 — all FastAPI/Postgres/httpx-specific rather than standalone language ideas, so Day 56 should weigh whether a genuinely new stdlib gap has opened (or a real learner completion/quiz-outcome signal, still never recorded) against a seventh review sweep drawing from that narrower, more backend-flavored list.<br><br>
+💬 Anything unclear — any of the six answers, the <code>string</code>/<code>textwrap</code> aside, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 78 · Multi-tenant data models: one app, many customers, whose rows are whose</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 78 · ~20 min</p>
+<h1>Multi-tenant data models: one app, many customers, whose rows are whose</h1>
+<p class="byline">Lesson 59 named row-level security's strongest real case in passing: "a table shared by many tenants in one database, where 'which rows belong to this caller' is not a rare edge case but the central question every query has to get right." That lesson taught the enforcement mechanism. It never named the design question underneath it: when a feature request says "customers," what does "one app, many customers" actually look like as tables? This lesson is that design question — the three standard shapes, and which one a given feature request actually needs.</p>
+
+<h2>1 · The word this course has used loosely until now</h2>
+<p>Every schema this course has designed so far quietly assumed one thing: an <code>orders</code> table belongs to one business. A <dfn data-en="a customer, organization, or account whose data must stay isolated from every other tenant's data inside the same application — the unit multi-tenancy design has to keep separate" data-vn="tenant (giữ nguyên) — 1 khách hàng/tổ chức dùng chung app, dữ liệu phải tách biệt khỏi tenant khác">tenant</dfn> is that business — one customer, organization, or account whose data must never leak into another tenant's view, even though every tenant runs on the same application code. A single-person to-do app has no tenants worth naming; a B2B SaaS product where Acme Corp and Globex Inc. both use the same deployed app, each managing their own users, orders, and settings, has two tenants from the moment the second customer signs up. Nothing about handlers, routing, or HTTP changes — the entire question lives in the schema.</p>
+
+<h2>2 · Three shapes, same feature</h2>
+<p>Take one feature request — "store each customer's orders" — and look at what changes underneath it:</p>
+<table class="cmp">
+<thead><tr><th>Shape</th><th>What it looks like</th></tr></thead>
+<tbody>
+<tr><th>shared schema</th><td>one <code>orders</code> table, every tenant's rows mixed together, each row carries a <code>tenant_id</code> column</td></tr>
+<tr><th>schema-per-tenant</th><td>one Postgres <em>schema</em> per tenant (<code>acme.orders</code>, <code>globex.orders</code>), same table definitions repeated per schema, one database</td></tr>
+<tr><th>database-per-tenant</th><td>one entire Postgres database per tenant, each with its own <code>orders</code> table, no cross-tenant query possible even by accident</td></tr>
+</tbody>
+</table>
+<p>All three answer the same feature request. They differ in where the isolation guarantee lives, and what that guarantee costs.</p>
+
+<h2>3 · Shared schema: the default, and Lesson 59's <code>tenant_id</code></h2>
+<p>Shared schema is the shape Lesson 59 assumed without naming it: one <code>orders</code> table, one extra column, one index.</p>
+<pre><code><span class="kw">CREATE TABLE</span> orders (
+    id          bigint <span class="kw">GENERATED ALWAYS AS IDENTITY PRIMARY KEY</span>,
+    tenant_id   bigint <span class="kw">NOT NULL REFERENCES</span> tenants(id),
+    customer_id bigint <span class="kw">NOT NULL</span>,
+    total_cents bigint <span class="kw">NOT NULL</span>
+);
+<span class="kw">CREATE INDEX</span> <span class="kw">ON</span> orders (tenant_id);</code></pre>
+<p>Every query needs a <code>WHERE tenant_id = ...</code>, and every foreign key that used to just say "this row belongs to that customer" now silently also means "within the same tenant" — a fact easy to assume and easy to get wrong the first time two tenants' <code>customer_id</code> values collide because both started counting from 1. This is exactly the gap Lesson 59's row-level security policy closes: instead of trusting every handler, background job, and admin script to remember <code>WHERE tenant_id = ...</code>, a policy makes Postgres attach it automatically. Shared schema is the cheapest shape to run — one set of tables, one connection pool, one migration to apply — and the one place a forgotten <code>WHERE</code> clause is also the most catastrophic, since every tenant's rows sit in arm's reach of every query against that table.</p>
+
+<h2>4 · Schema-per-tenant and database-per-tenant: isolation moves outward</h2>
+<p>The other two shapes trade that cheapness for a guarantee that doesn't depend on any query, or any policy, being written correctly at all:</p>
+<div class="callout"><strong>Schema-per-tenant</strong> gives each tenant its own Postgres <em>schema</em> (a namespace inside one database — Lesson 2's tables live inside the default <code>public</code> schema without this course ever naming it until now), so <code>acme.orders</code> and <code>globex.orders</code> are genuinely separate tables that happen to share a definition. A query that forgets to filter by tenant doesn't leak another tenant's rows — it simply can't see them, because the connection is scoped to one schema at a time. The cost shows up at migration time: adding a column to <code>orders</code> means running that migration once per tenant schema, not once, and a fleet of a few thousand tenants turns a one-statement migration into a loop.</div>
+<div class="callout"><strong>Database-per-tenant</strong> goes one step further: a separate Postgres database per tenant, sometimes on separate physical instances entirely. No query can cross tenants even by a typo, because there is no shared connection through which to do it — and a single noisy tenant's queries can't degrade another tenant's performance by contending for the same table or the same buffer cache. The cost is the same multiplication problem Lesson 18 named for connection pools, now applied to whole databases: a thousand tenants can mean a thousand databases, a thousand sets of migrations to run, and a thousand times the fixed per-database overhead this course has never had to pay before.</div>
+
+<h2>5 · Picking a shape: what the feature request is actually asking</h2>
+<p>The three shapes sit on one line, cheap-and-shared to expensive-and-isolated, and the right one depends on what a specific feature request needs, not on which shape sounds more careful. A small number of large tenants who each expect their data physically separate for compliance reasons (a hospital system, a bank) points toward database-per-tenant, because "we can prove your data never touched shared infrastructure" is the actual requirement being satisfied. A product with thousands of small tenants — most SaaS signups — points toward shared schema with row-level security, because running thousands of databases for a majority of tenants who will never ask where their bytes live is cost with no matching benefit. Schema-per-tenant sits in between: a real, load-bearing choice for a mid-size tenant count that wants stronger isolation than a shared table but can't justify a full database per customer, though the per-tenant migration cost from section 4 tends to make it the least common of the three in practice once a fleet grows past a few hundred tenants.</p>
+
+<div class="interview">
+<p><strong>Q: "We're building a new B2B feature. How should we decide whether to isolate tenant data with a shared table and a tenant_id, or give each tenant its own schema?"</strong> A strong answer, out loud: <em>"I'd start from what's actually being promised to the customer, not from which shape feels safer. If a handful of large tenants need to prove their data is physically separate for compliance, that's a database-per-tenant requirement, full stop. If we're expecting hundreds or thousands of small tenants, a shared table with a tenant_id column is the only shape that keeps migrations and connection pooling sane at that scale — and I'd pair it with row-level security so the isolation doesn't depend on every handler remembering a WHERE clause. Schema-per-tenant is the one I'd reach for least often, because it multiplies migration work by tenant count without giving the hard guarantee a separate database gives."</em> The signal: naming the actual constraint (compliance, tenant count, migration cost) driving the choice, not just picking the shape that sounds most secure.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A shared-schema design puts every tenant's rows in the same table, so a tenant_id column plus a WHERE clause (or a row-level security policy per Lesson 59) is the only thing separating one tenant's rows from another's -- forgetting it exposes every other tenant's data at once, not just one row.">
+    <p class="stem">In a shared-schema multi-tenant design, what actually keeps one tenant from seeing another tenant's rows?</p>
+    <button class="opt" data-ok>a tenant_id column filtered on every single query</button>
+    <button class="opt">a separate physical disk for every tenant row</button>
+    <button class="opt">Postgres always refusing all cross-tenant joins by default</button>
+    <button class="opt">each tenant getting its own primary key range</button>
+  </div>
+  <div class="q" data-why="Schema-per-tenant repeats the same table definitions once per Postgres schema, so a single column addition to orders has to be applied once for every tenant's own copy of that table -- a loop instead of one statement, unlike a shared table where one migration reaches every tenant at once.">
+    <p class="stem">What is the main recurring cost of a schema-per-tenant design as tenant count grows?</p>
+    <button class="opt" data-ok>every migration must run once per tenant schema</button>
+    <button class="opt">every tenant must share one single connection pool</button>
+    <button class="opt">every query must join across every tenant schema</button>
+    <button class="opt">every tenant loses its own primary key entirely</button>
+  </div>
+  <div class="q" data-why="Database-per-tenant removes any shared connection a query could cross through, so no query -- not even a buggy or malicious one -- can reach another tenant's database at all, which is exactly the physical-separation guarantee a compliance requirement is usually asking for.">
+    <p class="stem">Why does a compliance requirement for physical data separation typically point toward database-per-tenant?</p>
+    <button class="opt" data-ok>no shared connection exists for any query to cross</button>
+    <button class="opt">database-per-tenant is always the very cheapest shape to run</button>
+    <button class="opt">shared schemas cannot legally ever store any customer data</button>
+    <button class="opt">schema-per-tenant already gives that same exact identical guarantee too</button>
+  </div>
+  <div class="q" data-why="Lesson 59 taught row-level security as the enforcement mechanism that closes the gap an app-level check leaves open, and named a shared table across many tenants as its strongest real case -- but it never covered the design question of which tenant-isolation shape (shared schema, schema-per-tenant, database-per-tenant) a feature should even use in the first place, which is this lesson's subject.">
+    <p class="stem">What did Lesson 59 (row-level security) leave open that this lesson covers?</p>
+    <button class="opt" data-ok>which tenant-isolation shape a schema should even use at all</button>
+    <button class="opt">how to write a boolean USING expression in plain SQL</button>
+    <button class="opt">how a session variable gets set on each new connection</button>
+    <button class="opt">why BYPASSRLS exempts a given table's owner role at all</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> before citing it, ran a live <code>WebFetch</code> check against <a href="https://www.postgresql.org/docs/current/ddl-rowsecurity.html">PostgreSQL Manual — Row Security Policies</a> (the same page Lesson 59 cited) and against <a href="https://www.postgresql.org/docs/current/ddl-schemas.html">PostgreSQL Manual — Schemas</a> — both confirmed live; the schemas page explicitly lists "to allow many users to use one database without interfering with each other" as a reason schemas exist, and gives the same-table-name-in-different-schemas example this lesson's <code>acme.orders</code> / <code>globex.orders</code> pairing is built on.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially. Nếu chỗ nào chưa rõ, cứ hỏi lại bằng tiếng Việt cũng được.<br><br>
+<em>Next lesson:</em> open. Still no <code>lesson_completed</code>/quiz-outcome record exists for any lesson after 78 rounds — the honest next step remains a completion signal or a user-named track.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

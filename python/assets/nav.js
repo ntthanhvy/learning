@@ -114,6 +114,8 @@
       file: "lessons/0053-deque-and-namedtuple.html" },
     { n: 54, date: "2026-09-20", title: "The random module: choosing, shuffling & repeatable randomness",
       file: "lessons/0054-random-module.html" },
+    { n: 55, date: "2026-09-21", title: "Review day 6: retrieval across six more lessons",
+      file: "lessons/0055-review-retrieval-day-6.html" },
   ];
 
   const REFS = [

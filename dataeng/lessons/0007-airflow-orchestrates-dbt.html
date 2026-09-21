@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 7 · Airflow orchestrates the batch &amp; ship it</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 7 · ~30–45 min · 21 Sep 2026</p>
+<h1>Airflow orchestrates the batch &amp; ship it</h1>
+<p class="byline">Today's tangible win, and the last day of the intensive week: an Airflow 3 DAG that runs <code>load_raw</code> then <code>dbt_build</code> daily, with retries, and that you can re-run by hand without fear. Then the README gets an architecture diagram and a "decisions" section — the write-up that turns six days of build steps into something an interviewer can actually read.</p>
+
+<div class="callout"><strong>Before today — check Day 6 actually landed:</strong> this lesson orchestrates the exact two steps you've been running by hand all week — the raw seed script and <code>dbt build</code>. Confirm both still work on their own first:
+<pre><code>docker compose up -d
+uv run --with "psycopg[binary]" python3 scripts/generate_raw_data.py
+cd warehouse &amp;&amp; uv run --with "dbt-postgres==1.11.0" dbt build --profiles-dir .</code></pre>
+Expected: the raw counts from Day 1 (<code>raw.restaurants: 40</code> / <code>raw.couriers: 15</code> / <code>raw.orders: 500</code>), then <code>Done. PASS=19 WARN=0 ERROR=0 SKIP=0 TOTAL=19</code> from <code>dbt build</code> (7 models + 12 tests, matching Day 6's count). If either fails, fix it before adding Airflow on top — today only adds a scheduler around these two commands, it doesn't change what they do.</div>
+
+<h2>1 · What Airflow actually adds here</h2>
+<p>Every build step this week, you've been the orchestrator: you typed the seed command, waited, then typed <code>dbt build</code>. That's fine for building a pipeline, but it's not what runs a pipeline in production — nobody wants to SSH in every morning and type two commands by hand. Airflow's whole job, as Day 1 named it, is to be that hand: it runs a fixed sequence of steps on a schedule, retries the ones that fail, and keeps a record of whether each run succeeded — without doing any of the actual data work itself.</p>
+<p>An <dfn data-en="a directed graph of tasks and their dependencies that Airflow schedules and runs together as one unit — the file that defines what runs, in what order, and how often" data-vn="giữ nguyên &quot;Airflow DAG&quot; — đồ thị các task và phụ thuộc, Airflow lên lịch và chạy như 1 đơn vị">Airflow DAG</dfn> is the same idea as dbt's DAG from Day 2 — a directed graph of things and their dependencies — just one level up: instead of models depending on other models via <code>ref()</code>, Airflow tasks depend on other tasks via <code>&gt;&gt;</code>. Today's DAG has exactly two tasks and one dependency: <code>load_raw &gt;&gt; dbt_build</code>. dbt build's own internal DAG (Day 2's model graph) still runs entirely inside that second task — Airflow doesn't know or care that dbt has its own dependency graph, it only sees "run this one command, then that one."</p>
+
+<h2>2 · Choosing the lightest setup, on purpose</h2>
+<p>Airflow's own <a href="https://airflow.apache.org/docs/apache-airflow/stable/howto/docker-compose/index.html">"Running Airflow in Docker"</a> page ships a reference <code>docker-compose.yaml</code> with a webserver, scheduler, triggerer, dag-processor, a dedicated Postgres for Airflow's own metadata, Redis and multiple workers — a real multi-service stack sized for demoing <code>CeleryExecutor</code>, not for adding a scheduler next to one existing Postgres. That page says so itself: it's a reference for exploring Airflow's moving parts, "not applicable for a production setup" and heavier than a laptop pipeline needs.</p>
+<p>The <a href="https://airflow.apache.org/docs/apache-airflow/stable/start.html">Quick Start</a> is the one this course actually follows: <dfn data-en="Airflow's own lightest local-dev command: it runs the webserver, scheduler and a one-time database migration all in a single process, defaulting to SQLite metadata storage and LocalExecutor — no separate containers, queue or worker fleet" data-vn="giữ nguyên &quot;airflow standalone&quot; — lệnh chạy Airflow nhẹ nhất cho local dev, gộp webserver+scheduler+migrate vào 1 process">airflow standalone</dfn>. It runs the webserver, scheduler and a database migration in a single command, defaulting to SQLite for Airflow's own metadata (a completely separate database from your <code>fdp</code> Postgres — Airflow's metadata is bookkeeping about runs and tasks, never your actual data) and <code>LocalExecutor</code> for running tasks as local subprocesses. No Redis, no Celery, no second container. This round's verification confirmed the default executor a fresh <code>AIRFLOW_HOME</code> resolves to is exactly <code>LocalExecutor</code>, and <code>airflow db migrate</code> against that fresh home created a working SQLite-backed metadata store in under a second — the "lightest setup that runs Airflow 3.3.1 next to the existing compose stack" <code>PLAN.md</code> asks for. Your two containers (<code>postgres</code>, <code>kafka</code>) keep running exactly as they are; Airflow runs as a plain process alongside them, talking to <code>fdp</code> Postgres over <code>localhost:5432</code> the same way your terminal has been doing all week.</p>
+<div class="callout"><strong>If your Airflow exposure was 2.x:</strong> the biggest visible change here is the import path. Airflow 3 moved the DAG-authoring surface into <code>airflow.sdk</code> (<code>from airflow.sdk import DAG</code>, not <code>from airflow import DAG</code>), and standard operators like <code>BashOperator</code> now live in a separate provider package, <code>airflow.providers.standard.operators.bash</code>, not in Airflow core. Both are confirmed-working imports against this course's pinned 3.3.1 below — an older tutorial's <code>from airflow.operators.bash import BashOperator</code> will not resolve on Airflow 3.</div>
+
+<h2>3 · Install and initialize, next to your existing stack</h2>
+<p>In your <code>food-delivery-pipeline</code> repo, Airflow doesn't need its own <code>docker-compose.yml</code> service — install it as a tool, same pattern as every <code>uv run --with</code> command this week:</p>
+<pre><code><span class="kw">export</span> AIRFLOW_HOME=<span class="str">"$(pwd)/airflow_home"</span>
+uv run --with <span class="str">"apache-airflow==3.3.1"</span> airflow db migrate</code></pre>
+<p>Expected — a fresh SQLite metadata database, created in seconds:</p>
+<pre><code>...
+Creating Airflow database tables from the ORM
+Airflow database tables created
+Database migration done!</code></pre>
+<p>Add <code>airflow_home/</code> to <code>.gitignore</code> — it's local scheduler state, not something to commit, the same reasoning as never committing <code>target/</code> from dbt.</p>
+
+<h2>4 · Build: <code>dags/food_delivery_pipeline.py</code></h2>
+<p>Create <code>dags/</code> inside <code>airflow_home/</code> (Airflow's default <code>dags_folder</code>, confirmed by this round's <code>airflow config get-value core dags_folder</code>) and add this DAG in full — it's scaffolding, in the same sense Day 5's producer was: the Python syntax is nothing new from <a href="../python/index.html">python/</a>, so today's actual skill is the three Airflow-specific choices named below, not the code itself:</p>
+<pre><code><span class="cm">"""Daily batch DAG: load raw.* data, then run dbt build on top of it.
+
+Both tasks are safe to re-run: generate_raw_data.py drops and recreates the
+raw schema deterministically (Day 1), and dbt build's models/tests are pure
+SELECTs plus idempotent incremental logic (Day 4/6) -- so a manual re-run,
+or Airflow retrying a failed task, produces the same end state as a single
+successful run.
+"""</span>
+<span class="kw">from</span> datetime <span class="kw">import</span> datetime, timedelta
+
+<span class="kw">from</span> airflow.sdk <span class="kw">import</span> DAG
+<span class="kw">from</span> airflow.providers.standard.operators.bash <span class="kw">import</span> BashOperator
+
+REPO_DIR = <span class="str">"/opt/airflow/food-delivery-pipeline"</span>  <span class="cm"># mount your repo checkout here, or edit to an absolute local path</span>
+
+default_args = {
+    <span class="str">"retries"</span>: <span class="kw">2</span>,
+    <span class="str">"retry_delay"</span>: timedelta(minutes=<span class="kw">5</span>),
+}
+
+<span class="kw">with</span> DAG(
+    dag_id=<span class="str">"food_delivery_pipeline"</span>,
+    description=<span class="str">"Load raw.* tables, then dbt build the staging/marts layers"</span>,
+    schedule=<span class="str">"@daily"</span>,
+    start_date=datetime(<span class="kw">2026</span>, <span class="kw">9</span>, <span class="kw">21</span>),
+    catchup=<span class="kw">False</span>,
+    default_args=default_args,
+    tags=[<span class="str">"food-delivery-pipeline"</span>],
+) <span class="kw">as</span> dag:
+
+    load_raw = BashOperator(
+        task_id=<span class="str">"load_raw"</span>,
+        bash_command=(
+            <span class="str">f"cd {REPO_DIR} &amp;&amp; "</span>
+            <span class="str">"uv run --with 'psycopg[binary]' python3 scripts/generate_raw_data.py"</span>
+        ),
+    )
+
+    dbt_build = BashOperator(
+        task_id=<span class="str">"dbt_build"</span>,
+        bash_command=(
+            <span class="str">f"cd {REPO_DIR}/warehouse &amp;&amp; "</span>
+            <span class="str">"uv run --with 'dbt-postgres==1.11.0' dbt build --profiles-dir ."</span>
+        ),
+    )
+
+    load_raw &gt;&gt; dbt_build</code></pre>
+<p>Three choices worth naming out loud, because an interviewer will ask "why does this DAG look the way it does," not just "does it work":</p>
+<ul>
+<li><strong><code>retries=2</code>, <code>retry_delay=timedelta(minutes=5)</code>:</strong> a <dfn data-en="an Airflow task setting: how many additional times a failed task is automatically re-run before the run is marked failed for good, with retry_delay controlling the pause between attempts" data-vn="giữ nguyên &quot;retries&quot; — số lần Airflow tự chạy lại 1 task bị fail trước khi đánh dấu fail hẳn">retries</dfn> transient failure — Postgres not accepting connections yet, a momentary network blip — shouldn't need a human to notice and re-trigger. Two retries, five minutes apart, absorbs exactly that class of failure without masking a real one (a genuinely broken model still fails all three attempts and alerts).</li>
+<li><strong><code>catchup=False</code>:</strong> per the <a href="https://airflow.apache.org/docs/apache-airflow/stable/best-practices.html">Airflow Best Practices</a> doc, a DAG with <dfn data-en="an Airflow DAG setting controlling whether, on first deploy or after downtime, the scheduler creates one run for every missed schedule interval between start_date and now (catchup=True, the default) or only the most recent one going forward (catchup=False)" data-vn="giữ nguyên &quot;catchup&quot; — Airflow có tự chạy bù các lần lịch đã bị bỏ lỡ từ start_date tới nay hay không">catchup</dfn> left on (the default) will, on first deploy, try to run once for every day between <code>start_date</code> and now. This pipeline has no history to backfill — Day 1's data didn't exist before today's week — so backfilling would just re-run today's logic against today's data, repeatedly, for no reason. Phase 2c covers when catchup is exactly what you want.</li>
+<li><strong><code>BashOperator</code>, not a Python function calling dbt's Python API:</strong> per <code>PLAN.md</code>, this is deliberately the simplest thing that works. <dfn data-en="an Airflow operator that runs a given string as a shell command in a subprocess — the task succeeds or fails based on that subprocess's exit code, with no Airflow-specific knowledge of what the command actually does" data-vn="giữ nguyên &quot;BashOperator&quot; — Airflow task chạy 1 lệnh shell trong subprocess, thành/bại theo exit code">BashOperator</dfn> runs each step as its own subprocess, in its own shell, exactly like typing the command yourself — nothing dbt-specific in Airflow's own code. Astronomer Cosmos (Phase 2c) turns every individual dbt model into its own Airflow task instead of one opaque <code>dbt build</code> block, trading simplicity for per-model visibility and retry granularity — a real upgrade, but not a Day 7 prerequisite.</li>
+</ul>
+
+<h2>5 · Why a manual re-run is safe — traced through both tasks</h2>
+<p>"Retries are safe" isn't a property Airflow adds — it's a property each task underneath either has or doesn't, and Airflow just calls the same idempotent thing again. Trace it through both of today's tasks:</p>
+<table class="gloss">
+<tr><th>Task</th><th>What a re-run actually does</th><th>Why that's safe</th></tr>
+<tr><td><code>load_raw</code></td><td><code>DROP SCHEMA IF EXISTS raw CASCADE</code>, then rebuild from the same fixed seed (Day 1)</td><td>Deterministic seed, same rows every time — a second run overwrites, never duplicates</td></tr>
+<tr><td><code>dbt_build</code></td><td>views recreate fully; <code>dim_restaurants</code> (table) rebuilds fully; <code>fct_orders</code> (incremental) merges on <code>unique_key='order_id'</code>; data tests re-run against whatever's in <code>raw.*</code> right now</td><td>No step here appends blindly — a view/table rebuild replaces its own output, and Day 4's <code>unique_key</code> is exactly what stops an incremental merge from duplicating a row on a repeated run</td></tr>
+</table>
+<div class="callout">This is the same idempotent-write idea Day 6's Kafka consumer used, and the same idempotency-key concept from <a href="../backend/index.html">backend/</a> before that — applied a third time, now to a scheduled batch task instead of a message or an API request. Same principle, three different layers of this stack.</div>
+<p>This round's verification traced this for real rather than asserting it — and surfaced something worth knowing about your own repo, not a flaw in the argument above. Running <code>load_raw</code>'s exact command against a live scratch Postgres gave Day 1's exact output:</p>
+<pre><code>raw.restaurants: 40
+raw.couriers:    15
+raw.orders:      500  (2 bad rows planted: order 13 orphan restaurant_id, order 27 negative subtotal)</code></pre>
+<p>Running <code>dbt_build</code>'s exact command straight afterward reproduced Day 3's two named test failures — because Day 1's seed script re-plants those two demo rows <em>every single time it runs</em>, on purpose, so this course always has something for Day 3's tests to catch:</p>
+<pre><code>Done. PASS=9 WARN=0 ERROR=2 SKIP=8 NO-OP=0 REUSED=0 TOTAL=19</code></pre>
+<p>Fixing those two rows by hand (Day 3's one-time <code>UPDATE</code>) and re-running <code>dbt_build</code> gave a clean build:</p>
+<pre><code>13 of 19 OK created sql incremental model dbt_dev.fct_orders .................. [SELECT 500 in 0.11s]
+12 of 19 OK created sql table model dbt_dev.dim_restaurants ................... [SELECT 40 in 0.13s]
+...
+Done. PASS=19 WARN=0 ERROR=0 SKIP=0 NO-OP=0 REUSED=0 TOTAL=19</code></pre>
+<p>Re-running <em>both</em> tasks again from there — a second full <code>load_raw &gt;&gt; dbt_build</code> pass, simulating what Airflow does on every scheduled run — confirmed the actual safety claim: <code>fct_orders</code> held exactly <strong>500 total rows, 500 distinct <code>order_id</code></strong> afterward, no duplicates, even though <code>load_raw</code> had just reset and reloaded every raw row underneath it.</p>
+<div class="callout"><strong>The honest gap this exposes:</strong> <code>generate_raw_data.py</code> is a portfolio demo generator, not a production loader — it exists to give this course deterministic, replayable data, and replanting Day 3's two bad rows every run is a deliberate feature of that demo, not of a real pipeline. A real daily loader would append genuinely new rows and never reintroduce fixed old ones, so this specific test failure would not recur once fixed. Today's DAG orchestrates exactly the two commands this course has taught; swapping the demo loader for a real incremental one is real-world follow-up work outside Phase 1's scope, and is worth being able to say out loud in an interview as the difference between a portfolio pipeline and a production one.</div>
+
+<h2>6 · Verify: run it, then re-run it by hand</h2>
+<p>Test one logical date directly, without waiting for the scheduler:</p>
+<pre><code>uv run --with "apache-airflow==3.3.1" airflow dags test food_delivery_pipeline 2026-09-21</code></pre>
+<p>This loads the DAG file, and this round's verification confirmed it parses with zero import errors and exactly the intended shape — checked directly against Airflow's own DAG loader:</p>
+<pre><code>import_errors: {}
+dag_ids: ['food_delivery_pipeline']
+tasks: ['load_raw', 'dbt_build']
+deps: [('load_raw', 'dbt_build')]</code></pre>
+<p>Confirm the same thing in the UI if you start the full standalone process (<code>uv run --with "apache-airflow==3.3.1" airflow standalone</code>, then open <code>localhost:8080</code> — the admin password prints in the terminal on first launch): the graph view should show exactly two boxes, <code>load_raw</code> then <code>dbt_build</code>, connected left to right. Trigger a manual run from the UI (the ▶ button), let it finish, then trigger it again — two green runs in the list, not one green and one red, is today's actual proof that "manual re-run is safe" is true and not just asserted.</p>
+<p>Commit <code>dags/food_delivery_pipeline.py</code> and the <code>.gitignore</code> entry for <code>airflow_home/</code>.</p>
+
+<h2>7 · Ship it: README, architecture diagram, decisions</h2>
+<p>Day 1 asked for two or three sentences in <code>README.md</code>. Today it becomes the write-up an interviewer actually reads before talking to you. Replace it with, at minimum, these two sections:</p>
+<p><strong>Architecture diagram</strong> — Day 1's pipeline map, now describing what's actually built and running, not what's planned:</p>
+<pre><code>generate_raw_data.py ──▶ raw.restaurants / raw.couriers / raw.orders
+      (batch, Airflow load_raw task)
+
+Kafka producer ──▶ topic:order_events (3 partitions, keyed by order_id)
+      (stream)          │
+                         ▼
+          Kafka consumer ──────────▶ raw.order_events
+   (at-least-once, ON CONFLICT DO NOTHING,      │
+    manual offset commit after write)           │
+                                                 ▼
+                                        dbt build (Airflow dbt_build task)
+                                        raw → staging → marts
+                                        (fct_orders, dim_restaurants,
+                                         mart_delivery_sla)
+                                                 │
+                                                 ▼
+                                   Airflow DAG: food_delivery_pipeline
+                                   load_raw &gt;&gt; dbt_build, @daily, retries=2</code></pre>
+<p><strong>Decisions</strong> — the section that actually answers "walk me through this repo," one line per decision, each with the *why* rather than just the *what*:</p>
+<ul>
+<li><strong>ELT over ETL</strong> — raw data lands untransformed first, so a bad load is always recoverable by re-running the transform, never by re-extracting from a source that may have moved on. (Day 1)</li>
+<li><strong>One topic, keyed by <code>order_id</code></strong> — Kafka guarantees order only within a partition, so keying by <code>order_id</code> is the minimum needed to keep one order's own status changes in sequence, and deliberately promises nothing about ordering across different orders. (Day 5)</li>
+<li><strong>At-least-once delivery, made safe by an idempotent write</strong> — <code>ON CONFLICT (event_id) DO NOTHING</code> plus committing the Kafka offset only after the Postgres write, so a crash mid-stream can redeliver a message but never loses one or double-counts it. Verified by an actual kill-and-restart test, not just asserted. (Day 6)</li>
+<li><strong><code>fct_orders</code> is incremental, <code>dim_restaurants</code> isn't</strong> — <code>raw.orders</code> only grows; restaurants barely change. Incremental logic is only worth its complexity where reprocessing everything every run would actually cost something. (Day 4)</li>
+<li><strong>Orchestration is <code>BashOperator</code>, not Cosmos</strong> — two coarse-grained tasks are enough to make a nightly run schedulable and retryable; per-model task granularity is a real upgrade for later, not a Day 7 requirement. (Day 7)</li>
+<li><strong>What breaks at 100× volume</strong> — <code>order_events</code>'s 3 partitions cap Kafka's parallelism at 3 consumers per group; <code>fct_orders</code>' incremental filter would need a watermark strategy more robust than a simple max-timestamp scan once late-arriving events are common; a single-node Postgres warehouse would need to become a column-store or a managed warehouse. None of these are urgent at this data's actual size — naming them anyway is what a design review is checking for.</li>
+</ul>
+<p>Push both files. This is the artifact <code>PLAN.md</code> calls Phase 1's ship step — a repo a stranger, or an interviewer, could clone and run in under ten minutes.</p>
+
+<div class="interview">
+<p><strong>Q: "Why does your Airflow DAG only have two tasks — isn't that too coarse?"</strong> A strong answer, out loud: <em>"For this repo's size, yes, two tasks is the right amount of granularity — <code>load_raw</code> and <code>dbt_build</code> are the only two things that actually need independent retry semantics, since dbt already has its own internal DAG that decides model build order and skips downstream models when an upstream one fails. Going finer — one Airflow task per dbt model, which is what Cosmos does — buys per-model retry and a graph view inside Airflow's own UI, at the cost of one task per model instead of one task per logical stage. That's a real trade I'd make once the dbt project is big enough that a single failing model shouldn't block investigating the others independently, but for seven models it would be complexity with no payoff yet."</em> The signal: naming the trade-off explicitly, with a concrete threshold for when the answer would flip, instead of treating "more granular is always better" as a fact.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="airflow standalone runs the webserver, scheduler and a database migration as one process, defaulting to SQLite metadata storage and LocalExecutor -- no separate Postgres, Redis or Celery workers, unlike the full reference docker-compose.yaml documented as a heavier, non-production setup.">
+    <p class="stem">What makes <code>airflow standalone</code> the lightest local setup, per today's verification?</p>
+    <button class="opt" data-ok>SQLite metadata, LocalExecutor, one process</button>
+    <button class="opt">Postgres metadata, CeleryExecutor, one process</button>
+    <button class="opt">SQLite metadata, CeleryExecutor, four workers</button>
+  </div>
+  <div class="q" data-why="Airflow 3 moved DAG and TaskFlow authoring into a separate airflow.sdk package, and moved standard operators like BashOperator into airflow.providers.standard -- both confirmed as the working import paths against this course's pinned 3.3.1, replacing Airflow 2's airflow.operators.bash import.">
+    <p class="stem">In Airflow 3.3.1, where does <code>BashOperator</code> actually live?</p>
+    <button class="opt" data-ok>In the <code>airflow.providers.standard</code> package, not core</button>
+    <button class="opt">In <code>airflow.operators.bash</code>, same as Airflow 2</button>
+    <button class="opt">In <code>airflow.sdk.operators</code>, new since Airflow 3</button>
+  </div>
+  <div class="q" data-why="fct_orders is safe to rebuild because materialized='incremental' with unique_key='order_id' merges a re-run's rows into any existing order_id instead of appending a duplicate row -- confirmed this round by re-running load_raw and dbt_build a second time and finding fct_orders still held exactly 500 total rows and 500 distinct order_ids.">
+    <p class="stem">Why is re-running <code>dbt_build</code> safe for <code>fct_orders</code> specifically?</p>
+    <button class="opt" data-ok><code>unique_key</code> merges instead of duplicating rows here</button>
+    <button class="opt">Incremental models simply skip every re-run entirely</button>
+    <button class="opt">Views never store rows, so nothing repeats</button>
+  </div>
+  <div class="q" data-why="catchup=False stops Airflow from scheduling one run per day between start_date and now on first deploy. This pipeline has no real history to backfill (Day 1's data didn't exist before this course's week), so catchup would just repeat today's logic against today's data for no benefit -- Phase 2c covers when catchup is actually the right choice.">
+    <p class="stem">Why does today's DAG set <code>catchup=False</code>?</p>
+    <button class="opt" data-ok>No real history exists yet to backfill</button>
+    <button class="opt">Catchup was removed entirely in Airflow 3</button>
+    <button class="opt">Catchup would skip today's own scheduled run</button>
+  </div>
+  <div class="q" data-why="This round's verification found that generate_raw_data.py re-plants Day 3's two intentionally-bad demo rows on every run, so dbt build's tests legitimately fail again after a fresh load until they're fixed by hand -- a real property of this course's demo loader, not a flaw in the DAG's retry logic or in dbt itself.">
+    <p class="stem">What did re-running the real DAG commands twice actually reveal?</p>
+    <button class="opt" data-ok>The seed script re-plants 2 bad rows</button>
+    <button class="opt">dbt build silently duplicated rows on rebuild</button>
+    <button class="opt">Airflow's own retries silently swallowed the errors</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the <a href="https://airflow.apache.org/docs/apache-airflow/stable/start.html">Airflow Quick Start</a> and <a href="https://airflow.apache.org/docs/apache-airflow/stable/howto/docker-compose/index.html">Running Airflow in Docker</a> pages (cited in <code>RESOURCES.md</code>, and read side by side this round exactly as <code>PLAN.md</code> asked, before choosing <code>standalone</code> over the reference compose file) are this course's primary sources for today's setup choice. The <a href="https://airflow.apache.org/docs/apache-airflow/stable/best-practices.html">Best Practices</a> doc is the primary source for <code>catchup</code> and idempotent-task design specifically. Maxime Beauchemin's <a href="https://maximebeauchemin.medium.com/functional-data-engineering-a-modern-paradigm-for-batch-data-processing-2327ec32c42a">"Functional Data Engineering"</a> (Airflow's creator, cited in <code>RESOURCES.md</code> for exactly this lesson) is the deeper read connecting today's "safe re-run" property to idempotent, re-runnable partitions as the core discipline behind reliable batch pipelines.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 7. This closes Phase 1 — six days of build steps are now one running, orchestrated pipeline with a README that explains itself.<br>
+<strong>Phase 2 starts 22 Sep:</strong> open-ended, sequential from Lesson 8, spending most of its time going deeper into dbt (layering conventions, snapshots for slowly-changing restaurant data, incremental strategies in depth), with Kafka and Airflow rounding out at a working level.<br><br>
+💬 Anything unclear — the executor choice, why <code>BashOperator</code> over Cosmos, or the demo-loader gap this lesson surfaced? Ask your teacher (the agent) in a session; Phase 2's first lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

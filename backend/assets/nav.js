@@ -160,6 +160,8 @@
       file: "lessons/0076-window-functions-and-ctes.html" },
     { n: 77, date: "2026-09-20", title: "Recursive CTEs: querying a tree without knowing how deep it goes",
       file: "lessons/0077-recursive-ctes.html" },
+    { n: 78, date: "2026-09-21", title: "Multi-tenant data models: one app, many customers, whose rows are whose",
+      file: "lessons/0078-multi-tenant-data-models.html" },
   ];
 
   const REFS = [

@@ -154,6 +154,8 @@
       file: "lessons/0073-argsort.html" },
     { n: 74, date: "2026-09-20", title: "np.unique(): sorted, richer, and a stricter cousin of Series.unique()",
       file: "lessons/0074-np-unique.html" },
+    { n: 75, date: "2026-09-21", title: "searchsorted(): binary search on data you already sorted",
+      file: "lessons/0075-searchsorted.html" },
   ];
 
   const REFS = [

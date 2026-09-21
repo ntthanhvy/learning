@@ -6842,3 +6842,149 @@ fail *gracefully* so the learner sees which task failed.
   review sweep more seriously to avoid three fresh days in a row, unless
   `string`/`textwrap` (or another late-surfacing gap) makes a strong
   enough case on inspection.
+- 2026-09-21 — **Day 55 generated: Review day 6**, covering Days 15, 28,
+  29, 35, 37, and 40 (headless run), review chosen over a third
+  fresh-content day in a row. Read `MISSION.md` (untouched, read-only),
+  `PLAN.md`, `RESOURCES.md`, the sole `learning-records/0001-baseline-
+  reads-python-writes-little.md`, `assets/nav.js`'s full `LESSONS` array,
+  and `NOTES.md`'s tail (~245 lines, since the full file — now 6,844 lines,
+  468.8 KB — exceeds the read tool's single-read size limit) to confirm
+  Day 54's own next-day note: two fresh days (53-54) had run since Day 52's
+  review, and Day 55 "should weigh a review sweep more seriously … unless
+  `string`/`textwrap` (or another late-surfacing gap) makes a strong enough
+  case on inspection."
+  Decision process, not taken on faith: grepped all 54 lessons and every
+  practice file for `string\.` and `textwrap\.` (the modules' actual
+  constants/functions, deliberately excluding the English word "string"
+  which appears constantly elsewhere) and confirmed zero real hits for
+  either — a genuine gap, same conclusion Days 53 and 54 each independently
+  reached. Weighed that against review: read all twelve lessons on Day 52's
+  candidate list (15, 18, 21-23, 25-26, 28-29, 35, 37, 40) in full rather
+  than trusting their titles, and found six are genuinely pure-language
+  with no FastAPI/Postgres/httpx dependency at all — 15 (`logging`), 28
+  (unpacking), 29 (writing a context manager), 35 (`__slots__`), 37
+  (descriptors), 40 (`contextlib` extras) — while the other six (18, 21-23,
+  25-26) are backend-specific. This directly overturned my own prior
+  assumption (inherited from Day 52's characterization of the list as
+  "leaning FastAPI/Postgres/httpx-specific") that a review day now would be
+  forced into thin backend material — it isn't; six strong, independent
+  mental models are available. Verdict: `string`/`textwrap` remain thin
+  enough (a handful of constants and three or four functions each) to earn
+  a paragraph, not a full 20-minute lesson competing for a tangible win —
+  the same judgment two prior next-day notes already made — so a third
+  fresh day wasn't compelling enough to override the standing "avoid three
+  fresh days in a row" guidance. Chose review, built from the six
+  pure-language candidates, and closed the `string`/`textwrap` lead
+  permanently by folding both into a one-paragraph aside (section 2) rather
+  than letting it recur in yet another next-day note. Read
+  `lessons/0052-review-retrieval-day-5.html` and its practice file in full
+  as the structural precedent for a review day (six fold-out Q&A pairs in
+  original teaching order, a "why today" callout, a "why these six, spread
+  this way" section, six independent practice exercises, no new glossary
+  terms for the reviewed material itself).
+  Topic selection within the six: one question per lesson, chosen for a
+  detail sharper than the original lesson's own headline claim — Day 15's
+  `%s`-vs-f-string laziness (not just "levels exist"), Day 28's `*rest`
+  having no minimum count of its own (not just "unpacking works"), Day 29's
+  falling-off-the-end-of-`__exit__`-is-safe corollary (not just "write
+  `__enter__`/`__exit__`"), Day 35's silent-inheritance-regression (not
+  just "`__slots__` saves memory"), Day 37's data-vs-non-data lookup
+  priority (not just "descriptors exist"), and Day 40's runtime-count
+  framing for `ExitStack` (not just "`suppress()` exists too"). Verified
+  correctness of the `string`/`textwrap` aside's own code snippets by
+  running them standalone via `uv run python3 -c "..."` before writing the
+  paragraph — `string.ascii_letters`, `string.digits`, `textwrap.fill()`
+  (30-char width wrap), `textwrap.shorten()`, and `textwrap.dedent()` all
+  matched the lesson text exactly.
+  No-pandas rule: grepped the lesson and practice file case-insensitively
+  for `pandas`/`numpy`/`pd\.`/`np\.` — exactly one hit, the standard
+  "nothing pandas-specific today" callout naming only the six reviewed
+  Python-language lessons; zero hits in the practice file.
+  Practice file `practice/55_review_retrieval_day_6.py` (6 exercises, one
+  per reviewed lesson): a `logging.isEnabledFor()`-gated lazy log call, a
+  single-element-safe `*rest` star-unpack, a class-based context manager
+  whose `__exit__` has no `return` statement at all yet still lets an
+  exception propagate, fixing a two-class `__slots__` inheritance chain,
+  writing a non-data descriptor's `__get__` from scratch alongside a
+  provided data descriptor to compare lookup priority, and an `ExitStack`-
+  based runtime-count resource-cleanup function. Two exercises (3 and 5)
+  needed a design fix mid-round: the first draft of Exercise 3 left
+  `__exit__` fully written with only a trailing comment as the "TODO"
+  (nothing to actually delete or add), and Exercise 5's `NonDataDesc` had
+  its real `__get__` already implemented with only the "don't add
+  `__set__`" instruction as a comment — both meant the unsolved file passed
+  those two checks without any code being written, caught by actually
+  running the unsolved file before shipping rather than assuming the
+  TODO-style comments were sufficient. Fixed by making Exercise 3 require
+  writing the entire `__exit__` method (only the "no return statement"
+  constraint given as guidance) and Exercise 5 require writing
+  `NonDataDesc.__get__` from scratch, plus adding a new
+  `_ex5_nondata_descriptor_get_works_unshadowed` check that only passes if
+  `__get__` actually returns the expected string on a plain unshadowed
+  read (the prior single check only verified instance-dict-wins-when-
+  shadowed, which held true vacuously even with no `__get__` defined at
+  all). Verified in the repo's `.scratch-python-verify/` scratch directory
+  (created fresh this round, deleted at the end): the shipped (unsolved)
+  copy printed all six ✗ with no traceback, confirmed on the real
+  `practice/55_review_retrieval_day_6.py` path directly (not just a
+  scratch copy) after the Exercise 3/5 fixes; a separately solved copy in
+  the scratch directory printed all six ✓ and the "All green" tally, run
+  twice consecutively with identical results (no flakiness — nothing here
+  is randomized or time-based).
+  Glossary: two new terms — `string module`, `textwrap module` — added
+  under a new `Day 55` section in `reference/glossary.html`, for the
+  gap-closing aside only; none of the six reviewed lessons' own concepts
+  got a new row, since each already has one from its original Day 15-40
+  lesson, matching every prior review day's own precedent.
+  HTML tag-balance was checked with a stdlib `html.parser.HTMLParser`-
+  based stack checker (written as a throwaway script via the `Write` tool,
+  deleted after use) against both the lesson file and the full
+  (now-modified) glossary — both reported balanced with no errors on the
+  first pass. A raw-unescaped-`&` grep
+  (`&(?!amp;|lt;|gt;|quot;|#39;|apos;|#\d+;)`) against both files found
+  zero true positives on the first pass.
+  Quiz: 6 questions, one per reviewed lesson, matching Day 52's precedent
+  of one question per topic on a review day (rather than 4-5 on a
+  fresh-content day). Word counts were checked with a small
+  `html.parser.HTMLParser`-based script splitting each `<button
+  class="opt">`'s stripped-tag text on whitespace. First draft mismatched
+  on four of six questions (Q1 10/11/9, Q2 11/10/11, Q3 10/10/8, Q4
+  9/10/10) — Q5 and Q6 landed correctly on the first attempt. Took one to
+  two rounds of few-word edits per mismatched question, re-running the
+  checker after every edit, including one self-correction where a first
+  fix attempt to Q3 undercounted by one word and needed a second small
+  edit. Landed at 10/10/10, 11/11/11, 10/10/10, 10/10/10, 10/10/10, and
+  12/12/12 respectively; a separate check confirmed exactly 6 `data-ok`
+  occurrences total, one per question, matching the six-question count.
+  `RESOURCES.md`: no edit made — the six reviewed lessons already cite
+  their own primary sources, and `string`/`textwrap`'s docs links are
+  cited directly in the lesson body only (matching Day 54's precedent for
+  a single-paragraph module mention, not promoted to a `RESOURCES.md` line
+  of their own). `PLAN.md` not edited.
+  Registered in `assets/nav.js` with `date: "2026-09-21"`; confirmed
+  `node --check assets/nav.js` reports no syntax errors after the edit.
+  **DB access:** confirmed via the `node -e` + `spawnSync` workaround this
+  round (the direct `psql "$LEARNING_DB_URL"` invocation remains blocked by
+  this sandbox's static analysis, "Contains simple_expansion") — the query
+  returned rows through Day 54 (2026-09-20) and nothing for 2026-09-21,
+  confirming Day 55 was safe to generate before any file was written.
+  `bin/record-progress python lesson_generated --day 55 --lesson
+  0055-review-retrieval-day-6.html --detail '{"by":"headless-run"}'` will
+  be run after this entry is written, per the standard closing step.
+  `python/learning-records/` still holds only the Day 1 baseline; no
+  completion/quiz/kata outcome has ever been recorded for any day 2-54, so
+  this round paced entirely from on-disk state, same as every prior round
+  since Day 42.
+  Final `git status --short -- python/` showed exactly four paths changed
+  (`assets/nav.js`, `reference/glossary.html`, the new lesson, the new
+  practice file) — no other course's files touched.
+  **Next-day note:** with today's review, the remaining uncovered days
+  from Day 52's original candidate list are 18, 21-23, 25-26 — all
+  FastAPI/Postgres/httpx-specific rather than standalone language ideas.
+  `string`/`textwrap` are now closed for good (covered in section 2 above,
+  won't recur as a "still unexplored" lead). Day 56 should scan once more
+  for any newly-noticeable pure-language stdlib gap before defaulting to a
+  seventh review sweep over the narrower, more backend-flavored six-lesson
+  remainder — if a sweep is chosen, it will need to either accept the
+  backend-specific material or reach further back for still-untouched
+  early lessons not yet on any review list.

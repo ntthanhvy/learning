@@ -116,6 +116,8 @@
       file: "lessons/0054-random-module.html" },
     { n: 55, date: "2026-09-21", title: "Review day 6: retrieval across six more lessons",
       file: "lessons/0055-review-retrieval-day-6.html" },
+    { n: 56, date: "2026-09-22", title: "The operator module: itemgetter, attrgetter & methodcaller",
+      file: "lessons/0056-operator-module.html" },
   ];
 
   const REFS = [

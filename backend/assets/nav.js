@@ -162,6 +162,8 @@
       file: "lessons/0077-recursive-ctes.html" },
     { n: 78, date: "2026-09-21", title: "Multi-tenant data models: one app, many customers, whose rows are whose",
       file: "lessons/0078-multi-tenant-data-models.html" },
+    { n: 79, date: "2026-09-22", title: "PgBouncer: pooling the pools",
+      file: "lessons/0079-pgbouncer-external-connection-pooling.html" },
   ];
 
   const REFS = [

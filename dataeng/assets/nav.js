@@ -16,6 +16,9 @@
     { n: 5, date: "2026-09-19", title: "Kafka: topics, partitions, keys & offsets", file: "lessons/0005-kafka-topics-partitions-offsets.html" },
     { n: 6, date: "2026-09-20", title: "Kafka → warehouse: at-least-once, landed safely", file: "lessons/0006-kafka-consumer-to-warehouse.html" },
     { n: 7, date: "2026-09-21", title: "Airflow orchestrates the batch & ship it", file: "lessons/0007-airflow-orchestrates-dbt.html" },
+    // Phase 2 — open-ended, sequential from here. Register each new lesson on
+    // the day it's generated.
+    { n: 8, date: "2026-09-22", title: "dbt: the intermediate layer", file: "lessons/0008-dbt-intermediate-layer.html" },
   ];
 
   const REFS = [

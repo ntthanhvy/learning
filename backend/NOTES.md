@@ -5760,3 +5760,118 @@
   become a stale default-avoidance rather than a real exclusion. This round
   adds no new deferred candidate beyond that standing one; the next round
   should still run its own fresh search first, same as this one did.
+- **2026-09-22 generation (Lesson 79, headless 06:00 run):** Idempotency check
+  first: `ls backend/lessons/` topped out at `0078-multi-tenant-data-models.html`
+  and `assets/nav.js`'s `LESSONS` array had no entry past day 78/date
+  2026-09-21 — confirmed not a duplicate run before writing anything (re-checked
+  again after writing, via `grep -c "n: 79" assets/nav.js` returning exactly 1
+  and `ls lessons/` showing exactly one `0079-*` file). The orchestrator's own
+  DB read (done just before this round started) confirmed the latest
+  `course_progress` row for `backend` was `lesson_generated day=78` recorded
+  2026-09-21, with no `lesson_completed`/quiz/kata signal more recent than
+  mid-July — so, same as every round since the baseline, pacing came from file
+  state and this round's own gap search, not a reported outcome. Read
+  `MISSION.md`, `RESOURCES.md`, both `learning-records/` files (still just the
+  0001 baseline and the 2026-07-30 concurrency-vocabulary gap — no fresher
+  outcome record), the tail of `NOTES.md` (Lessons 74–78's notes in full, to
+  see the PgBouncer-deferral history and Lesson 78's own structural precedent),
+  Lesson 78 in full as the current HTML/quiz-convention precedent, and Lesson
+  18 in full since its own closing paragraph was this round's strongest lead.
+  Grepped a wide net of candidates against `lessons/*.html` before settling:
+  gRPC/GraphQL/message-queue vocabulary, HTTP-method idempotency depth,
+  database normalization forms, sagas, HATEOAS, and API-gateway vocabulary
+  either had at least incidental or dedicated coverage already, or (EXPLAIN /
+  query planning) are explicitly named across multiple lessons (5, 18) as the
+  Go week's Day 5–6 material, deliberately out of this course's lane per
+  MISSION.md's own division-of-labor rule — not a clean gap. PgBouncer held
+  up: Lessons 74–78's notes each independently deferred it for the same
+  "infra-ops-adjacency" concern relative to MISSION.md's "Kubernetes/infra
+  tooling; cloud-provider specifics" exclusion, but on a direct re-read this
+  round that reasoning doesn't hold PgBouncer to the same standard as Lesson 69
+  (load balancing) or Lesson 18 itself (connection pooling) — both already
+  taught as runtime-concept vocabulary despite sounding infra-adjacent, and
+  PgBouncer is a Postgres-ecosystem connection multiplexer, not cluster
+  orchestration or a cloud-provider specific. A grep confirmed the gap was
+  exactly as narrow as Lesson 74's original note implied: `PgBouncer` appears
+  in exactly one place in the whole corpus — Lesson 18's own closing sentence,
+  which names and links the tool but never explains what it is or what its
+  pooling modes cost. That is a real, narrow, four-round-deferred gap under
+  MISSION.md's runtime-reasoning criterion (spotting what a feature/incident
+  actually needs), not a rehash — this round breaks the deferral with that
+  reasoning stated explicitly, rather than deferring a fifth time by default.
+  Lesson 79 covers: why Lesson 18's own per-instance `pgxpool` pool cannot fix
+  the instance-count multiplication problem it named (a per-process pool has
+  no visibility into any other instance's pool); PgBouncer as a separate proxy
+  process that multiplexes many app-side connections onto few real Postgres
+  ones; a three-row comparison table of session/transaction/statement pooling
+  modes (when each returns a real connection to the pool, and what's safe
+  under each); transaction mode's actual cost — breaking the one-client-one-
+  stable-connection assumption, so session-level state (explicitly Lesson 56's
+  advisory locks, plus `SET` variables) can vanish between statements unless
+  scoped to one transaction — framed as the same "isolation moves outward,
+  cost shows up elsewhere" shape Lesson 78 built for multi-tenant schemas,
+  now applied to connections; and a closing section naming the two pools (per-
+  instance, then PgBouncer) as two different problems solved at two different
+  layers, not a redundant pair. No Go snippet was shipped — the lesson's only
+  code is the same `pgxpool.Pool` config shape Lesson 18 already
+  compile-checked, referenced conceptually rather than re-shown, so the
+  Go-compile-check container doesn't apply this round. Source verification was
+  partial and is flagged honestly in the lesson itself: a live `WebFetch`
+  against `https://www.postgresql.org/docs/current/runtime-config-connection.html`
+  (the same page Lesson 18 cited) succeeded and confirmed `max_connections`'s
+  100-default and the superuser-reserved-connections carve-out exactly as
+  cited in section 1; three separate `WebFetch` attempts against PgBouncer's
+  own docs (`pgbouncer.org/features.html`, `/config.html`, and the bare
+  domain) were all blocked by this session's sandbox network-permission gate
+  ("Claude requested permissions to use WebFetch, but you haven't granted it
+  yet") with no interactive approver present to clear it — unlike the
+  postgresql.org fetches, which succeeded without issue, so the block is
+  specific to that domain/gate combination this round, not WebFetch broadly.
+  The lesson's pooling-mode descriptions (session/transaction/statement) rest
+  on PgBouncer's long-stable, widely-documented `pool_mode` behavior rather
+  than a freshly-fetched quote this round — said explicitly in the lesson's
+  "Go deeper" section rather than silently presented as freshly verified, and
+  flagged here as worth a live re-check once that gate is open in some future
+  round. Checked the glossary first for both candidate terms (`connection
+  pooler` / `connection proxy`, `multiplexing`) — zero collisions (the word
+  "multiplex" appears only inside two Go-course-derived rows' prose,
+  `goroutine` and `M:N scheduling`, never as its own row) — then appended both
+  as new rows after Lesson 78's `tenant` row; no existing row needed editing.
+  Verification performed mechanically: (1) quiz word-count balance via a Node
+  script parsing every `<div class="q">` block and counting each `<button
+  class="opt">`'s words two independent ways (`.split(/\s+/)` and
+  `.split(" ")`, both filtering empty strings, run together and cross-checked
+  every time) — first draft was uneven on all four questions (an 8–10 word
+  spread, plus one manual-counting mistake caught only by re-running the
+  script: "each statement must always run inside its own database" reads as 8
+  words by eye but is actually 9), fixed through several targeted
+  rewrite-and-recount cycles per question, re-running the script after every
+  edit rather than trusting a manual count, converged to exactly 9/9/9/9 on
+  question one, 9/9/9/9 on question two, 10/10/10/10 on question three, and
+  8/8/8/8 on question four, both counting methods agreeing exactly, and
+  exactly one `data-ok` per question confirmed the same way; (2) an
+  occurrence-count HTML tag-balance check (regex counting per tag, not
+  substring counting) across the same 22 tag pairs used in every prior round,
+  on both the lesson and `glossary.html` after its two-row addition — both
+  fully balanced on the first check, no fixes needed; (3) a raw-unescaped-`&`
+  regex scan (matching any `&` not followed by `amp;`/`lt;`/`gt;`/`quot;`/
+  `#39;`/`apos;`) across both files — zero hits; (4) a targeted regex for the
+  backslash-escaped-quote bug (`\"` inside an attribute) — zero hits in
+  either file; (5) `node --check` against `assets/nav.js`, `assets/quiz.js`,
+  and `assets/gloss.js` — all clean, no output. Registered Lesson 79 in
+  `nav.js` (date 2026-09-22), re-confirmed exactly one matching entry and
+  exactly one matching lesson file afterward. DB access: this round's task
+  brief stated the write path (`bin/record-progress`, invoked as a relative
+  path from the repo root) has been reliable and the read path is a known,
+  expected sandbox limitation not worth re-attempting — followed that
+  guidance directly rather than re-verifying either claim from scratch;
+  `bin/record-progress backend lesson_generated --day 79 --lesson
+  0079-pgbouncer-external-connection-pooling.html --detail
+  '{"by":"headless"}'` was run once, result recorded immediately below this
+  note. No confirmed next-lesson gap is named with certainty for the round
+  after this one — same standing note as every prior round; a
+  completion/quiz-outcome signal or a user-named track should take priority
+  over guessing blind. With PgBouncer now shipped, the only standing deferred
+  candidate from prior rounds is cleared — this round adds no new deferred
+  candidate in its place, so the next round should run its own fresh gap
+  search from scratch rather than assume anything is already queued.

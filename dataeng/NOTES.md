@@ -762,3 +762,124 @@ along the Phase 2 spine, adapted to the learning records.
   spine order is untouched, since Day 7's own honest finding (the demo loader
   vs. a production loader) is exactly the kind of thing that might reasonably
   pull Phase 2's very first lesson toward a real-loader discussion instead.
+- 2026-09-22 (headless 06:00 run, Day 8 generated — **Phase 2 begins**): eighth
+  lesson, `0008-dbt-intermediate-layer.html`, the first open-ended/sequential
+  lesson (no longer date-locked to `PLAN.md`'s Phase 1 table). Confirmed via
+  the orchestrator's own DB read moments before this round that the latest
+  `dataeng` row was `lesson_generated day=7` (2026-09-21) with no
+  `lesson_completed`/quiz signal yet and only the one baseline learning
+  record, and confirmed independently that `lessons/` contained only
+  `0001`–`0007`, `assets/nav.js`'s latest entry was Day 7, and no
+  `2026-09-22`/`0008` entry existed anywhere (`lessons/`, `assets/nav.js`,
+  this file), so proceeded on schedule per `PLAN.md`'s Phase 2 start date.
+  Read `MISSION.md`, `PLAN.md` in full (the Phase 2 spine and its "revisit at
+  the end of 2a" note), `NOTES.md`'s conventions sections plus the last three
+  generation-log entries, `RESOURCES.md`, the one `learning-records/` file,
+  `reference/glossary.html`, and `assets/nav.js` for established domain names,
+  then `lessons/0007-airflow-orchestrates-dbt.html` and
+  `lessons/0004-dbt-marts-and-incremental.html` in full for structural
+  precedent (dfn/gloss.js usage, quiz.js option-shape, nav.js registration,
+  Verify-block style, closing voice) before writing.
+  **Topic choice:** Day 7's closing note flagged that its own honest finding
+  (the demo loader vs. a production loader) might reasonably pull Phase 2's
+  first lesson toward a real-loader discussion instead of the spine's own
+  next topic. Judged that this doesn't actually apply here: Day 7's lesson
+  text itself frames that gap as real-world follow-up work "outside Phase 1's
+  scope" and something to be able to *name* in an interview, not an open
+  build task waiting to be picked up, and there is no fresh learning-record
+  or quiz signal (still just the one baseline file, no `lesson_completed`
+  rows at all) pointing anywhere else. Defaulted to the spine's own first
+  bullet under 2a: dbt layering conventions. Rather than restate staging vs.
+  marts (already taught Days 2 and 4), picked the one layer this course has
+  never introduced — intermediate models — since `dim_restaurants` already
+  has a real join (`stg_restaurants` × `stg_orders`) that's a natural
+  candidate to extract, giving today's build step an honest refactor instead
+  of a toy example.
+  **Content:** per `PLAN.md`'s 2a spine and dbt Labs' "How we structure our
+  dbt projects" (already this course's cited source for Day 2's staging
+  layout), introduced the intermediate layer's specific job — one reusable
+  join/reshape, not meant to be queried directly, narrower than staging's
+  "one source per model" and narrower than a mart's "answer a real question."
+  Built `models/intermediate/int_orders_joined.sql` in full (scaffolding,
+  same reasoning as prior full-script days: the join itself isn't new SQL,
+  the day's actual skill is the refactor), materialized `intermediate` as
+  `ephemeral` in `dbt_project.yml`, and had the learner rewrite
+  `dim_restaurants.sql` themselves (the day's actual skill: swap its own
+  direct `stg_restaurants`×`stg_orders` join for a select against
+  `int_orders_joined`, while noticing and preserving the join *direction* —
+  `int_orders_joined`'s own join runs orders-to-restaurants, so naively
+  selecting from it as the sole source would silently drop zero-order
+  restaurants that `dim_restaurants`' original `left join` from the
+  restaurant side was written to keep). Framed that direction gotcha
+  explicitly as the real cost side of reuse, bridging to Phase 2a's own
+  upcoming "when does a macro/model make a project worse" topic rather than
+  presenting intermediate models as a strictly-better default. `fct_orders`
+  was explicitly left unchanged with a one-line reason (it never joins
+  restaurants/couriers, so there's nothing in it for the new layer to
+  replace) rather than silently ignored, matching this file's standing
+  "never assume, always say why" convention. No pandas, no Python-language
+  teaching (no Python file exists in today's lesson at all — this is the
+  first Phase 1 successor day to be pure SQL/YAML/dbt, since there is no
+  new producer/consumer/DAG script), no re-derivation of idempotency or API
+  concepts — out of scope for a dbt-modelling day and not mentioned. Domain
+  names (`fct_orders`, `dim_restaurants`, `stg_orders`, `stg_restaurants`,
+  `raw.restaurants`, `raw.orders`) used exactly as `PLAN.md` and prior
+  lessons established; none renamed. Opened with an explicit "before today"
+  `dbt build` check (expect `PASS=19 WARN=0 ERROR=0 SKIP=0 TOTAL=19`,
+  matching Day 6's count) rather than assuming Day 7's build step landed, per
+  this file's standing guidance.
+  **Verification:** laid out a minimal scratch project
+  (`dbt_project.yml` with the `intermediate: +materialized: ephemeral` block
+  added next to Day 4's staging/marts block, `profiles.yml` pointing at
+  `10.255.255.1` — unreachable, `models/staging/sources.yml` with freshness,
+  Days 2/3/6's four staging models plus `stg_orders.yml`/`stg_order_events.yml`,
+  `tests/assert_positive_subtotal.sql`, today's new
+  `models/intermediate/int_orders_joined.sql`, the rewritten
+  `models/marts/dim_restaurants.sql`, Day 4's `fct_orders.sql` unchanged, Day
+  6's `mart_delivery_sla.sql`, and `models/marts/marts.yml`) in
+  `.scratch_dataeng_verify_d8/` under the repo root, deleted after. Ran
+  `uv run --with "dbt-postgres==1.11.0" dbt parse --project-dir <abs>
+  --profiles-dir <abs> --no-partial-parse` via the documented
+  `uv run python3 -c "...subprocess.run([...])"` wrapper (single non-compound
+  command, absolute-path flags, no `cd`/redirection) — clean on the first
+  try, dbt-core resolved to 1.12.5 again (consistent with every prior round
+  since Day 3), no live database needed. Grepped output for `Error` rather
+  than trusting the exit code, per this file's standing caution; found none.
+  `dbt list --resource-type model` resolved all 8 models, including the new
+  `food_delivery_pipeline.intermediate.int_orders_joined`, confirming the
+  layer and its folder-based fqn resolve correctly; `dbt list --resource-type
+  test` resolved all 11 tests by dbt-generated name, matching the lesson's
+  `TOTAL=19` (8 models + 11 tests). Then added a throwaway
+  `models/marts/broken_mart.sql` with a `ref()` to a nonexistent model to
+  confirm `dbt parse` still catches errors: reported `Compilation Error`,
+  exit code 2 this round (consistent with Days 3/4/6's finding that the
+  non-zero exit sometimes does happen, still not relied on instead of
+  grepping); deleted it and re-ran to confirm clean again before deleting the
+  whole scratch directory. No Python file exists in this lesson, so
+  `py_compile` was not applicable and was not run — noted here rather than
+  silently skipped. The raw-SQL `psql` row-count query in the lesson's Verify
+  section was hand-checked against Day 4's identical precedent query and
+  Postgres's own `count()`/`sum()` semantics, not executed against a live
+  warehouse (no Docker step was attempted this round; today's content needed
+  no live Postgres or Kafka behavior beyond what `dbt parse` already
+  confirms, unlike Days 1/5/6/7's build-and-run-a-real-stack verification).
+  Registered Lesson 8 in `assets/nav.js` (`node --check` clean) and added the
+  Day 8 section to `reference/glossary.html` (2 terms: intermediate model,
+  ephemeral — grepped Days 1–7's sections first, case-insensitively, no
+  collisions). Ran a small Python script (regex tag-balance check plus a
+  quiz-option word-count extractor, treating underscored/dotted identifiers
+  like `int_orders_joined`/`commission_rate` as single tokens, consistent
+  with every prior day's counting convention) against the saved HTML in a
+  scratch file outside `dataeng/`, deleted after use. It caught one real
+  markup bug this round introduced (three `<tr>` rows in Section 2's table
+  left unclosed — fixed to balance, `tr: open=4 close=4` confirmed after) and
+  found the first quiz draft mismatched on two of the four questions (6/8/6
+  and 8/7/6 word splits); rebalanced both to 7/7/7 and re-verified by
+  re-running the same script after each edit. Final state: all four
+  questions 7/7/7 or 9/9/9, all checked tags balanced
+  (div/p/table/tr/td/th/ul/li/pre/code/h2/dfn/button), zero suspicious bare
+  `&`, and both `<dfn>` terms in the lesson matching the two glossary rows
+  added.
+  `bin/record-progress dataeng lesson_generated --day 8 --lesson
+  0008-dbt-intermediate-layer.html --detail '{"by":"headless"}'` run from the
+  repo root; see this entry's tail for the result.

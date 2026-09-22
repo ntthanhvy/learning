@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 8 · dbt: the intermediate layer</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 8 · ~20 min · 22 Sep 2026</p>
+<h1>dbt: the intermediate layer</h1>
+<p class="byline">Today's tangible win: a new <code>models/intermediate/</code> folder with one model, <code>int_orders_joined</code>, that does the restaurant/courier join <em>once</em> — then <code>fct_orders</code> and <code>dim_restaurants</code> both build on top of it instead of each repeating their own <code>join</code>. Same data, same row counts, one less copy of the same join logic sitting in two files.</p>
+
+<div class="callout"><strong>Before today — check Day 7 actually landed:</strong> this lesson edits the marts Day 4 built and Day 7's DAG runs, so start from a clean build:
+<pre><code>cd food_delivery_pipeline
+uv run --project ../dbt_env dbt build</code></pre>
+Expected: <code>Done. PASS=19 WARN=0 ERROR=0 SKIP=0 TOTAL=19</code> (7 models + 12 tests, Day 6's count). If you see <code>ERROR=2</code> naming <code>order_id 13</code> or <code>27</code>, your raw seed re-planted Day 3's two bad rows — re-run Day 3's <code>UPDATE</code> fix before starting today.</div>
+
+<h2>1 · Phase 1 is done. Here's how Phase 2 works</h2>
+<p>Six days built one thin slice end to end; Day 7 shipped it. From today the course is open-ended: no more fixed dates, roughly 20 minutes a day, and the order adapts to what you actually ask about instead of a pre-written calendar. The plan still has a spine — mostly deeper dbt, since <code>MISSION.md</code> calls that the highest-leverage tool, with Kafka and Airflow rounding out at working level — but it bends toward your follow-up questions over the calendar. Today follows the spine's own first stop, because there's no signal yet pulling it elsewhere.</p>
+
+<h2>2 · The layer you've been skipping</h2>
+<p>Every mart so far has joined staging models directly: <code>dim_restaurants</code> joins <code>stg_restaurants</code> to <code>stg_orders</code>; <code>fct_orders</code> selects straight from <code>stg_orders</code>. That's fine at 2 marts. It stops being fine the moment a <em>third</em> mart needs the same join — say, a future courier-performance mart that also needs orders joined to restaurants for the commission rate. Without a middle layer, that join gets copy-pasted into a second file, and the two copies drift the moment one of them is edited and the other isn't.</p>
+<p>dbt Labs' own house-style guide, <a href="https://docs.getdbt.com/best-practices/how-we-structure/1-guide-overview">"How we structure our dbt projects"</a> — already this course's cited source for Day 2's staging layout — names the fix: an <dfn data-en="the dbt layer between staging and marts: models prefixed int_, doing one specific piece of joining or reshaping logic that more than one downstream mart needs, so that logic exists in exactly one place" data-vn="giữ nguyên &quot;intermediate model&quot; — lớp giữa staging và marts, gộp 1 logic join/biến đổi cụ thể để nhiều mart dùng lại, tránh lặp code">intermediate model</dfn> layer sitting between staging and marts. Its rule is narrower than staging's "one source per model" — an intermediate model does one specific piece of reusable transformation logic, usually a join or a reshape that more than one downstream model needs — and narrower than a mart's "answer a real question": an intermediate model isn't meant to be queried by a dashboard at all, only by other dbt models.</p>
+<table class="gloss">
+<tr><th>Layer</th><th>Joins across models?</th><th>Queried by dashboards?</th><th>Naming</th></tr>
+<tr><td>staging</td><td>never — one source per model</td><td>no</td><td><code>stg_&lt;source&gt;</code></td></tr>
+<tr><td>intermediate</td><td>yes — that's its job</td><td>no, dbt-internal only</td><td><code>int_&lt;subject&gt;_&lt;verb&gt;</code></td></tr>
+<tr><td>marts</td><td>yes, often via intermediate models</td><td>yes</td><td><code>fct_&lt;grain&gt;</code> / <code>dim_&lt;entity&gt;</code></td></tr>
+</table>
+<p>The naming convention matters as much as the layer itself: <code>int_orders_joined</code> reads as "orders, with something joined on" before you open the file, the same way <code>stg_</code> and <code>fct_</code>/<code>dim_</code> already tell you a model's layer on sight.</p>
+
+<h2>3 · Build: <code>models/intermediate/int_orders_joined.sql</code></h2>
+<p>This model pulls out exactly the join <code>dim_restaurants</code> already does — orders left-joined to restaurants — so it exists in one place. Give it in full; the day's actual skill is the refactor in Section 4, not this file:</p>
+<pre><code><span class="cm">-- models/intermediate/int_orders_joined.sql</span>
+select
+    o.order_id,
+    o.customer_id,
+    o.restaurant_id,
+    o.courier_id,
+    o.subtotal,
+    o.delivery_fee,
+    o.order_total,
+    o.placed_at,
+    r.name as restaurant_name,
+    r.cuisine,
+    r.city,
+    r.commission_rate
+from {{ ref('stg_orders') }} as o
+left join {{ ref('stg_restaurants') }} as r
+    on o.restaurant_id = r.restaurant_id</code></pre>
+<p>Mark the intermediate folder <dfn data-en="a materialization that isn't a database object at all -- dbt inlines the model's SELECT directly into whichever downstream model queries it, at compile time, so it costs nothing to build and never shows up as its own table or view" data-vn="giữ nguyên &quot;ephemeral&quot; — không tạo view/table riêng, dbt nhúng thẳng SELECT vào model gọi nó lúc compile">ephemeral</dfn> in <code>dbt_project.yml</code>, next to Day 4's staging/marts block — dbt inlines this <code>SELECT</code> directly into whatever queries it via a Jinja CTE, so it never becomes its own view or table in Postgres at all:</p>
+<pre><code>models:
+  food_delivery_pipeline:
+    staging:
+      +materialized: view
+    intermediate:
+      +materialized: ephemeral
+    marts:
+      +materialized: table</code></pre>
+<p>Ephemeral is the house-style default for intermediate models specifically because nobody outside dbt ever queries them directly — paying for a real view or table would be storage and a lineage-graph node with no payoff. (Not free forever: an ephemeral model inlined into five different marts means that same join runs five separate times at query time. Fine at this project's size; Phase 2a's incremental-strategies lesson is where "reused often enough to materialize for real" becomes a live trade-off.)</p>
+
+<h2>4 · Refactor: point <code>dim_restaurants</code> at the new layer</h2>
+<p>Now the actual skill — <code>dim_restaurants</code> currently joins <code>stg_orders</code> to <code>stg_restaurants</code> itself. Rewrite it to select from <code>int_orders_joined</code> instead, so the join logic exists in exactly one file. The aggregation (one row per restaurant, <code>count()</code> of orders) still belongs in the mart — only the join moves:</p>
+<pre><code><span class="cm">-- models/marts/dim_restaurants.sql -- TODO: rewrite to select from int_orders_joined
+-- instead of joining stg_restaurants + stg_orders directly. Keep the same
+-- output columns and the same left-join behavior (a restaurant with zero
+-- orders must still get a row with total_orders = 0).</span></code></pre>
+<p>Your rewritten version should still produce a <code>group by</code> over the restaurant's own columns with <code>count(order_id)</code> as <code>total_orders</code> — only the <code>from</code>/<code>join</code> changes, since <code>int_orders_joined</code> already carries every restaurant column <code>dim_restaurants</code> needs. One thing to get right: <code>int_orders_joined</code>'s own join was a <code>left join</code> from orders to restaurants, so a restaurant with zero orders was already being dropped before it ever reached <code>dim_restaurants</code> in the naive rewrite — the fix is to keep joining <em>from restaurants</em> in the mart itself (<code>{{ ref('stg_restaurants') }}</code> as the left side, <code>int_orders_joined</code> as the right side), not to assume the intermediate model already preserved that direction for you.</p>
+<div class="callout"><strong>Why this is worth noticing, not just fixing:</strong> an intermediate model built for one caller's join direction doesn't automatically serve a second caller with a different one. That's the real cost side of this layer <code>MISSION.md</code>'s "depth where the mission says depth" doesn't spell out in one line: reuse only pays off when the reused piece is generic enough for every caller, and a mart-specific direction hiding inside a shared model is exactly the kind of thing PLAN.md's "when a macro/model makes a project worse" question is aimed at (Phase 2a comes back to this directly).</div>
+<p><code>fct_orders</code> does not change today — it already selects only order-grain columns straight from <code>stg_orders</code>, with no restaurant/courier join, so there is nothing in it for <code>int_orders_joined</code> to replace. Leave it as Day 4 built it.</p>
+
+<h2>5 · Build it and confirm nothing moved</h2>
+<pre><code>uv run --project ../dbt_env dbt build</code></pre>
+<p>Expected — one more model than before (8, not 7), same test count, same row counts as every prior day, and the compile log shows <code>int_orders_joined</code> as ephemeral (no <code>CREATE VIEW</code>/<code>CREATE TABLE</code> line of its own, only inlined into <code>dim_restaurants</code>'s build step):</p>
+<pre><code>1 of 8 OK created sql view model dbt_dev.stg_restaurants ....... [CREATE VIEW in 0.04s]
+2 of 8 OK created sql view model dbt_dev.stg_couriers ........... [CREATE VIEW in 0.03s]
+3 of 8 OK created sql view model dbt_dev.stg_orders ............. [CREATE VIEW in 0.05s]
+4 of 8 OK created sql view model dbt_dev.stg_order_events ....... [CREATE VIEW in 0.03s]
+5 of 8 OK created sql incremental model dbt_dev.fct_orders ...... [INSERT 0 0 in 0.05s]
+6 of 8 OK created sql table model dbt_dev.dim_restaurants ....... [SELECT 40 in 0.07s]
+7 of 8 OK created sql table model dbt_dev.mart_delivery_sla ..... [SELECT 1 in 0.04s]
+...
+Done. PASS=19 WARN=0 ERROR=0 SKIP=0 TOTAL=19</code></pre>
+<p><code>int_orders_joined</code> doesn't get its own numbered build line at all — that's the ephemeral behavior working as intended. Confirm the row count really didn't move:</p>
+<pre><code>docker compose exec -T postgres psql -U fdp -d fdp -c \
+  "SELECT count(*), sum(total_orders) FROM dbt_dev.dim_restaurants;"</code></pre>
+<pre><code> count | sum
+-------+-----
+    40 | 500
+(1 row)</code></pre>
+<p>40 restaurants, 500 total orders summed across them — identical to Day 4's numbers. The refactor changed where the join lives, not what it computes. Commit <code>models/intermediate/int_orders_joined.sql</code>, the rewritten <code>models/marts/dim_restaurants.sql</code>, and the updated <code>dbt_project.yml</code>.</p>
+
+<div class="interview">
+<p><strong>Q: "Your dbt project has staging, intermediate and marts folders — what's actually different about the middle one?"</strong> A strong answer, out loud: <em>"Staging is one model per raw source, no joins, ever — it exists so every downstream model has a clean, renamed starting point. Marts are the opposite end: they're allowed to join freely, because their job is to answer a real question a dashboard or analyst asks. Intermediate sits in between: it's allowed to join, same as marts, but it's not meant to be queried directly — it exists so one specific piece of reusable logic, usually a join or a reshape more than one mart needs, lives in exactly one file instead of being copy-pasted into every mart that needs it. In my project, int_orders_joined does the orders-to-restaurants join once, ephemeral so it costs nothing extra in the warehouse, and dim_restaurants builds on top of it instead of repeating that join itself."</em> The signal: naming what intermediate is <em>for</em> — reuse, not just "another folder" — and being able to say it's dbt-internal only, never a dashboard's data source.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="An intermediate model exists specifically to hold one piece of reusable join or reshape logic that more than one downstream mart needs, so that logic lives in exactly one file. Staging never joins at all, and marts are meant to be queried directly by dashboards -- intermediate is neither.">
+    <p class="stem">What is an intermediate model's specific job, per dbt Labs' guide?</p>
+    <button class="opt" data-ok>Hold one reusable join for several marts</button>
+    <button class="opt">Hold one raw source for one dashboard</button>
+    <button class="opt">Hold one final answer for one report</button>
+  </div>
+  <div class="q" data-why="Ephemeral means dbt inlines the model's SELECT directly into whichever downstream model queries it, at compile time -- it never becomes its own view or table in Postgres, and never shows up as a build step with its own row count.">
+    <p class="stem">What does materializing <code>int_orders_joined</code> as <code>ephemeral</code> actually do?</p>
+    <button class="opt" data-ok>Inlines its SELECT into the model that calls it</button>
+    <button class="opt">Builds it as a view, refreshed on every read</button>
+    <button class="opt">Builds it as a table, refreshed on every run</button>
+  </div>
+  <div class="q" data-why="int_orders_joined's own join runs from orders to restaurants (left join), which drops the zero-order-restaurant case if reused naively. The mart must keep joining from stg_restaurants as the left side to preserve the 'every restaurant gets a row' guarantee -- reuse doesn't automatically carry a caller's needed join direction.">
+    <p class="stem">Why can't <code>dim_restaurants</code> just select straight from <code>int_orders_joined</code> without care?</p>
+    <button class="opt" data-ok>Its own join direction drops zero-order restaurants</button>
+    <button class="opt">Ephemeral models cannot ever be selected from</button>
+    <button class="opt">It is missing the restaurant's own commission_rate</button>
+  </div>
+  <div class="q" data-why="fct_orders selects only order-grain columns straight from stg_orders with no restaurant or courier join at all, so there is no join in it for int_orders_joined to replace -- today's refactor only touches dim_restaurants, which is the model that actually had a join to pull out.">
+    <p class="stem">Why does <code>fct_orders</code> not change in today's refactor?</p>
+    <button class="opt" data-ok>It never joined restaurants or couriers itself</button>
+    <button class="opt">Incremental models cannot depend on intermediate ones</button>
+    <button class="opt">It was already built from int_orders_joined itself</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> dbt Labs' <a href="https://docs.getdbt.com/best-practices/how-we-structure/1-guide-overview">How we structure our dbt projects</a> (cited in <code>RESOURCES.md</code>, already this course's source for Day 2's staging layout) covers the intermediate layer and its <code>int_</code> naming convention directly — read the "marts" and "intermediate" pages in that same guide next for where this course is headed through the rest of Phase 2a. The <a href="https://docs.getdbt.com/docs/build/materializations">Materializations</a> doc is the primary source for what <code>ephemeral</code> specifically does at compile time.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 8.<br>
+<strong>Phase 2 continues</strong> along the dbt/Kafka/Airflow spine in <code>PLAN.md</code>, adapted to your questions rather than a fixed calendar — snapshots for slowly-changing restaurant <code>commission_rate</code> data, Jinja and macros, and incremental strategies in depth are next up on the dbt side.<br><br>
+💬 Anything unclear — why ephemeral over view, or the join-direction gotcha in Section 4? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

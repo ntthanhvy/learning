@@ -156,6 +156,8 @@
       file: "lessons/0074-np-unique.html" },
     { n: 75, date: "2026-09-21", title: "searchsorted(): binary search on data you already sorted",
       file: "lessons/0075-searchsorted.html" },
+    { n: 76, date: "2026-09-22", title: "str.split(): breaking one text column into several",
+      file: "lessons/0076-str-split.html" },
   ];
 
   const REFS = [

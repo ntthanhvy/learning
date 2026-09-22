@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 79 · PgBouncer: pooling the pools</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 79 · ~20 min</p>
+<h1>PgBouncer: pooling the pools</h1>
+<p class="byline">Lesson 18 named the fix for the multiplication problem — <code>MaxConns</code> per instance times instance count outrunning Postgres's <code>max_connections</code> — in one sentence: "put an external pooler like PgBouncer in front of Postgres." It linked the tool and moved on. This lesson is the sentence that was owed: what PgBouncer actually is, how it multiplexes many app-side connections onto few real ones, and the trade-off its three pooling modes make.</p>
+
+<h2>1 · The gap Lesson 18's own pool can't close</h2>
+<p><code>pgxpool</code>'s pool (Lesson 18) is per-<em>process</em>. Each instance opens its own set of real Postgres connections and keeps them warm — that's the pool a handler borrows from. It solves "don't reopen a connection every request." It cannot solve the multiplication problem, because that pool has no visibility into any other instance's pool; scaling from three instances to thirty just multiplies the same per-instance <code>MaxConns</code> by thirty, and Postgres's <code>max_connections</code> (100 by default, per the PostgreSQL Manual, minus a handful reserved for superusers) doesn't move. A per-process pool can be sized carefully and still lose this fight the moment autoscaling adds instances.</p>
+<p>A <dfn data-en="a separate proxy process that sits between an application's connection pools and the real Postgres server, holding a small fixed number of real database connections and handing them out to a much larger number of client connections" data-vn="connection pooler / connection proxy (giữ nguyên) — proxy đứng giữa app và Postgres, giữ ít connection thật, chia sẻ cho nhiều client hơn">connection pooler</dfn> like PgBouncer sits between every instance's pool and Postgres itself, as its own separate process. Every instance now points its DSN at PgBouncer instead of Postgres directly; PgBouncer holds a small, fixed number of real Postgres connections and hands them out to however many client connections actually show up, whether that's 3 instances or 300.</p>
+
+<h2>2 · What "multiplexing" means here</h2>
+<p>The word doing the real work is <dfn data-en="reusing a small, fixed set of real backend connections to serve a much larger, varying number of client-side connections, by handing a real connection to whichever client currently needs one and taking it back when that client is done with it" data-vn="multiplex (giữ nguyên) — dùng ít connection thật để phục vụ nhiều client, mượn/trả liên tục">multiplexing</dfn>: many client connections share few real ones over time, not all at once. A client connection to PgBouncer isn't the same object as a real Postgres backend process — PgBouncer decides, per some unit of work, which real connection a given client borrows next, then takes it back. That unit of work is the pooling mode, and it's the one setting that actually decides how safely this can be done.</p>
+<table class="cmp">
+<thead><tr><th>Pool mode</th><th>Real connection returned to the pool</th><th>Safe with</th></tr></thead>
+<tbody>
+<tr><th>session</th><td>when the client disconnects</td><td>anything, including session-level features (advisory locks from Lesson 56, <code>SET</code> variables)</td></tr>
+<tr><th>transaction</th><td>when the current transaction commits or rolls back</td><td>most application code — one request, one transaction, one borrow</td></tr>
+<tr><th>statement</th><td>after each individual statement</td><td>only autocommit, single-statement traffic — no multi-statement transactions at all</td></tr>
+</tbody>
+</table>
+<p>Session mode is the least aggressive multiplexing — it barely improves on not pooling at all, since a client that opens a connection and does nothing for a while still occupies a real backend the whole time. Transaction mode is where most of PgBouncer's actual value lives: a real connection is only tied up for the length of one transaction, then it's free for a different client's request, which is how a fixed pool of, say, 20 real connections can serve hundreds of app-side connections that are mostly idle between requests — exactly the mismatch Lesson 18 named ("most services need far fewer concurrent connections than requests-per-second").</p>
+
+<h2>3 · The cost transaction mode charges for that reuse</h2>
+<p>Transaction mode's speed comes from breaking an assumption Lesson 18's own pool never had to break: that a single client connection maps to a single, stable real connection for its whole lifetime. Session-level state — a <code>SET search_path</code>, a temp table, an advisory lock taken with <code>pg_advisory_lock</code> and expected to still be held later — lives on whichever real connection happened to run it, and the next statement from that same client might land on a completely different real connection with none of that state. Lesson 56's advisory locks assumed one session held a lock across multiple statements; that assumption breaks under transaction-mode pooling unless the lock and its release both happen inside one transaction.</p>
+<div class="callout">This is the trade transaction mode makes explicit: give up per-connection session state, get to run far more app-side connections than <code>max_connections</code> would otherwise allow. It is not a free multiplier — it is the same "isolation moves outward, cost shows up somewhere else" shape Lesson 78 walked through for multi-tenant schemas, just applied to connections instead of tenants.</div>
+
+<h2>4 · Where it actually sits</h2>
+<p>Nothing about the instance's own code changes — the DSN just points at PgBouncer's port instead of Postgres's, and <code>pgxpool</code> keeps working exactly as Lesson 18 described, borrowing and releasing from its own per-instance pool. PgBouncer is the second, outer layer: instance pools multiplex handlers onto a modest number of app-side connections; PgBouncer multiplexes every instance's app-side connections onto a small, fixed number of real Postgres ones. Two pools, two different problems — per-instance pooling saves the connect-handshake cost per request; PgBouncer saves Postgres from the instance-count multiplication that no amount of per-instance tuning alone can fix.</p>
+
+<div class="interview">
+<p><strong>Q: "We autoscaled to handle a traffic spike, and now the database is refusing connections. What's going on, and what would you check?"</strong> A strong answer, out loud: <em>"I'd check whether the new instance count times each instance's pool size has pushed total connections past max_connections — that's the classic multiplication problem, and autoscaling is exactly when it bites, since instance count grows without anyone revisiting pool math. If instance count is genuinely going to keep growing, I'd put PgBouncer in front of Postgres in transaction pooling mode, so every instance talks to a small fixed number of real connections instead of each one claiming its own slice of max_connections. I'd also check the codebase for anything relying on session-level state — advisory locks, SET commands — since transaction mode breaks that unless it's scoped to one transaction."</em> The signal: naming the multiplication problem first, then the specific pooling-mode trade-off, not just "add a pooler" with no cost attached.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A per-instance pgxpool pool has no visibility into any other instance's pool, so scaling instance count multiplies total real connections against Postgres's shared max_connections no matter how carefully one instance's MaxConns is tuned -- only an external pooler sitting in front of every instance actually caps the total.">
+    <p class="stem">Why can't Lesson 18's per-instance <code>pgxpool</code> pool alone fix the multiplication problem as instance count grows?</p>
+    <button class="opt" data-ok>each instance's own pool is blind to the rest</button>
+    <button class="opt">pgxpool refuses to ever open more than four connections</button>
+    <button class="opt">Postgres always doubles max_connections automatically at every single deploy</button>
+    <button class="opt">every running instance already shares one single pgxpool object</button>
+  </div>
+  <div class="q" data-why="PgBouncer's multiplexing means many client-side connections take turns borrowing from a small, fixed set of real Postgres connections over time, handing a real connection back to the pool once its unit of work (a transaction, in transaction mode) finishes -- not opening one dedicated real connection per client.">
+    <p class="stem">What does it mean for PgBouncer to "multiplex" client connections onto real Postgres connections?</p>
+    <button class="opt" data-ok>many clients take turns borrowing a few real connections</button>
+    <button class="opt">every single client gets its own permanent dedicated connection</button>
+    <button class="opt">Postgres itself simply doubles its own max_connections limit today</button>
+    <button class="opt">each client connection instantly becomes two real live connections</button>
+  </div>
+  <div class="q" data-why="Transaction mode returns a real connection to the pool as soon as the current transaction commits or rolls back, rather than holding it for the client's entire session, which is exactly why session-level state set on that connection (an advisory lock, a SET variable) may not still be there on the next statement from the same client.">
+    <p class="stem">Under PgBouncer's transaction pooling mode, when does a real connection go back to the pool?</p>
+    <button class="opt" data-ok>as soon as the current transaction commits or rolls back</button>
+    <button class="opt">only once that one client disconnects from PgBouncer for good</button>
+    <button class="opt">only after the entire Postgres server itself gets fully restarted</button>
+    <button class="opt">never, once a client has been handed that real connection</button>
+  </div>
+  <div class="q" data-why="Transaction mode's speed comes from breaking the assumption that one client keeps the same real connection for its whole session, so any session-level state a statement sets -- an advisory lock from Lesson 56, a SET search_path -- may vanish before that same client's next statement, unless the lock is both taken and released inside one transaction.">
+    <p class="stem">What does transaction pooling mode cost in exchange for reusing connections so aggressively?</p>
+    <button class="opt" data-ok>session-level state can silently vanish between two statements</button>
+    <button class="opt">every transaction now permanently blocks all other queries</button>
+    <button class="opt">Postgres stops enforcing any normal transaction isolation levels</button>
+    <button class="opt">each statement must always run inside its database</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://www.postgresql.org/docs/current/runtime-config-connection.html">PostgreSQL Manual — Connections and Authentication</a> (the same page Lesson 18 cited, re-confirmed live this round via <code>WebFetch</code> — it explicitly defines <code>max_connections</code> and the superuser-reserved-connections carve-out cited in section 1 above). A direct <code>WebFetch</code> against PgBouncer's own docs (<code>pgbouncer.org</code>) was attempted for this lesson but blocked by this session's sandbox network-permission gate with no interactive approver present — the pooling-mode descriptions above rest on PgBouncer's long-stable, widely-documented <code>pool_mode</code> behavior (session/transaction/statement) rather than a freshly-fetched quote; worth a live re-check next time that gate is open.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially. Nếu chỗ nào chưa rõ, cứ hỏi lại bằng tiếng Việt cũng được.<br><br>
+<em>Next lesson:</em> open. Still no <code>lesson_completed</code>/quiz-outcome record exists for any lesson after 79 rounds — the honest next step remains a completion signal or a user-named track.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

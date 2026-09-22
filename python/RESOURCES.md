@@ -15,8 +15,8 @@ authors for *why*. Cite inline; each lesson recommends exactly one primary sourc
   The standard text on idiomatic Python. Use for: depth on the data model, sequences, iterators/generators, and dataclasses. (Paid — the docs cover the same ground for this course's purposes.)
 - [Docs: Sorting HOW TO](https://docs.python.org/3/howto/sorting.html)
   Official guide to `sorted()`, `key=`, and stability. Use for: Day 4 — the shortest path to sorting fluency.
-- [Docs: `itertools`](https://docs.python.org/3/library/itertools.html) · [`collections`](https://docs.python.org/3/library/collections.html)
-  The two stdlib modules that replace most hand-written data-munging loops. Use for: Days 3, 5, and 53; the `itertools` recipes section is lesson-grade on its own.
+- [Docs: `itertools`](https://docs.python.org/3/library/itertools.html) · [`collections`](https://docs.python.org/3/library/collections.html) · [`operator`](https://docs.python.org/3/library/operator.html)
+  The stdlib modules that replace most hand-written data-munging loops and lambdas. Use for: Days 3, 5, 53, and 56; the `itertools` recipes section is lesson-grade on its own, and `operator`'s "Mapping Operators to Functions" table covers every arithmetic/comparison spelling Day 56 only samples two of.
 - [Talk/course: "Generators: The Final Frontier" — David Beazley](https://www.dabeaz.com/generators/)
   Deep, practical treatment of generators as data-pipeline building blocks. Use for: Day 5's lazy-pipeline framing.
 - [Blog: Trey Hunner](https://treyhunner.com/blog/archives/)

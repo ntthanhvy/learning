@@ -100,6 +100,13 @@
   <tr><td>BashOperator</td><td>giữ nguyên "BashOperator" — Airflow task chạy 1 lệnh shell trong subprocess, thành/bại theo exit code</td><td>An Airflow operator that runs a given string as a shell command in a subprocess — the task succeeds or fails based on that subprocess's exit code, with no Airflow-specific knowledge of what the command actually does. Lives in <code>airflow.providers.standard.operators.bash</code> as of Airflow 3, not Airflow core.</td></tr>
 </table>
 
+<h2 id="day8">Day 8 — dbt: the intermediate layer</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>intermediate model</td><td>giữ nguyên "intermediate model" — lớp giữa staging và marts, gộp 1 logic join/biến đổi cụ thể để nhiều mart dùng lại, tránh lặp code</td><td>The dbt layer between staging and marts: models prefixed <code>int_</code>, doing one specific piece of joining or reshaping logic that more than one downstream mart needs, so that logic exists in exactly one place — not meant to be queried directly, only by other dbt models.</td></tr>
+  <tr><td>ephemeral</td><td>giữ nguyên "ephemeral" — không tạo view/table riêng, dbt nhúng thẳng SELECT vào model gọi nó lúc compile</td><td>A materialization that isn't a database object at all — dbt inlines the model's <code>SELECT</code> directly into whichever downstream model queries it, at compile time, so it costs nothing to build and never shows up as its own table or view. The house-style default for intermediate models, since nobody outside dbt queries them directly.</td></tr>
+</table>
+
 <script src="../assets/nav.js"></script>
 </body>
 </html>

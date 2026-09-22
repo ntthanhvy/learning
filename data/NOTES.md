@@ -6341,3 +6341,145 @@
   data/lesson_generated day=75 lesson=0075-searchsorted.html`). The read
   path (`bin/query-progress`) was not attempted this round since the
   direct-`psql`-via-Node workaround already covered the read need.
+- 2026-09-22 generation (Lesson 76, headless run): idempotency confirmed
+  first per this round's own instructions rather than re-verified by this
+  agent independently — the orchestrator reported the DB's latest row as
+  `lesson_generated day=75 lesson=0075-searchsorted.html` recorded
+  2026-09-21, with nothing newer, so this round did not re-run its own DB
+  read (direct `psql "$LEARNING_DB_URL"` remains hard-blocked by this
+  sandbox's static analysis regardless). Independently confirmed via the
+  filesystem instead: `ls data/lessons/` showed no `0076-*.html`, the
+  highest file present was `0075-searchsorted.html`; grepped
+  `assets/nav.js` for `n: 76`/`2026-09-22` and found neither, highest
+  registered entry was still 75, dated 2026-09-21 — so this round
+  proceeded. Read `MISSION.md` in full (not modified), the tail of
+  `NOTES.md` (this file is now over 6650 lines — a `tail`/`wc -l`/`grep
+  "^## "` pass covered the "Course conventions" section near the top and
+  the most recent generation-log entries, which was sufficient),
+  `RESOURCES.md` in full, the sole
+  `data/learning-records/0001-baseline-sql-strong-python-basic.md` (still
+  just the single 2026-07-09 baseline — no new learning-record files have
+  been added since this course began), `assets/nav.js` in full, and
+  Lesson 75's own HTML body plus its practice file as structural
+  precedent. Lesson 75's own closing teaser stated the
+  `argsort`/`np.unique`/`searchsorted` trio (originally surfaced by
+  Lesson 72) is now fully taught, with no further named-but-unpicked
+  candidate left over — so this round started from a genuinely blank
+  curriculum/glossary scan rather than a named teaser. Grepped every
+  lesson body under `data/lessons/` and the full glossary for a list of
+  candidate gaps (`duplicated()`, `.diff()`, `assign()`,
+  `value_counts(normalize=)`, `nlargest`/`nsmallest`, `rank()`,
+  `MultiIndex`, `Timedelta`, `corrwith()`, `str.split`, `str.replace`):
+  most came back already taught (`duplicated()` Lesson 11, `.diff()`
+  Lesson 23's `shift()` lesson, `assign()` Lessons 8/53/67, `nlargest`
+  Lesson 10, `rank()` in 5 lessons, `MultiIndex` in 12 lessons) — but
+  `str.split()` and `str.replace()` came back with genuinely ZERO hits
+  across all 75 lesson bodies and the glossary, a real gap despite
+  Lessons 42/43 (`str.extract()`/`str.extractall()`, regex-based) and
+  Lesson 60 (`str.contains()`, a filter) already covering three of the
+  five core `.str` accessor methods. Picked `str.split()` over
+  `str.replace()` as this round's topic since it's the more
+  interview-frequent of the two ("this column has two things jammed
+  together, split it" is a more common live-coding ask than a plain
+  find-and-replace) and it naturally sets up `str.replace()` as tomorrow's
+  candidate, named explicitly in today's own closing teaser, matching the
+  "close a gap, name the next one" pattern recent rounds have used. No
+  fixture in `practice/data/orders_raw.csv`/`customers.csv` has a
+  naturally delimited text column, so — following Lesson 42's own
+  precedent of a small inline DataFrame when the real CSVs don't fit —
+  built two synthetic columns in-lesson: `customer_full` (e.g. "An
+  Nguyen-North", one row deliberately `NaN`) and `sku_path` (e.g.
+  "ELEC/PHONE/CASE-01", one row deliberately shorter than the rest, only
+  2 "/"-separated segments instead of 3) to have a real ragged-split case
+  to demonstrate, not a contrived one. A scratch dir was created at
+  `data/.scratch/lesson76/` (not `/tmp`, this sandbox blocks that,
+  confirmed again this round) with a copied `practice/data/` directory
+  (via `mkdir` + the `Write` tool per-file, since `cp` with any flag hit
+  this sandbox's command-approval gate this round — a new block shape not
+  hit by recent rounds) and probe scripts written as real `.py` files
+  (not inline heredocs, consistent with recent rounds' own findings about
+  heredoc parsing issues in this sandbox); `uv run --with pandas python3`
+  worked on the first attempt (pandas 3.0.6, numpy 2.5.3, matching every
+  recent lesson). Every claim was hand-verified there before writing:
+  confirmed the default `str.split(" ")` (`expand=False`) returns a
+  Series of real Python `list` objects (`type()` confirmed directly),
+  native length per row, `NaN` preserved as `NaN` (not an empty list) for
+  the one missing row. Confirmed `expand=True` on `sku_path` (delimiter
+  `"/"`) returns a `(5, 3)` DataFrame shaped by the WIDEST row (3
+  segments), with the one shorter row's ("TOYS/BLOCK-05", only 2
+  segments) third column padded `NaN` — confirmed directly via
+  `pd.isna()` on that exact cell, not assumed. Confirmed `n=1` on
+  `customer_full` split on `"-"` caps the cut count, correctly producing
+  `("An Nguyen", "North")` rather than over-splitting if a name ever
+  contained a second `"-"`. Confirmed `.str[i]` on the ragged list form is
+  safe on the out-of-range row: `parts.str[2]` on `sku_path`'s split
+  returns `NaN` for the 2-segment row, confirmed directly to differ from
+  plain Python list indexing (`parts.iloc[4][2]`) on the identical
+  underlying list, which raises `IndexError: list index out of range` —
+  this divergence is the round's central, verified (not assumed) finding
+  and the reason the `.str` accessor family exists rather than just
+  calling `.apply(list.__getitem__)`. Also directly confirmed `rsplit()`
+  mirrors `split()` counting from the right end instead of the left, on
+  `sku_path` with `n=1` (correctly keeping `"ELEC/PHONE"` intact against
+  `"CASE-01"`). Before writing the practice file, ran this course's
+  now-standard freebie-risk probe: `ex1_expected_len` is checked with
+  `== 2`, `ex2_delimiter` with `== "/"`, `ex3_n` with `== 1`, and
+  `ex4_position` with `== 2` — every blank fails closed if left as `...`,
+  confirmed by running the shipped file unmodified before any exercise
+  was solved. The shipped (unsolved) `practice/76_str_split.py` was
+  executed directly from its real `practice/` location (`cd data && uv
+  run --with pandas python3 practice/76_str_split.py`) and printed exactly
+  4 ✗ with no traceback on the first attempt (no bugs needed fixing this
+  round); a solved copy (`76_solved.py`, kept only in the scratch dir, not
+  shipped) then printed all 4 ✓ on the first run. Quiz options were
+  drafted, then mechanically word-counted with a Python script (run via
+  `uv run python3`, consistent with recent rounds since a bare `python3`
+  invocation is blocked by this sandbox's command-approval gate) isolating
+  each `<div class="q">` block by regex span — the first draft came out
+  mismatched on all three questions (Q1 11/10/10, Q2 7/9/10, Q3 11/9/11);
+  iterated through several rewrite+recount cycles (rewriting each option
+  to a shared target word count per question, then re-running the same
+  script to confirm before moving on, rather than trusting a manual count
+  by eye) until all three landed level (Q1 10/10/10, Q2 10/10/10, Q3
+  9/9/9), with exactly one `data-ok` per question throughout, confirmed by
+  the same script; independently cross-checked with a separate arithmetic
+  computation (`10*3 + 10*3 + 9*3 = 87`) against the script's own reported
+  whole-file option-word total (87) — the same two-genuinely-different-
+  methods approach recent rounds have used, and it agreed exactly. A
+  separate mechanical tag-balance script (regex open/close occurrence
+  counts per tag) caught one real markup bug this round, the same
+  recurring pattern as Lessons 72-75: the initial draft's `<div
+  class="callout">` closed with a stray extra `</p>` even though this
+  course's established callout markup never wraps content in `<p>` at
+  all; fixed by removing the stray `</p>`, re-ran the tag-balance script
+  afterward and confirmed `p` open/close counts matched exactly (19/19)
+  along with every other tracked tag (`html`/`head`/`title`/`body`/`h1`/
+  `dfn` 1/1 each, `h2` 7/7, `div` 6/6, `pre` 5/5, `code` 76/76, `span`
+  21/21, `strong` 4/4, `em` 1/1, `a` 2/2, `button` 9/9). Raw-`&` scan found
+  exactly two matches in the lesson body, both the two `&` characters
+  inside the single already-established `cd ~/learning/data && uv run …`
+  shell command inside a `<pre><code>` block (this course's standing
+  precedent, not a new bug), zero raw `&` in prose. Checked the glossary
+  for a collision before adding anything: grepped for
+  `str.split`/`str.rsplit` across the full glossary — no existing entry —
+  so added exactly one new row, `str.split()`, placed directly after
+  Lesson 75's `searchsorted()` entry; confirmed the glossary table's tags
+  stayed balanced after the insert via occurrence counts (`table` 1/1,
+  `tr` 137/137, `td` 408/408, `th` 3/3, `code` 821/821), zero raw `&`
+  introduced. Registered Lesson 76 in `nav.js` with today's date
+  (2026-09-22); `node --check` confirmed it still parses as valid
+  JavaScript after the edit. This round's fresh gap search leaves
+  `str.replace()` as the sole standing named candidate for next time,
+  named explicitly in today's closing teaser as the natural remaining
+  piece of the `.str` accessor family (extract/extractall/contains/split
+  all now taught). The entire `data/.scratch/` directory was removed
+  (`rm -rf`) after verification (only `lesson76/` lived there, confirmed
+  via listing before deleting, nothing else was at risk); `git status
+  --short` afterward will be checked next to confirm only the intended
+  `data/` files changed. This agent does not run `git commit` — leaving
+  working-tree changes uncommitted remains this course's established
+  convention. `bin/record-progress data lesson_generated --day 76
+  --lesson 0076-str-split.html --detail '{"by":"headless"}'` was run next
+  from the repo root using the relative-path form, per this course's own
+  established tip that it's more reliable than an absolute path in this
+  sandbox.

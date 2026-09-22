@@ -6988,3 +6988,150 @@ fail *gracefully* so the learner sees which task failed.
   remainder — if a sweep is chosen, it will need to either accept the
   backend-specific material or reach further back for still-untouched
   early lessons not yet on any review list.
+- 2026-09-22 — **Day 56 generated: the `operator` module**
+  (`lessons/0056-operator-module.html`), fresh content, chosen over a
+  seventh review sweep per Day 55's own next-day note ("Day 56 should
+  scan once more for any newly-noticeable pure-language stdlib gap before
+  defaulting to" review). Read `MISSION.md` (untouched, read-only),
+  `PLAN.md`, `RESOURCES.md`, the sole `learning-records/0001-baseline-
+  reads-python-writes-little.md`, `assets/nav.js`'s full `LESSONS` array,
+  and `NOTES.md`'s tail (last ~400 lines via `tail`, since the full file —
+  now 6,990 lines — exceeds the read tool's single-read size limit) to
+  confirm the DB state the orchestrator had already checked (latest row
+  `lesson_generated day=55` on 2026-09-21, nothing for day 56, no
+  completion/quiz/kata signal past mid-July) and Day 55's exact framing
+  above.
+  Idempotency: grepped the whole repo for `2026-09-22` (only dataeng's own
+  planning docs matched, confirming nothing python-specific existed yet)
+  and confirmed `lessons/0056*` did not exist and `nav.js` had no `n: 56`
+  entry before writing anything.
+  Topic selection, not taken on faith: rather than trusting Day 55's list
+  of remaining review candidates (18, 21-23, 25-26 — all backend-specific)
+  as the only option, scanned for a fresh stdlib gap first, per Day 55's
+  instruction. Grepped all 55 lessons and every practice file for
+  `shutil\.`, `tempfile\.`, `statistics\.`, `operator\.`, `copy\.deepcopy|
+  copy\.copy`, `io\.StringIO|io\.BytesIO`, and `json\.dumps|json\.loads`.
+  `tempfile` had two incidental hits (Days 11, 13, using it as a fixture
+  helper, not teaching the module itself); `json`/`io` were already fully
+  covered (Day 6); `shutil`/`statistics` had zero hits but are thin,
+  narrow modules with limited everyday reach; `copy.deepcopy` had exactly
+  one hit, in Day 1's shallow-vs-deep-copy section, already adequately
+  taught there as a one-off, not a standalone-lesson-sized gap. `operator`
+  had zero real hits (a `<title>` and quiz-stem substring match on the
+  English word "operator" in Days 42/52 were confirmed to be about the
+  walrus operator, not the module) — a clean, genuine gap, and unlike
+  `shutil`/`statistics` it is used constantly in real code and interviews
+  (`sorted(key=operator.itemgetter(...))` is close to idiomatic Python's
+  default spelling once the key is a plain lookup), and builds directly on
+  two already-taught lessons: Day 4's `lambda`/`key=` (the thing being
+  named) and Day 36's `functools.reduce` (what `operator.add`/`mul` pair
+  with) — a stronger, more load-bearing choice than either alternative.
+  Read `lessons/0053-deque-and-namedtuple.html` and `lessons/0036-
+  functools.html` in full as structural precedent (dfn markup, callout/
+  interview divs, code span classes, closing pattern, practice-file/quiz/
+  glossary shape) and as the two lessons today's material builds on
+  directly.
+  Topic: `operator.itemgetter` as the named version of `lambda x: x[key]`
+  (single-key, then multi-key returning a tuple for a multi-column sort,
+  paralleling `ORDER BY city, amount`); `operator.attrgetter` as the same
+  idea for dot-access on objects/namedtuples/dataclasses instead of
+  bracket-access on dicts; `operator.methodcaller` for sorting/mapping by
+  a no-argument method call; a callout on *why* bother over a working
+  `lambda` (C-implemented speed on large sorts, but more importantly
+  readability — "get the amount field" said directly vs. parsed from a
+  tiny function definition), with an explicit boundary (`itemgetter`/
+  `attrgetter`/`methodcaller` only express a plain lookup or no-argument
+  call; any real computation in the key still needs a real `lambda`); and
+  `operator.add`/`operator.mul` as plain-function spellings of `+`/`*`,
+  paired with Day 36's `functools.reduce` for a product (no built-in
+  equivalent to `sum()`, unlike a plain sum which Day 36 already said to
+  prefer over `reduce`).
+  No-pandas rule: grepped the lesson and practice file case-insensitively
+  for `pandas`/`numpy`/`pd\.`/`np\.` — exactly one hit, a "Where pandas
+  goes from here" callout naming `df.sort_values(["city", "amount"])`
+  without demonstrating it, noting pandas's multi-key sort is a vectorized
+  column operation with no per-row Python callable involved at all; zero
+  hits in the practice file.
+  Correctness spot-check: every worked snippet (`itemgetter` vs `lambda`
+  equivalence on the sales-by-amount sort; multi-key `itemgetter("city",
+  "amount")` including which of two tied-city rows sorts first;
+  `attrgetter("x")` sorting a list of `namedtuple` `Point`s; `attrgetter`
+  on a plain class instance sorted by age; `methodcaller("lower")` for a
+  case-insensitive string sort and `methodcaller("upper")` via `map()`;
+  `reduce(add, nums)` and `reduce(mul, nums)`) was run standalone via `uv
+  run python3` on a single scratch script (created with the `Write` tool
+  in this round's `.scratch-python-verify/` directory, deleted at the end)
+  before shipping. All output matched the in-lesson comments exactly,
+  including the specific multi-key tie-break example (`Danang` first
+  alphabetically, then the two `Hanoi` rows ordered `80` before `120`).
+  Practice file `practice/56_operator_module.py` (5 exercises): sorting a
+  list of dicts by one field with `itemgetter`, sorting by two fields at
+  once with a multi-key `itemgetter`, sorting a list of `namedtuple`s with
+  `attrgetter`, a case-insensitive string sort with `methodcaller` that
+  preserves original casing in the output, and a `reduce`+`operator.mul`
+  product. Verified in a scratch directory under the repo root
+  (`.scratch-python-verify/`, created fresh this round, deleted at the
+  end): the shipped (unsolved) copy printed all five ✗ with no traceback;
+  a separately solved copy printed all five ✓ and the "All green" tally.
+  Re-ran the real `practice/56_operator_module.py` directly (unsolved)
+  after deleting the scratch copies, confirming the same all-✗-no-
+  traceback result from its actual repo path.
+  Glossary: four new terms — `operator module`, `itemgetter`,
+  `attrgetter`, `methodcaller` — added under a new `Day 56` section in
+  `reference/glossary.html`, after grepping for and confirming zero
+  collisions with any existing row.
+  HTML tag-balance was checked with a stdlib `html.parser.HTMLParser`-
+  based stack checker (written as a throwaway script via the `Write`
+  tool, deleted after use) against both the lesson file and the full
+  (now-modified) glossary. First pass caught one real issue: a stray
+  `</p>` left inside the "Why bother — a lambda already works" `<div
+  class="callout">` (should have closed with `</div>` only, same bug
+  shape Day 54's notes describe) — fixed, then re-checked clean on both
+  files. A raw-unescaped-`&` regex (`&(?!amp;|lt;|gt;|quot;|#39;|apos;|
+  #\d+;)`) against both files found zero true positives.
+  Quiz: 4 questions, one per concept (`itemgetter` as named-`lambda`
+  equivalence, multi-key `itemgetter` as a tuple comparison mirroring
+  `ORDER BY`, `attrgetter` vs `itemgetter`'s dot-vs-bracket boundary, and
+  where a real `lambda` still beats `operator` entirely). Word counts were
+  checked with a small `html.parser.HTMLParser`-based Python script
+  splitting each `<button class="opt">`'s stripped-tag text on whitespace,
+  cross-checked with a second, independent Node.js regex-based script per
+  this course's established two-method practice. First draft mismatched
+  on all four questions (Q1 7/9/9, Q2 11/9/10, Q3 11/10/11, Q4 10/9/8) —
+  took one to two rounds of few-word edits per question, re-running both
+  scripts after every edit. Landed at 9/9/9, 10/10/10, 11/11/11, and
+  11/11/11 respectively; both scripts agreed at every step, and a separate
+  check confirmed exactly 4 `data-ok` occurrences total, one per question,
+  matching the four-question count.
+  `RESOURCES.md`: extended the existing `itertools`/`collections` stdlib
+  line to add `operator` as a third module in the same "replaces a
+  hand-written loop or lambda" family, rather than adding a new line —
+  matching Day 53's precedent for extending an existing citation instead
+  of duplicating it. `PLAN.md` not edited.
+  Registered in `assets/nav.js` with `date: "2026-09-22"`; confirmed `node
+  --check assets/nav.js` reports no syntax errors after the edit.
+  **DB access:** not attempted this round — the orchestrator had already
+  confirmed via the DB moments before this run started that the latest
+  python row was `lesson_generated day=55` on 2026-09-21 with nothing for
+  day 56, so a fresh query would have been redundant; deferred entirely to
+  that pre-run confirmation plus this round's own on-disk idempotency
+  check (repo-wide grep for `2026-09-22`, and checking `lessons/` and
+  `nav.js` directly) before writing anything.
+  `bin/record-progress python lesson_generated --day 56 --lesson
+  0056-operator-module.html --detail '{"by":"headless"}'` will be run
+  from the repo root after this entry is written, per the standard
+  closing step.
+  `python/learning-records/` still holds only the Day 1 baseline; no
+  completion/quiz/kata outcome has ever been recorded for any day 2-55,
+  so this round paced entirely from on-disk state, same as every prior
+  round since Day 42.
+  **Next-day note:** with `operator` now covered, the remaining explicit
+  candidates for a fresh-content day are thinner — `shutil` and
+  `statistics` (both zero-hit, both narrower/less load-bearing than
+  `operator` was, worth a one-paragraph mention on a future review day
+  rather than a standalone lesson) — while the six-lesson backend-specific
+  review-candidate list (18, 21-23, 25-26) remains available if Day 57
+  weighs review over a further scan. Only one fresh day (56) has run
+  since Day 55's review, so the "avoid three fresh days in a row" rule is
+  not yet a constraint — Day 57 can pick either fresh content or review on
+  its own merits, same as every prior day-after-a-review-day has.

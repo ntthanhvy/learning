@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 76 · str.split(): breaking one text column into several</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 76 · ~20 min · 22 Sep 2026</p>
+<h1>str.split(): breaking one text column into several</h1>
+<p class="byline">Chào bạn — the <code>argsort</code>/<code>np.unique</code>/<code>searchsorted</code> trio Lesson 72 opened is now fully taught, so today's a fresh scan. A fresh grep across all 75 lessons and the glossary turned up a real gap hiding in plain sight: Lessons 42/43 taught <code>str.extract()</code>/<code>str.extractall()</code> (regex-based) and Lesson 60 taught <code>str.contains()</code> (a filter), but the plain, no-regex-needed workhorse for "one messy column, several real fields" — <code>str.split()</code> — never got its own lesson. It's one of the most common live-coding asks ("this column has name and region jammed together with a dash, split it"), so it closes that gap today.</p>
+
+<h2>1 · The default: one string in, one Python list out</h2>
+<p><dfn data-en="a Series.str method, str.split(sep), that breaks each string in a column into pieces at every occurrence of sep -- by default (expand=False) it returns a Series where EACH ROW HOLDS A PYTHON LIST of the pieces, one list per row, and the list's length can differ row to row depending on how many delimiters that particular string actually contains" data-vn="giữ nguyên 'str.split()' — tách mỗi chuỗi trong cột thành nhiều phần tại mọi vị trí có dấu phân cách (sep); mặc định (expand=False) trả về 1 Series mà MỖI HÀNG LÀ MỘT LIST Python chứa các phần đã tách, số phần tử trong list KHÁC NHAU giữa các hàng tuỳ chuỗi đó có bao nhiêu dấu phân cách">.str.split(sep)</dfn> breaks each string at every occurrence of <code>sep</code>. Its default shape surprises people coming from SQL: not a new table, but a Series where every cell holds a plain Python list.</p>
+<pre><code>orders[<span class="str">"customer_full"</span>]
+<span class="cm"># 0    An Nguyen-North
+# 1    Binh Tran-South
+# 2        Chi Le-East
+# ...</span>
+orders[<span class="str">"customer_full"</span>].str.split(<span class="str">" "</span>)
+<span class="cm"># 0    [An, Nguyen-North]
+# 1    [Binh, Tran-South]
+# 2        [Chi, Le-East]
+# ...  -- dtype: object, each cell is a real Python list</span></code></pre>
+<p>Confirmed directly (pandas 3.0.6): the result's dtype is <code>object</code>, and <code>type()</code> on any individual cell is Python's built-in <code>list</code>, not a Series or array. This list form is the right shape when you only need to index one piece out with <code>.str[i]</code> (Section 3) — it is the wrong shape the moment you want the pieces as real separate columns.</p>
+
+<h2>2 · expand=True: turn the split into real columns — and watch it pad ragged rows with NaN</h2>
+<p><dfn data-en="a keyword on str.split() -- expand=True -- that returns a DataFrame instead of a Series-of-lists, one column per split piece; if different rows split into different numbers of pieces, the SHORTER rows get their missing trailing columns padded with NaN rather than raising an error" data-vn="giữ nguyên 'expand=True' — tham số của str.split() khiến kết quả trả về là 1 DataFrame (mỗi phần tách thành 1 cột) thay vì Series chứa list; nếu các hàng tách ra SỐ LƯỢNG PHẦN KHÁC NHAU, hàng ngắn hơn sẽ bị ĐIỀN NaN vào (các) cột thiếu ở cuối, KHÔNG báo lỗi">expand=True</dfn> is the fix — one real column per piece, ready to assign back onto the DataFrame. But it hides a real trap: if rows don't all split into the same number of pieces, the shorter rows get padded with <code>NaN</code>, silently, no warning:</p>
+<pre><code>orders[<span class="str">"sku_path"</span>]
+<span class="cm"># 0      ELEC/PHONE/CASE-01
+# 1     HOME/KITCHEN/MUG-02
+# ...
+# 4           TOYS/BLOCK-05   -- only ONE "/" here, not two</span>
+orders[<span class="str">"sku_path"</span>].str.split(<span class="str">"/"</span>, expand=<span class="kw">True</span>)
+<span class="cm">#         0         1        2
+# 0    ELEC     PHONE  CASE-01
+# ...
+# 4    TOYS  BLOCK-05      NaN   -- row 4 padded, no dept/subdept split like the others</span></code></pre>
+<p>Confirmed directly on this course's own fixture: 4 of 5 rows in <code>sku_path</code> follow a <code>dept/subdept/sku</code> pattern, but one row ("TOYS/BLOCK-05") only has two segments. <code>expand=True</code> returns a DataFrame shaped by the WIDEST row (3 columns here), and every narrower row's missing tail column becomes <code>NaN</code> — the same "coerce a mismatch into NaN rather than raise" instinct as <code>str.extract()</code>'s no-match rows (Lesson 42) or <code>pd.to_numeric(errors="coerce")</code>. Naming this unprompted — "check for unexpected NaNs after an expand=True split, since it means a row had a different piece-count than expected" — is the interview-grade instinct here.</p>
+
+<h2>3 · n=: capping how many cuts happen, so the remainder stays whole</h2>
+<p><dfn data-en="a keyword on str.split(), n=, capping the maximum NUMBER OF SPLITS performed (not the number of output pieces) -- the string is only cut n times from the left, and everything after the last cut stays together as one final piece, even if it still contains more of the separator character" data-vn="giữ nguyên 'n=' — tham số của str.split() giới hạn SỐ LẦN CẮT tối đa (không phải số phần tách ra) -- chuỗi chỉ bị cắt n lần tính từ trái, phần còn lại sau lần cắt cuối giữ nguyên thành 1 mảnh, dù nó vẫn còn chứa dấu phân cách">n=</dfn> limits the split count directly, useful whenever only the FIRST separator actually matters and the rest of the string should stay intact:</p>
+<pre><code>orders[<span class="str">"customer_full"</span>].str.split(<span class="str">"-"</span>, n=<span class="num">1</span>, expand=<span class="kw">True</span>)
+<span class="cm">#            0        1
+# 0  An Nguyen    North
+# 1  Binh Tran    South
+# ...  -- exactly ONE cut, no matter how many "-" a name might contain</span></code></pre>
+<p>Confirmed directly: without <code>n=1</code>, a row like a hypothetical <code>"An Nguyen-Van-North"</code> (two dashes) would split into three pieces instead of the intended two — <code>n=</code> is the guardrail against that. <code>rsplit()</code> is the mirror method: same signature, but counts <code>n</code> cuts from the RIGHT end instead of the left — the natural choice for "keep everything up to the last separator together," e.g. pulling a file extension or the final path segment off <code>sku_path</code> without disturbing the rest.</p>
+
+<div class="callout"><strong>SQL bridge:</strong> there's no single built-in SQL <code>SPLIT</code> that returns multiple columns cleanly across dialects — Postgres has <code>split_part(col, sep, n)</code>, called once PER desired piece, or <code>string_to_array(col, sep)</code> for the list form. <code>str.split(sep, expand=True)</code> is the vectorized version of calling <code>split_part()</code> for every piece in one shot; <code>str.split(sep)</code> without <code>expand</code> is the pandas equivalent of <code>string_to_array()</code>.</div>
+
+<h2>4 · .str[i]: indexing into the list form, safely, even on ragged rows</h2>
+<p>The list form (Section 1) supports positional indexing with <code>.str[i]</code> — and unlike indexing a plain Python list, it never raises <code>IndexError</code> on a row whose list happens to be too short for that position:</p>
+<pre><code>parts = orders[<span class="str">"sku_path"</span>].str.split(<span class="str">"/"</span>)   <span class="cm"># list form, ragged lengths (3, 3, 3, 3, 2)</span>
+parts.str[<span class="num">2</span>]
+<span class="cm"># 0    CASE-01
+# ...
+# 4        NaN   -- row 4's list only has 2 elements, position 2 doesn't exist -- NaN, not a crash</span></code></pre>
+<p>Confirmed directly: <code>parts.iloc[4][2]</code> (plain Python list indexing) raises <code>IndexError: list index out of range</code>, but <code>parts.str[2]</code> (the vectorized accessor) returns <code>NaN</code> for that same row instead — the whole point of the <code>.str</code> accessor family is exactly this kind of per-row safety net that raw Python list/string operations don't give you for free.</p>
+
+<div class="interview">
+<p><strong>Q: "You need to split a 'name-region' column into two real columns. Walk me through it."</strong> A strong answer, out loud: <em>"str.split('-', n=1, expand=True) — n=1 caps it at one cut so a name that happens to contain another dash doesn't get split further than intended, and expand=True gives me back a real two-column DataFrame instead of a Series of lists, ready to assign column names and merge back onto the original frame. The thing I'd check immediately after: whether any row produced an unexpected NaN in a column that should be fully populated — that means a row didn't actually contain the separator the number of times I assumed, the same silent-mismatch risk as str.extract()'s no-match rows. I'd run isna().sum() on the result before trusting it."</em> The signal: naming <code>n=</code> and <code>expand=True</code> together with their actual reasons, and flagging the ragged-row NaN risk unprompted.</p>
+</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/76_str_split.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/76_str_split.py</code></pre>
+<p>Uses a small inline <code>customer_full</code>/<code>sku_path</code> DataFrame (same customer/order domain as Lessons 6-75, no new CSV needed — one row is deliberately <code>NaN</code>, one <code>sku_path</code> row deliberately has fewer segments than the rest). Exercise 1 confirms the default list-of-strings shape and its native per-row length (Section 1). Exercise 2 confirms <code>expand=True</code>'s NaN-padding on the shorter row (Section 2). Exercise 3 confirms <code>n=</code> capping the split so the remainder stays whole (Section 3). Exercise 4 confirms <code>.str[i]</code>'s safe-NaN behavior on a ragged list, versus plain list indexing's <code>IndexError</code> (Section 4).</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: str.split(sep) with the default expand=False returns a Series where every cell is a real Python list, and different rows can hold lists of different lengths depending on how many delimiters each string actually contains.">
+    <p class="stem">What does <code>str.split(sep)</code> return by default (<code>expand=False</code>)?</p>
+    <button class="opt" data-ok>a Series where each row holds one Python list only</button>
+    <button class="opt">a brand new DataFrame with one fresh column per piece</button>
+    <button class="opt">one single flat Series with every piece from every row</button>
+  </div>
+  <div class="q" data-why="Confirmed directly on this lesson's own sku_path column: expand=True shapes the result DataFrame by the row with the MOST pieces, and any shorter row's missing trailing column(s) become NaN, not an error.">
+    <p class="stem">With <code>expand=True</code>, what happens to a row that splits into FEWER pieces than other rows?</p>
+    <button class="opt" data-ok>Its own missing trailing column becomes NaN right there, silently</button>
+    <button class="opt">pandas immediately raises a ValueError, refusing the whole split entirely</button>
+    <button class="opt">That one shorter row simply gets dropped from the result</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: parts.iloc[4][2] on the plain Python list raises IndexError, but parts.str[2] on the same ragged Series returns NaN for that row instead -- the .str accessor absorbs the out-of-range case rather than crashing.">
+    <p class="stem">Why does <code>parts.str[2]</code> return <code>NaN</code> for a row instead of raising, when plain list indexing would raise <code>IndexError</code>?</p>
+    <button class="opt" data-ok>The .str accessor absorbs an out-of-range position as NaN</button>
+    <button class="opt">Because that specific row had already been silently dropped</button>
+    <button class="opt">Because .str[2] only ever reads the real column two</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official pandas <a href="https://pandas.pydata.org/docs/reference/api/pandas.Series.str.split.html">Series.str.split()</a> API reference (per <code>RESOURCES.md</code>'s "Docs: pandas User Guide" entry) — read the <code>expand=</code>, <code>n=</code>, and <code>regex=</code> parameter sections in full, and note the same page documents <code>rsplit()</code> immediately below it (~5 min).</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>str.split()</code>, <code>expand=True</code>, and <code>n=</code> are new today, placed right after Lesson 75's <code>searchsorted()</code> entry.<br>
+<strong>Next lesson:</strong> <code>str.replace()</code> is the natural next candidate — same <code>.str</code> family, but rewriting text in place rather than breaking it apart, and it shares the <code>regex=</code> default gotcha Lesson 60's <code>str.contains()</code> already surfaced. Otherwise, a fresh curriculum/glossary scan for the next genuinely-uncovered pattern.<br><br>
+💬 Anything unclear — the expand=True NaN-padding trap, n= vs rsplit(), the .str[i] safety net, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

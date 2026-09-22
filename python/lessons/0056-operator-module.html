@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 56 · the operator module</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 56 · ~20 min · 22 Sep 2026</p>
+<h1>The <code>operator</code> module: naming what a <code>lambda</code> was already doing</h1>
+<p class="byline">Day 4 taught <code>sorted(rows, key=lambda row: row["amount"])</code> — a throwaway one-line function whose entire job is "pull one field out of each item." That job is common enough that the standard library ships a small module of ready-made functions for it: <dfn data-en="operator — a standard-library module of small functions, one per built-in operator or common lookup, meant to be passed as a value (e.g. to key=, sorted(), or reduce()) instead of writing an equivalent one-line lambda by hand" data-vn="giữ nguyên &quot;operator module&quot; — module chuẩn chứa các hàm nhỏ tương ứng với từng phép toán/lookup phổ biến, dùng để truyền làm giá trị (key=, sorted(), reduce()) thay cho viết lambda tương đương">operator</dfn> module. Today covers its three everyday exports — <dfn data-en="operator.itemgetter(key) returns a callable that, given an item, returns item[key] — the named version of lambda x: x[key], and the version sorted()/heapq/groupby most commonly use as key=" data-vn="giữ nguyên &quot;itemgetter&quot; — hàm trả về callable lấy item[key], bản có tên của lambda x: x[key]">itemgetter</dfn>, <dfn data-en="operator.attrgetter(name) returns a callable that, given an object, returns object.name — the named version of lambda x: x.name, for objects/namedtuples/dataclasses instead of dicts" data-vn="giữ nguyên &quot;attrgetter&quot; — hàm trả về callable lấy object.name, bản có tên của lambda x: x.name">attrgetter</dfn>, and <dfn data-en="operator.methodcaller(name, *args) returns a callable that, given an object, calls object.name(*args) and returns the result — the named version of lambda x: x.name(*args)" data-vn="giữ nguyên &quot;methodcaller&quot; — hàm trả về callable gọi object.name(*args), bản có tên của lambda x: x.name(*args)">methodcaller</dfn> — plus the handful of operator-as-function spellings (<code>operator.add</code>, <code>operator.mul</code>) that pair with Day 36's <code>reduce</code>.</p>
+
+<div class="callout"><strong>Bridge from SQL:</strong> <code>ORDER BY city, amount</code> sorts by more than one column at once, left to right. <code>itemgetter("city", "amount")</code> is the same multi-column sort key spelled as one Python call, instead of a <code>lambda row: (row["city"], row["amount"])</code> that says the same thing with more punctuation.</div>
+
+<h2>1 · <code>itemgetter</code>: the named version of <code>lambda x: x[key]</code></h2>
+<p>Day 4's grouping-by-amount example used a <code>lambda</code> whose only job was one square-bracket lookup:</p>
+<pre><code><span class="kw">sorted</span>(sales, key=<span class="kw">lambda</span> row: row[<span class="str">"amount"</span>])</code></pre>
+<p><code>operator.itemgetter</code> builds exactly that callable, without writing the <code>lambda</code>:</p>
+<pre><code><span class="kw">from</span> operator <span class="kw">import</span> itemgetter
+
+sales = [
+    {<span class="str">"city"</span>: <span class="str">"Hanoi"</span>, <span class="str">"amount"</span>: <span class="num">120</span>},
+    {<span class="str">"city"</span>: <span class="str">"Danang"</span>, <span class="str">"amount"</span>: <span class="num">200</span>},
+    {<span class="str">"city"</span>: <span class="str">"HCMC"</span>, <span class="str">"amount"</span>: <span class="num">80</span>},
+]
+
+<span class="kw">sorted</span>(sales, key=itemgetter(<span class="str">"amount"</span>))
+<span class="cm"># [{'city': 'HCMC', 'amount': 80}, {'city': 'Hanoi', 'amount': 120}, {'city': 'Danang', 'amount': 200}]</span></code></pre>
+<p>Verified live: identical output to the <code>lambda</code> version above, same order, same items. Read <code>itemgetter("amount")</code> as "build me a function that takes one item and returns <code>item["amount"]</code>" — <code>itemgetter</code> doesn't look anything up itself; it <em>returns a callable</em> that does, the same two-step shape Day 36's <code>partial</code> used (call <code>itemgetter</code> once to build the function, then that result gets called once per item by <code>sorted</code>). <code>itemgetter</code> also works with integer positions, so it reads a plain tuple or list exactly like <code>lambda pair: pair[0]</code> would.</p>
+
+<h2>2 · Sorting by more than one field at once</h2>
+<p>Pass <code>itemgetter</code> more than one key and it returns a <em>tuple</em> of values instead of one — which is exactly what a multi-column sort needs, since Python compares tuples element by element, left to right, falling through to the second element only when the first ties:</p>
+<pre><code><span class="kw">from</span> operator <span class="kw">import</span> itemgetter
+
+rows = [
+    {<span class="str">"city"</span>: <span class="str">"Hanoi"</span>, <span class="str">"amount"</span>: <span class="num">120</span>},
+    {<span class="str">"city"</span>: <span class="str">"Hanoi"</span>, <span class="str">"amount"</span>: <span class="num">80</span>},
+    {<span class="str">"city"</span>: <span class="str">"Danang"</span>, <span class="str">"amount"</span>: <span class="num">200</span>},
+]
+
+<span class="kw">sorted</span>(rows, key=itemgetter(<span class="str">"city"</span>, <span class="str">"amount"</span>))
+<span class="cm"># [{'city': 'Danang', ...}, {'city': 'Hanoi', 'amount': 80}, {'city': 'Hanoi', 'amount': 120}]</span>
+<span class="cm"># -- Danang first (alphabetically first city); the two Hanoi rows then break</span>
+<span class="cm"># their tie on amount, 80 before 120</span></code></pre>
+<p>Verified live: matches the comment exactly, including which of the two Hanoi rows sorts first. The equivalent hand-written key would be <code>lambda row: (row["city"], row["amount"])</code> — <code>itemgetter</code> with several arguments is just a shorter, faster way to say "build that tuple."</p>
+
+<h2>3 · <code>attrgetter</code>: the same idea for objects, not dicts</h2>
+<p><code>itemgetter</code> reaches inside with <code>[]</code>, so it only works on things that support square-bracket lookup — dicts, lists, tuples. An object's fields are read with a dot instead, so sorting a list of plain objects or <code>namedtuple</code>s (Day 53) by a field needs <code>attrgetter</code>:</p>
+<pre><code><span class="kw">from</span> operator <span class="kw">import</span> attrgetter
+<span class="kw">from</span> collections <span class="kw">import</span> namedtuple
+
+Point = namedtuple(<span class="str">"Point"</span>, [<span class="str">"x"</span>, <span class="str">"y"</span>])
+pts = [Point(<span class="num">3</span>, <span class="num">1</span>), Point(<span class="num">1</span>, <span class="num">2</span>), Point(<span class="num">2</span>, <span class="num">0</span>)]
+
+<span class="kw">sorted</span>(pts, key=attrgetter(<span class="str">"x"</span>))
+<span class="cm"># [Point(x=1, y=2), Point(x=2, y=0), Point(x=3, y=1)]</span></code></pre>
+<p>Verified live: matches the comment. <code>attrgetter("x")</code> is the named version of <code>lambda p: p.x</code> — same relationship <code>itemgetter</code> has to <code>lambda p: p["x"]</code>, just reached with a dot instead of brackets. It works on any object with the named attribute: a <code>namedtuple</code>, a <code>dataclass</code> instance, a plain class instance, or a module. Like <code>itemgetter</code>, multiple names build a tuple for a multi-field sort: <code>attrgetter("last_name", "first_name")</code>.</p>
+
+<h2>4 · <code>methodcaller</code>: calling a method instead of reading a field</h2>
+<p>Sometimes the value to sort or map by isn't a field at all — it's the <em>result of calling a method</em>. <code>methodcaller</code> is the named version of that <code>lambda</code>:</p>
+<pre><code><span class="kw">from</span> operator <span class="kw">import</span> methodcaller
+
+words = [<span class="str">"banana"</span>, <span class="str">"Apple"</span>, <span class="str">"cherry"</span>]
+<span class="kw">sorted</span>(words, key=methodcaller(<span class="str">"lower"</span>))
+<span class="cm"># ['Apple', 'banana', 'cherry'] -- case-insensitive order</span>
+
+<span class="kw">list</span>(<span class="kw">map</span>(methodcaller(<span class="str">"upper"</span>), words))
+<span class="cm"># ['BANANA', 'APPLE', 'CHERRY']</span></code></pre>
+<p>Verified live: both match their comments. <code>methodcaller("lower")</code> is the named version of <code>lambda s: s.lower()</code> — it calls the named method with no arguments on whatever it's given. Extra positional or keyword arguments after the name get forwarded to the method call itself, e.g. <code>methodcaller("replace", "a", "@")</code> is the named version of <code>lambda s: s.replace("a", "@")</code>.</p>
+
+<div class="callout"><strong>Why bother — a <code>lambda</code> already works.</strong> Two real reasons, not just style. First, speed: <code>itemgetter</code>/<code>attrgetter</code>/<code>methodcaller</code> are implemented in C and skip the overhead of a Python-level function call on every comparison — on a large <code>sorted()</code> call this is measurably faster than the equivalent <code>lambda</code>, though "measurably" here matters far less than the second reason. Second, and more important day to day: <code>itemgetter("amount")</code> <em>says</em> "get the amount field" in six words of code that read the same way every time it's used, where a <code>lambda row: row["amount"]</code> asks a reader to parse a tiny function definition just to see the same thing. Reach for the <code>operator</code> version when the job is exactly "pull a field" or "call a no-argument method" — reach for a real <code>lambda</code> the moment the key needs any actual computation (Day 4's <code>lambda pair: pair[1]</code> reading a tuple index is a fine <code>lambda</code>; the moment it becomes <code>lambda row: row["amount"] * 1.1</code>, there's real logic, and <code>itemgetter</code> can't express that at all.)</div>
+
+<h2>5 · The other half of the module: operators as callables</h2>
+<p><code>operator</code> also has a plain function for every built-in operator — <code>operator.add(a, b)</code> is exactly <code>a + b</code> as a callable, <code>operator.mul</code> is <code>*</code>, and so on for every arithmetic and comparison operator. These exist for the same reason as <code>itemgetter</code>: some other function wants a callable, and writing <code>lambda a, b: a + b</code> to hand it one is exactly what <code>operator.add</code> already is:</p>
+<pre><code><span class="kw">from</span> functools <span class="kw">import</span> reduce
+<span class="kw">from</span> operator <span class="kw">import</span> add, mul
+
+nums = [<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>, <span class="num">4</span>]
+reduce(add, nums)   <span class="cm"># 10 -- same as reduce(lambda acc, x: acc + x, nums)</span>
+reduce(mul, nums)   <span class="cm"># 24 -- same as reduce(lambda acc, x: acc * x, nums)</span></code></pre>
+<p>Verified live: both match their comments. This is Day 36's <code>reduce</code> paired with the named operator instead of an inline <code>lambda</code> — <code>sum(nums)</code> is still the right call for a plain sum (Day 36's own point about preferring a named built-in when one already exists), but <code>reduce(mul, nums)</code> for a product has no built-in equivalent, and <code>operator.mul</code> reads more directly than <code>lambda a, b: a * b</code> inside the same line.</p>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> nothing pandas-specific — pandas has its own vectorized column operations (<code>df.sort_values(["city", "amount"])</code> covers the multi-key case) that don't call <code>itemgetter</code> or any plain Python function per row at all; today's module is a plain-Python, per-item mechanism with no DataFrame involved, per <code>MISSION.md</code>.</div>
+
+<div class="interview">
+<p><strong>Q: "Why would you use <code>operator.itemgetter</code> instead of a <code>lambda</code> for a sort key?"</strong> A strong answer, out loud: <em>"When the key is exactly 'read one field' or 'read a few fields for a multi-column sort,' <code>itemgetter("city", "amount")</code> says that directly and is implemented in C, so it's a little faster on a large sort than a Python-level <code>lambda</code> doing the same lookup. I'd reach for a real <code>lambda</code> the moment the key needs actual computation — anything past a plain lookup, like scaling a value or combining two fields with an operator, <code>itemgetter</code> can't express, and forcing it there just to avoid a <code>lambda</code> would be the wrong trade."</em> The signal: naming both the readability and performance reasons, and knowing exactly where <code>itemgetter</code>'s expressiveness runs out.</p>
+</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/56_operator_module.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/56_operator_module.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: sorting a list of dicts by one field with <code>itemgetter</code>, sorting by two fields at once with a multi-key <code>itemgetter</code>, sorting a list of <code>namedtuple</code>s with <code>attrgetter</code>, using <code>methodcaller</code> to sort strings case-insensitively, and pairing <code>operator.mul</code> with <code>functools.reduce</code> to compute a product.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="operator.itemgetter(key) returns a callable that, given an item, returns item[key] -- the exact same thing lambda x: x[key] returns, just built by a small C-implemented function instead of a Python-level function definition. It is a named stand-in for that one-line lambda, not a different mechanism.">
+    <p class="stem">What does <code>operator.itemgetter("amount")</code> return?</p>
+    <button class="opt" data-ok>a plain callable, equivalent to lambda x: x["amount"], reusable</button>
+    <button class="opt">the number 120, read immediately from the first row</button>
+    <button class="opt">a brand new dict, containing only the amount field</button>
+  </div>
+  <div class="q" data-why="Passing itemgetter more than one key makes it return a tuple of values instead of a single value, and Python compares tuples element by element left to right -- so sorted(rows, key=itemgetter('city', 'amount')) sorts by city first, falling through to amount only when two rows share the same city.">
+    <p class="stem">Why does <code>itemgetter("city", "amount")</code> work as a multi-column sort key?</p>
+    <button class="opt" data-ok>returns a tuple, compared left to right, like ORDER BY</button>
+    <button class="opt">it silently sorts by amount alone, always ignoring city completely</button>
+    <button class="opt">it raises TypeError whenever given more than one field name</button>
+  </div>
+  <div class="q" data-why="itemgetter reaches inside a value with square brackets, so it only works on things that support [] lookup -- dicts, lists, tuples. An object's fields are read with a dot instead, so a plain object, namedtuple, or dataclass instance needs attrgetter(name), the dot-based equivalent, not itemgetter.">
+    <p class="stem">Why does sorting a list of <code>namedtuple</code>s by field need <code>attrgetter</code>, not <code>itemgetter</code>?</p>
+    <button class="opt" data-ok>fields are read with a dot; itemgetter only reads with brackets</button>
+    <button class="opt">namedtuple fields simply have no fixed order for itemgetter to use</button>
+    <button class="opt">attrgetter is simply a newer, faster alias for the same function</button>
+  </div>
+  <div class="q" data-why="itemgetter/attrgetter/methodcaller can only express a plain lookup or a no-argument method call -- the exact shape of a one-line lambda that does nothing but read a field or call a method. The moment the key needs real computation, like scaling a value or combining two fields, none of the three can express that at all, and a real lambda or def is the only option.">
+    <p class="stem">When does a real <code>lambda</code> beat <code>operator.itemgetter</code> as a sort key?</p>
+    <button class="opt" data-ok>once the sort key needs real computation, not just one lookup</button>
+    <button class="opt">whenever sorting fewer than roughly ten total items in a list</button>
+    <button class="opt">never; itemgetter always fully replaces every possible lambda, with no exceptions</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the <a href="https://docs.python.org/3/library/operator.html"><code>operator</code></a> stdlib docs — the "Mapping Operators to Functions" table near the top covers every arithmetic/comparison spelling (<code>add</code>, <code>mul</code>, <code>lt</code>, …) this lesson only samples two of; the module's own "Examples" section shows <code>itemgetter</code>/<code>attrgetter</code>/<code>methodcaller</code> used the same way this lesson does. Cited in <code>RESOURCES.md</code> alongside the existing <code>itertools</code>/<code>collections</code> line, since it's the same "replaces a hand-written loop or lambda" family.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day56">glossary</a> under Day 56.<br>
+This builds directly on Day 4's <code>key=</code>/<code>lambda</code> lesson (the thing being named today) and Day 36's <code>reduce</code> (the thing <code>operator.add</code>/<code>mul</code> pair with), and reuses Day 53's <code>namedtuple</code> as the <code>attrgetter</code> example.<br><br>
+💬 Anything unclear — <code>itemgetter</code> vs <code>attrgetter</code>, multi-key sorting, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -158,6 +158,8 @@
       file: "lessons/0075-searchsorted.html" },
     { n: 76, date: "2026-09-22", title: "str.split(): breaking one text column into several",
       file: "lessons/0076-str-split.html" },
+    { n: 77, date: "2026-09-23", title: "str.replace(): rewriting text in place, and its flipped regex= default",
+      file: "lessons/0077-str-replace.html" },
   ];
 
   const REFS = [

@@ -22,7 +22,7 @@ authors for *why*. Cite inline; each lesson recommends exactly one primary sourc
 - [Blog: Trey Hunner](https://treyhunner.com/blog/archives/)
   Careful, beginner-aware writing on comprehensions, unpacking, and looping idioms. Use for: Day 2 — good at explaining *when not to* use a comprehension.
 - [Docs: `dataclasses`](https://docs.python.org/3/library/dataclasses.html) · [`typing`](https://docs.python.org/3/library/typing.html)
-  Use for: Day 7 — structuring records and reading annotated signatures.
+  Use for: Day 7 — structuring records and reading annotated signatures; also Day 57 — `field()`'s `default_factory`/`repr`/`compare` keywords and `frozen=True`, the two escape hatches Day 7 deferred.
 - [Docs: `abc`](https://docs.python.org/3/library/abc.html)
   Use for: Day 50 — abstract base classes, `@abstractmethod`, and how they differ from Day 41's structural `Protocol`.
 - [Docs: `heapq`](https://docs.python.org/3/library/heapq.html) · [`bisect`](https://docs.python.org/3/library/bisect.html)

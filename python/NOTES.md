@@ -7135,3 +7135,162 @@ fail *gracefully* so the learner sees which task failed.
   since Day 55's review, so the "avoid three fresh days in a row" rule is
   not yet a constraint — Day 57 can pick either fresh content or review on
   its own merits, same as every prior day-after-a-review-day has.
+- 2026-09-23 — **Day 57 generated: `dataclasses.field()` and `frozen=True`**
+  (`lessons/0057-dataclass-field-and-frozen.html`), fresh content, chosen
+  over both a seventh review sweep and Day 56's named `shutil`/`statistics`
+  candidates. Read `MISSION.md` (untouched, read-only), `PLAN.md`,
+  `RESOURCES.md` in full, `NOTES.md`'s top conventions/hard-rule/learner-
+  profile sections plus the tail of the Generation log (the file is now
+  7,137 lines — over the read tool's single-read limit — so the top ~70
+  lines were read directly and the log tail via `tail -n 200`), and
+  `assets/nav.js`'s full `LESSONS` array, to confirm the orchestrator's
+  pre-run DB check (latest row `lesson_generated day=56` on 2026-09-22,
+  nothing for day 57, no completion/quiz/kata signal past mid-July) and
+  Day 55/56's exact framing above. Per the task instructions, direct
+  `psql`/`printenv`/`env` reads were not attempted this round — deferred
+  entirely to the orchestrator's pre-run confirmation plus this round's
+  own on-disk idempotency check.
+  Idempotency: confirmed `lessons/0057-*` and `practice/57_*` did not
+  exist, and grepped the whole repo for `2026-09-23` (zero matches
+  anywhere) before writing anything.
+  Topic selection, not taken on faith: rather than defaulting straight to
+  Day 56's named remaining candidates (`shutil`/`statistics`, both
+  zero-hit but thin; or the six-lesson backend-specific review list),
+  scanned for other fresh gaps first. Grepped for `enum\.`/`class.*Enum`
+  (already fully covered, Day 33), `csv` module usage (already covered,
+  Day 6), and `subprocess\.`, `hashlib\.`, `threading\.`/`multiprocessing\.`,
+  `configparser` (all genuine zero-hit gaps, but `subprocess`/`hashlib`
+  aren't on `PLAN.md`'s spine at all, and `threading`/`multiprocessing`
+  are explicitly past `MISSION.md`'s "no deep asyncio/concurrency
+  internals" boundary — weaker choices than a gap already flagged by the
+  course's own prior lessons). The strongest candidate found: Day 7
+  (2026-08-04) explicitly named and deferred `dataclasses.field
+  (default_factory=list)` as "worth knowing exists but out of scope for
+  today's records" — 53 days ago, never picked up since — and Day 31
+  (`__hash__`/`__eq__`, 2026-08-28) used `frozen=True` for exactly one
+  quiz-answer sentence about hash safety without ever teaching what it
+  does on its own terms. Grepped `frozen|default_factory` across all 56
+  lessons to confirm: only those two mentions exist, both partial,
+  neither a standalone treatment of `field()`'s other keywords
+  (`repr=False`, `compare=False`) or of `frozen=True` as an immutability
+  tool in its own right. This is a named, self-flagged gap in a
+  foundational Day-7 topic (dataclasses, used in nearly every lesson
+  since) rather than a newly-invented one — stronger than either
+  `shutil`/`statistics` (thin, narrow, never referenced by name in any
+  prior lesson) or a seventh review sweep (the six remaining candidates
+  are all backend-specific, not a new pure-language idea). Read
+  `lessons/0007-dataclasses-typing-capstone.html` and `lessons/0056-
+  operator-module.html` in full as structural precedent (dfn markup,
+  callout/interview divs, code span classes, closing pattern) and as the
+  exact two lessons today's material extends/closes.
+  Topic: `field(default_factory=list)` fixing the mutable-default
+  `ValueError` Day 7 hit and deferred; `field(repr=False)` hiding a field
+  (e.g. a password) from the auto-generated `__repr__`; `field(default=…,
+  compare=False)` excluding a field (e.g. a surrogate `id`) from the
+  auto-generated `__eq__`; `@dataclass(frozen=True)` making every field
+  read-only after construction, raising `FrozenInstanceError` on any later
+  assignment, with an explicit callback to Day 31's `__hash__` point (a
+  frozen dataclass is the one case `@dataclass` auto-generates a matching
+  `__hash__`, since nothing can mutate it after insertion into a `dict`/
+  `set`); and a closing example combining `frozen=True` with `field()` on
+  one `Config`-shaped record.
+  No-pandas rule: grepped the lesson and practice file case-insensitively
+  for `pandas`/`numpy`/`pd\.`/`np\.` — exactly one hit, a "Where pandas
+  goes from here" callout noting a DataFrame's columns are always mutable
+  in place (`df["x"] = ...`) and pandas has no per-row immutability
+  concept resembling `frozen=True` at all, without demonstrating any
+  pandas call; zero hits in the practice file.
+  Correctness spot-check: every claim in the lesson (the exact
+  `ValueError` message and wording for a plain mutable default; that
+  `default_factory=list` gives each instance its own independent list;
+  the exact `FrozenInstanceError` message and text on a frozen-field
+  mutation; that `field(repr=False)` hides a field from `repr()` while
+  leaving it in `__eq__`; that `field(compare=False)` excludes a field
+  from `__eq__` while leaving it in `repr()`; that a frozen dataclass
+  hashes correctly and dedups in a `set`) was run standalone via `uv run
+  python3` on a single scratch script (created with the `Write` tool in
+  this round's `.scratch-python-verify/` directory, deleted at the end)
+  before shipping. All output matched the in-lesson comments and claims
+  exactly, including the literal `ValueError`/`FrozenInstanceError`
+  message text quoted in the lesson body.
+  Practice file `practice/57_dataclass_field_and_frozen.py` (5 exercises):
+  a `Cart` dataclass fixing the mutable-default trap with
+  `default_factory`, a `User` dataclass hiding `password` from `repr`, a
+  `Record` dataclass excluding `id` from equality, a frozen `Point`
+  confirming `FrozenInstanceError` on mutation, and a frozen `Config`
+  combining `field(repr=False)` and `field(compare=False)` on one record.
+  Verified in a scratch directory under the repo root
+  (`.scratch-python-verify/`, created fresh this round, deleted at the
+  end): the shipped (unsolved) copy printed all five ✗ with no traceback;
+  a separately solved copy printed all five ✓ and the "All green" tally.
+  Re-ran the real `practice/57_dataclass_field_and_frozen.py` directly
+  (unsolved) after deleting the scratch copies, confirming the same
+  all-✗-no-traceback result from its actual repo path.
+  Glossary: three new terms — `default_factory`, `field()`, `frozen
+  dataclass` — added under a new `Day 57` section in
+  `reference/glossary.html`, after grepping for and confirming zero
+  collisions with any existing row; reused the already-existing `Day 1`
+  `immutable` glossary row via plain `<dfn>` rather than redefining it.
+  HTML tag-balance was checked with a stdlib `html.parser.HTMLParser`-
+  based stack checker (written as a throwaway script via the `Write`
+  tool, deleted after use) against both the lesson file and the full
+  (now-modified) glossary. First pass caught one real issue: a stray
+  `</p>` left closing the "Bridge from SQL" `<div class="callout">`
+  (should have closed with `</div>` only — the same bug shape Days 54 and
+  56's notes both describe) — fixed, then re-checked clean on both files.
+  A raw-unescaped-`&` regex (`&(?!amp;|lt;|gt;|quot;|#39;|apos;|#\d+;)`)
+  against both files found zero true positives.
+  Quiz: 4 questions, one per concept (`default_factory` fixing the
+  mutable-default trap, `field(repr=False)`'s display-only scope,
+  `field(compare=False)`'s exclusion from equality, and `frozen=True`'s
+  `FrozenInstanceError` on mutation). Word counts were checked with a
+  small `html.parser.HTMLParser`-based Python script splitting each
+  `<button class="opt">`'s stripped-tag text on whitespace, cross-checked
+  with a second, independent Node.js regex-based script per this course's
+  established two-method practice. First draft mismatched on three of
+  four questions (Q2 10/11/12, Q3 13/10/10, Q4 8/9/10) — Q1 landed
+  correctly on the first attempt at 11/11/11. Took one to three rounds of
+  few-word edits per mismatched question, re-running both scripts after
+  every edit, including one self-correction on Q2 where a first fix
+  attempt still left a 12-word option needing a second small trim. Landed
+  at 11/11/11, 11/11/11, 10/10/10, and 9/9/9 respectively; both scripts
+  agreed at every step, and a separate check confirmed exactly 4
+  `data-ok` occurrences total, one per question, matching the
+  four-question count.
+  `RESOURCES.md`: extended the existing `dataclasses`/`typing` line to
+  add a Day 57 use-case (`field()`'s keywords and `frozen=True`)
+  alongside the existing Day 7 one, rather than adding a new line —
+  matching Day 53/56's precedent for extending an existing citation
+  instead of duplicating it. `PLAN.md` not edited.
+  Registered in `assets/nav.js` with `date: "2026-09-23"`; confirmed
+  `node --check assets/nav.js` reports no syntax errors after the edit.
+  **DB access:** not attempted this round — the orchestrator had already
+  confirmed via the DB moments before this run started that the latest
+  python row was `lesson_generated day=56` on 2026-09-22 with nothing for
+  day 57, so a fresh query would have been redundant; deferred entirely to
+  that pre-run confirmation plus this round's own on-disk idempotency
+  check (repo-wide grep for `2026-09-23`, and checking `lessons/` and
+  `nav.js` directly) before writing anything.
+  `bin/record-progress python lesson_generated --day 57 --lesson
+  0057-dataclass-field-and-frozen.html --detail '{"by":"headless"}'` will
+  be run from the repo root after this entry is written, per the standard
+  closing step.
+  `python/learning-records/` still holds only the Day 1 baseline; no
+  completion/quiz/kata outcome has ever been recorded for any day 2-56,
+  so this round paced entirely from on-disk state, same as every prior
+  round since Day 42.
+  **Next-day note:** with `field()`/`frozen=True` now covered, Day 7's
+  original deferred item is fully closed. Remaining candidates for Day 58:
+  the six-lesson backend-specific review list (18, 21-23, 25-26) is still
+  the most concrete option on the table; `shutil`/`statistics` remain
+  thin one-paragraph-mention candidates rather than standalone lessons;
+  and a further fresh-gap scan turned up `subprocess`/`hashlib`/
+  `configparser` as genuine zero-hit modules not on `PLAN.md`'s spine
+  (worth considering if Day 58 wants one more fresh sweep before
+  defaulting to review, though none is as clearly load-bearing as
+  `field()`/`frozen=True` or `operator` were) — `threading`/
+  `multiprocessing` remain explicitly out of scope per `MISSION.md`'s
+  concurrency-internals boundary. Two fresh days (56, 57) have now run
+  since Day 55's review — Day 58 should weigh the "avoid three fresh days
+  in a row" consideration seriously, though NOTES.md's rule has
+  historically been a guideline to weigh, not a hard block.

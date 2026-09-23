@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 80 · Timestamps: storing time without losing it</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 80 · ~20 min</p>
+<h1>Timestamps: storing time without losing it</h1>
+<p class="byline">Lesson 74's <code>CREATE TABLE</code> snippets — and several lessons before it — have quietly used <code>created_at TIMESTAMPTZ NOT NULL DEFAULT now()</code> without ever explaining the type name. That's the whole column type Postgres actually recommends, and skipping the "tz" one character produces a table that silently stores the wrong thing the first time two servers in two time zones write to it. This lesson is the explanation those snippets were owed: what <code>timestamptz</code> actually stores, what it doesn't, and where the "which time zone is this?" question resurfaces even after the column type is right.</p>
+
+<h2>1 · Two types that look almost identical</h2>
+<p>Postgres has two datetime column types one letter apart, and the missing letters matter more than they look:</p>
+<pre><code><span class="cm">-- looks fine, is not:</span>
+started_at <span class="kw">TIMESTAMP</span>       <span class="cm">-- no time zone</span>
+<span class="cm">-- the one almost every table actually wants:</span>
+started_at <span class="kw">TIMESTAMPTZ</span>     <span class="cm">-- "with time zone"</span></code></pre>
+<p>Per the PostgreSQL Manual's own datatype documentation, both are stored as the same 8 bytes with the same microsecond resolution — the difference isn't storage size, it's what Postgres does with a time zone on the way in and out. A <dfn data-en="a PostgreSQL column type that stores a date and time but discards any time zone information given on input, so the stored value has no way to say which time zone it was written in" data-vn="timestamp (không tz) (giữ nguyên) — lưu ngày giờ nhưng bỏ luôn thông tin múi giờ khi ghi vào, giá trị lưu không biết đang thuộc múi giờ nào">timestamp without time zone</dfn> does exactly what its name says: per the Manual, "PostgreSQL will silently ignore any time zone indication" in the input — not reject it, not convert it, just drop it. Write <code>'2026-09-23 09:00 +07'</code> into a plain <code>timestamp</code> column and Postgres keeps <code>2026-09-23 09:00</code> and throws the <code>+07</code> away with no error and no warning.</p>
+
+<h2>2 · What <code>timestamptz</code> actually stores</h2>
+<p>A <dfn data-en="a PostgreSQL column type that converts any input to UTC before storing it, using an explicit offset in the input or the session's TimeZone setting if none is given, and converts back to the session's TimeZone on output" data-vn="timestamptz (giữ nguyên) — chuyển giờ nhập vào thành UTC rồi mới lưu, dùng offset có sẵn trong input hoặc TimeZone của session nếu input không ghi offset, khi đọc ra lại chuyển về TimeZone của session">timestamptz</dfn> behaves differently at both ends, and the Manual states both directions explicitly. On the way in: "an input string that includes an explicit time zone will be converted to UTC using the appropriate offset for that time zone. If no time zone is stated in the input string, then it is assumed to be in the time zone indicated by the system's <code>TimeZone</code> configuration parameter." On the way out: "it is always converted from UTC to the current <code>timezone</code> zone, and displayed as local time in that zone." Put together: <strong>Postgres never stores a time zone inside a <code>timestamptz</code> value.</strong> It stores one absolute instant in UTC — per the Manual, "all timezone-aware dates and times are stored internally in UTC" — and does the conversion arithmetic itself, both when a value comes in and again every time one goes out, based on whatever session setting is asking.</p>
+<div class="callout">That's the part the type name misleads people into expecting: <code>timestamptz</code> does not remember "this happened at 9am Bangkok time." It remembers the one UTC instant that corresponds to 9am Bangkok time, and forgets Bangkok entirely. Two rows inserted at the same physical moment from a New York server and a Ho Chi Minh City server land on the identical stored value — which is exactly the property a column meant to answer "did A happen before B?" needs.</div>
+
+<h2>3 · Why "no time zone" breaks comparisons, not just display</h2>
+<p>The failure mode isn't cosmetic. Lesson 37's transaction-isolation lessons and Lesson 40's deadlock lesson both leaned on being able to order events correctly — which row was written first decides who wins a conflict. A <code>timestamp</code> (no tz) column can't answer that reliably across more than one time zone, because <code>2026-09-23 09:00</code> from a UTC+7 server and <code>2026-09-23 09:00</code> from a UTC-5 server compare as <em>equal</em> in the database, despite being twelve hours apart in reality. Every <code>ORDER BY created_at</code>, every <code>WHERE created_at > $1</code> cursor from Lesson 15's pagination, and every audit-log ordering from Lesson 46 silently assumes every row was written from the same time zone the moment a table uses plain <code>timestamp</code>. That assumption holds by accident in a single-region app and breaks the day a second region, a second server's clock setting, or a client-supplied timestamp enters the picture.</p>
+
+<h2>4 · The client boundary: serializing time zone back out</h2>
+<p>Storing correctly is half the problem; the API boundary is the other half. A <code>timestamptz</code> value serialized to JSON should carry its own offset rather than assume the reader knows the server's zone — the standard shape is <dfn data-en="a date/time text format (year-month-day, hour:minute:second, and either a UTC 'Z' suffix or an explicit +/-HH:MM offset) that unambiguously identifies one instant regardless of which time zone reads it" data-vn="ISO 8601 (giữ nguyên) — định dạng ngày giờ chuẩn quốc tế, ghi rõ offset hoặc 'Z' (UTC) nên đọc ở múi giờ nào cũng ra đúng 1 thời điểm, không mập mờ">ISO 8601</dfn>, e.g. <code>"2026-09-23T09:00:00+07:00"</code> or its UTC form <code>"2026-09-23T02:00:00Z"</code> — both name the identical instant unambiguously. The alternative some APIs use, a raw <dfn data-en="the number of seconds (or milliseconds) elapsed since 1970-01-01T00:00:00 UTC, used as a time zone-free way to represent one instant as a plain number" data-vn="Unix epoch (giữ nguyên) — số giây (hoặc mili giây) tính từ 1970-01-01T00:00:00 UTC, cách biểu diễn 1 thời điểm bằng số, không dính múi giờ">Unix epoch</dfn> integer like <code>1790226000</code>, is equally unambiguous — a count of seconds since a fixed UTC instant has no time zone to lose — but is unreadable without a converter and easy to accidentally mix seconds with milliseconds. What's never safe is a client-formatted string with no offset attached (<code>"2026-09-23 09:00"</code>): by the time it's serialized, whatever timezone-ness the original <code>timestamptz</code> carried is gone unless the serializer put it back in, so the receiving frontend has no way to tell which zone's 9am that even was.</p>
+<div class="callout"><strong>Frontend-habit bridge:</strong> this is the same trap as <code>new Date("2026-09-23 09:00")</code> in JavaScript — no offset in the string means the JS engine guesses (usually the browser's local zone), silently, with no error. A backend that stores <code>timestamptz</code> correctly can still hand a frontend a broken time if the serialization layer strips the offset before it reaches JSON. The fix on both sides is the same instinct: never let a datetime value travel without its offset attached, from the database column all the way to the rendered string.</div>
+
+<h2>5 · Where local time still belongs</h2>
+<p>None of this means "always store UTC and never think about time zones again" — some data is genuinely about a time zone, not just an instant. A recurring meeting at "9am every weekday" or a restaurant's posted opening hours describes a <em>local</em> time that should shift with daylight saving changes in that place, not a frozen UTC instant that would drift relative to the wall clock twice a year. That case needs the zone stored as its own value (an IANA name like <code>Asia/Ho_Chi_Minh</code>, not a fixed offset like <code>+07</code>, since offsets change with daylight saving and countries occasionally change zones outright) alongside a local time or a recurrence rule, with the actual UTC instant computed at read time. The rule of thumb: if the fact is "this specific thing happened," store a <code>timestamptz</code> instant. If the fact is "this recurs at a local wall-clock time," store the zone name and the local time separately, and compute instants on demand.</p>
+
+<table class="cmp">
+<thead><tr><th></th><th><code>TIMESTAMP</code></th><th><code>TIMESTAMPTZ</code></th><th>local time + zone name</th></tr></thead>
+<tbody>
+<tr><th>What's stored</th><td>date/time text, zone info dropped</td><td>one UTC instant</td><td>wall-clock time plus an IANA zone name</td></tr>
+<tr><th>Cross-zone comparison</th><td>wrong once zones differ</td><td>always correct</td><td>needs computing an instant first</td></tr>
+<tr><th>Right for</th><td>almost nothing in a networked app</td><td>"this event happened" (created_at, logged_in_at)</td><td>"this recurs at 9am local" (opening hours, schedules)</td></tr>
+</tbody>
+</table>
+
+<div class="interview">
+<p><strong>Q: "Why does this table use <code>TIMESTAMPTZ</code> instead of <code>TIMESTAMP</code> for <code>created_at</code>?"</strong> A strong answer, out loud: <em>"Because plain <code>TIMESTAMP</code> throws away whatever time zone the input had — Postgres silently ignores it — so two rows written from servers in different zones can end up with the same stored value even though they happened at different real moments, which breaks anything that orders or compares timestamps, like pagination cursors or audit-log ordering. <code>TIMESTAMPTZ</code> converts every input to one UTC instant and stores that, so comparisons are always correct regardless of which zone wrote the row. The one place I wouldn't reach for <code>TIMESTAMPTZ</code> is something like recurring opening hours, where the fact I actually want is 'runs at 9am local time' — that needs the zone name stored separately, since a frozen UTC instant would drift off 9am local once daylight saving shifts."</em> The signal: naming the silent-data-loss behavior specifically, not just "timestamptz is more correct," and knowing the local-time exception exists instead of treating UTC-everywhere as an absolute rule.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Per the PostgreSQL Manual, a plain TIMESTAMP column silently ignores any time zone indication in the input -- it keeps only the date/time fields and drops the offset with no error, so the stored value never records which zone it was written in.">
+    <p class="stem">What does Postgres do with a time zone offset given to a plain <code>TIMESTAMP</code> column?</p>
+    <button class="opt" data-ok>it silently discards the offset with no warning given</button>
+    <button class="opt">it stores the offset as extra separate hidden data</button>
+    <button class="opt">it always rejects that insert with a loud error</button>
+    <button class="opt">it converts the offset into a brand new row</button>
+  </div>
+  <div class="q" data-why="Per the Manual, all timezone-aware values are stored internally in UTC: on input, an explicit offset (or the session TimeZone if none given) converts the value to one UTC instant, and on output that instant converts back to the current session zone for display -- the zone itself is never kept inside the stored value.">
+    <p class="stem">What single instant does Postgres actually keep inside a stored <code>TIMESTAMPTZ</code> value?</p>
+    <button class="opt" data-ok>one absolute instant, always converted to UTC first of all</button>
+    <button class="opt">the exact local wall clock time of the writing server</button>
+    <button class="opt">both the original offset and a separate UTC copy together</button>
+    <button class="opt">nothing recorded at all until some query asks for it</button>
+  </div>
+  <div class="q" data-why="A plain TIMESTAMP column drops the offset on input, so two equal-looking stored values from servers in different zones compare as equal even though the real-world moments were hours apart -- silently breaking any ORDER BY or cursor comparison that assumes stored values are directly comparable instants.">
+    <p class="stem">Why can a plain <code>TIMESTAMP</code> column silently break a pagination cursor comparison across regions?</p>
+    <button class="opt" data-ok>rows from different zones can wrongly compare as equal</button>
+    <button class="opt">Postgres refuses every cursor query on that column type</button>
+    <button class="opt">TIMESTAMP columns cannot be indexed by Postgres at all</button>
+    <button class="opt">cursors always require a completely separate UUID key column</button>
+  </div>
+  <div class="q" data-why="A recurring local event (opening hours, a 9am weekday meeting) means 'this wall-clock time in this place', which should keep shifting relative to UTC as daylight saving changes there -- a frozen UTC instant would drift away from 9am local twice a year, so the zone name and local time need to be stored separately and converted to an instant only when needed.">
+    <p class="stem">Why might a recurring "9am local" schedule need a stored zone name instead of a plain <code>TIMESTAMPTZ</code> instant?</p>
+    <button class="opt" data-ok>a frozen instant drifts off local 9am after clocks shift</button>
+    <button class="opt">TIMESTAMPTZ columns cannot ever store any future dates at all</button>
+    <button class="opt">Postgres limits every table to one single time zone total</button>
+    <button class="opt">recurring schedules are always stored as plain integers instead now</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://www.postgresql.org/docs/current/datatype-datetime.html">PostgreSQL Manual — Date/Time Types</a> (RESOURCES.md's standing primary source for column-type questions) — confirmed live this round via <code>WebFetch</code>, which returned the exact "silently ignore any time zone indication," "stored internally in UTC," and input/output conversion wording quoted above directly from the page, not paraphrased from memory.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially. Nếu chỗ nào chưa rõ, cứ hỏi lại bằng tiếng Việt cũng được.<br><br>
+<em>Next lesson:</em> open. Still no <code>lesson_completed</code>/quiz-outcome record exists for any lesson after 80 rounds — the honest next step remains a completion signal or a user-named track.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

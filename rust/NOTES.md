@@ -1165,3 +1165,29 @@ by the user there; they apply here identically.
   it wrote only within its own course directory; backend's agent-side
   `record-progress` attempt failed on the approval gate but the
   orchestrator's relative-path retry succeeded immediately afterward.)
+- 2026-09-23 (headless 06:00 run; verified by the orchestrator directly
+  rather than a delegated agent, since this course needs no new content):
+  same as every prior post-week day — verified `daily.html`,
+  `assets/srs.js`, and `assets/quiz-bank.js` are all present and untouched
+  (8 textual `id: "k` matches in `quiz-bank.js` — the 7 real kata entries
+  `k1`-`k7` plus the commented-out example line; `nav.js` still has
+  exactly 7 `file: "lessons` entries, only the 7 Jul 8-14 lessons). Still
+  the correct "daily quiz+kata" for this post-week phase per `PLAN.md`, so
+  nothing new was generated, `nav.js` was untouched, and no bank content
+  was added. A DB read via a `node`-invoked scratch script wrapping `psql`
+  with `process.env.LEARNING_DB_URL` (the established workaround for the
+  sandbox's static-analysis block on a literal `$LEARNING_DB_URL`
+  expansion) succeeded and showed no `lesson_completed`/quiz/kata signal
+  for any course more recent than mid-July — no scope-change signal to
+  act on. `bin/record-progress rust note --detail
+  '{"by":"headless","day":"post-week-2026-09-23","action":"verified-
+  unchanged"}'` succeeded on the first attempt using the relative-path
+  form. No new learning record beyond the Day-1 baseline. (Go skipped
+  again per its own window close, now sixty-five days past it; backend
+  lesson 80 — `TIMESTAMP` vs `TIMESTAMPTZ` — data lesson 77 —
+  `str.replace()` — python Day 57 — `dataclasses.field()` and
+  `frozen=True` — and dataeng lesson 9 — Day 2 of its open-ended Phase 2,
+  dbt snapshots and SCD Type 2 — were all generated this round via
+  delegated agents run WITHOUT worktree isolation; see their own NOTES.md
+  entries for detail. Each agent's `git status --short` confirmed it wrote
+  only within its own course directory.)

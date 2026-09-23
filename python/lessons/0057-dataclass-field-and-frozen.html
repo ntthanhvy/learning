@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 57 · dataclasses.field() and frozen=True</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 57 · ~20 min · 23 Sep 2026</p>
+<h1><code>dataclasses.field()</code> and <code>frozen=True</code>: the two escape hatches Day 7 skipped</h1>
+<p class="byline">Day 7 named a fix and moved on: "the fix (<code>dataclasses.field(default_factory=list)</code>) is worth knowing exists but is out of scope for today." That was 53 days ago and nothing since has come back for it. Today closes it properly — <code>field()</code>'s three real jobs (a mutable default, hiding a field from <code>repr</code>, excluding a field from <code>==</code>) — plus <code>frozen=True</code>, which Day 31 used for exactly one sentence about <code>__hash__</code> safety without ever teaching what it actually does: turn a dataclass immutable on purpose.</p>
+
+<div class="callout"><strong>Bridge from SQL:</strong> <code>frozen=True</code> is close to a row from a table with no <code>UPDATE</code> grant — readable, comparable, but never rewritten in place; to "change" one field you build a new row. <code>field(compare=False)</code> is like leaving a column out of a <code>UNIQUE</code> constraint's column list: it still exists on the row, it's just not part of what makes two rows "the same."</div>
+
+<h2>1 · The mutable-default trap, and <code>default_factory</code></h2>
+<p>Day 1 taught that a mutable default argument is a trap because Python builds the default value <em>once</em>, at function-definition time, and every call that skips the argument shares that one object. A dataclass field with a mutable default would hit the exact same trap — so <code>@dataclass</code> refuses to even let you write it, and raises immediately when the class is defined, not later when it's misused:</p>
+<pre><code><span class="kw">from</span> dataclasses <span class="kw">import</span> dataclass
+
+<span class="kw">@dataclass</span>
+<span class="kw">class</span> Cart:
+    items: <span class="kw">list</span> = []   <span class="cm"># ValueError: mutable default &lt;class 'list'&gt; for field items is not allowed: use default_factory</span></code></pre>
+<p>Verified live: that exact line raises <code>ValueError</code> at class-definition time — before any <code>Cart()</code> is ever created. The fix is <dfn data-en="dataclasses.field(default_factory=callable) declares a dataclass field whose default is produced by calling callable() fresh for every instance that omits the argument, instead of one shared object built once at class-definition time — the dataclass-field equivalent of Day 1's None-default-then-build-inside-the-function fix for ordinary function parameters" data-vn="giữ nguyên &quot;default_factory&quot; — thay vì 1 default dùng chung, mỗi instance mới gọi lại hàm này để tạo default riêng, tránh bug list/dict mặc định bị share">field(default_factory=...)</dfn>, which stores a callable instead of a value — <code>@dataclass</code> calls it fresh for every instance that skips the argument, so no two instances ever share one list:</p>
+<pre><code><span class="kw">from</span> dataclasses <span class="kw">import</span> dataclass, field
+
+<span class="kw">@dataclass</span>
+<span class="kw">class</span> Cart:
+    items: <span class="kw">list</span> = field(default_factory=<span class="kw">list</span>)   <span class="cm"># calls list() fresh per instance, not once</span>
+
+c1 = Cart()
+c2 = Cart()
+c1.items.append(<span class="str">"apple"</span>)
+c1.items   <span class="cm"># ['apple']</span>
+c2.items   <span class="cm"># [] -- untouched; c1 and c2 never shared one list</span></code></pre>
+<p>Verified live: matches the comments exactly — <code>c2.items</code> stays empty after mutating <code>c1.items</code>. Read <code>field(default_factory=list)</code> as "don't give me a default value, give me a zero-argument function that builds one" — <code>list</code>, <code>dict</code>, and <code>set</code> are the three you'll reach for constantly, and any other zero-argument callable (including a <code>lambda</code>, Day 4) works the same way.</p>
+
+<div class="callout"><strong><code>field()</code> vs. a plain default — when each applies:</strong> a plain <code>= "VND"</code> default works for anything <em>immutable</em> (<code>str</code>, <code>int</code>, <code>float</code>, <code>bool</code>, <code>None</code>, a <code>tuple</code> of immutables) — Day 7's <code>currency: str = "VND"</code> was always fine. <code>field(default_factory=...)</code> is required the moment the default is mutable (<code>list</code>, <code>dict</code>, <code>set</code>, or another dataclass) — exactly the same immutable/mutable line Day 1 drew for function defaults, now enforced by <code>@dataclass</code> itself instead of silently trusted.</div>
+
+<h2>2 · <code>field()</code>'s other two jobs: <code>repr</code> and <code>compare</code></h2>
+<p><code>field()</code> takes more than <code>default_factory</code>. Two more keyword arguments control what the auto-generated <code>__repr__</code> and <code>__eq__</code> (Day 7 §2) do with one specific field, without touching how the rest of the class behaves:</p>
+<pre><code><span class="kw">from</span> dataclasses <span class="kw">import</span> dataclass, field
+
+<span class="kw">@dataclass</span>
+<span class="kw">class</span> User:
+    name: <span class="kw">str</span>
+    password: <span class="kw">str</span> = field(repr=<span class="kw">False</span>)              <span class="cm"># leave this field out of __repr__</span>
+    id: <span class="kw">int</span> = field(default=<span class="kw">0</span>, compare=<span class="kw">False</span>)     <span class="cm"># leave this field out of __eq__</span>
+
+u1 = User(<span class="str">"Ann"</span>, <span class="str">"secret"</span>, id=<span class="num">1</span>)
+u2 = User(<span class="str">"Ann"</span>, <span class="str">"secret"</span>, id=<span class="num">2</span>)
+<span class="kw">repr</span>(u1)         <span class="cm"># "User(name='Ann', id=1)" -- password never printed, even though it's a real field</span>
+u1 == u2       <span class="cm"># True -- id differs (1 vs 2) but compare=False takes it out of the equality check</span></code></pre>
+<p>Verified live: matches both comments — <code>repr(u1)</code> shows <code>name</code> and <code>id</code> but never <code>password</code>, and <code>u1 == u2</code> is <code>True</code> despite different <code>id</code>s. <code>repr=False</code> is the direct fix for the obvious problem: a password, token, or any secret field printed by accident the first time someone logs an instance for debugging. <code>compare=False</code> answers a narrower question — "should two records with a different <code>id</code> but otherwise identical data count as equal?" — the same judgment call SQL makes explicit every time a query does or doesn't include a surrogate key in a comparison. Note that <code>field(default=0, ...)</code> is how a plain default is spelled once <em>any</em> keyword argument is needed on that field — <code>field()</code> replaces the bare <code>= 0</code> entirely, it doesn't stack alongside it.</p>
+
+<h2>3 · <code>frozen=True</code>: a dataclass that refuses to be mutated</h2>
+<p>Day 31 used <code>frozen=True</code> for one sentence, in service of a different topic (why a frozen dataclass gets a safe auto-generated <code>__hash__</code>). What it actually does, on its own merits: every field becomes read-only after <code>__init__</code> finishes constructing the instance. Any later assignment raises, instead of silently succeeding the way an ordinary dataclass's would:</p>
+<pre><code><span class="kw">from</span> dataclasses <span class="kw">import</span> dataclass
+
+<span class="kw">@dataclass</span>(frozen=<span class="kw">True</span>)
+<span class="kw">class</span> Point:
+    x: <span class="kw">int</span>
+    y: <span class="kw">int</span>
+
+p = Point(<span class="num">1</span>, <span class="num">2</span>)
+p.x = <span class="num">99</span>   <span class="cm"># dataclasses.FrozenInstanceError: cannot assign to field 'x'</span></code></pre>
+<p>Verified live: that assignment raises <code>dataclasses.FrozenInstanceError</code> with exactly that message, immediately — not a silent no-op, and not deferred until <code>p</code> is read somewhere else. This is Day 1's <dfn data-en="an object whose value can never change after creation - int, float, str, tuple, and now, when frozen=True is set, a dataclass instance too; 'changing' one always means building a brand-new object rather than mutating the existing one in place" data-vn="giữ nguyên &quot;immutable&quot; — không sửa được sau khi tạo, muốn đổi phải tạo object mới">immutable</dfn> idea, now available for a class you write yourself instead of only the built-in types (<code>str</code>, <code>tuple</code>, <code>int</code>) that already had it. The practical payoff is the same reason immutability mattered on Day 1: an instance passed into a function, stored in a shared cache, or handed to another thread can never be mutated out from under whoever else is holding a reference to it — "changing" one always means building a new instance, the same discipline <code>str</code> already forces on every rename or slice.</p>
+
+<div class="callout"><strong>Why this pairs with Day 31's <code>__hash__</code> point:</strong> a mutable object is unsafe as a <code>dict</code> key or <code>set</code> member because mutating it after insertion can move it to the wrong hash bucket, unreachable by lookup (Day 31's exact bug). <code>frozen=True</code> removes that risk at the source — nothing can mutate a frozen instance's fields at all, ever, so <code>@dataclass(frozen=True)</code> is the one case where <code>@dataclass</code> auto-generates a matching <code>__hash__</code> for you; an ordinary (non-frozen) dataclass gets <code>__eq__</code> but no <code>__hash__</code>, and is unhashable by default for exactly this reason.</div>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> nothing pandas-specific — a DataFrame's columns are always mutable in place (<code>df["x"] = ...</code> reassigns a column freely); pandas has no per-row immutability concept resembling <code>frozen=True</code> at all. Not covered here; that's the only sentence in this lesson that mentions it, per <code>MISSION.md</code>.</div>
+
+<h2>4 · Putting both together: an immutable record with a hidden field</h2>
+<p><code>frozen=True</code> and <code>field()</code> combine freely — a config record that can't drift after being loaded, with a secret kept out of any accidental log line:</p>
+<pre><code><span class="kw">from</span> dataclasses <span class="kw">import</span> dataclass, field
+
+<span class="kw">@dataclass</span>(frozen=<span class="kw">True</span>)
+<span class="kw">class</span> Config:
+    host: <span class="kw">str</span>
+    api_key: <span class="kw">str</span> = field(repr=<span class="kw">False</span>)
+    retries: <span class="kw">int</span> = field(default=<span class="num">3</span>, compare=<span class="kw">False</span>)
+
+cfg = Config(<span class="str">"api.example.com"</span>, <span class="str">"sk-secret"</span>)
+<span class="kw">print</span>(cfg)   <span class="cm"># Config(host='api.example.com', retries=3) -- api_key never printed</span></code></pre>
+<p>Every field above traces back to a rule already stated this lesson — nothing new past this point, just the four rules (mutable default needs <code>default_factory</code>, <code>repr=False</code> hides a field from printing, <code>compare=False</code> excludes it from equality, <code>frozen=True</code> locks every field after construction) used together on one realistic record.</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/57_dataclass_field_and_frozen.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/57_dataclass_field_and_frozen.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: fixing a mutable-default <code>ValueError</code> with <code>default_factory</code>, hiding a field from <code>__repr__</code>, excluding a field from <code>__eq__</code>, confirming a <code>frozen=True</code> instance raises on mutation, and combining <code>frozen=True</code> with <code>field()</code> on one config-shaped record.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A plain mutable default like items: list = [] would share one list object across every instance that omits the argument, the exact Day 1 mutable-default-argument trap - so @dataclass refuses to even define the class, raising ValueError immediately rather than waiting for the shared-mutation bug to actually happen later.">
+    <p class="stem">Why does <code>items: list = []</code> in a dataclass raise <code>ValueError</code> at class-definition time?</p>
+    <button class="opt" data-ok>a plain mutable default would be silently shared by every instance</button>
+    <button class="opt">dataclasses forbid the list type in any field under any circumstance</button>
+    <button class="opt">empty list literals always raise outside of a plain function body</button>
+  </div>
+  <div class="q" data-why="field(default_factory=list) stores a zero-argument callable rather than a value, and @dataclass calls it fresh for every instance that omits the argument - so each instance gets its own independent list instead of every instance sharing one list built a single time.">
+    <p class="stem">What does <code>field(default_factory=list)</code> actually store, and when does it run?</p>
+    <button class="opt" data-ok>a callable, called fresh for every instance, never one shared value</button>
+    <button class="opt">one shared empty list, built the moment the class body runs</button>
+    <button class="opt">nothing at all; it only runs once the module later exits</button>
+  </div>
+  <div class="q" data-why="field(repr=False) removes a field from the auto-generated __repr__ only - it is still a real field, still set on the instance, still included in __eq__ comparisons by default. It is purely a display-time exclusion, not a way to skip storing or comparing the value.">
+    <p class="stem">What does <code>field(repr=False)</code> change about a dataclass field?</p>
+    <button class="opt" data-ok>only hides it from repr; it stays stored and compared</button>
+    <button class="opt">removes the field entirely, so accessing it later raises AttributeError</button>
+    <button class="opt">also excludes that same field from every equality comparison too</button>
+  </div>
+  <div class="q" data-why="frozen=True makes every field read-only once __init__ finishes constructing the instance - any later assignment raises dataclasses.FrozenInstanceError immediately, rather than silently succeeding the way an ordinary mutable dataclass's assignment would.">
+    <p class="stem">What happens when code assigns to a field of a <code>frozen=True</code> dataclass instance after construction?</p>
+    <button class="opt" data-ok>it raises FrozenInstanceError right away; the assignment never applies</button>
+    <button class="opt">the assignment silently succeeds, identical to an ordinary dataclass</button>
+    <button class="opt">only the very first assignment after construction is allowed</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the standard library's <a href="https://docs.python.org/3/library/dataclasses.html"><code>dataclasses</code></a> docs (cited in <code>RESOURCES.md</code>) — the <code>field()</code> section documents every keyword argument used today (<code>default_factory</code>, <code>repr</code>, <code>compare</code>) plus a few not covered here (<code>init</code>, <code>hash</code>, <code>metadata</code>); the "Frozen instances" section covers <code>frozen=True</code> and <code>FrozenInstanceError</code> directly.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day57">glossary</a> under Day 57.<br>
+This directly closes the gap Day 7 named and deferred ("out of scope for today's records"), and gives Day 31's one-sentence <code>frozen=True</code> mention its own full lesson.<br><br>
+💬 Anything unclear — <code>default_factory</code>, <code>field()</code>'s other keywords, or <code>frozen=True</code>? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

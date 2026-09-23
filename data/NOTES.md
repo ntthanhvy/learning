@@ -6483,3 +6483,115 @@
   from the repo root using the relative-path form, per this course's own
   established tip that it's more reliable than an absolute path in this
   sandbox.
+- 2026-09-23 generation (Lesson 77, headless run): per the orchestrator's
+  own prior DB check, the latest `course_progress` row for course=data was
+  `lesson_generated day=76 lesson=0076-str-split.html` dated 2026-09-22,
+  nothing newer — this round did not re-attempt a direct `psql
+  "$LEARNING_DB_URL"` read itself, still hard-blocked by this sandbox's
+  static analysis regardless. Independently confirmed idempotency via the
+  filesystem: `ls data/lessons/` and `ls data/practice/` showed no
+  `0077-*`/`77_*` files, and grepping `assets/nav.js` for `n: 77` /
+  `2026-09-23` found neither — highest registered entry was still 76,
+  dated 2026-09-22 — so this round proceeded. Read `MISSION.md` in full
+  (not modified), `RESOURCES.md` in full, the tail of `NOTES.md` (this
+  file is now past 6480 lines — `wc -l` plus a `grep "^#"` pass covered
+  the "Course conventions"/"Curriculum spine" section near the top, then
+  `tail -160` covered Lesson 76's own generation-log entry in full), the
+  tail of `assets/nav.js`, and Lesson 76's own HTML body plus its practice
+  file as structural precedent, along with Lesson 60's `str.contains()`
+  lesson (to check its `regex=`/`na=` gotcha framing before deciding how
+  today's topic relates to it). Lesson 76's own closing teaser named
+  `str.replace()` explicitly as the standing next-topic candidate — the
+  last uncovered piece of the core `.str` accessor family (extract/
+  extractall/contains/split now taught) — and grepping all 76 lesson
+  bodies plus the glossary confirmed zero existing hits for `str.replace`,
+  a genuine gap, so this round took the named candidate rather than
+  deviating. A scratch dir was created at `data/.scratch/lesson77/` (not
+  `/tmp`) with probe scripts written as real `.py` files (not inline
+  heredocs); `uv run --with pandas python3` worked on the first attempt
+  (pandas 3.0.6, numpy 2.5.3, matching every recent lesson). Every claim
+  was hand-verified there before writing, not assumed: confirmed via
+  `inspect.signature(pd.Series.str.replace)` that its own default is
+  `regex: bool = False` — the OPPOSITE default from `str.contains()`
+  (Lesson 60's own confirmed `regex=True` default) — and confirmed the
+  behavioral consequence directly on a small `["A.1", "A21", "B.5"]`
+  Series: the default call only replaces the literal-dot row, `regex=True`
+  additionally matches "A21" since "." then means any character. This
+  opposite-defaults contrast (not just each fact alone) became the
+  lesson's central hook, called out in its own `.callout` div and in the
+  interview Q&A box. Confirmed `regex=True` unlocks `\1`-style capture
+  group backreferences in `repl`, tested on a synthetic `price_note`
+  column ("price: $19.99" -> "price: USD 19.99"), the same capture-group
+  mental model as `str.extract()` (Lessons 42/43) but rewoven into a new
+  string instead of split into columns. Confirmed `n=` caps replacement
+  count from the left (mirroring `str.split()`'s own `n=`, Lesson 76) and
+  confirmed directly that a `NaN` in the source column passes through
+  `str.replace()` untouched (`pd.isna()` check on the one missing
+  `customer_full` row from Lesson 76's own fixture, reused here rather
+  than inventing a new one) rather than becoming the literal string
+  `"NaN"`. Also confirmed `str.replace()` never mutates its source column
+  in place — the original stays untouched unless the result is explicitly
+  reassigned — and confirmed `case=False` works with either `regex=True`
+  or `regex=False`, mentioned only implicitly (not given its own section,
+  to keep today's lesson focused on the one central regex= contrast rather
+  than diluting it). Before writing the practice file, ran this course's
+  now-standard freebie-risk probe pattern: `ex1_pat` checked against the
+  literal `"/"`, `ex2_regex_for_any_char` against literal `True`,
+  `ex3_repl` against the literal backreference string `r"USD \1"`, and
+  `ex4_n` against literal `1` — every blank fails closed if left as `...`.
+  The shipped (unsolved) `practice/77_str_replace.py` was executed
+  directly from its real `practice/` location (`cd data && uv run --with
+  pandas python3 practice/77_str_replace.py`) and printed exactly 4 ✗ with
+  no traceback; a solved copy (kept only in the scratch dir, not shipped)
+  then printed all 4 ✓ on the first run, confirmed before the unsolved
+  file was ever considered final. Quiz options were drafted, then
+  mechanically word-counted with a Python script (run via `uv run
+  python3`, a bare `python3` invocation being blocked by this sandbox's
+  command-approval gate) isolating each `<div class="q">` block by regex
+  span — the first draft came out mismatched on all three questions (Q1
+  11/12/9, Q2 9/10/9, Q3 9/8/9); iterated through several rewrite+recount
+  cycles until all three landed level (Q1 10/10/10, Q2 9/9/9, Q3 9/9/9),
+  with exactly one `data-ok` per question throughout, confirmed by the
+  same script; cross-checked with a separate arithmetic computation
+  (`10*3 + 9*3 + 9*3 = 84`) against the script's own reported whole-file
+  option-word total (84) — the same two-genuinely-different-methods
+  approach recent rounds have used, and it agreed exactly. A separate
+  mechanical tag-balance script (regex open/close occurrence counts per
+  tag) caught one real markup bug this round, the same recurring pattern
+  as Lessons 72-76: the initial draft's second `<div class="callout">`
+  closed with a stray extra `</p>` even though this course's established
+  callout markup never wraps content in `<p>` at all; fixed by removing
+  the stray `</p>`, re-ran the tag-balance script afterward and confirmed
+  `p` open/close counts matched exactly (19/19) along with every other
+  tracked tag (`html`/`head`/`title`/`body`/`h1`/`dfn` 1/1 each, `h2` 7/7,
+  `div` 7/7, `pre` 5/5, `code` 83/83, `span` 33/33, `strong` 5/5, `em` 1/1,
+  `a` 2/2, `button` 9/9). Raw-`&` scan found exactly two matches in the
+  lesson body, both the two `&` characters inside the single already-
+  established `cd ~/learning/data && uv run …` shell command inside a
+  `<pre><code>` block (this course's standing precedent, not a new bug),
+  zero raw `&` in prose. Checked the glossary for a collision before
+  adding anything: grepped for `str.replace` across the full glossary —
+  no existing entry — so added exactly one new row, `str.replace()`,
+  placed directly after Lesson 76's `str.split()` entry; confirmed the
+  glossary table's tags stayed balanced after the insert via occurrence
+  counts (`table` 1/1, `tr` 138/138, `td` 411/411, `th` 3/3, `code`
+  835/835), zero raw `&` introduced (confirmed via the same regex-based
+  scanner script). Registered Lesson 77 in `nav.js` with today's date
+  (2026-09-23); `node --check` confirmed it still parses as valid
+  JavaScript after the edit. This round's topic pick fully closes the
+  core `.str` accessor family named across Lessons 42/43/60/76/77
+  (extract/extractall/contains/split/replace) with no further named-but-
+  unpicked candidate left over — the closing teaser says so explicitly,
+  so tomorrow starts from a fresh curriculum/glossary scan rather than a
+  named teaser, same situation Lesson 76 itself started from. The entire
+  `data/.scratch/` directory was removed (`rm -rf`) after verification
+  (only `lesson77/` lived there, confirmed via listing before deleting,
+  nothing else was at risk); `git status --short` afterward will be
+  checked next to confirm only the intended `data/` files changed. This
+  agent does not run `git commit` — leaving working-tree changes
+  uncommitted remains this course's established convention.
+  `bin/record-progress data lesson_generated --day 77 --lesson
+  0077-str-replace.html --detail '{"by":"headless"}'` will be run next
+  from the repo root using the relative-path form, per this course's own
+  established tip that it's more reliable than an absolute path in this
+  sandbox.

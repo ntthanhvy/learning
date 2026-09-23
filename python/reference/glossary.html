@@ -456,6 +456,14 @@
   <tr><td>methodcaller</td><td>giữ nguyên "methodcaller" — hàm trả về callable gọi object.name(*args), bản có tên của lambda x: x.name(*args)</td><td><code>operator.methodcaller(name, *args)</code> returns a callable that, given an object, calls <code>object.name(*args)</code> and returns the result — the named version of <code>lambda x: x.name(*args)</code>.</td></tr>
 </table>
 
+<h2 id="day57">Day 57 — dataclasses.field() and frozen=True</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>default_factory</td><td>giữ nguyên "default_factory" — thay vì 1 default dùng chung, mỗi instance mới gọi lại hàm này để tạo default riêng, tránh bug list/dict mặc định bị share</td><td><code>dataclasses.field(default_factory=callable)</code> declares a dataclass field whose default is produced by calling <code>callable()</code> fresh for every instance that omits the argument, instead of one shared object built once at class-definition time — the dataclass-field equivalent of Day 1's fix for a mutable default function argument.</td></tr>
+  <tr><td>field()</td><td>giữ nguyên "field()" — hàm cấu hình 1 field trong dataclass: default_factory, repr, compare, v.v.</td><td><code>dataclasses.field(...)</code> configures one dataclass field beyond a plain default value — <code>default_factory</code> for a mutable default, <code>repr=False</code> to hide the field from the auto-generated <code>__repr__</code>, and <code>compare=False</code> to exclude it from the auto-generated <code>__eq__</code>. Replaces a bare <code>= value</code> default entirely once any keyword is needed.</td></tr>
+  <tr><td>frozen dataclass</td><td>giữ nguyên "frozen dataclass" — dataclass khai <code>@dataclass(frozen=True)</code>, mọi field chỉ đọc sau khi tạo, sửa là raise lỗi</td><td>A dataclass decorated <code>@dataclass(frozen=True)</code> — every field becomes read-only once <code>__init__</code> finishes constructing the instance; any later assignment raises <code>FrozenInstanceError</code>. Unlike an ordinary dataclass, a frozen one also gets a safe auto-generated <code>__hash__</code>, since nothing can mutate it after insertion into a <code>dict</code>/<code>set</code>.</td></tr>
+</table>
+
 <p class="next">💬 A term here still unclear? Ask your teacher — hỏi bằng tiếng Việt cũng được.</p>
 
 <script src="../assets/nav.js"></script>

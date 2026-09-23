@@ -5875,3 +5875,110 @@
   candidate from prior rounds is cleared — this round adds no new deferred
   candidate in its place, so the next round should run its own fresh gap
   search from scratch rather than assume anything is already queued.
+- **2026-09-23 generation (Lesson 80, headless 06:00 run):** Idempotency check
+  first: `ls backend/lessons/` topped out at `0079-pgbouncer-external-connection-pooling.html`
+  and `nav.js`'s `LESSONS` array had no `n: 80` or `date: "2026-09-23"` entry —
+  confirmed via `node --check backend/assets/nav.js` plus `grep -c 'n: 80'`
+  and a `ls backend/lessons/0080-*` count, both re-run after writing to
+  confirm exactly one match each. The orchestrator's own DB read (done just
+  before this round) confirmed the latest `course_progress` row for `backend`
+  was `lesson_generated day=79` recorded 2026-09-22, with no
+  `lesson_completed`/quiz/kata signal more recent than mid-July — same as
+  every round since baseline, pacing came from file state and this round's
+  own gap search, not a reported outcome. Read `MISSION.md`, `RESOURCES.md`,
+  both `learning-records/` files (no fresher outcome record than the
+  2026-07-30 concurrency-vocabulary gap), the tail of `NOTES.md` (Lessons
+  75–79 in full, including Lesson 79's note that PgBouncer's deferral was
+  cleared with no new candidate queued in its place), Lesson 79 in full as
+  the current HTML/quiz-convention precedent, and Lesson 74 in full since its
+  `TIMESTAMPTZ NOT NULL DEFAULT now()` column snippet (reused verbatim across
+  several lessons since) turned out to be this round's lead. With no named
+  candidate standing, ran a fresh gap search: grepped `lessons/*.html` for a
+  wide candidate list (saga/two-phase-commit vocabulary, read replicas,
+  blue-green/canary deployment, RBAC depth, HATEOAS/hypermedia, OpenAPI/JSON
+  Schema validation, GraphQL/gRPC, message-queue vocabulary, rate-limiting
+  algorithms, request-validation depth, prepared statements, encryption at
+  rest) and found each either already covered at the right depth (token
+  bucket is named explicitly seven times in Lesson 11; RBAC is a full section
+  of Lesson 12; event-driven/pub-sub vocabulary is Lesson 72's whole subject)
+  or explicitly out of this course's lane per `MISSION.md` (frameworks/ORMs,
+  distributed-systems depth beyond vocabulary). The gap that held up: date/time
+  handling. A targeted grep for `timestamptz|timestamp with time zone|
+  datetime|epoch|unix time` across every lesson returned only four incidental
+  hits — `TIMESTAMPTZ` used as a column type in Lessons 34, 46, 55, and 74's
+  own `CREATE TABLE` snippets, never once explained. That is a real, narrow,
+  assumed-not-taught gap squarely in the "data modeling & schema design"
+  track: every schema example in this course has used the type correctly by
+  convention without the lesson ever saying why `TIMESTAMP` (no tz) is the
+  wrong default. Lesson 80 covers: the two datetime column types one letter
+  apart and what Postgres actually does with each on input/output (per the
+  Manual's own wording, quoted directly — `TIMESTAMP` "silently ignore[s] any
+  time zone indication"; `TIMESTAMPTZ` stores everything "internally in UTC"
+  and converts on both input and output against the session's `TimeZone`
+  setting); why that difference isn't cosmetic — a plain `TIMESTAMP` column
+  breaks cross-region comparisons silently, tying back to Lesson 15's cursor
+  pagination and Lesson 46's audit-log ordering as concrete things that quietly
+  assume every row was written from one time zone; the client/API boundary
+  (ISO 8601 vs. Unix epoch as the two safe serializations, versus a
+  zone-less client-formatted string as the unsafe one, bridged to the
+  `new Date("...")`-with-no-offset JS footgun the user would recognize from
+  frontend work); and the genuine exception — local wall-clock recurrence
+  (opening hours, a 9am weekly meeting) that should shift with daylight
+  saving and therefore needs a stored zone name, not a frozen UTC instant.
+  Verified two of the lesson's own worked examples numerically rather than
+  trusting them by eye: `node -e "new Date('2026-09-23T09:00:00+07:00').toISOString()"`
+  confirmed the lesson's own claimed UTC equivalent (`02:00:00Z`) exactly, and
+  a similar check confirmed the epoch example (`1790226000`) lands in
+  2026-09-24, a plausible-looking value rather than an accidentally-wrong one
+  (seconds-vs-milliseconds is the classic mistake in exactly this kind of
+  example, so it was checked rather than assumed). Source verification:
+  `WebFetch` against `https://www.postgresql.org/docs/current/datatype-datetime.html`
+  succeeded on the first attempt this round (no gate, unlike Lesson 79's
+  PgBouncer-domain block) and returned the exact three sentences the lesson
+  quotes — the "silently ignore," "stored internally in UTC," and the
+  input/output conversion wording — confirmed against real page content, not
+  a 200 status alone, per the standing habit since Lesson 53's 404 incident.
+  Checked the glossary first for all four candidate terms (`timestamp
+  without time zone`, `timestamptz`, `ISO 8601`, `Unix epoch`) — zero
+  collisions — then appended all four as new rows after Lesson 79's
+  `multiplexing` row; no existing row needed editing. Verification performed
+  mechanically: (1) quiz word-count balance via a Node script (`.split(/\s+/)`
+  and `.split(" ")`, both filtering empty strings, run independently and
+  cross-checked) parsing every `<div class="q">` block — first draft was
+  uneven on all four questions (Q1 8/9/9/10, Q2 8/11/10/10, Q3 9/9/9/8, Q4
+  11/8/10/9), fixed through several rewrite-and-recount cycles per option,
+  converged to exactly 9/9/9/9 on Q1, 10/10/10/10 on Q2, 9/9/9/9 on Q3, and
+  10/10/10/10 on Q4, both counting methods agreeing exactly, and exactly one
+  `data-ok` per question confirmed the same way; (2) an occurrence-count HTML
+  tag-balance check (regex counting per tag, not substring counting, across
+  the same 22 tag pairs used in every prior round) on both the lesson and
+  `glossary.html` after its four-row addition — both balanced on the first
+  check, no fixes needed; (3) a raw-unescaped-`&` regex scan (matching any
+  `&` not followed by `amp;`/`lt;`/`gt;`/`quot;`/`#39;`/`apos;`) across both
+  files — zero hits; (4) a targeted regex for the backslash-escaped-quote bug
+  (`\"` inside an attribute) — caught and fixed one real instance this round:
+  a stray extra `"` left inside Q4's `data-why` attribute
+  (`...only when needed.""` before the closing `>`) from an editing slip,
+  found by the regex rather than by eye, fixed, re-scanned clean; (5)
+  `node --check` against `assets/nav.js`, `assets/quiz.js`, and
+  `assets/gloss.js` — all clean, no output. Registered Lesson 80 in `nav.js`
+  (date 2026-09-23), re-confirmed exactly one matching `n: 80` entry and
+  exactly one matching `0080-*` lesson file afterward. Scratch work (the
+  three verification scripts) lived under `backend/.scratch-0080/` per this
+  round's instructions and was deleted after use, not left behind. DB access:
+  read path not attempted per the standing sandbox limitation noted every
+  round since it was first flagged; write path
+  (`bin/record-progress backend lesson_generated --day 80 --lesson
+  0080-timestamps-and-time-zones.html --detail '{"by":"headless"}'`, run as a
+  relative path from the repo root) result recorded immediately below this
+  note. No confirmed next-lesson gap is named with certainty for the round
+  after this one — same standing note as every prior round; a
+  completion/quiz-outcome signal or a user-named track should take priority
+  over guessing blind. This round surfaced but did not use two secondary
+  candidates worth a look next time if no stronger signal appears: request
+  validation depth (JSON Schema / structured input validation as its own
+  topic, distinct from Lesson 17's injection focus) and encryption at rest as
+  a dedicated topic (currently only mentioned in passing across several
+  lessons, never explained on its own terms) — neither is flagged as
+  definitely narrow enough yet, so the next round should still run its own
+  fresh search first rather than assume either is queued.

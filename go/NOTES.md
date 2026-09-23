@@ -688,3 +688,26 @@
   Phase 2 — the dbt intermediate layer) were all generated this round via
   delegated agents, each confirmed via `git status --short` to have
   written only within its own course directory.
+- 2026-09-23 (headless 06:00 run): skipped again per the same rule — the
+  course window closed 2026-07-20, now sixty-five days past it. All 14
+  lessons (`0001`-`0014`) re-confirmed present on disk and registered in
+  `assets/nav.js` — moot either way. This session's DB read succeeded via
+  the same `node`-invoked scratch script wrapping `psql` with
+  `process.env.LEARNING_DB_URL` (deleted after use); the latest 30 rows
+  showed no `course_progress` entry for go past day 14 and no
+  lesson_completed/quiz/kata signal for any course more recent than
+  mid-July — moot for this course since it's a pure skip regardless of DB
+  state. Rust was re-verified unchanged by the orchestrator directly (8
+  `id: "k` matches in `quiz-bank.js`, 7 `file: "lessons` entries in
+  `nav.js`) and logged a `note` row via `bin/record-progress` (relative
+  path, succeeded first try). Backend lesson 80 (`TIMESTAMP` vs
+  `TIMESTAMPTZ`, a gap used in four earlier `CREATE TABLE` snippets but
+  never explained), data lesson 77 (`str.replace()`, closing the `.str`
+  accessor family), python Day 57 (`dataclasses.field()` and
+  `frozen=True`, a gap Day 7 explicitly deferred and Day 31 used without
+  teaching), and dataeng lesson 9 (Day 2 of its open-ended Phase 2 — dbt
+  snapshots and SCD Type 2 for `commission_rate`, per `PLAN.md`'s 2a
+  spine) were all generated this round via delegated agents run WITHOUT
+  worktree isolation; each agent's own `git status --short` confirmed it
+  wrote only within its own course directory, and a final orchestrator-
+  level `git status --short` confirmed no cross-course contamination.

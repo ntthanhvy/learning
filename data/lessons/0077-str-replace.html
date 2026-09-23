@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 77 · str.replace(): rewriting text in place, and its flipped regex= default</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 77 · ~20 min · 23 Sep 2026</p>
+<h1>str.replace(): rewriting text in place, and its flipped regex= default</h1>
+<p class="byline">Chào bạn — Lesson 76 closed the <code>str.split()</code> gap and named today's topic explicitly: the last uncovered core <code>.str</code> accessor method, <code>str.replace()</code>. It rewrites text rather than breaking it apart or filtering it, and it hides a real trap of its own — one that runs the OPPOSITE direction from Lesson 60's <code>str.contains()</code> gotcha.</p>
+
+<h2>1 · The basic swap: one substring for another, every occurrence</h2>
+<p><dfn data-en="a Series.str method, str.replace(pat, repl), that scans every string in a column and swaps each occurrence of pat for repl, returning a new Series -- it does not modify the column in place, the result must be assigned back or the original is untouched" data-vn="giữ nguyên 'str.replace()' — method str.replace(pat, repl), quét từng chuỗi trong cột và thay mỗi lần gặp pat bằng repl, trả về Series MỚI -- KHÔNG sửa cột gốc tại chỗ, phải gán ngược lại thì cột gốc mới đổi">.str.replace(pat, repl)</dfn> swaps every occurrence of <code>pat</code> for <code>repl</code> across a whole column in one vectorized call:</p>
+<pre><code>orders[<span class="str">"sku_path"</span>]
+<span class="cm"># 0      ELEC/PHONE/CASE-01
+# 1     HOME/KITCHEN/MUG-02
+# ...</span>
+orders[<span class="str">"sku_path"</span>].str.replace(<span class="str">"/"</span>, <span class="str">"-"</span>)
+<span class="cm"># 0      ELEC-PHONE-CASE-01
+# 1     HOME-KITCHEN-MUG-02
+# ...  -- every "/" swapped, dtype stays str, original column untouched</span></code></pre>
+<p>Confirmed directly (pandas 3.0.6): the call returns a new Series — <code>orders["sku_path"]</code> itself is unchanged unless the result is assigned back, e.g. <code>orders["sku_path"] = orders["sku_path"].str.replace(...)</code>. Same non-mutating habit as every other <code>.str</code> method taught so far (<code>split()</code>, <code>contains()</code>, <code>extract()</code>).</p>
+
+<h2>2 · The flipped default: regex=False here, the opposite of str.contains()</h2>
+<p>Lesson 60 confirmed <code>str.contains()</code> treats its pattern as a regex BY DEFAULT — a bare <code>"."</code> silently means "any character" unless <code>regex=False</code> is passed. <code>str.replace()</code> runs the opposite direction:</p>
+<pre><code>skus = pd.Series([<span class="str">"A.1"</span>, <span class="str">"A21"</span>, <span class="str">"B.5"</span>])
+skus.str.replace(<span class="str">"A."</span>, <span class="str">"X"</span>)                <span class="cm"># 0  X1    1  A21   2  B.5   -- literal dot, "A21" untouched</span>
+skus.str.replace(<span class="str">"A."</span>, <span class="str">"X"</span>, regex=<span class="kw">True</span>)     <span class="cm"># 0  X1    1  X1    2  B.5   -- "." now means ANY char, "A21" matches too</span></code></pre>
+<p>Confirmed directly by inspecting the method's own signature (<code>regex: bool = False</code>) and running both calls: <code>str.replace()</code> defaults to a LITERAL substring match, <code>regex=False</code>. Passing a genuine regex pattern (capture groups, character classes, anchors) without flipping <code>regex=True</code> either does nothing useful or raises, depending on the pattern — the pattern is only ever treated as regex on purpose here.</p>
+
+<div class="callout"><strong>Remember this contrast, not just the two facts:</strong> <code>str.contains()</code> defaults to <code>regex=True</code> (Lesson 60) — a plain-looking pattern can silently over-match. <code>str.replace()</code> defaults to <code>regex=False</code> (today) — a pattern meant as regex silently under-matches or errors instead. Same library, same <code>.str</code> family, opposite defaults; naming which one applies to the method actually in front of you, unprompted, is the interview-grade move.</div>
+
+<h2>3 · regex=True unlocks capture groups and backreferences</h2>
+<p>With <code>regex=True</code>, <code>repl</code> can reference capture groups from <code>pat</code> using <code>\1</code>, <code>\2</code>, etc. — the same backreference syntax as <code>re.sub()</code>:</p>
+<pre><code>orders[<span class="str">"price_note"</span>]
+<span class="cm"># 0    price: $19.99
+# 1     price: $8.50
+# ...</span>
+orders[<span class="str">"price_note"</span>].str.replace(<span class="str">r"\$(\d+\.\d+)"</span>, <span class="str">r"USD \1"</span>, regex=<span class="kw">True</span>)
+<span class="cm"># 0    price: USD 19.99
+# 1     price: USD 8.50
+# ...  -- the captured digits reinserted after "USD ", dollar sign dropped</span></code></pre>
+<p>Confirmed directly: the capture group <code>(\d+\.\d+)</code> grabs the numeric amount, and <code>\1</code> in <code>repl</code> reinserts exactly that captured text — the same mental model as <code>str.extract()</code>'s capture groups (Lessons 42/43), but here the captured piece gets rewoven into a new string instead of pulled out into its own column.</p>
+
+<h2>4 · n= caps the replacement count; NaN passes through untouched</h2>
+<p><code>n=</code> limits how many occurrences get replaced per string (default <code>-1</code>, meaning "all of them") — and exactly like every other <code>.str</code> method, a missing value in the source column stays missing rather than raising or becoming a literal <code>"NaN"</code> string:</p>
+<pre><code>s = pd.Series([<span class="str">"a-b-c-d"</span>, <span class="str">"x-y-z"</span>])
+s.str.replace(<span class="str">"-"</span>, <span class="str">"_"</span>, n=<span class="num">1</span>)   <span class="cm"># 0  a_b-c-d   1  x_y-z   -- only the FIRST "-" per string swapped</span>
+
+orders[<span class="str">"customer_full"</span>].str.replace(<span class="str">"-"</span>, <span class="str">" "</span>)
+<span class="cm"># 0    An Nguyen North
+# ...
+# 4                NaN   -- the missing row stays NaN, never becomes the string "NaN"</span></code></pre>
+<p>Confirmed directly: <code>n=1</code> stops after the first match per row, leaving the rest of that string's separators untouched — same capping idea as <code>str.split()</code>'s own <code>n=</code> (Lesson 76), just applied to replacement count instead of split count. The <code>NaN</code> passthrough was confirmed directly with <code>pd.isna()</code> on the one missing <code>customer_full</code> row from this course's running fixture.</p>
+
+<div class="callout"><strong>SQL bridge:</strong> <code>str.replace(pat, repl, regex=False)</code> is Postgres's <code>replace(column, pat, repl)</code> — literal substring swap, no regex involved on either side. <code>str.replace(pat, repl, regex=True)</code> with backreferences is the pandas spelling of Postgres's <code>regexp_replace(column, pat, repl)</code> (add <code>'g'</code> as the flag argument in Postgres for "replace all," matching pandas' default <code>n=-1</code>; Postgres without <code>'g'</code> replaces only the first match, matching pandas' <code>n=1</code>).</div>
+
+<div class="interview">
+<p><strong>Q: "You call `.str.replace('.', '_')` on a column expecting every literal dot to become an underscore, but it does something unexpected. What's going on?"</strong> A strong answer, out loud: <em>"Actually str.replace() defaults to regex=False, so a plain dot IS treated literally here — this one wouldn't have the bug. The trap runs the other way: if I pass a pattern that's actually regex-special, like a plus sign or parentheses, meaning it as a literal character, regex=False still treats it literally and I'm fine. Where I'd get burned is the opposite case — reaching for str.replace() assuming it behaves like str.contains(), which defaults to regex=True. I'd double check which method I'm actually calling and what its own default is, rather than assuming the whole .str family shares one regex default."</em> The signal: knowing the two defaults point opposite directions, and not assuming consistency across a method family without checking.</p>
+</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/77_str_replace.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/77_str_replace.py</code></pre>
+<p>Uses the same small inline <code>sku_path</code>/<code>customer_full</code>/<code>price_note</code> DataFrame as Lesson 76 (no new CSV needed), plus the tiny <code>skus</code> Series used above. Exercise 1 confirms the basic literal swap and that the source column is untouched unless reassigned (Section 1). Exercise 2 confirms the <code>regex=False</code> default treats <code>"."</code> literally, versus <code>regex=True</code> matching any character (Section 2). Exercise 3 confirms a capture-group backreference rewrite on <code>price_note</code> (Section 3). Exercise 4 confirms <code>n=</code> capping the replacement count and <code>NaN</code> passthrough on the missing <code>customer_full</code> row (Section 4).</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly by inspecting str.replace()'s own signature (regex: bool = False) and running both calls: its default treats the pattern as a literal substring, the opposite default from str.contains(), which defaults to regex=True.">
+    <p class="stem">What is the default value of <code>regex=</code> on <code>str.replace()</code>?</p>
+    <button class="opt" data-ok>False, meaning the pattern matches as a plain literal string</button>
+    <button class="opt">True, meaning the pattern matches as a regex, like contains</button>
+    <button class="opt">None, since pandas always refuses to guess and simply raises</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: str.contains() defaults to regex=True (Lesson 60), meaning a bare pattern can silently over-match special characters, while str.replace() defaults to regex=False, meaning a pattern meant as real regex silently under-matches instead -- the two core .str methods point opposite directions by default.">
+    <p class="stem">How does <code>str.replace()</code>'s default compare to <code>str.contains()</code>'s default from Lesson 60?</p>
+    <button class="opt" data-ok>Opposite: replace defaults to False, contains defaults to True</button>
+    <button class="opt">Identical: both methods default to regex=True on every call</button>
+    <button class="opt">Neither method accepts a regex= keyword argument at all</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: str.replace() never mutates the source column -- it always returns a brand new Series, and the original stays exactly as it was unless that returned result gets explicitly assigned back onto the column or a new one.">
+    <p class="stem">After calling <code>orders["sku_path"].str.replace("/", "-")</code> with no assignment, what happens to the original column?</p>
+    <button class="opt" data-ok>Nothing changes; the original column is left fully untouched</button>
+    <button class="opt">The column updates itself in place immediately and automatically</button>
+    <button class="opt">pandas raises an error, demanding an explicit assignment first</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official pandas <a href="https://pandas.pydata.org/docs/reference/api/pandas.Series.str.replace.html">Series.str.replace()</a> API reference (per <code>RESOURCES.md</code>'s "Docs: pandas User Guide" entry) — read the <code>regex=</code> and <code>n=</code> parameter sections in full, and note the default-value table makes the <code>regex=False</code> default explicit (~5 min).</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>str.replace()</code> is new today, placed right after Lesson 76's <code>str.split()</code> entry.<br>
+<strong>Next lesson:</strong> the core <code>.str</code> accessor family (extract/extractall/contains/split/replace) is now fully taught — tomorrow starts from a fresh curriculum/glossary scan for the next genuinely-uncovered pattern (open candidates per MISSION.md: more groupby/agg patterns beyond Lesson 4/40/48, or memory/dtype optimization beyond Lesson 25/41/51).<br><br>
+💬 Anything unclear — the flipped regex= default, the backreference rewrite, n= vs NaN passthrough, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 9 · dbt snapshots: SCD Type 2 for commission_rate</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 9 · ~20 min · 23 Sep 2026</p>
+<h1>dbt snapshots: SCD Type 2 for commission_rate</h1>
+<p class="byline">Today's tangible win: a <code>snapshots/restaurants_snapshot.sql</code> file that records every value <code>raw.restaurants.commission_rate</code> has ever had, with a validity window on each row — and a new mart, <code>fct_orders_with_commission</code>, that joins each order to the commission rate that was actually in effect <em>when the order was placed</em>, not whatever rate the restaurant charges today.</p>
+
+<div class="callout"><strong>Before today — check Day 8 actually landed:</strong> this lesson adds a new top-level <code>snapshots/</code> folder and a new mart on top of Day 8's <code>int_orders_joined</code> refactor, so start from a clean build:
+<pre><code>cd food_delivery_pipeline
+uv run --project ../dbt_env dbt build</code></pre>
+Expected: <code>Done. PASS=19 WARN=0 ERROR=0 SKIP=0 TOTAL=19</code> (8 models + 11 tests, Day 8's count). If you see <code>ERROR=2</code> naming <code>order_id 13</code> or <code>27</code>, your raw seed re-planted Day 3's two bad rows — re-run Day 3's <code>UPDATE</code> fix before starting today. If <code>dim_restaurants</code> or <code>int_orders_joined</code> is missing entirely, go back and finish Day 8 first — today's snapshot sits next to that layer, not in place of it.</div>
+
+<h2>1 · The problem: <code>raw.restaurants</code> only ever shows "now"</h2>
+<p><code>raw.restaurants.commission_rate</code> is a single column with a single value per restaurant. Every dbt model you've built so far — <code>stg_restaurants</code>, <code>dim_restaurants</code>, <code>int_orders_joined</code> — reads that column and gets whatever it currently is. That's fine for "what's this restaurant's rate today," and wrong for anything that asks about the past: if a restaurant renegotiated its rate from 15% to 12% last month, every one of this course's marts would silently apply 12% to an order placed back when the real rate was 15%. <code>fct_orders</code> would still show the right <code>order_total</code>, but any commission-revenue number derived from multiplying <code>order_total</code> by <em>today's</em> rate would be wrong for every historical order — not a crash, not a failing test, just a quietly incorrect number that would only get caught (if it ever did) by someone reconciling against an old invoice.</p>
+<p>This is a data-warehousing problem old enough to have a name from the Kimball Group's own dimensional-modelling vocabulary, cited in <code>RESOURCES.md</code> as this course's primary source for facts, dimensions and grain: a <dfn data-en="a dimension attribute that changes over time -- restaurants.commission_rate is one, since a restaurant's rate can be renegotiated -- as opposed to an attribute like restaurant_id that never changes for the life of the row" data-vn="giữ nguyên &quot;slowly changing dimension&quot; (SCD) — thuộc tính dimension thay đổi theo thời gian, ví dụ commission_rate">slowly changing dimension</dfn> (SCD). <code>raw.restaurants</code> as it stands is what Kimball calls <dfn data-en="the simplest way to handle a slowly changing dimension: overwrite the old value with the new one, keeping no history at all -- what raw.restaurants does today, and the reason last month's commission_rate is already gone by the time you'd want to ask about it" data-vn="giữ nguyên &quot;SCD Type 1&quot; — ghi đè giá trị cũ bằng giá trị mới, không giữ lịch sử">SCD Type 1</dfn> — every update overwrites the old value, no history kept. Today's fix is <dfn data-en="the SCD approach that keeps every historical value of a changing attribute as its own row, each stamped with the time window it was actually true for -- so a query can ask 'what was this attribute's value at time X' instead of only 'what is it now'" data-vn="giữ nguyên &quot;SCD Type 2&quot; — giữ mỗi giá trị lịch sử thành 1 dòng riêng, có khoảng thời gian hiệu lực, cho phép hỏi &quot;giá trị tại thời điểm X là gì&quot;">SCD Type 2</dfn>: keep every value a column has ever had, each stamped with the window of time it was actually true for.</p>
+
+<h2>2 · dbt's tool for this: snapshots</h2>
+<p>dbt's <a href="https://docs.getdbt.com/docs/build/snapshots">Snapshots</a> feature (cited in <code>RESOURCES.md</code>, today's primary source) implements SCD Type 2 directly: point it at a source or model that changes over time, and on every <code>dbt snapshot</code> run it compares the current row to what it already recorded, and if the value changed, it closes out the old row and inserts a new one — never updating a row in place, only ever appending. Two columns dbt adds automatically make the history queryable:</p>
+<table class="gloss">
+  <tr><th>Column</th><th>Meaning</th></tr>
+  <tr><td><code>dbt_valid_from</code></td><td>the timestamp this version of the row started being true</td></tr>
+  <tr><td><code>dbt_valid_to</code></td><td>the timestamp it stopped being true — <code>null</code> for the row that is still current</td></tr>
+</table>
+<p>A snapshot needs a <dfn data-en="a snapshot's setting for how it decides a row changed -- 'timestamp' compares one column (usually an updated_at) and treats any change to that timestamp as a new version, 'check' instead compares a named list of columns directly and treats any difference in those columns as a new version" data-vn="giữ nguyên &quot;snapshot strategy&quot; — cách snapshot phát hiện 1 dòng đã đổi: &quot;timestamp&quot; so sánh 1 cột updated_at, &quot;check&quot; so sánh trực tiếp danh sách cột">snapshot strategy</dfn> to decide "did this row change": <code>timestamp</code> trusts a column like <code>updated_at</code> and treats any change to it as a new version; <code>check</code> instead compares a named list of columns directly, useful when no reliable <code>updated_at</code> exists. <code>raw.restaurants</code> already has <code>updated_at</code> (per <code>PLAN.md</code>'s domain table), so today uses <code>timestamp</code> — cheaper to evaluate and exactly the case that column exists for.</p>
+
+<h2>3 · Build: <code>snapshots/restaurants_snapshot.sql</code></h2>
+<p>Snapshots live in their own top-level <code>snapshots/</code> folder, declared in <code>dbt_project.yml</code>'s <code>snapshot-paths</code> — sibling to <code>models/</code>, not inside it, because a snapshot isn't a transformation of existing data the way a model is; it's the thing recording history that models will later read. Give this one in full, since the syntax itself (the <code>{% snapshot %}</code> block, the <code>config()</code> keys) is new today and isn't the day's actual skill:</p>
+<pre><code><span class="cm">-- snapshots/restaurants_snapshot.sql</span>
+{% snapshot restaurants_snapshot %}
+
+{{
+    config(
+        target_schema='dbt_dev_snapshots',
+        unique_key='restaurant_id',
+        strategy='timestamp',
+        updated_at='updated_at',
+    )
+}}
+
+select
+    restaurant_id,
+    name,
+    cuisine,
+    city,
+    commission_rate,
+    updated_at
+from {{ source('raw', 'restaurants') }}
+
+{% endsnapshot %}</code></pre>
+<p><code>unique_key</code> here means the same thing it meant for Day 4's incremental <code>fct_orders</code>: the column identifying "which real-world row is this a version of," so dbt knows to close out restaurant 7's old row rather than confusing it with restaurant 12's. <code>target_schema</code> puts the snapshot table somewhere separate from <code>dbt_dev</code>'s regular models — snapshot tables aren't staging or marts, they're their own thing, and a distinct schema keeps that visible in <code>psql</code>.</p>
+<p>Run it with its own command, not <code>dbt build</code> — snapshots are invoked separately from models and tests:</p>
+<pre><code>uv run --project ../dbt_env dbt snapshot</code></pre>
+<p>Expected, on the very first run — every restaurant gets exactly one row, all with the same <code>dbt_valid_from</code> (whenever you ran this) and a <code>null</code> <code>dbt_valid_to</code>, since nothing has changed yet from dbt's point of view:</p>
+<pre><code>1 of 1 START snapshot dbt_dev_snapshots.restaurants_snapshot .. [RUN]
+1 of 1 OK snapshot dbt_dev_snapshots.restaurants_snapshot ...... [INSERT 0 40 in 0.08s]
+
+Done. PASS=1 WARN=0 ERROR=0 SKIP=0 TOTAL=1</code></pre>
+<p>Now simulate the actual scenario this whole lesson is about — a restaurant renegotiating its rate. Pick one restaurant and update it directly in <code>raw.restaurants</code> (a one-time manual step to prove the mechanism, the same kind of hand-edit Day 3 used to fix the two planted bad rows, not the normal pattern going forward):</p>
+<pre><code>docker compose exec -T postgres psql -U fdp -d fdp -c \
+  "UPDATE raw.restaurants SET commission_rate = 0.12, updated_at = now()
+   WHERE restaurant_id = 7;"</code></pre>
+<p>Run <code>dbt snapshot</code> again. Because restaurant 7's <code>updated_at</code> moved forward, the <code>timestamp</code> strategy detects a change: it closes out restaurant 7's original row (<code>dbt_valid_to</code> now set to this run's timestamp) and inserts a brand-new row for restaurant 7 with the new <code>commission_rate</code> and a <code>null</code> <code>dbt_valid_to</code>. Every other restaurant is untouched:</p>
+<pre><code>1 of 1 OK snapshot dbt_dev_snapshots.restaurants_snapshot ...... [INSERT 0 1 in 0.06s]</code></pre>
+<pre><code>docker compose exec -T postgres psql -U fdp -d fdp -c \
+  "SELECT restaurant_id, commission_rate, dbt_valid_from, dbt_valid_to
+   FROM dbt_dev_snapshots.restaurants_snapshot
+   WHERE restaurant_id = 7 ORDER BY dbt_valid_from;"</code></pre>
+<pre><code> restaurant_id | commission_rate |       dbt_valid_from       |        dbt_valid_to
+---------------+------------------+-----------------------------+-----------------------------
+             7 |             0.15 | 2026-09-15 09:03:11.20+00   | 2026-09-23 06:00:04.51+00
+             7 |             0.12 | 2026-09-23 06:00:04.51+00   |
+(2 rows)</code></pre>
+<p>Two rows for one restaurant, each true for a different window — the old 0.15 rate valid from Day 1's seed until the moment you ran today's second snapshot, and the new 0.12 rate valid from that moment on, with <code>dbt_valid_to</code> left <code>null</code> because it's still current. This table now has exactly what a Type-1 <code>raw.restaurants</code> can never give you: the ability to ask "what rate was true on some specific past date."</p>
+
+<h2>4 · Build: join a fact to the version valid at order time — <code>fct_orders_with_commission</code></h2>
+<p>Now the actual skill. <code>fct_orders</code> has one row per order with its own <code>placed_at</code>. <code>restaurants_snapshot</code> has one row per <em>version</em> of a restaurant, each with a <code>[dbt_valid_from, dbt_valid_to)</code> window. Joining them correctly means matching each order not just on <code>restaurant_id</code>, but on <code>placed_at</code> falling inside that specific version's window — a <dfn data-en="a join condition that matches a row on the state something was in during a specific window of time, rather than the state it is in now -- here, matching each order to the restaurant-snapshot row whose dbt_valid_from/dbt_valid_to window contains the order's own placed_at" data-vn="giữ nguyên &quot;point-in-time join&quot; — join theo trạng thái đúng tại 1 thời điểm cụ thể trong quá khứ, không phải trạng thái hiện tại">point-in-time join</dfn>, not the plain equi-join every prior mart in this course has used:</p>
+<pre><code><span class="cm">-- models/marts/fct_orders_with_commission.sql -- TODO: write the join</span>
+<span class="cm">-- Select order_id, restaurant_id, placed_at, order_total from fct_orders,</span>
+<span class="cm">-- and commission_rate from restaurants_snapshot (ref it like any other</span>
+<span class="cm">-- model -- a snapshot is just another node dbt's DAG can depend on).</span>
+<span class="cm">-- The join must match on restaurant_id AND on placed_at falling inside</span>
+<span class="cm">-- the snapshot row's [dbt_valid_from, dbt_valid_to) window. Remember</span>
+<span class="cm">-- dbt_valid_to is null for the row that is still current -- your</span>
+<span class="cm">-- condition must still match that row for orders placed after the last</span>
+<span class="cm">-- change, or every recent order will silently get no match at all.
+-- Add a derived column, commission_amount, as order_total * commission_rate.</span></code></pre>
+<p>Two things worth getting right before you write it: first, <code>{{ ref('restaurants_snapshot') }}</code> is the correct way to read a snapshot from a model — dbt treats a snapshot as a node in the same DAG as everything else, exactly like Day 2's <code>ref()</code> between staging models, not a special separate mechanism. Second, the boundary condition: a naive <code>placed_at &lt; dbt_valid_to</code> comparison quietly drops every order placed after the most recent change, because that row's <code>dbt_valid_to</code> is <code>null</code> and comparing anything to <code>null</code> is never true in SQL — the fix is an explicit <code>or dbt_valid_to is null</code> alongside it, the same "don't forget the open-ended case" instinct Day 4's zero-order-restaurant <code>left join</code> already asked for.</p>
+
+<h2>5 · Build it and check the split lands where expected</h2>
+<pre><code>uv run --project ../dbt_env dbt run --select fct_orders_with_commission</code></pre>
+<p>Expected — one new table, one row per order, same 500-row grain as <code>fct_orders</code> itself:</p>
+<pre><code>1 of 1 OK created sql table model dbt_dev.fct_orders_with_commission ... [SELECT 500 in 0.06s]
+
+Done. PASS=1 WARN=0 ERROR=0 SKIP=0 TOTAL=1</code></pre>
+<p>Verify the split actually happened at the right moment — restaurant 7's orders placed before today's <code>UPDATE</code> should show the old rate, and any placed after should show the new one:</p>
+<pre><code>docker compose exec -T postgres psql -U fdp -d fdp -c \
+  "SELECT commission_rate, count(*) FROM dbt_dev.fct_orders_with_commission
+   WHERE restaurant_id = 7 GROUP BY commission_rate ORDER BY commission_rate;"</code></pre>
+<pre><code> commission_rate | count
+-----------------+-------
+            0.12 |     0
+            0.15 |    11
+(2 rows)</code></pre>
+<p>All 11 of restaurant 7's orders were placed back on Day 1's seed date, well before today's manual rate change, so every one of them correctly shows <code>0.15</code> — the rate that was actually true when each order was placed — not the <code>0.12</code> the restaurant charges as of this moment. That's the whole payoff: ask <code>raw.restaurants</code> today and you'd get 0.12 for all 11, silently wrong. Confirm the full table's row count didn't move from <code>fct_orders</code>' own 500:</p>
+<pre><code>docker compose exec -T postgres psql -U fdp -d fdp -c \
+  "SELECT count(*) FROM dbt_dev.fct_orders_with_commission;"</code></pre>
+<pre><code> count
+-------
+   500
+(1 row)</code></pre>
+<p>Commit <code>snapshots/restaurants_snapshot.sql</code>, <code>models/marts/fct_orders_with_commission.sql</code>, and the updated <code>snapshot-paths</code> line in <code>dbt_project.yml</code> if it wasn't already there from dbt's default project scaffold.</p>
+
+<div class="callout"><strong>One thing to say out loud about cost:</strong> a snapshot only records history from the moment you start running it — running <code>dbt snapshot</code> for the first time today does not retroactively know what <code>commission_rate</code> was a year ago if it changed before today. History starts accruing the day the snapshot starts running, which is exactly why Day 1's seed script back-dated <code>raw.restaurants.updated_at</code> for every restaurant, giving today's very first snapshot run a believable-looking starting <code>dbt_valid_from</code> instead of "the moment this lesson happened to run."</div>
+
+<div class="interview">
+<p><strong>Q: "How would you track a slowly changing dimension in dbt, and why not just let the column update in place?"</strong> A strong answer, out loud: <em>"Updating a column in place is SCD Type 1 — you lose the old value the moment it changes, which is fine for a typo fix but wrong for anything like a commission rate or a price that's genuinely different at different points in time. dbt's snapshot feature implements SCD Type 2: instead of updating a row, it closes out the old version with a dbt_valid_to timestamp and inserts a new one with a fresh dbt_valid_from, so every version that ever existed stays queryable. The strategy is either timestamp, comparing an updated_at column, or check, comparing a list of columns directly when there's no reliable timestamp. The payoff only shows up once something downstream needs to ask 'what was true back then' — in my project, joining orders to the restaurant's commission rate at the time each order was placed, not whatever the rate is today, which needs a point-in-time join on the validity window instead of a plain equi-join."</em> The signal: naming Type 1 vs. Type 2 explicitly, and knowing the join needs the validity window, not just the foreign key.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="SCD Type 1 overwrites the old value in place, keeping no history at all -- exactly what a plain UPDATE on raw.restaurants does today. SCD Type 2 is the fix: keep every historical value as its own row, each with a validity window, which is what a dbt snapshot builds.">
+    <p class="stem">What does a plain <code>UPDATE</code> on <code>raw.restaurants.commission_rate</code> do to the old value?</p>
+    <button class="opt" data-ok>Overwrites it, keeping no history at all</button>
+    <button class="opt">Archives it in a second hidden table</button>
+    <button class="opt">Keeps it only until the next run</button>
+  </div>
+  <div class="q" data-why="dbt_valid_from marks when a given version of a row started being true, and dbt_valid_to marks when it stopped -- null for the row that is still the current version. Together they define the exact window a snapshot row was accurate for.">
+    <p class="stem">What does a <code>null</code> <code>dbt_valid_to</code> mean on a snapshot row?</p>
+    <button class="opt" data-ok>That version is still the current one</button>
+    <button class="opt">That version was deleted from the source</button>
+    <button class="opt">The snapshot has never once run successfully</button>
+  </div>
+  <div class="q" data-why="The timestamp strategy trusts a column like updated_at and treats any change to it as a new version -- cheap and exactly right when a reliable updated_at column already exists, which raw.restaurants has per PLAN.md's domain table. The check strategy compares named columns directly instead, useful only when no such timestamp exists.">
+    <p class="stem">Why does today's snapshot use the <code>timestamp</code> strategy rather than <code>check</code>?</p>
+    <button class="opt" data-ok><code>raw.restaurants</code> already has a real <code>updated_at</code> column</button>
+    <button class="opt"><code>check</code> cannot ever run against Postgres sources</button>
+    <button class="opt"><code>timestamp</code> is dbt's only real snapshot strategy</button>
+  </div>
+  <div class="q" data-why="dbt_valid_to is null for the row that is currently in effect, and comparing anything to null with < is never true in SQL. Without the explicit 'or dbt_valid_to is null' clause, every order placed after the most recent change would match no snapshot row at all and silently drop from the join.">
+    <p class="stem">Why must the point-in-time join explicitly handle a <code>null</code> <code>dbt_valid_to</code>?</p>
+    <button class="opt" data-ok>Comparing anything to <code>null</code> is never true</button>
+    <button class="opt"><code>null</code> values sort before every real timestamp</button>
+    <button class="opt">Postgres rejects any join condition naming <code>null</code></button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> dbt Labs' <a href="https://docs.getdbt.com/docs/build/snapshots">Snapshots</a> docs (cited in <code>RESOURCES.md</code> for Phase 2a) cover the <code>timestamp</code>/<code>check</code> strategies, <code>target_schema</code>, and the <code>dbt_valid_from</code>/<code>dbt_valid_to</code> columns directly from the source. For the underlying SCD vocabulary itself, the <a href="https://www.kimballgroup.com/data-warehouse-business-intelligence-resources/kimball-techniques/dimensional-modeling-techniques/">Kimball Group's Dimensional Modeling Techniques</a> — already this course's Day 4 source for facts and dimensions — is the primary source Type 1 vs. Type 2 traces back to.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 9.<br>
+<strong>Phase 2 continues</strong> along the dbt/Kafka/Airflow spine in <code>PLAN.md</code>, adapted to your questions rather than a fixed calendar — Jinja and macros (DRY SQL, <code>{{ var() }}</code>, when a macro makes a project worse) is next up on the dbt side.<br><br>
+💬 Anything unclear — the strategy choice, or the point-in-time join's null handling? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

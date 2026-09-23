@@ -118,6 +118,8 @@
       file: "lessons/0055-review-retrieval-day-6.html" },
     { n: 56, date: "2026-09-22", title: "The operator module: itemgetter, attrgetter & methodcaller",
       file: "lessons/0056-operator-module.html" },
+    { n: 57, date: "2026-09-23", title: "dataclasses.field() and frozen=True",
+      file: "lessons/0057-dataclass-field-and-frozen.html" },
   ];
 
   const REFS = [

@@ -883,3 +883,137 @@ along the Phase 2 spine, adapted to the learning records.
   `bin/record-progress dataeng lesson_generated --day 8 --lesson
   0008-dbt-intermediate-layer.html --detail '{"by":"headless"}'` run from the
   repo root; see this entry's tail for the result.
+- 2026-09-23 (headless 06:00 run, Day 9 generated): ninth lesson,
+  `0009-dbt-snapshots-scd2.html`. The orchestrator's own DB read moments
+  before this round confirmed the latest `dataeng` row was
+  `lesson_generated day=8` (2026-09-22) with nothing for 2026-09-23 yet, and
+  independently confirmed `lessons/` contained only `0001`–`0008`,
+  `assets/nav.js`'s latest entry was Day 8, and no `2026-09-23`/`0009` entry
+  existed anywhere (`lessons/`, `assets/nav.js`, this file), so proceeded on
+  schedule. Direct `psql`/`printenv` reads were not attempted this round
+  (already confirmed blocked by the orchestrator). Read `MISSION.md`,
+  `NOTES.md` in full (conventions, scope boundaries, the portfolio-repo and
+  verification sections), `RESOURCES.md`, `PLAN.md` in full (the domain
+  table and the 2a spine), and `lessons/0008-dbt-intermediate-layer.html` and
+  `lessons/0004-dbt-marts-and-incremental.html` in full for structural and
+  content precedent (dfn/gloss.js usage, quiz.js option-shape, nav.js
+  registration, Verify-block style, closing voice) before writing.
+  **Topic choice:** followed 2a's spine in order, as instructed — Day 8 was
+  the spine's first bullet (layering conventions); today is the spine's
+  second bullet verbatim: snapshots and SCD Type 2 for restaurant
+  `commission_rate`, `dbt_valid_from`/`dbt_valid_to`, and joining a fact to
+  the version valid at order time. No new learning-record or quiz signal
+  exists beyond the one Day 1 baseline file, so there was no reason to
+  deviate from the spine order, consistent with Day 8's own reasoning.
+  **Content:** framed the problem first in Kimball vocabulary (already this
+  course's Day 4 source for facts/dimensions/grain) — `raw.restaurants` as it
+  stands is SCD Type 1 (overwrite in place, no history), and any mart
+  multiplying `order_total` by *today's* `commission_rate` would be silently
+  wrong for historical orders after a rate change. Introduced dbt's snapshot
+  feature as the SCD Type 2 mechanism: never updates in place, only closes
+  out old rows (`dbt_valid_to`) and inserts new ones (`dbt_valid_from`).
+  Covered the `timestamp` vs. `check` strategy choice and picked `timestamp`
+  because `raw.restaurants.updated_at` already exists per `PLAN.md`'s domain
+  table. Built `snapshots/restaurants_snapshot.sql` in full as scaffolding
+  (the `{% snapshot %}` block syntax and `config()` keys are new today and
+  aren't the day's skill), walked a real before/after `UPDATE` on one
+  restaurant's `commission_rate` to make the two-row history concrete rather
+  than asserted, then left the day's actual skill as a partial/TODO: writing
+  `models/marts/fct_orders_with_commission.sql`'s point-in-time join —
+  `ref()`-ing the snapshot like any other node, joining on `restaurant_id`
+  plus `placed_at` falling inside `[dbt_valid_from, dbt_valid_to)`, and
+  explicitly flagging the `dbt_valid_to is null` boundary gotcha (comparing
+  to `null` is never true, so a naive `<` condition silently drops every
+  order placed after the most recent change) — named in prose as the thing
+  to get right, mirroring Day 8's join-direction gotcha as "the real cost
+  side" of the day's feature, not just the mechanics. Added a callout on
+  snapshot cost/limits: history only accrues from the first `dbt snapshot`
+  run forward, which is why Day 1's seed script back-dated
+  `raw.restaurants.updated_at`. `fct_orders` and `dim_restaurants` are
+  unchanged today (new mart is additive, not a refactor of either), matching
+  this file's "never assume, always say why" convention implicitly since
+  nothing needed removing. No pandas, no Python-language teaching (no Python
+  file in today's lesson at all, same as Day 8 — pure SQL/YAML/dbt), no
+  re-derivation of idempotency or API concepts — `unique_key`'s appearance is
+  a one-line callback to Day 4's own bridge, not re-derived. Domain names
+  (`raw.restaurants`, `commission_rate`, `updated_at`, `fct_orders`) used
+  exactly as `PLAN.md` established; none renamed. Opened with an explicit
+  "before today" `dbt build` check (expect `PASS=19 WARN=0 ERROR=0 SKIP=0
+  TOTAL=19`, Day 8's own count) rather than assuming Day 8's build step
+  landed, per this file's standing guidance — including a fallback line for
+  Day 3's two planted bad rows resurfacing, and for Day 8's layer being
+  entirely missing.
+  **Verification:** laid out a minimal scratch project mirroring Day 8's
+  approach (`dbt_project.yml` with `snapshot-paths: ["snapshots"]` added
+  alongside `model-paths`, `profiles.yml` pointing at `10.255.255.1` —
+  unreachable, a trimmed staging/marts set, and today's new
+  `snapshots/restaurants_snapshot.sql`) in `.scratch_dataeng_verify_d9/`
+  under the repo root, deleted after. `dbt --version` resolved dbt-core to
+  1.12.5 again (consistent with every round since Day 3) against the pinned
+  dbt-postgres 1.11.0. Ran
+  `uv run --with "dbt-postgres==1.11.0" dbt parse --project-dir <abs>
+  --profiles-dir <abs> --no-partial-parse`: clean, no database needed,
+  grepped output for `Error` rather than trusting the exit code per this
+  file's standing caution, found none. `dbt list --resource-type snapshot`
+  correctly resolved `food_delivery_pipeline.restaurants_snapshot.restaurants_snapshot`,
+  confirming the snapshot's own fqn is real, not guessed. **Snapshot-specific
+  parse coverage, checked directly rather than assumed:** added three
+  throwaway broken snapshots to see how much `dbt parse` actually validates
+  for a `{% snapshot %}` block specifically (this file had never verified a
+  snapshot before, only models) — a broken `source()` inside a snapshot was
+  caught (`Compilation Error`, "depends on a source named ... which was not
+  found"); a snapshot `config()` missing both `strategy` and `unique_key`
+  was caught (`Snapshots must be configured with a 'strategy' and
+  'unique_key'`); and a `timestamp`-strategy snapshot missing `updated_at`
+  was also caught (`A snapshot configured with the timestamp strategy must
+  specify an updated_at configuration`). All three came back as real,
+  current dbt-core 1.12.5 error text, not guessed — so, unlike the
+  suggestion that `dbt parse` might not fully validate snapshot config the
+  way it does models, this version of dbt-core actually does validate
+  `source()`/`ref()` resolution and the required-config-key checks for
+  snapshots at parse time, same as models. What `dbt parse` does **not** and
+  cannot check (not attempted, said here plainly): the actual SCD-2 row-
+  versioning behavior on a second run (whether a changed `updated_at`
+  really produces a closed-out old row plus a new one) and the point-in-time
+  join's runtime correctness against real data — both need a live Postgres,
+  which this sandbox's `10.255.255.1` profile deliberately doesn't have; the
+  two-row before/after `psql` output and the `commission_rate` split shown
+  in the lesson's Verify sections are hand-derived from dbt's own documented
+  snapshot behavior and Day 1's seed script, not executed against a live
+  warehouse, and are described that way rather than overclaimed. Deleted all
+  three broken-snapshot throwaways and re-ran clean each time. Separately
+  confirmed the exact completed join SQL that Section 4 asks the learner to
+  write (`fct_orders_with_commission.sql`, joining `{{ ref('fct_orders') }}`
+  to `{{ ref('restaurants_snapshot') }}` on `restaurant_id` and the validity
+  window with the `or dbt_valid_to is null` fix applied) parses cleanly and
+  that `dbt list`'s `depends_on` correctly shows both a `model` node and a
+  `snapshot` node as its dependencies — confirming `ref()` on a snapshot is
+  real, current dbt behavior and not assumed from memory. Docker was not
+  brought up this round (no live Postgres needed for parse-level
+  verification; today's content is a pure dbt/SQL day like Day 8, not a
+  build-and-run-a-stack day like Days 1/5/6/7). Deleted the whole scratch
+  directory afterward.
+  Registered Lesson 9 in `assets/nav.js` (`node --check` clean) and added the
+  Day 9 section to `reference/glossary.html` (6 terms: slowly changing
+  dimension, SCD Type 1, SCD Type 2, snapshot strategy, dbt_valid_from /
+  dbt_valid_to, point-in-time join — grepped Days 1–8's sections first,
+  case-insensitively, no collisions). Ran a small Python script (regex
+  tag-balance check, unescaped-`&` scan, and a quiz-option word-count
+  extractor treating underscored/dotted identifiers like `updated_at` and
+  `raw.restaurants` as single tokens, consistent with every prior day's
+  counting convention) against the saved HTML from a scratch file outside
+  `dataeng/`, deleted after use. All tags balanced
+  (div/p/table/tr/td/th/ul/li/pre/code/h2/dfn/button), zero suspicious bare
+  `&`. The first quiz draft came up mismatched on all four questions (7/7/8,
+  7/7/6, 6/8/7, 10/8/7 word splits); rebalanced all four to 7/7/7,
+  re-verified by re-running the same script after each edit. Caught and
+  fixed one small inconsistency the script's dfn-list output surfaced by eye
+  (not mechanically): the fourth `<dfn>`'s visible text read only "strategy"
+  while its own `data-vn` and the glossary heading both say "snapshot
+  strategy" — changed the visible term to "snapshot strategy" so the on-page
+  term and the glossary row name match exactly. Also ran the same tag-balance
+  and unescaped-`&` checks against the updated `reference/glossary.html`
+  (clean, both zero).
+  `bin/record-progress dataeng lesson_generated --day 9 --lesson
+  0009-dbt-snapshots-scd2.html --detail '{"by":"headless"}'` run from the
+  repo root; see this entry's tail for the result.

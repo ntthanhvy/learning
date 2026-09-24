@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 10 · dbt: Jinja, macros &amp; var()</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 10 · ~20 min · 24 Sep 2026</p>
+<h1>dbt: Jinja, macros &amp; var()</h1>
+<p class="byline">Today's tangible win: the hardcoded <code>45</code> minutes buried inside <code>mart_delivery_sla.sql</code> becomes a project variable you can change without editing SQL, and the breach check it drives becomes a one-line macro instead of a repeated <code>case when</code> — with a second caller of that same macro added today to make the reuse real, not just claimed.</p>
+
+<div class="callout"><strong>Before today — check Day 9 actually landed:</strong> this lesson edits <code>mart_delivery_sla.sql</code>, built back on Day 6, so start from a clean build:
+<pre><code>cd food_delivery_pipeline
+uv run --project ../dbt_env dbt build</code></pre>
+Expected: <code>Done. PASS=21 WARN=0 ERROR=0 SKIP=0 TOTAL=21</code> (9 models + 12 tests, Day 9's count — <code>fct_orders_with_commission</code> plus <code>restaurants_snapshot</code> added since Day 8). If you see <code>ERROR=2</code> naming <code>order_id 13</code> or <code>27</code>, your raw seed re-planted Day 3's two bad rows — re-run Day 3's <code>UPDATE</code> fix before starting today. If <code>fct_orders_with_commission</code> is missing, go back and finish Day 9 first.</div>
+
+<h2>1 · The SQL you've already been writing has a template language underneath</h2>
+<p>Every <code>{{ ref('stg_orders') }}</code> and <code>{{ source('raw', 'restaurants') }}</code> you've typed since Day 2 is a call into <dfn data-en="the templating language dbt compiles every .sql file through before sending it to Postgres -- {{ }} for expressions, {% %} for control flow like if/for, running at compile time, not query time" data-vn="giữ nguyên &quot;Jinja&quot; — ngôn ngữ template dbt dùng để biên dịch .sql trước khi gửi tới Postgres, {{ }} cho biểu thức, {% %} cho if/for">Jinja</dfn>, the templating language dbt compiles every model through before a single query reaches Postgres. <code>ref()</code> and <code>source()</code> are just Jinja functions dbt provides — <code>{{ }}</code> drops in a value, <code>{% %}</code> runs control flow like <code>if</code> or <code>for</code>, and it all happens at <em>compile</em> time, on your laptop, before Postgres ever sees a query. Day 8's <code>{% if is_incremental() %}</code> in <code>fct_orders</code> was already this — you were writing Jinja without it being named yet. Today names it and gives you two more tools built on top: a project-wide variable, and a macro.</p>
+<p>One habit worth building now: <code>dbt compile</code> renders every model's Jinja to plain SQL without running it, and writes the result to <code>target/compiled/</code>. Whenever a Jinja construct's output isn't obvious, compiling and reading the plain SQL beats guessing:</p>
+<pre><code>uv run --project ../dbt_env dbt compile --select mart_delivery_sla</code></pre>
+
+<h2>2 · <code>{{ var() }}</code>: pull a magic number out of SQL</h2>
+<p><code>mart_delivery_sla.sql</code> (Day 6) has a bare <code>45</code> sitting inside a <code>case when</code> — the SLA threshold, in minutes, hardcoded into the query text. That's a real problem the moment anyone asks "what if we measured against 30 minutes instead," because answering means editing SQL and redeploying, not changing a setting. dbt's fix is <dfn data-en="a dbt project-level setting, declared with a default in dbt_project.yml and readable from any model via {{ var('name') }}, and overridable per-invocation with --vars without touching any SQL file" data-vn="giữ nguyên &quot;var()&quot; — biến cấp project, khai báo default trong dbt_project.yml, đọc bằng {{ var('name') }}, ghi đè được qua --vars mà không sửa SQL">var()</dfn>: a named project variable, declared with a default in <code>dbt_project.yml</code>, read from any model with <code>{{ var('name') }}</code>, and overridable per-run from the command line with <code>--vars</code> — no SQL file touched either way.</p>
+<p>Declare the default in <code>dbt_project.yml</code>, alongside the <code>models:</code> block Day 8 added:</p>
+<pre><code>vars:
+  sla_threshold_minutes: 45</code></pre>
+<p>Replace the bare <code>45</code> in <code>mart_delivery_sla.sql</code> with <code>{{ var('sla_threshold_minutes') }}</code>:</p>
+<pre><code><span class="cm">-- models/marts/mart_delivery_sla.sql -- inside the final select</span>
+    sum(case when minutes_to_deliver > {{ var(<span class="str">'sla_threshold_minutes'</span>) }} then <span class="kw">1</span> else <span class="kw">0</span> end)::numeric
+        / count(*) as share_over_45_min</code></pre>
+<p>The column is still named <code>share_over_45_min</code> — renaming it today would ripple into any downstream query already reading that column name, and this lesson's job is making the threshold configurable, not renaming a shipped column. Note that in your head, not in the SQL, for now.</p>
+<p>Build normally and the default (45) applies, identical output to before:</p>
+<pre><code>uv run --project ../dbt_env dbt build --select mart_delivery_sla</code></pre>
+<p>Now override it for one run, with no file edited — this is the entire payoff:</p>
+<pre><code>uv run --project ../dbt_env dbt build --select mart_delivery_sla --vars '{sla_threshold_minutes: 30}'</code></pre>
+<p>Compile it to see exactly what changed, per Section 1's habit — the rendered SQL should show a literal <code>30</code> where <code>{{ var(...) }}</code> was:</p>
+<pre><code>uv run --project ../dbt_env dbt compile --select mart_delivery_sla --vars '{sla_threshold_minutes: 30}'
+grep -B1 "share_over" target/compiled/food_delivery_pipeline/models/marts/mart_delivery_sla.sql</code></pre>
+<pre><code>    sum(case when minutes_to_deliver > 30 then 1 else 0 end)::numeric
+        / count(*) as share_over_45_min</code></pre>
+<p><code>{{ target }}</code> is the same idea, one level up: instead of a value you name, dbt exposes the <em>active connection</em> itself as an object — <code>{{ target.name }}</code>, <code>{{ target.schema }}</code>. It's how a project tells dev and CI apart inside SQL without a separate <code>var()</code> for it, since dbt already knows which profile target is active from the <code>--target</code> flag or profile default. This project only has one target so far (<code>dbt_dev</code>), so there's nothing to branch on yet — worth knowing the name for the day a CI profile shows up, which Phase 2a's own spine has coming.</p>
+
+<h2>3 · Macros: a Jinja function you define once, call from anywhere</h2>
+<p>A <dfn data-en="a reusable Jinja function defined once in macros/ with {% macro %}...{% endmacro %}, callable from any model with {{ macro_name(args) }} -- dbt's answer to not copy-pasting the same SQL fragment or Jinja logic into multiple files" data-vn="giữ nguyên &quot;macro&quot; — hàm Jinja tái sử dụng, định nghĩa 1 lần trong macros/, gọi từ model bằng {{ macro_name(args) }}, tránh lặp code SQL">macro</dfn> is a reusable Jinja function: define it once in <code>macros/</code> with <code>{% macro %}...{% endmacro %}</code>, call it from any model with <code>{{ macro_name(args) }}</code>. It's dbt's answer to "this exact SQL fragment appears in two files" — the same DRY instinct Day 8's intermediate layer applied to a whole join, aimed here at a smaller, expression-level piece of logic.</p>
+<p>The SLA breach check — "is this duration over the threshold" — is exactly that kind of fragment: <code>mart_delivery_sla.sql</code> needs it today, and a courier-scorecard mart would need the identical check tomorrow if one gets built. Write it once as a macro, give it in full since the <code>{% macro %}</code> syntax itself is new today:</p>
+<pre><code><span class="cm">-- macros/is_sla_breach.sql</span>
+{% macro is_sla_breach(minutes_column) -%}
+{{ minutes_column }} > {{ var(<span class="str">'sla_threshold_minutes'</span>) }}
+{%- endmacro %}</code></pre>
+<p>The <code>-%}</code>/<code>{%-</code> whitespace-trim markers matter here, not just style: without them Jinja leaves the newlines and indentation from inside the <code>{% macro %}</code> block in the rendered output, so a call like <code>{{ is_sla_breach('minutes_to_deliver') }}</code> would compile to SQL with a line break in the middle of a <code>case when</code> expression. Still valid SQL either way, but worth trimming so compiled output reads the way you wrote it — the "compile and read the plain SQL" habit from Section 1 is exactly how this gets caught.</p>
+<p>Notice the macro itself calls <code>{{ var(...) }}</code> — macros and <code>var()</code> compose, the macro doesn't hardcode the threshold either, it just centralizes the *comparison*, while <code>var()</code> keeps centralizing the *number*. Call it from <code>mart_delivery_sla.sql</code> in place of the raw comparison:</p>
+<pre><code><span class="cm">-- models/marts/mart_delivery_sla.sql -- inside the final select</span>
+    sum(case when {{ is_sla_breach(<span class="str">'minutes_to_deliver'</span>) }} then <span class="kw">1</span> else <span class="kw">0</span> end)::numeric
+        / count(*) as share_over_45_min</code></pre>
+<p>Compile and confirm it renders to the exact same plain SQL as Section 2's direct comparison — a macro must be invisible in its output, or something's wrong:</p>
+<pre><code>uv run --project ../dbt_env dbt compile --select mart_delivery_sla
+grep -B1 "share_over" target/compiled/food_delivery_pipeline/models/marts/mart_delivery_sla.sql</code></pre>
+<pre><code>    sum(case when minutes_to_deliver > 45 then 1 else 0 end)::numeric
+        / count(*) as share_over_45_min</code></pre>
+
+<h2>4 · Build: give the macro a real second caller</h2>
+<p>Now the actual skill, and the point Section 3 only claimed: a macro isn't proven reusable until something else actually calls it. Add a second model, <code>models/marts/mart_restaurant_sla.sql</code> — same breach logic, different grain (one row per restaurant instead of per city per day), reusing <code>is_sla_breach()</code> rather than repeating the <code>case when</code> a second time:</p>
+<pre><code><span class="cm">-- models/marts/mart_restaurant_sla.sql -- TODO: write the final select
+-- Reuse the order_durations CTE shape from mart_delivery_sla.sql (same
+-- placed/delivered join through stg_order_events), but group by
+-- restaurant_id instead of city + order_date. Select: restaurant_id,
+-- count(*) as delivered_orders, and share_over_threshold using
+-- {{ is_sla_breach('minutes_to_deliver') }} the same way Section 3 did --
+-- do not write a second case-when by hand.</span></code></pre>
+<p>Add the grain test to <code>models/marts/marts.yml</code>, alongside <code>mart_delivery_sla</code>'s:</p>
+<pre><code><span class="cm">  - name: mart_restaurant_sla
+    columns:
+      - name: restaurant_id
+        tests:
+          - not_null
+          - unique</span></code></pre>
+<pre><code>uv run --project ../dbt_env dbt build --select mart_restaurant_sla</code></pre>
+<p>Expected — one new table, one row per restaurant that has at least one delivered order:</p>
+<pre><code>1 of 1 OK created sql table model dbt_dev.mart_restaurant_sla ... [SELECT 40 in 0.05s]
+
+Done. PASS=3 WARN=0 ERROR=0 SKIP=0 TOTAL=3</code></pre>
+<p>Confirm both marts agree on the threshold with a single override, no SQL touched in either file — this is what "the macro and the var actually compose" looks like end to end:</p>
+<pre><code>uv run --project ../dbt_env dbt build --select mart_delivery_sla mart_restaurant_sla --vars '{sla_threshold_minutes: 30}'
+docker compose exec -T postgres psql -U fdp -d fdp -c \
+  "SELECT count(*) FROM dbt_dev.mart_restaurant_sla WHERE share_over_threshold > 0;"</code></pre>
+<p>Re-run once more with no <code>--vars</code> flag afterward to leave the warehouse in its default (45-minute) state before committing:</p>
+<pre><code>uv run --project ../dbt_env dbt build --select mart_delivery_sla mart_restaurant_sla</code></pre>
+<p>Commit <code>macros/is_sla_breach.sql</code>, the edited <code>mart_delivery_sla.sql</code>, the new <code>mart_restaurant_sla.sql</code>, the updated <code>marts.yml</code>, and the <code>vars:</code> block in <code>dbt_project.yml</code>.</p>
+
+<div class="callout"><strong>When a macro makes a project worse:</strong> per <code>PLAN.md</code>'s own framing of this topic, a macro isn't free. <code>is_sla_breach()</code> earns its place because two real models call it with the identical comparison. A macro with exactly one caller is indirection with no payoff — anyone reading that one model now has to open a second file to understand a one-line comparison, which is strictly worse than reading it inline. And a macro that branches heavily on <code>{% if %}</code> to serve very different callers stops being "one job reused" and starts being an undocumented mini-language only the macro's author can safely edit — Day 8's own "reuse only pays off when the reused piece is generic enough for every caller" finding, applied one layer down from a whole model to a single expression. Before writing a macro, name the second real caller first; if there isn't one yet, write the SQL inline and wait.</div>
+
+<div class="interview">
+<p><strong>Q: "When would you reach for a dbt macro instead of just writing the SQL twice?"</strong> A strong answer, out loud: <em>"Only once there's a second real caller — not in anticipation of one. dbt compiles every model through Jinja already, so a macro is just a named, reusable Jinja function, called with curly-brace syntax like ref() or source() are. I'd pull a comparison or expression into a macro when two or more models need the exact same logic, so a change to the rule happens in one file instead of drifting between copies. But a macro with only one caller is pure indirection — it makes the one model harder to read for no reuse payoff. I'd pair it with var() when the thing that's actually varying isn't the logic but a number or threshold inside it, like an SLA minutes cutoff — var() centralizes the value with a project-level default, overridable per run with --vars, without touching SQL at all. The two compose: the macro can call var() internally, so a model reads as one clean line while both the comparison and the number it compares against are each defined in exactly one place."</em> The signal: naming the "second real caller" bar explicitly, not treating macros as always-good DRY.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="ref() and source() are themselves Jinja functions dbt provides, resolved at compile time before any query reaches Postgres -- the same mechanism {{ var() }} and macros use. dbt compiles every .sql file through Jinja first, always, not only when {% %} syntax is visible.">
+    <p class="stem">What compiles <code>ref()</code> and <code>source()</code> before a query reaches Postgres?</p>
+    <button class="opt" data-ok>Jinja, the templating language dbt runs first</button>
+    <button class="opt">Postgres, reading each function at query time</button>
+    <button class="opt">psycopg, translating Python calls into SQL text</button>
+  </div>
+  <div class="q" data-why="var() reads a project variable with a default declared in dbt_project.yml, and --vars overrides it for one invocation with no SQL file touched at all -- that's the whole payoff over a hardcoded literal sitting inside a model's SQL.">
+    <p class="stem">What does <code>--vars '{sla_threshold_minutes: 30}'</code> change without editing any SQL file?</p>
+    <button class="opt" data-ok>The threshold value <code>var()</code> renders for one run</button>
+    <button class="opt">Which Postgres schema every single model builds into</button>
+    <button class="opt">Whether <code>dbt build</code> runs tests at all today</button>
+  </div>
+  <div class="q" data-why="A macro with only one caller adds a layer of indirection -- anyone reading that model now opens a second file to understand a one-line comparison -- with no reuse payoff to offset it. The bar for a macro earning its place is a second real caller, not anticipation of one, per today's callout and Day 8's identical finding about intermediate models.">
+    <p class="stem">Per today's callout, when does a macro make a project worse?</p>
+    <button class="opt" data-ok>When it has exactly one caller, adding pure indirection</button>
+    <button class="opt">When it is called from more than one caller</button>
+    <button class="opt">When it is simply defined inside the <code>macros/</code> folder</button>
+  </div>
+  <div class="q" data-why="dbt compile renders every model's Jinja to plain SQL without executing it, writing the result to target/compiled/ -- the direct way to check what {{ var() }} or a macro actually produced, instead of guessing from the template source.">
+    <p class="stem">What does <code>dbt compile</code> do that <code>dbt run</code> does not?</p>
+    <button class="opt" data-ok>Renders Jinja to plain SQL without running it</button>
+    <button class="opt">Runs every model's own tests without building tables</button>
+    <button class="opt">Connects to Postgres just to check credentials only</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> dbt Labs' own <a href="https://docs.getdbt.com/docs/build/jinja-macros">Jinja and macros</a> docs (the day's primary source — not yet cited in <code>RESOURCES.md</code>, add it under dbt (deep) alongside Snapshots) cover macro syntax, <code>var()</code>, and <code>target</code> directly from source. dbt's <a href="https://docs.getdbt.com/reference/dbt-jinja-functions/var">var()</a> reference and <a href="https://docs.getdbt.com/reference/dbt-jinja-functions/target">target</a> reference are the exact-syntax pages worth bookmarking.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 10.<br>
+<strong>Phase 2 continues</strong> along the dbt/Kafka/Airflow spine in <code>PLAN.md</code>, adapted to your questions rather than a fixed calendar — the <code>dbt_utils</code> package (surrogate keys, <code>generate_series</code>) and when to write a test instead of importing one is next up on the dbt side.<br><br>
+💬 Anything unclear — the var()/macro composition, or when a macro stops paying for itself? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

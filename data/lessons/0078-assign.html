@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 78 · .assign(): adding columns without ever risking SettingWithCopy</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 78 · ~20 min · 24 Sep 2026</p>
+<h1>.assign(): adding columns without ever risking SettingWithCopy</h1>
+<p class="byline">Chào bạn — Lesson 77 closed the core <code>.str</code> accessor family, so today's a fresh scan. Grepping every lesson body and the glossary turned up a real gap hiding in plain sight: <code>.assign()</code> has quietly appeared in code since Lesson 8's method-chaining lesson (<code>.assign(amount=lambda d: ...)</code>) and kept showing up ever since (Lessons 53, 67), but it has never gotten its own lesson explaining its own mechanics — what its multiple keyword arguments actually do, in what order, and why it's the one column-creation tool that sidesteps Lesson 26's whole SettingWithCopy question entirely.</p>
+
+<h2>1 · The basic shape: keyword name becomes the new column</h2>
+<p><dfn data-en="a DataFrame method, df.assign(col=value_or_callable, ...), that returns a NEW DataFrame with one column added or overwritten per keyword argument -- the keyword's name becomes the column name, and the original DataFrame is never mutated, no matter what" data-vn="giữ nguyên '.assign()' — method df.assign(ten_cot=gia_tri_hoac_ham, ...), trả về DataFrame MỚI với mỗi keyword argument thành 1 cột được thêm/ghi đè; tên keyword = tên cột; KHÔNG BAO GIỜ sửa DataFrame gốc">.assign(col=value)</dfn> returns a new DataFrame with <code>col</code> set to <code>value</code> — the keyword's own name becomes the column name:</p>
+<pre><code>df = pd.DataFrame({
+    <span class="str">"customer"</span>: [<span class="str">"An"</span>, <span class="str">"Binh"</span>, <span class="str">"Chi"</span>],
+    <span class="str">"amount"</span>: [<span class="num">120.0</span>, <span class="num">215.5</span>, <span class="num">99.9</span>],
+    <span class="str">"qty"</span>: [<span class="num">3</span>, <span class="num">2</span>, <span class="num">1</span>],
+})
+out = df.assign(unit_price=df[<span class="str">"amount"</span>] / df[<span class="str">"qty"</span>])
+<span class="cm"># customer  amount  qty  unit_price
+#       An   120.0    3       40.00
+#     Binh   215.5    2      107.75
+#      Chi    99.9    1       99.90</span>
+<span class="str">"unit_price"</span> <span class="kw">in</span> df.columns   <span class="cm"># False -- df itself was never touched</span></code></pre>
+<p>Confirmed directly (pandas 3.0.6): <code>out</code> is a brand-new DataFrame; <code>df</code> keeps exactly its original three columns. This is functionally the same result as <code>df["unit_price"] = df["amount"] / df["qty"]</code>, but that spelling mutates <code>df</code> in place — <code>.assign()</code> never does, by design.</p>
+
+<h2>2 · Multiple columns in one call, later ones referencing earlier ones via lambda</h2>
+<p>Passing several keyword arguments builds several columns in a single call. When a later column needs a column an earlier keyword in the <em>same call</em> just created, that value must be a <code>lambda d: ...</code> rather than a plain expression — the lambda receives the in-progress DataFrame (with the earlier keywords already applied) as <code>d</code>:</p>
+<pre><code>out = df.assign(
+    unit_price=<span class="kw">lambda</span> d: d[<span class="str">"amount"</span>] / d[<span class="str">"qty"</span>],
+    unit_price_rounded=<span class="kw">lambda</span> d: d[<span class="str">"unit_price"</span>].round(<span class="num">1</span>),
+)
+<span class="cm"># customer  amount  qty  unit_price  unit_price_rounded
+#       An   120.0    3       40.00                40.0
+#     Binh   215.5    2      107.75               107.8</span></code></pre>
+<p>Confirmed directly: keyword arguments are guaranteed to run in the exact order written (a documented behavior, not incidental), so <code>unit_price_rounded</code>'s lambda genuinely sees <code>unit_price</code> already present on <code>d</code>. Swapping the plain (non-lambda) form in for the second keyword — <code>unit_price_rounded=df["unit_price"].round(1)</code> — was confirmed to raise <code>KeyError: 'unit_price'</code>, because a plain expression evaluates immediately against the ORIGINAL <code>df</code>, which never had <code>unit_price</code> at all. The lambda form is not just style — it is the only way to chain a new column off one created earlier in the same call.</p>
+
+<div class="callout"><strong>Rule of thumb:</strong> if a keyword's value only reads columns that already exist on the original DataFrame, a plain expression is fine. The moment it needs a column being created by an earlier keyword in the same <code>.assign()</code> call, it must be <code>lambda d: ...</code> — same reason Lesson 8 introduced the lambda form in the first place, now with the mechanism spelled out explicitly.</div>
+
+<h2>3 · Overwriting an existing column works the same way</h2>
+<p>The keyword name doesn't have to be new — reusing an existing column's name overwrites it in the returned DataFrame, and still leaves the original untouched:</p>
+<pre><code>out = df.assign(amount=<span class="kw">lambda</span> d: d[<span class="str">"amount"</span>] * <span class="num">2</span>)
+out[<span class="str">"amount"</span>].tolist()   <span class="cm"># [240.0, 431.0, 199.8]</span>
+df[<span class="str">"amount"</span>].tolist()    <span class="cm"># [120.0, 215.5, 99.9]  -- original amounts, unchanged</span></code></pre>
+<p>Confirmed directly: this is a genuine overwrite in the result, with zero risk to <code>df</code> — useful for "clean this column" steps inside a chain (coercing dtype, rounding, clipping) without needing a second variable name.</p>
+
+<h2>4 · Why .assign() never triggers Lesson 26's SettingWithCopy question</h2>
+<p>Lesson 26 warned that writing into a filtered slice — <code>sub["col"] = value</code> after <code>sub = df[mask]</code> — is ambiguous: it might silently fail to update anything, might raise, or might mutate something unintended, depending on whether <code>sub</code> is a view or a copy. <code>.assign()</code> sidesteps that whole question, because it never writes <em>into</em> an existing object at all — it always returns a fresh, independent DataFrame:</p>
+<pre><code>sub = df[df[<span class="str">"amount"</span>] > <span class="num">100</span>]
+sub_flagged = sub.assign(flag=<span class="kw">True</span>)   <span class="cm"># no warning, no ambiguity -- sub_flagged is simply new</span></code></pre>
+<p>Confirmed directly: calling <code>.assign()</code> on a filtered slice raises nothing and produces a correct, independent result, with no <code>.copy()</code> needed first — because <code>.assign()</code> was never going to write into <code>sub</code>'s own memory in the first place. This is exactly why it is the standard tool inside a method chain (Lesson 8): every intermediate DataFrame is disposable, so there is nothing to accidentally mutate.</p>
+
+<div class="callout"><strong>SQL bridge:</strong> <code>df.assign(new_col=expr)</code> is the pandas spelling of adding a computed column to a <code>SELECT</code> list — <code>SELECT *, amount / qty AS unit_price FROM orders</code>. Chaining several keyword arguments in one <code>.assign()</code> call, where a later one reads an earlier one, mirrors a query building one derived column on top of another within the same <code>SELECT</code> (or a chain of <code>WITH</code> CTEs) — each step sees the previous step's output, nothing upstream is ever mutated.</div>
+
+<div class="interview">
+<p><strong>Q: "Why use df.assign(col=...) instead of just df['col'] = ...?"</strong> A strong answer, out loud: <em>"Both produce the same values, but assign() never mutates the original DataFrame — it always returns a new one, which is what makes it safe to drop into the middle of a method chain without worrying about Lesson 26's whole view-versus-copy question, since there's no in-place write happening at all. It also reads better inside a chain: df.query(...).assign(unit_price=lambda d: d['amount']/d['qty']).sort_values('unit_price') stays one expression, no intermediate variable needed. The one thing I'd watch for: if I'm creating two columns in the same assign() call and the second depends on the first, the second has to be a lambda — a plain expression there evaluates against the original DataFrame, before the first new column existed, and raises a KeyError."</em> The signal: naming the immutability as the actual reason (not just "it's the fancy way"), and knowing the lambda-dependency rule cold rather than guessing at it live.</p>
+</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/78_assign.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/78_assign.py</code></pre>
+<p>Uses a small inline <code>customer</code>/<code>amount</code>/<code>qty</code> DataFrame. Exercise 1 confirms the basic single-column <code>.assign()</code> and that the source DataFrame stays untouched (Section 1). Exercise 2 confirms a two-keyword call where the second lambda reads the first keyword's new column (Section 2). Exercise 3 confirms overwriting an existing column leaves the original DataFrame's values unchanged (Section 3). Exercise 4 confirms <code>.assign()</code> on a filtered slice needs no <code>.copy()</code> and raises nothing (Section 4).</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: df.assign(col=value) always returns a brand new DataFrame with the added/overwritten column -- the original df keeps exactly its original columns, no matter what value or callable was passed.">
+    <p class="stem">What does <code>df.assign(new_col=value)</code> do to <code>df</code> itself?</p>
+    <button class="opt" data-ok>Nothing; df keeps its original columns fully untouched</button>
+    <button class="opt">It immediately adds new_col onto df permanently in-place</button>
+    <button class="opt">It quietly deletes every column df originally had</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: keyword arguments in one assign() call run in the order written, so a later lambda genuinely sees an earlier keyword's new column already present on d -- but a plain (non-lambda) expression evaluates immediately against the ORIGINAL DataFrame, which never had that new column, raising KeyError.">
+    <p class="stem">Inside one <code>.assign(a=..., b=lambda d: d["a"] + 1)</code> call, why must the second keyword use a lambda?</p>
+    <button class="opt" data-ok>A plain expression reads the original frame, missing column</button>
+    <button class="opt">pandas simply forbids more than one keyword argument entirely</button>
+    <button class="opt">Lambdas always execute noticeably faster than plain expressions do</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: calling .assign() on a filtered slice raises nothing and needs no .copy() first, because .assign() never writes into the slice's own memory -- it always returns an independent new DataFrame, sidestepping Lesson 26's whole view-versus-copy ambiguity entirely.">
+    <p class="stem">Why does <code>sub.assign(flag=True)</code> on a filtered slice never trigger Lesson 26's SettingWithCopy concern?</p>
+    <button class="opt" data-ok>assign() never writes into sub; it always returns something new</button>
+    <button class="opt">pandas silently calls .copy() on sub first, every single time</button>
+    <button class="opt">Filtered slices are always safe views, never risky copies here</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official pandas <a href="https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.assign.html">DataFrame.assign()</a> API reference (per <code>RESOURCES.md</code>'s "Docs: pandas User Guide" entry) — read the "Notes" section in full, which documents the keyword-argument execution-order guarantee behind Section 2 (~5 min).</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>.assign()</code> is new today, placed right after Lesson 77's <code>str.replace()</code> entry.<br>
+<strong>Next lesson:</strong> a fresh curriculum/glossary scan for the next genuinely-uncovered pattern — open candidates per MISSION.md and this course's own running gap list: more groupby/agg patterns beyond Lessons 4/40/48/61/66, or memory/dtype optimization beyond Lessons 25/41/51/62.<br><br>
+💬 Anything unclear — the lambda-dependency rule, why assign() sidesteps SettingWithCopy, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

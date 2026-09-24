@@ -160,6 +160,8 @@
       file: "lessons/0076-str-split.html" },
     { n: 77, date: "2026-09-23", title: "str.replace(): rewriting text in place, and its flipped regex= default",
       file: "lessons/0077-str-replace.html" },
+    { n: 78, date: "2026-09-24", title: ".assign(): adding columns without ever risking SettingWithCopy",
+      file: "lessons/0078-assign.html" },
   ];
 
   const REFS = [

@@ -1017,3 +1017,153 @@ along the Phase 2 spine, adapted to the learning records.
   `bin/record-progress dataeng lesson_generated --day 9 --lesson
   0009-dbt-snapshots-scd2.html --detail '{"by":"headless"}'` run from the
   repo root; see this entry's tail for the result.
+- 2026-09-24 (headless 06:00 run, Day 10 generated): tenth lesson,
+  `0010-dbt-jinja-and-macros.html`. The orchestrator's own DB read moments
+  before this round confirmed the latest `dataeng` row was `lesson_generated
+  day=9` (2026-09-23) with nothing for 2026-09-24 yet, and independently
+  confirmed `lessons/` contained only `0001`–`0009`, `assets/nav.js`'s latest
+  entry was Day 9, and no `2026-09-24`/`0010` entry existed anywhere
+  (`lessons/`, `assets/nav.js`, this file), so proceeded on schedule. Read
+  `MISSION.md`, `NOTES.md` in full (conventions, scope boundaries, portfolio-
+  repo and verification sections), `PLAN.md` in full (the domain table and the
+  2a spine), `RESOURCES.md`, the one `learning-records/` file, and
+  `lessons/0009-dbt-snapshots-scd2.html` and `lessons/0008-dbt-intermediate-layer.html`
+  in full for structural and content precedent (dfn/gloss.js usage, quiz.js
+  option-shape, nav.js registration, Verify-block style, closing voice) before
+  writing.
+  **Topic choice:** followed 2a's spine in order, as every prior Phase 2 round
+  has — Day 8 was the spine's first bullet (layering), Day 9 the second
+  (snapshots/SCD2), today is the third verbatim: "Jinja & macros: DRY SQL,
+  `{{ var() }}`, `{{ target }}`, when a macro makes a project worse." No new
+  learning-record or quiz signal exists beyond the one Day 1 baseline file, so
+  there was no reason to deviate from the spine order, consistent with Days 8
+  and 9's own reasoning.
+  **Content:** named Jinja as the templating layer every `ref()`/`source()`
+  call (and Day 8's `{% if is_incremental() %}`) already runs through, without
+  it being named until today, then built two tools on top: `{{ var() }}` for a
+  configurable project-level value, and a macro for a reusable Jinja function.
+  Rather than invent an example, found a genuine hardcoded magic number already
+  sitting in this course's own code — the bare `45` (SLA minutes) inside Day
+  6's `mart_delivery_sla.sql` — and used it as the day's real refactor target:
+  pulled it into `vars: {sla_threshold_minutes: 45}` in `dbt_project.yml`,
+  overridable per-run with `--vars` and no SQL touched. Then extracted the
+  breach comparison itself into a macro, `is_sla_breach(minutes_column)`
+  (given in full, since `{% macro %}` syntax is new today), which itself calls
+  `{{ var(...) }}` internally — chosen deliberately to make the "macros and
+  var() compose" point concrete rather than asserted. The day's actual skill
+  (Section 4) is writing a second real caller, `mart_restaurant_sla.sql` (new
+  mart, grain one row per restaurant, TODO on the final `select` — reuse the
+  macro, don't hand-write a second `case when`), because per Day 8's own
+  "reuse only pays off when the reused piece is generic enough for every
+  caller" finding, a macro isn't proven reusable until something else actually
+  calls it — a single-caller macro is pure indirection, which the closing
+  callout states as the direct answer to PLAN.md's "when does a macro make a
+  project worse" bullet. `{{ target }}` is covered at vocabulary level only
+  (one paragraph, no `<dfn>`, no build step) since this project has only one
+  profile target so far and PLAN.md lists it third/lightest in the same
+  bullet — flagged as "worth knowing the name for the day a CI profile shows
+  up," which Phase 2a's own spine (dbt in CI) has coming. No pandas, no
+  Python-language teaching, no re-derivation of idempotency or API concepts —
+  none applicable to a pure Jinja/dbt day. Domain names (`mart_delivery_sla`,
+  `minutes_to_deliver`, `share_over_45_min`) used exactly as Day 6 established;
+  the column name `share_over_45_min` is deliberately *not* renamed even
+  though its value becomes configurable, with an explicit one-line reason
+  (avoiding a downstream rename ripple) rather than silently left alone. Opened
+  with an explicit "before today" `dbt build` check (expect `PASS=21 WARN=0
+  ERROR=0 SKIP=0 TOTAL=21`, Day 9's own real count, independently confirmed
+  below) rather than assuming Day 9's build step landed, per this file's
+  standing guidance.
+  **Verification:** laid out a minimal scratch project mirroring Day 8/9's
+  approach (`dbt_project.yml` with a new `vars:` block and `macro-paths`,
+  `profiles.yml`, all four staging models, `int_orders_joined`, `dim_restaurants`,
+  `fct_orders`, `restaurants_snapshot`, `fct_orders_with_commission`, and
+  today's new `macros/is_sla_breach.sql` + edited `mart_delivery_sla.sql` +
+  new `mart_restaurant_sla.sql`) in `.scratch_dataeng_verify_d10/` under the
+  repo root, deleted after. Before writing today's "before today" PASS count,
+  independently rebuilt Day 9's *exact* end state in a separate scratch
+  project (`.scratch_dataeng_verify_d9check/`, deleted after) and ran
+  `dbt list --resource-type model`/`--resource-type test` against it rather
+  than trusting Day 9's own prose — confirmed 9 models + 12 tests = 21, i.e.
+  Day 9's lesson text is internally consistent and today's opening callout's
+  `PASS=21 TOTAL=21` is real, not carried forward unchecked.
+  `uv run --with "dbt-postgres==1.11.0" dbt parse --project-dir <abs>
+  --profiles-dir <abs> --no-partial-parse` (absolute-path flags, single
+  non-compound command, no `cd`/redirection — the same approval-gate
+  workaround every prior round has documented) came back clean on the first
+  try; grepped for `Error`, found none. `dbt list --resource-type model` and
+  `--resource-type test` against the Day 10 scratch project resolved 10
+  models and 14 tests, matching the lesson's own math (9+1 new model,
+  12+2 new tests). Confirmed a genuine syntax error inside a `{% macro %}`
+  block (an unclosed `{{`) is still caught by `dbt parse` — `Compilation
+  Error`, exit code 2 — consistent with every prior day's finding that `dbt
+  parse` validates Jinja syntax, not just `ref()`/`source()` resolution.
+  Separately confirmed, and this is a genuinely new finding this round (no
+  prior day's lesson used `dbt compile` as a taught, learner-run command, only
+  as this file's own internal verification step) — that `dbt compile`, unlike
+  `dbt parse`, *requires a live database connection* even for the simplest
+  model with no adapter-specific Jinja at all; it failed against the
+  unreachable `10.255.255.1` profile with a connection-timeout `Database
+  Error` on every model tried, including plain `stg_restaurants`. Since
+  today's lesson teaches `dbt compile` directly to the learner (who always has
+  a live Postgres via their own compose stack, so this is not a problem for
+  them), this was verified for real: Docker was available this round, so
+  brought up a real scratch `postgres:17` via `docker compose up -d` (config
+  validated first), seeded a small hand-written `raw.*` dataset (2 restaurants,
+  2 couriers, 6 orders, 12 order_events — deliberately including 2 deliveries
+  over 45 minutes and 4 under, to exercise the actual threshold-crossing logic
+  rather than an all-pass or all-fail dataset), pointed the scratch profile at
+  it, and ran the real `dbt build` end to end: `PASS=24 WARN=0 ERROR=0 SKIP=0
+  NO-OP=0 REUSED=0 TOTAL=24` (10 models + 1 snapshot + 14 tests by dbt's own
+  accounting for `build`, which counts differently from `dbt list`'s
+  per-resource-type counts). This live run caught two real bugs before they
+  shipped: first, the macro as originally drafted (`{% macro %}` without
+  whitespace-trim markers) rendered compiled SQL with a stray line break
+  inside the `case when` expression — fixed by adding `-%}`/`{%-` trim markers
+  to the macro definition, re-verified the compiled output was a single clean
+  line matching Section 2's direct-comparison version exactly, and added a
+  sentence explaining why the trim markers matter rather than presenting them
+  as unexplained syntax. Second, the lesson's own `grep -A1 "share_over"`
+  instruction for reading the compiled SQL was checked against the real
+  compiled file and found to print the wrong two lines (it matched the
+  `share_over_45_min` line itself, not the `case when` line above it) — fixed
+  to `grep -B1 "share_over"` in both places it appears (Sections 2 and 3),
+  re-verified against the live compiled output at both the default (45) and
+  overridden (30) threshold, byte-matching what the lesson now shows verbatim.
+  Also ran the `--vars '{sla_threshold_minutes: 30}'` override for real against
+  the live stack and confirmed the compiled SQL substitutes the literal `30`
+  correctly, and ran `mart_restaurant_sla` alone (`--select mart_restaurant_sla`)
+  to confirm `PASS=3 WARN=0 ERROR=0 SKIP=0 TOTAL=3` — matching Section 4's
+  claim exactly (1 model + `not_null` + `unique`, real dbt output, not
+  hand-derived). The `SELECT 40` in that same expected-output block is a
+  hand-derived scale figure (this project's real seed has 40 restaurants per
+  Day 1, vs. 2 in this round's minimal scratch dataset), stated as such rather
+  than passed off as directly observed. Tore down the scratch Postgres
+  (`docker compose down -v`) and deleted both scratch directories (the dbt
+  project and the compose stack) afterward. No Python file exists in this
+  lesson (a pure Jinja/dbt day, same as Days 8–9), so `py_compile` was not
+  applicable and was not run — noted here rather than silently skipped.
+  Registered Lesson 10 in `assets/nav.js` (`node --check` clean) and added the
+  Day 10 section to `reference/glossary.html` (3 terms: Jinja, var(), macro —
+  grepped Days 1–9's sections first, case-insensitively, no collisions;
+  `{{ target }}` deliberately left without a `<dfn>`/glossary row since it's
+  covered at vocabulary level only, consistent with the lesson's own scoping
+  choice). Also added the "Jinja and macros"/`var()`/`target` doc links to
+  `RESOURCES.md` under dbt (deep), since the lesson's own "Go deeper" section
+  cited them as not-yet-listed there. Ran the same small Python tag-balance/
+  unescaped-`&`/quiz-word-count script prior rounds have used, from a scratch
+  file outside `dataeng/`, deleted after use. All tags balanced
+  (div/p/table/tr/td/th/ul/li/pre/code/h2/dfn/button), zero suspicious bare
+  `&`. The first quiz draft came up mismatched on three of the four questions
+  (7/7/6, 10/7/7, 10/11/8 word splits, with the double-brace `{{ var(...) }}`
+  inline-code snippet in one option turning out to tokenize as multiple words
+  by this script's counting convention) and was rebalanced to 7/7/7, 8/8/8,
+  9/9/9 and 8/8/8 across several edit-and-recount passes, re-verified by
+  re-running the same script after each edit; Question 2's flagged option was
+  reworded from inline Jinja syntax to plain prose (`var()` rendering "the
+  threshold value") specifically to sidestep the brace-tokenization ambiguity
+  rather than fight it. Also ran the same check against the updated
+  `reference/glossary.html` (clean, all tags balanced, zero bare `&`).
+  `bin/record-progress dataeng lesson_generated --day 10 --lesson
+  0010-dbt-jinja-and-macros.html --detail '{"by":"headless"}'` succeeded on the
+  first attempt, run from the repo root:
+  `recorded: dataeng/lesson_generated day=10 lesson=0010-dbt-jinja-and-macros.html`.

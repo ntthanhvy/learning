@@ -118,6 +118,14 @@
   <tr><td>point-in-time join</td><td>giữ nguyên "point-in-time join" — join theo trạng thái đúng tại 1 thời điểm cụ thể trong quá khứ, không phải trạng thái hiện tại</td><td>A join condition that matches a row on the state something was in during a specific window of time, rather than the state it is in now — here, matching each order to the <code>restaurants_snapshot</code> row whose <code>dbt_valid_from</code>/<code>dbt_valid_to</code> window contains the order's own <code>placed_at</code>, instead of a plain equi-join on <code>restaurant_id</code> alone.</td></tr>
 </table>
 
+<h2 id="day10">Day 10 — dbt: Jinja, macros &amp; var()</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>Jinja</td><td>giữ nguyên "Jinja" — ngôn ngữ template dbt dùng để biên dịch .sql trước khi gửi tới Postgres, {{ }} cho biểu thức, {% %} cho if/for</td><td>The templating language dbt compiles every <code>.sql</code> file through before sending it to Postgres — <code>{{ }}</code> for expressions, <code>{% %}</code> for control flow like <code>if</code>/<code>for</code>, running at compile time, not query time. <code>ref()</code> and <code>source()</code> are Jinja functions dbt provides.</td></tr>
+  <tr><td>var()</td><td>giữ nguyên "var()" — biến cấp project, khai báo default trong dbt_project.yml, đọc bằng {{ var('name') }}, ghi đè được qua --vars mà không sửa SQL</td><td>A dbt project-level setting, declared with a default in <code>dbt_project.yml</code> and readable from any model via <code>{{ var('name') }}</code>, and overridable per-invocation with <code>--vars</code> without touching any SQL file.</td></tr>
+  <tr><td>macro</td><td>giữ nguyên "macro" — hàm Jinja tái sử dụng, định nghĩa 1 lần trong macros/, gọi từ model bằng {{ macro_name(args) }}, tránh lặp code SQL</td><td>A reusable Jinja function defined once in <code>macros/</code> with <code>{% macro %}...{% endmacro %}</code>, callable from any model with <code>{{ macro_name(args) }}</code> — dbt's answer to not copy-pasting the same SQL fragment or Jinja logic into multiple files. Only earns its place with a second real caller; one caller is pure indirection.</td></tr>
+</table>
+
 <script src="../assets/nav.js"></script>
 </body>
 </html>

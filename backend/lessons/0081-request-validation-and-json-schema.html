@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 81 · Request validation: writing the shape down instead of checking it by hand</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 81 · ~20 min</p>
+<h1>Request validation: writing the shape down instead of checking it by hand</h1>
+<p class="byline">Lesson 17 drew a line between SQL injection defense and input validation and left validation as one sentence: "is this string actually an email, is this page size a positive integer under some cap." That sentence has been true in every handler since without ever getting its own lesson. This one stays on that side of the line — no SQL, no injection — and asks the question Lesson 17 didn't: where does that checking code live, and what happens once a handler has more than three fields to check.</p>
+
+<h2>1 · The habit that doesn't scale</h2>
+<p>The natural first move is checking fields by hand, inline, at the top of the handler:</p>
+<pre><code><span class="kw">func</span> createOrder(w http.ResponseWriter, r *http.Request) {
+    <span class="kw">var</span> in CreateOrderInput
+    json.NewDecoder(r.Body).Decode(&amp;in)
+
+    <span class="kw">if</span> in.Quantity <= <span class="dv">0</span> {
+        http.Error(w, <span class="kw">"quantity must be positive"</span>, <span class="dv">400</span>)
+        <span class="kw">return</span>
+    }
+    <span class="kw">if</span> in.Quantity > <span class="dv">1000</span> {
+        http.Error(w, <span class="kw">"quantity too large"</span>, <span class="dv">400</span>)
+        <span class="kw">return</span>
+    }
+    <span class="kw">if</span> in.Email == <span class="kw">""</span> || !strings.Contains(in.Email, <span class="kw">"@"</span>) {
+        http.Error(w, <span class="kw">"invalid email"</span>, <span class="dv">400</span>)
+        <span class="kw">return</span>
+    }
+    <span class="cm">// ...and so on, one if-block per field</span>
+}</code></pre>
+<p>This works for three fields. It stops working long before twenty: every field needs its own <code>if</code>, every <code>if</code> needs its own error-contract-shaped response (Lesson 3's <code>{"error":{"code","message"}}</code>), the checks drift out of sync with whatever the frontend's form actually sends, and — the part that bites hardest — every other handler in the codebase that also accepts a quantity or an email re-derives the same rule slightly differently, because nothing forces two handlers to agree on what "a valid email" means.</p>
+
+<h2>2 · Declaring the shape instead of checking it</h2>
+<p>The alternative is writing the rules down once, as data, instead of as scattered <code>if</code> statements — a <dfn data-en="a declarative document that describes the required shape of a JSON value: which fields exist, their types, which are required, and constraints like numeric ranges or string patterns — checked by a general-purpose validator instead of hand-written per-field code" data-vn="JSON Schema (giữ nguyên) — tài liệu khai báo hình dạng 1 JSON: field nào có, kiểu gì, field nào bắt buộc, giới hạn range/pattern ra sao, được 1 validator chung kiểm tra thay vì code if thủ công từng field">JSON Schema</dfn> document:</p>
+<pre><code>{
+  <span class="kw">"type"</span>: <span class="kw">"object"</span>,
+  <span class="kw">"required"</span>: [<span class="kw">"productId"</span>, <span class="kw">"quantity"</span>, <span class="kw">"email"</span>],
+  <span class="kw">"properties"</span>: {
+    <span class="kw">"productId"</span>: { <span class="kw">"type"</span>: <span class="kw">"string"</span>, <span class="kw">"format"</span>: <span class="kw">"uuid"</span> },
+    <span class="kw">"quantity"</span>:  { <span class="kw">"type"</span>: <span class="kw">"integer"</span>, <span class="kw">"minimum"</span>: <span class="dv">1</span>, <span class="kw">"maximum"</span>: <span class="dv">1000</span> },
+    <span class="kw">"email"</span>:     { <span class="kw">"type"</span>: <span class="kw">"string"</span>, <span class="kw">"format"</span>: <span class="kw">"email"</span> }
+  },
+  <span class="kw">"additionalProperties"</span>: <span class="kw">false</span>
+}</code></pre>
+<p>Nothing here is executable code — it's a description of a valid <code>CreateOrderInput</code>, handed to a general-purpose <dfn data-en="a library that reads a JSON Schema document and a JSON value, and reports whether the value matches every rule in the schema — the single piece of code that enforces every schema in a codebase, instead of each handler re-implementing the same checks" data-vn="schema validator (giữ nguyên) — thư viện đọc JSON Schema + 1 JSON value, báo có khớp luật hay không; 1 chỗ enforce cho toàn bộ schema thay vì mỗi handler tự viết check riêng">validator</dfn> library that walks the value against the rules and reports every violation at once. The handler's job shrinks to one call — validate, then branch on whether it passed — instead of a wall of hand-written conditionals. <code>additionalProperties: false</code> is doing real work too: without it, a client could attach an unexpected field and the schema would silently allow it through, which is exactly the gap <a href="#mass-assignment-note">the callout below</a> comes back to.</p>
+<div class="callout">This is the same instinct as a Postgres <code>CHECK</code> constraint from Lesson 60 — "declare the rule where the data lives, once, instead of trusting every caller to enforce it correctly" — just one layer earlier, at the API boundary instead of the table. A schema doesn't replace the <code>CHECK</code> constraint; it catches the same class of mistake sooner, before a bad request even reaches a query, and it can express things a column constraint can't (required-together fields, string formats, nested object shapes).</div>
+
+<h2>3 · Syntactic validation vs. semantic validation</h2>
+<p>A schema validator only answers one kind of question, and it's worth being precise about which one. <dfn data-en="checking that a value has the right type, shape, and format — a string, an integer in range, a well-formed email pattern — without knowing whether the value is true or meaningful in context" data-vn="syntactic validation (giữ nguyên) — kiểm tra kiểu/hình dạng/định dạng đúng (string, integer trong range, email đúng pattern) mà không biết giá trị có đúng/hợp lý trong ngữ cảnh hay không">syntactic validation</dfn> is "is this shaped like an email" — a schema handles that completely. <dfn data-en="checking that a value is actually true or permitted given the current state of the system — this product id exists, this user owns this order, this quantity doesn't exceed remaining stock — which requires a database lookup or business rule a schema document cannot express" data-vn="semantic validation (giữ nguyên) — kiểm tra giá trị có đúng/được phép theo trạng thái hệ thống hiện tại không (product id có tồn tại, user có sở hữu order này không, số lượng có vượt tồn kho không) — cần query DB hoặc business rule, schema không diễn tả được">semantic validation</dfn> is "does this product id actually exist, does this user own this order, is there enough stock for this quantity" — a schema cannot answer any of that; it has no access to the database. A syntactically perfect request (a well-formed UUID, a quantity of 5, a valid email) can still be semantically wrong (that UUID belongs to no product, that quantity exceeds stock). The schema is a fast, cheap first gate that rejects garbage before it costs a query — it is never the last check.</p>
+<table class="cmp">
+<thead><tr><th></th><th>Syntactic (schema)</th><th>Semantic (handler logic)</th></tr></thead>
+<tbody>
+<tr><th>Question</th><td>is this the right shape?</td><td>is this true/allowed right now?</td></tr>
+<tr><th>Needs the DB?</th><td>no</td><td>usually yes</td></tr>
+<tr><th>Example</th><td>quantity is an integer 1–1000</td><td>quantity ≤ remaining stock</td></tr>
+<tr><th>Runs</th><td>before any query, every request</td><td>after syntactic checks pass</td></tr>
+</tbody>
+</table>
+
+<h2>4 · Allowlist over denylist, the same rule Lesson 17 already gave</h2>
+<p>A schema's <code>"type": "string", "format": "email"</code> is an <dfn data-en="a validation strategy that enumerates exactly what is acceptable and rejects everything outside that set — as opposed to a denylist, which enumerates known-bad values and always misses one" data-vn="allowlist (giữ nguyên) — liệt kê chính xác cái được phép, từ chối tất cả cái còn lại — khác denylist là liệt kê cái biết là xấu, luôn bị sót">allowlist</dfn> by construction: it names what's acceptable and rejects everything else, including shapes nobody thought to block explicitly. That's the identical rule Lesson 17 gave for SQL injection defense — "define exactly what's acceptable... rather than a blocklist that tries to guess every bad value in advance" — applied one level up, to the whole request body instead of one field's characters. A schema with <code>additionalProperties: false</code> is what makes that allowlist total: any field the schema didn't name is rejected, not silently passed through.</p>
+<div class="callout" id="mass-assignment-note"><strong>Why that field matters more than it looks:</strong> a request-shape allowlist is also the first line of defense against <em>overexposure</em> — a client attaching fields the handler never meant to accept, like a <code>role</code> or <code>isAdmin</code> field slipped into a signup payload. Rejecting unknown fields at the schema is the same defense named more narrowly by mass-assignment protection, just applied earlier, before the value ever reaches a struct.</div>
+
+<h2>5 · Where this sits in a request's lifecycle</h2>
+<p>Putting the last few lessons' layers in request order for one handler:</p>
+<pre><code>request arrives
+  → <span class="cm">is the body valid JSON at all?           (parse)</span>
+  → <span class="cm">does it match the schema?                (syntactic validation -- this lesson)</span>
+  → <span class="cm">am I logged in? am I allowed to do this? (authn/authz -- Lessons 4, 12)</span>
+  → <span class="cm">does the referenced data exist/agree?    (semantic validation -- handler + DB)</span>
+  → <span class="cm">query, using $1 placeholders always      (Lesson 17 -- never string-built SQL)</span></code></pre>
+<p>Schema validation runs early and cheap on purpose — rejecting a malformed body before touching auth or the database means a flood of garbage requests never reaches the expensive layers. A 400 for a bad shape should never cost a connection-pool checkout.</p>
+
+<div class="interview">
+<p><strong>Q: "Why put request validation in a schema instead of writing the checks in the handler?"</strong> A strong answer, out loud: <em>"Hand-written per-field checks don't scale past a handful of fields, and worse, they drift — two handlers that both accept an email end up validating it slightly differently because nothing forces them to agree. A schema declares the shape once as data, gets enforced by one shared validator, and can express `additionalProperties: false` so unexpected fields are rejected by default instead of silently passed through, which is also a mass-assignment defense. What a schema can't do is anything that needs the database — whether a referenced id actually exists, whether there's enough stock — that's semantic validation, and it still has to happen in handler logic after the schema passes. The schema is the fast, cheap first gate; it's never the whole check."</em> The signal: naming the syntactic/semantic split explicitly, and knowing a schema is a first gate, not a replacement for handler-level checks against real data.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A schema validator only checks shape, type, and format against the document itself -- it has no access to the database, so it cannot know whether a referenced id exists, whether a user owns a row, or whether stock is sufficient. Those require a handler-level lookup after the schema passes, which is exactly what semantic validation means.">
+    <p class="stem">A request passes JSON Schema validation completely. What can still be wrong with it?</p>
+    <button class="opt" data-ok>the referenced product id might simply not exist anywhere</button>
+    <button class="opt">the request body might not be valid JSON text</button>
+    <button class="opt">a required field might be entirely missing from body</button>
+    <button class="opt">the quantity field might hold a string not number</button>
+  </div>
+  <div class="q" data-why="additionalProperties: false makes the schema reject any field it didn't explicitly name, rather than silently passing an unexpected field through to the handler -- without it, a client could attach a field like role or isAdmin that the schema never intended to accept, which is exactly the overexposure risk mass-assignment protection names.">
+    <p class="stem">What does a JSON Schema's <code>additionalProperties: false</code> setting actually defend against?</p>
+    <button class="opt" data-ok>unexpected extra fields silently reaching the handler code</button>
+    <button class="opt">a client sending a request over plain HTTP</button>
+    <button class="opt">a required field being left out entirely today</button>
+    <button class="opt">a numeric field arriving as text instead now</button>
+  </div>
+  <div class="q" data-why="Lesson 17 named the identical rule for SQL injection defense: define exactly what's acceptable and reject everything outside it, rather than trying to enumerate every bad value and always missing one. A JSON Schema with named properties and additionalProperties: false is that same allowlist idea applied to a whole request body instead of one field's characters.">
+    <p class="stem">A schema naming exactly which fields are acceptable is which strategy from Lesson 17?</p>
+    <button class="opt" data-ok>allowlist -- name what's acceptable, reject the rest</button>
+    <button class="opt">denylist -- block only field names known bad</button>
+    <button class="opt">parameterization -- keep query code apart from data</button>
+    <button class="opt">escaping -- rewrite dangerous characters into safe ones</button>
+  </div>
+  <div class="q" data-why="Schema validation is deliberately placed first because it is cheap and needs no database lookup or auth check -- rejecting a malformed body immediately means a flood of garbage requests never reaches the expensive layers (authentication, authorization, a connection-pool checkout, a query). Running it after auth or a query would waste that work on requests that were always going to be rejected anyway.">
+    <p class="stem">Why does schema validation belong before authentication and the database query, not after?</p>
+    <button class="opt" data-ok>rejecting garbage early avoids wasting expensive later work</button>
+    <button class="opt">Postgres refuses any connection until JSON gets validated</button>
+    <button class="opt">authentication middleware requires a schema to run first</button>
+    <button class="opt">schemas can only ever execute before handler starts</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://json-schema.org/understanding-json-schema/about">Understanding JSON Schema — About</a> and the <a href="https://cheatsheetseries.owasp.org/cheatsheets/Input_Validation_Cheat_Sheet.html">OWASP Input Validation Cheat Sheet</a> (RESOURCES.md's standing high-trust source for this track, same series Lesson 17 cited). <strong>Honest flag:</strong> both were the intended primary sources, but a live fetch against either domain was blocked by this session's sandbox network-permission gate this round, with no interactive approver present to clear it — the same class of block noted in Lesson 79's round against a different domain. Nothing in this lesson depends on a fast-moving detail: JSON Schema's <code>type</code>/<code>required</code>/<code>properties</code>/<code>additionalProperties</code> keywords and OWASP's allowlist-vs-denylist framing (already fetched and quoted correctly in Lesson 17) are long-stable, but the citations above should get a live re-check once that gate is open in some future round, per the same standing habit noted since Lesson 53's 404 incident.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially. Nếu chỗ nào chưa rõ, cứ hỏi lại bằng tiếng Việt cũng được.<br><br>
+<em>Next lesson:</em> open. Still no <code>lesson_completed</code>/quiz-outcome record exists for any lesson after 81 rounds — the honest next step remains a completion signal or a user-named track.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

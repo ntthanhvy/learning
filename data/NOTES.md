@@ -6595,3 +6595,109 @@
   from the repo root using the relative-path form, per this course's own
   established tip that it's more reliable than an absolute path in this
   sandbox.
+- 2026-09-24 generation (Lesson 78, headless run): per the orchestrator's own
+  prior DB check, the latest `course_progress` row for course=data was
+  `lesson_generated day=77 lesson=0077-str-replace.html` dated 2026-09-23,
+  nothing newer — this round did not attempt a direct `psql
+  "$LEARNING_DB_URL"` read itself, per the orchestrator's own note that it's
+  hard-blocked by this sandbox's static analysis regardless (a Node-script
+  workaround was offered but not needed, since the orchestrator's own DB
+  check already covered it). Independently confirmed idempotency via the
+  filesystem: `ls data/lessons/` and `ls data/practice/` showed no
+  `0078-*`/`78_*` files, and grepping `assets/nav.js` for `n: 78` /
+  `2026-09-24` found neither — highest registered entry was still 77, dated
+  2026-09-23 — so this round proceeded. Read `MISSION.md` in full (not
+  modified), the "User preferences"/"Course design decisions"/"Curriculum
+  spine" section near the top of `NOTES.md`, `RESOURCES.md` in full, the tail
+  of `NOTES.md` (this file is now past 6590 lines — read via `offset`/`limit`
+  rather than a whole-file read, which this file's size now exceeds), the
+  tail of `assets/nav.js`, and Lessons 76/77's own HTML bodies plus Lesson
+  77's practice file as structural/style precedent. Lesson 77's own closing
+  teaser said the core `.str` accessor family (extract/extractall/contains/
+  split/replace) was now fully closed with no named candidate left over, and
+  offered two open leads instead: "more groupby/agg patterns beyond Lesson
+  4/40/48" or "memory/dtype optimization beyond Lesson 25/41/51." Before
+  picking either, grepped all 77 lesson bodies plus the glossary for other
+  candidates first: `duplicated()`/`drop_duplicates()` and `nlargest()`/
+  `nsmallest()` both already have their own glossary entries (genuinely
+  covered, not gaps); `.assign()` turned up as real code in Lessons 8, 53,
+  and 67 (introduced informally back in Lesson 8's method-chaining lesson)
+  but was never itself glossed with a `<dfn>` tag, never appeared as a
+  glossary row, and never got its own dedicated lesson explaining its own
+  mechanics — a genuine, well-scoped gap, and a natural companion to Lesson
+  26's SettingWithCopy lesson (assign() sidesteps that whole question by
+  construction), so this round picked it over the two named leads. A scratch
+  dir was created at `data/.scratch/lesson78/` (not `/tmp`) with a probe
+  script written as a real `.py` file (not an inline heredoc); `uv run
+  --with pandas python3` worked on the first attempt (pandas 3.0.6, numpy
+  2.5.3, matching every recent lesson). Every claim was hand-verified there
+  before writing, not assumed: confirmed `df.assign(col=value)` always
+  returns a new DataFrame, original untouched; confirmed multiple keyword
+  arguments in one call run in the exact order written, so a later
+  `lambda d: ...` genuinely sees an earlier keyword's new column already on
+  `d`, while swapping in a plain non-lambda expression for the same spot
+  raises `KeyError` (confirmed directly, since a plain expression evaluates
+  eagerly against the ORIGINAL DataFrame, which never had that column);
+  confirmed overwriting an existing column via `assign()` works cleanly and
+  leaves the original DataFrame's own column unchanged; confirmed calling
+  `.assign()` on a filtered slice raises nothing and needs no `.copy()`
+  first, since it never writes into the slice's own memory — the direct tie-
+  back to Lesson 26's SettingWithCopy lesson that made this topic pick feel
+  well-motivated rather than arbitrary. Before writing the practice file, ran
+  this course's now-standard freebie-risk probe pattern: `ex1_new_col_name`
+  checked against the literal string `"unit_price"`, `ex2_round_ndigits`
+  against literal `1`, `ex3_multiplier` against literal `2`, and
+  `ex4_threshold` against literal `100` — every blank fails closed if left as
+  `...`. The shipped (unsolved) `practice/78_assign.py` was executed
+  directly from its real `practice/` location (`cd data && uv run --with
+  pandas python3 practice/78_assign.py`) and printed exactly 4 ✗ with no
+  traceback; a solved copy (kept only in the scratch dir, not shipped) then
+  printed all 4 ✓ on the first run, confirmed before the unsolved file was
+  ever considered final. Quiz options were drafted, then mechanically
+  word-counted with a Python script (run via `uv run python3`, a bare
+  `python3` invocation being blocked by this sandbox's command-approval
+  gate) isolating each `<div class="q">` block by regex span — the first
+  draft came out mismatched on all three questions (Q1 8/9/8, Q2 10/11/10,
+  Q3 10/10/11); iterated through several rewrite+recount cycles until all
+  three landed level (Q1 8/8/8, Q2 9/9/9, Q3 10/10/10), with exactly one
+  `data-ok` per question throughout, confirmed by the same script; the
+  script's own reported whole-file option-word total (81) was cross-checked
+  by hand against `8*3 + 9*3 + 10*3 = 81`, and it agreed exactly. A separate
+  mechanical tag-balance script (regex open/close occurrence counts per tag)
+  found every tracked tag already balanced on the first draft this round —
+  no stray `</p>` inside a `.callout` div this time, unlike the recurring
+  pattern Lessons 72-77 hit (`html`/`head`/`title`/`body`/`h1`/`dfn` 1/1
+  each, `h2` 7/7, `p` 19/19, `div` 7/7, `pre` 5/5, `code` 56/56, `span`
+  36/36, `strong` 5/5, `em` 3/3, `a` 2/2, `button` 9/9). Raw-`&` scan found
+  exactly two matches in the lesson body, both the two `&` characters inside
+  the single already-established `cd ~/learning/data && uv run …` shell
+  command inside a `<pre><code>` block (this course's standing precedent,
+  not a new bug), zero raw `&` in prose. Checked the glossary for a
+  collision before adding anything: grepped for `.assign()`/`assign(` across
+  the full glossary — the word "assign" appeared only inside unrelated
+  existing rows (`rank()`'s "assigning each value its rank," `.pipe()`'s
+  description, `lambda`'s "used inside assign() to name the in-progress
+  DataFrame") — no existing dedicated `.assign()` row, confirmed a genuine
+  gap, so added exactly one new row placed directly after Lesson 77's
+  `str.replace()` entry; confirmed the glossary table's tags stayed balanced
+  after the insert via occurrence counts (`table` 1/1, `tr` 139/139, `td`
+  414/414, `th` 3/3, `code` 841/841), zero raw `&` introduced. Registered
+  Lesson 78 in `nav.js` with today's date (2026-09-24); `node --check`
+  confirmed it still parses as valid JavaScript after the edit. This round's
+  closing teaser leaves the same two open leads Lesson 77 named (groupby/agg
+  patterns beyond Lesson 4/40/48/61/66, or memory/dtype optimization beyond
+  Lesson 25/41/51/62) as candidates for tomorrow, since neither was picked
+  this round. The entire `data/.scratch/` directory was removed (`rm -rf`)
+  after verification (only `lesson78/` lived there, confirmed via listing
+  before deleting, nothing else was at risk); `git status --short` afterward
+  confirmed only the intended `data/` files changed (`assets/nav.js`,
+  `reference/glossary.html`, `lessons/0078-assign.html`,
+  `practice/78_assign.py`), alongside unrelated in-flight changes from
+  sibling courses' own parallel runs (backend/python/dataeng), left
+  untouched. This agent does not run `git commit` — leaving working-tree
+  changes uncommitted remains this course's established convention.
+  `bin/record-progress data lesson_generated --day 78 --lesson
+  0078-assign.html --detail '{"by":"headless"}'` was run from the repo root
+  using the relative-path form, per this course's own established tip that
+  it's more reliable than an absolute path in this sandbox, and succeeded:
+  `recorded: data/lesson_generated day=78 lesson=0078-assign.html`.

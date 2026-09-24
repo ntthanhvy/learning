@@ -5982,3 +5982,132 @@
   lessons, never explained on its own terms) — neither is flagged as
   definitely narrow enough yet, so the next round should still run its own
   fresh search first rather than assume either is queued.
+- **2026-09-24 generation (Lesson 81, headless 06:00 run):** Idempotency check
+  first: `ls backend/lessons/` topped out at `0080-timestamps-and-time-zones.html`
+  and `nav.js`'s `LESSONS` array had no `n: 81` or `date: "2026-09-24"` entry —
+  confirmed via `node --check backend/assets/nav.js` plus `grep -c 'n: 81'`
+  and a `ls backend/lessons/0081-*` count, both re-run after writing to
+  confirm exactly one match each. The orchestrator's own DB read (done just
+  before this round) confirmed the latest `course_progress` row for `backend`
+  was `lesson_generated day=80` recorded 2026-09-23, with no
+  `lesson_completed`/quiz/kata signal more recent than mid-July — same as
+  every round since baseline, pacing came from file state and this round's
+  own gap search, not a reported outcome. Read `MISSION.md`, `RESOURCES.md`,
+  both `learning-records/` files (still just the 0001 baseline and the
+  2026-07-30 concurrency-vocabulary gap — no fresher outcome record), the tail
+  of `NOTES.md` (Lessons 76–80 in full), Lesson 80 in full as the current
+  HTML/quiz-convention precedent, and Lesson 17 in full since it turned out to
+  hold this round's actual gap. No named candidate was standing with high
+  confidence going in — Lesson 80's note surfaced two secondary candidates
+  ("request validation depth... distinct from Lesson 17's injection focus"
+  and "encryption at rest") but flagged neither as definitely narrow enough
+  yet, so this round evaluated both properly rather than assuming either was
+  queued. Encryption at rest stayed vague on inspection — the lesson would
+  mostly restate "Postgres supports disk/tablespace encryption, cloud
+  providers turn it on by default" with little else concept-shaped to teach
+  in ~20 min, more an ops checkbox than a mental model. Request validation
+  held up: a re-read of Lesson 17 in full confirmed its own scope note
+  exactly — it spends one paragraph and one table row on input validation
+  ("is this string actually an email, is this page size a positive integer
+  under some cap") entirely in service of contrasting it with SQL injection
+  defense, and never once mentions JSON Schema, a validator library, or the
+  syntactic/semantic distinction. A grep for `JSON Schema|request
+  validation|encryption at rest|structured input validation` across every
+  lesson returned zero hits anywhere in the corpus — confirming the gap is
+  real and exactly as narrow as Lesson 80's note implied, not a rehash of
+  Lesson 17's existing paragraph. This is squarely in the "API & service
+  design" track (MISSION.md's second scope track) and not out of scope under
+  MISSION.md's frameworks/ORMs exclusion — JSON Schema is a declarative spec
+  the lesson treats as vocabulary and a mental model, not a framework
+  integration. Lesson 81 covers: why hand-written per-field `if` checks in a
+  handler stop scaling and drift out of sync across handlers; a JSON Schema
+  document as writing the shape down once as data instead, with
+  `additionalProperties: false` doing real allowlist work; the
+  syntactic-vs-semantic validation split (a schema can never know a
+  referenced id exists or that stock is sufficient — that still needs a
+  handler-level DB lookup); an explicit callback to Lesson 17's own allowlist
+  rule ("define exactly what's acceptable... rather than a blocklist") as the
+  same idea one level up, from one field's characters to a whole request
+  body; a callout tying `additionalProperties: false` to mass-assignment/
+  overexposure defense (Lesson 23) since rejecting unknown fields at the
+  schema is the same protection applied earlier; and a request-lifecycle
+  ordering diagram placing schema validation before authn/authz (Lessons 4,
+  12) and semantic validation, with the reasoning stated explicitly (cheap
+  rejection before expensive layers). One Go snippet (the naive hand-checked
+  `createOrder` handler, illustrating what doesn't scale rather than a
+  recommended pattern) was compile-checked clean with `go build -C` / `go vet
+  -C` in a scratch module (`.scratch-0081/gocheck/`, `go mod init scratch081`
+  succeeded first, both commands produced no output/errors) before shipping;
+  a bare `go version` invocation with no working directory hit the same
+  approval gate noted in Lesson 13's round, but `go mod init`/`go build -C`/
+  `go vet -C` all ran fine once issued from inside the scratch directory,
+  consistent with that same historical note. Source verification: this round
+  hit the identical class of block Lesson 79's PgBouncer citations hit —
+  `WebFetch` against both intended primary sources
+  (`json-schema.org/understanding-json-schema/about` and
+  `cheatsheetseries.owasp.org/cheatsheets/Input_Validation_Cheat_Sheet.html`)
+  was blocked outright by this session's sandbox network-permission gate with
+  no interactive approver present, on the very first attempt and a retry.
+  Rather than presenting unverified content as freshly fetched, the lesson's
+  "Go deeper" section says so explicitly and notes the cited material (JSON
+  Schema's core keywords, OWASP's allowlist/denylist framing already fetched
+  correctly in Lesson 17's own round) is long-stable, flagging both links for
+  a live re-check once the gate opens in a future round — same honest-flag
+  pattern Lesson 79 used for its own blocked PgBouncer citations. Checked the
+  glossary first for all candidate terms — `JSON Schema`, `schema validator`,
+  `syntactic validation`, `semantic validation` were zero collisions and
+  added as new rows after Lesson 80's `Unix epoch` row; `allowlist` was NOT
+  re-added since Lesson 17 already registered the identical term as
+  `allowlist validation` with matching data-en/data-vn text — this lesson's
+  `<dfn>` reuses that exact wording rather than creating a near-duplicate
+  row, confirmed by grepping the glossary for `allowlist` before writing
+  anything. Verification performed mechanically: (1) quiz word-count balance
+  via a Node script (`.split(/\s+/)` and `.split(" ")`, both filtering empty
+  strings, run together and cross-checked every time) parsing every `<div
+  class="q">` block — first draft was uneven on all four questions (an
+  8–11-word spread across options), fixed through several rewrite-and-recount
+  cycles per option, including two full passes where a fix to one question
+  accidentally introduced a new mismatch elsewhere in the same edit and had
+  to be caught by re-running the script rather than trusting the edit by eye
+  — converged to exactly 9/9/9/9 on Q1, 8/8/8/8 on Q2, 8/8/8/8 on Q3, and
+  8/8/8/8 on Q4, both counting methods agreeing exactly, and exactly one
+  `data-ok` per question confirmed the same way; (2) an occurrence-count HTML
+  tag-balance check (regex counting per tag, not substring counting, across
+  the same 22 tag pairs used in every prior round) on both the lesson and
+  `glossary.html` after its four-row addition — both balanced on the first
+  check, no fixes needed; (3) a raw-unescaped-`&` regex scan (matching any
+  `&` not followed by `amp;`/`lt;`/`gt;`/`quot;`/`#39;`/`apos;`) across both
+  files — caught and fixed one real instance this round: the Go snippet's
+  `Decode(&in)` used a raw `&` inside a `<pre><code>` block, which a
+  cross-lesson grep confirmed is inconsistent with the established
+  convention (every other lesson's Go snippets escape `&` as `&amp;` even
+  inside code blocks, e.g. Lesson 27's `&amp;http.Server`, Lesson 36's
+  `&amp;o.ID`) — fixed to `&amp;in`, re-scanned clean; (4) a targeted regex
+  for the backslash-escaped-quote bug (`\"` inside an attribute) — zero hits
+  in either file; (5) `node --check` against `assets/nav.js`, `assets/
+  quiz.js`, and `assets/gloss.js` — all clean, no output. Registered Lesson
+  81 in `nav.js` (date 2026-09-24), re-confirmed exactly one matching `n: 81`
+  entry and exactly one matching `0081-*` lesson file afterward. Caught one
+  self-inconsistency before shipping: an early draft's closing teaser still
+  pointed at "encryption at rest" as an open candidate even though this
+  round's own gap search (above) had just evaluated and set that topic aside
+  as too thin for its own lesson — fixed the teaser to the standard
+  no-signal-yet closing instead of shipping a stale pointer, re-ran the full
+  mechanical check suite after the edit to confirm nothing regressed (tags
+  still balanced, quiz counts unchanged, no new unescaped `&`). Scratch work
+  (the quiz/tag-balance check scripts and the Go compile-check module) lived
+  under `backend/.scratch-0081/` and was deleted in full after use. DB
+  access: read path not attempted per the standing sandbox limitation noted
+  every round since it was first flagged; write path (`bin/record-progress
+  backend lesson_generated --day 81 --lesson
+  0081-request-validation-and-json-schema.html --detail '{"by":"headless"}'`,
+  run as a relative path from the repo root) succeeded with no approval gate,
+  output confirmed: `recorded: backend/lesson_generated day=81
+  lesson=0081-request-validation-and-json-schema.html`. No confirmed
+  next-lesson gap is named with certainty for the round after this one — same
+  standing note as every prior round; a completion/quiz-outcome signal or a
+  user-named track should take priority over guessing blind. This round
+  clears both of Lesson 80's secondary candidates (encryption at rest was
+  evaluated and set aside as too thin for its own lesson, not deferred for a
+  future round) — the next round should run its own fresh gap search from
+  scratch rather than assume anything is queued.

@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 58 · Review day 7: retrieval across the six backend lessons</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 58 · ~20 min · 24 Sep 2026</p>
+<h1>Review day 7: retrieval across the six backend lessons</h1>
+<p class="byline">Day 43 reviewed Days 1, 2, 3, 5, 7, 12; Day 44 reviewed Days 16, 19, 30, 33, 34, 38; Day 45 reviewed Days 4, 6, 9, 13, 20, 36; Day 49 reviewed Days 8, 11, 17, 24, 32, 41; Day 52 reviewed Days 10, 14, 27, 31, 39, 42; Day 55 reviewed Days 15, 28, 29, 35, 37, 40. Days 56-57 then ran fresh content two days straight (the <code>operator</code> module, then <code>dataclasses.field()</code>/<code>frozen=True</code>) with no reported weak spot to chase, since no <code>lesson_completed</code>/quiz/kata signal has ever come back from any of the 57 lessons shipped so far. This is a seventh <dfn data-en="a study technique where the learner produces an answer from memory before checking it, rather than re-reading the source material - it is a stronger driver of durable learning than re-reading, especially when spaced across separated topics rather than massed on one" data-vn="giữ nguyên &quot;retrieval practice&quot; — tự nhớ lại và viết ra câu trả lời trước khi xem lại tài liệu, hiệu quả hơn hẳn việc đọc lại; càng hiệu quả khi trộn nhiều chủ đề cũ thay vì ôn 1 chủ đề liền mạch">retrieval practice</dfn> day, and the last one built from Days 16-26's original FastAPI/Postgres/httpx run: six ideas from Days 18, 21, 22, 23, 25, and 26 — the only days from that run no earlier review has touched.</p>
+
+<div class="callout"><strong>Why today, specifically:</strong> Day 57's own next-day note flagged that two fresh-content days in a row (56-57) since Day 55's last review meant Day 58 "should weigh the 'avoid three fresh days in a row' consideration seriously." Before taking that at face value, a fresh-gap scan ran first, matching every prior review day's own discipline: <code>subprocess\.</code>, <code>hashlib\.</code>, and <code>configparser</code> are genuine zero-hit modules (confirmed via grep across all 57 lessons and every practice file), but none is on <code>PLAN.md</code>'s spine, and Day 57's note already called them "worth considering... though none is as clearly load-bearing as <code>field()</code>/<code>frozen=True</code> or <code>operator</code> were." Weighed against that thin case: Days 18, 21-23, 25-26 are the last six days of the original Day 16-26 FastAPI arc that no review has ever revisited — over a month old for the earliest of them (15 Aug 2026) — and they compose tightly (a request/response schema feeding a database query, tested through a client, wrapped in an error handler, deployed with a real server, then all five stacked into one capstone). A third fresh day built on modules weaker than the two that just ran loses to closing out the last uncovered slice of a whole course arc. Review wins today, and — importantly — this closes the review-candidate list Day 55 opened: after today, every one of Days 1-57 has been touched by at least one review sweep.</div>
+
+<h2>1 · Six questions, in the original teaching order</h2>
+<p>Answer each out loud or on paper <em>before</em> reading the fold-out answer. If one is shaky, note it and go fix it in the practice file below rather than only rereading the old lesson.</p>
+
+<p><strong>Day 18 — request/response schemas.</strong> A handler's <code>return</code> includes a field its <code>response_model</code> doesn't declare — say, an internal <code>secret_cost</code>. What actually reaches the client?</p>
+<div class="callout">Fold-out answer: nothing — that extra field is silently filtered out. <code>response_model</code> builds its declared model from whatever the handler returned, using the same construction-time validation and coercion as any other pydantic model, and only the fields that model declares survive into the JSON response. This is why real routes use two schemas per route — one named <code>...In</code>, one named <code>...Out</code> — rather than reusing one model for both directions: a field that only belongs on the request side, like a password, can never accidentally leak through a response built from a deliberately narrower response model.</div>
+
+<p><strong>Day 21 — talking to PostgreSQL.</strong> <code>cur.execute("... WHERE name = %s", (name,))</code> versus <code>cur.execute(f"... WHERE name = '{name}'")</code>. Why does only the first one stop SQL injection?</p>
+<div class="callout">Fold-out answer: the placeholder version sends the SQL text and the values tuple to the server as two separate pieces, so a value can never be interpreted as new SQL syntax, no matter what characters it contains. The f-string version pastes the raw value directly into the query text before it's ever sent — a crafted value like <code>"x' OR '1'='1"</code> becomes part of the query's own grammar and can rewrite what the query matches. This was confirmed directly: the same injection-style string matched every row through the f-string version and zero rows through the placeholder version, treated as one literal string to compare against.</div>
+
+<p><strong>Day 22 — testing with httpx.</strong> <code>TestClient(app).get("/users/1")</code> gets a real response back with no server process running anywhere. How?</p>
+<div class="callout">Fold-out answer: <code>TestClient</code> is built on <code>httpx.Client</code>, and it hands each request straight to the FastAPI <code>app</code> object in the same process through the ASGI interface FastAPI already speaks — no socket opens, no bytes get serialized onto a wire. This is the exact in-process call every FastAPI practice file since Day 16 was already making without a name for it; Day 22 just gave it one. A <code>test_*</code>-named function using <code>assert</code> against it is Day 11's whole pytest convention, unchanged, just calling <code>client.get()</code>/<code>client.post()</code> instead of a plain function.</div>
+
+<p><strong>Day 23 — error handling.</strong> Two routes can both raise the same domain rule — say, <code>OutOfStock</code>. Why register one <code>@app.exception_handler(OutOfStock)</code> instead of a local <code>if</code>/<code>raise HTTPException</code> in each route?</p>
+<div class="callout">Fold-out answer: one place owns the rule instead of repeating it. Registering <code>@app.exception_handler(OutOfStock)</code> once means every route that raises <code>OutOfStock(item)</code> — however many there end up being — gets back the identical status code and JSON body, with zero copy-pasted <code>if</code>/<code>raise</code> logic to drift out of sync between routes. <code>@app.exception_handler</code> isn't limited to custom classes either — it registers on any exception type escaping a route uncaught, including <code>RequestValidationError</code>, the type FastAPI itself raises internally when pydantic rejects a request, letting a service override FastAPI's own default 422 body with one consistent shape.</div>
+
+<p><strong>Day 25 — deploying with uvicorn.</strong> <code>uvicorn app:app --reload</code> and <code>uvicorn app:app --workers 4</code> cannot be combined. Why not, and which one actually lets two requests run on two CPU cores at once?</p>
+<div class="callout">Fold-out answer: <code>--reload</code> runs exactly one process and restarts it whenever a source file changes — combining it with <code>--workers</code> would mean restarting several independent processes on every save, defeating the entire reason to have several. <code>--workers N</code> is the opposite goal: N independent processes, each a full copy of the app, so N requests really can run on N separate CPU cores at the same instant. More worker processes — not more <code>await</code> written inside a handler — is what buys that; Day 20 already explained why a single <code>async def</code> process still serializes CPU-bound work no matter how it's awaited.</div>
+
+<p><strong>Day 26 — the FastAPI capstone.</strong> The capstone's <code>read_task</code> handler never checks whether the requested task exists. Why not, and what happens when it doesn't?</p>
+<div class="callout">Fold-out answer: <code>Depends(get_task_or_404)</code> runs that dependency before the handler body, and if the task is missing it raises <code>TaskNotFound</code> — the exact Day 19 dependency shape feeding Day 23's exception-handler shape. The route body only ever sees an already-found task; it never needs its own "if missing" branch, because the dependency already handled that case by raising, and the registered <code>@app.exception_handler(TaskNotFound)</code> turns that raise into a clean <code>404</code> before the client ever sees a crash. Nothing about the capstone introduced a new mechanism — it is Days 17-20 and 23 wired into one 36-line file.</div>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> nothing pandas-specific today — this review only revisits Days 18, 21, 22, 23, 25, and 26's FastAPI/pydantic/httpx/uvicorn material, none of which has a pandas equivalent, since a one-shot data pipeline never has a request/response contract, a connection pool, an in-process test client, an app-wide error handler, or a deployable server process to speak of.</div>
+
+<h2>2 · Why these six, spread this way, and why now is the natural stopping point</h2>
+<p>Same interleaving logic as every prior review day: a filtering rule on the response side, then a SQL-injection defense one layer of the stack down, then an in-process testing mechanism, then an app-wide error-handling pattern, then a process-launch and concurrency question, then a whole-service composition question — six different mental models, not six variations on one, so each answer forces a fresh retrieval instead of riding momentum from the previous question. Unlike the six prior review days, this set isn't scattered across the course — Days 18, 21-23, 25-26 are consecutive days from one arc (Days 16-26, FastAPI + pydantic), reviewed last on purpose: a service's pieces compose (schema feeds database query, tested through a client, wrapped in an error handler, deployed with a real server, all five stacked into the capstone), so reviewing them together after the six earlier, more scattered sweeps closes the arc as one connected sweep rather than six unrelated facts.</p>
+<p>With today's six, every one of Days 1-57 has now been touched by at least one review day — Days 43, 44, 45, 49, 52, 55, and today cover, respectively: 1,2,3,5,7,12 · 16,19,30,33,34,38 · 4,6,9,13,20,36 · 8,11,17,24,32,41 · 10,14,27,31,39,42 · 15,28,29,35,37,40 · 18,21,22,23,25,26. A future review day (a likely Day 60-something) will need to pick a second pass over already-reviewed material, or lean on whatever fresh gaps have opened by then, rather than a new never-covered slice — there isn't one left.</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/58_review_retrieval_day_7.py</code>. It is six small, independent exercises — one per topic above, same order — with no new syntax anywhere; every mechanism needed was already taught in Days 18, 21, 22, 23, 25, and 26. Fill in each TODO from memory first; only reopen the old lesson if a fold-out answer above didn't fully land.</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run --with fastapi --with httpx --with pydantic-settings python3 practice/58_review_retrieval_day_7.py</code></pre>
+<p>Needs <code>fastapi</code>, <code>httpx</code>, and <code>pydantic-settings</code>, installed one-off via <code>--with</code>, same as every Day 16-26 practice file. Exercises: building a <code>response_model</code> that filters an extra field out of a handler's return value, proving a placeholder query is immune to an injection string that an f-string version isn't (using the standard library's own <code>sqlite3</code>, same DB-API shape as Day 21), writing a <code>test_*</code> function against an in-process <code>TestClient</code>, registering an <code>@app.exception_handler</code> for a custom exception so two routes share one consistent error shape, confirming <code>PORT</code>/<code>WORKERS</code> environment variables coerce correctly through a <code>BaseSettings</code> subclass, and wiring a tiny two-route service (create + read-or-404) from already-taught pieces exactly like Day 26's capstone.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="response_model builds its declared model from whatever the handler returned, and only the fields that model declares survive into the actual JSON response - so a handler that includes an extra field like secret_cost in its own return value still ships a response with that field silently stripped out.">
+    <p class="stem">A handler's <code>return</code> includes a field its <code>response_model</code> doesn't declare. What reaches the client?</p>
+    <button class="opt" data-ok>nothing at all, that extra field is silently filtered from response</button>
+    <button class="opt">the full dict, extra field included, exactly as it was returned</button>
+    <button class="opt">a 500 error, since response_model always rejects that unexpected field type</button>
+  </div>
+  <div class="q" data-why="cursor.execute(sql, params) sends the SQL text and the values as two separate pieces to the server, so a value can never be interpreted as new SQL syntax regardless of its contents - confirmed directly by passing an injection-style string through both an f-string query (rewrites the query, matches every row) and a placeholder query (matches zero rows, treated as one literal value).">
+    <p class="stem">Why does a <code>%s</code> placeholder in <code>cursor.execute(sql, params)</code> stop SQL injection?</p>
+    <button class="opt" data-ok>the SQL text and the values are sent separately</button>
+    <button class="opt">psycopg secretly deletes every quote character it ever finds</button>
+    <button class="opt">PostgreSQL always rejects any query that holds user input</button>
+  </div>
+  <div class="q" data-why="TestClient wraps httpx and hands each request straight to the FastAPI app in-process via the ASGI interface it already speaks, with no socket and no server process involved - the same in-process call every practice file since Day 16 has already been making.">
+    <p class="stem">Why does <code>TestClient(app).get("/users/1")</code> not need a running server process?</p>
+    <button class="opt" data-ok>it calls the app directly in-process over the ASGI interface</button>
+    <button class="opt">FastAPI silently starts a real background server in a thread</button>
+    <button class="opt">status codes are always faked here and never really computed</button>
+  </div>
+  <div class="q" data-why="Registering @app.exception_handler(OutOfStock) once means every route that raises OutOfStock(item) gets the identical status code and JSON body back, with no repeated if/raise HTTPException logic copy-pasted into each route that needs the same domain rule.">
+    <p class="stem">Why register one <code>@app.exception_handler(OutOfStock)</code> instead of a local check in every route?</p>
+    <button class="opt" data-ok>one place owns the rule, instead of repeating it everywhere</button>
+    <button class="opt">HTTPException can never be raised from inside a route handler</button>
+    <button class="opt">exception handlers always execute faster than a plain if check</button>
+  </div>
+  <div class="q" data-why="--reload runs exactly one process and restarts it whenever a source file changes, a development convenience. --workers N runs N independent processes for real concurrent load on N separate CPU cores. Combining them would mean restarting several processes on every save, defeating the reason to have several - uvicorn refuses the combination.">
+    <p class="stem">Why can't <code>--reload</code> and <code>--workers</code> be passed to <code>uvicorn</code> together?</p>
+    <button class="opt" data-ok>reload restarts one process, so several workers would all restart</button>
+    <button class="opt">the workers flag only exists in an old uvicorn release</button>
+    <button class="opt">reload needs its own database connection that workers always close</button>
+  </div>
+  <div class="q" data-why="Depends(get_task_or_404) calls that function first, and if it raises TaskNotFound, the registered @app.exception_handler(TaskNotFound) converts that straight into a 404 response before the route body ever executes - Day 19's dependency shape feeding Day 23's handler shape, exactly what the capstone wired together.">
+    <p class="stem">In the capstone, why doesn't <code>read_task</code>'s own body ever check whether the task exists?</p>
+    <button class="opt" data-ok>the Depends() dependency already handled that before the body ran</button>
+    <button class="opt">FastAPI route handlers are not allowed to contain an if-statement</button>
+    <button class="opt">a missing task became impossible once TaskOut got defined once</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the six lessons this review draws from are each still the primary source for their own topic — <a href="../lessons/0018-request-response-schemas.html">Day 18</a>, <a href="../lessons/0021-talking-to-postgresql.html">Day 21</a>, <a href="../lessons/0022-testing-with-httpx.html">Day 22</a>, <a href="../lessons/0023-error-handling-and-exception-handlers.html">Day 23</a>, <a href="../lessons/0025-deploying-with-uvicorn.html">Day 25</a>, and <a href="../lessons/0026-fastapi-capstone.html">Day 26</a>. Of those, the single strongest one-stop read is FastAPI's own <a href="https://fastapi.tiangolo.com/tutorial/">Tutorial - User Guide</a> — it is the spine `RESOURCES.md` already names for this entire phase, and each of today's six lessons cites one specific page from it. For the retrieval-practice technique itself, <a href="https://docs.python.org/3/tutorial/">the Python Tutorial</a> stays this course's general reference, matching every prior review day's own note.</p>
+
+<p class="next">New terms today: none — every concept in the six review questions already has its own Day 18-26 glossary row, matching every prior review day's own precedent of not duplicating an existing entry.<br>
+With seven review days now shipped (Days 1-12, 16-38, 4/6/9/13/20/36, 8/11/17/24/32/41, 10/14/27/31/39/42, 15/28/29/35/37/40, and today's 18/21/22/23/25/26), every lesson from Day 1 through Day 57 has now been touched by at least one review sweep — Day 59 either scans for a genuinely fresh stdlib gap (candidates on the table per Day 57's note: <code>subprocess</code>, <code>hashlib</code>, <code>configparser</code>, none clearly load-bearing yet) or, if review is chosen again, will need a second pass over already-covered material rather than a new slice.<br><br>
+💬 Anything unclear — any of the six answers, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

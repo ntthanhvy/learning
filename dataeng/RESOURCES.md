@@ -37,6 +37,8 @@ before Phase 2.
   `is_incremental()`, `unique_key`, strategies. Use for: Day 4 and Phase 2a incremental depth.
 - [Docs: Snapshots](https://docs.getdbt.com/docs/build/snapshots)
   SCD type 2 in dbt. Use for: Phase 2a.
+- [Docs: Jinja and macros](https://docs.getdbt.com/docs/build/jinja-macros) · [var()](https://docs.getdbt.com/reference/dbt-jinja-functions/var) · [target](https://docs.getdbt.com/reference/dbt-jinja-functions/target)
+  DRY SQL via reusable Jinja functions, project variables and the active-connection object. Use for: Day 10, the primary source.
 - [Guide: How we structure our dbt projects — dbt Labs](https://docs.getdbt.com/best-practices/how-we-structure/1-guide-overview)
   The community-standard staging → intermediate → marts layering and naming. Use for: Day 2's folder layout and every modelling lesson after it. This is the house style.
 - [Courses: dbt Learn catalog](https://learn.getdbt.com/catalog)

@@ -7294,3 +7294,180 @@ fail *gracefully* so the learner sees which task failed.
   since Day 55's review — Day 58 should weigh the "avoid three fresh days
   in a row" consideration seriously, though NOTES.md's rule has
   historically been a guideline to weigh, not a hard block.
+- 2026-09-24 — **Day 58 generated: Review day 7**, covering Days 18, 21,
+  22, 23, 25, and 26 (headless run), review chosen over a third
+  fresh-content day in a row. Read `MISSION.md` (untouched, read-only),
+  `PLAN.md`, `RESOURCES.md`, `NOTES.md`'s top conventions/hard-rule/
+  learner-profile sections plus the tail of the Generation log (the file
+  is now 7,296 lines — over the read tool's single-read limit — so the
+  top ~150 lines were read directly and the log tail via targeted `grep`
+  for `2026-09-1[5-9]|2026-09-2[0-9]` followed by a direct read of lines
+  6845-7296, covering Days 55-57 in full), the sole `learning-records/
+  0001-baseline-reads-python-writes-little.md`, and `assets/nav.js`'s
+  full `LESSONS` array, to confirm the orchestrator's pre-run DB check
+  (latest row `lesson_generated day=57` on 2026-09-23, nothing for day
+  58, no completion/quiz/kata signal past mid-July) and Day 57's exact
+  next-day framing above.
+  Idempotency: confirmed `lessons/0058-*` and `practice/58_*` did not
+  exist, and grepped the whole repo for `2026-09-24` (zero matches
+  anywhere) before writing anything.
+  Decision process, not taken on faith: Day 57's next-day note flagged
+  two fresh days in a row (56-57) since Day 55's review and named
+  `subprocess`/`hashlib`/`configparser` as the only remaining fresh-gap
+  candidates, explicitly calling them weaker than `operator` or
+  `field()`/`frozen=True`. Weighed that thin case against the six-lesson
+  review-candidate list Day 55 left open (18, 21-23, 25-26) — the last
+  uncovered slice of the original Day 16-26 FastAPI/pydantic/httpx arc,
+  the earliest of them over a month old (15 Aug 2026) — and confirmed via
+  a full read of all six that they compose tightly (a request/response
+  schema feeding a database query, tested through a client, wrapped in an
+  error handler, deployed with a real server, all five stacked into the
+  capstone), unlike a third fresh day built on modules weaker than the
+  two that just ran. Also confirmed via the prior six review days' own
+  bylines (grepped each for "reviewed Days") that 18, 21, 22, 23, 25, 26
+  is exactly the complement of all six prior review sets against 1-57,
+  meaning today closes the review-candidate list for good: after this
+  lesson, every one of Days 1-57 has been touched by at least one review
+  sweep, a first for this course. Read `lessons/0055-review-retrieval-
+  day-6.html` and its practice file in full as the structural precedent
+  (fold-out Q&A pairs in original teaching order, "why today" callout,
+  "why these six, spread this way" section, independent practice
+  exercises, no new glossary terms for reviewed material), and read all
+  six target lessons (18, 21, 22, 23, 25, 26) in full rather than
+  trusting their titles/summaries, to source every fold-out answer and
+  quiz explanation directly from the original text.
+  Topic selection within the six: one question per lesson, chosen for a
+  mechanism sharper than the original lesson's own headline claim — Day
+  18's silent response_model field-filtering (not just "schemas exist"),
+  Day 21's placeholder-vs-f-string injection contrast (not just
+  "parameterized queries are safer"), Day 22's in-process ASGI call
+  underlying `TestClient` (not just "TestClient exists"), Day 23's
+  one-handler-many-routes rationale (not just "custom exceptions exist"),
+  Day 25's `--reload`-vs-`--workers` mutual exclusion and what actually
+  buys multi-core concurrency (not just "uvicorn deploys apps"), and Day
+  26's dependency-raises-into-handler composition (not just "the capstone
+  combines things"). Verified every claim before writing the fold-out
+  answers and quiz explanations by running a single standalone scratch
+  script (`.scratch-python-verify/verify_review7.py`, created via `Write`
+  and deleted at the end) covering all six: `response_model` filtering an
+  unlisted `secret_cost` field via `TestClient`; a real SQL-injection
+  contrast using the standard library's own `sqlite3` (`nonexistent' OR
+  '1'='1'` matched 2 rows through an f-string query, 0 through a `?`
+  placeholder query — sqlite3's placeholder syntax differs from
+  psycopg's `%s` but the DB-API safety mechanism is identical, same
+  precedent Day 21's own practice file already used); a `yield`-based
+  dependency's open/use/close ordering; a `test_*`+`assert` function
+  against `TestClient`; a custom-exception handler and a
+  `RequestValidationError` handler both reshaping their response bodies
+  correctly; `pydantic_settings.BaseSettings` coercing `PORT`/`WORKERS`/
+  `RELOAD` from `os.environ` while leaving an unset `HOST` at its coded
+  default; and the full create-then-read-then-404 capstone flow. One
+  real bug was caught and fixed during this verification: registering an
+  `@app.exception_handler` on an `app` object *after* `TestClient(app)`
+  had already made a request against it left the exception unhandled
+  (starlette caches its exception-handling stack on first use) — fixed
+  by reordering the scratch script to register every handler before the
+  first request, and the same ordering constraint was written directly
+  into the shipped practice file as a comment on Exercise 4 so it isn't
+  rediscovered the hard way again.
+  No-pandas rule: grepped the lesson and practice file case-insensitively
+  for `pandas`/`numpy`/`pd\.`/`np\.` — exactly one hit, the standard
+  "nothing pandas-specific today" callout naming only the six reviewed
+  FastAPI/pydantic/httpx/uvicorn lessons and explaining why none has a
+  pandas equivalent (no request/response contract, connection pool, test
+  client, error handler, or deployable process in a one-shot pipeline);
+  zero hits in the practice file.
+  Practice file `practice/58_review_retrieval_day_7.py` (6 exercises, one
+  per reviewed lesson): a `response_model` that filters an extra field, a
+  `sqlite3`-based placeholder-vs-f-string injection contrast, a
+  `test_*`-shaped function against an in-process `TestClient`, an
+  app-wide exception handler exercised against two different routes to
+  prove it isn't hardcoded to one item, a `BaseSettings` subclass
+  checked both for its unset-field default and its env-coerced fields,
+  and a two-route create/read/404 service mirroring the capstone. One
+  design bug matched the shape Day 55's notes warned about and was
+  caught the same way — by actually running the unsolved file rather
+  than trusting the TODO comments: Exercise 3's `test_get_widget_
+  returns_200()` originally had only `...` as its body with no return
+  value, so `check()`'s `bool(cond())` call treated the function's
+  implicit `None` return as unrelated to whether its (unwritten)
+  assertions had run, and a `try`/`except AssertionError` wrapper around
+  a call that never raised anything made the unsolved exercise print a
+  vacuous ✓. Fixed by having the unsolved default explicitly `return
+  False` (with a comment explaining why) and the solved version `return
+  True` only after both real asserts pass, then changing the check to
+  `test_get_widget_returns_200() is True` — an honest ✗ until the TODO is
+  actually filled in. Verified in a scratch directory under the repo root
+  (`.scratch-python-verify/`, created fresh this round, deleted at the
+  end): the shipped (unsolved) copy printed all six ✗ with no traceback,
+  confirmed twice — once on a scratch copy before the Exercise 3 fix
+  (caught the vacuous-✓ bug there) and once directly on the real
+  `practice/58_review_retrieval_day_7.py` path after the fix; a
+  separately solved copy printed all six ✓ and the "All green" tally,
+  run twice consecutively with identical results (no flakiness — nothing
+  here is randomized or time-based beyond `os.environ` state, which each
+  run sets explicitly before reading it back).
+  Glossary: no new terms — every concept in today's six questions already
+  has its own Day 18-26 glossary row (confirmed by reading `reference/
+  glossary.html`'s existing `day18`/`day21`/`day22`/`day23`/`day25`/
+  `day26` sections directly), matching every prior review day's own
+  precedent of not duplicating an existing entry.
+  HTML tag-balance was checked with a stdlib `html.parser.HTMLParser`-
+  based stack checker (written as a throwaway script via the `Write`
+  tool, deleted after use) against the lesson file and the full glossary
+  (unmodified this round) — both reported balanced with no errors. A
+  raw-unescaped-`&` regex (`&(?!amp;|lt;|gt;|quot;|#39;|apos;|#\d+;)`)
+  against the lesson file found zero true positives.
+  Quiz: 6 questions, one per reviewed lesson, matching every prior review
+  day's precedent of one question per topic. Word counts were checked
+  with a small `html.parser.HTMLParser`-based Python script splitting
+  each `<button class="opt">`'s stripped-tag text on whitespace. First
+  draft mismatched on four of six questions (Q1 11/10/9, Q2 12/9/9, Q4
+  11/10/10, Q5 10/11/10) — Q3 and Q6 landed correctly on the first
+  attempt at 10/10/10 each. Took one to two rounds of few-word edits per
+  mismatched question, re-running the checker after every edit, including
+  two self-corrections on Q1 where the first two fix attempts (adding an
+  em dash, then a trailing word) still left a mismatch before a third
+  edit landed all three options at 11 words each. Landed at 11/11/11,
+  9/9/9, 10/10/10, 10/10/10, 10/10/10, and 10/10/10 respectively; a
+  separate check confirmed exactly 6 `data-ok` occurrences total, one per
+  question, matching the six-question count.
+  `RESOURCES.md`: no edit made — the six reviewed lessons already cite
+  their own primary sources (each a specific FastAPI tutorial page), and
+  today's "Go deeper" section points to the FastAPI Tutorial - User Guide
+  as the one-stop read, already cited in `RESOURCES.md`'s existing
+  "Knowledge — backend" section, matching every prior review day's
+  precedent of not adding a line when the citation already exists.
+  `PLAN.md` not edited.
+  Registered in `assets/nav.js` with `date: "2026-09-24"`; confirmed
+  `node --check assets/nav.js` reports no syntax errors after the edit.
+  **DB access:** not attempted directly this round — the orchestrator had
+  already confirmed via the DB moments before this run started that the
+  latest python row was `lesson_generated day=57` on 2026-09-23 with
+  nothing for day 58, so a fresh query would have been redundant;
+  deferred entirely to that pre-run confirmation plus this round's own
+  on-disk idempotency check (repo-wide grep for `2026-09-24`, and
+  checking `lessons/` and `nav.js` directly) before writing anything.
+  `bin/record-progress python lesson_generated --day 58 --lesson
+  0058-review-retrieval-day-7.html --detail '{"by":"headless"}'` was run
+  from the repo root after generation and succeeded, recording
+  `lesson_generated day=58 lesson=0058-review-retrieval-day-7.html`.
+  `python/learning-records/` still holds only the Day 1 baseline; no
+  completion/quiz/kata outcome has ever been recorded for any day 2-57,
+  so this round paced entirely from on-disk state, same as every prior
+  round since Day 42.
+  Final `git status --short -- python/` showed exactly three paths
+  changed (`assets/nav.js`, the new lesson, the new practice file) — no
+  glossary edit this round since no new term was introduced, and no other
+  course's files touched.
+  **Next-day note:** with today's review, every lesson from Day 1 through
+  Day 57 has now been touched by at least one of the seven review sweeps
+  (43, 44, 45, 49, 52, 55, 58) — there is no untouched slice left for a
+  future review day to draw from. Day 59 should either scan fresh for a
+  genuinely new stdlib gap (named but unconfirmed candidates on the table:
+  `subprocess`, `hashlib`, `configparser`, none clearly load-bearing per
+  Day 57's own assessment) or, if review is judged the better choice
+  again, pick a second pass over already-reviewed material — most likely
+  weighted toward the six from today's arc (18, 21-23, 25-26) or Day 43's
+  original six (1, 2, 3, 5, 7, 12), since those are furthest from today's
+  date rather than most recently touched.

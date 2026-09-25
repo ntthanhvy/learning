@@ -41,6 +41,8 @@ before Phase 2.
   DRY SQL via reusable Jinja functions, project variables and the active-connection object. Use for: Day 10, the primary source.
 - [Guide: How we structure our dbt projects — dbt Labs](https://docs.getdbt.com/best-practices/how-we-structure/1-guide-overview)
   The community-standard staging → intermediate → marts layering and naming. Use for: Day 2's folder layout and every modelling lesson after it. This is the house style.
+- [Package: dbt_utils — dbt Labs](https://github.com/dbt-labs/dbt-utils)
+  The most widely installed dbt package: cross-database SQL and testing macros (`generate_surrogate_key`, `date_spine`, `generate_series`, `accepted_range`, and more). Use for: Phase 2a's packages lesson, and any time a rule is generic enough that dbt Labs has already solved it.
 - [Courses: dbt Learn catalog](https://learn.getdbt.com/catalog)
   Free official video courses (dbt Fundamentals etc.). Use for: an optional second pass on Days 2–4 for a learner who prefers video.
 

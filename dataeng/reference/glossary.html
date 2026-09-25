@@ -126,6 +126,13 @@
   <tr><td>macro</td><td>giữ nguyên "macro" — hàm Jinja tái sử dụng, định nghĩa 1 lần trong macros/, gọi từ model bằng {{ macro_name(args) }}, tránh lặp code SQL</td><td>A reusable Jinja function defined once in <code>macros/</code> with <code>{% macro %}...{% endmacro %}</code>, callable from any model with <code>{{ macro_name(args) }}</code> — dbt's answer to not copy-pasting the same SQL fragment or Jinja logic into multiple files. Only earns its place with a second real caller; one caller is pure indirection.</td></tr>
 </table>
 
+<h2 id="day11">Day 11 — dbt packages: dbt_utils and when to write a test instead</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>dbt package</td><td>giữ nguyên "dbt package" — gói macro/test dbt cài qua packages.yml và dbt deps, giống thư viện Python/npm nhưng cho dbt</td><td>A bundle of dbt macros and generic tests, distributed as a git repo, that a project pulls in via <code>packages.yml</code> and <code>dbt deps</code> — the dbt equivalent of a Python or npm library, extending what Jinja and YAML tests a project has access to without hand-writing them. <code>dbt_utils</code>, maintained by dbt Labs, is the most widely installed one.</td></tr>
+  <tr><td>surrogate key</td><td>giữ nguyên "surrogate key" — cột khóa nhân tạo (thường hash từ cột khác) dùng làm định danh duy nhất, khác với khóa tự nhiên có sẵn trong dữ liệu nguồn</td><td>A column whose value is manufactured (typically hashed) from other columns specifically to serve as a unique identifier, as opposed to a natural key that already existed in the source data — used when a model's real-world grain has no single natural column to test <code>unique</code>/<code>not_null</code> against. <code>dbt_utils.generate_surrogate_key()</code> builds one by coalescing, concatenating and hashing a list of columns.</td></tr>
+</table>
+
 <script src="../assets/nav.js"></script>
 </body>
 </html>

@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 82 · A fixed set of values: Postgres ENUM vs. CHECK-constrained text</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 82 · ~20 min</p>
+<h1>A fixed set of values: Postgres ENUM vs. CHECK-constrained text</h1>
+<p class="byline">Lesson 60 named the example directly, in passing, and moved on: "the strongest case for reaching for [a CHECK constraint]: any rule that must never be false... a status column limited to a fixed set of strings." That example has appeared as plain <code>TEXT</code> with a <code>CHECK</code> in every status column this course has written since Lesson 3's <code>orders</code> table — <code>pending</code>, <code>shipped</code>, <code>canceled</code> — without ever asking whether Postgres has a purpose-built type for exactly this. It does, and today's lesson is the choice between the two.</p>
+
+<h2>1 · The pattern already in use: TEXT plus CHECK</h2>
+<p>Every status-like column this course has shown so far looks like this:</p>
+<pre><code><span class="kw">CREATE TABLE</span> orders (
+    id <span class="kw">BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY</span>,
+    status <span class="kw">TEXT NOT NULL CHECK</span> (status <span class="kw">IN</span> (<span class="kw">'pending'</span>, <span class="kw">'shipped'</span>, <span class="kw">'canceled'</span>)),
+    created_at <span class="kw">TIMESTAMPTZ NOT NULL DEFAULT now()</span>
+);</code></pre>
+<p>This works, and it is exactly Lesson 60's CHECK constraint applied to a set membership rule instead of a numeric range: Postgres rejects any write where <code>status</code> isn't one of the three named strings, on every code path, for the same reasons Lesson 60 gave. Nothing about it is wrong. The question this lesson asks is what a purpose-built alternative buys instead.</p>
+
+<h2>2 · The alternative: a native ENUM type</h2>
+<p>Postgres lets you declare the fixed set once, as its own named type, separate from any one table:</p>
+<pre><code><span class="kw">CREATE TYPE</span> order_status <span class="kw">AS ENUM</span> (<span class="kw">'pending'</span>, <span class="kw">'shipped'</span>, <span class="kw">'canceled'</span>);
+
+<span class="kw">CREATE TABLE</span> orders (
+    id <span class="kw">BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY</span>,
+    status order_status <span class="kw">NOT NULL DEFAULT</span> <span class="kw">'pending'</span>,
+    created_at <span class="kw">TIMESTAMPTZ NOT NULL DEFAULT now()</span>
+);</code></pre>
+<p>A <dfn data-en="a Postgres data type, declared once with CREATE TYPE ... AS ENUM, that restricts a column to a fixed, named, ordered list of string labels -- enforced by the type system itself rather than by a separate CHECK expression, and reusable by name across many tables" data-vn="ENUM type (giữ nguyên) — kiểu dữ liệu Postgres khai báo 1 lần bằng CREATE TYPE ... AS ENUM, giới hạn cột vào 1 danh sách nhãn cố định có thứ tự, do chính type system enforce chứ không phải 1 CHECK riêng, và dùng lại được bằng tên ở nhiều bảng">ENUM type</dfn> moves the same "only these values" rule out of a per-table expression and into the type system: <code>status</code>'s column type <em>is</em> <code>order_status</code>, the same way another column's type is <code>BIGINT</code> or <code>TIMESTAMPTZ</code>. Any table that needs the identical set of statuses — a <code>shipments</code> table, an <code>order_events</code> audit table — references the same <code>order_status</code> type by name instead of retyping the same three strings into a new CHECK expression and hoping they never drift apart.</p>
+
+<h2>3 · What the ENUM buys: order and reuse</h2>
+<p>Two properties fall out of declaring the set as a real type instead of a CHECK list. First, an ENUM's values have a built-in <dfn data-en="the sequence in which an ENUM type's labels were listed when the type was created -- Postgres uses this order for comparisons like less-than or ORDER BY, distinct from alphabetical order and distinct from a CHECK constraint's IN list, which has no ordering at all" data-vn="ordinal order (giữ nguyên) — thứ tự các nhãn trong ENUM theo đúng lúc khai báo CREATE TYPE, Postgres dùng thứ tự này để so sánh (</) hay ORDER BY, khác với thứ tự alphabet và khác hẳn CHECK IN vốn không có thứ tự gì cả">ordinal order</dfn> — the order they were listed in at <code>CREATE TYPE</code> time — so <code>WHERE status &lt; 'shipped'</code> and <code>ORDER BY status</code> follow the declared pending-before-shipped-before-canceled progression, not alphabetical order (which would wrongly sort <code>canceled</code> before <code>pending</code>). A <code>CHECK (status IN (...))</code> list gives <code>TEXT</code> no ordering at all; sorting or comparing it correctly needs a separate <code>CASE</code> expression mapping each string to a rank number by hand. Second, the type is reusable by name: five tables can all declare a column as <code>order_status</code>, and the set of valid values is guaranteed identical across every one of them, enforced in one place — the same "one fact, one place" instinct Lesson 2's glossary named for normalization, just applied to a type instead of a table.</p>
+
+<div class="callout"><strong>Frontend-habit bridge:</strong> this is the TypeScript <code>type Status = 'pending' | 'shipped' | 'canceled'</code> union, moved into the database. A union type gives the compiler one named, reusable definition of "these three strings and nothing else" instead of repeating the literal string list at every call site — an ENUM does the identical job for Postgres, checked at write time instead of compile time.</div>
+
+<h2>4 · What the ENUM costs: schema-change friction</h2>
+<p>The reuse comes with a real cost the CHECK version doesn't have. Adding a new value to an ENUM is cheap and safe:</p>
+<pre><code><span class="kw">ALTER TYPE</span> order_status <span class="kw">ADD VALUE</span> <span class="kw">'refunded'</span>;</code></pre>
+<p>But <em>removing</em> or renaming a value is not a single statement — Postgres has no <code>ALTER TYPE ... DROP VALUE</code> at all, because existing rows might already hold that value and dropping it would leave them referencing a label the type no longer defines. The only path is building a replacement type, migrating every column and every row across to it, and dropping the old type — real work, and exactly the kind of live-table migration Lesson 19 walked through for a column's type generally. A <code>CHECK (status IN (...))</code> list has no such asymmetry: adding or removing a value is one <code>ALTER TABLE ... DROP CONSTRAINT</code> plus one <code>ADD CONSTRAINT</code> with the new list, a single migration either direction.</p>
+<table class="cmp">
+<thead><tr><th></th><th>TEXT + CHECK</th><th>ENUM type</th></tr></thead>
+<tbody>
+<tr><th>Add a value</th><td>one constraint swap</td><td>one cheap ALTER TYPE</td></tr>
+<tr><th>Remove/rename a value</th><td>one constraint swap</td><td>build a new type, migrate every column</td></tr>
+<tr><th>Reused across tables</th><td>copy the list each time</td><td>reference the same type name</td></tr>
+<tr><th>Has a built-in order</th><td>no -- write a CASE by hand</td><td>yes -- declaration order</td></tr>
+</tbody>
+</table>
+
+<h2>5 · Where this actually gets decided</h2>
+<p>The set that changes often — anything shaped like a workflow that product will keep extending, feature flags' variant names, a status list still being designed — is the case for staying with <code>TEXT + CHECK</code>: the churn cost of the ENUM's one-way street outweighs the ordering and reuse it buys. A set that is genuinely fixed by the domain itself and rarely touched once chosen — the seven days of the week, a small closed set of currency codes, a payment state machine whose stages are contractually fixed — is where the ENUM's reuse-by-name and built-in ordering earn their keep, because the case that costs the most (removing a value) almost never happens. When in doubt, the CHECK version is the safer default precisely because reversing that choice later is cheap; committing to an ENUM and outgrowing it is the expensive direction to walk back from.</p>
+
+<div class="interview">
+<p><strong>Q: "Would you use a Postgres ENUM type or a CHECK constraint for a status column?"</strong> A strong answer, out loud: <em>"It depends on how likely the set of values is to change. An ENUM gives you a named, reusable type with a real ordering baked into the declaration order, so ORDER BY and comparisons follow the workflow's own sequence instead of alphabetical order. The cost is that Postgres can add a new ENUM value cheaply but can't drop or rename one in place — doing that means building a replacement type and migrating every table and row across. A CHECK constraint's IN list has no such asymmetry; adding or removing a value is one constraint swap either direction. So I'd reach for an ENUM only when the set is genuinely stable — something like fixed currency codes — and stick with CHECK for anything still likely to grow a new status as the product evolves."</em> The signal: naming the one-way-street cost specifically, not just "ENUMs are stricter," and tying the decision to how volatile the value set actually is.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Postgres has no ALTER TYPE ... DROP VALUE at all -- removing or renaming an ENUM label requires building a replacement type, migrating every column and row referencing the old type across to it, then dropping the old type. A CHECK (status IN (...)) list has no such asymmetry: adding or removing a value is one constraint swap either direction.">
+    <p class="stem">What is the real cost of choosing a Postgres ENUM type over a CHECK-constrained TEXT column?</p>
+    <button class="opt" data-ok>removing a value later needs a full type migration</button>
+    <button class="opt">adding a new value later needs a backup first</button>
+    <button class="opt">every single ENUM column must always allow null values</button>
+    <button class="opt">ENUM columns can never appear inside any WHERE clause</button>
+  </div>
+  <div class="q" data-why="An ENUM type's values carry an ordinal order fixed at CREATE TYPE time -- comparisons like < and ORDER BY follow that declared sequence, not alphabetical order. A CHECK (status IN (...)) list gives plain TEXT no ordering at all; sorting it correctly by workflow stage needs a hand-written CASE expression mapping each string to a rank.">
+    <p class="stem">Why does `ORDER BY status` behave more usefully on an ENUM column than on CHECK-constrained TEXT?</p>
+    <button class="opt" data-ok>ENUM values sort by their declared order, not alphabetically</button>
+    <button class="opt">CHECK constraints always forbid any sorting from happening now</button>
+    <button class="opt">TEXT columns simply cannot legally appear in ORDER BY</button>
+    <button class="opt">ENUM values get silently converted to integers on read</button>
+  </div>
+  <div class="q" data-why="A set that is genuinely fixed by the domain and rarely touched -- like a small closed list of currency codes -- is where an ENUM's reuse-by-name and built-in ordering earn their keep, since the expensive case (removing or renaming a value) almost never happens for that kind of set.">
+    <p class="stem">This lesson names which case as the strongest fit for choosing an ENUM type?</p>
+    <button class="opt" data-ok>a genuinely fixed set unlikely to gain new values soon</button>
+    <button class="opt">a status list the product plans to extend every quarter</button>
+    <button class="opt">any column at all that a frontend form ever submits</button>
+    <button class="opt">a workflow whose stages keep getting renamed fairly often lately</button>
+  </div>
+  <div class="q" data-why="Adding a new ENUM value is a single cheap ALTER TYPE ... ADD VALUE statement -- Postgres allows that direction freely. It is removing or renaming an existing value that has no direct statement and instead requires building a replacement type and migrating every referencing column and row.">
+    <p class="stem">Which ENUM schema change is cheap and safe as a single statement in Postgres?</p>
+    <button class="opt" data-ok>adding one brand new value onto an existing ENUM type</button>
+    <button class="opt">renaming one existing value that some rows already use now</button>
+    <button class="opt">removing one existing value that some rows already use now</button>
+    <button class="opt">reordering every one of the existing value's own declared position</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://www.postgresql.org/docs/current/datatype-enum.html">PostgreSQL Manual — Enumerated Types</a> (RESOURCES.md's standing "Data Definition" source, this time the dedicated ENUM chapter — a live <code>WebFetch</code> check against this exact URL was attempted this round and blocked outright by this session's sandbox network-permission gate, the same class of block Lesson 79 and Lesson 81's rounds both hit against different domains). <strong>Honest flag:</strong> not freshly fetched this round; nothing here depends on a fast-moving detail — the ENUM type's <code>CREATE TYPE</code> syntax, its declared-order comparison semantics, and the lack of a <code>DROP VALUE</code> statement have been stable Postgres behavior for many major versions — but the link above should get a live re-check once the gate is open in a future round, per the same standing habit noted since Lesson 53's 404 incident.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially. Nếu chỗ nào chưa rõ, cứ hỏi lại bằng tiếng Việt cũng được.<br><br>
+<em>Next lesson:</em> open. Still no <code>lesson_completed</code>/quiz-outcome record exists for any lesson after 82 rounds — the honest next step remains a completion signal or a user-named track.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

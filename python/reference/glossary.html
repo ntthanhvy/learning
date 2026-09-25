@@ -464,6 +464,14 @@
   <tr><td>frozen dataclass</td><td>giữ nguyên "frozen dataclass" — dataclass khai <code>@dataclass(frozen=True)</code>, mọi field chỉ đọc sau khi tạo, sửa là raise lỗi</td><td>A dataclass decorated <code>@dataclass(frozen=True)</code> — every field becomes read-only once <code>__init__</code> finishes constructing the instance; any later assignment raises <code>FrozenInstanceError</code>. Unlike an ordinary dataclass, a frozen one also gets a safe auto-generated <code>__hash__</code>, since nothing can mutate it after insertion into a <code>dict</code>/<code>set</code>.</td></tr>
 </table>
 
+<h2 id="day59">Day 59 — hashlib and content hashing</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>hash function</td><td>giữ nguyên "hash function" — hàm nhận bytes độ dài bất kỳ, trả về digest độ dài cố định; cùng input luôn ra cùng digest, đổi input là digest đổi hẳn, không suy ngược lại input được</td><td>A function that takes arbitrary-length bytes and produces a short, fixed-length digest such that the same input always produces the same output, different inputs almost never collide, and there is no practical way to recover the input from the digest alone. <code>hashlib.sha256</code> is this course's default.</td></tr>
+  <tr><td>digest</td><td>giữ nguyên "digest" — kết quả cố định độ dài của hash function cho 1 input, xem dạng hex qua <code>.hexdigest()</code> hoặc dạng bytes qua <code>.digest()</code></td><td>The fixed-length output of a hash function for a given input — <code>.hexdigest()</code> returns it as a hex string (64 characters for <code>sha256</code>), <code>.digest()</code> returns the same value as raw <code>bytes</code>.</td></tr>
+  <tr><td>avalanche effect</td><td>giữ nguyên "avalanche effect" — đổi 1 bit input làm digest thay đổi tung tóe không đoán được, input gần giống nhau không cho ra digest gần giống nhau</td><td>A hash function's property that changing even one input bit flips roughly half the output bits unpredictably, so similar inputs never produce similar-looking digests — the reason a digest can't be reverse-engineered by tweaking a guess and checking whether the result gets "closer."</td></tr>
+</table>
+
 <p class="next">💬 A term here still unclear? Ask your teacher — hỏi bằng tiếng Việt cũng được.</p>
 
 <script src="../assets/nav.js"></script>

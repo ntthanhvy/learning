@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 11 · dbt packages: dbt_utils and when to write a test instead</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 11 · ~20 min · 25 Sep 2026</p>
+<h1>dbt packages: dbt_utils and when to write a test instead</h1>
+<p class="byline">Today's tangible win: <code>mart_delivery_sla</code> finally gets a real primary key — <code>sla_key</code>, a hashed <dfn data-en="a column whose value is manufactured (typically hashed) from other columns specifically to serve as a unique identifier, as opposed to a natural key that already existed in the source data -- used when a model's real-world grain has no single natural column to test unique/not_null against" data-vn="giữ nguyên &quot;surrogate key&quot; — cột khóa nhân tạo (thường hash từ cột khác) dùng làm định danh duy nhất, khác với khóa tự nhiên có sẵn trong dữ liệu nguồn">surrogate key</dfn> built from <code>dbt_utils.generate_surrogate_key(['city', 'order_date'])</code> — closing a real gap this project has had since Day 6: that mart's true grain is <code>city</code> + <code>order_date</code> together, and nothing has ever tested that combination is actually unique.</p>
+
+<div class="callout"><strong>Before today — check Day 10 actually landed:</strong> this lesson edits <code>mart_delivery_sla.sql</code> again and adds a new package dependency, so start from a clean build:
+<pre><code>cd food_delivery_pipeline
+uv run --project ../dbt_env dbt build</code></pre>
+Expected: <code>Done. PASS=24 WARN=0 ERROR=0 SKIP=0 NO-OP=0 REUSED=0 TOTAL=24</code> (10 models + 1 snapshot + 14 tests, Day 10's own re-verified count). If you see <code>ERROR=2</code> naming <code>order_id 13</code> or <code>27</code>, your raw seed re-planted Day 3's two bad rows — re-run Day 3's <code>UPDATE</code> fix before starting today. If <code>mart_restaurant_sla</code> or <code>macros/is_sla_breach.sql</code> is missing, go back and finish Day 10 first.</div>
+
+<h2>1 · A gap that's been sitting in this project since Day 6</h2>
+<p><code>mart_delivery_sla</code>'s own grain, stated out loud back on Day 6, is one row per <code>city</code> per <code>order_date</code> — but the only test on it, added that same day, is a lone <code>not_null</code> on <code>city</code>. Nothing has ever asserted that a <code>(city, order_date)</code> pair is actually unique, the same kind of grain guarantee Day 4 put on <code>fct_orders.order_id</code> and <code>dim_restaurants.restaurant_id</code> the moment each of those marts existed. The reason it was skipped is mechanical: dbt's built-in <code>unique</code> test takes exactly one column, and this mart's real identity is two columns together. Today's fix needs a single column that represents "this specific <code>city</code> + <code>order_date</code> combination" — which means manufacturing one, not finding one already sitting in the data.</p>
+
+<h2>2 · dbt packages: code someone else already wrote, into your project</h2>
+<p>Every model and macro in this project so far has been hand-written. A <dfn data-en="a bundle of dbt macros and generic tests, distributed as a git repo, that a project pulls in via packages.yml and dbt deps -- the dbt equivalent of a Python or npm library, extending what Jinja and YAML tests a project has access to without hand-writing them" data-vn="giữ nguyên &quot;dbt package&quot; — gói macro/test dbt cài qua packages.yml và dbt deps, giống thư viện Python/npm nhưng cho dbt">dbt package</dfn> is the alternative for anything common enough that someone else has already solved it well: a bundle of macros and generic tests, distributed as a git repo, installed with a manifest file and one command — the dbt equivalent of adding a library to <code>pyproject.toml</code> rather than writing the function yourself. <a href="https://github.com/dbt-labs/dbt-utils">dbt_utils</a>, maintained by dbt Labs itself and cited in <code>RESOURCES.md</code>'s Phase 2a spine, is the most widely installed one — general-purpose SQL and testing helpers that don't belong to any one company's specific models.</p>
+<p>Declare it in <code>packages.yml</code>, a new file at the project root, sibling to <code>dbt_project.yml</code>:</p>
+<pre><code><span class="cm">-- packages.yml</span>
+packages:
+  - package: dbt-labs/dbt_utils
+    version: [<span class="str">">=1.3.0"</span>, <span class="str">"&lt;2.0.0"</span>]</code></pre>
+<p>Install it — this is the one step in today's lesson that needs internet access, since it downloads from dbt Hub:</p>
+<pre><code>uv run --project ../dbt_env dbt deps</code></pre>
+<p>Expected — dbt resolves the version range, writes a lockfile, and drops the package's macros into <code>dbt_packages/</code>:</p>
+<pre><code>Installing dbt-labs/dbt_utils
+Installed from version 1.4.1
+Up to date!</code></pre>
+<p><code>dbt_packages/</code> and <code>package-lock.yml</code> are generated files — the lockfile is worth committing (it pins the exact resolved version for anyone else who clones the repo and runs <code>dbt deps</code>), <code>dbt_packages/</code> itself is not, the same "generated, not source" distinction Day 1's <code>.gitignore</code> already drew around dbt's own <code>target/</code> folder.</p>
+
+<h2>3 · Build: <code>generate_surrogate_key</code> gives the mart a real key</h2>
+<p>dbt_utils' <a href="https://github.com/dbt-labs/dbt-utils?tab=readme-ov-file#generate_surrogate_key-source"><code>generate_surrogate_key</code></a> macro takes a list of column expressions, coalesces each to a placeholder if null, concatenates them, and hashes the result — one deterministic value standing in for "this exact combination." Add it to <code>mart_delivery_sla.sql</code>'s final <code>select</code>, as the first column:</p>
+<pre><code><span class="cm">-- models/marts/mart_delivery_sla.sql -- inside the final select, as the new first column</span>
+select
+    {{ dbt_utils.generate_surrogate_key([<span class="str">'city'</span>, <span class="str">"date_trunc('day', placed_at)::date"</span>]) }} as sla_key,
+    city,
+    date_trunc(<span class="str">'day'</span>, placed_at)::date as order_date,
+    <span class="cm">-- ...rest of the select is unchanged from Day 10</span></code></pre>
+<p>Note the package prefix: it's <code>{{ dbt_utils.generate_surrogate_key(...) }}</code>, not a bare <code>{{ generate_surrogate_key(...) }}</code> — every macro a package brings in is namespaced under that package's name, exactly so a project's own macro (like Day 10's <code>is_sla_breach</code>) can never silently collide with one an installed package defines. On Postgres, the macro resolves <code>dbt.hash()</code> to <code>md5()</code> and each column to <code>varchar</code> before concatenating with <code>||</code> — worth reading once with Day 10's <code>dbt compile</code> habit, since a macro from a package is still just Jinja producing plain SQL, no different from one you wrote yourself.</p>
+<p>Add the grain test to <code>models/marts/marts.yml</code>, on the new column instead of the old single-column <code>city</code> test:</p>
+<pre><code><span class="cm">  - name: mart_delivery_sla
+    columns:
+      - name: sla_key
+        tests:
+          - unique
+          - not_null</span></code></pre>
+<pre><code>uv run --project ../dbt_env dbt build --select mart_delivery_sla</code></pre>
+<p>Expected — same row count as every prior day, now with a real key backing it:</p>
+<pre><code>1 of 3 OK created sql table model dbt_dev.mart_delivery_sla ... [SELECT 1 in 0.04s]
+2 of 3 PASS unique_mart_delivery_sla_sla_key ................... [PASS in 0.02s]
+3 of 3 PASS not_null_mart_delivery_sla_sla_key ................. [PASS in 0.02s]
+
+Done. PASS=3 WARN=0 ERROR=0 SKIP=0 TOTAL=3</code></pre>
+<div class="callout"><strong>Why a hash, not just concatenating the two columns as text:</strong> <code>city || order_date</code> would work for uniqueness too, but a hash gives a fixed-width, opaque, join-friendly value that never needs quoting or escaping regardless of what's inside <code>city</code> — the same reason Day 5's Kafka messages used a generated <code>event_id</code> rather than concatenating fields into one string key. The tradeoff is real: a hash can't be reversed back into <code>city</code> and <code>order_date</code> by eye in a <code>psql</code> session the way a concatenated string could, which is exactly why <code>city</code> and <code>order_date</code> stay in the <code>select</code> as their own columns — <code>sla_key</code> is for uniqueness and joins, not for reading.</div>
+
+<h2>4 · When to write a test instead of importing one</h2>
+<p>dbt_utils also ships generic tests, not just macros — <a href="https://github.com/dbt-labs/dbt-utils?tab=readme-ov-file#accepted_range-source"><code>dbt_utils.accepted_range</code></a> asserts a column's values fall inside a given bound, declared in YAML exactly like the built-in <code>unique</code>/<code>not_null</code>/<code>relationships</code>/<code>accepted_values</code> Day 3 used. This is worth comparing directly against Day 3's <code>assert_positive_subtotal</code>, a hand-written singular test asserting the exact same underlying business rule — <code>subtotal</code> can't be negative:</p>
+<table class="gloss">
+<tr><th></th><th><code>dbt_utils.accepted_range</code></th><th>Day 3's <code>assert_positive_subtotal</code></th></tr>
+<tr><td>Shape</td><td>generic test, one YAML line</td><td>singular test, a whole <code>.sql</code> file</td></tr>
+<tr><td>Rule expressed</td><td>a value bound: <code>min_value: 0</code></td><td>the same value bound, spelled the same way</td></tr>
+<tr><td>Reusable across columns?</td><td>yes, same line on any numeric column</td><td>no — one file, one column, one rule</td></tr>
+</table>
+<p>For a plain range check like this one, <code>dbt_utils.accepted_range</code> is strictly less code for the identical result — today, replace the hand-written version to prove it:</p>
+<pre><code><span class="cm">-- models/staging/stg_orders.yml -- replace the singular test's job with a generic one</span>
+      - name: subtotal
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0</code></pre>
+<p>Delete <code>tests/assert_positive_subtotal.sql</code> — its job is now done by one YAML line pulled from a package instead of a whole separate hand-written SQL file. But the swap only works because this particular rule happens to be a plain range check. The moment a rule needs something dbt_utils' generic tests don't express — Day 9's whole point-in-time-join correctness, or "an order's <code>delivered</code> event must occur after its <code>placed</code> event," which needs a join across two rows of the same source rather than a bound on one column — no package test fits, and a singular test is the only option, same as Day 3 reached for one when no <em>built-in</em> test fit. The decision rule is the same one Day 10's callout used for macros, one layer up: reach for the package when the rule is truly generic and the package already expresses it; write it by hand the moment the rule is specific to this business or needs logic no generic test shape covers.</p>
+<pre><code>uv run --project ../dbt_env dbt build --select stg_orders</code></pre>
+<p>Expected — the swapped test still passes, since <code>raw.orders</code>' two planted bad rows were already fixed back on Day 3:</p>
+<pre><code>1 of 3 OK created sql view model dbt_dev.stg_orders ....................... [CREATE VIEW in 0.03s]
+2 of 3 PASS dbt_utils_accepted_range_stg_orders_subtotal__0 ............... [PASS in 0.02s]
+3 of 3 PASS relationships_stg_orders_restaurant_id__restaurant_id__ref_stg_restaurants_ ... [PASS in 0.02s]
+
+Done. PASS=3 WARN=0 ERROR=0 SKIP=0 TOTAL=3</code></pre>
+<p>Commit <code>packages.yml</code>, <code>package-lock.yml</code>, the edited <code>mart_delivery_sla.sql</code> and <code>marts.yml</code>, the edited <code>stg_orders.yml</code>, and the deletion of <code>tests/assert_positive_subtotal.sql</code>. Add <code>dbt_packages/</code> to <code>.gitignore</code> if it isn't there already from dbt's default project scaffold.</p>
+
+<div class="interview">
+<p><strong>Q: "When would you reach for a dbt package instead of writing your own macro or test?"</strong> A strong answer, out loud: <em>"Once a piece of logic is generic enough that it isn't really about my business at all — hashing a set of columns into a surrogate key, or checking a numeric column falls in a range, are the same problem in every dbt project that has them, so dbt_utils having already solved it well means I shouldn't solve it again. I'd install it with a packages.yml pinned to a version range and dbt deps, the same idea as pinning a library in a Python project. But the moment a rule is specific to my own data — a point-in-time join's correctness, or an order's delivered event needing to come after its placed event — no generic package test expresses that, and I write a singular test by hand instead, the same as I would before ever installing a package. Packages replace generic, reusable logic; they don't replace understanding what's actually specific to this pipeline's own business rules."</em> The signal: naming a concrete package function by what problem it solves, and drawing the line at "generic vs. specific to my data" rather than treating a package as always better than hand-written SQL.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="mart_delivery_sla's real grain has always been city plus order_date together, but dbt's built-in unique test only takes one column, so the combination was never actually tested for uniqueness until today's surrogate key gave that combination a single column to test.">
+    <p class="stem">Why did <code>mart_delivery_sla</code> have no uniqueness test on its own grain before today?</p>
+    <button class="opt" data-ok>dbt's <code>unique</code> test only ever takes one column</button>
+    <button class="opt">Postgres itself cannot ever store a two-column key</button>
+    <button class="opt"><code>mart_delivery_sla</code> never really had a single fixed grain</button>
+  </div>
+  <div class="q" data-why="dbt namespaces every macro a package provides under that package's own name, specifically so a project's own macro (like Day 10's is_sla_breach) can never silently collide with a same-named macro an installed package defines.">
+    <p class="stem">Why is it <code>{{ dbt_utils.generate_surrogate_key(...) }}</code>, not a bare <code>{{ generate_surrogate_key(...) }}</code>?</p>
+    <button class="opt" data-ok>Package macros are namespaced, so names never collide</button>
+    <button class="opt">Bare macro calls are simply not valid Jinja</button>
+    <button class="opt"><code>dbt_utils</code> is a required prefix on any macro</button>
+  </div>
+  <div class="q" data-why="dbt_utils.accepted_range and the hand-written singular test express the exact same rule -- subtotal cannot be negative -- but the generic test does it in one reusable YAML line instead of a whole SQL file, which is strictly less code for an identical, genuinely generic rule.">
+    <p class="stem">Why does today's lesson replace <code>assert_positive_subtotal</code> with <code>dbt_utils.accepted_range</code>?</p>
+    <button class="opt" data-ok>Same rule, in far less code, reusable elsewhere too</button>
+    <button class="opt">The singular test had silently failed since Day 3</button>
+    <button class="opt">Generic tests always run before any singular test does</button>
+  </div>
+  <div class="q" data-why="A generic test like accepted_range expresses a bound on a single column and nothing more. A rule needing logic across rows or models -- like a delivered event needing to occur after its own order's placed event -- has no generic shape to reuse, so a singular test, written by hand, is the only option, same as Day 3's original reasoning for assert_positive_subtotal.">
+    <p class="stem">Per today's lesson, when does a rule still need a hand-written singular test?</p>
+    <button class="opt" data-ok>When no generic test shape expresses that specific rule</button>
+    <button class="opt">Whenever a rule happens to involve two whole columns</button>
+    <button class="opt">Never, since packages now cover every possible data rule</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the <a href="https://github.com/dbt-labs/dbt-utils">dbt_utils</a> README (dbt Labs' own package, cited in <code>RESOURCES.md</code>'s Phase 2a spine) documents every macro and generic test used today, plus others worth skimming — <code>date_spine</code> and <code>generate_series</code> in particular, for the day a calendar table is needed to fill in dates with zero orders rather than only ever seeing the days that had some. The <a href="https://docs.getdbt.com/docs/build/data-tests">Data tests</a> doc, already Day 3's source, is the reference for how a project's own generic and singular tests relate to a package's.</p>
+
+<div class="callout"><strong>Honesty note on today's verification:</strong> <code>dbt deps</code> really ran against the live dbt Hub registry this round and installed real <code>dbt_utils</code> 1.4.1 — that part is genuinely confirmed, not assumed. A separate attempt to bring up a scratch Postgres to run today's changes through a live <code>dbt build</code> (the way Day 10's round did) was blocked by this sandbox's network/container gate this time; <code>dbt parse</code> against the installed package (no database needed) came back clean, and <code>dbt list</code> confirmed the new <code>sla_key</code> tests resolve correctly, but the exact <code>PASS=3</code> build output shown above is hand-derived from dbt's documented behavior and this project's own row counts, not captured from a live run this round.</div>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 11.<br>
+<strong>Phase 2 continues</strong> along the dbt/Kafka/Airflow spine in <code>PLAN.md</code>, adapted to your questions rather than a fixed calendar — unit tests (dbt ≥ 1.8) vs. data tests, testing logic with fixed inputs instead of testing real data, is next up on the dbt side.<br><br>
+💬 Anything unclear — the package-namespacing rule, or where the package-vs-hand-written line sits? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

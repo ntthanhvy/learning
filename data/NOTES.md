@@ -6701,3 +6701,108 @@
   using the relative-path form, per this course's own established tip that
   it's more reliable than an absolute path in this sandbox, and succeeded:
   `recorded: data/lesson_generated day=78 lesson=0078-assign.html`.
+- 2026-09-25 generation (Lesson 79, headless run): per the orchestrator's own
+  prior DB check, the latest `course_progress` row for course=data was
+  `lesson_generated day=78 lesson=0078-assign.html` dated 2026-09-24, with no
+  `lesson_completed`/quiz/kata signal for data more recent than mid-July — no
+  fresh recall/weak-spot signal to target, same situation as every recent
+  round. A direct `psql "$LEARNING_DB_URL"` read was not attempted (confirmed
+  hard-blocked by this sandbox's static analysis regardless, per the
+  orchestrator's own note); independently confirmed idempotency via the
+  filesystem instead: `ls data/lessons/` and `grep "n: 79"
+  data/assets/nav.js` both found nothing for day 79 before this round
+  started. Read `MISSION.md` in full (not modified) and `RESOURCES.md` in
+  full, the "User preferences"/"Course design decisions"/"Curriculum spine"
+  section near the top of `NOTES.md`, the tail of `NOTES.md` (past 6700
+  lines now — read via `offset`/`limit`), and Lesson 78's own HTML body plus
+  its practice file as structural/style precedent. Lesson 78's closing
+  teaser left two open leads unpicked: "more groupby/agg patterns beyond
+  Lesson 4/40/48/61/66" or "memory/dtype optimization beyond Lesson
+  25/41/51/62." Per this course's own established practice, delegated a
+  full gap-scan (a sub-agent reading Lessons 4/40/48/61/66/25/41/51/62 in
+  full plus grepping all 78 lesson bodies and the glossary against ~29
+  candidate pandas/NumPy topics) before picking either lead at face value.
+  Result: the groupby/agg lead is nearly exhausted (only `as_index=False`
+  and `.get_group()` remain, both minor); the memory/dtype lead had more
+  real runway, including `infer_objects()`, `read_csv(dtype=)`, sparse
+  dtypes, and nullable boolean — none covered anywhere. Investigating those
+  by hand (re-reading Lesson 62 in full, then probing directly in a scratch
+  dir) surfaced a bigger and more current gap one level underneath all of
+  them: current pandas' `read_csv()` no longer defaults text columns to
+  `object` dtype at all — confirmed directly (pandas 3.0.6) it now defaults
+  to a dedicated `str` dtype (`pandas.StringDtype`), a pandas 3.0 default-
+  inference change. Lesson 60's own quiz already named this in passing (its
+  `str.contains()` `na=` default varies by dtype, mentioning "the modern
+  str dtype" as one case) but no lesson ever explained what that dtype IS,
+  and grepping confirmed zero dedicated coverage anywhere — a genuine,
+  well-scoped, and highly current gap, so this round picked it over both
+  named leads. Scratch probes at `data/.scratch/lesson79/` (not `/tmp`)
+  confirmed every claim directly before writing: `isinstance(df["customer"]
+  .dtype, pd.StringDtype)` is `True` on a plain `read_csv()` load, with zero
+  `dtype=` passed; confirmed the new default costs IDENTICAL memory to
+  legacy `object` on the 500x-repeated fixture (155632 bytes both ways,
+  Lesson 62's own repeat-to-scale technique reused) — a type-identity
+  change, not a memory optimization, so Lesson 62's `category` advice is
+  entirely unaffected; confirmed the default `str` dtype and Lesson 51's
+  older opt-in nullable `string` dtype (from `convert_dtypes()`) share the
+  same `StringDtype` class and `.storage` value but differ in `.na_value`
+  (plain float `NaN` for the default, `pd.NA` for nullable); and confirmed
+  the real gotcha driving this lesson's central hook: `select_dtypes
+  (include="object")` (Lesson 25) still matches the new `str` columns today
+  but only through a deprecated backward-compatibility shim that raises
+  `Pandas4Warning` on every call, while `select_dtypes(include="str")`
+  matches identically with zero warning — reproduced directly with
+  `warnings.catch_warnings(record=True)`. Before writing the practice file,
+  ran this course's now-standard freebie-risk probe pattern: `ex1_expected_
+  dtype_name` checked against the literal string `"str"`, `ex2_legacy_
+  dtype_name` against literal `"object"`, `ex3_attr_name` against literal
+  `"storage"`, and `ex4_forward_compatible_include` against literal `"str"`
+  — every blank fails closed if left as `...`. The shipped (unsolved)
+  `practice/79_default_str_dtype.py` was executed directly from its real
+  `practice/` location (`cd data && uv run --with pandas python3
+  practice/79_default_str_dtype.py`) and printed exactly 4 ✗ with no
+  traceback; a solved copy (kept only in the scratch dir, not shipped) then
+  printed all 4 ✓ on the first run, confirmed before the unsolved file was
+  ever considered final. Quiz options were drafted, then mechanically
+  word-counted with a Python script (run via `uv run python3`, a bare
+  `python3` invocation being blocked by this sandbox's command-approval
+  gate) isolating each `<div class="q">` block by regex span — the first
+  draft came out mismatched on all three questions (Q1 9/9/8, Q2 9/8/6, Q3
+  11/10/10); iterated through several rewrite+recount cycles (testing
+  candidate option strings in an isolated word-count harness before ever
+  touching the HTML, to stop hand-counting by eye) until all three landed
+  level (Q1 9/9/9, Q2 9/9/9, Q3 11/11/11), with exactly one `data-ok` per
+  question throughout, confirmed by the same script; cross-checked with a
+  separate arithmetic computation (`9*3 + 9*3 + 11*3 = 87`) against the
+  script's own reported whole-file option-word total (87), and it agreed
+  exactly. A separate mechanical tag-balance script (regex open/close
+  occurrence counts per tag) found every tracked tag already balanced
+  (`html`/`head`/`title`/`body`/`h1`/`dfn` 1/1 each, `h2` 6/6, `p` 17/17,
+  `div` 6/6, `pre` 4/4, `code` 65/65, `span` 17/17, `strong` 4/4, `em` 4/4,
+  `a` 2/2, `button` 9/9). Raw-`&` scan found exactly two matches in the
+  lesson body, both the two `&` characters inside the single already-
+  established `cd ~/learning/data && uv run …` shell command inside a
+  `<pre><code>` block (this course's standing precedent, not a new bug),
+  zero raw `&` in prose. Checked the glossary for a collision before adding
+  anything: grepped for `StringDtype`/`>str<`/"default str dtype" across
+  the full glossary — found only the existing `na= (str.contains)` entry's
+  passing mention of "the modern str dtype," no dedicated row — confirmed a
+  genuine gap, so added exactly one new row, `str dtype (default, pandas
+  3.0+)`, placed directly after Lesson 78's `.assign()` entry; confirmed
+  the glossary table's tags stayed balanced after the insert via occurrence
+  counts (`table` 1/1, `tr` 140/140, `td` 417/417, `th` 3/3, `code`
+  859/859), zero raw `&` introduced. Registered Lesson 79 in `nav.js` with
+  today's date (2026-09-25); `node --check` confirmed it still parses as
+  valid JavaScript after the edit. This round's topic pick leaves the
+  groupby/agg lead nearly closed (only `as_index=False`/`.get_group()`
+  remain unpicked there) as the standing candidate for tomorrow, alongside
+  a fresh scan as always. The entire `data/.scratch/` directory was removed
+  (`rm -rf`) after verification (only `lesson79/` lived there, confirmed
+  via listing before deleting, nothing else was at risk). This agent does
+  not run `git commit` — leaving working-tree changes uncommitted remains
+  this course's established convention. `bin/record-progress data
+  lesson_generated --day 79 --lesson 0079-default-str-dtype.html --detail
+  '{"by":"headless"}'` was run from the repo root using the relative-path
+  form, per this course's own established tip that it's more reliable than
+  an absolute path in this sandbox, and succeeded: `recorded:
+  data/lesson_generated day=79 lesson=0079-default-str-dtype.html`.

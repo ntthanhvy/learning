@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 79 · pandas 3.0's default str dtype, and the select_dtypes gotcha it causes</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 79 · ~20 min · 25 Sep 2026</p>
+<h1>pandas 3.0's default str dtype, and the select_dtypes gotcha it causes</h1>
+<p class="byline">Lesson 78 left two open leads — more groupby/agg beyond Lessons 4/40/48/61/66, or memory/dtype beyond Lessons 25/41/51/62 — but neither survived a fresh scan untouched: grepping all 78 lesson bodies plus the glossary found the groupby/agg lead nearly exhausted, while re-reading Lesson 62 (memory/dtype) in full turned up a real gap one level underneath it. Lesson 60's own quiz already mentioned, in passing, that <code>str.contains()</code>'s <code>na=</code> default depends on "the modern <code>str</code> dtype" versus "legacy object dtype" — but no lesson ever explained what that modern <code>str</code> dtype actually IS, why every text column here has quietly been one since Lesson 62 ran on pandas 3.0.6, or the deprecation trap it sets for Lesson 25's own <code>select_dtypes()</code>. That's today's topic.</p>
+
+<h2>1 · Confirmed directly: read_csv() no longer gives you plain object dtype</h2>
+<p>Every earlier lesson describing a text column as "object dtype" was accurate on older pandas, but current pandas changed the default. Loading this course's own <code>orders_raw.csv</code> fixture:</p>
+<pre><code>df = pd.read_csv(<span class="str">"orders_raw.csv"</span>)
+df.dtypes
+<span class="cm">-- order_id      int64
+-- customer        str
+-- amount          str
+-- order_date      str
+-- dtype: object</span></code></pre>
+<p>Confirmed directly (pandas 3.0.6): every text column's dtype now prints as <dfn data-en="pandas 3.0's new DEFAULT dtype for text columns loaded by read_csv() (and text literals generally) -- an instance of pandas.StringDtype, replacing the legacy generic 'object' dtype that older pandas used for any non-numeric Python value; NOT the same object as the OLDER, separately-opt-in nullable 'string' dtype from convert_dtypes(), even though both are the same StringDtype class under the hood" data-vn="giữ nguyên 'str' dtype (pandas 3.0+) — dtype MẶC ĐỊNH MỚI cho cột chữ khi đọc read_csv(), là instance của pandas.StringDtype, thay cho 'object' kiểu cũ vốn dùng cho mọi giá trị Python không phải số; KHÔNG giống 'string' dtype (chữ thường, từ convert_dtypes(), Lesson 51) dù cùng là class StringDtype bên dưới">str</dfn>, not <code>object</code> — <code>isinstance(df["customer"].dtype, pd.StringDtype)</code> is <code>True</code>. This is a pandas 3.0 default-inference change, not something this course's fixture did differently; older code and older pandas tutorials describing text columns as "object dtype" are describing the previous default, still reachable today via <code>.astype(object)</code> but no longer what you get for free.</p>
+
+<h2>2 · Does the new default change memory usage? Confirmed: no</h2>
+<p>Lesson 62 taught measuring memory with <code>memory_usage(deep=True)</code> and shrinking low-cardinality text with <code>category</code>. It's tempting to assume the new <code>str</code> dtype is itself a memory optimization — it is not:</p>
+<pre><code>big[<span class="str">"customer"</span>].memory_usage(deep=<span class="kw">True</span>)                     <span class="cm"># 155632, default "str" dtype</span>
+big[<span class="str">"customer"</span>].astype(<span class="kw">object</span>).memory_usage(deep=<span class="kw">True</span>)     <span class="cm"># 155632, legacy "object" dtype -- IDENTICAL</span>
+big[<span class="str">"customer"</span>].astype(<span class="str">"category"</span>).memory_usage(deep=<span class="kw">True</span>)   <span class="cm"># 3288, still the real win</span></code></pre>
+<p>Confirmed directly on the 500x-repeated fixture (Lesson 62's own scaling technique): default <code>str</code> and legacy <code>object</code> cost the exact same bytes. The new default is about <em>type safety and consistency</em> — a dedicated string type instead of a generic bucket that could hold literally anything — not about memory. Lesson 62's own advice is unchanged: <code>category</code> is still the tool that actually shrinks a low-cardinality text column, regardless of whether it starts as <code>str</code> or <code>object</code>.</p>
+
+<div class="callout"><strong>Two different things named "string," worth keeping straight:</strong> lowercase <code>str</code> (today's topic) is the new automatic <em>default</em> — you get it for free, no opt-in. Lesson 51's <code>string</code> (via <code>convert_dtypes()</code>) is pandas' older <em>nullable</em> string dtype, opt-in only. Confirmed directly they're the same underlying <code>StringDtype</code> class with the same <code>.storage</code> value — but their <code>.na_value</code> differs: the default <code>str</code> column's missing marker is plain float <code>NaN</code>, while the nullable <code>string</code> column's is <code>pd.NA</code>. Same class, different missing-value contract — worth checking <code>.dtype.na_value</code> directly rather than assuming, especially before an <code>== NaN</code> comparison (Lesson 3's own NaN rule still applies to either).</div>
+
+<h2>3 · The gotcha: select_dtypes("object") still works today — with a warning</h2>
+<p>Lesson 25 taught <code>select_dtypes(include="object")</code> to find text columns. It still finds them — but only through a deprecated backward-compatibility shim:</p>
+<pre><code>df.select_dtypes(include=<span class="str">"object"</span>).columns.tolist()
+<span class="cm">-- ['customer', 'amount', 'order_date']   -- still works, but:
+-- Pandas4Warning: For backward compatibility, 'str' dtypes are included
+-- by select_dtypes when 'object' dtype is specified. This behavior is
+-- deprecated and will be removed in a future version.</span>
+
+df.select_dtypes(include=<span class="str">"str"</span>).columns.tolist()
+<span class="cm">-- ['customer', 'amount', 'order_date']   -- identical result, ZERO warning</span></code></pre>
+<p>Confirmed directly: both calls return the exact same three columns today, but only <code>include="object"</code> raises <code>Pandas4Warning</code> — <code>include="str"</code> gets there silently. This is the same "still runs, quietly outdated" family as Lesson 73's stale <code>argsort()</code> docstring and Lesson 29's removed <code>isin()</code> folklore: code written against the old default keeps working for now, on borrowed time, while the forward-compatible spelling is one word different and already available.</p>
+
+<div class="interview">
+<p><strong>Q: "Why would df.select_dtypes(include='object') print a deprecation warning on current pandas?"</strong> A strong answer, out loud: <em>"pandas 3.0 changed the default dtype read_csv() gives text columns — it's now a dedicated str dtype (pandas.StringDtype), not the old generic object dtype. select_dtypes(include='object') still catches those str columns today, but only through a backward-compatibility shim that pandas has already flagged for removal, so it warns every time. The fix is just passing include='str' instead, which matches the same columns with no warning. The bigger point I'd make: the new str dtype doesn't change memory usage at all versus the old object dtype — it's the same bytes — so Lesson-level advice about using category for low-cardinality text is completely unaffected; this is a type-identity change, not a memory optimization."</em> The signal: naming the actual pandas-version cause instead of guessing, and correctly scoping what did and didn't change (identity, not memory).</p>
+</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/79_default_str_dtype.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/79_default_str_dtype.py</code></pre>
+<p>Reuses <code>practice/data/orders_raw.csv</code>, repeated 500x the same way as Lesson 62, for a visible memory comparison. Exercise 1 confirms <code>read_csv()</code>'s default text-column dtype is <code>str</code>, an instance of <code>pd.StringDtype</code> (Section 1). Exercise 2 confirms default <code>str</code> and legacy <code>object</code> cost identical memory (Section 2). Exercise 3 confirms the default <code>str</code> dtype and the nullable <code>string</code> dtype share the same <code>StringDtype</code> class and <code>.storage</code>, but carry different <code>.na_value</code>s (Section 2's callout). Exercise 4 confirms <code>select_dtypes(include="str")</code> matches <code>include="object"</code>'s result with no deprecation warning (Section 3).</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: pandas 3.0 changed read_csv()'s default text-column dtype from the legacy generic 'object' dtype to a dedicated 'str' dtype (an instance of pandas.StringDtype) -- the old object dtype is still reachable via .astype(object), but is no longer the automatic default.">
+    <p class="stem">On current pandas, what dtype does <code>read_csv()</code> give a plain text column by default?</p>
+    <button class="opt" data-ok>str, a brand new dedicated StringDtype, replacing legacy object</button>
+    <button class="opt">object, exactly the same legacy dtype it always used</button>
+    <button class="opt">category, automatically chosen right now for every loaded column</button>
+  </div>
+  <div class="q" data-why="Confirmed directly on the 500x-repeated fixture: the default str dtype and the legacy object dtype report the identical deep memory_usage() total -- the new default is about type identity/safety, not a memory optimization. category (Lesson 62) remains the actual memory-shrinking tool for low-cardinality text.">
+    <p class="stem">Compared to legacy <code>object</code> dtype, how much memory does the new default <code>str</code> dtype save?</p>
+    <button class="opt" data-ok>none at all; both report the identical memory_usage total</button>
+    <button class="opt">roughly half, similar to what category achieves here today</button>
+    <button class="opt">exactly the same drop plain astype("category") produces here too</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: select_dtypes(include='object') still returns the new default str columns today, but only via a deprecated backward-compatibility shim that raises Pandas4Warning every call. select_dtypes(include='str') returns the identical columns with no warning at all.">
+    <p class="stem">Why does <code>select_dtypes(include="object")</code> raise a deprecation warning on current pandas?</p>
+    <button class="opt" data-ok>it only matches new str columns via a deprecated compatibility shim</button>
+    <button class="opt">the include= keyword itself simply no longer works at all today</button>
+    <button class="opt">plain object dtype columns no longer exist anywhere in pandas now</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official pandas <a href="https://pandas.pydata.org/docs/user_guide/index.html">User Guide</a> (per <code>RESOURCES.md</code>'s "Docs: pandas User Guide" entry, ~10 min) — search "migration" for the dedicated pandas 3.0 string-migration guide, which documents this exact <code>select_dtypes()</code> compatibility shim and its planned removal in full.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — the default <code>str</code> dtype is new today, placed right after Lesson 78's <code>.assign()</code> entry.<br>
+<strong>Next lesson:</strong> a fresh curriculum/glossary scan for the next genuinely-uncovered pattern — the groupby/agg lead is now nearly exhausted (only <code>as_index=False</code> and <code>.get_group()</code> remain unpicked there), so tomorrow likely starts from either of those or a brand new scan.<br><br>
+💬 Anything unclear — str vs object vs nullable string, the select_dtypes warning, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

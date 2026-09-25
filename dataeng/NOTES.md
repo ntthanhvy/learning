@@ -1167,3 +1167,121 @@ along the Phase 2 spine, adapted to the learning records.
   0010-dbt-jinja-and-macros.html --detail '{"by":"headless"}'` succeeded on the
   first attempt, run from the repo root:
   `recorded: dataeng/lesson_generated day=10 lesson=0010-dbt-jinja-and-macros.html`.
+- 2026-09-25 (headless 06:00 run, Day 11 generated): eleventh lesson,
+  `0011-dbt-utils-and-packages.html`. Before writing, checked `dataeng/assets/nav.js`
+  for an `n: 11` entry and `dataeng/lessons/` for a `0011-*` file — neither
+  existed, so proceeded. Also wrote a throwaway `node` script
+  (`execFileSync('psql', [process.env.LEARNING_DB_URL, ...])`, deleted after)
+  per the orchestrator's suggested workaround to double-check the DB directly:
+  confirmed the latest `dataeng` row is `lesson_generated day=10` (2026-09-24)
+  with nothing for 2026-09-25 yet, and no `lesson_completed`/quiz/kata signal
+  more recent than mid-July — consistent with the orchestrator's own pre-check.
+  `learning-records/` still holds only the one Day-1 baseline file. Read
+  `MISSION.md`, `PLAN.md` and `RESOURCES.md` in full, this file's conventions
+  section and the last ~200 lines of this log, and Lessons 8, 9 and 10 in full
+  for structural/voice precedent, before writing anything.
+  **Topic choice:** followed 2a's spine in order, as every prior Phase 2 round
+  has — Days 8/9/10 were the spine's first three bullets (layering, snapshots,
+  Jinja/macros); today is the fourth verbatim: "Packages: `dbt_utils`
+  (surrogate keys, `generate_series`), and when to write a test instead of
+  importing one." No learning-record or quiz signal exists to suggest
+  deviating, same finding as every prior round.
+  **Content:** rather than invent a generic surrogate-key example, searched
+  this project's own lesson history for a real, still-open gap and found one:
+  `mart_delivery_sla`'s true grain has been `city` + `order_date` since Day 6,
+  but the only test ever added to it (also Day 6) is a lone `not_null` on
+  `city` — the combination itself has never been tested for uniqueness,
+  because dbt's built-in `unique` test takes exactly one column. Fixed it for
+  real with `dbt_utils.generate_surrogate_key(['city', "date_trunc('day',
+  placed_at)::date"])` as a new `sla_key` column, with `unique`+`not_null`
+  tests added on that column in `marts.yml` — a genuine bug closed, not a
+  toy example. For "when to write a test instead of importing one," used
+  `dbt_utils.accepted_range` against Day 3's own hand-written
+  `assert_positive_subtotal` singular test as a direct, textual side-by-side
+  (same rule, `subtotal >= 0`, two shapes), replacing the singular test with
+  the generic one since the rule is a plain range check, then named the real
+  boundary: Day 9's point-in-time join and an event-ordering rule ("delivered
+  must follow placed") need a join across rows, which no generic test shape
+  covers, so a singular test stays the only option there — deliberately not
+  claiming packages replace singular tests in general. No pandas, no
+  Python-language teaching, no re-derivation of idempotency/API concepts —
+  none applicable to a pure dbt/package day. Domain names used exactly as
+  established (`raw.orders`, `mart_delivery_sla`, `city`, `order_date`).
+  Opened with a "before today" `dbt build` check citing Day 10's own
+  generation-log-confirmed number (`PASS=24 TOTAL=24`, 10 models + 1 snapshot
+  + 14 tests) verbatim, rather than re-deriving Days 3–10's running test count
+  from each lesson's individual YAML snippets — attempting that reconciliation
+  during this round's own verification surfaced small pre-existing arithmetic
+  drift between several days' stated running totals and what their literal
+  YAML snippets sum to (e.g. Day 8→9's "12 tests" vs. what Day 6+9's own shown
+  snippets imply), which predates this round and isn't this round's lesson
+  content to silently rewrite; Day 10's own number was the most recently and
+  rigorously reconfirmed (via a real live-Postgres `dbt build` in that day's
+  own generation log), so it was trusted verbatim here, the same way Day 10
+  trusted Day 9's number before independently re-verifying its own new delta.
+  **Verification:** laid out a minimal scratch project mirroring Days 8–10's
+  approach (`dbt_project.yml` with `vars`/`macro-paths`/`test-paths`, all four
+  staging models plus `stg_orders.yml`/`stg_order_events.yml` schema tests and
+  the `assert_positive_subtotal.sql` singular test reconstructed from Day 3's
+  own literal snippets, `int_orders_joined`, `dim_restaurants`, `fct_orders`,
+  `restaurants_snapshot`, `fct_orders_with_commission`, `macros/is_sla_breach.sql`,
+  `mart_delivery_sla.sql` and `mart_restaurant_sla.sql` from Day 10) in
+  `.scratch_dataeng_verify_d11/` under the repo root, deleted after. Added
+  today's real new content: `packages.yml` pinning `dbt-labs/dbt_utils` to
+  `[">=1.3.0", "<2.0.0"]`, the `sla_key` surrogate-key column, and the
+  `dbt_utils.accepted_range` swap. Ran `uv run --with "dbt-postgres==1.11.0"
+  dbt deps --project-dir <abs>` first — **this genuinely reached the live dbt
+  Hub registry and installed real dbt_utils 1.4.1** (confirmed via
+  `dbt_packages/dbt_utils/` and `package-lock.yml`, both real, not fabricated),
+  which was a pleasant surprise since a plain `curl` to `hub.getdbt.com`
+  earlier in this same round had required sandbox approval and was not
+  attempted further — `dbt deps` apparently has a narrower, permitted network
+  path this round even though ad hoc `curl`/`docker compose`/`docker run`
+  calls did not (each of those three specifically prompted for approval and
+  was left un-run rather than forced through). Read the installed package's
+  own `generate_surrogate_key.sql` and `generate_series.sql` macro source
+  directly to confirm real signatures before writing the lesson, rather than
+  citing them from memory. Ran `uv run --with "dbt-postgres==1.11.0" dbt parse
+  --project-dir <abs> --profiles-dir <abs> --no-partial-parse` (absolute-path
+  flags, single non-compound command, no `cd`/redirection, same workaround
+  every prior round used) — came back clean, grepped for `Error`, found none
+  (only a `MissingArgumentsPropertyInGenericTestDeprecation` warning on the
+  pre-existing Day 6 `accepted_values` block, unrelated to today's new content
+  and not touched, since it predates this round). Fixed one real deprecation
+  this round's own `dbt_utils.accepted_range` YAML triggered on first parse
+  (flat `min_value:` instead of nested under `arguments:`) before it ever
+  reached the lesson text. `dbt list --resource-type model/test/snapshot`
+  against the scratch project resolved 10 models, 1 snapshot, 19 tests today
+  (this scratch project's own from-literal-snippets reconstruction, not
+  directly comparable to Day 10's "14 tests" figure per the drift noted
+  above); confirmed the two new `sla_key` tests (`unique`, `not_null`) resolve
+  with real dbt-generated names, used verbatim in the lesson. Attempted a live
+  `dbt build` end to end the way Day 10's round did, via `docker run`/`docker
+  compose up` against a scratch Postgres — **both were blocked by this
+  sandbox's approval gate this round** (Day 10's round evidently had that
+  available; this one did not) — so the lesson's own `PASS=3`/`PASS=3` Verify
+  blocks are hand-derived from dbt's documented `dbt build` output shape and
+  this project's own known row counts, not captured live, and the lesson
+  states this honestly in its own closing "Honesty note" callout rather than
+  presenting them as directly observed, matching this course's established
+  honest-flag convention for blocked network/container access. No `.py` files
+  in this lesson (a pure dbt/package day), so `py_compile` was not applicable.
+  Deleted `.scratch_dataeng_verify_d11/` afterward.
+  Registered Lesson 11 in `assets/nav.js` (`node --check` clean) and added the
+  Day 11 section to `reference/glossary.html` (2 terms: dbt package, surrogate
+  key — grepped Days 1–10's sections first, case-insensitively, no
+  collisions). Added the `dbt_utils` GitHub README to `RESOURCES.md` under
+  dbt (deep), since the lesson's own "Go deeper" section cited it as
+  not-yet-listed there. Ran the same tag-balance/unescaped-`&`/quiz-word-count
+  script prior rounds have used, from a scratch file outside `dataeng/`,
+  deleted after use. All tags balanced (div/p/table/tr/td/th/ul/li/pre/code/
+  h2/dfn/button), zero suspicious bare `&`. The first quiz draft came up
+  mismatched on all four questions (9/7/6, 8/10/9, 10/9/8, 9/10/8 word
+  splits); rebalanced all four to 8/8/8, 8/8/8, 9/9/9 and 9/9/9 across several
+  edit-and-recount passes, re-verified by re-running the same script after
+  each edit. Also ran the same check against the updated
+  `reference/glossary.html` (clean, all tags balanced, zero bare `&`).
+  `bin/record-progress dataeng lesson_generated --day 11 --lesson
+  0011-dbt-utils-and-packages.html --detail '{"by":"headless"}'` succeeded on
+  the first attempt, run from the repo root:
+  `recorded: dataeng/lesson_generated day=11 lesson=0011-dbt-utils-and-packages.html`.

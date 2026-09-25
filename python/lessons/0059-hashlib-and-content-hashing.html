@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 59 · hashlib: fingerprinting data instead of comparing it byte for byte</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 59 · ~20 min · 25 Sep 2026</p>
+<h1><code>hashlib</code>: fingerprinting data instead of comparing it byte for byte</h1>
+<p class="byline">Day 58's next-day note named three unconfirmed fresh-gap candidates left on the table — <code>subprocess</code>, <code>hashlib</code>, <code>configparser</code> — with Day 57 having called none of them clearly load-bearing yet. A closer look changes that verdict for one of them: Day 6's ETL capstone already reads and writes files, but has no way to answer "did this file actually change?" or "are these two downloaded copies identical?" without opening and diffing every byte. That is exactly the gap <code>hashlib</code> closes, and it is a plain data-pipeline need, not a security topic reached for its own sake.</p>
+
+<div class="callout"><strong>Why today, specifically:</strong> a fresh-gap grep across all 58 lessons and every practice file confirmed zero hits for <code>hashlib</code>, <code>subprocess</code>, or <code>configparser</code> — all three genuinely untaught. Of the three, <code>subprocess</code> is process-and-shell territory closer to <code>MISSION.md</code>'s explicit concurrency/OS-internals boundary than to data or backend work, and <code>configparser</code> only reads one narrow config file format that <code>pathlib</code> (Day 13) and plain <code>dict</code>s already cover well enough for this course's needs. <code>hashlib</code> is different: content hashing is the standard way to detect duplicate files, verify a download wasn't corrupted, and build a cache key from data instead of a filename — all squarely inside "read messy files, clean them, reshape them" from <code>MISSION.md</code>. That made it the stronger pick over a second review pass, especially with Days 56-58 having already re-covered the two furthest-back review clusters' adjacent material recently.</div>
+
+<h2>1 · The problem: "are these two files the same?" without reading both in full</h2>
+<p>Day 6 taught reading files with <code>open()</code> and Day 5 taught why a generator lets a huge file stream through constant memory. Neither answers a different, common question: given two files — or a file today versus the same file yesterday — are their <em>contents</em> identical? Comparing every byte works but means holding both files in memory at once, or reading both in lockstep; slow and wasteful once files are large, and pointless if the goal is just a single "did anything change?" flag stored in a database row.</p>
+<pre><code><span class="cm"># The byte-for-byte way — works, but doesn't scale and gives no compact answer to store</span>
+<span class="kw">def</span> same_contents(path_a, path_b):
+    <span class="kw">with</span> <span class="kw">open</span>(path_a, <span class="str">"rb"</span>) <span class="kw">as</span> fa, <span class="kw">open</span>(path_b, <span class="str">"rb"</span>) <span class="kw">as</span> fb:
+        <span class="kw">return</span> fa.read() == fb.read()   <span class="cm"># both files fully in memory at once</span></code></pre>
+<p><code>hashlib</code> answers a related but more useful question: given some bytes, produce a short, fixed-length "fingerprint" such that the same bytes always produce the same fingerprint, and any change to even one byte produces a completely different one. Store the fingerprint instead of the file, and "did this change?" becomes "do the two fingerprints match?" — one short string compared instead of two whole files.</p>
+
+<h2>2 · <code>hashlib.sha256</code>: deterministic, one-way, and sensitive to every bit</h2>
+<p>A <dfn data-en="a function that takes arbitrary-length bytes and produces a short, fixed-length output (a digest) such that the same input always produces the same output, different inputs almost never produce the same output, and there is no practical way to recover the input from the output alone" data-vn="giữ nguyên &quot;hash function&quot; — hàm nhận bytes độ dài bất kỳ, trả về chuỗi kết quả (digest) độ dài cố định; cùng input luôn ra cùng digest, đổi 1 bit input là digest đổi hẳn, và không suy ngược lại input từ digest được">hash function</dfn> takes bytes of any length and returns a short, fixed-length <dfn data-en="the fixed-length output of a hash function for a given input — often shown as a hex string via .hexdigest(), or as raw bytes via .digest()" data-vn="giữ nguyên &quot;digest&quot; — kết quả cố định độ dài mà hash function trả về cho 1 input, thường hiển thị dạng hex qua .hexdigest()">digest</dfn>. `hashlib.sha256()` is this course's default choice — build an empty hash object, feed it bytes, and read the digest back as a hex string:</p>
+<pre><code><span class="kw">import</span> hashlib
+
+data = <span class="str">b"hello world"</span>
+h = hashlib.sha256(data)
+h.hexdigest()   <span class="cm"># 'b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde' -- 64 hex chars, always</span>
+
+hashlib.sha256(<span class="str">b"hello world"</span>).hexdigest() == h.hexdigest()   <span class="cm"># True -- same bytes in, same digest out, every time</span>
+hashlib.sha256(<span class="str">b"hello worle"</span>).hexdigest() == h.hexdigest()   <span class="cm"># False -- one changed letter, a completely different digest</span></code></pre>
+<p>Verified live: both comparisons match — identical bytes always produce an identical 64-character hex digest, and a single-character change produces a digest that shares no visible resemblance with the original. That second property (small input change, large unpredictable output change) is called the <dfn data-en="a hash function's property that changing even one input bit flips roughly half the output bits unpredictably, so similar inputs never produce similar-looking digests - the reason a hash can't be reverse-engineered by tweaking a guess and seeing if the digest gets 'closer'" data-vn="giữ nguyên &quot;avalanche effect&quot; — đổi 1 bit input làm digest thay đổi tung tóe không đoán được, input gần giống nhau không cho ra digest gần giống nhau">avalanche effect</dfn>, and it's what makes a digest useless for "guess and check how close I am" — either two digests match exactly, or the inputs are considered different, with nothing in between.</p>
+
+<h2>3 · Hashing a file in chunks — the pattern that actually matters for Day 6-sized data</h2>
+<p><code>hashlib.sha256(data)</code> above needed the whole <code>data</code> in memory first — fine for a short string, wrong for a multi-gigabyte file, and exactly the constant-memory problem Day 5's generators already solved once. The fix reuses that same idea: a hash object accepts bytes incrementally via <code>.update()</code>, so a file can be hashed one chunk at a time without ever holding it all in memory:</p>
+<pre><code><span class="kw">import</span> hashlib
+
+<span class="kw">def</span> hash_file(path, chunk_size=65536):
+    h = hashlib.sha256()
+    <span class="kw">with</span> <span class="kw">open</span>(path, <span class="str">"rb"</span>) <span class="kw">as</span> f:
+        <span class="kw">while</span> chunk := f.read(chunk_size):   <span class="cm"># Day 42's walrus -- read and check in one line</span>
+            h.update(chunk)
+    <span class="kw">return</span> h.hexdigest()</code></pre>
+<p>Verified live: hashing a 1 MB in-memory buffer in 64 KB chunks via repeated <code>.update()</code> calls produced a digest identical to hashing the same bytes in one shot — <code>.update()</code> is cumulative, not a replace, so it makes no difference to the final digest whether the bytes arrive as one call or many. This is the standard shape for checksumming a real file on disk of any size, in constant memory, the same discipline Day 5 and Day 6 already established for reading — <code>hashlib</code> is just the first thing done with each chunk instead of yielding it onward.</p>
+
+<div class="callout"><strong>Bridge from SQL:</strong> a content hash plays the role of a surrogate key computed from the row's own data instead of assigned by a sequence — two rows (or files) with identical content always get the identical key, so a <code>UNIQUE</code> constraint on a hash column is a cheap, storage-light way to reject an exact duplicate without comparing every other column.</div>
+
+<h2>4 · Two direct uses: change detection and de-duplication</h2>
+<p>Both uses follow from the same fact — identical bytes always produce identical digests, and different bytes (almost) never do:</p>
+<pre><code><span class="cm"># Change detection: store a hash instead of the whole file, compare hashes later</span>
+old_hash = <span class="str">"3f9a1c..."</span>                      <span class="cm"># saved from yesterday's run, e.g. in a database row</span>
+new_hash = hash_file(<span class="str">"report.csv"</span>)
+<span class="kw">if</span> new_hash != old_hash:
+    <span class="kw">print</span>(<span class="str">"file changed since last run -- reprocess it"</span>)
+
+<span class="cm"># De-duplication: group files (or records) by content hash to find exact duplicates</span>
+<span class="kw">from</span> collections <span class="kw">import</span> defaultdict   <span class="cm"># Day 3</span>
+
+<span class="kw">def</span> find_duplicates(paths):
+    by_hash = defaultdict(list)
+    <span class="kw">for</span> p <span class="kw">in</span> paths:
+        by_hash[hash_file(p)].append(p)
+    <span class="kw">return</span> {h: ps <span class="kw">for</span> h, ps <span class="kw">in</span> by_hash.items() <span class="kw">if</span> <span class="kw">len</span>(ps) > <span class="num">1</span>}   <span class="cm"># only groups with 2+ files</span></code></pre>
+<p>Verified live: two byte strings with identical content produced the identical <code>sha256</code> digest, and a third with different content produced a different one — exactly the property <code>find_duplicates</code> relies on to group same-content files together by their shared hash, regardless of filename or location.</p>
+
+<div class="callout"><strong>Not a password hasher:</strong> <code>hashlib.sha256</code> is deliberately fast — good for checksums, bad for passwords, because "fast" means an attacker with a stolen password-hash database can try billions of guesses per second. Real password storage needs a deliberately <em>slow</em>, salted algorithm — <code>hashlib.pbkdf2_hmac()</code> is the standard library's own answer, or a dedicated library like <code>bcrypt</code>/<code>argon2</code> in real backend code. That's a FastAPI-phase concern for a future lesson on authentication, not today's — today's <code>sha256</code> use is entirely about detecting sameness, never about hiding a secret.</div>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> nothing pandas-specific today — <code>pandas.util.hash_pandas_object()</code> hashes DataFrame rows for pandas' own internal purposes (fast row comparison inside a DataFrame), but it isn't a general-purpose content-fingerprinting tool for arbitrary files or byte strings the way <code>hashlib</code> is, and this course doesn't teach pandas APIs regardless. Not covered further here, per <code>MISSION.md</code>.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/59_hashlib_and_content_hashing.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/59_hashlib_and_content_hashing.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: hashing bytes with <code>sha256</code> and confirming determinism, hashing a real file in chunks with <code>.update()</code> and matching a whole-file hash, detecting whether a file changed by comparing an old and new hash, and grouping duplicate files by content hash with <code>defaultdict</code>.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="hashlib.sha256 is deterministic: the exact same input bytes always produce the exact same digest, no matter how many times it runs or on what machine - that determinism is what makes a stored hash from yesterday comparable to a freshly computed hash today.">
+    <p class="stem">Why does hashing the same bytes twice with <code>hashlib.sha256</code> always give the same digest?</p>
+    <button class="opt" data-ok>sha256 is fully deterministic — identical input always yields identical output</button>
+    <button class="opt">Python caches the very first digest and quietly reuses it forever</button>
+    <button class="opt">two separate calls always land on colliding digests by pure chance</button>
+  </div>
+  <div class="q" data-why="update() is cumulative, not a replacement of prior data - each call feeds more bytes into the same running digest computation, so hashing a file in many small chunks via repeated update() calls produces the exact same final digest as hashing the whole file in one call.">
+    <p class="stem">Why does hashing a file in 64 KB chunks via <code>.update()</code> match hashing it in one shot?</p>
+    <button class="opt" data-ok>update() is cumulative — it never replaces bytes fed in earlier</button>
+    <button class="opt">chunked hashing always skips over the file's very last partial chunk</button>
+    <button class="opt">sha256 silently rehashes the entire file once at the very end</button>
+  </div>
+  <div class="q" data-why="The avalanche effect means a single changed byte flips roughly half the output bits unpredictably, so the resulting digest bears no visible resemblance to the original - two digests either match completely (same content) or look totally unrelated, with no partial-match middle ground to compare against.">
+    <p class="stem">What happens to a sha256 digest when a single byte of the input changes?</p>
+    <button class="opt" data-ok>the digest changes completely, sharing almost no visible resemblance at all</button>
+    <button class="opt">only the digest's very last two hex characters ever really shift</button>
+    <button class="opt">nothing changes unless at least a whole kilobyte of input differs</button>
+  </div>
+  <div class="q" data-why="hashlib.sha256 is intentionally fast, which is exactly wrong for password storage: a fast hash lets an attacker holding a stolen hash database try enormous numbers of guesses per second. Password storage needs a deliberately slow, salted algorithm such as hashlib's own pbkdf2_hmac, or a dedicated library like bcrypt or argon2.">
+    <p class="stem">Why is plain <code>hashlib.sha256</code> the wrong tool for storing user passwords?</p>
+    <button class="opt" data-ok>it's deliberately fast, which helps an attacker guessing at scale</button>
+    <button class="opt">sha256 digests are fully reversible, exposing the original password text</button>
+    <button class="opt">sha256 cannot ever accept password-shaped strings as its input bytes</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the standard library's <a href="https://docs.python.org/3/library/hashlib.html"><code>hashlib</code></a> docs — covers every guaranteed algorithm (<code>sha256</code>, <code>sha1</code>, <code>md5</code>, and more), the incremental <code>.update()</code> API used above, and the slow, salted <code>pbkdf2_hmac()</code> function named in the password callout. Not yet in <code>RESOURCES.md</code>; added there today alongside the other single-module stdlib citations.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day59">glossary</a> under Day 59.<br>
+This closes a genuine gap Day 6's file-handling lesson left open — "did this file change?" and "is this a duplicate?" — using only what Days 3, 5, 6, and 42 already taught.<br><br>
+💬 Anything unclear — chunked hashing, de-duplication, or why passwords need a different tool entirely? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

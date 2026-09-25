@@ -27,6 +27,8 @@ authors for *why*. Cite inline; each lesson recommends exactly one primary sourc
   Use for: Day 50 — abstract base classes, `@abstractmethod`, and how they differ from Day 41's structural `Protocol`.
 - [Docs: `heapq`](https://docs.python.org/3/library/heapq.html) · [`bisect`](https://docs.python.org/3/library/bisect.html)
   Use for: Day 51 — priority queues and binary search over a plain Python list, without a full re-sort on every change.
+- [Docs: `hashlib`](https://docs.python.org/3/library/hashlib.html)
+  Use for: Day 59 — content hashing for change detection and de-duplication, chunked file hashing via `.update()`, and why a fast general-purpose digest like `sha256` is the wrong tool for password storage (`pbkdf2_hmac()` or a dedicated library instead).
 - [PEP 8 — Style Guide for Python Code](https://peps.python.org/pep-0008/)
   Use for: naming and layout conventions, so written code looks like the ecosystem's.
 

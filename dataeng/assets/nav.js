@@ -21,6 +21,7 @@
     { n: 8, date: "2026-09-22", title: "dbt: the intermediate layer", file: "lessons/0008-dbt-intermediate-layer.html" },
     { n: 9, date: "2026-09-23", title: "dbt snapshots: SCD Type 2 for commission_rate", file: "lessons/0009-dbt-snapshots-scd2.html" },
     { n: 10, date: "2026-09-24", title: "dbt: Jinja, macros & var()", file: "lessons/0010-dbt-jinja-and-macros.html" },
+    { n: 11, date: "2026-09-25", title: "dbt packages: dbt_utils and when to write a test instead", file: "lessons/0011-dbt-utils-and-packages.html" },
   ];
 
   const REFS = [

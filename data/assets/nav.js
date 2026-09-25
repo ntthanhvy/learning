@@ -162,6 +162,8 @@
       file: "lessons/0077-str-replace.html" },
     { n: 78, date: "2026-09-24", title: ".assign(): adding columns without ever risking SettingWithCopy",
       file: "lessons/0078-assign.html" },
+    { n: 79, date: "2026-09-25", title: "pandas 3.0's default str dtype, and the select_dtypes gotcha it causes",
+      file: "lessons/0079-default-str-dtype.html" },
   ];
 
   const REFS = [

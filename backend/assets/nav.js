@@ -168,6 +168,8 @@
       file: "lessons/0080-timestamps-and-time-zones.html" },
     { n: 81, date: "2026-09-24", title: "Request validation: writing the shape down instead of checking it by hand",
       file: "lessons/0081-request-validation-and-json-schema.html" },
+    { n: 82, date: "2026-09-25", title: "A fixed set of values: Postgres ENUM vs. CHECK-constrained text",
+      file: "lessons/0082-postgres-enum-type.html" },
   ];
 
   const REFS = [

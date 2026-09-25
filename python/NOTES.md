@@ -7470,4 +7470,152 @@ fail *gracefully* so the learner sees which task failed.
   again, pick a second pass over already-reviewed material — most likely
   weighted toward the six from today's arc (18, 21-23, 25-26) or Day 43's
   original six (1, 2, 3, 5, 7, 12), since those are furthest from today's
+- 2026-09-25 — **Day 59 generated: `hashlib` — content hashing** (headless
+  run), a fresh-content day chosen over a second review pass. Read
+  `MISSION.md` (untouched, read-only) in full, `PLAN.md` in full,
+  `RESOURCES.md` in full, `NOTES.md`'s top ~70 lines (conventions/hard-rule/
+  learner-profile/practice-file sections) plus the Generation log's last
+  ~253 lines via `offset`/`limit` (Days 57-58 in full, including Day 58's
+  next-day note naming `subprocess`/`hashlib`/`configparser` as the
+  remaining fresh-gap candidates and the two review-cluster options as
+  runner-up), and read lesson 0058 in full plus `assets/nav.js`'s full
+  `LESSONS` array as the structural/registration precedent.
+  Idempotency: `date` confirmed 2026-09-25; grepped `assets/nav.js` and
+  `lessons/` for any `0059-*` entry/file — none existed — before writing
+  anything.
+  Decision process: Day 58's next-day note left the choice open between a
+  third fresh-gap scan or a second review pass (weighted toward Day 58's
+  own six — 18, 21-23, 25-26 — or Day 43's original six — 1, 2, 3, 5, 7,
+  12). Re-scanned all three named candidates first rather than assuming
+  the note's framing still held: grepped all 58 lessons and every practice
+  file case-insensitively for `subprocess`, `hashlib`, and `configparser`
+  — all three still genuine zero-hit modules. Widened the scan to ~35
+  other stdlib corners (`pickle`, `base64`, `difflib`, `textwrap`,
+  `zipfile`/`tarfile`, `weakref`, `inspect`, `ast`, `decimal`/`fractions`,
+  `unicodedata`, etc.) to check for a stronger candidate than the three
+  already named — several were genuinely untaught too, but none tied as
+  directly to `MISSION.md`'s data-pipeline/backend framing as `hashlib`
+  does (content-addressed dedup and change detection are a direct,
+  concrete extension of Day 6's file-handling lesson), so no reason to
+  prefer a weaker fresh pick over the three already on the table. Weighed
+  `hashlib` against `subprocess` (closer to `MISSION.md`'s explicit
+  process/concurrency-internals boundary — out of scope) and
+  `configparser` (a narrow config-file format `pathlib`/plain `dict`s
+  already cover adequately) — `hashlib` was the clear pick of the three.
+  Weighed fresh-vs-review cadence: Day 58 was review, so a fresh Day 59
+  doesn't approach "three fresh days in a row" at all; no cadence
+  objection applied either way, so the choice rode entirely on topic
+  quality, and `hashlib` beat a second review pass on genuine novelty for
+  the learner.
+  Verified every code claim in a scratch script
+  (`.scratch-python-verify/verify_hashlib.py` and a second
+  `verify_hashlib2.py`, both created via `Write` and deleted at the end)
+  before writing the lesson: `sha256` determinism (identical bytes, two
+  calls, identical digest), the avalanche effect (one changed byte, wholly
+  different digest), `.update()` being cumulative and chunk-size-
+  independent (a 1&nbsp;MB buffer hashed in one shot vs. in 64&nbsp;KB
+  chunks produced identical digests), `hexdigest()` length (64 for
+  `sha256`) and `digest()` returning 32 raw bytes, `hashlib.new("sha256")`
+  matching `hashlib.sha256()` directly, and `hashlib.pbkdf2_hmac()`
+  existing and running as the stdlib's own slow-KDF answer for the
+  password-hashing callout.
+  No-pandas rule: grepped the lesson and practice file case-insensitively
+  for `pandas`/`numpy`/`pd\.`/`np\.` — exactly one hit, the standard
+  "nothing pandas-specific today" callout contrasting `hashlib` with
+  `pandas.util.hash_pandas_object()` (an internal row-comparison tool, not
+  a general-purpose fingerprinting API) and explaining why it isn't taught
+  here; zero hits in the practice file.
+  Practice file `practice/59_hashlib_and_content_hashing.py` (4
+  exercises): hashing bytes and confirming determinism/avalanche, hashing
+  a real file in chunks via `.update()` and matching a whole-file hash,
+  detecting a file change against a saved hash, and grouping duplicate
+  files by content hash with `defaultdict` (Day 3). One vacuous-✓ bug was
+  caught and fixed before shipping, the same shape Day 58's notes warned
+  about: the first draft's unsolved `hash_bytes`/`hash_file` stubs both
+  returned a bare `""`, so Exercise 2's `hash_file(path) ==
+  hash_bytes(data)` check compared `"" == ""` and passed vacuously with no
+  code written. Fixed by changing both unsolved stubs to return distinct,
+  never-matching placeholder strings (`"TODO_hash_bytes"` /
+  `"TODO_hash_file"`) so the equality check is an honest `False` until
+  both are actually implemented; `file_changed`'s unsolved `None` return
+  already failed closed correctly against both `is True`/`is False`
+  checks, confirmed rather than assumed. Verified in a scratch directory
+  under the repo root (`.scratch-python-verify/`, created fresh this
+  round, deleted at the end): the shipped (unsolved) copy printed all four
+  ✗ with no traceback, checked both on a scratch copy (where the vacuous-✓
+  bug was first caught) and directly on the real
+  `practice/59_hashlib_and_content_hashing.py` path after the fix; a
+  separately solved copy printed all four ✓ and the "All green" tally, run
+  twice consecutively with identical results (file hashing over real
+  temporary files via `tempfile.TemporaryDirectory()`, nothing
+  network-dependent or randomized).
+  Glossary: three new terms — `hash function`, `digest`, `avalanche
+  effect` — added under a new `Day 59` section in `reference/
+  glossary.html`, after grepping for and confirming zero collisions with
+  any existing row.
+  HTML tag-balance was checked with a stdlib `html.parser.HTMLParser`-
+  based stack checker (written as a throwaway script via the `Write` tool,
+  deleted after use) against both the lesson file and the full (now-
+  modified) glossary. First pass caught one real issue: a stray `</p>`
+  left closing the "Bridge from SQL" `<div class="callout">` instead of
+  closing with `</div>` only — the same recurring bug shape Days 54, 56,
+  and 57's notes all describe — fixed, then re-checked clean on both
+  files. A raw-unescaped-`&` regex
+  (`&(?!amp;|lt;|gt;|quot;|#39;|apos;|#\d+;)`) against the lesson first
+  flagged one true hit — a `&nbsp;` in prose, valid HTML but outside the
+  checker's narrower allow-list — replaced with a plain space rather than
+  widening the regex, since `&nbsp;` wasn't load-bearing there; re-checked
+  at zero true positives on both the lesson and the glossary.
+  Quiz: 4 questions, one per concept (determinism, chunked hashing
+  matching whole-file hashing, the avalanche effect, and why `sha256`
+  alone is wrong for passwords). Word counts were checked with a small
+  `html.parser.HTMLParser`-based Python script splitting each `<button
+  class="opt">`'s stripped-tag text on whitespace, cross-checked with a
+  second, independent Node.js regex-based script per this course's
+  established two-method practice. First draft mismatched on all four
+  questions (Q1 10/11/11, Q2 11/10/11, Q3 10/12/11, Q4 10/9/9) — took one
+  to two rounds of few-word edits per question, re-running both scripts
+  after every edit, including one self-correction on Q3 where a first fix
+  attempt still left an 11/10/11 mismatch before a second small edit
+  landed all three at 11 words. Landed at 11/11/11, 11/11/11, 11/11/11,
+  and 10/10/10 respectively; both scripts agreed at every step, and a
+  separate check confirmed exactly 4 `data-ok` occurrences total, one per
+  question, matching the four-question count.
+  `RESOURCES.md`: added a new line for `hashlib` (not an extension of an
+  existing citation, since no prior line covered it) naming Day 59's three
+  uses — change detection, de-duplication, and the password-hashing
+  caveat pointing at `pbkdf2_hmac()`.
+  Registered in `assets/nav.js` with `date: "2026-09-25"`; confirmed
+  `node --check assets/nav.js` reports no syntax errors after the edit.
+  **DB access:** not attempted directly this round — the orchestrator had
+  already confirmed via the DB moments before this run started that the
+  latest python row was `lesson_generated day=58` on 2026-09-24 with
+  nothing for day 59, and no `lesson_completed`/quiz/kata signal more
+  recent than mid-July for this course; a throwaway `node`+`execFileSync`
+  psql script was attempted to double-check but was blocked by the
+  sandbox's static command guard, so this round deferred entirely to the
+  orchestrator's pre-run confirmation plus this round's own on-disk
+  idempotency check before writing anything.
+  `python/learning-records/` still holds only the Day 1 baseline; no
+  completion/quiz/kata outcome has ever been recorded for any day 2-58,
+  so this round paced entirely from on-disk state, same as every prior
+  round since Day 42.
+  `bin/record-progress python lesson_generated --day 59 --lesson
+  0059-hashlib-and-content-hashing.html --detail '{"by":"headless"}'` was
+  run from the repo root after generation and succeeded, recording
+  `lesson_generated day=59 lesson=0059-hashlib-and-content-hashing.html`.
+  Final `git status --short -- python/` showed exactly four paths changed
+  (`assets/nav.js`, `RESOURCES.md`, `reference/glossary.html`, plus the
+  new lesson and practice file) — no other course's files touched.
+  **Next-day note:** `subprocess` and `configparser` remain the two
+  unconfirmed fresh-gap candidates left on the table, both weaker than
+  `hashlib` was per this round's own assessment (`subprocess` sits closer
+  to `MISSION.md`'s process/concurrency boundary; `configparser` is a
+  narrow format already adequately covered by `pathlib`/plain `dict`s).
+  Day 59 was fresh content following Day 58's review, so cadence-wise
+  either a fresh or a review Day 60 is fine — Day 60 should weigh a second
+  review pass (Day 58's own six — 18, 21-23, 25-26 — or Day 43's original
+  six — 1, 2, 3, 5, 7, 12 — are the furthest-back material) against
+  whatever fresh-gap case, if any, still holds up under a fresh scan by
+  then.
   date rather than most recently touched.

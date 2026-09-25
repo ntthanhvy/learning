@@ -6111,3 +6111,100 @@
   evaluated and set aside as too thin for its own lesson, not deferred for a
   future round) — the next round should run its own fresh gap search from
   scratch rather than assume anything is queued.
+- **2026-09-25 generation (Lesson 82, headless 06:00 run):** Idempotency check
+  first: `grep -c "n: 82" backend/assets/nav.js` and `ls backend/lessons/ | grep
+  -c "^0082-"` both returned 0 before writing anything, so proceeded. A direct
+  DB read this round (a throwaway `node` script wrapping
+  `execFileSync('psql', [process.env.LEARNING_DB_URL, ...])`, written to `/tmp`
+  and left in place afterward since `rm` on `/tmp` paths is blocked by this
+  sandbox for paths outside the workspace — harmless, no workspace file
+  touched) confirmed the latest `course_progress` row for `backend` is
+  `lesson_generated day=81` (2026-09-24) plus a `note` row right after it whose
+  `detail` was just `{"day": 81, "round_complete": true}` — a housekeeping
+  marker, not a new signal. No `lesson_completed`/quiz/kata signal exists more
+  recent than mid-July, same as every round since baseline; pacing came from
+  file state and this round's own fresh gap search, not a reported outcome.
+  Read `MISSION.md`, `RESOURCES.md`, both `learning-records/` files (still just
+  the baseline and the concurrency-vocabulary gap note), the tail of
+  `NOTES.md` (Lessons 80–81 in full), and Lesson 81 itself as the current
+  HTML/quiz-convention precedent, plus Lesson 74 (primary-key design) as a
+  second precedent for a "Postgres feature as its own data-modeling lesson"
+  structure. Lesson 81's own round explicitly closed "encryption at rest" as
+  too thin and left no other named candidate, so this round ran its own fresh
+  corpus grep from scratch per standing convention: swept a wide net of
+  API-design and runtime-ops terms (rate limiting depth, GraphQL, CQRS, cache
+  invalidation strategies, blue-green/canary deploys, sparse fieldsets, bulk
+  operations) and a data-modeling net (composite/covering/partial indexes,
+  many-to-many with attributes, hierarchical data, Postgres native ENUM type)
+  against every lesson filename and file content. Most hits were already
+  covered incidentally; the one clean zero-hit gap was Postgres's native
+  `ENUM` type — confirmed with `grep -i "\benum\b|CREATE TYPE" backend/lessons/*.html`
+  returning only the generic word "enum" used loosely in Lesson 17's
+  validation prose and glossary (never the Postgres type, never `CREATE TYPE`
+  anywhere), and grepping `glossary.html` for "enum"/"ordinal" before writing
+  confirmed zero collisions. This gap traces directly to Lesson 60's own CHECK
+  constraint lesson, which named "a status column limited to a fixed set of
+  strings" as its worked example and moved on without ever mentioning
+  Postgres has a purpose-built type for exactly that — a real, narrow,
+  concept-shaped trade-off (not a rehash), squarely in the "data modeling &
+  schema design" track (MISSION.md's first scope track), not out of scope
+  (no NoSQL/sharding/frameworks involved), and confirmed via a corpus grep
+  that the Go week's own lessons never mention ENUM either, so no duplication
+  risk there. Lesson 82 covers: the TEXT+CHECK pattern already used
+  throughout the course as the baseline; `CREATE TYPE ... AS ENUM` as the
+  purpose-built alternative, reusable by name across tables; what the ENUM
+  buys (built-in ordinal ordering for comparisons/ORDER BY, matching
+  declaration order rather than alphabetical, plus reuse-by-name replacing
+  Lesson 2's normalization "one fact, one place" instinct applied to a type);
+  what it costs (Postgres has no `ALTER TYPE ... DROP VALUE` at all — removing
+  or renaming a value needs a full replacement-type migration, while adding a
+  value is a cheap single statement, an asymmetry a CHECK list doesn't have);
+  and a closing decision rule tying the choice to how volatile the value set
+  actually is, with a frontend bridge to a TypeScript string-literal union
+  type. No Go code in this lesson (pure SQL/data-modeling), so the
+  Go-compile-check step was correctly skipped — confirmed by grepping the
+  drafted HTML for `func `/`package main`/`import (` and getting zero hits
+  before skipping. Source verification: attempted a live `WebFetch` against
+  `https://www.postgresql.org/docs/current/datatype-enum.html` (RESOURCES.md's
+  standing "Data Definition" source, this time the dedicated Enumerated Types
+  chapter) and it was blocked outright by this session's sandbox
+  network-permission gate, the same class of block Lesson 79 and Lesson 81's
+  rounds both hit against different domains — the lesson's "Go deeper" section
+  flags this explicitly rather than presenting the citation as freshly
+  fetched, same honest-flag pattern as those two rounds, noting the cited
+  material (CREATE TYPE syntax, declared-order comparison semantics, absence
+  of DROP VALUE) is long-stable Postgres behavior. Verification performed
+  mechanically, not by eye: (1) quiz word-count balance via a Node script
+  parsing every `<div class="q">` block with both `.split(/\s+/)` and
+  `.split(" ")` (filtering empty strings), cross-checked every run — first
+  draft was uneven on all four questions (7–11-word spread), fixed through
+  several rewrite-and-recount cycles, including catching one edit that
+  overshot the target count and had to be trimmed again on the next run —
+  converged to exactly 9/9/9/9 on Q1, 9/9/9/9 on Q2, 10/10/10/10 on Q3, and
+  10/10/10/10 on Q4, both counting methods agreeing exactly, and exactly one
+  `data-ok` per question confirmed the same way; (2) an occurrence-count HTML
+  tag-balance check (regex counting per tag, not substring counting, across
+  the same tag set used in every prior round) on both the lesson and
+  `glossary.html` after its two-row addition — both balanced on the first
+  check, no fixes needed; (3) a raw-unescaped-`&` regex scan (matching any `&`
+  not followed by `amp;`/`lt;`/`gt;`/`quot;`/`#39;`/`apos;`/`#\d+;`) across
+  both files — zero hits in either, no SQL/Go snippets used a raw `&` this
+  round; (4) a backslash-escaped-quote scan (`\"`) — zero hits in either file;
+  (5) `node --check` against `assets/nav.js` (the only asset touched this
+  round) — clean, no output. Registered Lesson 82 in `nav.js` (date
+  2026-09-25), re-confirmed exactly one matching `n: 82` entry and exactly one
+  matching `0082-*` lesson file afterward. Scratch work (the quiz/tag-balance
+  check scripts) lived under `backend/.scratch-0082/` and was deleted in full
+  after use; the standalone DB-read `.js` scratch file under `/tmp` (outside
+  the workspace) could not be removed by this sandbox's `rm` restriction but
+  touches no workspace file. Write path (`bin/record-progress backend
+  lesson_generated --day 82 --lesson 0082-postgres-enum-type.html --detail
+  '{"by":"headless"}'`, run as a relative path from the repo root) succeeded
+  with no approval gate, output confirmed: `recorded: backend/lesson_generated
+  day=82 lesson=0082-postgres-enum-type.html`. No confirmed next-lesson gap is
+  named with certainty for the round after this one — same standing note as every
+  prior round; a completion/quiz-outcome signal or a user-named track should
+  take priority over guessing blind. This round did not surface any strong
+  secondary candidate worth flagging for next time (the wide net swept above
+  mostly hit already-covered ground) — the next round should still run its
+  own fresh gap search from scratch rather than assume anything is queued.

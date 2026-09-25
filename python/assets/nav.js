@@ -122,6 +122,8 @@
       file: "lessons/0057-dataclass-field-and-frozen.html" },
     { n: 58, date: "2026-09-24", title: "Review day 7: retrieval across the six backend lessons",
       file: "lessons/0058-review-retrieval-day-7.html" },
+    { n: 59, date: "2026-09-25", title: "hashlib: fingerprinting data instead of comparing it byte for byte",
+      file: "lessons/0059-hashlib-and-content-hashing.html" },
   ];
 
   const REFS = [

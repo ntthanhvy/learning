@@ -124,6 +124,8 @@
       file: "lessons/0058-review-retrieval-day-7.html" },
     { n: 59, date: "2026-09-25", title: "hashlib: fingerprinting data instead of comparing it byte for byte",
       file: "lessons/0059-hashlib-and-content-hashing.html" },
+    { n: 60, date: "2026-09-26", title: "unittest.mock: faking the outside world in a test",
+      file: "lessons/0060-unittest-mock.html" },
   ];
 
   const REFS = [

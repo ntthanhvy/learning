@@ -6208,3 +6208,115 @@
   secondary candidate worth flagging for next time (the wide net swept above
   mostly hit already-covered ground) — the next round should still run its
   own fresh gap search from scratch rather than assume anything is queued.
+- **2026-09-26 generation (Lesson 83, headless 06:00 run):** Idempotency check
+  first: `grep -c "n: 83" backend/assets/nav.js` and `ls backend/lessons/ | grep
+  -c "^0083-"` both returned 0 before writing anything, so proceeded. Per the
+  orchestrator's confirmed state, no direct DB read was attempted this round
+  (the standing sandbox limitation on read access, flagged every round since
+  first noted); no `lesson_completed`/quiz/kata signal exists more recent than
+  mid-July for any course, same as every round since baseline, so pacing came
+  from file state and this round's own fresh gap search, not a reported
+  outcome. Read `MISSION.md`, `RESOURCES.md`, both `learning-records/` files
+  (still just the baseline and the concurrency-vocabulary gap note — neither
+  needed a new entry this round, see below), the tail of `NOTES.md` (Lessons
+  81–82 in full), and Lessons 81–82 themselves as the current HTML/quiz/
+  glossary-convention precedent. Lesson 82's round closed with no strong named
+  candidate, so this round ran its own fresh corpus grep from scratch per
+  standing convention: swept database-feature terms (generated columns,
+  exclusion constraints, domain types, range types, LISTEN/NOTIFY, composite/
+  covering indexes) and API-design terms (GraphQL, CQRS, batch/bulk endpoints,
+  sparse fieldsets, standardized error-response formats) against every lesson
+  filename and file content. Most database-feature hits were incidental noise
+  (matched loosely, not the actual feature); the clean zero-hit gap was a
+  standardized HTTP error-body format — confirmed with
+  `grep -i "problem+json|RFC 7807|RFC7807|application/problem"` across every
+  lesson and file in `backend/` returning nothing at all, and a read of Lesson
+  3 (`the-api-contract.html`) and Lesson 7 (`what-a-500-should-tell-the-
+  client.html`) confirming both built and reused a bespoke
+  `{"error":{"code","message"}}` shape without ever mentioning that the
+  industry standardized this exact problem as RFC 7807 (now RFC 9457),
+  Problem Details for HTTP APIs. This is a real, narrow gap — not a rehash of
+  Lesson 3 (which decided the shape) or Lesson 7 (which decided what's safe to
+  put inside a 500) but the standardization layer neither ever raised —
+  squarely in MISSION.md's "API design" track (naming, verbs, status codes,
+  error contract), no NoSQL/frameworks/ORM involved, and Zalando's own
+  guidelines (Lesson 3's cited primary source) recommend this exact RFC,
+  closing the loop cleanly. Checked the glossary first for all candidate terms
+  — `Problem Details`, `media type`, `extension member` were zero collisions
+  — and added as new rows after Lesson 82's `ordinal order` row. Lesson 83
+  covers: the wider version of Lesson 3's own opening problem (bespoke error
+  shapes proliferating, just across organizations instead of across handlers
+  in one codebase); the five Problem Details fields (`type`, `title`,
+  `status`, `detail`, `instance`) with `type` as the load-bearing
+  machine-readable field, including the specific point that a `type` URI
+  never has to resolve to a real page — it's a stable identifier by
+  convention, the same trick a Go import path or XML namespace URI plays; the
+  `application/problem+json` registered media type as the actual new
+  mechanism (a `Content-Type` signal a proxy or generic client can read before
+  parsing any JSON, unlike Lesson 3's plain `application/json` contract);
+  that Problem Details is explicitly extensible, so Lesson 3's own
+  `"code": "order_not_found"` instinct survives unharmed as an extension
+  member alongside the standard fields rather than being replaced by the
+  URI-shaped `type`; and a closing decision rule — shaped identically to
+  Lesson 82's ENUM-vs-CHECK call — that the standard earns its keep once
+  errors cross an organizational boundary (public APIs, gateways, generic
+  tooling that already expects the media type) and a lightweight homegrown
+  contract remains fine for a single frontend calling its own team's backend.
+  No Go code in this lesson (pure HTTP/API-design content, no code), so the
+  Go-compile-check step was correctly skipped — confirmed by grepping the
+  drafted HTML for `func `/`package main`/`import (` and getting zero hits
+  before skipping. Source verification: attempted a live `WebFetch` against
+  `https://www.rfc-editor.org/rfc/rfc9457` (the current standard obsoleting
+  the originally-intended RFC 7807 citation) twice in this round — both
+  attempts were blocked outright by this session's sandbox network-permission
+  gate with no interactive approver present, the same class of block Lessons
+  79, 81, and 82's rounds all hit against different domains. Rather than
+  presenting the RFC's content as freshly fetched, the lesson's "Go deeper"
+  section says so explicitly and notes the five-field shape, the media type,
+  and the extension-member mechanism have been stable since the original 2016
+  RFC 7807 and are unchanged in substance by RFC 9457 — same honest-flag
+  pattern as the three prior rounds. Verification performed mechanically, not
+  by eye: (1) quiz word-count balance via a Node script (`.scratch-0083/
+  quizcheck.js`) parsing every `<div class="q">` block with both
+  `.split(/\s+/)` and `.split(" ")` (filtering empty strings), cross-checked
+  every run — first draft was uneven on all four questions (a 1–4-word spread
+  per question), fixed through several rewrite-and-recount cycles, including
+  at least two edits where a hand-counted replacement string turned out wrong
+  on the next script run and had to be corrected again rather than trusted by
+  eye — converged to exactly 9/9/9/9 on Q1, 10/10/10/10 on Q2, 10/10/10/10 on
+  Q3, and 10/10/10/10 on Q4, both counting methods agreeing exactly, and
+  exactly one `data-ok` per question confirmed the same way; (2) an
+  occurrence-count HTML tag-balance check (`.scratch-0083/tagcheck.js`,
+  regex-counting per tag, not substring counting, across the same tag set
+  used in every prior round) on both the lesson and `glossary.html` after its
+  three-row addition — both balanced on the first check, no fixes needed;
+  (3) a raw-unescaped-`&` regex scan (matching any `&` not followed by
+  `amp;`/`lt;`/`gt;`/`quot;`/`#39;`/`apos;`/`#\d+;`) across both files — zero
+  hits in either; (4) a backslash-escaped-quote scan (`\"`) — zero hits in
+  either file; (5) `node --check` against `assets/nav.js`, `assets/quiz.js`,
+  and `assets/gloss.js` — all clean, no output. Also caught and fixed one
+  self-inserted bug before shipping: an early draft of Q4's `data-why`
+  attribute had a stray literal `</p>` fragment leaked into the middle of the
+  quoted string from a copy-paste slip, which would have broken the
+  attribute's quoting — caught on a full read-through of the drafted HTML
+  before running any mechanical checks, fixed, and confirmed gone by
+  re-reading that block afterward. Registered Lesson 83 in `nav.js` (date
+  2026-09-26), re-confirmed exactly one matching `n: 83` entry and exactly one
+  matching `0083-*` lesson file afterward. No new `learning-records/` file was
+  added this round — that directory holds baseline/gap-magnitude notes (2
+  files across 82 prior lessons), not a per-lesson log, and this lesson is a
+  routine topical entry like Lessons 3–82, not a new baseline finding of that
+  magnitude. Scratch work (the quiz/tag-balance check scripts) lived under
+  `backend/.scratch-0083/` and was deleted in full after use. Write path
+  (`bin/record-progress backend lesson_generated --day 83 --lesson
+  0083-problem-details-rfc7807.html --detail '{"by":"headless"}'`, run as a
+  relative path from the repo root) succeeded with no approval gate, output
+  confirmed: `recorded: backend/lesson_generated day=83
+  lesson=0083-problem-details-rfc7807.html`. No confirmed next-lesson gap is
+  named with certainty for the round after this one — same standing note as
+  every prior round; a completion/quiz-outcome signal or a user-named track
+  should take priority over guessing blind. This round's wide net (database-
+  feature terms swept above) mostly hit already-covered or too-incidental
+  ground and is not being flagged as a queued candidate — the next round
+  should still run its own fresh gap search from scratch rather than assume
+  anything is queued.

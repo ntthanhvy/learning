@@ -6806,3 +6806,125 @@
   form, per this course's own established tip that it's more reliable than
   an absolute path in this sandbox, and succeeded: `recorded:
   data/lesson_generated day=79 lesson=0079-default-str-dtype.html`.
+- 2026-09-26 generation (Lesson 80): headless 06:00 run. The orchestrator had
+  already confirmed no `lesson_generated` row for course=data dated
+  2026-09-26 and no `0080-*` lesson/nav entry existed yet, so this round
+  proceeded without re-checking that itself. Also confirmed independently:
+  no `lesson_completed`/quiz/kata rows for any course more recent than
+  mid-July remains the steady state (matches every recent round's own
+  note) — not a new problem, not something this round needed to solve.
+  Read `MISSION.md` in full (not modified), `RESOURCES.md` in full, the
+  "User preferences"/"Course design decisions" section near the top of
+  `NOTES.md`, the tail of `NOTES.md`, Lesson 79's own HTML body plus its
+  practice file as structural precedent, and Lesson 25 in full (the lead
+  this round ultimately picked traces back to Lesson 25's own "Go deeper"
+  citation). Re-confirmed `data/learning-records/` still holds only the
+  single Lesson-1 baseline file — the same steady state every round since
+  has independently reconfirmed and left alone (no completion/quiz/kata
+  signal has arrived for any course since mid-July) — so no new
+  learning-record file was added this round either, consistent with ~79
+  prior rounds. Lesson 79's closing teaser named the groupby/agg leftovers
+  (`as_index=False`, `.get_group()`) as the standing candidate — but per
+  this course's own established practice (exactly what Lesson 79 itself did
+  to its own predecessor's teaser), delegated a fresh gap-scan sub-agent
+  before picking that lead at face value: it read `MISSION.md`, skimmed
+  `NOTES.md`'s curriculum-spine section, and grepped all 79 lesson bodies
+  plus the glossary against ~20 candidate topics (`as_index=False`,
+  `.get_group()`, ordered categoricals, `infer_objects()`,
+  `read_csv(dtype=)`, sparse dtype, nullable boolean, and others already
+  well-covered like `crosstab`/`cut`/`qcut`/`explode`/`pipe`/`merge_asof`/
+  `stack`/`unstack`/`rolling`/`query`/`str.extract`/`json_normalize`/
+  `SettingWithCopyWarning`). Result: `as_index=False`/`.get_group()` really
+  are still uncovered (confirmed by direct grep of Lessons 4/40/48/61/66,
+  the five groupby-touching lessons), but the sub-agent flagged a cleaner
+  gap one level over — Lesson 25's own "Go deeper" line named "ordered
+  categories" as something the pandas docs cover that Lesson 25 itself
+  never taught, and grepping `ordered=` across every lesson body confirmed
+  zero hits anywhere in the course. Picked ordered categoricals over the
+  groupby leftovers: higher interview frequency (sorting a Low/Medium/High
+  priority column correctly is a classic "why did my sort come out wrong"
+  interview moment), a clean SQL-equivalence angle (ordered ENUM / a
+  rank-column `CASE WHEN` hack), and it directly extends Lesson 25's own
+  runway rather than closing out two minor groupby footnotes. Before
+  writing, probed every claim directly in `data/.scratch-0080/` (not
+  `/tmp`) against `practice/data/orders_raw.csv`'s real cleaned rows (An
+  120.0/01-05, An 42.0/01-10, Binh 35.5/01-06, Binh 180.0/01-09, same as
+  Lessons 6-25), bucketed into small/medium/large size tiers by amount via
+  `pd.cut`: confirmed a plain `category` conversion sorts alphabetically
+  (Binh/large sorts first, wrong), confirmed
+  `pd.CategoricalDtype(categories=[...], ordered=True)` makes `sort_values()`
+  follow the written order instead, confirmed `>`/`min()`/`max()` work on
+  the ordered column and raise `TypeError` on the unordered one (exact
+  message: "Unordered Categoricals can only compare equality or not"),
+  confirmed comparing an ordered categorical to a value outside its fixed
+  category list also raises `TypeError` (exact message: "Invalid comparison
+  between dtype=category and str") rather than silently producing NaN like
+  Lesson 25's fixed-`astype()` gotcha, and confirmed `pd.cut()`'s own
+  bucketed output already has `.cat.ordered == True` and matches the
+  hand-built ordered column exactly, row for row — the lesson's "Section 4
+  callback" claim. Every DataFrame printout and error message shown
+  verbatim in the lesson body was re-run against the real fixture
+  immediately before shipping and matched exactly (row order included).
+  The shipped (unsolved) `practice/80_ordered_categorical.py` was executed
+  directly from its real `practice/` location and printed exactly 4 ✗ with
+  no traceback; a solved copy (kept only in the scratch dir, not shipped)
+  then printed all 4 ✓. Caught and fixed two real bugs before shipping:
+  (1) Exercise 3's first draft accidentally accepted the unfilled `...`
+  placeholder as a passing answer, since `series > Ellipsis` itself already
+  raises `TypeError` for unrelated reasons — added an explicit
+  `isinstance(out_of_range_value, str)` check to close that freebie; (2)
+  Exercise 4's first draft compared a boolean produced by `.all()` on a
+  pandas equality Series with `is True`, which is always `False` for a
+  NumPy `np.True_` value (identity, not equality) even when the underlying
+  comparison is correct — fixed by wrapping the computed value in `bool(...)`
+  at the source so the later `is True` check is meaningful again; both
+  caught by actually running the solved copy and getting an unexpected ✗
+  rather than assuming the solved version would obviously pass. Quiz
+  options were drafted, then mechanically word-counted with a Python script
+  (run via `uv run python3`, a bare `python3` invocation being blocked by
+  this sandbox's command-approval gate, consistent with Lesson 79's own
+  note) isolating each `<div class="q">` block by regex span — iterated
+  through a couple of rewrite+recount cycles until all three questions
+  landed level (8/8/8, 9/9/9, 8/8/8 option words), with exactly one
+  `data-ok` per question throughout. A separate mechanical tag-balance
+  script found one real mismatch on the first pass — `p` tags 21/22,
+  traced to a stray `</p>` left over from copying Lesson 25's own callout
+  `<div>` pattern (Lesson 25 has the identical stray `</p>` today, an
+  existing harmless inconsistency in that older lesson, left untouched
+  since only new files may be edited this round) — fixed by removing the
+  stray tag in this lesson's own new callout, confirmed balanced afterward
+  (`html`/`head`/`title`/`body`/`h1`/`dfn` 1/1, `h2` 7/7, `p` 21/21, `div`
+  6/6, `pre` 7/7, `code` 79/79, `span` 53/53, `strong` 4/4, `em` 6/6, `a`
+  2/2, `button` 9/9). Raw-`&` scan found exactly two matches, both inside
+  the one already-established `cd ~/learning/data && uv run …` shell
+  command in a `<pre><code>` block (this course's standing precedent), zero
+  raw `&` in prose. Checked the glossary for a collision before adding
+  anything — grepped `categor`/`ordered` across the full glossary, found
+  only the existing `category dtype` row (Lesson 25) with no mention of
+  ordering — confirmed a genuine gap, so added exactly one new row,
+  `ordered categorical`, placed directly after Lesson 25's `category dtype`
+  entry; confirmed the glossary table's tags stayed balanced after the
+  insert (`table` 1/1, `tr` 141/141, `td` 420/420, `th` 3/3, `code` 875/875),
+  zero raw `&` introduced. Attempted to verify the cited primary source
+  (pandas User Guide's Categorical data page) with `WebFetch` — it was NOT
+  blocked this round (unlike some recent sibling-course rounds) and
+  returned a real fetch confirming the page's "Sorting and order" and
+  "Comparisons" sections cover `ordered=`, `CategoricalDtype`,
+  `as_ordered()`/`as_unordered()`, and the exact `TypeError`-on-unordered
+  behavior taught in this lesson — genuinely fetched, not assumed. Registered
+  Lesson 80 in `nav.js` with today's date (2026-09-26); `node --check`
+  confirmed it still parses as valid JavaScript after the edit, and exactly
+  one `n: 80` entry plus one `lessons/0080-*` file were confirmed to exist.
+  This round's topic pick leaves the groupby/agg leftovers
+  (`as_index=False`/`.get_group()`) and the memory/dtype family
+  (`infer_objects()`, `read_csv(dtype=)`, sparse dtype, nullable boolean)
+  both still open as standing candidates for tomorrow, alongside a fresh
+  scan as always. The entire `data/.scratch-0080/` directory was removed
+  (`rm -rf`) after verification (confirmed via listing before deleting,
+  nothing else was at risk). This agent does not run `git commit` —
+  leaving working-tree changes uncommitted remains this course's
+  established convention. `bin/record-progress data lesson_generated --day
+  80 --lesson 0080-ordered-categorical.html --detail '{"by":"headless"}'`
+  was run from the repo root using the relative-path form, per this
+  course's own established tip that it's more reliable than an absolute
+  path in this sandbox.

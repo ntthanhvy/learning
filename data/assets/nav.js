@@ -164,6 +164,8 @@
       file: "lessons/0078-assign.html" },
     { n: 79, date: "2026-09-25", title: "pandas 3.0's default str dtype, and the select_dtypes gotcha it causes",
       file: "lessons/0079-default-str-dtype.html" },
+    { n: 80, date: "2026-09-26", title: "Ordered categoricals: making \"small < medium < large\" sort correctly",
+      file: "lessons/0080-ordered-categorical.html" },
   ];
 
   const REFS = [

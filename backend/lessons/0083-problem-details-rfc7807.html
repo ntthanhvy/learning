@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 83 · Problem Details: the error contract someone already standardized</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 83 · ~20 min</p>
+<h1>Problem Details: the error contract someone already standardized</h1>
+<p class="byline">Lesson 3 had you invent an error contract from scratch: <code>{"error":{"code","message"}}</code>. Lesson 7 reused it for 500s. Neither ever mentioned that the industry ran into the exact same "every API's error body looks different" problem and shipped an actual internet standard for it. Today's lesson is that standard, and the honest question of whether it should have replaced Lesson 3's shape all along.</p>
+
+<h2>1 · The problem Lesson 3 solved locally, and RFC 7807 solved globally</h2>
+<p>Lesson 3's framing was right: pick one error shape and use it everywhere in <em>your</em> API. But "everywhere in your API" is one API. A frontend calling three different backend services — yours, a payments provider, an internal auth service — meets three different bespoke error shapes, each invented the same way Lesson 3 walked you through: reasonably, in isolation, with no coordination between teams. That's the wider version of the exact problem Lesson 3 opened with ("sometimes a string, sometimes HTML, sometimes <code>{message}</code>") — just one level up, across organizations instead of across handlers in one codebase.</p>
+<p><a href="https://www.rfc-editor.org/rfc/rfc9457"><dfn data-en="an IETF standard (originally RFC 7807, updated by RFC 9457) that defines one JSON object shape for representing an HTTP API error, with a registered media type (application/problem+json) and a small fixed set of named fields, so any client that understands the standard can parse any compliant API's errors without learning that API's custom shape first" data-vn="Problem Details / RFC 7807 (giữ nguyên) — chuẩn IETF định nghĩa 1 hình dạng JSON chung cho lỗi HTTP API, có media type riêng (application/problem+json) và vài field cố định, để client hiểu lỗi của bất kỳ API nào tuân chuẩn mà không cần học riêng hình dạng lỗi của từng API">Problem Details</dfn></a> is that coordination: one JSON shape, standardized once, so any client that already knows the standard can parse any compliant API's errors without learning that API's custom shape first.</p>
+
+<h2>2 · The five fields</h2>
+<p>A Problem Details body is still just JSON — nothing exotic — with a small fixed set of optional-but-conventional fields:</p>
+<pre><code>{
+  <span class="kw">"type"</span>: <span class="kw">"https://example.com/errors/insufficient-stock"</span>,
+  <span class="kw">"title"</span>: <span class="kw">"Insufficient stock"</span>,
+  <span class="kw">"status"</span>: <span class="dv">409</span>,
+  <span class="kw">"detail"</span>: <span class="kw">"Only 3 units of product 42 remain, 5 were requested."</span>,
+  <span class="kw">"instance"</span>: <span class="kw">"/orders/42"</span>
+}</code></pre>
+<table class="cmp">
+<thead><tr><th>Field</th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><th><code>type</code></th><td>a URI naming the error <em>category</em> — the machine-readable part a client branches on, playing the same role as Lesson 3's <code>code</code></td></tr>
+<tr><th><code>title</code></th><td>a short, human-readable summary of that category, stable across occurrences</td></tr>
+<tr><th><code>status</code></th><td>the same HTTP status code as the response's own status line, repeated in the body so it survives a proxy or log that only kept the JSON</td></tr>
+<tr><th><code>detail</code></th><td>a human-readable explanation of <em>this specific occurrence</em> — the part that can safely mention "3 units of product 42," unlike <code>title</code></td></tr>
+<tr><th><code>instance</code></th><td>a URI identifying this specific occurrence, often just the request path</td></tr>
+</tbody>
+</table>
+<p>The <code>type</code> field is the load-bearing one, and it's worth being precise about what kind of value it holds. It doesn't have to resolve to a real, fetchable page — the RFC explicitly allows a URI that's never dereferenced, used purely as a stable, globally-unique-by-convention name (the same trick a Go import path or an XML namespace URI plays: a URL shape chosen for its namespacing guarantee, not because anything lives there). What matters is that it's a stable identifier for "this category of problem," precise enough that <code>https://example.com/errors/insufficient-stock</code> can never mean two different things, the way a short string like <code>"conflict"</code> might drift in meaning across a codebase over months.</p>
+
+<h2>3 · The part that's actually new: a registered media type</h2>
+<p>Lesson 3's contract was a JSON shape, served with the same <code>Content-Type: application/json</code> as every success response. A client had no way to tell "this is an error in our agreed shape" from "this is just some JSON" without first parsing the body and checking for an <code>error</code> key. RFC 7807 registers its own <dfn data-en="the string an HTTP response's Content-Type header carries to tell the recipient what format the body is in -- application/json for ordinary JSON, application/problem+json specifically for a Problem Details error body, letting a client or proxy distinguish an error response from a success response before parsing the body at all" data-vn="media type / MIME type (giữ nguyên) — chuỗi trong header Content-Type báo định dạng body; application/problem+json báo riêng đây là lỗi dạng Problem Details, phân biệt được với response thành công mà không cần parse body">media type</dfn>, <code>application/problem+json</code>, so the <code>Content-Type</code> header itself announces "this body is a Problem Details error" before a single byte of JSON gets parsed. A generic HTTP client, proxy, or logging tool that has never heard of your API can still tell an error response from a success response by header alone.</p>
+<div class="callout"><strong>Frontend-habit bridge:</strong> this is the same instinct as checking <code>response.ok</code> before touching <code>response.json()</code> — except pushed one layer earlier, into content negotiation instead of a status-code check you write yourself. A client that understands <code>application/problem+json</code> gets that signal for free from a header a proxy can also read, without any body-shape convention it has to already know.</div>
+
+<h2>4 · What it doesn't replace: your own machine-readable code</h2>
+<p>Problem Details standardizes the <em>envelope</em>, not your domain's vocabulary. Lesson 3's <code>"code": "order_not_found"</code> — a short, stable string a frontend does exact-match branching on — has no required equivalent in the five fields above; <code>type</code> is a URI, not a short enum string, and matching on a full URI string is clunkier for a client's <code>switch</code> statement than Lesson 3's bare code. The RFC's answer is that Problem Details is explicitly <dfn data-en="a Problem Details response may include any additional JSON members beyond the five standard fields, defined by the API itself, to carry information the base spec doesn't cover -- the mechanism the standard provides for a domain's own machine-readable detail instead of overriding it" data-vn="extension member (giữ nguyên) — Problem Details cho phép thêm field JSON ngoài 5 field chuẩn, do chính API định nghĩa, để mang thông tin riêng của domain mà chuẩn gốc không có sẵn">extensible</dfn>: an API is free to add its own fields alongside the standard five.</p>
+<pre><code>{
+  <span class="kw">"type"</span>: <span class="kw">"https://example.com/errors/insufficient-stock"</span>,
+  <span class="kw">"title"</span>: <span class="kw">"Insufficient stock"</span>,
+  <span class="kw">"status"</span>: <span class="dv">409</span>,
+  <span class="kw">"detail"</span>: <span class="kw">"Only 3 units of product 42 remain, 5 were requested."</span>,
+  <span class="cm">"code"</span>: <span class="cm">"insufficient_stock"</span>,
+  <span class="cm">"available"</span>: <span class="dv">3</span>,
+  <span class="cm">"requested"</span>: <span class="dv">5</span>
+}</code></pre>
+<p>That last block is exactly Lesson 3's instinct, unharmed: a short stable <code>code</code> plus whatever structured detail the specific error needs (<code>available</code>, <code>requested</code>) — just sitting inside a body whose envelope, and whose <code>Content-Type</code>, are now a standard instead of a one-off invention. Adopting Problem Details isn't "throw out Lesson 3's contract"; it's "wrap the same contract in a shape and header a wider ecosystem already recognizes."</p>
+
+<h2>5 · Where this is actually worth the switch</h2>
+<p>A single frontend talking only to one backend team's API gets little from adopting the RFC verbatim — Lesson 3's homegrown shape already does the job inside that closed pair, and rewriting every handler's error body for a standard nobody outside the team will ever check is not a strong trade. The RFC earns its keep when errors cross an organizational boundary: a public API with third-party integrators, a service mesh where a generic API gateway (Lesson 66) needs to make routing or retry decisions from error shape alone without knowing every backend's bespoke contract, or tooling (API gateways, generic HTTP client libraries, some framework error handlers) that already understands <code>application/problem+json</code> out of the box and can surface a useful error automatically. The decision rule is the same shape as Lesson 82's ENUM-vs-CHECK call: adopt the standard when the audience for your error format is wider than the one team that wrote it; keep the lightweight local convention when it isn't.</p>
+
+<div class="interview">
+<p><strong>Q: "Have you seen or used RFC 7807 Problem Details?"</strong> A strong answer, out loud: <em>"It's a standard JSON shape for API errors — type, title, status, detail, instance — served with its own media type, application/problem+json, so a client or proxy can tell it's a structured error before parsing the body. It doesn't replace an API's own machine-readable error code; the spec is explicitly extensible, so you'd still add your own code field and any domain-specific detail alongside the standard fields. I'd reach for it when errors cross an organizational boundary — a public API, or tooling that already expects that media type — and stick with a simpler homegrown contract for an API only my own frontend calls."</em> The signal: knowing it's an envelope standard that coexists with your own error codes, not a replacement for them.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="application/problem+json is the registered media type RFC 7807 defines specifically for a Problem Details error body -- it lets a client or proxy tell from the Content-Type header alone that the body is a structured error, before parsing any JSON at all.">
+    <p class="stem">What does the <code>application/problem+json</code> media type actually let a client do?</p>
+    <button class="opt" data-ok>detect a structured error before parsing the body itself</button>
+    <button class="opt">skip validating the response status code entirely right now</button>
+    <button class="opt">automatically retry every single failed request it already received</button>
+    <button class="opt">decrypt a response body that arrived fully encrypted already</button>
+  </div>
+  <div class="q" data-why="The RFC explicitly allows the type URI to be one that's never fetched -- it only has to be a stable, precise identifier for a category of problem, the same way a Go import path or XML namespace URI names something without anyone dereferencing it as a live page.">
+    <p class="stem">Does a Problem Details response's <code>type</code> URI have to resolve to a real page?</p>
+    <button class="opt" data-ok>no, it just needs to be a stable unique identifier</button>
+    <button class="opt">yes, every single client fetches it before parsing the rest</button>
+    <button class="opt">yes, but only when the status code sits above 500</button>
+    <button class="opt">no, because the field is entirely optional to ever include</button>
+  </div>
+  <div class="q" data-why="Problem Details standardizes the envelope and media type, not an API's domain vocabulary -- the spec is explicitly extensible, so an API adds its own fields (like a short stable code) alongside the five standard ones rather than dropping that instinct.">
+    <p class="stem">Does adopting Problem Details mean dropping a short machine-readable <code>code</code> field?</p>
+    <button class="opt" data-ok>no, extension members let an API keep its own code</button>
+    <button class="opt">yes, the type field always fully replaces any code field</button>
+    <button class="opt">yes, status alone must carry all the needed meaning now</button>
+    <button class="opt">no, but only Vietnamese language APIs may keep one field</button>
+  </div>
+  <div class="q" data-why="A single frontend talking to one backend team's own API gains little from the RFC's wider-ecosystem envelope -- the value shows up once errors cross an organizational boundary, where third-party integrators, gateways, or generic tooling benefit from a shape they already understand without learning a bespoke one first.">
+    <p class="stem">This lesson names which situation as the strongest case for adopting the RFC?</p>
+    <button class="opt" data-ok>errors crossing an organizational boundary out to other callers now</button>
+    <button class="opt">a lone frontend calling only its own single team backend</button>
+    <button class="opt">any handler that only ever returns one plain 200 response</button>
+    <button class="opt">a service that never returns any 4xx or 5xx code</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://www.rfc-editor.org/rfc/rfc9457">RFC 9457 — Problem Details for HTTP APIs</a> (the current standard, obsoleting the original RFC 7807 with the same core shape) — a live <code>WebFetch</code> check against this exact URL was attempted this round and blocked outright by this session's sandbox network-permission gate, the same class of block Lesson 79, 81, and 82's rounds all hit against different domains. <strong>Honest flag:</strong> not freshly fetched this round; the five-field shape, the <code>application/problem+json</code> media type, and the extension-member mechanism described above have been stable since the original 2016 RFC 7807 and are unchanged in substance by RFC 9457 — but the link should get a live re-check once the gate is open in a future round, per the same standing habit noted since Lesson 53's 404 incident. For the error-contract half of this lesson's frame, Lesson 3's own primary source, the <a href="https://opensource.zalando.com/restful-api-guidelines/">Zalando RESTful API Guidelines</a>, has a dedicated section recommending exactly this RFC.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially. Nếu chỗ nào chưa rõ, cứ hỏi lại bằng tiếng Việt cũng được.<br><br>
+<em>Next lesson:</em> open. Still no <code>lesson_completed</code>/quiz-outcome record exists for any lesson after 83 rounds — the honest next step remains a completion signal or a user-named track.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

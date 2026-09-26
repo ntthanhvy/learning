@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 12 · dbt unit tests vs. data tests</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 12 · ~20 min · 26 Sep 2026</p>
+<h1>dbt unit tests vs. data tests</h1>
+<p class="byline">Today's tangible win: a <dfn data-en="a dbt test (dbt >= 1.8) that runs a model's SQL logic against small, hand-written fake input rows and checks the output against hand-written expected rows -- testing the transformation's code path with known inputs, not testing whatever rows actually happen to be sitting in the warehouse" data-vn="giữ nguyên &quot;unit test&quot; (dbt) — chạy logic SQL của model trên các dòng input giả tự viết, so khớp với dòng kết quả kỳ vọng tự viết; kiểm tra đúng logic biến đổi, không phải dữ liệu thật trong warehouse">unit test</dfn> on <code>mart_delivery_sla</code> that proves its <code>share_over_45_min</code> math is correct on two fabricated orders, independent of whatever real rows happen to be sitting in <code>raw.orders</code> today — the first test in this project that doesn't touch the actual warehouse data at all.</p>
+
+<div class="callout"><strong>Before today — check Day 11 actually landed:</strong> this lesson adds a new YAML file next to <code>mart_delivery_sla.sql</code> and needs <code>dbt_utils</code> already installed, so start from a clean build:
+<pre><code>cd food_delivery_pipeline
+uv run --project ../dbt_env dbt build</code></pre>
+Expected: <code>Done. PASS=24 WARN=0 ERROR=0 SKIP=0 NO-OP=0 REUSED=0 TOTAL=24</code> (10 models + 1 snapshot + 14 tests, Day 11's own re-verified count). If <code>sla_key</code> is missing from <code>mart_delivery_sla</code>, or <code>dbt deps</code> fails to find <code>dbt_utils</code>, go back and finish Day 11 first.</div>
+
+<h2>1 · Every test so far has tested real data. Today tests logic instead.</h2>
+<p>Days 3, 9 and 11's tests all share one property: they run against whatever rows are actually sitting in the warehouse right now. <code>not_null</code>, <code>relationships</code>, <code>dbt_utils.accepted_range</code> — every one of them is a query over real, live data, and it either finds a violation or it doesn't. That's exactly the right tool for "is today's data clean," which is what a <dfn data-en="a dbt test (unique, not_null, relationships, accepted_values, and any custom generic or singular test) that runs a query against the actual rows currently in the warehouse and asserts something about them -- catches bad data, not bad SQL logic" data-vn="giữ nguyên &quot;data test&quot; — test dbt chạy trên dữ liệu thật đang có trong warehouse, kiểm tra dữ liệu có sạch không, không kiểm tra logic SQL đúng hay sai">data test</dfn> is for: Day 3's <code>relationships</code> test on <code>stg_orders.restaurant_id</code> caught a real orphan row because a real orphan row existed to catch.</p>
+<p>But data tests have a blind spot: they can only fail on data that exists right now. <code>mart_delivery_sla</code>'s <code>share_over_45_min</code> calculation — the <code>case when {{ is_sla_breach(...) }} then 1 else 0 end</code> divided by <code>count(*)</code> from Day 10 — could have an off-by-one bug, a wrong join direction, or a sign error, and no data test would ever notice, because a data test only checks properties like "is this null" or "is this in range," not "did this specific arithmetic produce the specific number it should have." Proving the *logic* is right needs inputs you control completely, with an answer you already know by hand — which is what a <dfn data-en="dbt's name (>= 1.8) for a unit test: fixed, hand-written fake rows fed into a model's SQL in place of its real ref()/source() inputs, with hand-written expected output rows to compare against -- available since dbt-core 1.8" data-vn="giữ nguyên &quot;unit test&quot; (dbt >= 1.8) — dòng input giả cố định thay cho ref()/source() thật của model, so với dòng kết quả kỳ vọng tự viết">unit test</dfn> (available since dbt-core 1.8) is built for.</p>
+<table class="gloss">
+<tr><th></th><th>Data test</th><th>Unit test</th></tr>
+<tr><td>Runs against</td><td>real rows currently in the warehouse</td><td>fake rows you write by hand in YAML</td></tr>
+<tr><td>Catches</td><td>bad data (nulls, orphans, out-of-range values)</td><td>bad logic (wrong join, wrong arithmetic, wrong filter)</td></tr>
+<tr><td>Can fail with clean data?</td><td>no — nothing to flag if today's rows are all valid</td><td>yes — a logic bug fails it regardless of what's in the warehouse</td></tr>
+<tr><td>Examples so far</td><td><code>unique</code>, <code>relationships</code>, <code>accepted_range</code> (Days 3, 11)</td><td>none yet — today's first one</td></tr>
+</table>
+
+<h2>2 · Anatomy of a unit test: <code>given</code>, fake inputs; <code>expect</code>, the answer</h2>
+<p>A unit test is declared in a model's schema YAML, under a top-level <code>unit_tests:</code> key — sibling to the <code>models:</code> key Day 3's <code>stg_orders.yml</code> used, not nested inside it. It names the model under test, supplies fake rows for each upstream <code>ref()</code>/<code>source()</code> that model reads via <code>given</code>, and states the exact output rows it should produce via <code>expect</code>. dbt substitutes the fake <code>given</code> rows for the model's real inputs, compiles and runs the model's actual SQL — the identical <code>mart_delivery_sla.sql</code> file, untouched — and diffs the result against <code>expect</code>.</p>
+<p>Write one for <code>mart_delivery_sla</code>, in a new file <code>models/marts/unit_tests.yml</code>. Two delivered orders, same city and day, one inside the 45-minute SLA and one over it — an answer you can check by hand: 1 breach out of 2 orders is exactly 0.5.</p>
+<pre><code><span class="cm">-- models/marts/unit_tests.yml</span>
+version: <span class="kw">2</span>
+
+unit_tests:
+  - name: test_mart_delivery_sla_share_over_threshold
+    description: <span class="str">"One breach out of two delivered orders in the same city/day should compute a 0.5 share, using the default 45-minute var()."</span>
+    model: mart_delivery_sla
+    given:
+      - input: ref(<span class="str">'stg_orders'</span>)
+        rows:
+          - {order_id: <span class="kw">1</span>, restaurant_id: <span class="kw">1</span>, courier_id: <span class="kw">1</span>, subtotal: <span class="kw">20</span>, delivery_fee: <span class="kw">3</span>, placed_at: <span class="str">"2026-09-01 12:00:00"</span>}
+          - {order_id: <span class="kw">2</span>, restaurant_id: <span class="kw">1</span>, courier_id: <span class="kw">1</span>, subtotal: <span class="kw">20</span>, delivery_fee: <span class="kw">3</span>, placed_at: <span class="str">"2026-09-01 12:00:00"</span>}
+      - input: ref(<span class="str">'stg_restaurants'</span>)
+        rows:
+          - {restaurant_id: <span class="kw">1</span>, city: <span class="str">"Hanoi"</span>}
+      - input: ref(<span class="str">'stg_order_events'</span>)
+        rows:
+          - {order_id: <span class="kw">1</span>, status: <span class="str">"delivered"</span>, occurred_at: <span class="str">"2026-09-01 12:20:00"</span>}
+          <span class="cm"># order 1: 20 minutes to deliver -- inside the 45-minute SLA</span>
+          - {order_id: <span class="kw">2</span>, status: <span class="str">"delivered"</span>, occurred_at: <span class="str">"2026-09-01 13:10:00"</span>}
+          <span class="cm"># order 2: 70 minutes to deliver -- a breach</span>
+    expect:
+      rows:
+        - {city: <span class="str">"Hanoi"</span>, order_date: <span class="str">"2026-09-01"</span>, delivered_orders: <span class="kw">2</span>, share_over_45_min: <span class="kw">0.5</span>}</code></pre>
+<p>Only the columns each fake row actually needs are given — <code>stg_orders</code>' fake rows skip <code>order_total</code> entirely, since <code>mart_delivery_sla.sql</code> never reads it. Run it on its own with <code>dbt test</code>, the same command Day 3 used for data tests:</p>
+<pre><code>uv run --project ../dbt_env dbt test --select test_mart_delivery_sla_share_over_threshold</code></pre>
+<p>Expected:</p>
+<pre><code>1 of 1 PASS test_mart_delivery_sla_share_over_threshold ... [PASS in 0.08s]
+
+Done. PASS=1 WARN=0 ERROR=0 SKIP=0 TOTAL=1</code></pre>
+<div class="callout"><strong>This proves nothing about today's real orders.</strong> The unit test would pass identically whether <code>raw.orders</code> currently has 500 rows or zero — it never queries <code>raw.orders</code> at all, since <code>given</code> replaces every upstream input with fakes. That's the whole point, not a limitation: a unit test asks "is this SQL correct," a data test asks "is this data correct," and <code>mart_delivery_sla</code> needs both, run for different reasons, not one instead of the other.</div>
+
+<h2>3 · Build: prove it actually catches a broken change</h2>
+<p>A test that has never failed hasn't proven anything yet — the same standard Day 3 held its <code>relationships</code> test to. Break <code>mart_delivery_sla.sql</code> on purpose: flip the aggregation from <code>sum(...)</code> to <code>count(*)</code> in the numerator, a realistic copy-paste slip that silently changes "how many orders breached" into "how many orders there are" — every order would count as a breach:</p>
+<pre><code><span class="cm">-- models/marts/mart_delivery_sla.sql -- TEMPORARY, to prove the unit test catches a break
+-- change: sum(case when {{ is_sla_breach('minutes_to_deliver') }} then 1 else 0 end)::numeric
+-- to:     count(*)::numeric  -- wrong: counts every order as a breach, not just late ones</span></code></pre>
+<pre><code>uv run --project ../dbt_env dbt test --select test_mart_delivery_sla_share_over_threshold</code></pre>
+<p>Expected — the fixture's two fabricated orders now produce a <code>share_over_45_min</code> of <code>1.0</code> (2 counted as breaches out of 2) instead of the expected <code>0.5</code>, so the unit test fails exactly where the bug is:</p>
+<pre><code>1 of 1 FAIL 1 test_mart_delivery_sla_share_over_threshold ... [FAIL 1 in 0.06s]
+
+Done. PASS=0 WARN=0 ERROR=0 SKIP=0 TOTAL=1
+</code></pre>
+<p>dbt reports which expected row didn't match, not just pass/fail — read the mismatch with <code>--store-failures</code> or the console diff the way Day 3's failure output named the exact bad <code>order_id</code>. Revert the change back to <code>{{ is_sla_breach('minutes_to_deliver') }}</code> and confirm green again before moving on:</p>
+<pre><code>uv run --project ../dbt_env dbt test --select test_mart_delivery_sla_share_over_threshold</code></pre>
+<pre><code>Done. PASS=1 WARN=0 ERROR=0 SKIP=0 TOTAL=1</code></pre>
+<p>Now the day's actual skill: <code>mart_restaurant_sla</code> (Day 10) has the identical class of bug risk — a <code>share_over_threshold</code> computed the same way, grouped by <code>restaurant_id</code> instead of city/day — and has no unit test yet. Add one to <code>models/marts/unit_tests.yml</code>, alongside today's first:</p>
+<pre><code><span class="cm">-- models/marts/unit_tests.yml -- TODO: add a second unit_tests entry
+-- name: test_mart_restaurant_sla_share_over_threshold
+-- model: mart_restaurant_sla
+-- given: fake rows for ref('stg_orders') and ref('stg_order_events') only --
+--   mart_restaurant_sla does not join stg_restaurants, so it needs no fake
+--   rows for it (re-check mart_restaurant_sla.sql from Day 10 to confirm
+--   exactly which refs it reads before deciding what given: needs).
+-- expect: one row for restaurant_id 1, with a hand-computed share_over_threshold
+--   from whatever delivery times you choose -- pick numbers you can check by hand,
+--   the same way Section 2's 20-minute/70-minute pair was chosen so 1/2 = 0.5
+--   is obviously correct without running anything.</span></code></pre>
+<pre><code>uv run --project ../dbt_env dbt test --select test_mart_restaurant_sla_share_over_threshold</code></pre>
+<p>Expected: <code>Done. PASS=1 WARN=0 ERROR=0 SKIP=0 TOTAL=1</code> once the fake rows and hand-computed <code>expect</code> agree. Run the full suite to confirm nothing else broke:</p>
+<pre><code>uv run --project ../dbt_env dbt build</code></pre>
+<p>Expected: <code>Done. PASS=26 WARN=0 ERROR=0 SKIP=0 NO-OP=0 REUSED=0 TOTAL=26</code> (Day 11's 24, plus today's 2 new unit tests). Commit <code>models/marts/unit_tests.yml</code>.</p>
+
+<div class="callout"><strong>Why not unit-test every model:</strong> <code>stg_orders</code> and the other staging models are close to pure passthroughs of <code>raw.*</code> — a unit test on a <code>select</code> with no branching or arithmetic mostly re-states the SQL in YAML, costing maintenance for no real bug-catching power. Unit tests earn their place on models with actual logic to get wrong: a <code>case when</code>, a join that could silently drop or duplicate rows, an aggregation, a threshold comparison like today's. That's also why <code>mart_delivery_sla</code> and <code>mart_restaurant_sla</code> got one today and the staging layer still has none — the same "does this specific piece earn its complexity" question Day 10 asked of macros, asked here of tests instead.</div>
+
+<div class="interview">
+<p><strong>Q: "What's the difference between a dbt data test and a dbt unit test, and when do you reach for each?"</strong> A strong answer, out loud: <em>"A data test — unique, not_null, relationships, or a custom one — runs a query against whatever rows are actually in the warehouse right now and flags a violation if it finds one. It's the right tool for 'is today's data clean,' but it has a blind spot: it can only fail on data that currently exists, so it can never catch a logic bug that just hasn't been exercised by today's rows yet. A unit test, available since dbt-core 1.8, fixes that by replacing a model's real ref() and source() inputs with small, hand-written fake rows and checking the output against a hand-written expected result — it runs the model's actual SQL, but on inputs I fully control, so I can prove an aggregation or a threshold comparison is correct independent of whatever's really in the warehouse today. I reach for a unit test on any model with real logic to get wrong — a case when, a join, an aggregation — and skip it on a near-passthrough staging model, where it would just restate the SQL in YAML for no real payoff. The two aren't redundant: a mart can have a unit test proving its math is right and a data test proving today's actual output still respects its grain, at the same time, for different reasons."</em> The signal: naming the blind spot in data tests specifically ("can only fail on data that exists"), not just "one tests data, one tests logic" as a slogan.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A data test like unique or relationships only ever queries the real rows currently in the warehouse -- if no bad row happens to exist right now, there is nothing for it to flag, even if the underlying SQL logic that produced those rows has a genuine bug waiting to surface on different input.">
+    <p class="stem">What can a data test never catch, no matter how it's written?</p>
+    <button class="opt" data-ok>A logic bug today's real data doesn't happen to expose</button>
+    <button class="opt">A column that is null in more than one row</button>
+    <button class="opt">Two whole rows in one table sharing one identical value</button>
+  </div>
+  <div class="q" data-why="A unit test's given: block replaces a model's real ref()/source() inputs with small, hand-written fake rows, then runs the model's actual, unmodified SQL against those fakes and diffs the result against expect: -- proving the logic itself is correct, independent of whatever data is really in the warehouse.">
+    <p class="stem">What does a unit test's <code>given</code> block actually replace?</p>
+    <button class="opt" data-ok>The model's own real <code>ref()</code>/<code>source()</code> input rows only</button>
+    <button class="opt">The model's own already-compiled SQL text entirely instead</button>
+    <button class="opt">Every data test already declared in the model</button>
+  </div>
+  <div class="q" data-why="The unit test's given: rows are entirely fabricated in the YAML file itself and never touch raw.orders or any other real table, so the test's pass/fail result is identical no matter what real data currently exists in the warehouse -- that independence from live data is the entire point of a unit test.">
+    <p class="stem">Why does today's unit test pass the same way regardless of what's in <code>raw.orders</code>?</p>
+    <button class="opt" data-ok>Its <code>given</code> rows are fabricated, never real warehouse data</button>
+    <button class="opt">It only runs once, on the first <code>dbt build</code></button>
+    <button class="opt"><code>raw.orders</code> is always guaranteed empty in every dev database</button>
+  </div>
+  <div class="q" data-why="Per today's closing callout, a unit test earns its place on a model with actual logic to get wrong -- a case when, a join, an aggregation, a threshold comparison -- the same way Day 10 asked whether a macro had a second real caller before it earned its place. A near-passthrough staging select has nothing like that to verify, so a unit test there would just restate the SQL in YAML.">
+    <p class="stem">Per today's callout, why do the staging models get no unit tests?</p>
+    <button class="opt" data-ok>They have little join or aggregation logic to verify</button>
+    <button class="opt">dbt technically forbids unit tests on any staging model</button>
+    <button class="opt">Staging models are all deleted before any test runs</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> dbt Labs' own <a href="https://docs.getdbt.com/docs/build/unit-tests">Unit tests</a> doc (not yet cited in <code>RESOURCES.md</code>, added under dbt (deep) alongside Data tests) covers the full <code>given</code>/<code>expect</code> syntax, fixture files as an alternative to inline rows for larger cases, and overriding a project variable per unit test. The <a href="https://docs.getdbt.com/docs/build/data-tests">Data tests</a> doc, already Day 3's source, is worth re-reading side by side to see how deliberately the two pages keep the two concepts separate.</p>
+
+<div class="callout"><strong>Honesty note on today's verification:</strong> <code>dbt deps</code> reached the live dbt Hub registry again this round and installed real <code>dbt_utils</code> 1.4.1 into the scratch project, confirmed via <code>dbt_packages/</code> and the lockfile. <code>dbt parse</code> against the full scratch project (including today's <code>unit_tests.yml</code>) came back clean with no errors, and <code>dbt list --resource-type unit_test</code> confirmed the new unit test resolves and is discoverable under its own resource type, not silently absorbed into <code>--resource-type test</code>. A deliberately broken unit test (a <code>model:</code> pointing at a model that doesn't exist) was confirmed to fail parsing with a clear <code>Parsing Error</code>, proving parse-level validation has real teeth here, not just YAML-shape checking. Actually *running* a unit test end to end — the <code>PASS=1</code>/<code>FAIL 1</code> outputs shown above — needs a live Postgres, since dbt executes the model's real SQL against the fake rows through the adapter; both a direct <code>docker run</code> and a <code>docker compose up</code> attempt to bring up a scratch Postgres for this were blocked by this sandbox's approval gate this round, the same friction Day 11's round hit. The exact <code>PASS</code>/<code>FAIL</code> output shown is therefore hand-derived from dbt's documented unit-test output format and this lesson's own hand-checked arithmetic (1 breach out of 2 orders = 0.5), not captured from a live run this round.</div>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 12.<br>
+<strong>Phase 2 continues</strong> along the dbt/Kafka/Airflow spine in <code>PLAN.md</code>, adapted to your questions rather than a fixed calendar — incremental strategies in depth (<code>merge</code>/<code>delete+insert</code> on Postgres, late-arriving events, <code>--full-refresh</code>) is next up on the dbt side.<br><br>
+💬 Anything unclear — the data-test/unit-test split, or which of your own models actually deserve a unit test? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

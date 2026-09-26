@@ -133,6 +133,12 @@
   <tr><td>surrogate key</td><td>giữ nguyên "surrogate key" — cột khóa nhân tạo (thường hash từ cột khác) dùng làm định danh duy nhất, khác với khóa tự nhiên có sẵn trong dữ liệu nguồn</td><td>A column whose value is manufactured (typically hashed) from other columns specifically to serve as a unique identifier, as opposed to a natural key that already existed in the source data — used when a model's real-world grain has no single natural column to test <code>unique</code>/<code>not_null</code> against. <code>dbt_utils.generate_surrogate_key()</code> builds one by coalescing, concatenating and hashing a list of columns.</td></tr>
 </table>
 
+<h2 id="day12">Day 12 — dbt unit tests vs. data tests</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>unit test (dbt)</td><td>giữ nguyên "unit test" (dbt &gt;= 1.8) — dòng input giả cố định thay cho ref()/source() thật của model, so với dòng kết quả kỳ vọng tự viết</td><td>A dbt test (dbt-core &gt;= 1.8) that replaces a model's real <code>ref()</code>/<code>source()</code> inputs with small, hand-written fake rows via <code>given</code>, runs the model's actual SQL against them, and diffs the result against hand-written <code>expect</code> rows — proving the transformation's logic is correct on known inputs, independent of whatever data is really in the warehouse. Complements, not replaces, a <a href="glossary.html#day3">data test</a> (Day 3).</td></tr>
+</table>
+
 <script src="../assets/nav.js"></script>
 </body>
 </html>

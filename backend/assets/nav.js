@@ -170,6 +170,8 @@
       file: "lessons/0081-request-validation-and-json-schema.html" },
     { n: 82, date: "2026-09-25", title: "A fixed set of values: Postgres ENUM vs. CHECK-constrained text",
       file: "lessons/0082-postgres-enum-type.html" },
+    { n: 83, date: "2026-09-26", title: "Problem Details: the error contract someone already standardized",
+      file: "lessons/0083-problem-details-rfc7807.html" },
   ];
 
   const REFS = [

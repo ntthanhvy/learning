@@ -7619,3 +7619,153 @@ fail *gracefully* so the learner sees which task failed.
   whatever fresh-gap case, if any, still holds up under a fresh scan by
   then.
   date rather than most recently touched.
+- 2026-09-26 — **Day 60 generated: `unittest.mock` — faking the outside
+  world in a test** (headless run), a fresh-content day chosen over a
+  second review pass. Read `MISSION.md` (untouched, read-only) in full,
+  `PLAN.md` in full, `RESOURCES.md` in full, the tail of `assets/nav.js`'s
+  `LESSONS` array (all 59 entries), the full `learning-records/` directory
+  (still only the Day 1 baseline), and the tail of `NOTES.md` including
+  Day 59's full entry and next-day note (leaving `subprocess`/
+  `configparser` as the remaining weaker fresh-gap candidates, and noting
+  a second review pass was equally on the table). Read lessons 0006 (files/
+  csv/json), 0011 (pytest), 0058 (review-day precedent), and 0059
+  (hashlib, most recent) in full as structural/style precedent, plus
+  `assets/quiz.js` and `assets/gloss.js` for the exact markup contracts.
+  Idempotency: `date` confirmed 2026-09-26; grepped `assets/nav.js` and
+  `lessons/` for any `0060-*` entry/file — none existed — before writing
+  anything.
+  Decision process: before accepting either of Day 59's two named
+  candidates (`subprocess`, `configparser`) or a second review pass, ran a
+  fresh scan across a wider set of plausible untaught stdlib/testing gaps —
+  `csv`/`json` (already well covered on Day 6, ruled out), `groupby`/
+  `functools` (covered Days 27/36), `unittest.mock`/`monkeypatch` (zero
+  hits, confirmed by grep across all 59 lessons, every practice file, and
+  the full glossary — the `dispatch`/`patch` substring hits in Day 24's
+  `BaseHTTPMiddleware` material were confirmed false positives on manual
+  read, not real mocking content). `unittest.mock` won clearly: Day 11
+  taught `pytest`/fixtures/`parametrize` but never answered "how do you
+  test code that calls something slow, flaky, or dangerous to actually
+  run" (network, `datetime.now()`, a real write) — a gap that's both
+  squarely inside MISSION.md's pytest-testing goal and, unlike `pytest`
+  itself, importable from the standard library, so the practice file could
+  stay `uv run python3` with no `--with` flag, this course's default.
+  `subprocess`/`configparser` remain on the table exactly as weak as Day
+  59 assessed them; a second review pass lost to this stronger fresh case.
+  No-pandas rule: grepped the lesson and practice file case-insensitively
+  for `pandas`/`numpy`/`pd\.`/`np\.` — exactly one hit, the standard
+  "nothing pandas-specific today" callout naming `pd.read_json()` only in
+  a one-line contrast (mocking a pandas pipeline's I/O uses the identical
+  `patch`/`Mock` mechanics, not demonstrated further); zero hits in the
+  practice file.
+  Practice file `practice/60_unittest_mock.py` (3 exercises): building a
+  `Mock` with a fixed `return_value` and checking `.called`/repeated calls,
+  using `patch()` to replace a same-module function (`__main__._http_get`,
+  chosen deliberately so the patch-target path is one the practice file
+  itself owns, matching lesson section 5's "where to patch" point) for one
+  `with` block and computing a real result through it, and confirming the
+  original is restored (still raises) once the block ends. One real bug
+  was caught and fixed before shipping: the first draft's `_ex2` check
+  compared `patched_convert(100, "eur", 1.1) == 110.0` with strict `==`,
+  which failed even on a fully correct solved copy because `100 * 1.1`
+  evaluates to `110.00000000000001` in IEEE-754 floats, not exactly
+  `110.0` — caught by debugging a solved copy that still printed a ✗
+  rather than assuming a green run meant the check was sound; fixed by
+  comparing with `abs(result - 110.0) < 1e-9` instead, matching how a real
+  test would compare floats. A second, unrelated bug was caught the same
+  way debugging that failure: calling `patch("__main__._http_get", ...)`
+  from a *different* script that `import`ed the practice file as a module
+  raised `AttributeError` (patch target must be `__main__` relative to
+  whatever file is actually run as the entry point) — not a bug in the
+  shipped file itself, since the practice file is always run directly
+  (`uv run python3 practice/60_unittest_mock.py`, never imported), but
+  confirmed by running it exactly that way, twice, both before and after
+  the float fix.
+  Verified in a scratch directory under the repo root
+  (`.scratch-0060/`, created fresh this round, deleted at the end): the
+  shipped (unsolved) copy printed all three ✗ with no traceback, both
+  before and after the float-comparison fix; a separately solved copy
+  (written fresh via the `Write` tool, not by editing the shipped file)
+  printed all three ✓ and the "All green" tally, run twice consecutively
+  with identical results.
+  Glossary: three new terms — `Mock`, `patch`, `monkeypatch` — added under
+  a new `Day 60` section in `reference/glossary.html`, after grepping for
+  and confirming zero collisions with any existing row.
+  HTML tag-balance was checked with a stdlib `html.parser.HTMLParser`-
+  based stack checker (written as a throwaway script via the `Write` tool,
+  deleted after use) against both the lesson file and the full (now-
+  modified) glossary. First pass caught one real issue: a stray `</p>`
+  left closing the "Bridge from SQL" `<div class="callout">` instead of
+  closing with `</div>` only — the same recurring bug shape Days 54, 56,
+  57, and 59's notes all describe — fixed, then re-checked clean on both
+  files. A raw-unescaped-`&` regex
+  (`&(?!amp;|lt;|gt;|quot;|#39;|apos;|#\d+;)`) against the lesson and
+  glossary found zero true hits, no widening needed.
+  Quiz: 4 questions, one per concept (a bare `Mock()`'s call behavior,
+  `patch()`'s restore guarantee, the "patched the wrong path" failure
+  mode, and how `monkeypatch` differs from calling `patch()` directly).
+  Word counts were checked with a small `html.parser.HTMLParser`-based
+  Python script splitting each `<button class="opt">`'s stripped-tag text
+  on whitespace, cross-checked with a second, independent Node.js
+  regex-based script per this course's established two-method practice.
+  First draft mismatched on all four questions (Q1 9/8/9, Q2 9/9/7, Q3
+  11/10/10, Q4 10/9/10) — one to two rounds of few-word edits per
+  question, re-running both scripts after every edit, including one
+  self-correction on Q3's answer where a first edit's wording read
+  awkwardly and was smoothed once more while holding the word count fixed.
+  Landed at 9/9/9, 9/9/9, 10/10/10, and 10/10/10 respectively; both
+  scripts agreed at every step, and a separate check confirmed exactly 4
+  `data-ok` occurrences total, one per question, matching the
+  four-question count.
+  `RESOURCES.md`: added a new line for `unittest.mock` (not an extension
+  of an existing citation, since no prior line covered it, and it is
+  distinct from the existing `pytest` citation) naming Day 60's use —
+  `Mock`/`patch()` for faking side effects in a test, and the "Where to
+  patch" section as the primary source for the lesson's own "patched the
+  wrong path" section.
+  Registered in `assets/nav.js` with `date: "2026-09-26"`; confirmed
+  `node --check assets/nav.js` reports no syntax errors after the edit,
+  and that exactly one `n: 60` entry and one `lessons/0060-*.html` file
+  exist.
+  **DB access:** not attempted directly this round — the orchestrator had
+  already confirmed via the DB moments before this run started that the
+  latest python row was `lesson_generated day=59` on 2026-09-25 with
+  nothing for day 60, and no `lesson_completed`/quiz/kata signal more
+  recent than mid-July for this course; this round deferred entirely to
+  that pre-run confirmation plus this round's own on-disk idempotency
+  check before writing anything.
+  `python/learning-records/` still holds only the Day 1 baseline; no new
+  file was added this round — this round's findings (a quiz-word-count
+  bug pattern, a float-comparison test bug) are lesson-production notes
+  that belong here in the Generation log, not durable learner-profile
+  facts, matching the precedent of every round since Day 42 not adding a
+  new learning-records file without a genuinely new learner-baseline
+  finding.
+  **WebFetch:** attempted and succeeded this round (unlike several recent
+  sibling-course rounds blocked by the sandbox's network-permission gate)
+  — fetched `https://docs.python.org/3/library/unittest.mock.html` and
+  confirmed it documents the `Mock` class, `patch()` as a context
+  manager/decorator, and a dedicated "Where to patch" section stating
+  patch targets are looked up by name in the module under test rather
+  than where the object is originally defined — matching the lesson's own
+  section 5 claim. Separately, this round's own attempt to invoke the
+  bare `uv` binary (e.g. `uv --version`) for an environment sanity check
+  was blocked by a sandbox approval gate that does not apply to the
+  actually-required `uv run python3 <script>` invocation form, which
+  worked normally throughout — noted here since it cost some time before
+  the distinction became clear, in case a future round hits the same
+  false start.
+  `bin/record-progress python lesson_generated --day 60 --lesson
+  0060-unittest-mock.html --detail '{"by":"headless"}'` was run from the
+  repo root after generation and succeeded, recording `lesson_generated
+  day=60 lesson=0060-unittest-mock.html`.
+  Final `git status --short -- python/` showed exactly five paths changed
+  (`assets/nav.js`, `RESOURCES.md`, `reference/glossary.html`, plus the
+  new lesson and practice file) — no other course's files touched.
+  **Next-day note:** `subprocess` and `configparser` remain the two
+  unconfirmed fresh-gap candidates, both still weaker than `hashlib` and
+  `unittest.mock` were per two rounds' now-consistent assessment.
+  Day 60 was fresh content following Day 59's fresh content — two fresh
+  days in a row since Day 58's last review — so Day 61 should weigh the
+  "avoid three fresh days in a row" consideration seriously, per Day
+  57/58's own precedent for exactly this situation, unless a compelling
+  fresh-gap case turns up first.

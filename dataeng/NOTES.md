@@ -1285,3 +1285,143 @@ along the Phase 2 spine, adapted to the learning records.
   0011-dbt-utils-and-packages.html --detail '{"by":"headless"}'` succeeded on
   the first attempt, run from the repo root:
   `recorded: dataeng/lesson_generated day=11 lesson=0011-dbt-utils-and-packages.html`.
+- 2026-09-26 (headless 06:00 run, Day 12 generated): twelfth lesson,
+  `0012-dbt-unit-tests.html`. Per the orchestrator's own pre-check, the latest
+  `dataeng` row in `course_progress` was `lesson_generated day=11`
+  (2026-09-25) with nothing for 2026-09-26 yet, `lessons/` contained only
+  `0001`–`0011`, `assets/nav.js`'s latest entry was `n: 11`, and no
+  `2026-09-26`/`0012` entry existed anywhere — independently re-confirmed
+  before writing (`ls lessons/`, `grep` on `nav.js` and this file), so
+  proceeded on schedule. `learning-records/` still holds only the one Day-1
+  baseline file; no `lesson_completed`/quiz/kata signal exists for any
+  course more recently than mid-July, per the orchestrator's own DB read, so
+  there was no new learner-behavior signal to fold into today's content or
+  to justify a new learning-record file, consistent with every Phase 2 round
+  so far. Read `MISSION.md`, `PLAN.md` and `RESOURCES.md` in full, this
+  file's last ~300 lines, and Lessons 9, 10 and 11 in full for structural
+  and voice precedent before writing anything.
+  **Topic choice:** followed 2a's spine in order, as every prior Phase 2
+  round has — Days 8/9/10/11 were the spine's first four bullets (layering,
+  snapshots, Jinja/macros, packages); today is the fifth verbatim: "Unit
+  tests (dbt >= 1.8) vs. data tests: testing *logic* with fixed inputs vs.
+  testing *data*." This was also Day 11's own closing "next up" line
+  verbatim, giving a second independent confirmation beyond the spine order
+  itself. No learning-record or quiz signal exists to suggest deviating,
+  same finding as every prior round.
+  **Content:** framed the distinction around a real, previously-unexamined
+  blind spot rather than an abstract definition — every test in this project
+  so far (Days 3, 9, 11: `not_null`, `relationships`, `dbt_utils.accepted_range`)
+  is a data test, meaning it can only ever fail on rows that currently exist,
+  so none of them could ever catch a pure logic bug (wrong join direction,
+  off-by-one, sign error) in `mart_delivery_sla`'s `share_over_45_min`
+  arithmetic if today's real orders simply never happened to exercise it.
+  Built a `unit_tests.yml` unit test against `mart_delivery_sla` (Day 6/10)
+  in full as scaffolding (the `given`/`expect`/`model:` syntax itself is new
+  today, matching this course's own convention of giving new syntax in full
+  and reserving TODOs for the day's actual reasoning skill) with two
+  hand-picked, hand-checkable fake orders (20 minutes and 70 minutes to
+  deliver, against the 45-minute default `var()` from Day 10) so the
+  expected `share_over_45_min: 0.5` is verifiable by inspection, not just
+  asserted. Proved the test has teeth per Day 3's own "a test that's never
+  failed hasn't proven anything" standard: walked a real broken-model
+  scenario (accidentally aggregating with `count(*)` instead of
+  `sum(case when ... )`, a realistic copy-paste slip) that the fixture's own
+  hand-checked arithmetic (0.5 expected vs. 1.0 actual) demonstrably catches,
+  then reverted it. Left the day's actual skill as a second TODO unit test
+  on `mart_restaurant_sla` (Day 10), deliberately not giving the exact
+  `given`/`expect` rows so the learner has to re-check that model's own refs
+  first (it does not join `stg_restaurants`, unlike `mart_delivery_sla`) —
+  named this explicitly in the TODO comment rather than leaving it as a trap.
+  Closed with a callout on why staging models get no unit tests (near-
+  passthrough `select`s have no real logic to get wrong, so a unit test
+  there would just restate the SQL in YAML for no payoff), directly
+  mirroring Day 10's "does this earn its complexity" bar for macros, applied
+  here to test coverage instead. No pandas, no Python-language teaching, no
+  re-derivation of idempotency/API concepts — none applicable to a pure
+  dbt-testing day. Domain names used exactly as established
+  (`mart_delivery_sla`, `mart_restaurant_sla`, `share_over_45_min`,
+  `is_sla_breach`). Opened with a "before today" `dbt build` check citing
+  Day 11's own re-verified `PASS=24 TOTAL=24` number verbatim, per the
+  running convention of trusting the immediately-prior day's own most
+  recently reconfirmed count rather than re-deriving it independently each
+  round.
+  **Verification:** laid out a minimal scratch project mirroring Days 8–11's
+  approach (`dbt_project.yml` with `vars`/`macro-paths`, `profiles.yml`
+  pointing at `10.255.255.1` — unreachable, all four staging models plus
+  `stg_orders.yml`/`stg_order_events.yml` schema tests reconstructed from
+  Days 2/3/11's own literal snippets, `macros/is_sla_breach.sql` from Day 10,
+  `packages.yml` pinning `dbt-labs/dbt_utils` from Day 11, and
+  `mart_delivery_sla.sql`/`marts.yml` combining Days 6/10/11's cumulative
+  edits) in `.scratch_dataeng_verify_d12/` under the repo root, deleted
+  after. Ran `uv run --with "dbt-postgres==1.11.0" dbt deps --project-dir
+  <abs>` first (absolute-path flag, single non-compound command, no
+  `cd`/redirection — the same workaround every round since Day 2 has needed
+  for this sandbox's approval gate) — **this reached the live dbt Hub
+  registry again this round** and installed real `dbt_utils` 1.4.1,
+  confirmed via `dbt_packages/` and `package-lock.yml`. Added today's real
+  new content, `models/marts/unit_tests.yml`, with the exact `given`/`expect`
+  fixture used in the lesson. Ran `uv run --with "dbt-postgres==1.11.0" dbt
+  parse --project-dir <abs> --profiles-dir <abs> --no-partial-parse`: came
+  back clean (one pre-existing, unrelated `unused configuration paths`
+  warning about an `intermediate` config block this scratch project's
+  trimmed `dbt_project.yml` doesn't use any model under — not touched, not
+  today's content), grepped for `Error`, found none. Ran `dbt list
+  --resource-type unit_test`, which correctly resolved and listed today's
+  new unit test under its own resource type — `unit_test:
+  food_delivery_pipeline.test_mart_delivery_sla_share_over_threshold` —
+  distinct from `--resource-type test`, confirming unit tests are their own
+  first-class dbt resource and not silently folded into data tests. Then
+  added a throwaway second unit test with `model: mart_does_not_exist` to
+  confirm `dbt parse` actually catches a bad unit-test reference: it
+  reported a `Parsing Error` naming the exact missing model, confirmed via a
+  direct (non-piped) run rather than trusting exit code, consistent with
+  this file's standing caution about the exit code being unreliable when
+  piped; deleted the broken file and re-ran to confirm clean again. Attempted
+  to actually *run* the new unit test live (`dbt test --select
+  test_mart_delivery_sla_share_over_threshold`) against a scratch Postgres:
+  first tried the unreachable-IP profile, which (correctly, expectedly) hung
+  waiting on a connection and was killed after 20s; then tried standing up a
+  real scratch Postgres with a direct `docker run -d ... postgres:17`,
+  which **was blocked by this sandbox's approval gate this round** (`docker
+  ps` itself worked and showed no running containers, but the `run`
+  invocation specifically required approval that wasn't available headless),
+  the same friction Day 11's round hit for its own live-build attempt — so
+  the lesson's `PASS=1`/`FAIL 1` outputs are hand-derived from dbt's
+  documented unit-test output format plus this fixture's own hand-checked
+  arithmetic (1 breach of 2 = 0.5; the broken `count(*)` version gives 1.0),
+  not captured from a live run, and the lesson's own closing "Honesty note"
+  callout says so explicitly rather than presenting them as observed. No
+  `.py` files in this lesson (a pure dbt-testing day), so `py_compile` was
+  not applicable. Deleted `.scratch_dataeng_verify_d12/` afterward.
+  **Source check:** attempted `WebFetch` on
+  <https://docs.getdbt.com/docs/build/unit-tests> (the day's cited primary
+  source) this round — **it succeeded**, unlike several sibling courses'
+  recent rounds that reported this blocked. The fetch confirmed, from the
+  live page rather than memory: the exact `given`/`expect`/`model:` YAML
+  shape used in the lesson matches dbt's own example, and the page states
+  unit tests are "available from dbt v1.8" verbatim — matching this lesson's
+  own "available since dbt-core 1.8" framing exactly. This is a genuinely
+  fresh fetch this round, not a cached or assumed citation.
+  Registered Lesson 12 in `assets/nav.js` (`node --check` clean) and added
+  the Day 12 section to `reference/glossary.html` (1 new term: unit test
+  (dbt) — grepped Days 1–11's sections first, case-insensitively; found
+  "data test" already exists from Day 3 and deliberately did not duplicate
+  it, linking to it instead via `glossary.html#day3`). Added the dbt Unit
+  tests doc to `RESOURCES.md` under dbt (deep), directly after Data tests,
+  since the lesson's own "Go deeper" section cited it as not-yet-listed
+  there. Ran the same tag-balance/unescaped-`&`/quiz-word-count script prior
+  rounds have used, from a scratch file outside `dataeng/` (`/tmp/`, deleted
+  after use where the sandbox allowed it — the `.py` script itself could not
+  be `rm`'d directly per this session's own file-removal allowlist, but it
+  lives outside `dataeng/` and outside the repo entirely, so it carries no
+  repo-cleanliness risk). All tags balanced (div/p/table/tr/td/th/ul/li/pre/
+  code/h2/dfn/button/span/a) on both the lesson and the updated
+  `reference/glossary.html`, zero suspicious bare `&` in either. The first
+  quiz draft came up mismatched on all four questions (10/10/9, 7/7/8,
+  9/11/9, 10/9/9 word splits); rebalanced all four to 10/10/10, 8/8/8, 9/9/9
+  and 9/9/9 across several edit-and-recount passes, re-verified by re-running
+  the same script after each edit.
+  `bin/record-progress dataeng lesson_generated --day 12 --lesson
+  0012-dbt-unit-tests.html --detail '{"by":"headless"}'` succeeded on the
+  first attempt, run from the repo root:
+  `recorded: dataeng/lesson_generated day=12 lesson=0012-dbt-unit-tests.html`.

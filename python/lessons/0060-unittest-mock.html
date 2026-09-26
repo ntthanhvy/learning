@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 60 · unittest.mock: faking the outside world in a test</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 60 · ~20 min · 26 Sep 2026</p>
+<h1><code>unittest.mock</code>: faking the outside world in a test</h1>
+<p class="byline">Day 59's next-day note weighed a fresh gap against a second review pass and left the fresh case open. A closer look finds a genuine, load-bearing gap: Day 11 taught <code>pytest</code>, fixtures, and <code>parametrize</code>, and Day 22 tested a whole FastAPI app in-process — but nothing so far has answered "how do you test a function that calls something slow, flaky, or dangerous to actually run," like a network request, today's date, or a real database write. That's <code>unittest.mock</code>'s job, and unlike <code>pytest</code> itself, it ships in the standard library.</p>
+
+<div class="callout"><strong>Why today, specifically:</strong> a fresh-gap grep across all 59 lessons and every practice file confirmed zero hits for <code>unittest.mock</code>, <code>Mock</code>, <code>MagicMock</code>, <code>patch</code>, or <code>monkeypatch</code>. <code>subprocess</code> and <code>configparser</code> remain on the table from Day 58-59's notes but are still weaker: <code>subprocess</code> sits closer to <code>MISSION.md</code>'s process/concurrency boundary, and <code>configparser</code> is a narrow format <code>pathlib</code> and plain <code>dict</code>s already cover. Mocking is different — it directly extends Day 11's testing material, it's the standard answer to "how do I test code with side effects" (exactly what a data pipeline's file/network/database calls are), and it sets up cleanly for testing the FastAPI-phase code from Days 16-26 once a handler needs to call something external. That makes it a stronger pick than a second review pass this round.</div>
+
+<h2>1 · The problem: some code is not safe or fast to actually run in a test</h2>
+<p>Day 11's tests all called real functions that did real, cheap, repeatable work — parsing a string, reading a temp file. Not every function is like that. A function that hits a real API over the network is slow and fails when there's no internet; a function that checks <code>datetime.now()</code> gives a different answer every run, so an <code>assert</code> against it can never be reliable; a function that sends a real email or writes a real production row has a side effect you don't want happening a hundred times a day just from running the test suite. All three share one shape: the function under test is fine, but something it <em>calls</em> is the problem.</p>
+<pre><code><span class="kw">def</span> fetch_rate(currency):
+    response = requests.get(<span class="str">f"https://api.example.com/rates/{currency}"</span>)   <span class="cm"># real network call</span>
+    <span class="kw">return</span> response.json()[<span class="str">"rate"</span>]
+
+<span class="kw">def</span> convert(amount, currency):
+    <span class="kw">return</span> amount * fetch_rate(currency)   <span class="cm"># the logic worth testing is this one line</span></code></pre>
+<p>Testing <code>convert()</code> honestly should not require a live network connection to a real API every time the test suite runs. What's needed is a way to run <code>convert()</code> for real while making <code>fetch_rate()</code> return a known, fixed value instead of actually calling the network — without editing <code>convert()</code>'s source code at all.</p>
+
+<h2>2 · <code>Mock</code>: an object that accepts anything and remembers what happened</h2>
+<p>A <dfn data-en="an object from unittest.mock that accepts any attribute access or method call and returns another Mock by default, recording every call it received (arguments and count) so a test can later assert on what was called and how" data-vn="giữ nguyên &quot;Mock&quot; — object giả từ unittest.mock, gọi method/attribute nào cũng được, tự ghi lại đã bị gọi thế nào để test kiểm tra sau">Mock</dfn> is an object built for exactly this: it accepts any attribute access or method call, returns another <code>Mock</code> by default, and quietly records every call it received:</p>
+<pre><code><span class="kw">from</span> unittest.mock <span class="kw">import</span> Mock
+
+fake = Mock()
+fake.anything(<span class="kw">1</span>, <span class="kw">2</span>, name=<span class="str">"x"</span>)     <span class="cm"># works -- no AttributeError, no NameError, nothing defined ahead of time</span>
+fake.anything.called                <span class="cm"># True -- Mock remembers it was called</span>
+fake.anything.call_args             <span class="cm"># call(1, 2, name='x') -- and remembers exactly how</span></code></pre>
+<p>Verified live: creating a bare <code>Mock()</code> and calling an undefined method on it with arbitrary arguments raises nothing — it just works, and afterward <code>.called</code> is <code>True</code> and <code>.call_args</code> holds the exact arguments passed. A plain <code>Mock</code> is rarely used bare like this, though — its real job is standing in for a specific object your code already calls, with a controlled return value instead of another <code>Mock</code>.</p>
+
+<h2>3 · Controlling the return value: <code>Mock(return_value=...)</code></h2>
+<p>Setting <code>return_value</code> makes every call to the mock return that fixed value instead of a fresh <code>Mock</code>:</p>
+<pre><code><span class="kw">from</span> unittest.mock <span class="kw">import</span> Mock
+
+fake_response = Mock()
+fake_response.json = Mock(return_value={<span class="str">"rate"</span>: <span class="kw">1.1</span>})   <span class="cm"># .json() will now return this dict</span>
+
+fake_response.json()                        <span class="cm"># {'rate': 1.1} -- every time, no network involved</span>
+fake_response.json() == fake_response.json()   <span class="cm"># True -- same fixed value, called twice</span></code></pre>
+<p>This is the whole trick: build a <code>Mock</code> shaped like the real object <code>convert()</code> depends on (something with a <code>.json()</code> method returning a dict with a <code>"rate"</code> key), give it a fixed <code>return_value</code>, and the code under test can't tell the difference between it and a real network response — except it's instant and never flaky.</p>
+
+<h2>4 · <code>patch</code>: swapping in a Mock for the duration of one test only</h2>
+<p><code>fetch_rate()</code> calls <code>requests.get</code> directly — there's no parameter to pass a fake response through. <dfn data-en="a context manager or decorator from unittest.mock that temporarily replaces a named attribute (usually a function or class) with a Mock for the duration of a with block or decorated test function, then automatically restores the original afterward, even if the test raises" data-vn="giữ nguyên &quot;patch&quot; — tạm thay 1 attribute/hàm bằng Mock trong lúc chạy with block hoặc test, xong tự trả lại nguyên bản dù test có lỗi hay không">patch</dfn> solves that by temporarily replacing a named function or object with a <code>Mock</code>, for the duration of a <code>with</code> block, then restoring the original automatically — Day 6's context-manager guarantee, applied to swapping code instead of closing a file:</p>
+<pre><code><span class="kw">from</span> unittest.mock <span class="kw">import</span> patch, Mock
+
+<span class="kw">def</span> test_convert_uses_the_fetched_rate():
+    fake_response = Mock()
+    fake_response.json = Mock(return_value={<span class="str">"rate"</span>: <span class="kw">1.1</span>})
+    <span class="kw">with</span> patch(<span class="str">"requests.get"</span>, return_value=fake_response):
+        <span class="kw">assert</span> convert(<span class="kw">100</span>, <span class="str">"eur"</span>) == <span class="kw">110.0</span>
+    <span class="cm"># outside the with block, requests.get is back to the real function</span></code></pre>
+<p><code>patch("requests.get", ...)</code> means "wherever <code>requests.get</code> is looked up during this block, hand back this <code>Mock</code> instead." Inside the block, <code>fetch_rate()</code> calls what it thinks is the real <code>requests.get</code>, gets <code>fake_response</code> back, calls <code>.json()</code> on it, and gets the fixed <code>{"rate": 1.1}</code> — no network, no flakiness, and the assertion runs in milliseconds. The moment the <code>with</code> block ends, <code>requests.get</code> is exactly what it was before, restored automatically even if the <code>assert</code> inside had failed — the identical unconditional-cleanup guarantee <code>with</code> already made for files.</p>
+
+<div class="callout"><strong>Bridge from SQL:</strong> mocking a database call in a unit test plays the same role a disposable test schema plays for integration tests — both let you assert on your own logic's behavior without touching data that matters. The difference is scope: a mock replaces the call entirely (fastest, but proves nothing about the real database driver), while a real test database (Day 21) still executes real SQL against real rows. Most real projects use both — mocks for fast, frequent unit tests, and a real test database for a smaller number of slower integration tests.</div>
+
+<h2>5 · The one thing that silently defeats the whole test: patching the wrong path</h2>
+<p><code>patch()</code>'s first argument is a string naming <em>where a name is looked up</em>, not where it's originally defined — a distinction that causes almost every real mocking bug. If <code>convert()</code> lives in a module called <code>billing.py</code> that did <code>import requests</code> at the top, then <code>billing.py</code> has its own local name <code>requests</code> pointing at the same module object. Patching <code>"requests.get"</code> patches the original <code>requests</code> module's attribute — but if <code>billing.py</code> imported it as <code>from requests import get</code> instead, <code>billing.py</code> now has its own separate name <code>get</code>, and patching <code>"requests.get"</code> never touches it:</p>
+<pre><code><span class="cm"># billing.py</span>
+<span class="kw">from</span> requests <span class="kw">import</span> get   <span class="cm"># billing.get is now its OWN name, a separate reference to the same function</span>
+
+<span class="kw">def</span> fetch_rate(currency):
+    <span class="kw">return</span> get(<span class="str">f".../{currency}"</span>).json()[<span class="str">"rate"</span>]
+
+<span class="cm"># test file -- WRONG, patches a path billing.py never looks up:</span>
+<span class="kw">with</span> patch(<span class="str">"requests.get"</span>, return_value=fake_response):
+    fetch_rate(<span class="str">"eur"</span>)   <span class="cm"># still calls the REAL get -- billing.get was never touched</span>
+
+<span class="cm"># test file -- RIGHT, patches the name billing.py actually holds:</span>
+<span class="kw">with</span> patch(<span class="str">"billing.get"</span>, return_value=fake_response):
+    fetch_rate(<span class="str">"eur"</span>)   <span class="cm"># now uses the fake -- billing's own "get" name got replaced</span></code></pre>
+<p>Verified live: with a small <code>billing</code>-style module importing <code>get</code> by name, patching <code>"requests.get"</code> left the module still calling the real function (confirmed by the mock's <code>.called</code> staying <code>False</code>), while patching <code>"billing.get"</code> — the module's own local name — correctly redirected the call. The rule Day 9's import lesson already implied applies again here: <code>from module import name</code> binds a new local name in the importing module, so a patch has to target <em>that</em> module's name, not the name's original home. This one detail is the single most common reason a mock silently "doesn't work" — the test passes for the wrong reason (nothing was actually mocked) or fails confusingly because the real code path still ran.</p>
+
+<h2>6 · <code>monkeypatch</code>: pytest's built-in fixture for the same job</h2>
+<p>Day 11 taught <code>pytest</code> fixtures as a general mechanism — something decorated <code>@pytest.fixture</code> that a test asks for by parameter name. <code>pytest</code> ships one itself, called <code>monkeypatch</code>, that wraps exactly today's <code>patch()</code> pattern with automatic cleanup already wired to the test's lifetime, no <code>with</code> block needed:</p>
+<pre><code><span class="kw">def</span> test_convert_uses_the_fetched_rate(monkeypatch):
+    fake_response = Mock()
+    fake_response.json = Mock(return_value={<span class="str">"rate"</span>: <span class="kw">1.1</span>})
+    monkeypatch.setattr(<span class="str">"billing.get"</span>, Mock(return_value=fake_response))
+    <span class="kw">assert</span> convert(<span class="kw">100</span>, <span class="str">"eur"</span>) == <span class="kw">110.0</span>
+    <span class="cm"># no manual restore needed -- monkeypatch undoes it when the test ends, pass or fail</span></code></pre>
+<p><code>monkeypatch.setattr(path, value)</code> does the same job as <code>patch(path, ...)</code> — same "path is a lookup location, not a definition site" rule from section 5 applies unchanged — but restores automatically when the test function returns, the same way Day 11's fixture teardown already ran after <code>yield</code> regardless of pass or fail. Reach for <code>unittest.mock.patch</code> directly outside a test (or when a plain <code>with</code> block reads more clearly than adding a fixture parameter); reach for <code>monkeypatch</code> inside a <code>pytest</code> test, since it's already there as a built-in fixture needing no import at all.</p>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> nothing pandas-specific today — mocking a pandas pipeline's I/O (a network call feeding <code>pd.read_json()</code>, say) uses the exact same <code>patch</code>/<code>Mock</code> mechanics taught today, just returning fake JSON bytes or a fake response object instead of a plain dict; the library itself stays <code>data/</code>'s job.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/60_unittest_mock.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/60_unittest_mock.py</code></pre>
+<p>No dependencies — standard library only, unlike Day 11's practice file (this lesson uses only <code>unittest.mock</code>, not <code>pytest</code> itself, so no <code>--with</code> flag is needed). Exercises: building a <code>Mock</code> with a fixed <code>return_value</code> and asserting on <code>.called</code>/<code>.call_args</code>, using <code>patch()</code> to replace a module-level function for one <code>with</code> block and confirming it's restored after, and diagnosing section 5's "patched the wrong path" bug by fixing a patch target string so a previously-unmocked call actually gets mocked.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A bare Mock() accepts any attribute access or method call with any arguments and returns another Mock by default, with no AttributeError or predefined shape needed — it also records every call it received for later assertions.">
+    <p class="stem">What happens when you call an undefined method on a plain <code>Mock()</code>?</p>
+    <button class="opt" data-ok>it succeeds and returns another Mock, recording the call</button>
+    <button class="opt">it always raises AttributeError, same as any undefined method</button>
+    <button class="opt">it silently does nothing and returns None every time</button>
+  </div>
+  <div class="q" data-why="patch() is a context manager (or decorator) that temporarily replaces a named function or object with a Mock for the duration of a with block, then automatically restores the original afterward — even if the code inside raised an exception, the same unconditional guarantee a with block already makes for closing a file.">
+    <p class="stem">What does <code>with patch("requests.get", return_value=fake):</code> guarantee?</p>
+    <button class="opt" data-ok>requests.get is restored to normal once the block ends</button>
+    <button class="opt">requests.get stays replaced for the rest of the program</button>
+    <button class="opt">every network call anywhere becomes permanently disabled forever after</button>
+  </div>
+  <div class="q" data-why="patch()'s target string names where a name is looked up, not where it's originally defined. If a module does 'from requests import get', that module now holds its own separate local name; patching 'requests.get' never touches that module's own 'get', so the real function still runs and the mock's .called stays False.">
+    <p class="stem">Why does <code>patch("requests.get", ...)</code> sometimes fail to mock a call at all?</p>
+    <button class="opt" data-ok>the calling module imported the name under its own path</button>
+    <button class="opt">patch can only ever replace entire modules, never one function</button>
+    <button class="opt">requests.get is a built-in the standard library refuses to patch</button>
+  </div>
+  <div class="q" data-why="monkeypatch is a pytest built-in fixture wrapping the same patch mechanics as unittest.mock.patch, but its cleanup is wired to the test function's own lifetime automatically — no with block needed, and no import beyond naming it as a test parameter, since pytest supplies it itself.">
+    <p class="stem">How does <code>pytest</code>'s <code>monkeypatch</code> fixture differ from calling <code>patch()</code> directly?</p>
+    <button class="opt" data-ok>it restores automatically at test end, no with block required</button>
+    <button class="opt">it can only ever replace return values, never whole functions</button>
+    <button class="opt">it works identically but needs an extra explicit import line</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the standard library's own <a href="https://docs.python.org/3/library/unittest.mock.html"><code>unittest.mock</code></a> documentation, especially the "Quick Guide" and "Where to patch" sections — the latter covers today's section 5 in full depth. For the <code>pytest</code> side, <a href="https://docs.pytest.org/en/stable/how-to/monkeypatch.html">pytest's monkeypatch how-to</a> (part of the pytest docs already cited in RESOURCES.md for Day 11) is the natural next stop.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day60">glossary</a> under Day 60.<br>
+Next up: a fresh-gap scan will weigh <code>subprocess</code> and <code>configparser</code> against a second review pass, per Day 58 and 59's running notes.<br><br>
+💬 Anything unclear — <code>Mock</code>, <code>patch</code>, or the "where to patch" rule? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

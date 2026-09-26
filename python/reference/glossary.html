@@ -472,6 +472,14 @@
   <tr><td>avalanche effect</td><td>giữ nguyên "avalanche effect" — đổi 1 bit input làm digest thay đổi tung tóe không đoán được, input gần giống nhau không cho ra digest gần giống nhau</td><td>A hash function's property that changing even one input bit flips roughly half the output bits unpredictably, so similar inputs never produce similar-looking digests — the reason a digest can't be reverse-engineered by tweaking a guess and checking whether the result gets "closer."</td></tr>
 </table>
 
+<h2 id="day60">Day 60 — unittest.mock: faking the outside world in a test</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>Mock</td><td>giữ nguyên "Mock" — object giả từ unittest.mock, gọi method/attribute nào cũng được, tự ghi lại đã bị gọi thế nào để test kiểm tra sau</td><td>An object from <code>unittest.mock</code> that accepts any attribute access or method call and returns another <code>Mock</code> by default, recording every call it received (arguments and count) so a test can later assert on what was called and how — set <code>return_value</code> to control what it hands back instead of another <code>Mock</code>.</td></tr>
+  <tr><td>patch</td><td>giữ nguyên "patch" — tạm thay 1 attribute/hàm bằng Mock trong lúc chạy with block hoặc test, xong tự trả lại nguyên bản dù test có lỗi hay không</td><td><code>unittest.mock.patch(target, ...)</code>, used as a context manager or decorator, temporarily replaces a named attribute (usually a function or class) with a <code>Mock</code> for the duration of a <code>with</code> block or decorated test, then automatically restores the original afterward, even if the code inside raised an exception. The target string names where a name is <em>looked up</em>, not where it's originally defined — patching the wrong module's copy of a name is the most common way a mock silently fails to take effect.</td></tr>
+  <tr><td>monkeypatch</td><td>giữ nguyên "monkeypatch" — fixture có sẵn của pytest, làm việc giống patch() nhưng tự dọn dẹp theo vòng đời của test, không cần with block</td><td><code>pytest</code>'s own built-in fixture wrapping the same replace-and-restore mechanics as <code>unittest.mock.patch</code>, with cleanup wired automatically to the test function's lifetime — no <code>with</code> block and no import needed beyond naming <code>monkeypatch</code> as a test parameter, since <code>pytest</code> supplies it itself.</td></tr>
+</table>
+
 <p class="next">💬 A term here still unclear? Ask your teacher — hỏi bằng tiếng Việt cũng được.</p>
 
 <script src="../assets/nav.js"></script>

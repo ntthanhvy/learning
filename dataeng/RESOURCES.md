@@ -33,6 +33,8 @@ before Phase 2.
   Use for: Day 2 (`source()`, `ref()`, view vs table), and when a seed is and isn't appropriate.
 - [Docs: Data tests](https://docs.getdbt.com/docs/build/data-tests)
   Generic and singular tests, and `dbt build`. Use for: Day 3, the primary source.
+- [Docs: Unit tests](https://docs.getdbt.com/docs/build/unit-tests)
+  `given`/`expect` fixtures against fake rows, available since dbt-core 1.8 — testing model *logic* on known inputs, distinct from a data test's check on real warehouse rows. Use for: Phase 2a's unit-tests-vs-data-tests lesson, the primary source.
 - [Docs: Incremental models](https://docs.getdbt.com/docs/build/incremental-models)
   `is_incremental()`, `unique_key`, strategies. Use for: Day 4 and Phase 2a incremental depth.
 - [Docs: Snapshots](https://docs.getdbt.com/docs/build/snapshots)

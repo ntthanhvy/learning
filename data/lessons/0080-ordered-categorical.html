@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 80 · ordered categoricals: making "small &lt; medium &lt; large" sort correctly</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 80 · ~20 min · 26 Sep 2026</p>
+<h1>Ordered categoricals: making "small &lt; medium &lt; large" sort correctly</h1>
+<p class="byline">Lesson 79's teaser named the groupby/agg leftovers (<code>as_index=False</code>, <code>.get_group()</code>) as the standing candidate, but a fresh gap-scan (grepping all 79 lesson bodies plus the glossary against a wider candidate list) found something with more runway: Lesson 25 taught the <code>category</code> dtype in full — memory, the lookup-table mechanics, the fixed-category silent-NaN gotcha — but its own "Go deeper" line named "ordered categories" as something the pandas docs cover that Lesson 25 itself never did. Grepping <code>ordered=</code> across every lesson body confirmed zero hits anywhere. That's today's topic: the same <code>category</code> dtype, with an order attached.</p>
+
+<h2>1 · The problem: category dtype sorts alphabetically by default</h2>
+<p>Lesson 25's <code>category</code> dtype is a lookup table plus a small integer code per row — great for memory, but by default pandas has no idea that <code>"medium"</code> sits between <code>"small"</code> and <code>"large"</code>. Bucket this course's own <code>orders_raw.csv</code> amounts into size tiers and convert to plain <code>category</code>:</p>
+<pre><code>clean[<span class="str">"size_cat"</span>] = clean[<span class="str">"size"</span>].astype(<span class="str">"category"</span>)
+clean.sort_values(<span class="str">"size_cat"</span>)[[<span class="str">"customer"</span>, <span class="str">"amount"</span>, <span class="str">"size"</span>]]
+<span class="cm"># customer  amount    size
+# Binh       180.0   large    &lt;- sorted FIRST -- wrong, alphabetical: large, medium, small
+# An         120.0  medium
+# An          42.0   small
+# Binh        35.5   small</span></code></pre>
+<p>Confirmed directly: <code>large</code> sorts before <code>medium</code> and <code>small</code> because pandas defaults to alphabetical category order — the same trap as a plain SQL <code>ORDER BY size</code> on a free-text column with no <code>CASE WHEN</code> or lookup-table rank to guide it. A dashboard sorting "Priority: Low/Medium/High" this way would put High in the middle. This is the exact gap Lesson 25 left open.</p>
+
+<h2>2 · The fix: CategoricalDtype(categories=[...], ordered=True)</h2>
+<p>Pass an explicit category list in the order you want, plus <code>ordered=True</code>, and build a <dfn data-en="a pandas category dtype where the fixed category list has a defined RANK (categories[0] < categories[1] < ...), built via pd.CategoricalDtype(categories=[...], ordered=True) or pd.Categorical(values, categories=[...], ordered=True) -- unlocks sort_values() honoring that rank instead of alphabetical order, plus <, >, min(), max() comparisons; an UNORDERED category (Lesson 25's default) supports only == and !=, and raises TypeError on <, >" data-vn="giữ nguyên 'ordered categorical' — category dtype (Lesson 25) có THÊM thứ tự xếp hạng rõ ràng (categories[0] < categories[1] < ...) qua CategoricalDtype(categories=[...], ordered=True); nhờ vậy sort_values() xếp theo thứ tự nghiệp vụ (vd: small<medium<large) thay vì theo bảng chữ cái, và dùng được <, >, min(), max(); category KHÔNG ordered (Lesson 25) chỉ so được ==, !=, dùng <, > sẽ báo TypeError">ordered categorical</dfn>:</p>
+<pre><code>order = pd.CategoricalDtype(categories=[<span class="str">"small"</span>, <span class="str">"medium"</span>, <span class="str">"large"</span>], ordered=<span class="kw">True</span>)
+clean[<span class="str">"size_ordered"</span>] = clean[<span class="str">"size"</span>].astype(order)
+clean.sort_values(<span class="str">"size_ordered"</span>)[[<span class="str">"customer"</span>, <span class="str">"amount"</span>, <span class="str">"size"</span>]]
+<span class="cm"># customer  amount    size
+# An          42.0   small    &lt;- correct business order now
+# Binh        35.5   small
+# An         120.0  medium
+# Binh       180.0   large</span></code></pre>
+<p>Confirmed directly: <code>sort_values()</code> now respects <code>small &lt; medium &lt; large</code>, the order the list was written in, not alphabetical order. Same lookup-table storage as Lesson 25's plain <code>category</code> — this costs nothing extra in memory, it's the identical dtype family with one more piece of metadata (the rank) attached.</p>
+
+<h2>3 · What ordering unlocks: real comparisons, not just equality</h2>
+<p>An <em>unordered</em> category (Lesson 25's default) only supports <code>==</code>/<code>!=</code> — pandas has no basis to say one category is "more than" another. An <em>ordered</em> one supports the full set:</p>
+<pre><code>clean[clean[<span class="str">"size_ordered"</span>] &gt; <span class="str">"small"</span>][[<span class="str">"customer"</span>, <span class="str">"amount"</span>, <span class="str">"size"</span>]]
+<span class="cm"># customer  amount    size
+# An         120.0  medium   -- both correctly kept: medium AND large are > small
+# Binh       180.0   large</span></code></pre>
+<pre><code>clean[<span class="str">"size_ordered"</span>].min(), clean[<span class="str">"size_ordered"</span>].max()
+<span class="cm"># ('small', 'large')</span>
+
+<span class="cm"># the unordered version from section 1, same comparison:</span>
+clean[<span class="str">"size_cat"</span>] &gt; <span class="str">"small"</span>
+<span class="cm"># TypeError: Unordered Categoricals can only compare equality or not</span></code></pre>
+<p>Confirmed directly on both sides: <code>&gt;</code>/<code>min()</code>/<code>max()</code> work on the ordered column and raise <code>TypeError</code> on the unordered one. This is the real interview tell — "why does comparing my category column raise TypeError?" almost always means the column was converted to plain <code>category</code> when the actual need was an ordered one.</p>
+
+<div class="callout"><strong>SQL bridge:</strong> Lesson 25 mapped plain <code>category</code> to a SQL <code>ENUM</code>/lookup table. An <em>ordered</em> categorical is that same lookup table with a rank column added — the pattern behind a hand-rolled <code>CASE WHEN size='small' THEN 1 WHEN size='medium' THEN 2 WHEN size='large' THEN 3 END AS size_rank</code> just to get <code>ORDER BY</code> right, or a dedicated small ranked lookup table joined in for the same reason. <code>ordered=True</code> is pandas doing that rank-column trick for you, once, at the dtype level — every <code>sort_values()</code>/<code>&gt;</code>/<code>min()</code> afterward just uses it.</div>
+
+<h2>4 · A gotcha, and a callback: pd.cut() already returns one</h2>
+<p>Comparing an ordered category to a value <em>outside</em> its fixed category list doesn't silently misbehave — it raises, unlike Lesson 25's fixed-category <code>astype()</code> gotcha (which silently produced <code>NaN</code>):</p>
+<pre><code>clean[<span class="str">"size_ordered"</span>] &gt; <span class="str">"huge"</span>
+<span class="cm"># TypeError: Invalid comparison between dtype=category and str</span></code></pre>
+<p>Confirmed directly: unlike Lesson 25's "no crash, quietly wrong" family, this one fails loudly — <code>"huge"</code> was never one of the three fixed categories, so pandas has nothing to rank it against. A useful, if accidental, safety net: it's easier to notice a crash than a silent alphabetical-sort bug.</p>
+<p>Lesson 12's/18's <code>pd.cut()</code>/<code>pd.qcut()</code> binning has been quietly returning an ordered categorical this whole course, worth naming explicitly now:</p>
+<pre><code>pd.cut(clean[<span class="str">"amount"</span>], bins=[<span class="num">0</span>, <span class="num">50</span>, <span class="num">150</span>, <span class="num">1000</span>], labels=[<span class="str">"small"</span>, <span class="str">"medium"</span>, <span class="str">"large"</span>]).dtype
+<span class="cm"># category
+</span>pd.cut(clean[<span class="str">"amount"</span>], bins=[<span class="num">0</span>, <span class="num">50</span>, <span class="num">150</span>, <span class="num">1000</span>], labels=[<span class="str">"small"</span>, <span class="str">"medium"</span>, <span class="str">"large"</span>]).cat.ordered
+<span class="cm"># True</span></code></pre>
+<p>Confirmed directly: <code>pd.cut()</code>'s output <code>.cat.ordered</code> is <code>True</code>, and its result matches this section's hand-built <code>size_ordered</code> column exactly, row for row. Every bucket <code>pd.cut()</code> ever produced in this course was already sortable/comparable correctly by construction — this lesson just names the mechanism.</p>
+
+<div class="interview">
+<p><strong>Q: "I converted a priority column (Low/Medium/High) to category dtype and sort_values() puts High in the middle. What's wrong?"</strong> A strong answer, out loud: <em>"category dtype defaults to alphabetical category order unless told otherwise — High, Low, Medium alphabetically, which is exactly the middle-High bug. The fix is building an ordered categorical instead: pd.CategoricalDtype(categories=['Low','Medium','High'], ordered=True), then .astype() that dtype. That also unlocks real comparisons — greater-than, min, max — which plain unordered category dtype refuses with a TypeError, only == and != work there. It's the same idea as hand-rolling a CASE WHEN rank column in SQL just to get ORDER BY right on a priority field — ordered=True does that once at the dtype level instead of every query. And I'd mention pd.cut()'s bucket output has actually been an ordered categorical all along, if that's ever come up already."</em> The signal: naming the alphabetical-default root cause precisely, not just patching around it, and connecting it to the comparison behavior unprompted.</p>
+</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/80_ordered_categorical.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/80_ordered_categorical.py</code></pre>
+<p>Reuses the same cleaned <code>orders_raw.csv</code> rows as Lessons 6-25 (An 120.0/01-05, An 42.0/01-10, Binh 35.5/01-06, Binh 180.0/01-09), bucketed into <code>small</code>/<code>medium</code>/<code>large</code> size tiers by amount. Exercise 1 builds the ordered <code>CategoricalDtype</code> and confirms <code>sort_values()</code> follows business order, not alphabetical (Section 2). Exercise 2 confirms <code>&gt;</code>/<code>min()</code>/<code>max()</code> work on the ordered column but raise <code>TypeError</code> on the plain unordered one (Section 3). Exercise 3 confirms comparing to a category outside the fixed list raises rather than silently misbehaving (Section 4). Exercise 4 confirms <code>pd.cut()</code>'s own bucketed output is already an ordered categorical matching the hand-built one exactly (Section 4's callback).</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Plain category dtype (Lesson 25) has no built-in concept of rank -- sort_values() falls back to alphabetical category order unless the dtype is explicitly built as ordered with a chosen category list, e.g. pd.CategoricalDtype(categories=[...], ordered=True).">
+    <p class="stem">By default, how does <code>sort_values()</code> order a plain <code>category</code> column?</p>
+    <button class="opt" data-ok>alphabetically, by each category's own label text itself</button>
+    <button class="opt">by first appearance order, seen while loading data</button>
+    <button class="opt">by each row's original integer position, always fixed</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: an ordered categorical (CategoricalDtype(categories=[...], ordered=True)) supports >, <, min(), max() using the rank of its fixed category list. An unordered category (Lesson 25's default) only supports == and != and raises TypeError on any > or < comparison.">
+    <p class="stem">What does an <em>unordered</em> category column raise on a <code>&gt;</code> comparison?</p>
+    <button class="opt" data-ok>TypeError, since only equality comparisons are ever defined here</button>
+    <button class="opt">nothing at all, comparing alphabetically from start to end</button>
+    <button class="opt">a silent NaN result, with zero warning printed ever</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: pd.cut()'s bucketed output has always been an ordered categorical (.cat.ordered is True) with categories ranked by interval, which is exactly why cutting a column into bins and sorting or comparing the buckets already works correctly today -- this lesson just names the mechanism.">
+    <p class="stem"><code>pd.cut()</code>'s bucketed output dtype is which of these?</p>
+    <button class="opt" data-ok>category, and already ordered, needing no extra step</button>
+    <button class="opt">category, but unordered, needing a manual ordered rebuild</button>
+    <button class="opt">plain object dtype, needing an explicit later conversion</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the pandas User Guide's <a href="https://pandas.pydata.org/docs/user_guide/categorical.html">Categorical data</a> page, "Sorting and order" section (per Lesson 25's own citation and <code>RESOURCES.md</code>'s "Docs: pandas User Guide" entry, ~10 min) — covers <code>as_ordered()</code>/<code>as_unordered()</code>/<code>reorder_categories()</code> beyond what today covered.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>ordered categorical</code> is new today, placed right after Lesson 25's <code>category dtype</code> entry.<br>
+<strong>Next lesson:</strong> the groupby/agg leftovers (<code>as_index=False</code>, <code>.get_group()</code>) remain the standing named candidate, alongside a fresh scan as always — the memory/dtype family (<code>infer_objects()</code>, <code>read_csv(dtype=)</code>, sparse dtype, nullable boolean) also stays open per Lesson 79's gap-scan.<br><br>
+💬 Anything unclear — ordered vs unordered category, the TypeError cases, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

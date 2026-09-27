@@ -166,6 +166,8 @@
       file: "lessons/0079-default-str-dtype.html" },
     { n: 80, date: "2026-09-26", title: "Ordered categoricals: making \"small < medium < large\" sort correctly",
       file: "lessons/0080-ordered-categorical.html" },
+    { n: 81, date: "2026-09-27", title: "pd.to_datetime(format=): stop guessing, start declaring",
+      file: "lessons/0081-to-datetime-format.html" },
   ];
 
   const REFS = [

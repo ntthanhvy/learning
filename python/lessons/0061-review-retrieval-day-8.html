@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 61 · Review day 8: retrieval across six more lessons</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 61 · ~20 min · 27 Sep 2026</p>
+<h1>Review day 8: retrieval across six more lessons</h1>
+<p class="byline">Day 43 reviewed Days 1, 2, 3, 5, 7, 12; Day 44 reviewed Days 16, 19, 30, 33, 34, 38; Day 45 reviewed Days 4, 6, 9, 13, 20, 36; Day 49 reviewed Days 8, 11, 17, 24, 32, 41; Day 52 reviewed Days 10, 14, 27, 31, 39, 42; Day 55 reviewed Days 15, 28, 29, 35, 37, 40; Day 58 reviewed Days 18, 21, 22, 23, 25, 26 (closing out every day through 57 with at least one sweep). Days 59-60 then ran fresh content two days straight (<code>hashlib</code>, then <code>unittest.mock</code>) with no reported weak spot to chase, since no <code>lesson_completed</code>/quiz/kata signal has ever come back from any of the 60 lessons shipped so far. This is an eighth <dfn data-en="a study technique where the learner produces an answer from memory before checking it, rather than re-reading the source material - it is a stronger driver of durable learning than re-reading, especially when spaced across separated topics rather than massed on one" data-vn="giữ nguyên &quot;retrieval practice&quot; — tự nhớ lại và viết ra câu trả lời trước khi xem lại tài liệu, hiệu quả hơn hẳn việc đọc lại; càng hiệu quả khi trộn nhiều chủ đề cũ thay vì ôn 1 chủ đề liền mạch">retrieval practice</dfn> day, this time a genuine second pass: six ideas from Days 46, 50, 51, 53, 54, and 56 — the oldest technical (non-review, non-answer-shape) lessons that Day 58's closing sweep left untouched, since they were all written after Day 45.</p>
+
+<div class="callout"><strong>Why today, specifically:</strong> Day 60's own next-day note flagged that two fresh-content days in a row (59-60) since Day 58's review meant Day 61 "should weigh the 'avoid three fresh days in a row' consideration seriously... unless a compelling fresh-gap case turns up first." A fresh-gap scan ran first, matching every prior review day's own discipline: grepping all 60 lessons and every practice file turned up nothing beyond the two candidates Days 59 and 60 already named and set aside twice — <code>subprocess</code> and <code>configparser</code> — both still off <code>PLAN.md</code>'s spine and weaker than the modules that won the last two fresh days. With Day 58 having just closed out Days 1-57 (every one touched by at least one sweep), the only lessons left with zero review coverage are 46, 50, 51, 53, 54, and 56-60 themselves — six of which (46, 50, 51, 53, 54, 56) are old enough (12-22 Sep) and substantial enough to be worth a first review pass now, ahead of the newer 57/59/60. A third fresh day on a weaker module loses to finally reviewing this backlog.</div>
+
+<h2>1 · Six questions, in the original teaching order</h2>
+<p>Answer each out loud or on paper <em>before</em> reading the fold-out answer. If one is shaky, note it and go fix it in the practice file below rather than only rereading the old lesson.</p>
+
+<p><strong>Day 46 — f-strings and the format spec.</strong> After running <code>label = f"{price:.2f}"</code>, what has happened to <code>price</code> itself, and why?</p>
+<div class="callout">Fold-out answer: nothing — <code>price</code> is still the exact same original float. The format spec after the colon only controls how a value renders into the new string; it never mutates the object being formatted, the same way <code>ROUND(price, 2)</code> in a SQL <code>SELECT</code> never touches the stored row. <code>label</code> is a brand-new string holding the rendered text; <code>price</code> was only ever read, not written.</div>
+
+<p><strong>Day 50 — abstract base classes.</strong> A subclass of an <code>abc.ABC</code> forgets to override an <code>@abstractmethod</code>. When, exactly, does Python raise an error, and how is that different from a plain <code>raise NotImplementedError</code> convention?</p>
+<div class="callout">Fold-out answer: immediately, at instantiation — <code>BrokenPayment()</code> raises <code>TypeError</code> the instant it's constructed, naming the specific missing method, before any call ever happens. A plain <code>raise NotImplementedError</code> inside an ordinary base-class method is only a convention: the subclass instantiates fine, and the mistake only surfaces the moment something eventually calls the missing method — which could be far later, in production. The ABC turns a call-time surprise into a construction-time guarantee.</div>
+
+<p><strong>Day 51 — <code>heapq</code> &amp; <code>bisect</code>.</strong> Why does <code>heapq.heappop()</code> stay <code>O(log n)</code> per call instead of needing a full <code>O(n log n)</code> re-sort, when the list isn't actually kept fully sorted?</p>
+<div class="callout">Fold-out answer: a heap only maintains the weaker "each parent ≤ its children" property, not full sorted order — just enough structure to guarantee the smallest element sits at index 0, and just little enough that fixing that property after one push or pop only costs a walk up or down one path of the tree, <code>O(log n)</code>, rather than reordering the whole collection. Sorting the whole list on every insert would repeat <code>O(n log n)</code> work that a heap deliberately avoids by never fully sorting in the first place.</div>
+
+<p><strong>Day 53 — <code>collections.deque</code> &amp; <code>namedtuple</code>.</strong> Why is <code>list.pop(0)</code> slow on a long list while <code>deque.popleft()</code> stays cheap regardless of length?</p>
+<div class="callout">Fold-out answer: a plain list stores its elements contiguously, so removing the first one means every remaining element has to shift left by one slot — <code>O(n)</code> work per call, growing with the list's length. A <code>deque</code> is built as a structure where both ends are equally cheap to add to or remove from, <code>O(1)</code>, regardless of length — the trade is that random access into the <em>middle</em> stays <code>O(n)</code> on a <code>deque</code> too, same as a list, so a <code>deque</code> only wins when the two ends are actually what matters.</div>
+
+<p><strong>Day 54 — the <code>random</code> module.</strong> Why does calling <code>random.seed(42)</code>, then a sequence of <code>random</code> calls, twice in a row, produce the identical sequence both times — and why does that matter for testing?</p>
+<div class="callout">Fold-out answer: <code>random</code>'s output isn't truly random — it's produced by a deterministic algorithm driven by a starting number, the seed. Calling <code>seed(42)</code> resets that starting point to the exact same value each time, so every call that follows reproduces the identical sequence, in order. That's what lets a test assert on a specific "random" result instead of writing a weaker test like "the length didn't change" — without seeding first, the same assertion would be flaky, passing or failing by chance from run to run.</div>
+
+<p><strong>Day 56 — the <code>operator</code> module.</strong> <code>itemgetter("city", "amount")</code> works as a sort key equivalent to <code>ORDER BY city, amount</code>. What does passing <code>itemgetter</code> two names actually return, and why does that make it work as a multi-column key?</p>
+<div class="callout">Fold-out answer: it returns a callable that, given a row, returns a <em>tuple</em> of both values — <code>(row["city"], row["amount"])</code> — instead of a single value. Python compares tuples element by element, left to right, only falling through to the second element when the first ties, which is exactly the "sort by this column, then break ties with that column" behavior <code>ORDER BY city, amount</code> describes. One <code>itemgetter</code> call with several keys is a shorter way to build the same tuple a hand-written <code>lambda row: (row["city"], row["amount"])</code> would.</div>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> nothing pandas-specific today — this review only revisits Days 46, 50, 51, 53, 54, and 56's plain-Python string-formatting, class-hierarchy, and data-structure material, none of which needs a DataFrame to demonstrate.</div>
+
+<h2>2 · Why these six, spread this way</h2>
+<p>Same interleaving logic as every prior review day: a display-formatting rule, then a class-enforcement mechanism, then an algorithmic-complexity question, then a sequence-performance question, then a determinism/testing question, then a sort-key mechanics question — six different mental models, not six variations on one, so each answer forces a fresh retrieval instead of riding momentum from the previous question. Unlike Day 58's closing sweep, which deliberately grouped one connected arc (the FastAPI Days 16-26 stack), today's six are unrelated to each other on purpose, matching the scattered style of Days 43, 44, 45, 49, 52, and 55 rather than Day 58's single-arc exception.</p>
+<p>With today's six done, the only lessons never touched by a review sweep are the three most recent (57, 59, 60) plus the two answer-shape meta-lessons (47, 48), which teach spoken-communication structure rather than a testable mechanism and don't fit this format cleanly. A future review day (a likely Day 65-70-ish) should pick up 57/59/60 once they've aged a little, the same way today waited for 46-56 to sit for at least a couple of weeks before revisiting them.</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/61_review_retrieval_day_8.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/61_review_retrieval_day_8.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. No new syntax: every mechanism below was taught in Days 46, 50, 51, 53, 54, and 56. Exercises: formatting a price with a format spec without touching the original float, an ABC that refuses to instantiate an incomplete subclass, a min-heap that always pops the smallest item first, a <code>deque</code> used as a fixed-size sliding window with <code>maxlen</code>, a seeded <code>random</code> sequence that reproduces identically, and a two-key <code>itemgetter</code> sort.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A format spec after the colon in an f-string only controls how a value renders into a new string - it never mutates the value being formatted. price is read, not written, so it is the exact same float object after f'{price:.2f}' runs as it was before.">
+    <p class="stem">After <code>label = f"{price:.2f}"</code> runs, what has happened to <code>price</code> itself?</p>
+    <button class="opt" data-ok>nothing - price stays the exact same float</button>
+    <button class="opt">price is now permanently rounded to two decimals</button>
+    <button class="opt">price becomes the string label, replacing the float</button>
+  </div>
+  <div class="q" data-why="An abc.ABC subclass that hasn't overridden every @abstractmethod raises TypeError the instant it is constructed, naming the missing method - not later, when that method finally gets called, the way an ordinary raise NotImplementedError convention only fails at call time.">
+    <p class="stem">When does an incomplete <code>abc.ABC</code> subclass raise an error for a missing <code>@abstractmethod</code>?</p>
+    <button class="opt" data-ok>immediately at instantiation time, before any real call ever happens</button>
+    <button class="opt">only the first time the missing method finally gets called</button>
+    <button class="opt">never - Python simply skips over any unwritten method quietly</button>
+  </div>
+  <div class="q" data-why="Heap order only guarantees each parent is less than or equal to its children, a weaker condition than full sorted order. That weaker guarantee is exactly what makes fixing the heap after one push or pop cheap, O(log n), instead of needing a full O(n log n) re-sort of the whole collection.">
+    <p class="stem">Why does <code>heapq.heappop()</code> stay <code>O(log n)</code> instead of needing a full re-sort?</p>
+    <button class="opt" data-ok>a heap only keeps the weaker parent-below-children rule intact</button>
+    <button class="opt">Python secretly re-sorts the entire heap on every pop</button>
+    <button class="opt">heaps only ever store one item, making sorting pointless</button>
+  </div>
+  <div class="q" data-why="A plain list stores its elements contiguously, so removing the front element forces every remaining element to shift left by one slot - O(n) work, growing with length. A deque is built so both ends are equally cheap, O(1), regardless of how long it is.">
+    <p class="stem">Why does <code>deque.popleft()</code> stay fast on a long sequence while <code>list.pop(0)</code> does not?</p>
+    <button class="opt" data-ok>a list shifts every remaining item over by one slot</button>
+    <button class="opt">a deque secretly discards most of its own oldest items</button>
+    <button class="opt">list.pop always scans the entire list before it removes it</button>
+  </div>
+  <div class="q" data-why="random's output is produced by a deterministic algorithm driven by a starting number, the seed. Resetting the seed to the same value resets that starting point, so every call that follows reproduces the identical sequence - which is exactly what lets a test assert on a specific result without being flaky.">
+    <p class="stem">Why does calling <code>random.seed(42)</code> before the same calls, twice, give identical results?</p>
+    <button class="opt" data-ok>the seed resets random's own deterministic starting point</button>
+    <button class="opt">Python caches every random result across separate runs</button>
+    <button class="opt">seeding always disables all randomness for the session</button>
+  </div>
+  <div class="q" data-why="Passing itemgetter more than one key makes it return a tuple of values instead of one, and Python compares tuples element by element, left to right, falling through to the next element only on a tie - exactly the ORDER BY city, amount behavior of sorting by city first and breaking ties on amount.">
+    <p class="stem">Why does <code>itemgetter("city", "amount")</code> work as a two-column sort key?</p>
+    <button class="opt" data-ok>it returns a tuple, compared left to right, breaking ties</button>
+    <button class="opt">it quietly ignores the city field, sorting by amount only</button>
+    <button class="opt">it raises an error whenever it receives two field names</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> no single new source today — revisit each lesson's own citation (the <a href="https://docs.python.org/3/library/string.html#format-specification-mini-language">format spec mini-language</a> for Day 46, <a href="https://docs.python.org/3/library/abc.html"><code>abc</code></a> for Day 50, <a href="https://docs.python.org/3/library/heapq.html"><code>heapq</code></a>/<a href="https://docs.python.org/3/library/bisect.html"><code>bisect</code></a> for Day 51, <a href="https://docs.python.org/3/library/collections.html">collections</a> for Day 53, <a href="https://docs.python.org/3/library/random.html"><code>random</code></a> for Day 54, and <a href="https://docs.python.org/3/library/operator.html"><code>operator</code></a> for Day 56), all already listed in <code>RESOURCES.md</code>.</p>
+
+<p class="next">No new terms today — this is a review day, and every term revisited already has a glossary entry under its original day (<a href="../reference/glossary.html#day46">46</a>, <a href="../reference/glossary.html#day50">50</a>, <a href="../reference/glossary.html#day51">51</a>, <a href="../reference/glossary.html#day53">53</a>, <a href="../reference/glossary.html#day54">54</a>, <a href="../reference/glossary.html#day56">56</a>).<br>
+💬 Anything unclear across any of today's six? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

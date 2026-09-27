@@ -23,6 +23,7 @@
     { n: 10, date: "2026-09-24", title: "dbt: Jinja, macros & var()", file: "lessons/0010-dbt-jinja-and-macros.html" },
     { n: 11, date: "2026-09-25", title: "dbt packages: dbt_utils and when to write a test instead", file: "lessons/0011-dbt-utils-and-packages.html" },
     { n: 12, date: "2026-09-26", title: "dbt unit tests vs. data tests", file: "lessons/0012-dbt-unit-tests.html" },
+    { n: 13, date: "2026-09-27", title: "dbt incremental strategies in depth", file: "lessons/0013-dbt-incremental-strategies.html" },
   ];
 
   const REFS = [

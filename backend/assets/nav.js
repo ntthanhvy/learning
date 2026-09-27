@@ -172,6 +172,8 @@
       file: "lessons/0082-postgres-enum-type.html" },
     { n: 83, date: "2026-09-26", title: "Problem Details: the error contract someone already standardized",
       file: "lessons/0083-problem-details-rfc7807.html" },
+    { n: 84, date: "2026-09-27", title: "Sagas: what replaces a transaction once two services are involved",
+      file: "lessons/0084-sagas-and-eventual-consistency.html" },
   ];
 
   const REFS = [

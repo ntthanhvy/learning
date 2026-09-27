@@ -139,6 +139,14 @@
   <tr><td>unit test (dbt)</td><td>giữ nguyên "unit test" (dbt &gt;= 1.8) — dòng input giả cố định thay cho ref()/source() thật của model, so với dòng kết quả kỳ vọng tự viết</td><td>A dbt test (dbt-core &gt;= 1.8) that replaces a model's real <code>ref()</code>/<code>source()</code> inputs with small, hand-written fake rows via <code>given</code>, runs the model's actual SQL against them, and diffs the result against hand-written <code>expect</code> rows — proving the transformation's logic is correct on known inputs, independent of whatever data is really in the warehouse. Complements, not replaces, a <a href="glossary.html#day3">data test</a> (Day 3).</td></tr>
 </table>
 
+<h2 id="day13">Day 13 — dbt incremental strategies in depth</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>incremental strategy</td><td>giữ nguyên "incremental strategy" — cách 1 incremental model hợp nhất dòng mới với dữ liệu đã có: append (chỉ insert), delete+insert (xoá rồi insert lại), merge (1 câu MERGE, vừa update vừa insert)</td><td>A dbt <code>incremental_strategy</code> setting for how an incremental model reconciles new rows with what's already in the table — <code>append</code> does a plain insert with no <code>unique_key</code>; <code>delete+insert</code> deletes any existing row sharing a key with the new batch then inserts the whole batch (dbt-postgres's own default once <code>unique_key</code> is set); <code>merge</code> runs a single <code>MERGE</code> statement that updates matching keys in place and inserts new ones.</td></tr>
+  <tr><td>--full-refresh</td><td>giữ nguyên "--full-refresh" — cờ bảo dbt bỏ qua is_incremental(), build lại toàn bộ incremental model từ đầu</td><td>A <code>dbt run</code>/<code>dbt build</code> flag that drops and rebuilds an incremental model's table entirely from its full, unfiltered <code>select</code>, ignoring <code>is_incremental()</code> for that one invocation — the blunt, correct-but-expensive fix for a late correction the incremental filter's own column never caught.</td></tr>
+  <tr><td>late-arriving event</td><td>giữ nguyên "late-arriving event" — sự kiện thật đến trễ, sau khi dòng/nhóm nó thuộc về đã được xử lý xong, filter incremental chỉ nhìn về phía trước sẽ bỏ sót nó</td><td>A real event a model's incremental logic needs to account for that arrives after the row or bucket it belongs to has already been processed — a filter that only looks forward from the last run will silently miss it unless it re-checks a short lookback window.</td></tr>
+</table>
+
 <script src="../assets/nav.js"></script>
 </body>
 </html>

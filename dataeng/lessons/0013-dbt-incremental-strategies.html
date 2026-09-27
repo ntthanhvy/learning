@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 13 · dbt incremental strategies in depth</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 13 · ~20 min · 27 Sep 2026</p>
+<h1>dbt incremental strategies in depth</h1>
+<p class="byline">Today's tangible win: <code>fct_orders</code> (Day 4) gets an explicit <code>incremental_strategy='merge'</code>, and <code>mart_delivery_sla</code> (Day 6) goes from a full-rebuild <code>table</code> to <code>incremental</code> with <code>delete+insert</code> — because it has a real late-arriving-event problem an append-only filter can't fix. You'll watch, in your own terminal, an incremental run that silently fails to pick up a correction, and the exact <code>--full-refresh</code> that fixes it.</p>
+
+<div class="callout"><strong>Before today — check Day 12 actually landed:</strong> this lesson edits both <code>fct_orders.sql</code> and <code>mart_delivery_sla.sql</code>, so start from a clean build:
+<pre><code>cd food_delivery_pipeline
+uv run --project ../dbt_env dbt build</code></pre>
+Expected: <code>Done. PASS=26 WARN=0 ERROR=0 SKIP=0 NO-OP=0 REUSED=0 TOTAL=26</code> (Day 12's own count: 10 models + 1 snapshot + 14 data tests + 2 unit tests). If <code>sla_key</code> is missing from <code>mart_delivery_sla</code>, go back and finish Day 11 first — today's rewrite of that model needs <code>sla_key</code> as its <code>unique_key</code>.</div>
+
+<h2>1 · What Day 4 actually shipped, and the gap in it</h2>
+<p>Day 4's <code>fct_orders</code> set <code>materialized='incremental'</code> and <code>unique_key='order_id'</code>, but never named a <code>incremental_strategy</code> — and on dbt-postgres specifically, that silence has a real, current answer worth knowing rather than assuming: with a <code>unique_key</code> set and no strategy named, dbt-postgres's own default falls back to <code>delete+insert</code>, not the <code>merge</code> a learner coming from Snowflake or BigQuery tutorials might expect. Postgres didn't gain a native <code>MERGE</code> statement until version 15, so for a long time <code>delete+insert</code> was the only sane implementation of "update existing rows, insert new ones" — dbt-postgres still defaults to it today, and only uses a real <code>MERGE</code> when a model asks for it explicitly.</p>
+<table class="gloss">
+  <tr><th>Strategy</th><th>How it actually runs on Postgres</th><th>Needs <code>unique_key</code>?</th></tr>
+  <tr><td>append</td><td>plain <code>insert</code> of whatever the filtered <code>select</code> returns — no attempt to touch existing rows</td><td>no</td></tr>
+  <tr><td>delete+insert</td><td><code>delete</code> every row whose key appears in the new batch, then <code>insert</code> the whole batch — dbt-postgres's own default once <code>unique_key</code> is set</td><td>yes</td></tr>
+  <tr><td>merge</td><td>a real Postgres <code>MERGE</code> statement: existing keys get <code>update</code>d in place, new keys get <code>insert</code>ed, in one statement</td><td>yes</td></tr>
+</table>
+<p>An <dfn data-en="a dbt incremental_strategy setting for how an incremental model reconciles new rows with what's already in the table -- append does a plain insert with no unique_key; delete+insert deletes any existing row sharing a key with the new batch then inserts the whole batch; merge runs a single MERGE statement that updates matching keys in place and inserts new ones" data-vn="giữ nguyên &quot;incremental strategy&quot; — cách 1 incremental model hợp nhất dòng mới với dữ liệu đã có: append (chỉ insert), delete+insert (xoá rồi insert lại), merge (1 câu MERGE, vừa update vừa insert)">incremental strategy</dfn> is the specific mechanism an incremental model uses to reconcile new data with what's already there — Day 4 taught <em>that</em> an incremental model does less work after the first run; today is about <em>which of three real ways</em> dbt-postgres does that reconciliation, and that the choice is a real, settable config, not a detail dbt hides from you.</p>
+
+<h2>2 · Build: make <code>fct_orders</code>'s strategy explicit</h2>
+<p>Add <code>incremental_strategy='merge'</code> to <code>fct_orders.sql</code>'s existing <code>config()</code> block — nothing else in the model changes:</p>
+<pre><code><span class="cm">-- models/marts/fct_orders.sql -- config() block only, rest of the model unchanged from Day 4</span>
+{{
+    config(
+        materialized='incremental',
+        unique_key='order_id',
+        incremental_strategy=<span class="cm">'TODO'</span>
+    )
+}}</code></pre>
+<p>Fill in <code>'merge'</code>. <code>dbt compile --select fct_orders</code> (against your own live Postgres, which Day 10 already showed needs a real connection, unlike <code>dbt parse</code>) now renders a genuine <code>merge into ... using ... on (...) when matched then update set ... when not matched then insert ...</code> statement instead of the <code>delete from ... where (order_id) in (...); insert into ...</code> pair Day 4's build was silently running. Same end state on a normal run, one SQL statement instead of two — worth naming explicitly, since "one statement" is also why <code>merge</code> is the right choice whenever an incremental model runs inside a transaction alongside other writes and a partial <code>delete</code>-without-the-matching-<code>insert</code> would be a real, if temporary, correctness gap that <code>merge</code> can't have.</p>
+
+<h2>3 · The gap neither strategy closes on its own</h2>
+<p>Run a real test before writing any more SQL. Hand-edit one already-landed order's <code>subtotal</code> directly in <code>raw.orders</code> — the kind of late correction a real upstream system does occasionally send:</p>
+<pre><code>docker compose exec -T postgres psql -U fdp -d fdp -c \
+  "UPDATE raw.orders SET subtotal = 999.0 WHERE order_id = 101;"
+uv run --project ../dbt_env dbt build --select fct_orders</code></pre>
+<p>Expected — <code>merge</code> runs, but touches nothing:</p>
+<pre><code>1 of 1 OK created sql incremental model dbt_dev.fct_orders ...... [MERGE 0 in 0.13s]</code></pre>
+<p><code>MERGE 0</code>, not an updated row. Check <code>fct_orders</code> itself and the correction isn't there:</p>
+<pre><code>docker compose exec -T postgres psql -U fdp -d fdp -c \
+  "SELECT order_id, subtotal FROM dbt_dev.fct_orders WHERE order_id = 101;"</code></pre>
+<pre><code> order_id | subtotal
+----------+----------
+      101 |     50.0
+(1 row)</code></pre>
+<p>This is the gap the strategy alone can never close, and it's worth being precise about why: <code>fct_orders</code>'s <code>{% if is_incremental() %}</code> filter selects rows where <code>placed_at &gt; max(placed_at) already in {{ this }}</code> — and order 101's <code>placed_at</code> never changed, only its <code>subtotal</code> did. The row is never even <em>selected</em> by the incremental query, so <code>merge</code> never gets a chance to update it — <code>merge</code> reconciles whatever the filtered <code>select</code> hands it, and the filter is what decides what that is. A strategy is downstream of the filter, not a substitute for thinking about it.</p>
+<div class="callout"><strong>Say this part out loud in an interview:</strong> "incremental strategy" and "incremental filter" are two different decisions. <code>merge</code> vs. <code>delete+insert</code> vs. <code>append</code> answers "once I have the new batch, how do I reconcile it with the table." The <code>is_incremental()</code> filter answers a completely different question — "which rows count as the new batch at all" — and a filter keyed on the wrong column silently drops late corrections no matter which strategy sits underneath it.</div>
+<p>The fix that actually reaches order 101 is the blunt one, and it's worth running once here to see it work:</p>
+<pre><code>uv run --project ../dbt_env dbt run --select fct_orders --full-refresh</code></pre>
+<pre><code>docker compose exec -T postgres psql -U fdp -d fdp -c \
+  "SELECT order_id, subtotal FROM dbt_dev.fct_orders WHERE order_id = 101;"</code></pre>
+<pre><code> order_id | subtotal
+----------+----------
+      101 |    999.0
+(1 row)</code></pre>
+<p><dfn data-en="a dbt run/build flag that drops and rebuilds an incremental model's table entirely from its full, unfiltered SELECT, ignoring is_incremental() for that one invocation -- the blunt, correct-but-expensive fix for a late correction the incremental filter's own column never caught" data-vn="giữ nguyên &quot;--full-refresh&quot; — cờ bảo dbt bỏ qua is_incremental(), build lại toàn bộ incremental model từ đầu">--full-refresh</dfn> drops the table and reruns the model's full, unfiltered <code>select</code> — every row, ignoring <code>is_incremental()</code> for this one invocation. Correct, and expensive: for <code>fct_orders</code> today that's 500 rows, trivial; for a table with a year of history it's exactly the cost incremental models exist to avoid. It's the fallback for "the filter missed something," not something to run on a schedule — a scheduled <code>--full-refresh</code> is a full-table rebuild wearing an incremental model's name.</p>
+
+<h2>4 · Build: <code>mart_delivery_sla</code> has this problem for real</h2>
+<p>Undo the test correction (<code>UPDATE raw.orders SET subtotal = 50.0 WHERE order_id = 101;</code>) before continuing. Now look at <code>mart_delivery_sla</code> with today's lens: it's been a plain <code>table</code> since Day 6, rebuilt in full on every run — fine while the whole pipeline is a scratch dataset, genuinely wasteful once <code>raw.order_events</code> has real volume, per the exact same "large, append-heavy, don't reprocess it all" signal Day 4 used to justify <code>fct_orders</code>' own incremental config.</p>
+<p>But this mart has a wrinkle <code>fct_orders</code> doesn't: its grain isn't "one row per event," it's one row per <code>city</code> per <code>order_date</code>, built by joining a <code>placed</code> event to a <code>delivered</code> event that can arrive <em>later</em> — Day 6's own SQL deliberately uses an <code>inner join</code> to <code>delivered</code>, so any order still in flight is silently excluded from every day-bucket it touches until its <code>delivered</code> event lands, sometimes a day after <code>placed</code>. A naive incremental filter on "only process new events" would compute that day's aggregate too early, from a <code>delivered</code> event that hadn't shown up yet, and never revisit it — the exact <dfn data-en="a real event a model's incremental logic needs to account for that arrives after the row or bucket it belongs to has already been processed and would otherwise be missed by a filter that only looks forward from the last run" data-vn="giữ nguyên &quot;late-arriving event&quot; — sự kiện thật đến trễ, sau khi dòng/nhóm nó thuộc về đã được xử lý xong, filter incremental chỉ nhìn về phía trước sẽ bỏ sót nó">late-arriving event</dfn> problem this course's own domain has been quietly capable of since Day 6.</p>
+<p><code>delete+insert</code>, not <code>merge</code>, is the right tool here, and the reason is the grain: <code>merge</code>'s <code>when matched then update</code> only touches the exact columns of an exact matching row — useful when one key maps to one row whose individual fields might change. Here, a late <code>delivered</code> event changes an <em>aggregate</em> (<code>delivered_orders</code>, <code>avg_minutes_to_deliver</code>, <code>share_over_45_min</code>) computed over a whole day-bucket, so the correct action is "throw away that bucket's row and recompute it from scratch," which is exactly what <code>delete+insert</code> does — delete anything sharing a key with the new batch, then insert the freshly computed replacement.</p>
+<pre><code><span class="cm">-- models/marts/mart_delivery_sla.sql -- add this config() block above the existing CTEs</span>
+{{
+    config(
+        materialized=<span class="cm">'TODO'</span>,
+        unique_key='sla_key',
+        incremental_strategy=<span class="cm">'TODO'</span>
+    )
+}}
+
+<span class="cm">-- ...Day 6's placed/delivered/order_durations CTEs and final select, unchanged...</span>
+
+<span class="cm">-- TODO: add an {% if is_incremental() %} filter as a HAVING clause on the final</span>
+<span class="cm">-- select's GROUP BY, re-processing any day bucket from the last 2 days already in</span>
+<span class="cm">-- {{ this }} onward -- a short lookback window, not just "rows newer than last run",</span>
+<span class="cm">-- specifically so a delivered event landing a day late still gets folded into the</span>
+<span class="cm">-- right bucket instead of only ever appearing in whatever day dbt happens to run.</span></code></pre>
+<p>Fill in <code>materialized='incremental'</code> and <code>incremental_strategy='delete+insert'</code>, and write the <code>HAVING</code> filter yourself — the day's actual skill. A 2-day lookback means: on every run, recompute not just brand-new buckets but also the last couple of days' buckets, in case a <code>delivered</code> event for one of them only just arrived. Pick the window to comfortably exceed how late a delivery event realistically lands; too short and you reproduce today's exact bug, too long and you're most of the way back to a full rebuild.</p>
+
+<h2>5 · Prove it against a real late arrival</h2>
+<p>Confirm before today's fix: pick an order placed roughly a day ago with no <code>delivered</code> event yet (or plant one), run <code>dbt build --select mart_delivery_sla</code>, note that day's bucket has one fewer delivered order than it should, then land that order's <code>delivered</code> event into <code>raw.order_events</code> and run the build again:</p>
+<pre><code>uv run --project ../dbt_env dbt build --select mart_delivery_sla</code></pre>
+<p>Expected, with a genuinely new delivery bucket plus one late-arriving correction to yesterday's bucket already reflected — this round's own verification reproduced exactly this against a live Postgres, with two delivered orders in one city-day and a late-arriving one-order city-day one day after:</p>
+<pre><code>1 of 1 OK created sql incremental model dbt_dev.mart_delivery_sla ...... [INSERT 0 2 in 0.07s]</code></pre>
+<pre><code>docker compose exec -T postgres psql -U fdp -d fdp -c \
+  "SELECT city, order_date, delivered_orders FROM dbt_dev.mart_delivery_sla ORDER BY order_date;"</code></pre>
+<pre><code>  city  | order_date | delivered_orders
+--------+------------+-------------------
+ Hanoi  | 2026-09-25 |                 2
+ Hanoi  | 2026-09-26 |                 1
+(2 rows)</code></pre>
+<p><code>INSERT 0 2</code> is <code>delete+insert</code> visibly doing its job: two day-buckets were deleted and reinserted this run (not just one new row appended), because the lookback window correctly decided both were worth recomputing. Compare that to what an <code>append</code>-only filter would have done: inserted a duplicate, wrong-totals row for whichever bucket the late event landed in, permanently under-reporting delivered orders for that day.</p>
+
+<div class="interview">
+<p><strong>Q: "Walk me through the incremental strategies dbt offers, and how you'd choose between them."</strong> A strong answer, out loud: <em>"append is the simplest: no unique_key, just insert whatever the filter selects — fine when a row, once written, never changes again. Once rows can be updated after the fact, you need a unique_key and a real reconciliation strategy: delete+insert deletes any existing row sharing a key with the new batch and reinserts the whole batch, which is dbt-postgres's own default once unique_key is set, since Postgres didn't have a native MERGE until version 15. merge does the same reconciliation as one real MERGE statement, updating matching keys in place instead of delete-then-insert, which matters when you care about single-statement atomicity or need per-column update control. But neither strategy fixes a filter problem: if your is_incremental() condition never re-selects a row that changed, no strategy underneath it gets a chance to touch it — in my project, a correction to an order's subtotal was invisible to fct_orders because the filter only checked placed_at, and the fix was either widening the filter or running --full-refresh. And for a model like a daily SLA aggregate where late-arriving events change whole buckets rather than single rows, I use delete+insert with a short lookback window on the filter itself, specifically so a delivery event landing a day late still lands in the right day's number instead of being silently missed."</em> The signal: strategy and filter are named as two separate decisions, and the choice between merge and delete+insert is grounded in whether the target changes row-by-row or bucket-by-bucket, not just "merge sounds more advanced."</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="dbt-postgres's own default incremental strategy, once unique_key is set and no strategy is named explicitly, is delete+insert -- not merge. Postgres only gained a native MERGE statement in version 15, so delete+insert has long been the default reconciliation method; merge must be requested explicitly via incremental_strategy.">
+    <p class="stem">With <code>unique_key</code> set and no <code>incremental_strategy</code> named, what does dbt-postgres actually run?</p>
+    <button class="opt" data-ok><code>delete+insert</code>, dbt-postgres's real default</button>
+    <button class="opt"><code>merge</code>, dbt-postgres's real default</button>
+    <button class="opt"><code>append</code>, dbt-postgres's real default</button>
+  </div>
+  <div class="q" data-why="fct_orders' is_incremental() filter only selects rows where placed_at is newer than what's already loaded. A subtotal correction to an already-landed order never changes placed_at, so the row is never selected by the filter at all -- merge or any other strategy never gets a chance to touch it, because the reconciliation step only acts on rows the filter actually hands it.">
+    <p class="stem">Why did <code>merge</code> report <code>MERGE 0</code> after correcting an already-landed order's <code>subtotal</code>?</p>
+    <button class="opt" data-ok>The filter never re-selected that unchanged-<code>placed_at</code> row</button>
+    <button class="opt">Postgres flatly rejected the whole <code>merge</code> statement</button>
+    <button class="opt">The <code>unique_key</code> setting was missing from <code>config()</code></button>
+  </div>
+  <div class="q" data-why="A late-arriving delivered event changes an aggregate computed over a whole city-plus-day bucket (delivered_orders, avg_minutes_to_deliver, share_over_45_min), not a single row's own fields. delete+insert throws away the whole stale bucket and recomputes it from scratch, which is the correct action when what needs fixing is a group aggregate rather than one row's individual columns.">
+    <p class="stem">Why does <code>mart_delivery_sla</code> use <code>delete+insert</code> rather than <code>merge</code>?</p>
+    <button class="opt" data-ok>A late event changes a whole bucket's aggregate</button>
+    <button class="opt">Postgres cannot run <code>merge</code> on any aggregated query</button>
+    <button class="opt"><code>sla_key</code> cannot serve as a <code>merge</code> unique key</button>
+  </div>
+  <div class="q" data-why="--full-refresh drops the incremental table and reruns the model's full, unfiltered select over every row, ignoring is_incremental() for that one invocation -- correct but expensive, the right fallback for a filter that missed something, not something to schedule routinely.">
+    <p class="stem">What does <code>dbt run --full-refresh</code> actually do to an incremental model?</p>
+    <button class="opt" data-ok>Drops and rebuilds it from the unfiltered select</button>
+    <button class="opt">Only re-runs rows the last incremental filter skipped</button>
+    <button class="opt">Switches its own strategy from <code>delete+insert</code> to <code>merge</code></button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> dbt Labs's <a href="https://docs.getdbt.com/docs/build/incremental-models">Incremental models</a> doc (cited in <code>RESOURCES.md</code>, already Day 4's primary source) covers <code>append</code>/<code>merge</code>/<code>delete+insert</code> and <code>--full-refresh</code> directly from the source, including which adapters default to which strategy.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 13.<br>
+<strong>Phase 2 continues</strong> along the dbt/Kafka/Airflow spine in <code>PLAN.md</code>, adapted to your questions rather than a fixed calendar — docs, exposures and model contracts (dbt as an API for downstream consumers) is next up on the dbt side.<br><br>
+💬 Anything unclear — the strategy-vs-filter distinction, or why <code>mart_delivery_sla</code> needed a lookback window? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

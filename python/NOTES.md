@@ -7769,3 +7769,110 @@ fail *gracefully* so the learner sees which task failed.
   "avoid three fresh days in a row" consideration seriously, per Day
   57/58's own precedent for exactly this situation, unless a compelling
   fresh-gap case turns up first.
+- 2026-09-27 — **Day 61 generated: Review day 8** (headless run), taking Day
+  60's own next-day advice: two fresh days in a row (59-60) since Day 58's
+  review meant Day 61 should weigh a review sweep seriously unless a
+  compelling fresh-gap case turned up. Read `MISSION.md` (untouched,
+  read-only) in full, `PLAN.md` in full, `RESOURCES.md` in full, the full
+  `assets/nav.js` `LESSONS` array (all 60 entries), the full
+  `learning-records/` directory (still only the Day 1 baseline), and the
+  tail of `NOTES.md` including Days 59-60's full entries. Read lesson 58
+  (the most recent review day, for structural precedent) and lesson 52 (a
+  stdlib-only review day, since 58's own precedent needed `--with` flags
+  that don't apply to an all-stdlib set) in full, plus lessons 46, 50, 51,
+  53, 54, and 56 in full to draft accurate retrieval questions.
+  Idempotency: confirmed via `date` that today is 2026-09-27, then grepped
+  `assets/nav.js` and `lessons/` for any `0061-*` entry/file — none
+  existed — before writing anything.
+  Decision process: ran a fresh-gap scan first, matching every prior
+  review day's own discipline — grepped all 60 lessons and every practice
+  file for `subprocess`, `configparser`, and a handful of other plausible
+  stdlib corners (`shutil`, `tempfile`, `textwrap`, `copy.deepcopy`/
+  `copy.copy`). `copy.deepcopy`/`copy.copy` turned out to already be fully
+  taught on Day 1 (section 4, with both terms already in the Day 1
+  glossary section) — not a gap. `subprocess`/`configparser` remain the
+  same two candidates Days 59 and 60 both named and set aside as weaker
+  than the module that won each of those two rounds, with no new
+  information this round to reverse that. With Day 58 having just closed
+  out every one of Days 1-57 with at least one review sweep, the review
+  candidate pool became Days 46, 50, 51, 53, 54, 56-57, 59-60 (everything
+  after Day 45 that Day 58's arc-closing sweep didn't touch, since that
+  sweep specifically picked the six oldest days from the Day 16-26 FastAPI
+  arc, not Days 46+). Picked the six oldest of those — 46, 50, 51, 53, 54,
+  56 — leaving 57/59/60 (all under two weeks old) for a later pass, and
+  leaving 47/48 (the two spoken-answer-shape meta-lessons) out entirely
+  since they teach communication structure, not a testable mechanism, and
+  don't fit this format's fold-out-answer/quiz/practice-file shape the way
+  every other review day's six picks have.
+  No-pandas rule: grepped the lesson and practice file case-insensitively
+  for `pandas`/`numpy`/`pd\.`/`np\.` — exactly one hit in the lesson, the
+  standard "nothing pandas-specific today" boundary callout naming no
+  pandas API; zero hits in the practice file.
+  Practice file `practice/61_review_retrieval_day_8.py` (6 exercises,
+  stdlib-only, no `--with` flag, matching Days 43/44/45/49/52/55's
+  stdlib-review precedent rather than Day 58's FastAPI-arc exception):
+  formatting a price with a format spec without mutating the original
+  float (Day 46), an `abc.ABC` that raises `TypeError` on an incomplete
+  subclass but instantiates a complete one (Day 50), `heapq` push/pop
+  returning items in ascending order (Day 51), a `deque(maxlen=)` sliding
+  window (Day 53), a seeded `random` sequence reproducing identically
+  across two calls (Day 54), and a two-key `itemgetter` sort matching
+  `ORDER BY city, amount` (Day 56). Verified in a scratch directory under
+  the repo root (`.scratch-0061/`, created fresh this round, deleted at
+  the end): the shipped (unsolved) copy printed all six ✗ with no
+  traceback; a separately written, fully solved copy printed all six ✓
+  and the "All green" tally, run twice consecutively (including the
+  seeded-`random` exercise, to rule out flakiness from seeding order)
+  with identical results both times.
+  HTML tag-balance was checked with a stdlib `html.parser.HTMLParser`-
+  based stack checker (written as a throwaway script via the `Write`
+  tool, deleted after use) against the lesson file — clean on the first
+  pass this round, no stray-`</p>`-in-a-callout bug this time. A
+  raw-unescaped-`&` regex (`&(?!amp;|lt;|gt;|quot;|#39;|apos;|#\d+;)`)
+  against the lesson found zero true hits.
+  Quiz: 6 questions (one per reviewed day, matching every prior review
+  day's one-question-per-topic shape). Word counts were checked with a
+  small `html.parser.HTMLParser`-based Python script splitting each
+  `<button class="opt">`'s stripped-tag text on whitespace, cross-checked
+  with a second, independent Node.js regex-based script per this course's
+  established two-method practice. First draft mismatched on all six
+  questions (Q1 10/8/8, Q2 8/9/8, Q3 8/10/10, Q4 11/10/8, Q5 8/8/7, Q6
+  12/10/10) — took two to four rounds of few-word edits per question,
+  re-running both scripts after nearly every edit, since several edits
+  that looked like they added or removed a word were counted differently
+  than expected the first time (hyphenated compounds like
+  "parent-below-children" count as one token to both scripts, which cost
+  a couple of extra rounds on Q2-Q4 before landing correctly). Landed at
+  8/8/8, 10/10/10, 9/9/9, 10/10/10, 8/8/8, and 10/10/10 respectively; both
+  scripts agreed at every step, and a separate check confirmed exactly 6
+  `data-ok` occurrences total, one per question, matching the
+  six-question count.
+  No glossary changes — a review day revisits already-glossaried terms
+  under their original day sections rather than adding new ones, same as
+  every prior review day; the lesson's closing paragraph links directly
+  to each of the six original glossary anchors instead.
+  `RESOURCES.md`: no changes — every source cited today (format spec
+  mini-language, `abc`, `heapq`/`bisect`, `collections`, `random`,
+  `operator`) was already added on its original day.
+  Registered in `assets/nav.js` with `date: "2026-09-27"`; confirmed
+  `node --check assets/nav.js` reports no syntax errors after the edit.
+  **DB access:** not attempted directly this round — the orchestrator had
+  already confirmed via the DB moments before this run started that no
+  `lesson_completed`/quiz/kata signal more recent than mid-July exists for
+  this course, and the most recent `lesson_generated` row was day 60; this
+  round deferred to that pre-run confirmation plus this round's own
+  on-disk idempotency check before writing anything.
+  `python/learning-records/` still holds only the Day 1 baseline; no new
+  file was added this round — nothing here rises to a durable
+  learner-profile finding distinct from what's already recorded.
+  `bin/record-progress python lesson_generated --day 61 --lesson
+  0061-review-retrieval-day-8.html --detail '{"by":"headless"}'` was run
+  from the repo root after generation.
+  **Next-day note:** `subprocess` and `configparser` remain the two
+  unconfirmed fresh-gap candidates, both still weaker than the last three
+  modules that won a fresh-content slot. Day 61 was a review day
+  following two fresh days (59-60), so Day 62 is open either way — a
+  fresh gap if a genuinely compelling one surfaces, or continuing the
+  review backlog (57, 59, 60 are the next-oldest review-uncovered days,
+  plus 47/48 if a future round decides those meta-lessons do belong in
+  some adapted review format after all).

@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 81 · pd.to_datetime(format=): stop guessing, start declaring</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 81 · ~20 min · 27 Sep 2026</p>
+<h1>pd.to_datetime(format=): stop guessing, start declaring</h1>
+<p class="byline">Lesson 80's teaser named two standing candidates: the groupby leftovers (<code>as_index=False</code>, <code>.get_group()</code>) and the memory/dtype family. A fresh gap-scan confirmed both are still open, but surfaced something with wider reach: every one of this course's 80 lessons that calls <code>pd.to_datetime()</code> (Lessons 2, 3, 32, 41, 51, 64) passes only <code>errors="coerce"</code> — never <code>format=</code>. That leaves a real, silent risk untaught: <code>pd.to_datetime()</code> guesses a format when none is given, and the guess can be wrong without ever raising.</p>
+
+<h2>1 · The problem: format-guessing picks a convention, silently</h2>
+<p>Lesson 2 already showed <code>pd.to_datetime(df["order_date"], errors="coerce")</code> parsing this course's own <code>YYYY-MM-DD</code> dates correctly — unambiguous, so the guess was always right. Ambiguity is where guessing gets dangerous. Take a date written <code>"01/02/2026"</code> — is that 1 Feb or 2 Jan?</p>
+<pre><code>pd.to_datetime(pd.Series([<span class="str">"01/02/2026"</span>, <span class="str">"03/04/2026"</span>]))
+<span class="cm"># 0   2026-01-02   &lt;- read as MONTH/DAY/YEAR: "01/02" -> Jan 2nd
+# 1   2026-03-04</span></code></pre>
+<p>Confirmed directly: with no <code>format=</code>, pandas silently assumed US-style <code>MM/DD/YYYY</code> and parsed <code>"01/02/2026"</code> as <strong>January 2nd</strong>. A CSV exported from a DD/MM/YYYY-convention system (most of the world outside the US) would have meant <strong>1 February</strong> instead — same string, opposite date, zero warning either way. This is the SQL equivalent of a client library silently picking a <code>DATESTYLE</code> setting for an ambiguous string instead of you declaring the column's real format up front.</p>
+
+<h2>2 · The fix: declare the format explicitly</h2>
+<p>Pass <dfn data-en="a keyword argument on pd.to_datetime() giving the EXACT strptime-style pattern (e.g. \"%Y-%m-%d\", \"%d/%m/%Y\") the input strings are already in -- removes all guessing: pandas parses every value against that one declared pattern instead of inferring a convention, and raises ValueError the moment a value does not match it (or produces NaT everywhere if errors=\"coerce\" is also passed, even for otherwise-valid-looking rows)" data-vn="giữ nguyên 'format=' (pd.to_datetime) — khai báo ĐÚNG mẫu ngày giờ kiểu strptime (vd \"%Y-%m-%d\", \"%d/%m/%Y\") của dữ liệu đầu vào, bỏ hẳn việc pandas tự đoán; sai 1 dòng không khớp mẫu là báo ValueError ngay (hoặc NaT ở MỌI dòng nếu có thêm errors=\"coerce\", kể cả dòng nhìn hợp lệ)">format=</dfn> with the exact pattern the strings are already in, and the guessing disappears entirely:</p>
+<pre><code>pd.to_datetime(pd.Series([<span class="str">"01/02/2026"</span>, <span class="str">"03/04/2026"</span>]), format=<span class="str">"%d/%m/%Y"</span>)
+<span class="cm"># 0   2026-02-01   &lt;- now correctly DAY/MONTH/YEAR: "01/02" -> Feb 1st
+# 1   2026-04-03</span></code></pre>
+<p>Confirmed directly: with <code>format="%d/%m/%Y"</code> declared, the same two strings now parse as <strong>1 Feb</strong> and <strong>3 Apr</strong> — the opposite reading from Section 1's unguided default, on the exact same input. Nothing about the data changed; only whether the convention was stated or assumed. <code>dayfirst=True</code> is a looser, related knob (a hint, not a full pattern) — confirmed it agrees with <code>format="%d/%m/%Y"</code> on this example, but <code>format=</code> is the precise, unambiguous version: it names every part of the pattern, not just which of day/month comes first.</p>
+
+<h2>3 · A gotcha: mismatched format doesn't quietly half-work</h2>
+<p>Declaring the wrong format isn't a silent no-op — it fails loudly by default, and fails in a specific way under <code>errors="coerce"</code>:</p>
+<pre><code>pd.to_datetime(pd.Series([<span class="str">"2026-01-05"</span>]), format=<span class="str">"%d/%m/%Y"</span>)
+<span class="cm"># ValueError: time data "2026-01-05" doesn't match format "%d/%m/%Y". ...</span>
+
+pd.to_datetime(pd.Series([<span class="str">"2026-01-05"</span>, <span class="str">"not-a-date"</span>]), format=<span class="str">"%d/%m/%Y"</span>, errors=<span class="str">"coerce"</span>)
+<span class="cm"># 0   NaT   &lt;- a genuinely well-formed date, but NOT in the DECLARED format -> NaT too
+# 1   NaT</span></code></pre>
+<p>Confirmed directly: the first call raises <code>ValueError</code> immediately, the same fail-loudly instinct as Lesson 41's <code>astype()</code>. The second is the sharper gotcha — adding Lesson 2/3's familiar <code>errors="coerce"</code> does not fall back to guessing; it turns <em>every</em> row that doesn't match the declared format into <code>NaT</code>, including <code>"2026-01-05"</code>, which is a perfectly valid date, just not in the pattern that was declared. <code>format=</code> and <code>errors="coerce"</code> compose (Lesson 2's coerce still catches genuine garbage), but <code>format=</code> raises the bar for what counts as "parseable" to exactly the one pattern named.</p>
+<p>Real mixed-format columns (some rows <code>YYYY-MM-DD</code>, others <code>DD/MM/YYYY</code>) need <code>format="mixed"</code> instead — pandas then infers a format per row individually rather than one global pattern. Confirmed directly it parses a genuinely mixed column without raising; it's slower than one fixed <code>format=</code> string (back to per-row guessing) but still safer than no format hint at all.</p>
+
+<div class="callout"><strong>SQL bridge:</strong> A SQL client parsing a text date column either fails fast on a bad literal (<code>CAST('2026-13-40' AS DATE)</code> errors) or relies on a session-level <code>DATESTYLE</code>/locale setting to decide what an ambiguous string means — a setting that travels with the connection, not the data, and silently differs across environments. <code>pd.to_datetime(..., format=...)</code> is the pandas fix for the same class of bug: pin the format to the DATA itself, in the code, so parsing behaves identically no matter who runs it or what locale their machine defaults to.</div>
+
+<h2>4 · When it's worth the extra keystroke</h2>
+<p>Three concrete reasons to reach for <code>format=</code>, not just "when unsure":</p>
+<ul>
+<li><strong>Ambiguity is silent, not flagged.</strong> Section 1's <code>MM/DD</code> vs <code>DD/MM</code> guess never warns — the only way to know it happened is to already suspect it, which defeats the point.</li>
+<li><strong>Any column with day ≤ 12 in every row is invisible to testing.</strong> <code>"03/04/2026"</code> parses under both conventions without error — it just gives two different, equally plausible-looking dates. A test suite built only from early-month sample rows would never catch the bug; it needs a day &gt; 12 to expose the disagreement at all.</li>
+<li><strong>It documents intent in the code, not just in a comment.</strong> <code>format="%d/%m/%Y"</code> written at the call site is a permanent, checked assertion about the data's shape — closer to declaring a SQL column's type than a code comment ever is.</li>
+</ul>
+<p>Confirmed directly at 200,000-row scale: <code>format=</code> was not meaningfully faster than plain inference when every row already shares one consistent, easy-to-infer pattern like <code>YYYY-MM-DD</code> (~13ms either way here) — the real win is correctness under ambiguity, not raw speed, for a column already this uniform. A messier real-world column (mixed formats, inconsistent locales) is where <code>format="mixed"</code>'s per-row guessing genuinely costs more than a fixed <code>format=</code> string.</p>
+
+<div class="interview">
+<p><strong>Q: "A date column parsed with pd.to_datetime() has a bug — some dates are off. What would you check?"</strong> A strong answer, out loud: <em>"First question is whether the source strings are ambiguous — something like 01/02/2026 with no explicit format means pandas has to guess a convention, and it defaults to month-first, US-style. If the data actually came from a day-first system, every date where the day is 12 or under gets silently misread, and it wouldn't show up in casual testing since those rows still parse without error — no exception, just the wrong date. The fix is to pass format= explicitly with the exact pattern, like format='%d/%m/%Y', which removes the guess entirely and raises ValueError instead of quietly parsing wrong if a row doesn't actually match. I'd also check whether errors='coerce' was masking mismatches as NaT rather than surfacing them, and reach for format='mixed' only if the column genuinely mixes multiple formats row to row."</em> The signal: naming the day ≤ 12 blind spot specifically — that's what makes this bug survive casual testing.</p>
+</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/81_to_datetime_format.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/81_to_datetime_format.py</code></pre>
+<p>Exercise 1 parses an ambiguous <code>DD/MM/YYYY</code> column two ways and confirms the no-<code>format=</code> default reads it as US-style month-first (Section 1). Exercise 2 supplies the correct <code>format=</code> and confirms the dates flip to the intended day-first reading (Section 2). Exercise 3 confirms a mismatched <code>format=</code> raises <code>ValueError</code> without <code>errors=</code>, and produces <code>NaT</code> for a genuinely valid-but-mismatched date under <code>errors="coerce"</code> (Section 3). Exercise 4 confirms <code>format="mixed"</code> parses a column with two different date conventions per row without raising (Section 3's real-mixed-data case).</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: with no format= given, pd.to_datetime() infers a convention rather than raising or asking -- for a slash-separated date it defaults to month-first (US-style) parsing, which silently misreads any day-first-authored string where the day is 12 or under.">
+    <p class="stem">With no <code>format=</code> given, how does <code>pd.to_datetime()</code> handle an ambiguous string like <code>"01/02/2026"</code>?</p>
+    <button class="opt" data-ok>guesses a convention silently, defaulting to month first</button>
+    <button class="opt">raises an error immediately, refusing any ambiguous string</button>
+    <button class="opt">returns NaT always, treating the value as unparseable</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: format= plus errors='coerce' does not fall back to guessing on a mismatch -- it turns every row not matching the declared pattern into NaT, including rows holding a perfectly valid date under a DIFFERENT format than the one named.">
+    <p class="stem">Passing a wrong <code>format=</code> together with <code>errors="coerce"</code> does what to an otherwise-valid date in a different format?</p>
+    <button class="opt" data-ok>turns it into NaT too, despite being valid</button>
+    <button class="opt">parses it correctly anyway, falling back to guessing</button>
+    <button class="opt">raises ValueError still, entirely ignoring the coerce setting</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: format='mixed' infers a pattern per row individually rather than requiring one single pattern for the whole column, letting a genuinely mixed-format date column parse without raising -- at the cost of losing the speed and full certainty a single fixed format= string provides.">
+    <p class="stem">What does <code>format="mixed"</code> do differently from a single fixed <code>format=</code> string?</p>
+    <button class="opt" data-ok>infers one pattern per row, not one shared one</button>
+    <button class="opt">infers one pattern globally, same as passing no format</button>
+    <button class="opt">disables parsing entirely, always just returning the raw text</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the pandas User Guide's <a href="https://pandas.pydata.org/docs/user_guide/timeseries.html#converting-to-timestamps">Time series / date functionality</a> page, "Converting to timestamps" section (per <code>RESOURCES.md</code>'s "Docs: pandas User Guide" entry, ~10 min) — covers <code>format="ISO8601"</code>, <code>exact=False</code>, and the full <code>strptime</code> directive table beyond what today covered.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>format=</code> is new today, placed right after Lesson 79's <code>str dtype (default, pandas 3.0+)</code> entry.<br>
+<strong>Next lesson:</strong> the groupby leftovers (<code>as_index=False</code>, <code>.get_group()</code>) and the memory/dtype family (<code>infer_objects()</code>, <code>read_csv(dtype=)</code>, sparse dtype, nullable boolean) remain the standing named candidates, alongside a fresh scan as always.<br><br>
+💬 Anything unclear — ambiguous dates, the mismatched-format gotcha, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -1425,3 +1425,134 @@ along the Phase 2 spine, adapted to the learning records.
   0012-dbt-unit-tests.html --detail '{"by":"headless"}'` succeeded on the
   first attempt, run from the repo root:
   `recorded: dataeng/lesson_generated day=12 lesson=0012-dbt-unit-tests.html`.
+- 2026-09-27 (headless 06:00 run, Day 13 generated): thirteenth lesson,
+  `0013-dbt-incremental-strategies.html`. Confirmed via `lessons/` (only
+  `0001`-`0012` present), `assets/nav.js`'s latest entry (`n: 12`), and a grep
+  of both plus this file for `0013`/`2026-09-27` (no matches anywhere) that
+  no lesson had already been generated for today, so proceeded. The
+  orchestrator's own pre-check found no `lesson_completed`/quiz/kata signal
+  for any course more recently than mid-July and `learning-records/` still
+  holds only the one Day-1 baseline file, so there was no new learner-
+  behavior signal to fold into today's content, consistent with every Phase
+  2 round so far. Read `MISSION.md`, `NOTES.md` and `PLAN.md` in full,
+  `RESOURCES.md`, the one `learning-records/` file, `assets/nav.js`, and
+  Lessons 4, 6, 9, 10, 11 and 12 in full for domain state and structural/
+  voice precedent before writing anything.
+  **Topic choice:** followed 2a's spine in order, as every prior Phase 2
+  round has — Days 8-12 covered the spine's first five bullets (layering,
+  snapshots, Jinja/macros, packages, unit tests); today is the sixth
+  verbatim: "Incremental strategies in depth: `merge`/`delete+insert` on
+  Postgres, late-arriving events, `--full-refresh`." No learning-record or
+  quiz signal exists to suggest deviating, same finding as every prior
+  round.
+  **Content:** rather than invent a toy incremental example, used this
+  project's own two existing incremental-shaped models. `fct_orders` (Day 4)
+  set `unique_key` with no explicit `incremental_strategy` — investigated
+  what dbt-postgres 1.11.0 actually does with that silence (reading its
+  `incremental_strategies.sql` macro source directly rather than assuming),
+  and found a genuinely current, non-obvious fact: dbt-postgres's own
+  default with `unique_key` set is `delete+insert`, not `merge` — Postgres
+  only gained a native `MERGE` statement in version 15, and dbt-postgres
+  still only dispatches to a real `merge` when a model asks for it
+  explicitly via `incremental_strategy='merge'`. Made that explicit on
+  `fct_orders` as today's first build step. Then built a real, observable
+  gotcha rather than asserting one: hand-edited an already-landed order's
+  `subtotal` directly in `raw.orders` and ran a live `dbt build`, showing
+  `MERGE 0` — the correction never reaches `fct_orders` at all, because the
+  `is_incremental()` filter only checks `placed_at`, which never changed;
+  `merge` never gets a chance to act because the filter never selects the
+  row in the first place. Named this explicitly as two separate decisions
+  (strategy vs. filter), then showed `--full-refresh` as the blunt fix.
+  Second half converts `mart_delivery_sla` (a plain `table` since Day 6,
+  untouched by every subsequent lesson that edited it) to `incremental` with
+  `delete+insert` and a 2-day lookback `HAVING` filter, motivated by a real,
+  previously-latent bug in this course's own domain: Day 6's `inner join` to
+  a `delivered` event means an order's day-bucket is only complete once its
+  `delivered` event lands, which can be a day after `placed` — a naive
+  incremental filter would compute that bucket too early and never revisit
+  it, a genuine late-arriving-event problem, not a manufactured one. Argued
+  `delete+insert` over `merge` specifically because a late event changes a
+  whole city+day aggregate, not one row's own columns — `merge`'s per-row
+  `update` doesn't fit a bucket that needs full recomputation, `delete+insert`
+  does. Left the `HAVING` lookback filter as the day's actual skill (TODO),
+  reusing Day 11's `sla_key` surrogate key as the model's `unique_key` since
+  that's the column that already represents the bucket's identity. No
+  pandas, no Python-language teaching, no re-derivation of idempotency or
+  API concepts — none applicable to a pure dbt-modelling day. Domain names
+  used exactly as established (`fct_orders`, `mart_delivery_sla`, `sla_key`,
+  `placed_at`, `order_date`). Opened with a "before today" `dbt build` check
+  citing Day 12's own stated `PASS=26 TOTAL=26` number verbatim, per the
+  running convention of trusting the immediately-prior day's own most
+  recently stated count.
+  **Verification:** laid out a minimal scratch project mirroring Days 8-12's
+  approach (`dbt_project.yml` with `vars`, all four staging models plus
+  `stg_orders.yml` schema tests reconstructed from Days 2/3/11's own literal
+  snippets, `macros/is_sla_breach.sql` from Day 10, `packages.yml` pinning
+  `dbt-labs/dbt_utils` from Day 11, and today's new `fct_orders.sql`/
+  `mart_delivery_sla.sql`/`marts.yml`) in `.scratch_dataeng_verify_d13/`
+  under the repo root, deleted after. Before writing anything, read
+  dbt-postgres 1.11.0's own installed `incremental_strategies.sql` macro
+  source directly (via `uv run --with "dbt-postgres==1.11.0" python3` to
+  locate and print the file) rather than assuming the merge-vs-delete+insert
+  default from memory or a tutorial — this is what surfaced the real,
+  current finding that `unique_key` alone triggers `delete+insert`, and
+  `merge` needs `incremental_strategy='merge'` stated explicitly. Ran
+  `uv run --with "dbt-postgres==1.11.0" dbt deps` (reached the live dbt Hub
+  registry again this round, installed real `dbt_utils` 1.4.1) then
+  `dbt parse --project-dir <abs> --profiles-dir <abs> --no-partial-parse`
+  (absolute-path flags, single non-compound command, no `cd`/redirection —
+  the same workaround every round since Day 2 has needed for this sandbox's
+  approval gate): clean, grepped for `Error`, found none. `dbt list
+  --resource-type model`/`--resource-type test` resolved all 7 models and 11
+  tests. Confirmed `dbt parse` catches a broken `ref()` (`Compilation
+  Error`, exit code 2) but explicitly does **not** catch an invalid
+  `incremental_strategy` string (a deliberately misspelled
+  `'bogus_strategy'` parsed clean) — that's only validated when the
+  materialization macro actually dispatches on the string at `run`/`compile`
+  time, a real, checked-not-assumed limitation stated honestly in this log
+  rather than overclaiming `dbt parse`'s coverage. Docker was available this
+  round, so verification went further than static parsing: brought up a
+  real scratch `postgres:17`, hand-seeded 3 orders across 2 restaurants with
+  a deliberately incomplete `order_events` history (2 orders with full
+  placed+delivered pairs, 1 order placed a day ago with `delivered` not yet
+  landed), and ran a real `dbt build`: `PASS=19 WARN=0 ERROR=0 SKIP=0
+  NO-OP=0 REUSED=0 TOTAL=19` on the first pass, with `mart_delivery_sla`
+  correctly emitting only 1 row (the 2-order bucket; the incomplete order
+  correctly absent). Then applied exactly the two mutations the lesson
+  describes — a late `delivered` event for the incomplete order, and a
+  `subtotal` correction on an already-landed order — and re-ran: `fct_orders`
+  reported `MERGE 0` and its corrected order's `subtotal` was confirmed
+  unchanged in the table (byte-for-byte the finding written into the
+  lesson), while `mart_delivery_sla` reported `INSERT 0 2` and a `psql`
+  query confirmed both the original bucket and the newly-completed bucket
+  were present with correct `delivered_orders` counts. Ran
+  `dbt run --select fct_orders --full-refresh` last and confirmed via `psql`
+  that the corrected `subtotal` was now present — the exact before/after
+  sequence in the lesson's Section 3 and Section 5 Verify blocks is this
+  round's own real, captured output, not hand-derived. Also ran
+  `uv run python3 -m py_compile` where applicable — no `.py` files exist in
+  this lesson (a pure dbt-modelling day), so that step was not applicable
+  and is noted here rather than silently skipped. Tore down the scratch
+  Postgres (`docker compose down -v`) and deleted the entire scratch
+  directory afterward, including the throwaway mutation script.
+  Registered Lesson 13 in `assets/nav.js` (`node --check` clean) and added
+  the Day 13 section to `reference/glossary.html` (3 terms: incremental
+  strategy, --full-refresh, late-arriving event — grepped Days 1-12's
+  sections first, case-insensitively, no collisions). Ran the same
+  tag-balance/unescaped-`&`/quiz-word-count script prior rounds have used,
+  from a scratch file outside `dataeng/` (inside the scratch verify
+  directory, deleted with it). All tags balanced
+  (div/p/table/tr/td/th/ul/li/pre/code/h2/dfn/button/span/a) on both the
+  lesson and the updated `reference/glossary.html`, zero suspicious bare `&`
+  in either. The first quiz draft came up mismatched on three of the four
+  questions (a stray dangling quote after `data-ok` on two buttons was also
+  caught and fixed by this same pass) with 7/6/6, 11/8/8 and 9/8/8 word
+  splits; rebalanced to 7/7/7, 8/8/8 and 8/8/8 respectively across several
+  edit-and-recount passes, re-verified by re-running the same script after
+  each edit. Confirmed `git status --short` touched only files under
+  `dataeng/` before finishing (other courses' own concurrent headless runs
+  were visibly touching `backend/`, `data/` and `python/` in the same
+  checkout this round, left untouched).
+  `bin/record-progress dataeng lesson_generated --day 13 --lesson
+  0013-dbt-incremental-strategies.html --detail '{"by":"headless"}'` run
+  from the repo root; see this entry's tail for the result.

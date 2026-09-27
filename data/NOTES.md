@@ -6928,3 +6928,97 @@
   was run from the repo root using the relative-path form, per this
   course's own established tip that it's more reliable than an absolute
   path in this sandbox.
+- 2026-09-27 generation (Lesson 81): headless 06:00 run. The orchestrator had
+  already confirmed no `lesson_generated` row for course=data dated
+  2026-09-27 and no `0081-*` lesson/nav entry existed yet; independently
+  re-confirmed via `ls lessons/` and grepping `assets/nav.js` for `n: 81`/
+  `2026-09-27` before starting — both empty, as expected. Also re-confirmed
+  no `lesson_completed`/quiz/kata row for any course more recent than
+  mid-July remains the steady state, same as every recent round. Read
+  `MISSION.md` in full (not modified), `RESOURCES.md` in full, the "User
+  preferences"/"Course design decisions" section near the top of `NOTES.md`,
+  the tail of `NOTES.md`, and Lesson 80's own HTML body plus its practice
+  file as structural precedent. `data/learning-records/` still holds only
+  the single Lesson-1 baseline file — unchanged, per the same steady state
+  every round since has reconfirmed. Lesson 80's teaser named two standing
+  candidates (groupby leftovers `as_index=False`/`.get_group()`; the memory/
+  dtype family `infer_objects()`/`read_csv(dtype=)`/sparse dtype/nullable
+  boolean) — per this course's own established practice, delegated a fresh
+  gap-scan sub-agent before picking either at face value. It grepped
+  `as_index`, `get_group`, `infer_objects`, `read_csv(dtype`, `Sparse`,
+  `BooleanDtype`, `pd.NA` across all 80 lesson bodies (confirmed both named
+  candidates are genuinely still open, real hits only in teaser prose) plus
+  a broader ~20-topic scan (melt/wide_to_long, MultiIndex, stack/unstack,
+  np.where/np.select, combine_first, duplicated(keep=), idxmax/idxmin,
+  nlargest, resample, memory_usage(deep=True), copy-on-write, eval/query,
+  expanding(), explode(), crosstab(normalize=) — all already solidly
+  covered). It surfaced two additional genuine gaps beyond the named
+  candidates: `pd.to_datetime(..., format=)` (every occurrence across
+  Lessons 2/3/32/41/51/64 uses only `errors=`, `format=` never appears) and
+  groupby `.first()`/`.last()` (zero hits anywhere). Picked
+  `to_datetime(format=)` over both the named candidates and the other new
+  lead: higher interview frequency than the narrow groupby footnotes or the
+  Sparse/BooleanDtype dtype-family tail, a clean SQL-equivalence angle
+  (DATESTYLE/locale-dependent parsing vs a declared format), and a concrete,
+  verifiable silent-bug story (ambiguous DD/MM vs MM/DD parsing) rather than
+  a drier API-surface topic. Before writing, probed every claim directly in
+  `data/.scratch-0081/` (not `/tmp`): confirmed `pd.to_datetime()` with no
+  `format=` on `["01/02/2026", "03/04/2026"]` silently parses US-style
+  month-first (2026-01-02, i.e. Jan 2nd); confirmed `format="%d/%m/%Y"` on
+  the identical input flips the first value to 2026-02-01 (Feb 1st) — same
+  string, opposite date; confirmed a mismatched `format=` alone raises
+  `ValueError` immediately (exact message shown verbatim in the lesson,
+  re-run right before shipping); confirmed combining a mismatched `format=`
+  with `errors="coerce"` produces `NaT` for EVERY row, including one that is
+  a genuinely valid date just in a different format — the sharper gotcha the
+  lesson leads with; confirmed `format="mixed"` parses a column mixing
+  `YYYY-MM-DD` and `DD/MM/YYYY` rows without raising, while neither no-format
+  nor any single fixed `format=` string can (both raise on the second row);
+  confirmed `dayfirst=True` agrees with `format="%d/%m/%Y"` on the same
+  example (mentioned as a looser, related knob, not the main teaching tool);
+  ran a timing check at 200k rows and found `format=` was NOT meaningfully
+  faster than plain inference on an already-uniform `YYYY-MM-DD` column
+  (~13ms either way) — the lesson leads with correctness under ambiguity,
+  not a false performance claim, since the probe didn't support one at this
+  fixture's scale. The shipped (unsolved) `practice/81_to_datetime_format.py`
+  was executed directly from its real `practice/` location and printed
+  exactly 4 ✗ with no traceback; a solved copy (kept only in the scratch
+  dir, not shipped) then printed all 4 ✓ on the first run. Quiz options were
+  drafted, then mechanically word-counted with a Python script (run via `uv
+  run python3`, a bare `python3` invocation being blocked by this sandbox's
+  command-approval gate, consistent with recent rounds' own notes) isolating
+  each `<div class="q">` block by regex span — iterated through several
+  rewrite+recount cycles until all three questions landed level (8/8/8,
+  8/8/8, 9/9/9 option words, 75 total, cross-checked as `8*3+8*3+9*3=75`),
+  with exactly one `data-ok` per question throughout. A separate mechanical
+  tag-balance script found one real mismatch on the first pass — `p` tags
+  20/21, the same recurring stray-`</p>`-inside-a-`.callout`-div pattern
+  prior rounds have hit (this round's copy of the pattern, not copied from
+  an older lesson this time) — fixed by removing the stray tag, confirmed
+  balanced afterward (`html`/`head`/`title`/`body`/`h1`/`dfn` 1/1 each,
+  `h2` 7/7, `p` 20/20, `div` 6/6, `pre` 4/4, `code` 74/74, `span` 15/15,
+  `strong` 11/11, `em` 2/2, `a` 2/2, `button` 9/9, `ul` 1/1, `li` 3/3). Raw-
+  `&` scan found exactly two matches, both inside the one already-
+  established `cd ~/learning/data && uv run …` shell command in a
+  `<pre><code>` block (this course's standing precedent), zero raw `&` in
+  prose. Checked the glossary for a collision before adding anything —
+  grepped `to_datetime`/`format=`/`strptime` across the full glossary, found
+  no dedicated row — confirmed a genuine gap, so added exactly one new row,
+  `format= (pd.to_datetime)`, placed directly after Lesson 79's `str dtype`
+  entry; confirmed the glossary table's tags stayed balanced after the
+  insert (`table` 1/1, `tr` 142/142, `td` 423/423, `th` 3/3, `code`
+  887/887), zero raw `&` introduced. Registered Lesson 81 in `nav.js` with
+  today's date (2026-09-27); `node --check` confirmed it still parses as
+  valid JavaScript after the edit, and exactly one `n: 81` entry plus one
+  `0081-*` file reference were confirmed to exist. This round's topic pick
+  leaves both of Lesson 80's named candidates (groupby leftovers; the
+  memory/dtype family) still open, plus the newly-surfaced groupby
+  `.first()`/`.last()` gap, as standing candidates for tomorrow, alongside a
+  fresh scan as always. The entire `data/.scratch-0081/` directory was
+  removed (`rm -rf`) after verification (confirmed via listing before
+  deleting, nothing else was at risk). This agent does not run `git commit`
+  — leaving working-tree changes uncommitted remains this course's
+  established convention. `bin/record-progress data lesson_generated --day
+  81 --lesson 0081-to-datetime-format.html --detail '{"by":"headless"}'` was
+  run from the repo root using the relative-path form and succeeded:
+  `recorded: data/lesson_generated day=81 lesson=0081-to-datetime-format.html`.

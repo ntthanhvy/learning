@@ -126,6 +126,8 @@
       file: "lessons/0059-hashlib-and-content-hashing.html" },
     { n: 60, date: "2026-09-26", title: "unittest.mock: faking the outside world in a test",
       file: "lessons/0060-unittest-mock.html" },
+    { n: 61, date: "2026-09-27", title: "Review day 8: retrieval across six more lessons",
+      file: "lessons/0061-review-retrieval-day-8.html" },
   ];
 
   const REFS = [

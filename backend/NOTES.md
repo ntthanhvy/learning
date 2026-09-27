@@ -6320,3 +6320,125 @@
   ground and is not being flagged as a queued candidate — the next round
   should still run its own fresh gap search from scratch rather than assume
   anything is queued.
+- **2026-09-27 generation (Lesson 84, headless 06:00 run):** Idempotency check
+  first: `grep -c "n: 84" backend/assets/nav.js` and `ls backend/lessons/ | grep
+  -c "^0084-"` both returned 0 before writing anything, so proceeded. Per the
+  orchestrator's confirmed state, no direct DB read was attempted this round
+  (standing sandbox limitation on read access, flagged every round since first
+  noted); no `lesson_completed`/quiz/kata signal exists more recent than
+  mid-July for any course, same as every round since baseline, so pacing came
+  from file state and this round's own fresh gap search, not a reported
+  outcome. Read `MISSION.md`, `RESOURCES.md`, both `learning-records/` files
+  (still just the baseline and the concurrency-vocabulary gap note), the tail
+  of `NOTES.md` (Lessons 81–83 in full), and Lesson 83 in full as the current
+  HTML/quiz/glossary-convention precedent, plus Lesson 72 (event-driven
+  vocabulary) as a second precedent for a "name the vocabulary behind
+  mechanisms already built, stop at MISSION.md's vocabulary-level line" lesson
+  shape. Lesson 83's round closed with no strong named candidate, so this round
+  ran its own fresh corpus grep from scratch per standing convention: swept
+  API-design terms (rate-limiting algorithms, GraphQL, CQRS, sparse fieldsets,
+  HATEOAS, HTTP compression) and database/runtime terms (generated columns,
+  exclusion/domain/range types, LISTEN/NOTIFY, read replicas, two-phase commit,
+  saga pattern, compensating transactions, eventual consistency) against every
+  lesson filename and file content. Two real zero-hit gaps surfaced: Postgres
+  generated columns as their own topic (used incidentally in Lesson 54's
+  tsvector column and referenced again in Lesson 75's comparison table, but
+  never taught as a general-purpose feature) and the saga pattern/eventual
+  consistency (zero hits anywhere for "saga," "compensating transaction," "two-
+  phase commit," or "eventual consistency"). Chose the latter: Lesson 75
+  already built a CHECK-vs-generated-column-vs-trigger comparison table that
+  treats generated columns as a settled, already-contextualized concept, so a
+  full new lesson on them risked feeling like a rehash rather than a genuine
+  gap, whereas the saga gap traces directly and cleanly to Lesson 29's outbox
+  pattern (which solved atomicity for one database and one event, and never
+  addressed what happens once step two lives in a second service with its own
+  database) and was completely unaddressed. Scope-checked carefully against
+  MISSION.md's explicit exclusion of "distributed systems beyond vocabulary
+  level" before committing to this topic — resolved by following Lesson 72's
+  own established precedent exactly: name the vocabulary and mental model
+  (saga, compensating transaction, orchestration vs. choreography, eventual
+  consistency) and explicitly draw the MISSION.md scope line in-lesson (Section
+  2 states outright that running/tuning 2PC infrastructure is out of scope,
+  matching Lesson 72's Section 5 doing the same for message brokers), rather
+  than teaching saga implementation, failure-handling depth, or any specific
+  broker/orchestration framework. Squarely in MISSION.md's runtime-concepts
+  track, not a NoSQL/sharding/replication topic. Lesson 84 covers: the
+  three-service order-placement motivating example (orders/payments/inventory,
+  each with its own DB); why 2PC is the theoretical answer but a poor practical
+  fit (every participant blocks and holds locks for the coordinator's whole
+  decision window, defeating the independent-failure boundary services are
+  drawn for); the saga as a sequence of ordinary local transactions (explicitly
+  tied back to Lesson 6's transaction guarantee — nothing new about any single
+  step) plus a compensating action per step, run in reverse order on failure;
+  the eventual-consistency trade-off named explicitly as a real, observable
+  inconsistency window traded for not needing a cross-service lock; and the
+  orchestration/choreography split, the latter explicitly tied back to Lesson
+  72's publisher/subscriber vocabulary. Checked the glossary first for all six
+  candidate terms — `two-phase commit`/`2PC`, `saga`, `compensating
+  transaction`/`compensating action`, `eventual consistency`, `orchestration`,
+  `choreography` — all zero collisions, confirmed via a case-insensitive grep
+  before writing anything, and added as new rows after Lesson 83's `extension
+  member` row. One Go snippet (the `placeOrderSaga` function showing the
+  happy-path sequence plus compensations run in reverse order on each failure
+  branch) was compile-checked clean with `go build`/`go vet` in a scratch
+  module (`.scratch-0084/gocheck/`, `go mod init scratch084` succeeded first,
+  both commands produced no output/errors) using minimal stand-in
+  `ordersService`/`paymentsService`/`inventoryService` types so the exact code
+  in the lesson is real, compiling Go. Source verification: a live `WebFetch`
+  against `https://microservices.io/patterns/data/saga.html` (Chris
+  Richardson's saga-pattern reference, the standard citation for the
+  orchestration/choreography split) was attempted this round and blocked
+  outright by this session's sandbox network-permission gate with no
+  interactive approver present — the identical class of block Lessons 79, 81,
+  82, and 83's rounds all hit against different domains. Rather than
+  presenting the site's content as freshly fetched, the lesson's "Go deeper"
+  section says so explicitly and notes the saga/compensating-transaction
+  vocabulary and orchestration/choreography split are long-stable material
+  predating the citation itself (tracing to a 1987 database theory paper), same
+  honest-flag pattern as the four prior rounds. Verification performed
+  mechanically, not by eye: (1) quiz word-count balance via a Node script
+  (`.scratch-0084/quizcheck.js`) parsing every `<div class="q">` block with
+  both `.split(/\s+/)` and `.split(" ")` (filtering empty strings),
+  cross-checked every run — first draft was uneven on all four questions (a
+  1–4-word spread per question after an initial pass at shortening options),
+  fixed through several rewrite-and-recount cycles per option, including
+  building a small standalone word-count harness to test candidate phrasings
+  before editing the file rather than trusting a hand count, which caught and
+  fixed one awkward-but-correct-count phrasing on Q4's correct answer before
+  shipping — converged to exactly 8/8/8/8 on all four questions, both counting
+  methods agreeing exactly, and exactly one `data-ok` per question confirmed
+  the same way; (2) an occurrence-count HTML tag-balance check
+  (`.scratch-0084/tagcheck.js`, regex-counting per tag, not substring counting,
+  across the same tag set used in every prior round) on both the lesson and
+  `glossary.html` after its six-row addition — both balanced on the first
+  check, no fixes needed; (3) a raw-unescaped-`&` regex scan (matching any `&`
+  not followed by `amp;`/`lt;`/`gt;`/`quot;`/`#39;`/`apos;`/`#\d+;`) across both
+  files — zero hits in either; (4) a backslash-escaped-quote scan (`\"`) — zero
+  hits in either file; (5) `node --check` against `assets/nav.js`, `assets/
+  gloss.js`, and `assets/quiz.js` — all clean, no output. Also caught and fixed
+  one self-inserted bug before shipping: an early draft had a stray duplicate
+  `</dfn>` closing tag inside the "choreography" `<dfn>` (leftover from an
+  editing slip that left `...trình tự</dfn>choreography</dfn>` instead of a
+  single properly-closed tag) and a stray literal `</p>` fragment inside a
+  `data-why` attribute on Q4 — both caught on a full read-through of the
+  drafted HTML before running the mechanical checks, fixed, and confirmed gone
+  by re-reading the file afterward; the tag-balance script's clean first-pass
+  result after the fix corroborates the fix held. Registered Lesson 84 in
+  `nav.js` (date 2026-09-27), re-confirmed exactly one matching `n: 84` entry
+  and exactly one matching `0084-*` lesson file afterward. No new
+  `learning-records/` file was added this round — routine topical entry like
+  Lessons 3–83, not a new baseline finding. Scratch work (the quiz/tag-balance
+  check scripts and the Go compile-check module) lived under
+  `backend/.scratch-0084/` and was deleted in full after use. Write path
+  (`bin/record-progress backend lesson_generated --day 84 --lesson
+  0084-sagas-and-eventual-consistency.html --detail '{"by":"headless"}'`, run
+  as a relative path from the repo root) succeeded with no approval gate,
+  output confirmed: `recorded: backend/lesson_generated day=84
+  lesson=0084-sagas-and-eventual-consistency.html`. No confirmed next-lesson gap is named with certainty
+  for the round after this one — same standing note as every prior round; a
+  completion/quiz-outcome signal or a user-named track should take priority
+  over guessing blind. This round's clear secondary candidate for a future
+  round is Postgres generated columns as their own lesson, evaluated and set
+  aside this round specifically because Lesson 75's existing comparison table
+  makes it feel covered, not because the gap search failed to find it — worth
+  a second look if a future round wants to revisit that call.

@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 84 · Sagas: what replaces a transaction once two services are involved</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 84 · ~20 min</p>
+<h1>Sagas: what replaces a transaction once two services are involved</h1>
+<p class="byline">Lesson 29's outbox pattern solved atomicity for one database and one event — insert the row, insert the outbox row, both commit together or neither does. That trick only works because both writes stay inside the same Postgres instance. What happens once step two of a business process lives in a <em>second</em> service, with its own database, that your transaction can never reach? Today: the vocabulary for that exact situation, and the pattern that replaces "wrap it in a transaction" once one transaction can no longer cover the whole story.</p>
+
+<h2>1 · The order-placement process, one service at a time</h2>
+<p>Say placing an order means three separate services each doing their own write: an <code>orders</code> service creates the order row, a <code>payments</code> service charges the card, and an <code>inventory</code> service decrements stock. Each service owns its own database on purpose — the same boundary reason Lesson 66's API gateway sits in front of a fleet instead of one shared schema: no team's internal table changes should force another team's redeploy. But it means Lesson 6's <code>BEGIN…COMMIT</code> is no longer an option for "all three happen or none do." Postgres's atomicity guarantee stops at the edge of one database connection, and these are three different databases behind three different services. If the payment charge succeeds but the inventory decrement then fails — card charged while stock silently oversold is the boring version, a service crashing mid-process is the scarier one — there is no single ROLLBACK that can undo work that already committed somewhere else.</p>
+<div class="callout"><strong>Same shape as Lesson 29, one level up:</strong> Lesson 29 named this exact hazard for two systems (a database and a queue) and fixed it by keeping both writes inside one database, in one transaction. That fix runs out of road the moment the two things that need to agree are two independently-committing services with no shared database at all — the dual-write problem, generalized past the point Lesson 29's trick can reach.</div>
+
+<h2>2 · Why there's no cross-service ROLLBACK</h2>
+<p>The textbook answer to "make several systems commit together" is <dfn data-en="a coordination protocol where a coordinator asks every participating system to confirm it can commit, waits for all of them to agree, and only then tells everyone to actually commit -- guaranteeing all-or-nothing across systems, at the cost of every participant holding its locks and staying blocked the whole time it waits on the coordinator's final word" data-vn="two-phase commit / 2PC (giữ nguyên) — coordinator hỏi mọi hệ thống tham gia có commit được không, đợi tất cả đồng ý rồi mới ra lệnh commit thật; đảm bảo tất cả-hoặc-không-gì nhưng mỗi bên phải giữ lock và bị block suốt lúc chờ">two-phase commit (2PC)</dfn>: a coordinator asks every participant "can you commit?", waits for a unanimous yes, then tells everyone to commit for real. Postgres can technically speak this protocol, but it's a poor fit for independently-run services on purpose — every participant must hold its locks and stay blocked the entire time it waits on the coordinator, so one slow or crashed service stalls all the others, which defeats the independent-failure boundary microservices are usually drawn for in the first place. This course's scope (MISSION.md excludes "distributed systems beyond vocabulary level") stops right here: naming 2PC as the theoretical answer almost nobody reaches for in this situation, not teaching how to operate it.</p>
+
+<h2>3 · The saga: local transactions plus a planned undo for each</h2>
+<p>The pattern actually used instead accepts that no cross-service lock will ever exist, and designs for what happens <em>after</em> a later step fails instead of trying to prevent that from ever being possible. A <dfn data-en="a business process split into a sequence of separate local transactions, one per service, where each step's service also defines a compensating action that undoes that step's effect -- used to keep multiple services eventually consistent without any cross-service lock or shared transaction" data-vn="saga (giữ nguyên) — quy trình nghiệp vụ chia thành nhiều transaction cục bộ riêng, mỗi bước có sẵn 1 hành động bù trừ (compensating action) để undo bước đó nếu bước sau thất bại, giữ các service nhất quán dần dần mà không cần lock/transaction chung">saga</dfn> splits the process into a sequence of ordinary local transactions — each one exactly the single-database, single-service kind Lesson 6 already covers, nothing new there — plus, for every step, a pre-written <dfn data-en="an action, defined ahead of time by the same service that performed the original step, that semantically undoes that step's effect -- e.g. issuing a refund to undo a charge -- used because a distributed process cannot literally roll back a step that already committed in another service's database" data-vn="compensating transaction / compensating action (giữ nguyên) — hành động định nghĩa sẵn để undo về mặt nghiệp vụ cho 1 bước trước đó (vd hoàn tiền để undo việc đã charge thẻ), dùng vì không thể ROLLBACK thật 1 bước đã commit ở database của service khác">compensating transaction</dfn> that undoes that step's effect if a later step fails. "Undo" here means semantically, not literally rolling back a commit that already happened elsewhere — <code>chargeCard</code>'s compensation is <code>refundCard</code>, not an impossible cross-service ROLLBACK.</p>
+<pre><code><span class="cm">// The happy path: three local transactions, one per service, run in order.</span>
+<span class="cm">// If a later step fails, run compensations for every step that already committed,</span>
+<span class="cm">// in reverse order.</span>
+<span class="kw">func</span> placeOrderSaga(ctx context.Context, o Order) <span class="kw">error</span> {
+    <span class="kw">if</span> err := ordersSvc.CreateOrder(ctx, o); err != <span class="kw">nil</span> {
+        <span class="kw">return</span> err <span class="cm">// nothing committed anywhere yet -- nothing to undo</span>
+    }
+    <span class="kw">if</span> err := paymentsSvc.ChargeCard(ctx, o.CustomerID, o.TotalCents); err != <span class="kw">nil</span> {
+        ordersSvc.CancelOrder(ctx, o.ID) <span class="cm">// compensate step 1</span>
+        <span class="kw">return</span> err
+    }
+    <span class="kw">if</span> err := inventorySvc.DecrementStock(ctx, o.Items); err != <span class="kw">nil</span> {
+        paymentsSvc.RefundCard(ctx, o.CustomerID, o.TotalCents) <span class="cm">// compensate step 2</span>
+        ordersSvc.CancelOrder(ctx, o.ID)                        <span class="cm">// compensate step 1</span>
+        <span class="kw">return</span> err
+    }
+    <span class="kw">return</span> <span class="kw">nil</span>
+}</code></pre>
+<p>Nothing about any individual step is new: each call is a normal local transaction inside one service's own database, exactly Lesson 6's guarantee. What's new is the explicit unwind list — every step that already succeeded gets a matching compensation, run in reverse order, the moment a later step fails.</p>
+
+<h2>4 · The cost: a window where the world is visibly inconsistent</h2>
+<p>Between step 2 committing (card charged) and step 3 failing and its compensation running (card refunded), a real customer's balance shows the charge. Anyone reading the payments database in that window sees state that the business process itself considers temporary and about to be corrected. This is <dfn data-en="a guarantee that if no new writes happen, all parts of a system will eventually agree -- weaker than Lesson 6's single-database atomicity, which never lets a partial state become visible in the first place; a saga trades away that stronger guarantee for the ability to work across services with no shared transaction at all" data-vn="eventual consistency (giữ nguyên) — đảm bảo nếu không có write mới, các phần của hệ thống rồi sẽ khớp nhau; yếu hơn atomicity trong 1 database (không cho lộ ra state dở dang), nhưng đổi lấy khả năng làm việc xuyên nhiều service không cần transaction chung">eventual consistency</dfn>: given enough time and no new writes, every service's state converges to correct — but unlike Lesson 6's single-database transaction, which never lets a partial state become visible to any other query in the first place, a saga's in-between window is real and observable. That's the trade a saga makes explicitly: give up "no partial state is ever visible" in exchange for "no cross-service lock is ever required."</p>
+<table class="cmp">
+<tr><th></th><th>Single-DB transaction (L6)</th><th>Saga across services</th></tr>
+<tr><td>Undo mechanism</td><td>ROLLBACK, exact and automatic</td><td>compensating transaction, hand-written per step</td></tr>
+<tr><td>Partial state ever visible?</td><td>no — atomicity hides it entirely</td><td>yes — a real window between failure and compensation</td></tr>
+<tr><td>Requires a cross-system lock?</td><td>no, one database handles it alone</td><td>no — this is the whole point of choosing a saga over 2PC</td></tr>
+<tr><td>Who writes the undo logic?</td><td>Postgres, automatically</td><td>each service, in advance, by hand</td></tr>
+</table>
+<div class="callout"><strong>Frontend-habit bridge:</strong> this is the backend version of an optimistic UI update that sometimes has to roll back — you show the new state immediately, then reconcile if the server rejects it, rather than blocking every pixel until a round trip confirms success. A saga is the same bet at the scale of a whole business process: move forward assuming each step will succeed, and have a real, tested undo ready for when one doesn't.</div>
+
+<h2>5 · Two ways to trigger the compensations</h2>
+<p>Nothing above says <em>who</em> decides "step 3 failed, now run compensations 2 and 1." Two shapes exist, and this course's scope stops at naming them rather than teaching how to run either one in production. An <dfn data-en="a saga coordination style where a single coordinator service calls each step directly, in order, and decides which compensations to run when a step fails -- centralized logic, easy to read as one flow, but a new single component every participating service now depends on" data-vn="orchestration (giữ nguyên) — kiểu saga có 1 coordinator gọi từng bước theo thứ tự và tự quyết compensation nào chạy khi có bước fail -- logic tập trung, dễ đọc, nhưng thêm 1 thành phần mà mọi service đều phụ thuộc vào">orchestration</dfn> saga has one coordinator calling each step directly and deciding what to compensate — close to the <code>placeOrderSaga</code> function above, just one explicit piece of code owning the whole sequence. A <dfn data-en="a saga coordination style with no central coordinator -- each service reacts to the previous service's event (Lesson 72's event-driven vocabulary) and publishes its own event in turn, including a failure event that tells earlier services to run their own compensation -- fully decentralized, but the overall sequence isn't visible in any one place" data-vn="choreography (giữ nguyên) — kiểu saga không có coordinator trung tâm -- mỗi service tự phản ứng theo event của service trước rồi tự publish event của mình, kể cả event báo lỗi để các service trước tự chạy compensation -- phi tập trung hoàn toàn, nhưng không nơi nào thấy được toàn bộ trình tự">choreography</dfn> saga has no coordinator at all — each service reacts to the previous service's event (Lesson 72's publisher/subscriber vocabulary, applied here) and publishes its own event in turn, including a failure event that tells earlier services to compensate themselves. Orchestration keeps the sequence readable in one place at the cost of a new central dependency; choreography removes that dependency at the cost of the overall sequence no longer being visible anywhere but the event log itself.</p>
+
+<h2>6 · Where this actually earns its keep</h2>
+<p>A saga is real complexity — hand-written compensations, an observable inconsistency window, a coordination style to pick — and it only pays for itself once a business process genuinely spans services with separate databases and no shared transaction is possible. A process confined to one service and one database should stay exactly what Lesson 6 already covers: a plain transaction, ROLLBACK included for free. Reach for a saga only once that option is structurally gone.</p>
+
+<div class="interview">
+<p><strong>Q: "How would you handle a business process that touches three different microservices, if one step can fail after an earlier one already succeeded?"</strong> A strong answer, out loud: <em>"A regular database transaction can't help here — Postgres's atomicity stops at one connection, and these are three separate databases. Two-phase commit exists on paper, but it means every service blocks and holds locks while waiting on a coordinator, which fights the whole point of running independent services. What's actually used is a saga: each step is its own ordinary local transaction, and every step also has a compensating action defined in advance — a refund to undo a charge, for instance — that runs if a later step fails. That does mean there's a real window where the system looks inconsistent, like a charge that hasn't been refunded yet, which is a genuine trade-off, not a bug — you're choosing eventual consistency over a lock you can't actually get across services. I'd pick orchestration, one coordinator calling each step and deciding what to compensate, if I wanted the sequence readable in one place, or choreography, each service reacting to the previous one's event, if I wanted to avoid adding that coordinator as a new dependency."</em> The signal: naming why 2PC is avoided in practice, not just that a saga exists, and being explicit that the inconsistency window is an accepted trade-off, not an oversight.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Postgres's BEGIN...COMMIT atomicity only covers writes made over one connection to one database. Once a business process spans three services each with their own database, no single ROLLBACK can undo a write that already committed inside a different service's database.">
+    <p class="stem">Why can't a plain database transaction cover a process spanning three separate services?</p>
+    <button class="opt" data-ok>atomicity only ever covers writes inside one database</button>
+    <button class="opt">three separate services can never share one client</button>
+    <button class="opt">Postgres transactions are always limited to one table</button>
+    <button class="opt">ROLLBACK statements are permanently disabled after two writes</button>
+  </div>
+  <div class="q" data-why="Two-phase commit requires every participant to hold its locks and stay blocked for the entire duration it waits on the coordinator's final decision, so one slow or crashed participant stalls every other one -- exactly the independent-failure boundary that running separate services was meant to provide in the first place.">
+    <p class="stem">Why do sagas get chosen over two-phase commit for independent services?</p>
+    <button class="opt" data-ok>2PC blocks every participant while one stays slow</button>
+    <button class="opt">two-phase commit has been fully removed from Postgres</button>
+    <button class="opt">sagas need zero coordination logic written by anyone</button>
+    <button class="opt">2PC can only ever run against one database</button>
+  </div>
+  <div class="q" data-why="A compensating transaction undoes a step's effect semantically, not by literally rolling back a commit that already happened in another service's database -- refunding a charge is the compensation for charging it, since no cross-service ROLLBACK can reach that already-committed write.">
+    <p class="stem">What does a compensating transaction actually do in a saga?</p>
+    <button class="opt" data-ok>semantically reverses a step that already fully committed</button>
+    <button class="opt">issues a literal ROLLBACK against another service's database</button>
+    <button class="opt">prevents any step from ever committing at all</button>
+    <button class="opt">merges every participating service's database into one connection</button>
+  </div>
+  <div class="q" data-why="Choreography has each service react to the previous service's published event and emit its own in turn, including a failure event, with no central coordinator deciding the sequence -- unlike orchestration, where one coordinator calls each step directly and decides what to compensate.">
+    <p class="stem">What distinguishes a choreography saga from an orchestration saga?</p>
+    <button class="opt" data-ok>no coordinator exists; services react to each event</button>
+    <button class="opt">choreography always requires a full commit protocol first</button>
+    <button class="opt">orchestration cannot ever run any compensating step itself</button>
+    <button class="opt">choreography only ever works with exactly one service</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> Chris Richardson's <a href="https://microservices.io/patterns/data/saga.html">microservices.io — Saga pattern</a> (~15 min), the standard reference distinguishing orchestration and choreography sagas with worked examples — a live <code>WebFetch</code> check against this URL was attempted this round and blocked outright by this session's sandbox network-permission gate, the same class of block Lessons 79, 81, 82, and 83's rounds all hit against different domains. <strong>Honest flag:</strong> not freshly fetched this round; the saga/compensating-transaction vocabulary and the orchestration/choreography split described above are long-stable, widely-cited material (the pattern predates microservices.io itself, going back to a 1987 database theory paper), but the link should get a live re-check once the gate is open. For the underlying eventual-consistency and atomicity theory, this extends RESOURCES.md's standing Kleppmann citation, <em>Designing Data-Intensive Applications</em> ch. 9 ("Consistency and Consensus") and ch. 7 (transactions, already cited by Lesson 6).</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially. Nếu chỗ nào chưa rõ, cứ hỏi lại bằng tiếng Việt cũng được.<br><br>
+<em>Next lesson:</em> open. Still no <code>lesson_completed</code>/quiz-outcome record exists for any lesson after 84 rounds — the honest next step remains a completion signal or a user-named track.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

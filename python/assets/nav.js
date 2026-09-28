@@ -128,6 +128,8 @@
       file: "lessons/0060-unittest-mock.html" },
     { n: 61, date: "2026-09-27", title: "Review day 8: retrieval across six more lessons",
       file: "lessons/0061-review-retrieval-day-8.html" },
+    { n: 62, date: "2026-09-28", title: "shutil: copying, moving & removing whole file trees",
+      file: "lessons/0062-shutil-file-and-tree-operations.html" },
   ];
 
   const REFS = [

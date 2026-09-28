@@ -24,6 +24,7 @@
     { n: 11, date: "2026-09-25", title: "dbt packages: dbt_utils and when to write a test instead", file: "lessons/0011-dbt-utils-and-packages.html" },
     { n: 12, date: "2026-09-26", title: "dbt unit tests vs. data tests", file: "lessons/0012-dbt-unit-tests.html" },
     { n: 13, date: "2026-09-27", title: "dbt incremental strategies in depth", file: "lessons/0013-dbt-incremental-strategies.html" },
+    { n: 14, date: "2026-09-28", title: "dbt docs, exposures & model contracts", file: "lessons/0014-dbt-docs-exposures-contracts.html" },
   ];
 
   const REFS = [

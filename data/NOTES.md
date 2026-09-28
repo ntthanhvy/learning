@@ -7022,3 +7022,130 @@
   81 --lesson 0081-to-datetime-format.html --detail '{"by":"headless"}'` was
   run from the repo root using the relative-path form and succeeded:
   `recorded: data/lesson_generated day=81 lesson=0081-to-datetime-format.html`.
+- 2026-09-28 generation (Lesson 82): headless 06:00 run. The orchestrator had
+  already confirmed no `lesson_generated` row for course=data dated
+  2026-09-28 and no `0082-*` lesson/nav entry existed yet, and that the last
+  `lesson_completed`/quiz/kata signal for any course remains stuck at
+  mid-July — both independently re-confirmed via `ls lessons/`/`ls
+  practice/` (max existing file `0081-to-datetime-format.html`, matching
+  `81_to_datetime_format.py`) and grepping `assets/nav.js` for `n: 82`/
+  `2026-09-28` before starting (both empty, as expected). Read `MISSION.md`
+  in full (not modified), `RESOURCES.md` in full, `assets/nav.js` in full,
+  the tail of `NOTES.md` (last ~2 generations, Lessons 80-81), and Lesson
+  81's own HTML body plus its practice file as structural precedent. Also
+  read Lesson 4 (`groupby: split-apply-combine`) and Lesson 61
+  (`groupby().apply() and multi-function .agg()`) in full, since both are
+  the groupby lessons most likely to already cover today's eventual pick.
+  `data/learning-records/` still holds only the single Lesson-1 baseline
+  file — unchanged, per the same steady state every round since has
+  reconfirmed. Lessons 80 AND 81 both independently named the same standing
+  candidate in their own teasers: the groupby leftovers `as_index=False`
+  and `.get_group()`, confirmed absent from all five groupby-touching
+  lessons (4, 40, 48, 61, 66) by two separate prior rounds' grep. Rather
+  than trust a two-round-old grep blindly, re-ran the check myself this
+  round: grepped `as_index`/`get_group` across all 81 lesson bodies plus
+  the glossary — zero hits anywhere except in Lessons 80/81's own teaser
+  prose — and separately grepped a fresh ~15-topic scan (Sparse dtype,
+  BooleanDtype/pd.NA, infer_objects(), read_csv(dtype=), groupby
+  `.first()`/`.last()`, `nsmallest()`, `duplicated(keep=)`, `.T`/
+  transpose(), `applymap()`, `to_numeric()`) to make sure nothing newer or
+  higher-priority had quietly surfaced — all either already well-covered or
+  narrower/lower-frequency than the two named leftovers. Picked
+  `as_index=False`+`.get_group()` over the memory/dtype family (the other
+  standing candidate, named since Lesson 79): both groupby arguments are
+  quick, concrete, directly extend Lesson 4's own groupby foundation
+  (5-lesson-old unfinished business, the longest-open named candidate in
+  the course so far), and pairing them as one short lesson matches this
+  course's own precedent for closing out small argument-level gaps (Lesson
+  57's `merge(validate=)`, Lesson 66's `NamedAgg`) rather than letting them
+  linger further. Before writing, probed every claim directly in
+  `data/.scratch-0082/` (not `/tmp`) against the real
+  `practice/data/orders_raw.csv` fixture (An/Binh/Chi, same coercion as
+  Lessons 2-4): confirmed `df.groupby("customer", as_index=False)
+  ["amount_clean"].sum()` is row-for-row, value-for-value identical
+  (`.equals()` True) to `df.groupby("customer")["amount_clean"].sum()
+  .reset_index()`; confirmed the real gotcha the lesson leads with in
+  Section 2 — the identical single-column-selected `.sum()` call returns a
+  plain `Series` by default but a `DataFrame` once `as_index=False` is
+  passed, a genuine type change caught by `isinstance()`, not merely a
+  cosmetic difference; confirmed `grouped.get_group("An")` returns exactly
+  An's 3 original, un-aggregated rows (order_ids 1/3/6, including the
+  still-unparsed `"unknown"` amount string), byte-identical via `.equals()`
+  to the plain boolean-mask filter `df[df["customer"] == "An"]`; confirmed
+  `grouped.get_group("Zzz")` for a customer never present in the data
+  raises `KeyError: 'Zzz'` immediately, not a silent empty result — this
+  course's now-familiar fail-loudly pattern (Lesson 46's `.at[]`, Lesson
+  47's `reindex()`). Also explored one avenue that did NOT make it into the
+  lesson: tested whether `as_index=False` interacts oddly with
+  `groupby().apply()` (a natural adjacent question given Lesson 61) —
+  confirmed it composes fine (grouping key shows up as an ordinary column
+  in the apply() result too, no error) but left this out of the shipped
+  lesson body as a needless extra wrinkle for a ~20-minute lesson whose
+  main job is closing two small, well-defined gaps, not exhaustively
+  cataloguing every interaction. The shipped (unsolved)
+  `practice/82_as_index_and_get_group.py` was executed directly from its
+  real `practice/` location (`cd data && uv run --with pandas python3
+  practice/82_...py`) and printed exactly 4 ✗ with no traceback; a solved
+  copy (kept only in the scratch dir, not shipped) then printed all 4 ✓ on
+  the first run. One real bug was caught and fixed before shipping:
+  Exercise 4's first draft used `except ... as e:` intending the bare `...`
+  placeholder to read naturally as "fill in the exception type here," but
+  `except <Ellipsis>` is invalid at runtime (`TypeError: catching classes
+  that do not inherit from BaseException is not allowed`) and crashed the
+  whole script with a traceback instead of printing a clean ✗ — caught only
+  by actually running the shipped file and seeing the traceback rather than
+  assuming the placeholder pattern from other exercises would transfer
+  safely to an `except` clause; fixed by moving the fill-in to a separate
+  `ex4_error_type = ...` variable checked with `isinstance()` inside a
+  `except BaseException` handler, so an unfilled placeholder now fails
+  cleanly as False/✗ instead of raising. Quiz options were drafted, then
+  mechanically word-counted with a Python-equivalent Node.js one-liner (run
+  via `node -e`, consistent with this round's own tag-balance and glossary
+  scripts; a bare `python3`/`uv run python3` invocation was not attempted
+  this round since `node` was already on hand and does the identical
+  whitespace-split word count) isolating each `<div class="q">` block by
+  regex span — iterated through several rewrite+recount cycles (compound
+  tokens like `groupby()`/`reset_index()` count as one whitespace-separated
+  word, which repeatedly threw off hand-estimates) until all three
+  questions landed exactly level (9/9/9, 9/9/9, 9/9/9 option words, 81
+  total), with exactly one `data-ok` per question throughout. A separate
+  mechanical tag-balance script found all tags already balanced on the
+  first pass this round (`html`/`head`/`title`/`body`/`h1` 1/1 each, `h2`
+  7/7, `p` 17/17, `div` 6/6, `pre` 4/4, `code` 63/63, `span` 10/10, `strong`
+  4/4, `em` 1/1, `a` 2/2, `button` 9/9, `dfn` 2/2) — no stray-`</p>` repeat
+  of prior rounds' recurring bug this time. Raw-`&` scan found exactly two
+  matches, both inside the one already-established `cd ~/learning/data &&
+  uv run …` shell command in a `<pre><code>` block (this course's standing
+  precedent), zero raw `&` in prose. Checked the glossary for a collision
+  before adding anything — grepped `as_index`/`get_group` across the full
+  glossary, found zero existing rows — confirmed a genuine gap, so added
+  exactly two new rows, `as_index=False` and `.get_group()`, placed
+  directly after Lesson 81's `format= (pd.to_datetime)` entry; confirmed
+  the glossary table's tags stayed balanced after the insert (`table` 1/1,
+  `tr` 144/144, `td` 429/429, `th` 3/3, `code` 900/900), zero raw `&`
+  introduced. Attempted a `WebFetch` of the cited primary source (pandas
+  User Guide's Group by page, `GroupBy object attributes` section) to
+  re-confirm the `.get_group()`/`as_index=` behavior described from
+  memory/local testing — it was blocked in this sandbox session (no
+  approver present, consistent with most recent rounds, though notably NOT
+  Lesson 80's round). Said so plainly in the lesson's "Go deeper" section
+  rather than claiming a fresh fetch: the citation is presented as
+  long-stable reference material the same page already cited from Lesson 4
+  onward, not as freshly re-verified content this round — this course's
+  established honest-fallback pattern. Registered Lesson 82 in `nav.js`
+  with today's date (2026-09-28); `node --check` confirmed it still parses
+  as valid JavaScript after the edit, and exactly one `n: 82` entry plus
+  one `0082-*` file reference were confirmed to exist (also confirmed
+  exactly one matching `82_*` practice file exists). This round's topic
+  pick leaves the memory/dtype family (`infer_objects()`,
+  `read_csv(dtype=)`, sparse dtype, nullable boolean) and the newly-
+  surfaced groupby `.first()`/`.last()` gap (spotted during Lesson 81's own
+  scan) both still open as standing candidates for tomorrow, alongside a
+  fresh scan as always. No new `data/learning-records/` entry was added
+  this round — routine lesson, no new baseline finding to justify one
+  (consistent with the established rule: not it every lesson gets one).
+  `bin/record-progress data lesson_generated --day 82 --lesson
+  0082-as-index-and-get-group.html --detail '{"by":"headless"}'` was run
+  from the repo root using the relative-path form, per this course's own
+  established tip that it's more reliable than an absolute path in this
+  sandbox.

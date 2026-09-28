@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 62 · shutil: copying, moving &amp; removing whole file trees</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 62 · ~20 min · 28 Sep 2026</p>
+<h1><code>shutil</code>: copying, moving &amp; removing whole file trees</h1>
+<p class="byline">Day 61's own next-day note left Day 62 open either way — a fresh gap if a compelling one turned up, or the review backlog (57, 59, 60) otherwise. A fresh-gap scan ran first: Day 6 taught reading and writing one file at a time with <code>open()</code>, and Day 13 taught <code>pathlib</code> for building and inspecting a path — but neither ever answers "copy this file to a backup location," "move this whole output directory somewhere else," or "delete this temp directory and everything in it." That gap is real, untaught, and squarely inside <code>MISSION.md</code>'s pipeline work: an ETL script routinely needs to stage input files, archive processed output, and clean up scratch directories. <code>shutil</code> closes it, one fresh day after Day 61's review.</p>
+
+<div class="callout"><strong>Why today, specifically:</strong> a fresh-gap grep across all 61 lessons and every practice file confirmed zero hits for <code>shutil</code> — genuinely untaught. <code>subprocess</code> and <code>configparser</code> remain on the table exactly as weak as Days 59-61 each assessed them (process/shell territory past <code>MISSION.md</code>'s concurrency boundary, and a narrow format <code>pathlib</code>/plain <code>dict</code>s already cover). <code>shutil</code> beat both a third weak-candidate day and a second review pass: it directly extends Day 6 and Day 13's file-handling material with the one thing neither covers — operating on a whole file or a whole directory tree at once, rather than one open file handle at a time — and Day 61 already closed a review day yesterday, so a second one back to back would skip a stronger fresh case sitting right here.</div>
+
+<h2>1 · The problem: <code>open()</code> only handles one file's bytes, not the file itself</h2>
+<p>Days 6 and 13 can read a file's contents, write new contents, and check whether a path exists — but none of that touches the file as a filesystem entry. Copying a file the "manual" way means opening the source for reading, opening the destination for writing, and copying every byte across by hand:</p>
+<pre><code><span class="kw">from</span> pathlib <span class="kw">import</span> Path
+
+src = Path(<span class="str">"report.csv"</span>)
+dst = Path(<span class="str">"backup/report.csv"</span>)
+<span class="kw">with</span> <span class="kw">open</span>(src, <span class="str">"rb"</span>) <span class="kw">as</span> fsrc, <span class="kw">open</span>(dst, <span class="str">"wb"</span>) <span class="kw">as</span> fdst:
+    fdst.write(fsrc.read())   <span class="cm"># works for one file, but copies no metadata (permissions, timestamps)</span></code></pre>
+<p>This works for a single small file, but it copies only bytes — no file permissions, no modified-time metadata — and it has no answer at all for "copy this entire directory, with everything inside it, to a new location." <dfn data-en="Python's standard-library module for high-level file operations that go beyond a single open() call: copying or moving a file or an entire directory tree, deleting a directory tree, and querying disk usage" data-vn="giữ nguyên &quot;shutil&quot; — module chuẩn (shell utilities) làm các thao tác file/thư mục mức cao: copy, move, xóa cả cây thư mục, mà open() một mình không làm được">shutil</dfn> ("shell utilities") is the standard library's answer: one function call per whole-file or whole-tree operation.</p>
+
+<h2>2 · Copying a file: <code>shutil.copy()</code> vs <code>shutil.copy2()</code></h2>
+<pre><code><span class="kw">import</span> shutil
+
+shutil.copy(<span class="str">"report.csv"</span>, <span class="str">"backup/report.csv"</span>)    <span class="cm"># copies content + permission bits</span>
+shutil.copy2(<span class="str">"report.csv"</span>, <span class="str">"backup/report.csv"</span>)   <span class="cm"># copy() plus modified-time and other metadata</span></code></pre>
+<p>Both accept either plain strings or <code>Path</code> objects (Day 13) interchangeably, and both also accept a destination <em>directory</em> instead of a full filename — <code>shutil.copy("report.csv", "backup/")</code> figures out the filename from the source automatically. <code>copy2()</code> is the one to reach for when preserving "when was this last touched" matters, such as a cache or a de-duplication check like Day 59's content hashing; plain <code>copy()</code> is enough when only the content matters.</p>
+
+<h2>3 · Whole directory trees: <code>copytree()</code>, <code>move()</code>, <code>rmtree()</code></h2>
+<p>The bigger gap <code>open()</code> and <code>pathlib</code> alone never close is operating on an entire directory at once — every file and subdirectory inside it, recursively:</p>
+<pre><code><span class="kw">import</span> shutil
+
+shutil.copytree(<span class="str">"data/raw"</span>, <span class="str">"data/raw_backup"</span>)   <span class="cm"># recursively copies everything inside; destination must NOT already exist</span>
+shutil.move(<span class="str">"data/processed"</span>, <span class="str">"archive/processed"</span>)  <span class="cm"># moves a file OR a whole directory; works across filesystems too</span>
+shutil.rmtree(<span class="str">"data/scratch"</span>)                    <span class="cm"># deletes a directory and everything inside it -- no confirmation, no undo</span></code></pre>
+<p><code>copytree()</code>'s destination-must-not-exist rule is deliberate, not a limitation to work around by pre-deleting the target — it exists so a typo in the destination path can never silently merge into and corrupt an existing directory. Pass <code>dirs_exist_ok=True</code> only when merging into an existing directory is genuinely the intent. <code>move()</code> is the general-purpose one: unlike <code>os.rename()</code>, it also handles moving across different disks/filesystems by copying then deleting the source when a plain rename isn't possible at the OS level, and it works identically whether the source is a single file or a whole tree.</p>
+
+<div class="callout"><strong><code>rmtree()</code> has no undo:</strong> it deletes immediately and permanently — no recycle bin, no confirmation prompt. The same discipline Day 8's exceptions lesson applied to <code>except</code> clauses applies here even harder: never call <code>rmtree()</code> on a path built from unvalidated input (a config value, a CLI argument, string concatenation gone wrong) without first confirming, ideally with <code>Path.resolve()</code> and an explicit check, that the resolved path is actually inside the directory intended to be cleaned.</div>
+
+<h2>4 · One more use: <code>shutil.disk_usage()</code></h2>
+<p>Before writing a large output file or unpacking a big archive, checking that there's actually room avoids a pipeline failing halfway through:</p>
+<pre><code><span class="kw">import</span> shutil
+
+usage = shutil.disk_usage(<span class="str">"."</span>)
+usage.total, usage.used, usage.free   <span class="cm"># all in bytes -- a namedtuple (Day 53), so also usable as usage[0], usage[1], usage[2]</span></code></pre>
+<p><code>disk_usage()</code> returns a <code>namedtuple</code> — exactly the lightweight-record shape Day 53 taught — so <code>usage.free</code> reads clearly instead of an unlabeled index into a plain tuple.</p>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> nothing pandas-specific today — <code>DataFrame.to_csv()</code>/<code>read_csv()</code> read and write file <em>contents</em>, but neither pandas nor any DataFrame method copies, moves, or deletes a file or directory as a filesystem entry; that stays <code>shutil</code>'s job (or <code>pathlib</code>'s, for a single file) in any pandas pipeline too. Not covered further here, per <code>MISSION.md</code>.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/62_shutil_file_and_tree_operations.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/62_shutil_file_and_tree_operations.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: copying a file with <code>shutil.copy()</code> and confirming the original is untouched, copying a whole directory tree with <code>copytree()</code> and confirming every nested file arrived, moving a directory with <code>move()</code> and confirming the source path no longer exists, and removing a directory tree with <code>rmtree()</code> and confirming it's gone.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="shutil.copy() copies a file's content plus its permission bits, but not its modified-time metadata. shutil.copy2() copies everything copy() does, plus metadata like the modified time -- the one to reach for when preserving 'when was this last touched' matters, such as for a cache or de-duplication check.">
+    <p class="stem">What does <code>shutil.copy2()</code> preserve that plain <code>shutil.copy()</code> does not?</p>
+    <button class="opt" data-ok>metadata, such as the file's own modified-time timestamp</button>
+    <button class="opt">the file's original byte content, but nothing more</button>
+    <button class="opt">nothing — both functions behave completely identically always</button>
+  </div>
+  <div class="q" data-why="copytree()'s destination-must-not-exist rule is deliberate: it exists so a typo in the destination path can never silently merge into and corrupt an existing directory. dirs_exist_ok=True opts into merging only when that is genuinely the intent.">
+    <p class="stem">Why does <code>shutil.copytree()</code> require the destination to not already exist?</p>
+    <button class="opt" data-ok>so a destination typo can't silently corrupt a folder</button>
+    <button class="opt">Python cannot technically write files into any existing folder</button>
+    <button class="opt">it is a hard OS limit with no override</button>
+  </div>
+  <div class="q" data-why="shutil.move() is the general-purpose one: unlike os.rename(), it also handles moving across different disks or filesystems, by copying then deleting the source when a plain rename isn't possible at the OS level -- and it works identically for a single file or a whole directory tree.">
+    <p class="stem">Why reach for <code>shutil.move()</code> instead of <code>os.rename()</code> for a directory?</p>
+    <button class="opt" data-ok>move() also works across different disks or filesystems</button>
+    <button class="opt">rename() can only ever rename one single file</button>
+    <button class="opt">move() refuses outright to relocate any directory tree</button>
+  </div>
+  <div class="q" data-why="shutil.rmtree() deletes a directory and everything inside it immediately and permanently, with no recycle bin and no confirmation prompt -- calling it on a path built from unvalidated input without first confirming the resolved path is safe is a real, unrecoverable-deletion risk.">
+    <p class="stem">What is the key risk to guard against before calling <code>shutil.rmtree()</code>?</p>
+    <button class="opt" data-ok>it deletes permanently at once, with no undo or confirmation</button>
+    <button class="opt">it only ever deletes empty directories, never any real content</button>
+    <button class="opt">it asks for confirmation twice before deleting anything at all</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the standard library's <a href="https://docs.python.org/3/library/shutil.html"><code>shutil</code></a> docs — covers <code>copy()</code>/<code>copy2()</code>/<code>copytree()</code>/<code>move()</code>/<code>rmtree()</code> and their full keyword-argument set (including <code>dirs_exist_ok</code> and ignore-pattern callbacks for <code>copytree()</code> not covered today), plus <code>disk_usage()</code> and the archiving functions (<code>make_archive()</code>/<code>unpack_archive()</code>) this lesson left out to stay to one tangible win. Not yet in <code>RESOURCES.md</code>; added there today alongside the other single-module stdlib citations.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day62">glossary</a> under Day 62.<br>
+This closes a genuine gap Days 6 and 13 left open — Day 6 handles one file's bytes, Day 13 builds and inspects one path, but neither copies, moves, or deletes a whole file or directory tree.<br><br>
+💬 Anything unclear — <code>copy()</code> vs <code>copy2()</code>, <code>copytree()</code>'s existing-destination rule, or when <code>rmtree()</code> is actually safe to call? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

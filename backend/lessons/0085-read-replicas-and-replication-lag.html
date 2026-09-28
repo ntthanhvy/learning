@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 85 · Read replicas: why the same query can return different answers a moment apart</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 85 · ~20 min</p>
+<h1>Read replicas: why the same query can return different answers a moment apart</h1>
+<p class="byline">Lesson 39 explained how one Postgres instance shows two transactions two different, both-correct versions of the same row without either blocking — MVCC, all inside one process, one disk. Five lessons have said the word "replica" in passing since (a failover, a reserved connection slot, a wrong quiz answer) without ever explaining what it is. Today names it: a second full copy of your database, on its own machine, kept in sync by copying changes across the network instead of sharing a disk — and the one new fact that copying introduces: it takes time.</p>
+
+<h2>1 · One database, then two copies of it</h2>
+<p>Every lesson so far has quietly assumed one Postgres process holding the only copy of the data. A <dfn data-en="the single Postgres instance that accepts write queries (INSERT/UPDATE/DELETE) -- the one copy of the data everything else is ultimately kept in sync with" data-vn="primary (giữ nguyên) — instance Postgres duy nhất nhận query ghi (INSERT/UPDATE/DELETE), bản gốc mà mọi bản sao khác phải theo kịp">primary</dfn> is that one instance, the only one allowed to accept writes. A <dfn data-en="a separate Postgres instance holding a continuously-updated copy of the primary's data, that only serves read queries (SELECT) and never accepts writes itself" data-vn="read replica (giữ nguyên) — instance Postgres riêng giữ bản sao dữ liệu của primary, chỉ phục vụ query đọc (SELECT), không nhận query ghi">read replica</dfn> is a second, separate Postgres instance holding a copy of that same data, that only ever answers read queries. The primary continuously ships its stream of changes over the network to the replica, which <dfn data-en="the replica's process of continuously receiving and applying the primary's stream of committed changes, keeping its own copy of the data up to date without the primary and replica sharing a disk" data-vn="streaming replication (giữ nguyên) — replica liên tục nhận và áp dụng luồng thay đổi đã commit từ primary để giữ bản sao luôn cập nhật, không cần chung ổ đĩa">replays</dfn> them locally to stay current. Nothing here is a new storage engine — a replica is an ordinary Postgres instance, running the exact MVCC machinery Lesson 39 covered, just fed its rows from another Postgres instance's change stream instead of from its own clients' writes.</p>
+<div class="callout"><strong>Why bother?</strong> A single primary has a ceiling on how many read queries it can serve before reads start competing with writes for the same CPU and I/O. Pointing report generation, analytics, and other read-heavy traffic at one or more replicas gets that load off the primary entirely, without touching a single line of query code — the query itself doesn't change, only which instance answers it.</div>
+
+<h2>2 · The one fact that copying over a network introduces</h2>
+<p>Inside one instance, Lesson 39's snapshot rule is exact and instantaneous — a transaction either sees a committed version or it doesn't, decided the moment it takes its snapshot. Between two instances, that certainty is gone: a write commits on the primary, then has to travel over the network and get replayed before the replica's copy reflects it. That gap has a name: <dfn data-en="the delay between a write committing on the primary and that same change becoming visible on a read replica, caused by the time it takes to ship and replay the change over the network -- normally milliseconds, but capable of growing under heavy write load or network trouble" data-vn="replication lag (giữ nguyên) — khoảng trễ giữa lúc write commit ở primary và lúc replica thấy được thay đổi đó, do thời gian truyền + áp dụng qua mạng -- bình thường vài mili giây nhưng có thể tăng khi write nhiều hoặc mạng có sự cố">replication lag</dfn>. It's normally a handful of milliseconds — small enough to ignore for most reads — but it is never guaranteed to be zero, and it can grow under heavy write traffic, a slow network link, or a replica temporarily falling behind.</p>
+<div class="callout"><strong>The classic bug this causes:</strong> a user submits a form (a write, routed to the primary), the page immediately re-fetches to show the result (a read, routed to a replica to save load), and the replica hasn't replayed that write yet. The user sees their own just-submitted data vanish for a moment — not a bug in the write, not a bug in the read, just replication lag made visible at the worst possible instant.</div>
+
+<h2>3 · The guarantee that has a name, and the one that doesn't</h2>
+<p>The property the bug above breaks is <dfn data-en="a consistency guarantee that a process reading data always sees at least its own most recent write -- broken by naively routing a read to a replica immediately after a write went to the primary, since the replica may not have replayed that write yet" data-vn="read-your-own-writes (giữ nguyên) — đảm bảo 1 tiến trình đọc lại luôn thấy được write gần nhất của chính nó -- bị vi phạm nếu route thẳng read sang replica ngay sau khi write vào primary, vì replica có thể chưa replay kịp">read-your-own-writes</dfn>: the specific, minimal promise that you at least see your own recent writes, even if you might momentarily see stale data written by someone else. It's Lesson 84's <code>eventual consistency</code> applied one layer earlier than sagas — same shape (a real, observable window where two copies of the truth briefly disagree), but living between a primary and its own replicas instead of between two independent services with two independent databases.</p>
+<table class="cmp">
+<tr><th></th><th>MVCC, one instance (L39)</th><th>Primary → replica</th></tr>
+<tr><td>Where the "other version" lives</td><td>same disk, same process</td><td>a separate machine, over the network</td></tr>
+<tr><td>Delay before visible</td><td>none — commit is instant and local</td><td>replication lag, normally small but never zero</td></tr>
+<tr><td>Guarantee for the writer's own next read</td><td>always sees its own write</td><td>only if that read is routed back to the primary</td></tr>
+</table>
+
+<h2>4 · The routing decision this actually is</h2>
+<p>Using replicas safely is a per-query routing choice, not a database setting: send a query to the primary or to a replica depending on what the query needs to see.</p>
+<pre><code><span class="cm">// A read that just needs "recent enough" data -- a public product listing,
+// a dashboard refreshed every few seconds -- is exactly what a replica is for.
+</span>rows, err := replicaPool.Query(ctx, <span class="st">"SELECT id, name, price FROM products WHERE active"</span>)
+
+<span class="cm">// A read that must reflect a write this same request just made -- "show the
+// order I just placed" -- has to go back to the primary, or it can lose the
+// read-your-own-writes guarantee and show the user their own action vanished.
+</span>row := primaryPool.QueryRow(ctx, <span class="st">"SELECT status FROM orders WHERE id = $1"</span>, orderID)</code></pre>
+<p>Nothing about the SQL differs — the same <code>SELECT</code> is valid against either instance. The only decision is which connection pool a given query goes through, made query by query based on whether that specific read can tolerate a small lag window or not.</p>
+
+<div class="callout"><strong>Scope line:</strong> this lesson stops at the vocabulary and the routing decision, matching MISSION.md's explicit exclusion of "distributed systems beyond vocabulary level" — the same line Lesson 84 drew for sagas. Standing up replicas, tuning replication itself, or handling a primary failing over to a promoted replica (Lesson 47 named that failover moment already, without explaining it) is operations work this course doesn't cover.</div>
+
+<div class="interview">
+<p><strong>Q: "Your team wants to point read-heavy dashboard queries at a read replica to reduce load on the primary. What would you watch out for?"</strong> A strong answer, out loud: <em>"The replica is a real Postgres instance running the same MVCC engine as the primary, just fed a stream of the primary's committed changes over the network instead of taking writes directly — so any query that's fine reading data that's a few milliseconds old is a good candidate. What I'd watch for is replication lag: if a user just wrote something and the very next request reads it back, and that read happens to land on a replica that hasn't replayed the write yet, they'll see their own change appear to vanish. I'd route anything that needs read-your-own-writes back to the primary explicitly, and only send replicas the reads that can genuinely tolerate a small lag window, like a dashboard or a public listing page."</em> The signal: naming replication lag as the actual mechanism, not just "replicas can be stale," and knowing which specific reads are and aren't safe to route away from the primary.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A read replica is a separate Postgres instance kept in sync by continuously replaying the primary's stream of committed changes over the network -- it never accepts writes itself, only reads.">
+    <p class="stem">What is a read replica, mechanically?</p>
+    <button class="opt" data-ok>a separate Postgres instance replaying the primary's own changes</button>
+    <button class="opt">a cache layer that only stores recent query results</button>
+    <button class="opt">a second schema living inside the same primary process</button>
+    <button class="opt">a connection pool that splits one instance's own capacity</button>
+  </div>
+  <div class="q" data-why="Replication lag is the delay between a write committing on the primary and that write becoming visible on a replica, caused by the time needed to ship and replay the change over the network -- it's normally small, but it is never guaranteed to be exactly zero.">
+    <p class="stem">What does the term "replication lag" actually refer to?</p>
+    <button class="opt" data-ok>the delay before a replica reflects a committed write</button>
+    <button class="opt">the total number of replicas a primary currently owns</button>
+    <button class="opt">the fixed interval between two scheduled nightly full backups</button>
+    <button class="opt">the number of open connections a replica allows now</button>
+  </div>
+  <div class="q" data-why="Read-your-own-writes is the guarantee that a process reading data back sees at least its own most recent write -- it gets broken specifically when a write goes to the primary and the very next read is routed to a replica that hasn't replayed that write yet.">
+    <p class="stem">Which situation breaks the read-your-own-writes guarantee?</p>
+    <button class="opt" data-ok>reading from a replica right after your own write</button>
+    <button class="opt">reading the exact same row twice from the primary</button>
+    <button class="opt">writing to the primary and never reading it back</button>
+    <button class="opt">running two entirely unrelated reads on two separate replicas</button>
+  </div>
+  <div class="q" data-why="A query that must reflect a write the same request just made -- like showing the order a user just placed -- needs to be routed to the primary, since only the primary is guaranteed to have that write applied the instant it commits; a replica might not have replayed it yet.">
+    <p class="stem">Which read should be routed to the primary rather than a replica?</p>
+    <button class="opt" data-ok>showing the order this same request just placed</button>
+    <button class="opt">a public listing page refreshed every few seconds</button>
+    <button class="opt">a dashboard chart summarizing last month's order totals</button>
+    <button class="opt">a search page over mostly unchanging catalog listings</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the PostgreSQL manual's <a href="https://www.postgresql.org/docs/current/high-availability.html">High Availability, Load Balancing, and Replication</a> chapter — the same manual RESOURCES.md already cites for Data Definition (Lesson 1's standing source), this time its replication chapter specifically. A live <code>WebFetch</code> check against this URL was attempted this round and blocked outright by this session's sandbox network-permission gate, the same class of block every recent round has hit against a different domain (Lessons 79, 81, 82, 83, 84). <strong>Honest flag:</strong> not freshly fetched this round; streaming replication, the primary/replica split, and replication lag as described above are long-stable Postgres behavior, documented essentially unchanged for many major versions, but the link should get a live re-check once the gate is open. For the broader theory of what a lagging copy can and can't promise a reader, this extends RESOURCES.md's standing Kleppmann citation, <em>Designing Data-Intensive Applications</em> ch. 5 ("Replication"), the direct sequel to the ch. 7 transactions material Lesson 6 and Lesson 84 already cited.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially. Nếu chỗ nào chưa rõ, cứ hỏi lại bằng tiếng Việt cũng được.<br><br>
+<em>Next lesson:</em> open. Still no <code>lesson_completed</code>/quiz-outcome record exists for any lesson after 85 rounds — the honest next step remains a completion signal or a user-named track.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -1556,3 +1556,148 @@ along the Phase 2 spine, adapted to the learning records.
   `bin/record-progress dataeng lesson_generated --day 13 --lesson
   0013-dbt-incremental-strategies.html --detail '{"by":"headless"}'` run
   from the repo root; see this entry's tail for the result.
+- 2026-09-28 (headless 06:00 run, Day 14 generated): fourteenth lesson,
+  `0014-dbt-docs-exposures-contracts.html`. Confirmed via `lessons/` (only
+  `0001`-`0013` present), `assets/nav.js`'s latest entry (`n: 13`), and a grep
+  of both plus this file for `0014`/`2026-09-28` (no matches anywhere) that no
+  lesson had already been generated for today, so proceeded. The
+  orchestrator's own pre-check found no `lesson_completed`/quiz/kata signal
+  for any course more recently than mid-July and `learning-records/` still
+  holds only the one Day-1 baseline file, so there was no new learner-
+  behavior signal to fold into today's content, consistent with every Phase 2
+  round so far. Read `MISSION.md`, `RESOURCES.md`, `PLAN.md`, the one
+  `learning-records/` file, `assets/nav.js`, this file's last ~300 lines, and
+  Lessons 8, 9, 10, 11 and 13 in full for domain state and structural/voice
+  precedent before writing anything.
+  **Topic choice:** followed 2a's spine in order, as every prior Phase 2 round
+  has — Days 8-13 covered the spine's first six bullets (layering, snapshots,
+  Jinja/macros, packages, unit tests, incremental strategies); today is the
+  seventh verbatim: "Docs, exposures, model contracts & versions: dbt as an
+  API for downstream consumers." This was also Day 13's own closing "next up"
+  line verbatim, a second independent confirmation beyond the spine order
+  itself, same pattern as every prior round's topic-choice check. Narrowed to
+  docs + exposures + full contracts, leaving dbt "versions" (model version
+  pinning for breaking-change migration) unclaimed for a future round — three
+  real, distinct features already filled 20 minutes without stretching to a
+  fourth just to exhaust the bullet's full title in one lesson.
+  **Content:** framed all three features around one real shift — `fct_orders`
+  and `mart_delivery_sla` becoming things a non-dbt consumer reads directly,
+  which this course's own domain has quietly supported since Day 6 without
+  ever naming it. Added `description`s to `fct_orders` and its columns
+  (`models/marts/marts.yml`), turned on `contract: {enforced: true}` for
+  `fct_orders` with a full `data_type` per column, and declared a
+  `delivery_ops_dashboard` exposure depending on `fct_orders` and
+  `mart_delivery_sla` via `models/marts/exposures.yml`. The real, checked-not-
+  assumed finding driving Section 3: enabling a contract on `fct_orders`
+  (`materialized='incremental'`, Day 13) immediately rejected the project's
+  own implicit `on_schema_change` default (`ignore`, never named explicitly
+  before today) with a real dbt error naming exactly `append_new_columns` or
+  `fail` as the only accepted values once a contract is enforced on an
+  incremental model — found by actually enabling the contract and reading the
+  error, not by asserting it from memory. Picked `fail`, the stricter option,
+  reasoned from the contract's own promise. A second real finding, also
+  checked rather than assumed: a contract's `constraints` (`not_null`,
+  `unique`) do **not** register as new dbt test nodes at all — confirmed via
+  `dbt list --resource-type test --select fct_orders`, which found only the
+  two pre-existing Day-4 YAML tests, unchanged — so the lesson keeps Day 4's
+  `tests:` block explicitly alongside the new `constraints:` block rather
+  than treating them as redundant, and states the build's total stays at
+  Day 13's 26, not 27, correcting an earlier draft of this lesson that had
+  wrongly assumed the constraints would add to the count. Deliberately broke
+  both a contract (`data_type` typo, then a declared column absent from the
+  model's own `select`) and an exposure (`ref()` to a nonexistent model) to
+  compare what `dbt parse` alone actually catches, per this course's standing
+  "prove the check has teeth" bar (Days 3, 12, 13) — found and stated
+  precisely: the exposure's broken `ref()` failed `dbt parse` immediately, no
+  connection needed (resolved against the manifest, same mechanism as any
+  model-to-model `ref()`), while both contract breaks parsed clean and only
+  surface at `dbt compile`/`dbt run` against a live connection, the same
+  "parse doesn't reach this far" limit Day 13 found for an invalid
+  `incremental_strategy` string. No pandas, no Python-language teaching, no
+  re-derivation of idempotency/API concepts — none applicable to a pure
+  dbt-governance day. Domain names used exactly as established (`fct_orders`,
+  `mart_delivery_sla`, `order_id`). Opened with a "before today" `dbt build`
+  check citing Day 13's own re-verified `PASS=26 TOTAL=26` number verbatim,
+  per the running convention of trusting the immediately-prior day's own most
+  recently reconfirmed count.
+  **Verification:** laid out a minimal scratch project mirroring Days 8-13's
+  approach (`dbt_project.yml` with `vars`, all four staging models plus
+  `stg_orders.yml` schema tests reconstructed from Days 2/3/11's own literal
+  snippets — nesting the `relationships` test's `to`/`field` under `arguments`
+  after `dbt parse` surfaced a real
+  `MissingArgumentsPropertyInGenericTestDeprecation` warning on the
+  unqualified top-level form, a genuine current dbt-core 1.12.5 deprecation
+  worth fixing in the scratch project even though it predates today's own
+  content — `macros/is_sla_breach.sql` from Day 10, `packages.yml` pinning
+  `dbt-labs/dbt_utils` from Day 11, and `fct_orders.sql`/`mart_delivery_sla.sql`
+  reconstructed with Day 13's `merge`/`delete+insert` configs plus
+  `unit_tests.yml` from Day 12 (adding a required
+  `overrides: {macros: {is_incremental: false}}` block after `dbt parse`
+  correctly rejected a unit test against an incremental model with no
+  explicit override — another real, current parse-time check surfaced by
+  actually running it, not assumed) in `.scratch-0014/` under `dataeng/`,
+  deleted after. Ran `uv run --with "dbt-postgres==1.11.0" dbt deps
+  --project-dir <abs>` first (absolute-path flag, single non-compound
+  command, no `cd`/redirection — the same workaround every round since Day 2
+  has needed for this sandbox's approval gate) — reached the live dbt Hub
+  registry again this round and installed real `dbt_utils` 1.4.1. Confirmed
+  the reconstructed Day-13 baseline itself parsed clean before adding any new
+  content, isolating today's own changes. Added today's real new content
+  (`description`s, `contract: {enforced: true}`, `exposures.yml`) and ran
+  `dbt parse --project-dir <abs> --profiles-dir <abs> --no-partial-parse`
+  after every meaningful change, piping to a file and grepping for `Error`
+  rather than trusting exit code (unreliable when piped, this file's own
+  standing caution) — each intermediate error (the `on_schema_change`
+  rejection, the unit-test override requirement) was a real error dbt itself
+  raised, read, and fixed in place, not anticipated. `dbt list
+  --resource-type exposure` correctly resolved
+  `exposure.food_delivery_pipeline.delivery_ops_dashboard` as its own
+  resource type. Tested contract-break detection three ways: a `data_type`
+  typo (`bigin_typo`) parsed clean; a wholly nonexistent contracted column
+  parsed clean and only failed at `dbt compile` with a `Database Error`
+  (timeout against the deliberately unreachable `10.255.255.1` profile IP,
+  confirming compile genuinely tries to reach a live connection rather than
+  failing for an unrelated reason); an exposure `ref()` to
+  `mart_does_not_exist` failed `dbt parse` itself with a named `Compilation
+  Error`. All three reverted and a final clean `dbt parse` and `dbt list
+  --resource-type model` (all 10 models resolved) confirmed before deleting
+  `.scratch-0014/` entirely. No `.py` files in this lesson (a pure
+  dbt-governance day), so `py_compile` was not applicable and is noted here
+  rather than silently skipped. **Live source check:** attempted `WebFetch`
+  on <https://docs.getdbt.com/docs/collaborate/govern/model-contracts> this
+  round — **it succeeded**, unlike several recent rounds' blocked attempts.
+  The fetch's own constraint-enforcement-by-adapter table directly confirmed
+  this round's own empirical Postgres finding (constraints are real,
+  database-enforced DDL here, `not_null`/`unique`/`primary_key`/`foreign_key`
+  all genuinely enforced) and additionally surfaced that Snowflake/BigQuery/
+  Redshift only enforce `not_null`, treating the rest as declared-but-
+  unchecked metadata — folded into the lesson's Section 3 callout and the new
+  glossary definition as a fresh, fetched fact, not assumed from memory. Also
+  confirmed the exact `on_schema_change` restriction (`append_new_columns` or
+  `fail` only, for contracted incremental models) matches the doc verbatim.
+  This is a genuinely fresh fetch this round, not a cached or assumed
+  citation — the lesson's "Go deeper" section states this plainly rather than
+  presenting it as a return to blocked-fetch honesty-note territory.
+  Registered Lesson 14 in `assets/nav.js` (`node --check` clean) and added
+  the Day 14 section to `reference/glossary.html` (2 new terms: model
+  contract, exposure — grepped Days 1-13's sections first, case-
+  insensitively, no collisions). Added the Documentation/Exposures/Model
+  contracts docs to `RESOURCES.md` under dbt (deep), after the `dbt_utils`
+  package entry, since the lesson's own "Go deeper" section cited them as
+  not-yet-listed there. Ran the same tag-balance/unescaped-`&`/quiz-word-count
+  script prior rounds have used, written to a dotfile inside `dataeng/`
+  itself this round (`.verify_0014.py`, `.verify_glossary.py` — plain
+  `python3 <path>` required approval this round even for a read-only check
+  script, so both were run via `uv run python3 <path>` instead, then deleted
+  once verification passed) rather than `/tmp/` as some earlier rounds used.
+  All tags balanced (div/p/table/tr/td/th/ul/li/pre/code/h2/dfn/button/span/a)
+  on both the lesson and the updated `reference/glossary.html`, zero
+  suspicious bare `&` in either. The first quiz draft came up mismatched on
+  all four questions (8/8/5, 8/9/6, 11/9/10, 5/5/7 word splits); rebalanced
+  all four to 10/10/10, 11/11/11, 13/13/13 and 6/6/6 respectively across
+  several edit-and-recount passes, re-verified by re-running the same script
+  after each edit. Confirmed `git status --short` touched only files under
+  `dataeng/` before finishing.
+  `bin/record-progress dataeng lesson_generated --day 14 --lesson
+  0014-dbt-docs-exposures-contracts.html --detail '{"by":"headless"}'` run
+  from the repo root; see this entry's tail for the result.

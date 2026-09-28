@@ -6442,3 +6442,148 @@
   aside this round specifically because Lesson 75's existing comparison table
   makes it feel covered, not because the gap search failed to find it — worth
   a second look if a future round wants to revisit that call.
+- **2026-09-28 generation (Lesson 85, headless 06:00 run):** Idempotency check
+  first: `grep -c "n: 85" backend/assets/nav.js` and `ls backend/lessons/ | grep
+  -c "^0085-"` both returned 0 before writing anything, so proceeded. Per the
+  orchestrator's confirmed state, no direct DB read was attempted this round
+  (standing sandbox limitation on read access, flagged every round since first
+  noted, with the `node -e` + `execFileSync('psql', ...)` workaround available
+  but not needed this round since the orchestrator had already confirmed no
+  `lesson_completed`/quiz/kata signal exists more recent than mid-July for any
+  course — same as every round since baseline); pacing came from file state and
+  this round's own fresh gap search, not a reported outcome. Read `MISSION.md`,
+  `RESOURCES.md`, both `learning-records/` files (still just the baseline and
+  the concurrency-vocabulary gap note — neither needed a new entry this round,
+  see below), the tail of `NOTES.md` (Lessons 82–84 in full), and Lesson 84
+  itself as the current HTML/quiz/glossary-convention precedent, plus Lesson 39
+  (MVCC) as a second precedent since it's the natural single-instance
+  predecessor to whatever this round's topic would build on. Lesson 84's own
+  round closed with one named secondary candidate — Postgres generated columns
+  as their own lesson — set aside specifically because Lesson 75's comparison
+  table already contextualizes them, not because the search failed to find
+  them; re-evaluated that call this round and let it stand for the same reason
+  Lesson 84 gave: a full lesson on generated columns would read as a rehash of
+  material Lesson 54 (the worked `tsvector` example) and Lesson 75 (the
+  CHECK-vs-generated-column-vs-trigger table) already cover, not a genuine gap.
+  Ran a fresh corpus grep from scratch per standing convention instead of
+  taking the queued candidate: swept API-design terms (GraphQL, CQRS, sparse
+  fieldsets, HTTP caching header depth, rate-limiting algorithm depth) and
+  database/runtime terms (read replicas, replication lag, sharding, exclusion/
+  domain/range types, LISTEN/NOTIFY) against every lesson filename and file
+  content. Token-bucket rate limiting turned out already taught in full depth
+  by Lesson 11 and referenced by name in four later lessons (confirmed via
+  `grep -n -i "token bucket" lessons/*.html`), so that avenue was closed
+  immediately. The clean zero-hit gap was read replicas and replication lag:
+  `grep -rli "replica\|replication" lessons/*.html` hit six files (Lessons 8,
+  18, 41, 47, 48, 61), but reading every hit showed the word used only
+  incidentally — a wrong quiz-answer distractor in Lesson 61 ("read replica
+  queries, versus queries against the primary database"), a parenthetical about
+  reserved connection slots in Lesson 18, a passing mention of a failover in
+  Lesson 47 — never once explained as its own concept, and a case-insensitive
+  grep of `glossary.html` for "replica"/"replication"/"read-your-own-writes"
+  returned zero rows before writing anything. This is a real, narrow gap that
+  traces directly to Lesson 39's MVCC lesson (which explained how one instance
+  shows two transactions two different, both-correct snapshots of a row with no
+  new concept needed once you cross to a *second* instance kept in sync over a
+  network) and to Lesson 84's eventual-consistency vocabulary (the same
+  observable-inconsistency-window shape, one layer earlier than a saga: between
+  a primary and its own replica instead of between two independent services).
+  Squarely in MISSION.md's runtime-concepts track; scope-checked against the
+  same "distributed systems beyond vocabulary level" exclusion Lesson 84 had to
+  navigate, resolved the identical way — name the vocabulary (primary, read
+  replica, streaming replication, replication lag, read-your-own-writes) and
+  the per-query routing decision it implies, explicitly draw the scope line
+  in-lesson (Section "Scope line" states outright that standing up replicas,
+  tuning replication, or handling failover is operations work out of scope,
+  matching Lesson 84's Section 2 doing the same for 2PC), and stop short of
+  teaching how to configure or operate streaming replication itself. No
+  duplication risk with the Go week's own material (grepped its lessons for
+  "replica"/"replication", zero hits) or with `data`/`python`/`rust`/`go`
+  course scope (pure Postgres/backend-runtime concept, no pandas/NumPy, no
+  language feature taught for its own sake — the one Go snippet is two ordinary
+  `pgxpool.Pool.Query` calls used only to show the routing decision, not to
+  teach Go). Lesson 85 covers: primary vs. read replica as two Postgres
+  instances instead of one, replaying committed changes over a network instead
+  of sharing a disk; replication lag as the one new fact copying over a network
+  introduces, tied explicitly back to Lesson 39's exact-and-instantaneous
+  single-instance snapshot rule; the classic bug (submit a form, immediately
+  re-fetch, the re-fetch lands on a replica that hasn't replayed the write yet)
+  as a concrete illustration before naming the guarantee it breaks;
+  read-your-own-writes named as the specific minimal guarantee at stake,
+  explicitly tied to Lesson 84's eventual-consistency vocabulary as the same
+  trade-off one layer earlier; a comparison table contrasting single-instance
+  MVCC against primary→replica on exactly three axes (where the other version
+  lives, delay before visible, guarantee for the writer's own next read); and a
+  closing per-query routing example (two short Go snippets, one hitting
+  `replicaPool` for a tolerant read, one hitting `primaryPool` for a
+  read-your-own-writes-sensitive read) with no new Go concept taught. Checked
+  the glossary first for all five candidate terms — `primary`, `read replica`,
+  `streaming replication`, `replication lag`, `read-your-own-writes` — all zero
+  collisions, confirmed via a case-insensitive grep before writing anything,
+  and added as new rows after Lesson 84's `choreography (saga)` row. No Go
+  compile-check module was set up this round: the two Go lines in the lesson
+  (`replicaPool.Query(ctx, "...")` and `primaryPool.QueryRow(ctx, "...", 
+  orderID)`) are illustrative fragments, not a complete compilable function
+  like Lesson 84's `placeOrderSaga` — confirmed by grepping the drafted HTML for
+  `func `/`package main`/`import (` and getting zero hits, the same signal
+  prior rounds used to decide whether the compile-check step applies. Source
+  verification: a live `WebFetch` against
+  `https://www.postgresql.org/docs/current/high-availability.html` (the
+  PostgreSQL manual's replication chapter, a different chapter of the same
+  manual RESOURCES.md already cites for Data Definition) was attempted this
+  round and blocked outright by this session's sandbox network-permission gate
+  with no interactive approver present — the identical class of block Lessons
+  79, 81, 82, 83, and 84's rounds all hit against different domains. Rather
+  than presenting the manual's content as freshly fetched, the lesson's "Go
+  deeper" section says so explicitly and notes the primary/replica split and
+  replication-lag vocabulary are long-stable Postgres behavior, documented
+  essentially unchanged for many major versions — same honest-flag pattern as
+  the five prior rounds. Verification performed mechanically, not by eye: (1)
+  quiz word-count balance via a Node script (`.scratch-0085/quizcheck.js`)
+  parsing the quiz section and each `<div class="q">` block with both
+  `.split(/\s+/)` and `.split(" ")` (filtering empty strings), cross-checked
+  every run — first draft was uneven on all four questions (a 1–3-word spread
+  per question), fixed through several rewrite-and-recount cycles per option,
+  including two edits that overshot a target count on one option while fixing
+  another in the same question and had to be corrected again on the next run
+  rather than trusted by eye — converged to exactly 9/9/9/9 on Q1, 9/9/9/9 on
+  Q2, 9/9/9/9 on Q3, and 8/8/8/8 on Q4, both counting methods agreeing exactly,
+  and exactly one `data-ok` per question confirmed the same way; (2) an
+  occurrence-count HTML tag-balance check (`.scratch-0085/tagcheck.js`,
+  regex-counting per tag, not substring counting, across the same tag set used
+  in every prior round) on both the lesson and `glossary.html` after its
+  five-row addition — this round the first pass caught a real bug: a
+  `<div class="callout">` in Section 1 opened directly with `<strong>` (no
+  `<p>`), matching every other callout's convention in this course, but closed
+  with a stray leftover `</p></div>` from an earlier edit, unbalancing `<p>` by
+  one; fixed by deleting the stray `</p>` so the callout closes the same way
+  every other callout in Lessons 84 and 72 does, re-ran the check, clean on the
+  second pass; (3) a raw-unescaped-`&` regex scan (matching any `&` not
+  followed by `amp;`/`lt;`/`gt;`/`quot;`/`#39;`/`apos;`/`#\d+;`) across both
+  files — zero hits in either; (4) a backslash-escaped-quote scan (`\"`) — zero
+  hits in either file; (5) `node --check` against `assets/nav.js`,
+  `assets/gloss.js`, and `assets/quiz.js` — all clean, no output; re-ran all
+  five checks a second time after a later wording fix to the "Go deeper"
+  citation sentence (it originally implied `high-availability.html` itself was
+  RESOURCES.md's cited DDL page, which it isn't — corrected to say it's the
+  same manual, a different chapter), confirming nothing regressed. Registered
+  Lesson 85 in `nav.js` (date 2026-09-28), re-confirmed exactly one matching
+  `n: 85` entry and exactly one matching `0085-*` lesson file afterward. No new
+  `learning-records/` file was added this round — routine topical entry like
+  Lessons 3–84, not a new baseline finding. Scratch work (the quiz/tag-balance
+  check scripts) lived under `backend/.scratch-0085/` and was deleted in full
+  after use, confirmed gone. Write path (`bin/record-progress backend
+  lesson_generated --day 85 --lesson 0085-read-replicas-and-replication-lag.html
+  --detail '{"by":"headless"}'`, run as a relative path from the repo root) is
+  the last step of this round — see the immediately following record for its
+  confirmed output. No confirmed next-lesson gap is named with certainty for
+  the round after this one — same standing note as every prior round; a
+  completion/quiz-outcome signal or a user-named track should take priority
+  over guessing blind. This round's wide net (GraphQL, CQRS, sparse fieldsets,
+  HTTP caching header depth, sharding, exclusion/domain/range types,
+  LISTEN/NOTIFY) mostly hit already-covered or too-incidental ground beyond the
+  one gap chosen and is not being flagged as a queued candidate, except to note
+  that database sharding and read replicas are adjacent topics — if a future
+  round wants horizontal read/write splitting depth beyond today's vocabulary
+  level, that's the next natural step, but MISSION.md's explicit sharding
+  exclusion means that would need a fresh scope check, not an assumption.

@@ -147,6 +147,13 @@
   <tr><td>late-arriving event</td><td>giữ nguyên "late-arriving event" — sự kiện thật đến trễ, sau khi dòng/nhóm nó thuộc về đã được xử lý xong, filter incremental chỉ nhìn về phía trước sẽ bỏ sót nó</td><td>A real event a model's incremental logic needs to account for that arrives after the row or bucket it belongs to has already been processed — a filter that only looks forward from the last run will silently miss it unless it re-checks a short lookback window.</td></tr>
 </table>
 
+<h2 id="day14">Day 14 — dbt docs, exposures &amp; model contracts</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>model contract</td><td>giữ nguyên "model contract" — khai báo trước tên cột, kiểu dữ liệu và ràng buộc not_null/unique/primary_key của 1 model, dbt so khớp SELECT đã compile với khai báo đó trước khi cho build hoàn tất, bắt lỗi hình dạng trước khi bản build sai lọt qua thay vì test sau</td><td>A dbt model config (<code>contract: {enforced: true}</code>) that declares a model's exact column names, data types and column-level <code>not_null</code>/<code>unique</code>/<code>primary_key</code> constraints up front in YAML, and has dbt compare the model's compiled <code>SELECT</code> against that declared shape before allowing the build to finish — catches a shape mismatch before a bad build ever lands, rather than testing the output afterward. On Postgres these constraints are real, database-enforced DDL, not just declared metadata, unlike on some other warehouses dbt supports.</td></tr>
+  <tr><td>exposure</td><td>giữ nguyên "exposure" — khai báo 1 bên tiêu thụ downstream không phải dbt (dashboard, notebook, pipeline khác), nêu rõ phụ thuộc vào model/source nào qua ref()/source(), trở thành 1 node thật trong DAG của dbt dù dbt không build nó</td><td>A dbt YAML declaration (<code>exposures:</code> key) naming a non-dbt downstream consumer — a dashboard, notebook or pipeline — and the dbt models/sources it depends on via <code>ref()</code>/<code>source()</code>, added as a real node in dbt's own DAG and lineage graph even though dbt never builds it. A broken <code>ref()</code> inside one fails <code>dbt parse</code> immediately, the same as a broken <code>ref()</code> between two models.</td></tr>
+</table>
+
 <script src="../assets/nav.js"></script>
 </body>
 </html>

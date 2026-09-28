@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 14 · dbt docs, exposures &amp; model contracts</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 14 · ~20 min · 28 Sep 2026</p>
+<h1>dbt docs, exposures &amp; model contracts</h1>
+<p class="byline">Today's tangible win: <code>fct_orders</code> gets real column <code>description</code>s a generated docs site can show, a <code>contract: {enforced: true}</code> that pins its column names and types so a future edit can't silently drift, and an <code>exposures.yml</code> that tells dbt's own graph about a downstream dashboard reading it directly — dbt treated as an API other things depend on, not just a private SQL project.</p>
+
+<div class="callout"><strong>Before today — check Day 13 actually landed:</strong> this lesson edits <code>fct_orders</code>'s config and schema YAML, so start from a clean build:
+<pre><code>cd food_delivery_pipeline
+uv run --project ../dbt_env dbt build</code></pre>
+Expected: <code>Done. PASS=26 WARN=0 ERROR=0 SKIP=0 NO-OP=0 REUSED=0 TOTAL=26</code> (Day 13's own re-verified count: 10 models + 1 snapshot + 14 data tests + 2 unit tests). If <code>fct_orders</code> has no <code>incremental_strategy='merge'</code> in its <code>config()</code>, or <code>mart_delivery_sla</code> is still a plain <code>table</code>, go back and finish Day 13 first — today's contract is written against Day 13's exact <code>fct_orders</code> columns.</div>
+
+<h2>1 · Every model so far has been private. Today one becomes an API.</h2>
+<p>Thirteen days of models, and not one of them has told dbt about anything outside dbt itself. <code>ref()</code> and <code>source()</code> only ever point at other dbt nodes — staging, intermediate, marts, snapshots. But <code>fct_orders</code> and <code>mart_delivery_sla</code> are exactly the kind of table <code>MISSION.md</code>'s own "walk through the architecture" goal has in mind: something a real dashboard, a data scientist's notebook, or another team's own pipeline reads directly, with no dbt in between on their side. The moment that's true, those two models stop being "just SQL this project happens to run" and become something closer to a contract: change a column's name or type without warning, and something downstream — code you may never see — breaks silently, weeks after the change shipped.</p>
+<p>dbt has three separate features for exactly this shift from private SQL to a relied-upon interface, and today builds all three on <code>fct_orders</code>, the mart the rest of this project already depends on most:</p>
+<table class="gloss">
+  <tr><th>Feature</th><th>What it actually does</th><th>Enforced how?</th></tr>
+  <tr><td>docs (<code>description</code>)</td><td>human-readable documentation on a model/column, rendered into a browsable site</td><td>never — pure documentation, dbt does not check it against anything</td></tr>
+  <tr><td>exposure</td><td>declares a non-dbt downstream consumer (dashboard, notebook, pipeline) as a real node in dbt's own DAG</td><td>a broken <code>ref()</code> inside an exposure fails <code>dbt parse</code>, same as a broken <code>ref()</code> in a model</td></tr>
+  <tr><td>model contract</td><td>pins a model's column names and types up front; dbt checks the compiled <code>SELECT</code> against that list before letting a build finish</td><td>only at compile/run time, against a real warehouse connection — not at <code>dbt parse</code></td></tr>
+</table>
+
+<h2>2 · Docs: descriptions a generated site can actually show</h2>
+<p><code>dbt docs generate</code> has been available since Day 1 without ever being used — it reads every model, column and test in the project and builds a static, browsable site with the full lineage graph. Today's build step gives it something worth showing: <code>fct_orders</code> gets a model-level <code>description</code> and a <code>description</code> on every column, in <code>models/marts/marts.yml</code>, alongside the tests already there:</p>
+<pre><code><span class="cm">-- models/marts/marts.yml -- fct_orders section, replacing the bare "columns:" block from Day 4</span>
+models:
+  - name: fct_orders
+    description: <span class="str">"One row per order, at the grain the whole downstream pipeline depends on. Contracted: column names, types and the order_id not-null/unique guarantee are enforced at build time, not just tested after the fact."</span>
+    columns:
+      - name: order_id
+        description: <span class="str">"Primary key. One row per order; never null, never duplicated."</span>
+        tests:
+          - not_null
+          - unique
+      <span class="cm"># ...customer_id, restaurant_id, courier_id, subtotal, delivery_fee,
+      # order_total, placed_at -- one description: line each, TODO below</span></code></pre>
+<p>Fill in a one-line <code>description</code> for the remaining seven columns yourself — the day's first real skill is just writing them accurately, since a wrong or stale description is worse than none: it tells a future reader (possibly you, in six months) something false with total confidence. Generate the site and open it:</p>
+<pre><code>uv run --project ../dbt_env dbt docs generate
+uv run --project ../dbt_env dbt docs serve</code></pre>
+<p>Expected — <code>dbt docs serve</code> starts a local webserver (default port 8080) and opens the generated site; click <code>fct_orders</code> in the left-hand model tree and every description you wrote appears next to its column, with the full lineage graph (<code>stg_orders → fct_orders</code>, and now <code>fct_orders → delivery_ops_dashboard</code> once Section 4 adds the exposure) one click away via the graph icon.</p>
+<div class="callout"><strong>Docs are pure documentation, not a guarantee.</strong> Nothing in dbt checks a <code>description</code> against anything — write <code>"the customer's email address"</code> on a column that's actually an integer ID, and <code>dbt build</code> passes without a single warning. That's the real difference from what Section 3 builds next: descriptions inform a human reader; a contract is checked by dbt itself, every build.</div>
+
+<h2>3 · Model contracts: pin the shape, not just test it after the fact</h2>
+<p>Every test this project has wired since Day 3 — <code>not_null</code>, <code>relationships</code>, <code>dbt_utils.accepted_range</code>, Day 12's unit tests — runs <em>after</em> a model is built, checking whether the output happens to be correct. A <dfn data-en="a dbt model config (contract: {enforced: true}) that declares a model's exact column names, data types and column-level not_null/unique/primary_key constraints up front in YAML, and has dbt compare the model's compiled SELECT against that declared shape before allowing the build to finish -- catches a shape mismatch before a bad build ever lands, rather than testing the output afterward" data-vn="giữ nguyên &quot;model contract&quot; — khai báo trước tên cột, kiểu dữ liệu và ràng buộc not_null/unique/primary_key của 1 model, dbt so khớp SELECT đã compile với khai báo đó trước khi cho build hoàn tất, bắt lỗi hình dạng trước khi bản build sai lọt qua thay vì test sau">model contract</dfn> works the other way round: declare the exact shape a model must produce — column names, types, and column-level constraints — before it's built, and dbt refuses to finish the build if the compiled <code>SELECT</code> doesn't match. It's the difference between a promise checked after the fact and a promise dbt enforces on the way in.</p>
+<p>Turn it on for <code>fct_orders</code> — <code>contract: {enforced: true}</code> as a model <code>config</code>, plus a <code>data_type</code> on every column (required once a contract is enforced; a column dbt can't type-check is a contract with a hole in it):</p>
+<pre><code><span class="cm">-- models/marts/marts.yml -- fct_orders, extending Section 2's block</span>
+models:
+  - name: fct_orders
+    description: <span class="str">"..."</span>  <span class="cm"># from Section 2</span>
+    config:
+      contract:
+        enforced: <span class="kw">true</span>
+      on_schema_change: <span class="str">'TODO'</span>
+    columns:
+      - name: order_id
+        data_type: bigint
+        description: <span class="str">"..."</span>
+        constraints:
+          - type: not_null
+          - type: unique
+        tests:
+          - not_null
+          - unique
+      - name: customer_id
+        data_type: bigint
+      <span class="cm"># ...restaurant_id, courier_id: bigint; subtotal, delivery_fee, order_total: numeric;
+      # placed_at: timestamp -- match each to what stg_orders/fct_orders.sql actually selects</span></code></pre>
+<p>Keep Day 4's <code>not_null</code>/<code>unique</code> <em>tests</em> on <code>order_id</code> alongside the new <code>constraints</code> block — they check two different things, at two different times. A <code>constraints</code> entry becomes a real DDL constraint dbt writes into the <code>create table</code> statement itself (a Postgres <code>not null</code> column and a <code>unique</code> index), enforced by the database on every single write, contract or no contract test — worth being specific about, since this isn't true on every warehouse dbt supports: dbt Labs' own docs list Postgres as actually <em>enforcing</em> <code>not_null</code>, <code>unique</code>, <code>primary_key</code> and <code>foreign_key</code> constraints at the database level, while Snowflake, BigQuery and Redshift only let you <em>declare</em> most of them as metadata the warehouse never checks — a real difference worth naming if this pipeline's warehouse ever changed. The pre-existing <code>tests:</code> entries are still ordinary dbt data tests, run after the build via a <code>select</code> that fails if it finds any violating rows. Dropping the <code>tests:</code> block because the <code>constraints:</code> block "does the same thing" would be a mistake — a constraint stops a <em>write</em> from violating it; a test tells you, with a named, readable failure, whether one already has.</p>
+<p>Fill in <code>on_schema_change</code> and run a plain build first, before guessing:</p>
+<pre><code>uv run --project ../dbt_env dbt build --select fct_orders</code></pre>
+<p>With <code>on_schema_change: 'ignore'</code> (dbt's own incremental default since Day 4, never named explicitly until now), that build refuses to even start — <code>fct_orders</code> is <code>materialized='incremental'</code>, and dbt's own contract validation rejects the combination outright:</p>
+<pre><code>Invalid value for on_schema_change: ignore. Models materialized as incremental
+with contracts enabled must set on_schema_change to 'append_new_columns' or 'fail'</code></pre>
+<p>Worth sitting with why: a contract is a promise about columns that never silently appear or disappear. <code>ignore</code> — Day 4's implicit default, that a schema drift between runs just gets quietly absorbed — is the exact opposite promise. Fill in <code>on_schema_change: 'fail'</code> — the stricter of the two options dbt allows here, and the right one for a mart other things depend on: if <code>fct_orders.sql</code> ever changes shape unexpectedly, the build stops loudly instead of a downstream dashboard finding out days later that a column vanished.</p>
+<pre><code>uv run --project ../dbt_env dbt build --select fct_orders</code></pre>
+<p>Expected — identical output to every prior day, since the contract matches what the model already produces:</p>
+<pre><code>1 of 1 OK created sql incremental model dbt_dev.fct_orders ...... [MERGE 0 in 0.11s]
+
+Done. PASS=1 WARN=0 ERROR=0 SKIP=0 TOTAL=1</code></pre>
+<div class="callout"><strong>What a contract actually catches, checked this round, not assumed:</strong> a <code>data_type</code> typo (<code>bigin</code> for <code>bigint</code>) and a declared column that doesn't exist in the model's own <code>select</code> both parsed clean under <code>dbt parse</code> — a contract's real shape-check only happens when dbt compiles the model against a live connection and compares the result, the identical "parse doesn't reach this far, compile/run does" limit Day 13 found for an invalid <code>incremental_strategy</code> string. An exposure's broken <code>ref()</code> is different — Section 4 checks that one, and it fails at <code>dbt parse</code> itself, no connection needed, because a <code>ref()</code> is resolved against the manifest directly rather than against a compiled column list.</div>
+
+<h2>4 · Exposures: tell dbt's own graph about the dashboard reading this</h2>
+<p>An <dfn data-en="a dbt YAML declaration (exposures: key) naming a non-dbt downstream consumer -- a dashboard, notebook or pipeline -- and the dbt models/sources it depends on via ref()/source(), added as a real node in dbt's own DAG and lineage graph even though dbt never builds it" data-vn="giữ nguyên &quot;exposure&quot; — khai báo 1 bên tiêu thụ downstream không phải dbt (dashboard, notebook, pipeline khác), nêu rõ phụ thuộc vào model/source nào qua ref()/source(), trở thành 1 node thật trong DAG của dbt dù dbt không build nó">exposure</dfn> is dbt's way of naming the other side of today's shift: something that reads a dbt model's output but isn't itself a dbt model. Declare the city-ops dashboard this course's own domain implies — the one built on <code>mart_delivery_sla</code>'s SLA numbers and <code>fct_orders</code>' order-level detail — as a new file, <code>models/marts/exposures.yml</code>:</p>
+<pre><code><span class="cm">-- models/marts/exposures.yml</span>
+version: <span class="kw">2</span>
+
+exposures:
+  - name: delivery_ops_dashboard
+    label: <span class="str">"Delivery Ops Dashboard"</span>
+    type: dashboard
+    maturity: medium
+    url: https://example.com/dashboards/delivery-ops
+    description: <span class="str">"The city-ops dashboard reading mart_delivery_sla and fct_orders directly. Not a dbt model -- a downstream consumer dbt now knows about."</span>
+    depends_on:
+      - ref(<span class="str">'fct_orders'</span>)
+      - ref(<span class="str">'mart_delivery_sla'</span>)
+    owner:
+      name: <span class="str">"Data Platform"</span>
+      email: data-platform@example.com</code></pre>
+<p><code>type</code> is one of a fixed vocabulary (<code>dashboard</code>, <code>notebook</code>, <code>analysis</code>, <code>ml</code>, <code>application</code>) — pick the one closest to reality, not a free-text label. <code>depends_on</code>'s <code>ref()</code> calls are the whole payoff: they make <code>delivery_ops_dashboard</code> a real node in dbt's DAG, exactly like Day 9's snapshot became a node any model could <code>ref()</code> right back. Confirm it resolves as its own resource type, distinct from a model:</p>
+<pre><code>uv run --project ../dbt_env dbt list --resource-type exposure</code></pre>
+<pre><code>exposure.food_delivery_pipeline.delivery_ops_dashboard</code></pre>
+<p>Now break it on purpose, the same "prove the check has teeth" standard Day 3 and Day 12 both held their own tests to — point <code>depends_on</code> at a model that doesn't exist:</p>
+<pre><code>uv run --project ../dbt_env dbt parse</code></pre>
+<p>With <code>ref('mart_does_not_exist')</code> temporarily swapped in, this fails immediately, no database needed:</p>
+<pre><code>Compilation Error
+  Exposure 'exposure.food_delivery_pipeline.delivery_ops_dashboard' (models/marts/exposures.yml)
+  depends on a node named 'mart_does_not_exist' which was not found</code></pre>
+<p>Revert to the real <code>ref()</code>s and regenerate the docs site — <code>delivery_ops_dashboard</code> now shows up as a downstream node on both <code>fct_orders</code>' and <code>mart_delivery_sla</code>'s own lineage graphs, a real answer to "what actually reads this mart" that used to live only in someone's memory or a wiki page nobody kept current:</p>
+<pre><code>uv run --project ../dbt_env dbt docs generate
+uv run --project ../dbt_env dbt build</code></pre>
+<p>Expected: <code>Done. PASS=26 WARN=0 ERROR=0 SKIP=0 NO-OP=0 REUSED=0 TOTAL=26</code> — the same count as Day 13, not one higher: an exposure is never built or tested by <code>dbt build</code> at all (confirmed this round via <code>dbt list --resource-type test --select fct_orders</code>, which found no test node for either new <code>constraints</code> entry), and a contract's <code>constraints</code> become real DDL on the table rather than a new dbt test node, so today adds real enforcement without adding to the visible test count. Commit the edited <code>models/marts/marts.yml</code> and the new <code>models/marts/exposures.yml</code>.</p>
+
+<div class="interview">
+<p><strong>Q: "What's the difference between a dbt model's description, an exposure, and a model contract — and when would you reach for each?"</strong> A strong answer, out loud: <em>"All three exist because the moment a dbt model gets a consumer outside dbt — a dashboard, another team's pipeline — it stops being private SQL and starts being something people rely on without reading the code. A description is pure documentation: dbt renders it into the generated docs site, but never checks it against anything, so a stale or wrong description costs nothing to dbt itself, only to whoever trusts it. An exposure is different — it's a real node in dbt's own DAG, naming a non-dbt consumer and the models it depends on via ref(), so a broken dependency fails dbt parse immediately, no live connection needed, the same way a broken ref() between two models always has. A model contract is the strictest of the three: it pins exact column names and types up front, and dbt checks the compiled model against that declaration before letting the build finish — though that check only actually happens at compile or run time against a real connection, not at parse, which matters if you're trying to catch a contract break in CI without spinning up a database. I'd reach for a description on anything worth a human explanation, an exposure the moment a real non-dbt consumer exists, and a contract specifically on a model where an accidental type or column change would break something outside my control to fix quickly."</em> The signal: naming exactly which check runs when — parse-time for exposures, compile/run-time for contracts, never for descriptions — instead of treating all three as interchangeable "governance" features.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="dbt never checks a description against anything -- it is rendered into the generated docs site purely for a human reader. A model contract is the opposite: dbt compares the compiled model's actual output against the declared column names and types before letting the build finish, refusing to complete if they don't match.">
+    <p class="stem">What does dbt actually check a model's <code>description</code> against?</p>
+    <button class="opt" data-ok>Nothing at all; it is pure, entirely unenforced documentation text</button>
+    <button class="opt">The model's own compiled column list, checked on every build</button>
+    <button class="opt">Every downstream exposure's own full list of stated dependencies, always</button>
+  </div>
+  <div class="q" data-why="dbt's contract validation rejects materialized='incremental' plus contract enforced with the default on_schema_change of 'ignore' outright, because a contract's whole promise is that columns never silently appear or disappear -- exactly what 'ignore' would otherwise allow between incremental runs. Only 'append_new_columns' or 'fail' are accepted once a contract is enforced on an incremental model.">
+    <p class="stem">Why did enforcing a contract on <code>fct_orders</code> force a change to <code>on_schema_change</code>?</p>
+    <button class="opt" data-ok><code>ignore</code> would let columns silently drift, breaking the contract's promise entirely</button>
+    <button class="opt">Contracts are simply never supported by dbt on Postgres at all</button>
+    <button class="opt"><code>on_schema_change</code> only ever really exists on plain non-incremental table models, period</button>
+  </div>
+  <div class="q" data-why="An exposure's ref() is resolved directly against dbt's manifest at parse time, the same mechanism any broken ref() between two models already uses -- no live warehouse connection needed. A model contract's data_type and column checks, by contrast, are only actually validated when dbt compiles the model against a real connection and compares the result, which this round confirmed by testing both a data_type typo and a nonexistent contracted column parsing clean.">
+    <p class="stem">Why did a broken exposure <code>ref()</code> fail <code>dbt parse</code>, while a broken contract <code>data_type</code> did not?</p>
+    <button class="opt" data-ok>Exposure <code>ref()</code>s resolve at parse time; contracts need a live connection first, always</button>
+    <button class="opt">Exposures are always checked far more strictly than a model itself, in dbt</button>
+    <button class="opt">Contract errors are always silently ignored entirely by dbt, in every single case</button>
+  </div>
+  <div class="q" data-why="depends_on's ref() calls are what make an exposure a real, resolvable node in dbt's own DAG and lineage graph -- the same mechanism that lets any model or snapshot be ref()'d by something else. Without it, an exposure would be inert metadata dbt could not connect to anything, and dbt list --resource-type exposure would still find it, but the generated docs site's lineage graph would have nothing to draw an edge to.">
+    <p class="stem">What makes an exposure a real node in dbt's DAG rather than inert metadata?</p>
+    <button class="opt" data-ok>Its own <code>depends_on</code> block's <code>ref()</code> calls</button>
+    <button class="opt">Its own <code>type: dashboard</code> field specifically</button>
+    <button class="opt">Running <code>dbt docs generate</code> once, beforehand</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> dbt Labs' <a href="https://docs.getdbt.com/docs/collaborate/govern/model-contracts">Model contracts</a> doc (fetched live this round, not yet cited in <code>RESOURCES.md</code> — add it under dbt (deep), after Packages, alongside Documentation and Exposures) confirms today's own findings directly: constraints are "definable" on every adapter but only actually <em>enforced</em> — checked by the database itself, not just accepted as metadata — on some, and Postgres is one of the adapters enforcing <code>not_null</code>, <code>unique</code>, <code>primary_key</code> and <code>foreign_key</code> for real, unlike Snowflake/BigQuery/Redshift, which only enforce <code>not_null</code>. It also confirms only <code>append_new_columns</code> and <code>fail</code> support contracts on an incremental model, matching this lesson's own <code>on_schema_change</code> error exactly. The <a href="https://docs.getdbt.com/docs/build/exposures">Exposures</a> and <a href="https://docs.getdbt.com/docs/collaborate/documentation">Documentation</a> docs are the sources for Sections 2 and 4, both already this course's convention of citing dbt's own docs over any blog.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 14.<br>
+<strong>Phase 2 continues</strong> along the dbt/Kafka/Airflow spine in <code>PLAN.md</code>, adapted to your questions rather than a fixed calendar — dbt in CI (GitHub Actions with a Postgres service container, <code>dbt build --select state:modified+</code>, deferral) is next up on the dbt side, closing out Phase 2a before the spine turns to Kafka's delivery semantics.<br><br>
+💬 Anything unclear — why contracts need a live connection to actually check anything, or the exposure-vs-contract enforcement split? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

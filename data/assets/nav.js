@@ -168,6 +168,8 @@
       file: "lessons/0080-ordered-categorical.html" },
     { n: 81, date: "2026-09-27", title: "pd.to_datetime(format=): stop guessing, start declaring",
       file: "lessons/0081-to-datetime-format.html" },
+    { n: 82, date: "2026-09-28", title: "groupby(as_index=False) and .get_group(): two groupby leftovers, finally closed",
+      file: "lessons/0082-as-index-and-get-group.html" },
   ];
 
   const REFS = [

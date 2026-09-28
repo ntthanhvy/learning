@@ -174,6 +174,8 @@
       file: "lessons/0083-problem-details-rfc7807.html" },
     { n: 84, date: "2026-09-27", title: "Sagas: what replaces a transaction once two services are involved",
       file: "lessons/0084-sagas-and-eventual-consistency.html" },
+    { n: 85, date: "2026-09-28", title: "Read replicas: why the same query can return different answers a moment apart",
+      file: "lessons/0085-read-replicas-and-replication-lag.html" },
   ];
 
   const REFS = [

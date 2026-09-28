@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 82 · groupby(as_index=False) and .get_group(): two groupby leftovers, finally closed</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 82 · ~20 min · 28 Sep 2026</p>
+<h1>groupby(as_index=False) and .get_group(): two groupby leftovers, finally closed</h1>
+<p class="byline">Lessons 80 and 81 both named the same standing candidate in their teaser: two small groupby arguments that five different groupby lessons (4, 40, 48, 61, 66) never covered — <code>as_index=False</code> and <code>.get_group()</code>. Both are genuinely uncovered (confirmed by grep across all 81 lesson bodies) and both are quick, concrete wins, so today closes them out before picking a fresh topic tomorrow.</p>
+
+<h2>1 · Recap: what a groupby result's index actually is</h2>
+<p>Lesson 4 already showed this shape without naming it: <code>df.groupby("customer")["amount_clean"].sum()</code> returns a <code>Series</code> where <code>customer</code> is not a regular column — it's the row label. <code>reset_index()</code> was the fix, every time, to turn that label back into a plain column before merging, plotting, or exporting it.</p>
+<pre><code>df.groupby(<span class="str">"customer"</span>)[<span class="str">"amount_clean"</span>].sum()
+<span class="cm">-- customer
+-- An       162.0
+-- Binh     215.5
+-- Chi       99.9
+-- Name: amount_clean, dtype: float64   &lt;- a Series, customer is the INDEX</span></code></pre>
+
+<h2>2 · <code>as_index=False</code>: skip the reset_index() round-trip</h2>
+<p>Pass <dfn data-en="a keyword argument on groupby() itself (not on the aggregation call after it) that keeps the grouping key(s) as ordinary column(s) in the result instead of moving them into the row index -- equivalent to calling the default groupby's aggregation and then chaining .reset_index(), but done in one step and, for a single-column selection, changing the result type from a Series to a DataFrame" data-vn="giữ nguyên 'as_index=False' — tham số của chính groupby(), giữ cột nhóm là CỘT THƯỜNG trong kết quả thay vì đưa vào index; giống hệt gọi groupby() mặc định rồi .reset_index(), nhưng gộp làm 1 bước — và nếu chỉ chọn 1 cột để tính, kết quả đổi từ Series thành DataFrame">as_index=False</dfn> directly to <code>groupby()</code> itself — not to <code>.sum()</code> or <code>.agg()</code> afterward — and the grouping key stays a plain column from the start:</p>
+<pre><code>df.groupby(<span class="str">"customer"</span>, as_index=<span class="kw">False</span>)[<span class="str">"amount_clean"</span>].sum()
+<span class="cm">--   customer  amount_clean
+-- 0       An         162.0
+-- 1     Binh         215.5
+-- 2      Chi          99.9    &lt;- customer is a COLUMN now, default RangeIndex 0,1,2</span></code></pre>
+<p>Confirmed directly against this course's real <code>orders_raw.csv</code>: <code>df.groupby("customer", as_index=False)["amount_clean"].sum()</code> is row-for-row, value-for-value identical to <code>df.groupby("customer")["amount_clean"].sum().reset_index()</code> — genuinely the same result, just one call instead of two chained ones. The one thing worth noticing, also confirmed directly: the default groupby-then-select-one-column call returns a <code>Series</code>, but the <code>as_index=False</code> version of the exact same call returns a <code>DataFrame</code> instead — forcing the grouping key into a real column changes the result's very type, not just its shape.</p>
+
+<div class="callout"><strong>SQL bridge:</strong> plain SQL <code>GROUP BY</code> never turns the grouping key into anything special — <code>SELECT customer, SUM(amount) FROM orders GROUP BY customer</code> always comes back with <code>customer</code> as an ordinary result column. pandas' default groupby is the odd one out, moving the key into the index instead; <code>as_index=False</code> is the argument that makes pandas' output shape match what SQL gives you for free.</div>
+
+<h2>3 · .get_group(): pulling ONE group's original rows back out</h2>
+<p>Everything so far aggregates every group down to one row. Sometimes the actual need is the opposite — not a summary, but the original, un-aggregated rows belonging to just one specific group, the way a SQL <code>WHERE customer = 'An'</code> would. <dfn data-en="a method on a GroupBy object (the lazy result of calling groupby(), before any aggregation) that returns the original, un-aggregated rows belonging to exactly one named group -- the un-aggregated-rows equivalent of a WHERE filter on the grouping column, called on the grouped object rather than the original DataFrame. Raises KeyError immediately if the named key does not exist as a group" data-vn="giữ nguyên '.get_group()' — method gọi trên đối tượng GroupBy (kết quả groupby() còn CHƯA tính gì), trả về nguyên các hàng GỐC (chưa gộp) thuộc đúng 1 nhóm được chỉ tên — giống WHERE lọc theo cột nhóm nhưng gọi trên đối tượng đã groupby(); truyền tên nhóm không tồn tại sẽ báo lỗi KeyError ngay">.get_group()</dfn> is that lookup:</p>
+<pre><code>grouped = df.groupby(<span class="str">"customer"</span>)
+grouped.get_group(<span class="str">"An"</span>)
+<span class="cm">--    order_id customer   amount  order_date  amount_clean
+-- 0         1       An    120.0  2026-01-05         120.0
+-- 2         3       An  unknown  2026-01-07           NaN
+-- 5         6       An     42.0  2026-01-10          42.0   &lt;- ALL of An's original rows, untouched</span></code></pre>
+<p>Confirmed directly: this is exactly <code>df[df["customer"] == "An"]</code> in effect — same three rows back, unaggregated, every original column intact including the still-unparsed <code>"unknown"</code> string. The difference is only where the filter lives: <code>.get_group()</code> is called on the already-built <code>GroupBy</code> object (the same lazy object Lesson 4 introduced as doing nothing until an aggregation is chained), not on the DataFrame directly. Confirmed directly: calling <code>.get_group("Zzz")</code> for a customer that was never in the data raises <code>KeyError: 'Zzz'</code> immediately — the same fail-loudly instinct as Lesson 46's <code>.at[]</code>, not a silent empty result.</p>
+
+<div class="interview">
+<p><strong>Q: "You've grouped an orders table by customer to compute totals — now you also need to eyeball the raw rows for one specific customer to debug a number that looks off. What do you do?"</strong> A strong answer, out loud: <em>"Two options depending on what I already have in hand. If I haven't grouped yet, a plain boolean mask, df[df['customer'] == 'An'], is simplest — no groupby needed at all for a single filter. But if I already built the GroupBy object for the aggregation and want the raw rows for one group without re-filtering the original frame from scratch, get_group('An') pulls exactly that group's original, un-aggregated rows off the same object, and raises KeyError immediately if I typo the name rather than quietly returning nothing. Separately, if the report itself needs the customer column to stay a normal column instead of the index — for a CSV export or a join — I'd pass as_index=False to the groupby call up front, which is the same result as chaining reset_index() afterward, just one step instead of two."</em> The signal: distinguishing "filter before grouping" from "look inside an already-grouped object," and knowing as_index=False is a groupby()-level argument, not something bolted onto the aggregation call after it.</p>
+</div>
+
+<h2>4 · Why these earn their keep despite being small</h2>
+<p><code>as_index=False</code> is a habit worth building now: reaching for it up front avoids a <code>reset_index()</code> tacked onto the end of nearly every groupby chain in this course so far (Lessons 4, 40, 48, 61, 66 all did the two-step version). <code>.get_group()</code> matters less for daily use — a boolean mask usually reads just as clearly — but it's a fast, precise way to inspect one group's real rows while already holding a <code>GroupBy</code> object mid-pipeline, without breaking the chain to re-filter the original frame from scratch.</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/82_as_index_and_get_group.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/82_as_index_and_get_group.py</code></pre>
+<p>Reuses <code>practice/data/orders_raw.csv</code>, coerced the same way as Lessons 2-4. Exercise 1 checks <code>as_index=False</code> matches the default-groupby-plus-<code>reset_index()</code> result exactly (Section 2). Exercise 2 checks that the same <code>as_index=False</code> call returns a <code>DataFrame</code> even though the plain default call on the identical single-column selection returns a <code>Series</code> (Section 2). Exercise 3 checks <code>.get_group()</code> returns the correct original, un-aggregated rows for one named group (Section 3). Exercise 4 checks <code>.get_group()</code> raises <code>KeyError</code> for a group name that doesn't exist (Section 3).</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: as_index=False is passed to groupby() itself, and its result is row-for-row identical to the default groupby's aggregation chained with .reset_index() afterward -- same data, one step instead of two.">
+    <p class="stem">Where does <code>as_index=False</code> get passed, and what result does it match?</p>
+    <button class="opt" data-ok>Into groupby() itself, matching sum() then reset_index() right after</button>
+    <button class="opt">Into sum() itself, matching a totally different result set</button>
+    <button class="opt">Into read_csv() itself, matching an unrelated index reset step</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: df.groupby('customer')['amount_clean'].sum() returns a Series, but df.groupby('customer', as_index=False)['amount_clean'].sum() on the exact same selection returns a DataFrame instead -- forcing the key into a column changes the result type, not just its shape.">
+    <p class="stem">Calling the identical single-column <code>.sum()</code> with vs. without <code>as_index=False</code> — what changes about the result?</p>
+    <button class="opt" data-ok>The result type flips from Series to a DataFrame</button>
+    <button class="opt">Nothing changes at all, both come back identical objects</button>
+    <button class="opt">The underlying totals themselves come out silently wrong too</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: .get_group('Zzz') on a GroupBy object with no such group raises KeyError immediately, the same fail-loudly instinct as .at[] -- it never silently returns an empty DataFrame instead.">
+    <p class="stem">Calling <code>grouped.get_group("Zzz")</code> when <code>"Zzz"</code> was never a value in the grouping column does what?</p>
+    <button class="opt" data-ok>Raises a KeyError right away, naming the missing group</button>
+    <button class="opt">Returns an empty DataFrame silently, with no error raised</button>
+    <button class="opt">Returns every single row, simply ignoring the group name</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the pandas User Guide's <a href="https://pandas.pydata.org/docs/user_guide/groupby.html">Group by: split-apply-combine</a> page (the same page cited in Lesson 4), "GroupBy object attributes" section covers <code>.get_group()</code> and the <code>group_keys=</code>/<code>as_index=</code> family together (per <code>RESOURCES.md</code>'s "Docs: pandas User Guide" entry, ~10 min). This citation was not freshly re-fetched this round (WebFetch to external sites was unavailable in this sandbox session) — treated as long-stable reference material, consistent with this course's established fallback when a fetch tool is unavailable.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>as_index=False</code> and <code>.get_group()</code> are both new today, added right after Lesson 81's <code>format= (pd.to_datetime)</code> entry.<br>
+<strong>Next lesson:</strong> the memory/dtype family (<code>infer_objects()</code>, <code>read_csv(dtype=)</code>, sparse dtype, nullable boolean) remains the standing named candidate from Lessons 79-81, alongside a fresh curriculum/glossary scan as always.<br><br>
+💬 Anything unclear — <code>as_index=False</code>, <code>.get_group()</code>, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

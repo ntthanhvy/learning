@@ -45,6 +45,8 @@ before Phase 2.
   The community-standard staging → intermediate → marts layering and naming. Use for: Day 2's folder layout and every modelling lesson after it. This is the house style.
 - [Package: dbt_utils — dbt Labs](https://github.com/dbt-labs/dbt-utils)
   The most widely installed dbt package: cross-database SQL and testing macros (`generate_surrogate_key`, `date_spine`, `generate_series`, `accepted_range`, and more). Use for: Phase 2a's packages lesson, and any time a rule is generic enough that dbt Labs has already solved it.
+- [Docs: Documentation](https://docs.getdbt.com/docs/collaborate/documentation) · [Exposures](https://docs.getdbt.com/docs/build/exposures) · [Model contracts](https://docs.getdbt.com/docs/collaborate/govern/model-contracts)
+  `description`s and the generated docs site; declaring a non-dbt downstream consumer as a real DAG node; pinning a model's column names/types/constraints and having dbt enforce them at build time. Use for: Day 14, the primary source — Model contracts' own constraint-enforcement table (which adapters actually enforce `not_null`/`unique`/`primary_key`/`foreign_key` at the database level, not just declare them) is worth rereading before touching a contract on any adapter other than Postgres.
 - [Courses: dbt Learn catalog](https://learn.getdbt.com/catalog)
   Free official video courses (dbt Fundamentals etc.). Use for: an optional second pass on Days 2–4 for a learner who prefers video.
 

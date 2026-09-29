@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 86 · The write-ahead log: the fourth letter of ACID, finally named</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 86 · ~20 min</p>
+<h1>The write-ahead log: the fourth letter of ACID, finally named</h1>
+<p class="byline">Lesson 6 named atomicity and walked straight into a lost-update bug without ever naming the guarantee that makes a committed transaction survive a crash. Lesson 55 mentioned "one WAL entry per row" in passing, twice, and moved on. Lesson 85 explained that a replica "replays the primary's stream of committed changes" without ever saying what that stream physically is. All three point at the same mechanism. Today names it.</p>
+
+<h2>1 · The question Lesson 6 never answered</h2>
+<p>Lesson 6 split a transaction's guarantee into atomicity (all statements commit together, or none do) and picked apart a lost-update bug from there. It never asked the other obvious question: once <code>COMMIT</code> returns, and the client has already been told "done" — what actually guarantees that row still exists if the machine loses power one millisecond later? That guarantee has a name: <dfn data-en="the ACID guarantee that once a transaction's COMMIT has returned successfully, its effect survives any subsequent crash, power loss, or restart -- the data does not need to still be sitting only in fast, volatile memory to be safe" data-vn="durability (giữ nguyên) — đảm bảo trong ACID: COMMIT trả về xong là coi như chắc chắn còn, kể cả nếu server crash hay mất điện ngay sau đó">durability</dfn>, the "D" in ACID — atomicity, consistency, isolation (Lesson 37), and durability. Postgres could make every write durable the naive way: before returning from <code>COMMIT</code>, flush every changed data page, wherever it lives across a potentially huge table file, all the way to disk. That works, but it's brutally slow — a single-row update to one column would force a full random-access write of an entire 8KB page, every time.</p>
+
+<h2>2 · Write the change down first, worry about the table file later</h2>
+<p>Postgres's actual answer is the <dfn data-en="an append-only log file that Postgres writes every change to, sequentially, before that change is considered committed -- the actual table's data pages on disk get updated later, in the background; the log is the thing durability is actually built on" data-vn="write-ahead log / WAL (giữ nguyên) — file log append-only, Postgres ghi mọi thay đổi vào đây tuần tự trước khi coi là commit -- trang dữ liệu thật trong bảng được cập nhật sau, ở nền; log này mới là thứ durability thật sự dựa vào">write-ahead log (WAL)</dfn>: before a transaction is allowed to report success, Postgres appends a compact description of the change — "row X in table Y changed like this" — to the end of a sequential log file. Appending to the end of a file already open for writing is one of the cheapest disk operations there is: no seeking, no touching the actual table's data pages at all. Only <em>after</em> that append is safely on disk does <code>COMMIT</code> return. The actual table file — the one <code>SELECT</code> reads from — gets updated separately, lazily, in the background, whenever Postgres gets around to it. That laziness is safe precisely because the WAL already has the full story: if Postgres crashes before the table file catches up, it doesn't lose anything, because durability was never resting on the table file being current.</p>
+<div class="callout"><strong>Why "write-ahead":</strong> the rule is in the name — the log entry for a change must hit disk <em>before</em> that change is allowed to be reported as committed. Not after, not "eventually." The name describes the ordering guarantee, not just "a log that happens to exist."</div>
+
+<h2>3 · What a crash actually recovers</h2>
+<p>Say Postgres crashes mid-run: some committed transactions' changes made it into the table file already, some are still sitting only in the WAL. On restart, Postgres runs <dfn data-en="the startup step where Postgres replays every WAL entry written since the last checkpoint against the on-disk table files, bringing them back up to exactly the state they should be in given everything that was durably logged before the crash" data-vn="crash recovery / replay (giữ nguyên) — bước lúc khởi động lại, Postgres replay lại mọi WAL entry từ checkpoint gần nhất vào file bảng, đưa dữ liệu về đúng trạng thái đã được log trước khi crash">crash recovery</dfn>: it replays every WAL entry since the last <dfn data-en="a periodic point Postgres marks where it guarantees every earlier WAL entry has already been applied to the table files on disk -- recovery after a crash only ever needs to replay WAL written after the most recent checkpoint, not the log's entire history" data-vn="checkpoint (giữ nguyên) — mốc Postgres đánh dấu định kỳ, đảm bảo mọi WAL trước đó đã được áp dụng vào file bảng -- crash recovery chỉ cần replay WAL sau checkpoint gần nhất, không cần toàn bộ lịch sử log">checkpoint</dfn> against the table files, bringing them up to exactly the state every successful <code>COMMIT</code> promised. A change whose WAL entry made it to disk before the crash comes back, full stop — that's what "committed" meant all along. A change whose WAL entry never made it to disk never happened, and Postgres never told the client it did. Checkpoints exist so recovery doesn't mean replaying the log all the way back to server install: every checkpoint is a promise that everything before it is already safely reflected in the table files, so recovery only replays the tail.</p>
+<div class="callout"><strong>The one-sentence version:</strong> the table file is a cache of the WAL's history that Postgres keeps around for fast reads. The WAL is the actual source of truth for "what committed." That's backwards from how it feels reading SQL, where the table looks like the real thing — but durability is built on the log, not the table.</div>
+
+<h2>4 · Two things this explains that you already met</h2>
+<p>Neither Lesson 55 nor Lesson 85 needs a new mechanism now — both were describing WAL behavior without the name.</p>
+<table class="cmp">
+<tr><th>Earlier moment</th><th>What was actually happening</th></tr>
+<tr><td>Lesson 55: "one WAL entry per row, regardless of indexing"</td><td>every row a bulk <code>DELETE</code> touches needs its own durably-logged change, which is exactly why dropping a whole partition (a metadata change, one WAL entry total) is so much cheaper</td></tr>
+<tr><td>Lesson 85: a replica "replays the primary's stream of committed changes"</td><td>that stream <em>is</em> the WAL — streaming replication ships the primary's write-ahead log over the network, and the replica runs the same replay logic crash recovery uses, just continuously instead of once after a crash</td></tr>
+</table>
+<p>That second row is the payoff: a read replica isn't running some separate replication-specific protocol. It's running ordinary Postgres crash recovery, permanently, fed by a WAL stream arriving over a network instead of from its own crash. Replication lag (Lesson 85) is just "how far behind is this instance's replay of the WAL" — the identical question crash recovery answers once, that a replica answers continuously.</p>
+
+<div class="interview">
+<p><strong>Q: "Why does Postgres write to a log before updating the actual table, instead of just updating the table directly?"</strong> A strong answer, out loud: <em>"It's about durability without paying for a full random-access disk write on every commit. Postgres appends a compact record of the change to the write-ahead log — a cheap, sequential append — and only returns from COMMIT once that's safely on disk. The actual table file gets updated lazily afterward. If Postgres crashes in between, recovery replays the WAL since the last checkpoint and the table ends up exactly where every successful COMMIT promised, because the log was always the real source of truth, not the table file."</em> The signal: naming the WAL as the actual durability mechanism, not "Postgres just handles crashes," and connecting it to why the append is cheap.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Durability is the ACID guarantee that once COMMIT returns successfully, the transaction's effect survives any later crash or power loss -- it does not depend on the change already being reflected in the table file on disk.">
+    <p class="stem">What does "durability" guarantee, exactly?</p>
+    <button class="opt" data-ok>a committed change still survives a crash right after</button>
+    <button class="opt">two transactions never read the exact same row twice</button>
+    <button class="opt">every single statement inside a transaction commits together always</button>
+    <button class="opt">a query always returns rows in the same order</button>
+  </div>
+  <div class="q" data-why="The write-ahead log is a sequential, append-only file Postgres writes every change to before COMMIT is allowed to report success -- the actual table's data pages get updated later, in the background, precisely because the WAL already durably records the change.">
+    <p class="stem">What is the write-ahead log, mechanically?</p>
+    <button class="opt" data-ok>a sequential log written just before a commit succeeds</button>
+    <button class="opt">a cache holding the most recently read table rows</button>
+    <button class="opt">a background job that rewrites every index each night</button>
+    <button class="opt">a second full copy of every table's own pages</button>
+  </div>
+  <div class="q" data-why="Appending to the end of an already-open sequential file needs no seeking and never touches the table's own data pages, unlike flushing a changed data page to its own location inside a potentially huge table file, which requires a random-access write.">
+    <p class="stem">Why is writing to the WAL cheaper than updating the table file directly?</p>
+    <button class="opt" data-ok>appending sequentially to disk avoids a random-access seek entirely</button>
+    <button class="opt">the WAL file never actually gets written to disk</button>
+    <button class="opt">table files are always smaller than any log file</button>
+    <button class="opt">Postgres never skips all durability even for single-row updates</button>
+  </div>
+  <div class="q" data-why="Streaming replication ships the primary's write-ahead log to the replica, which replays it the same way crash recovery replays WAL after a restart -- just continuously, from a stream arriving over the network instead of from its own local crash.">
+    <p class="stem">How does Lesson 85's streaming replication relate to the WAL?</p>
+    <button class="opt" data-ok>the replica keeps continuously replaying the primary's shipped WAL</button>
+    <button class="opt">replicas skip the WAL and copy table files hourly</button>
+    <button class="opt">the WAL only ever matters for one standalone instance</button>
+    <button class="opt">replication lag has nothing to do with WAL replay</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the PostgreSQL manual's <a href="https://www.postgresql.org/docs/current/wal-intro.html">Write-Ahead Logging (WAL)</a> chapter — the same manual RESOURCES.md already cites for Data Definition (Lesson 1) and that Lesson 85 cited for its replication chapter; this is the chapter one level underneath both. A live <code>WebFetch</code> check against this URL was attempted this round and blocked outright by this session's sandbox network-permission gate, the same class of block recent rounds have hit against other domains (Lessons 79, 81–85). <strong>Honest flag:</strong> not freshly fetched this round; the write-ahead-log-before-commit rule and checkpoint-bounded recovery described above are foundational, long-stable Postgres behavior, documented essentially unchanged for many major versions, but the link should get a live re-check once the gate is open. For the general theory of log-structured durability and how it underlies both crash recovery and replication, this extends RESOURCES.md's standing Kleppmann citation, <em>Designing Data-Intensive Applications</em> ch. 3 ("Storage and Retrieval") and ch. 5 ("Replication," already cited by Lesson 85).</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially. Nếu chỗ nào chưa rõ, cứ hỏi lại bằng tiếng Việt cũng được.<br><br>
+<em>Next lesson:</em> open. Still no <code>lesson_completed</code>/quiz-outcome record exists for any lesson after 86 rounds — the honest next step remains a completion signal or a user-named track.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

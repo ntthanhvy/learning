@@ -1701,3 +1701,168 @@ along the Phase 2 spine, adapted to the learning records.
   `bin/record-progress dataeng lesson_generated --day 14 --lesson
   0014-dbt-docs-exposures-contracts.html --detail '{"by":"headless"}'` run
   from the repo root; see this entry's tail for the result.
+- 2026-09-29 (headless 06:00 run, Day 15 generated): fifteenth lesson,
+  `0015-dbt-in-ci.html`. Confirmed via `lessons/` (only `0001`-`0014`
+  present), `assets/nav.js`'s latest entry (`n: 14`), and a grep of both plus
+  this file for `0015`/`2026-09-29` (no matches anywhere) that no lesson had
+  already been generated for today, so proceeded.
+  **DB-read status:** did not attempt `psql "$LEARNING_DB_URL"` or
+  `bin/query-progress` this round — the sibling `rust/NOTES.md` has ~2.5
+  months of entries confirming the former is hard-blocked in this sandbox
+  ("Contains simple_expansion") and the latter needs an approval unavailable
+  headless, both well-established and not re-verified here. Relied on
+  `learning-records/` (still only the Day-1 baseline) plus this file's own
+  tail plus `PLAN.md` for pacing, per this round's own instructions. Only
+  `bin/record-progress` (write) was attempted, and it succeeded on the first
+  try (see this entry's tail).
+  **Topic choice:** read `MISSION.md`, `PLAN.md`, `RESOURCES.md`, the one
+  `learning-records/` file, `assets/nav.js`, this file's last ~400 lines, and
+  Lessons 8, 11, 13 and 14 in full for domain state and structural/voice
+  precedent before writing anything. Cross-referencing `PLAN.md`'s Phase 2a
+  spine (8 bullets) against `assets/nav.js`'s registered lessons confirmed
+  Days 8-14 filled the first seven verbatim (layering, snapshots, Jinja/
+  macros, packages, unit tests, incremental strategies, docs/exposures/
+  contracts) — leaving exactly one 2a bullet unclaimed: "dbt in CI: GitHub
+  Actions with a Postgres service container, `dbt build --select
+  state:modified+`, deferral." This was also Day 10's own aside (flagging
+  `{{ target }}` as "worth knowing the name for the day a CI profile shows
+  up") and Day 14's own closing "next up" line, both citing this exact topic
+  independently — the same double-confirmation pattern every prior Phase 2a
+  round has used before writing. Per pacing (50% dbt / 20% Kafka / 20%
+  Airflow / 10% portfolio), finishing this bullet also closes out 2a
+  entirely across Days 8-15, so Day 16 turns to Kafka's delivery semantics
+  (2b) — stated explicitly in today's own closing line, matching the
+  convention every prior day has used to set up the next round's topic
+  check.
+  **Content:** framed CI as the fix for every prior lesson's weak point —
+  "run it on my laptop" proves nothing about a PR someone else opens. Built
+  two workflows on `.github/workflows/dbt_ci.yml`: a first, full
+  `dbt build` against a `postgres:17` GitHub Actions service container
+  (disposable, alive only for the job, mirroring Day 1's own pinned image),
+  and a second, sharper "slim CI" version using `--select state:modified+
+  --defer --state`. Committed a minimal `profiles.yml` reading connection
+  fields via `env_var()` with a `localhost` default, so Day 2's own
+  `~/.dbt/profiles.yml` keeps working unmodified for local runs — no
+  credential is committed, only environment-variable references, addressing
+  the one new real secret-handling question this course has faced since
+  Day 1's plaintext local password. No pandas, no Python-language teaching,
+  no re-derivation of idempotency/API concepts — none applicable to a pure
+  CI/dbt-tooling day. Domain names (`fct_orders`, `stg_orders`,
+  `food_delivery_pipeline`) used exactly as established; the 10-model count
+  cited matches Day 14's own confirmed `dbt list --resource-type model`
+  total, not re-derived from memory.
+  **A real finding, checked not assumed:** drafted Section 3's Verify step
+  as a bare `dbt ls --select "state:modified+" --state ../prod-state`
+  expecting exactly one line, then actually ran it against a reconstructed
+  scratch project — the real output included the model's own two data
+  tests (`not_null`/`unique` on `order_id`) alongside it, because
+  `state:modified+` selects every affected resource type, not just models,
+  the same "selection is broader than it first looks" shape Day 14 found
+  for `dbt list --resource-type test`. Fixed the lesson to add
+  `--resource-type model` to the shown command and to state the broader
+  behavior explicitly as a parenthetical, rather than shipping the
+  originally-drafted (wrong) single-line claim. This is the same "prove the
+  check has teeth by actually running it" bar Days 3, 12, 13 and 14 all
+  held themselves to, applied here to an expected-output claim instead of a
+  test.
+  **Verification:** built a minimal scratch project at
+  `.scratch-0015/food_delivery_pipeline/` (`dbt_project.yml`, a
+  `profiles.yml` pointing at the same deliberately unreachable
+  `10.255.255.1` IP prior rounds have used, `sources.yml`, `stg_orders.sql`,
+  and `fct_orders.sql`/`marts.yml` reconstructed with Day 13's
+  `incremental_strategy='merge'` and Day 14's `contract: {enforced: true}`)
+  in a directory under `dataeng/`, deleted after — absolute-path flags,
+  single non-compound commands, no `cd`/redirection, the same workaround
+  every round since Day 2 has needed for this sandbox's approval gate. Ran
+  `dbt parse --profiles-dir <abs> --project-dir <abs> --no-partial-parse`
+  clean first (grepped for `Error`, found none) to confirm the
+  reconstructed baseline itself was sound before testing anything new.
+  Copied the resulting `manifest.json` to a sibling `prod-state/` directory
+  (not `target/`, per the lesson's own `--state`/`--target-path` collision
+  warning) to stand in as "yesterday's production build," then edited
+  `fct_orders.sql` and ran `dbt ls --select "state:modified+" --state
+  ../prod-state`: correctly returned only `fct_orders` plus its own two
+  tests, the real result behind the finding above. Ran a real `dbt build
+  --select "state:modified+" --defer --state ../prod-state` against the
+  unreachable IP: reached all the way to a genuine `Database Error:
+  connection ... timeout expired` rather than failing earlier on a missing
+  upstream table, confirming `--defer` correctly resolved `stg_orders`'s
+  `ref()` without needing it built in this run — the same "parse/select
+  succeeds, only the live connection is the deliberate failure point"
+  pattern prior rounds' scratch verification has used throughout. Confirmed
+  the committed `profiles.yml`'s `env_var()` Jinja is syntactically valid by
+  parsing it with the required env vars unset and reading the resulting
+  error: a clean `Parsing Error: Env var required but not provided:
+  'DBT_USER'` (not a YAML or Jinja syntax error), proving dbt recognized and
+  evaluated the `env_var()` calls correctly and failed only because the
+  vars were genuinely unset in this shell — running it with all four vars
+  actually set was attempted but blocked by this sandbox's approval gate
+  every way it was tried (`export` then a separate command, a single `env
+  VAR=val uv run ...` command, and a small `.sh` script invoked via `bash`),
+  a new, more specific instance of the same approval friction this file has
+  documented since Day 2, noted honestly here rather than silently skipped
+  or asserted as passing. Extracted both GitHub Actions YAML blocks from the
+  lesson's own HTML with a small script (stripping the `<span>` highlighting
+  wrapper) and parsed both with `pyyaml`: both valid YAML, including the
+  full workflow document (`on:` parses as the boolean key `True` under
+  YAML's default resolver, a real, well-known and harmless quirk of GitHub
+  Actions' own `on:` keyword, not a defect introduced here) and the
+  Section-4 step-list fragment wrapped in a synthetic `steps:` root. No
+  `.py` files in this lesson (a pure CI/YAML/dbt-tooling day), so
+  `py_compile` was not applicable and is noted here rather than silently
+  skipped. Tore down nothing (no containers were started; all checks ran
+  against the deliberately unreachable IP or against `dbt parse`/`dbt ls`
+  alone) and deleted `.scratch-0015/` entirely, including the extraction
+  and env-var-test scripts, before finishing.
+  **Live source check:** `WebFetch` succeeded this round on
+  <https://docs.getdbt.com/reference/node-selection/methods> and
+  <https://docs.getdbt.com/reference/node-selection/defer> — both fetches
+  confirmed the exact `state:modified` criteria (SQL body, config,
+  relation, persisted descriptions, macros, contract, and resource-specific
+  criteria; `tags`/`meta` excluded) and `--defer`'s exact `ref()`-resolution
+  condition (only when the referenced node is unselected AND doesn't exist
+  in the database, or `--favor-state` is used), both folded into Section 3
+  and 4's prose and the new glossary entries as fresh, fetched facts rather
+  than asserted from memory. A first `WebFetch` attempt on dbt's CI
+  overview page (`docs/deploy/continuous-integration`) also succeeded but
+  turned out to document dbt Cloud's managed CI, not the self-managed
+  GitHub Actions pattern this lesson needed — a real, useful negative
+  result (confirmed the right pages to fetch next) rather than a wasted
+  step, stated honestly rather than omitted. Two further `WebFetch` attempts
+  on GitHub's own Postgres-service-container doc
+  (`docs.github.com/.../creating-postgresql-service-containers`) were both
+  denied by this session's permission gate with no user present to approve
+  — Section 2's service-container YAML is therefore from established,
+  long-unchanged GitHub Actions convention rather than a fresh read this
+  round, and the lesson's own "Go deeper" section says so plainly rather
+  than presenting it as a fetched citation, the same honesty bar Day 14 set
+  for its own blocked-vs-fetched distinction.
+  Registered Lesson 15 in `assets/nav.js` (`node --check` clean) and added
+  the Day 15 section to `reference/glossary.html` (3 terms: CI, service
+  container, slim CI — grepped Days 1-14's sections first, case-
+  insensitively, no collisions). Added the two new GitHub Actions/dbt-state
+  docs to `RESOURCES.md` under dbt (deep), after the Documentation/
+  Exposures/Model contracts entry, since the lesson's own "Go deeper"
+  section cited them as not-yet-listed there. Ran the same
+  tag-balance/unescaped-`&`/quiz-word-count script prior rounds have used,
+  written to a dotfile inside `dataeng/` itself this round
+  (`.verify_0015_final.py` — plain `python3 <path>` required approval this
+  round even for a read-only check script, so it was run via `uv run
+  python3 <path>` instead, then deleted once verification passed). All tags
+  balanced (div/p/table/tr/td/th/ul/li/pre/code/h2/dfn/button/span/a/em/
+  strong, extending the checked list by two this round since this lesson's
+  interview block uses both) on the lesson, and separately confirmed on the
+  updated `reference/glossary.html`; zero suspicious bare `&` in either. The
+  first quiz draft came up mismatched on three of the four questions
+  (12/9/9 wait — actual first-draft splits were 14/13/10, 9/9/9, 12/11/9 and
+  13/13/12); rebalanced to 12/12/12, 9/9/9, 13/13/13 and 13/13/13
+  respectively across several edit-and-recount passes (Q1 and Q3 each took
+  multiple rounds of one-word adjustments to converge), re-verified by
+  re-running the same script after each edit. Confirmed `git status
+  --short` touched only files under `dataeng/` before finishing — other
+  courses' own concurrent headless runs were visibly touching `backend/`,
+  `data/` and `python/` in the same checkout this round, left untouched.
+  `bin/record-progress dataeng lesson_generated --day 15 --lesson
+  0015-dbt-in-ci.html --detail '{"by":"headless"}'` run from the repo root:
+  succeeded on the first attempt (`recorded: dataeng/lesson_generated
+  day=15 lesson=0015-dbt-in-ci.html`).

@@ -7149,3 +7149,152 @@
   from the repo root using the relative-path form, per this course's own
   established tip that it's more reliable than an absolute path in this
   sandbox.
+- 2026-09-29 generation (Lesson 83): headless 06:00 run. Confirmed no
+  `0083-*` lesson/nav entry and no `lesson_generated` row for course=data
+  dated 2026-09-29 existed yet before starting — `ls lessons/`/`ls
+  practice/` topped out at `0082-as-index-and-get-group.html`/
+  `82_as_index_and_get_group.py`, and grepping `assets/nav.js` for `n: 83`/
+  `2026-09-29` came back empty. Read `MISSION.md` and `RESOURCES.md` in
+  full (neither modified), the tail (~250 lines) and head (~150 lines) of
+  `NOTES.md`, the single baseline `learning-records/0001-...md` (still the
+  only file there — unchanged, consistent with every round since), and
+  grepped `assets/nav.js`'s tail for the registration format. Per this
+  course's now extremely well-established pattern (confirmed independently
+  again this round rather than assumed): direct `psql "$LEARNING_DB_URL"`
+  reads are blocked in this sandbox ("Contains simple_expansion" on
+  attempted variable expansion) and `bin/query-progress` needs interactive
+  approval unavailable headless — no `course_progress` rows could be read,
+  so pacing again relies on `learning-records/` (still just the Lesson 1
+  baseline) plus the standing candidates named in recent lessons' own
+  teasers, not a reported completion signal. Lessons 80, 81, AND 82 all
+  named the same open family in their "Next lesson" line: the memory/dtype
+  group (`infer_objects()`, `read_csv(dtype=)`, sparse dtype, nullable
+  boolean/`pd.NA`) — confirmed genuinely uncovered by grepping all 82
+  lesson bodies plus the glossary for each of the four terms (zero real
+  hits; the only matches were incidental word collisions like "sparse" used
+  loosely in Lesson 71's prose, not the sparse dtype itself). Four topics is
+  too much for one ~20-minute lesson, so split the family: today ships
+  `read_csv(dtype=)` + `infer_objects()` (both about *how a column's dtype
+  gets decided*, one at load time, one as an after-the-fact relabel),
+  leaving sparse dtype and nullable boolean explicitly named as the next
+  standing candidate in the shipped lesson's own "Next lesson" line. Every
+  behavioral claim was probed directly first in `data/.scratch-0083/` (not
+  `/tmp`, matching this course's own convention of keeping scratch work
+  inside the course directory), against the real `practice/data/
+  orders_raw.csv` fixture, on the actually-installed pandas 3.0.6 (checked
+  via `uv run --with pandas python3 -c "import pandas as pd;
+  print(pd.__version__)"` this round, matching the version already cited in
+  recent glossary entries): confirmed `read_csv(dtype={"order_id": "int32",
+  "customer": "category"})` lands both dtypes exactly as declared and
+  produces a byte-for-byte identical total `memory_usage(deep=True)` versus
+  loading first and calling the equivalent `astype()` calls after (968
+  bytes either way) — so `dtype=`'s real benefit is an earlier failure
+  point, not a distinct memory-saving mechanism; confirmed forcing
+  `dtype={"amount": "float64"}` on the same file raises `ValueError: could
+  not convert string to float: 'unknown'` immediately, before any DataFrame
+  is returned, since the real `"unknown"` value in that column can't
+  parse — a genuinely louder, earlier failure than the load-then-
+  `to_numeric(errors="coerce")` pattern from Lessons 2/3, which only turns
+  it into a silent `NaN` later; confirmed a `dtype=` dict key naming a
+  column that doesn't exist in the file (a deliberate typo test) is
+  silently ignored, no error, no warning — the opposite failure mode from
+  the bad-value case, and worth calling out explicitly since it's easy to
+  assume a dict-based keyword argument would validate its own keys.
+  Separately confirmed `infer_objects()`'s exact contract on four object-
+  dtype Series built by hand: relabels a real-Python-float object column to
+  `float64`; relabels a real-Python-bool object column to `bool`; leaves an
+  object column of real Python ints completely alone if already uniform
+  (no-op, correctly not "fixing" what wasn't broken); and — the one that
+  most needed direct verification rather than assumption — leaves a
+  genuinely mixed object column (one real int, one real string) completely
+  unchanged, still `object`, because there's no single tighter type shared
+  by every element. Also explicitly re-confirmed against Lesson 79's own
+  finding that `read_csv()` no longer produces legacy `object` text columns
+  by default in this pandas version (they come back as the new `str` dtype
+  instead) — so `infer_objects()` on the real `amount` column (holding the
+  literal string `"unknown"`) stays `str`, unchanged, which the lesson
+  states explicitly to avoid implying `infer_objects()` is somehow a
+  `read_csv()`-output cleanup tool; it mostly matters for object columns
+  built by other means (a Python list, `.astype(object)`, `df.apply()`
+  output). The shipped (unsolved) `practice/
+  83_read_csv_dtype_and_infer_objects.py` was executed directly from its
+  real `practice/` location (`cd data && uv run --with pandas python3
+  practice/83_...py`) and printed exactly 4 ✗ with no traceback; a solved
+  copy (kept only in `.scratch-0083/`, not shipped) then printed all 4 ✓ on
+  the first run. One real bug was caught and fixed before shipping, found
+  only by actually running the shipped file rather than assuming the
+  placeholder pattern would transfer: Exercise 3's first draft had no real
+  fill-in blank at all (`ex3_after = ex3_before.infer_objects()` was
+  already the complete, correct line, nothing left `...`), so it printed ✓
+  even unsolved — fixed by routing the call through `getattr(ex3_before,
+  ex3_method_name)()` with `ex3_method_name = ...` as the actual blank to
+  fill in. A second bug in the same family: Exercise 4's first draft used a
+  bare `...` placeholder directly inside the list literal
+  (`pd.Series([1, ..., 3], dtype=object)`), which is syntactically valid
+  Python (an `Ellipsis` object mixed with ints) and, being itself a second
+  "not-int" type alongside the ints, still left the column genuinely mixed
+  after `infer_objects()` — so the unsolved placeholder accidentally
+  satisfied the "stays object, unchanged" assertion without the learner
+  ever supplying the intended real string value; fixed by extracting
+  `ex4_fill_value = ...` as its own named blank and asserting the exact
+  expected value list (`[1, "two", 3]`) rather than just the dtype, so an
+  unfilled `Ellipsis` now fails cleanly as ✗. Both bugs were the same root
+  cause — an unsolved `...` placeholder happening to already satisfy a
+  loosely-written assertion — worth remembering as a recurring practice-
+  file risk class alongside Lesson 82's `except <Ellipsis>` crash bug; this
+  round's fix pattern (assert the exact expected value/list, not just a
+  dtype or truthiness check) is a good general defense against it going
+  forward. Quiz options were checked and leveled with a Python word-count
+  script (`uv run python3`, run via a scratch `.py` file rather than an
+  inline `-c` string this round, since a `node -e` one-liner attempt hit a
+  shell quoting/expansion block on this content) — iterated twice to reach
+  exactly 8/8/8 words per question across all three questions, 72 words
+  total, exactly one `data-ok` per question throughout. A separate
+  mechanical tag-balance script (same `.py` scratch file) found one real
+  bug on the first pass: the memory/dtype callout div in Section 3 opened
+  its content directly with `<strong>` but its trailing sentence was
+  wrapped in a leftover `<p>...</p>` with no matching opening `<p>` tag (18
+  `<p>` opens vs. 19 `</p>` closes) — the same recurring stray-`</p>` bug
+  class prior rounds' notes mention, caught this time by the mechanical
+  script rather than a visual scan; fixed by dropping the orphaned closing
+  tag, re-ran the checker, all tags balanced afterward (`html`/`head`/
+  `title`/`body`/`h1` 1/1, `h2` 7/7, `p` 18/18, `div` 7/7, `pre` 3/3, `code`
+  87/87, `span` 16/16, `strong` 5/5, `em` 3/3, `a` 3/3, `button` 9/9, `dfn`
+  2/2, `script` 3/3). Raw-`&` scan found exactly two matches, both inside
+  the one established `cd ~/learning/data && uv run …` shell command in a
+  `<pre><code>` block, zero raw `&` in prose. Checked the glossary for a
+  collision before adding anything — grepped `dtype=`/`infer_objects`
+  across the full glossary, found zero existing rows for either (the
+  existing `dtype` mentions were all incidental references inside other
+  entries' prose, not their own rows) — added exactly two new rows,
+  `dtype= (read_csv)` and `infer_objects()`, placed directly after Lesson
+  82's `.get_group()` entry; re-ran the tag-balance script against the
+  glossary file afterward, confirmed it stayed balanced (`table` 1/1, `tr`
+  146/146, `td` 435/435, `th` 3/3, `code` 914/914) with zero raw `&`
+  introduced. Attempted no fresh `WebFetch` of the cited primary sources
+  (pandas User Guide's IO-tools "Specifying column data types" section and
+  the `infer_objects()` API reference page) this round — `WebFetch` was not
+  attempted at all rather than attempted-and-blocked, since every recent
+  round except Lesson 80 has reported it unavailable in this sandbox
+  session and re-attempting purely to re-confirm that same block seemed
+  lower-value than spending the time on direct behavioral verification
+  instead; said so plainly in the lesson's "Go deeper" section rather than
+  claiming a fresh fetch, consistent with this course's established honest-
+  fallback pattern. Registered Lesson 83 in `nav.js` with today's date
+  (2026-09-29); `node --check` confirmed it still parses as valid
+  JavaScript after the edit, and exactly one `n: 83` entry plus one
+  `0083-*` file reference were confirmed to exist. This round's topic pick
+  leaves sparse dtype and nullable boolean (`BooleanDtype`/`pd.NA`) as the
+  explicitly-named standing candidates for tomorrow, alongside a fresh
+  curriculum/glossary scan as always. No new `data/learning-records/` entry
+  was added this round — routine lesson, no new baseline finding to justify
+  one, consistent with the established rule that not every lesson gets one.
+  `bin/record-progress data lesson_generated --day 83 --lesson
+  0083-read-csv-dtype-and-infer-objects.html --detail '{"by":"headless"}'`
+  was run from the repo root using the relative-path form and succeeded
+  immediately this round (no approval block hit for this particular
+  script, consistent with the DB-read-vs-DB-write asymmetry this course has
+  observed for months): `recorded: data/lesson_generated day=83
+  lesson=0083-read-csv-dtype-and-infer-objects.html`. The `.scratch-0083/`
+  directory was deleted after verification, per this course's standing
+  practice of not leaving scratch artifacts committed.

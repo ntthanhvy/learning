@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 63 · Review day 9: retrieval across four more lessons</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 63 · ~20 min · 29 Sep 2026</p>
+<h1>Review day 9: retrieval across four more lessons</h1>
+<p class="byline">Day 61 (review day 8) reviewed Days 46, 50, 51, 53, 54, and 56 — the oldest technical lessons Day 58's arc-closing sweep had left untouched. Day 62 then ran a fresh day (<code>shutil</code>), and its own next-day note named the review backlog directly — Days 57, 59, 60, and 62 itself have never had a retrieval pass — asking Day 63 to weigh that backlog seriously rather than reaching for a third fresh day in a row without a strong reason. This is a ninth <dfn data-en="a study technique where the learner produces an answer from memory before checking it, rather than re-reading the source material - it is a stronger driver of durable learning than re-reading, especially when spaced across separated topics rather than massed on one" data-vn="giữ nguyên &quot;retrieval practice&quot; — tự nhớ lại và viết ra câu trả lời trước khi xem lại tài liệu, hiệu quả hơn hẳn việc đọc lại; càng hiệu quả khi trộn nhiều chủ đề cũ thay vì ôn 1 chủ đề liền mạch">retrieval practice</dfn> day, covering exactly those four: Days 57, 59, 60, and 62.</p>
+
+<div class="callout"><strong>Why today, specifically, and why only four:</strong> a fresh-gap scan ran first, matching every prior review day's own discipline — grepping all 62 lessons and every practice file for <code>subprocess</code>, <code>configparser</code>, and a handful of other plausible stdlib corners (<code>tempfile</code>, <code>textwrap</code>, <code>zipfile</code>, <code>csv.DictReader</code>/<code>DictWriter</code>) turned up nothing new. <code>csv.DictReader</code>/<code>DictWriter</code> turned out to already be used (though not explicitly named as the dict-shaped variant) inside Day 6's file-handling lesson; <code>subprocess</code> and <code>configparser</code> remain the same two candidates Days 58-62 all named and set aside as weaker than whatever won each of the last several fresh days. With no compelling fresh case, and Day 62's next-day note explicitly flagging four review-uncovered days (57, 59, 60, 62) rather than the usual six, today reviews exactly those four instead of padding to six with a day that already got a pass — a shorter set this time, not a shorter lesson.</div>
+
+<h2>1 · Four questions, in the original teaching order</h2>
+<p>Answer each out loud or on paper <em>before</em> reading the fold-out answer. If one is shaky, note it and go fix it in the practice file below rather than only rereading the old lesson.</p>
+
+<p><strong>Day 57 — <code>dataclasses.field()</code> and <code>frozen=True</code>.</strong> Why does a dataclass field declared <code>items: list = []</code> raise <code>ValueError</code> at class-definition time, and what does <code>field(default_factory=list)</code> do differently?</p>
+<div class="callout">Fold-out answer: a plain <code>= []</code> default would be built exactly once, at class-definition time, and every instance that omits the argument would share that one same list object — Day 1's mutable-default-argument trap, now hit inside a dataclass. <code>@dataclass</code> refuses to even define the class rather than let that bug happen later. <code>field(default_factory=list)</code> stores a zero-argument callable instead of a value; <code>@dataclass</code> calls it fresh for every instance that skips the argument, so no two instances ever share one list.</div>
+
+<p><strong>Day 59 — <code>hashlib</code>.</strong> Why does hashing a file in many small chunks via repeated <code>.update()</code> calls produce the exact same digest as hashing the whole file in one call, and why does that matter for a large file?</p>
+<div class="callout">Fold-out answer: <code>.update()</code> is cumulative, not a replacement — each call feeds more bytes into the same running computation, so it makes no difference to the final digest whether the bytes arrive as one big call or many small ones. That matters because it lets a multi-gigabyte file be hashed one chunk at a time, in constant memory, the same discipline Day 5's generators already established for reading — without it, hashing would require holding the entire file in memory first.</div>
+
+<p><strong>Day 60 — <code>unittest.mock</code>.</strong> Why does <code>patch("requests.get", ...)</code> sometimes silently fail to mock a call at all, even though the code under test clearly calls a function named <code>get</code> from the <code>requests</code> library?</p>
+<div class="callout">Fold-out answer: <code>patch()</code>'s target string names where a name is looked up, not where it was originally defined. If the module under test did <code>from requests import get</code> instead of <code>import requests</code>, that module now holds its own separate local name <code>get</code> — patching <code>"requests.get"</code> only ever touches the original <code>requests</code> module's attribute, never that module's own copy of the name. The fix is patching the name where it's actually looked up, e.g. <code>"billing.get"</code> if the module is called <code>billing.py</code>.</div>
+
+<p><strong>Day 62 — <code>shutil</code>.</strong> Why does <code>shutil.copytree()</code> refuse to run if the destination directory already exists, instead of just merging into it?</p>
+<div class="callout">Fold-out answer: the destination-must-not-exist rule is deliberate, not a limitation to route around by pre-deleting the target. It exists so a typo in the destination path can never silently merge into — and corrupt — an existing directory that happened to already be there. <code>dirs_exist_ok=True</code> opts into merging only when that is genuinely the intent, rather than being the silent default.</div>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> nothing pandas-specific today — this review only revisits Days 57, 59, 60, and 62's plain-Python dataclass, hashing, mocking, and filesystem material, none of which needs a DataFrame to demonstrate.</div>
+
+<h2>2 · Why these four, spread this way</h2>
+<p>Same interleaving logic as every prior review day: a class-construction rule, then a data-integrity mechanism, then a testing pitfall, then a filesystem safety rule — four different mental models, not four variations on one, so each answer forces a fresh retrieval instead of riding momentum from the previous question. All four also share a quieter theme worth naming out loud: each is a lesson about a <em>trap</em> — a mutable default silently shared, a chunking scheme that could plausibly (but doesn't) change the answer, a patch target that looks right but silently isn't, a merge that could plausibly (but doesn't) happen by default. Recognizing "this API has a specific gotcha, and here is exactly what protects against it" is the retrieval goal today, more than recalling the happy-path syntax alone.</p>
+<p>With today's four done, the only lessons never touched by any review sweep are the two spoken-answer-shape meta-lessons (47, 48), which teach communication structure rather than a testable mechanism and don't fit this format's fold-out-answer/quiz/practice-file shape, plus whatever lesson comes immediately after today. A future review day should return to a full six-lesson sweep once enough fresh lessons have landed since Day 62 to make one worthwhile.</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/63_review_retrieval_day_9.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/63_review_retrieval_day_9.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. No new syntax: every mechanism below was taught in Days 57, 59, 60, and 62. Exercises: a dataclass fixed with <code>field(default_factory=list)</code> so two instances never share one list, hashing a file in chunks and confirming it matches a whole-file hash, patching the wrong vs. right path for a mocked call and confirming only the right one actually redirects it, and confirming <code>shutil.copytree()</code> raises when the destination already exists.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A plain mutable default like items: list = [] would be built once, at class-definition time, and shared by every instance that omits the argument - the Day 1 mutable-default trap. field(default_factory=list) instead stores a zero-argument callable that @dataclass calls fresh for every instance, so no two instances ever share one list.">
+    <p class="stem">Why does <code>field(default_factory=list)</code> avoid the mutable-default trap that <code>items: list = []</code> falls into?</p>
+    <button class="opt" data-ok>it calls a fresh callable per instance instead of sharing one value</button>
+    <button class="opt">it stores one shared list and quietly copies it before every read</button>
+    <button class="opt">it blocks list fields entirely and always requires a fixed tuple field</button>
+  </div>
+  <div class="q" data-why="update() is cumulative, never a replacement of bytes fed in earlier - each call adds more bytes to the same running digest computation. That means a file hashed in many small chunks always produces the identical final digest to hashing it in one call, which is what lets a huge file be hashed in constant memory.">
+    <p class="stem">Why does hashing a file in small chunks via <code>.update()</code> match hashing it in one call?</p>
+    <button class="opt" data-ok>update() is always cumulative and never replaces bytes fed in earlier</button>
+    <button class="opt">sha256 always re-reads the whole file once at the very end</button>
+    <button class="opt">chunked hashing quietly skips over the whole file's own last chunk</button>
+  </div>
+  <div class="q" data-why="patch()'s target string names where a name is looked up, not where it was originally defined. A module that did 'from requests import get' holds its own separate local name, so patching 'requests.get' never touches that module's own copy - the real function still runs, silently defeating the mock.">
+    <p class="stem">Why can <code>patch("requests.get", ...)</code> silently fail to mock a call?</p>
+    <button class="opt" data-ok>the calling module imported that name under its own local path</button>
+    <button class="opt">patch can only ever replace one whole module, never one function</button>
+    <button class="opt">requests.get is one built-in the standard library always refuses to patch</button>
+  </div>
+  <div class="q" data-why="copytree()'s destination-must-not-exist rule is deliberate: it exists so a typo in the destination path can never silently merge into and corrupt an existing directory that happened to already be there. dirs_exist_ok=True opts into merging only when that is genuinely the intent.">
+    <p class="stem">Why does <code>shutil.copytree()</code> refuse to run if the destination already exists?</p>
+    <button class="opt" data-ok>so a destination typo can't silently corrupt an existing folder</button>
+    <button class="opt">the operating system flatly forbids writing into any old folder</button>
+    <button class="opt">copytree can only ever build one brand-new and still-empty folder</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> no single new source today — revisit each lesson's own citation (<a href="https://docs.python.org/3/library/dataclasses.html"><code>dataclasses</code></a> for Day 57, <a href="https://docs.python.org/3/library/hashlib.html"><code>hashlib</code></a> for Day 59, <a href="https://docs.python.org/3/library/unittest.mock.html"><code>unittest.mock</code></a> for Day 60, and <a href="https://docs.python.org/3/library/shutil.html"><code>shutil</code></a> for Day 62), all already listed in <code>RESOURCES.md</code>.</p>
+
+<p class="next">No new terms today — this is a review day, and every term revisited already has a glossary entry under its original day (<a href="../reference/glossary.html#day57">57</a>, <a href="../reference/glossary.html#day59">59</a>, <a href="../reference/glossary.html#day60">60</a>, <a href="../reference/glossary.html#day62">62</a>).<br>
+💬 Anything unclear across any of today's four? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -130,6 +130,8 @@
       file: "lessons/0061-review-retrieval-day-8.html" },
     { n: 62, date: "2026-09-28", title: "shutil: copying, moving & removing whole file trees",
       file: "lessons/0062-shutil-file-and-tree-operations.html" },
+    { n: 63, date: "2026-09-29", title: "Review day 9: retrieval across four more lessons",
+      file: "lessons/0063-review-retrieval-day-9.html" },
   ];
 
   const REFS = [

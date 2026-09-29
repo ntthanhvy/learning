@@ -170,6 +170,8 @@
       file: "lessons/0081-to-datetime-format.html" },
     { n: 82, date: "2026-09-28", title: "groupby(as_index=False) and .get_group(): two groupby leftovers, finally closed",
       file: "lessons/0082-as-index-and-get-group.html" },
+    { n: 83, date: "2026-09-29", title: "read_csv(dtype=) and infer_objects(): declaring vs. best-guessing a column's real type",
+      file: "lessons/0083-read-csv-dtype-and-infer-objects.html" },
   ];
 
   const REFS = [

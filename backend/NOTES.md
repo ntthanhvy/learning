@@ -6587,3 +6587,78 @@
   round wants horizontal read/write splitting depth beyond today's vocabulary
   level, that's the next natural step, but MISSION.md's explicit sharding
   exclusion means that would need a fresh scope check, not an assumption.
+- **2026-09-29 generation (Lesson 86, headless 06:00 run):** Idempotency check
+  first: `grep -c "n: 86" backend/assets/nav.js` and `ls backend/lessons/ | grep
+  -c "^0086-"` both returned 0 before writing anything, so proceeded. Per this
+  workspace's now well-established pattern (confirmed via the rust course's ~2.5
+  months of identical daily entries), direct `psql "$LEARNING_DB_URL" ...` reads
+  and `bin/query-progress` are hard-blocked in this sandbox (a static block on
+  expanding that shell variable, plus an interactive-approval gate with no
+  approver present headless) — not re-verified this round since the evidence is
+  already extensive; only `bin/record-progress` (a write) was attempted, and it
+  worked. So pacing came from `learning-records/` (still just the two baseline
+  files — frontend-mindset gap and the concurrency-vocabulary gap, neither
+  needing a new entry today) plus this round's own fresh gap search against file
+  state, not any reported `course_progress` row. Read `MISSION.md`, `RESOURCES.md`,
+  both `learning-records/` files, the tail of `NOTES.md` (Lessons 84–85 in full),
+  the nav.js `LESSONS` array tail, and Lesson 85 itself as the current
+  HTML/quiz/glossary precedent. Ran a fresh gap grep across all lesson filenames
+  and content rather than assuming Lesson 85's own closing note (sharding as a
+  adjacent-but-excluded topic) was this round's answer — sharding remains
+  correctly out of scope per MISSION.md and wasn't revisited. Checked N+1/
+  batching, GraphQL, rate-limiting algorithm depth (sliding window/leaky bucket):
+  all either already covered or zero-hit/not-a-fit. The clean gap: `VACUUM` is
+  taught in real depth (Lesson 39), but the write-ahead log it depends on is only
+  ever mentioned in passing — "one WAL entry per row" (Lesson 55, twice), and
+  Lesson 85's own "replica replays the primary's stream of committed changes"
+  never named what that stream physically is — and durability, the fourth letter
+  of ACID, is never named anywhere despite Lesson 6 teaching atomicity in detail
+  six lessons before isolation (Lesson 37) got its own lesson too. Confirmed via
+  `grep -rn -i "durability\|crash recovery\|fsync\|checkpoint" lessons/*.html`
+  (zero hits) and a glossary grep for the same terms plus "WAL"/"write-ahead"
+  (zero hits) before writing anything. Lesson 86 covers: durability as ACID's
+  unnamed fourth guarantee and the question Lesson 6 left open (what survives a
+  crash right after COMMIT returns); the WAL as the actual mechanism — a cheap
+  sequential append that must land before COMMIT succeeds, versus the expensive
+  alternative of flushing full data pages on every commit; crash recovery as WAL
+  replay since the last checkpoint, and checkpoints as the reason recovery never
+  needs the log's entire history; and a closing comparison table that retroactively
+  explains two things taught without the WAL name — Lesson 55's "one WAL entry per
+  row" line and Lesson 85's replica-replay description, naming streaming
+  replication as ordinary crash-recovery replay logic fed a network WAL stream
+  instead of a local crash. No Go code in this lesson (confirmed zero hits for
+  `func `/`package main`/`import (` before deciding this), so no compile-check
+  module was needed — same signal prior rounds used. Checked the glossary first
+  for all four candidate terms — `durability`, `write-ahead log / WAL`, `crash
+  recovery / replay`, `checkpoint` — zero collisions confirmed via case-insensitive
+  grep before writing, added as new rows after Lesson 85's `read-your-own-writes`
+  row. Verification performed mechanically: (1) quiz word-count balance via a
+  Node script (`.scratch-0086/quizcheck.js`), both `.split(/\s+/)` and
+  `.split(" ")` cross-checked — first draft was uneven on all four questions (a
+  1–2-word spread per question), fixed through several rewrite-and-recount
+  cycles including one overshoot (a 10-word option caught and corrected on the
+  next run rather than trusted by eye), converged to exactly 9/9/9/9 on all four
+  questions, both counting methods agreeing exactly, and exactly one `data-ok`
+  per question confirmed the same way; (2) an occurrence-count HTML tag-balance
+  check (`.scratch-0086/tagcheck.js`) on both the lesson and `glossary.html`
+  after its four-row addition — clean on the first pass, no fix needed this
+  round; (3) a raw-unescaped-`&` regex scan and (4) a backslash-escaped-quote
+  scan across both files — zero hits in either; (5) `node --check` against
+  `assets/nav.js` after registering Lesson 86 — clean, no output. Registered
+  Lesson 86 in `nav.js` (date 2026-09-29), re-confirmed exactly one matching
+  `n: 86` entry and exactly one matching `0086-*` lesson file afterward. No new
+  `learning-records/` file was added this round — routine topical entry like
+  Lessons 3–85, not a new baseline finding. Scratch work
+  (`backend/.scratch-0086/`, the quiz/tag-balance check scripts) was deleted in
+  full after use, confirmed gone via directory listing. Write path
+  (`bin/record-progress backend lesson_generated --day 86 --lesson
+  0086-write-ahead-log-durability.html --detail '{"by":"headless"}'`, run as a
+  relative path from the repo root) succeeded with no approval gate, output
+  confirmed: `recorded: backend/lesson_generated day=86
+  lesson=0086-write-ahead-log-durability.html`. No confirmed next-lesson gap is
+  named with certainty for the round after this one — same standing note as
+  every prior round; a completion/quiz-outcome signal or a user-named track
+  should take priority over guessing blind. This round's wide net (N+1/
+  batching, GraphQL, sliding-window/leaky-bucket rate limiting) mostly hit
+  already-covered or too-incidental ground beyond the one gap chosen and is not
+  being flagged as a queued candidate.

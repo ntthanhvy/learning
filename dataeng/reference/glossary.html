@@ -154,6 +154,14 @@
   <tr><td>exposure</td><td>giữ nguyên "exposure" — khai báo 1 bên tiêu thụ downstream không phải dbt (dashboard, notebook, pipeline khác), nêu rõ phụ thuộc vào model/source nào qua ref()/source(), trở thành 1 node thật trong DAG của dbt dù dbt không build nó</td><td>A dbt YAML declaration (<code>exposures:</code> key) naming a non-dbt downstream consumer — a dashboard, notebook or pipeline — and the dbt models/sources it depends on via <code>ref()</code>/<code>source()</code>, added as a real node in dbt's own DAG and lineage graph even though dbt never builds it. A broken <code>ref()</code> inside one fails <code>dbt parse</code> immediately, the same as a broken <code>ref()</code> between two models.</td></tr>
 </table>
 
+<h2 id="day15">Day 15 — dbt in CI: GitHub Actions, state:modified+, deferral</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>CI (continuous integration)</td><td>giữ nguyên "CI" — tự động build/test mỗi thay đổi trước khi merge, chạy trên server chứ không phải máy dev, bắt lỗi trước khi lọt vào main</td><td>The practice of automatically building and testing every proposed code change before it merges, on a server rather than a developer's own machine, so a broken change is caught before it reaches <code>main</code> — here, a GitHub Actions workflow running <code>dbt build</code> against a disposable Postgres service container on every pull request.</td></tr>
+  <tr><td>service container</td><td>giữ nguyên "service container" — container GitHub Actions khởi cùng job, các step trong job gọi qua localhost, chỉ tồn tại trong lúc job chạy rồi bị xoá</td><td>A container GitHub Actions starts alongside a job's own runner, reachable at <code>localhost</code> from every step in that job, that exists only for the duration of the job and is discarded afterward — used here for a throwaway <code>postgres:17</code> instance, one per CI run.</td></tr>
+  <tr><td>slim CI</td><td>giữ nguyên "slim CI" — build CI chỉ chọn state:modified+ (model đổi + downstream), deferred ref() còn lại về manifest đã build trước đó, không build lại toàn bộ project mỗi PR</td><td>A dbt CI build that selects only <code>state:modified+</code> (changed models plus their downstream) and defers unselected <code>ref()</code>s to a prior, already-built manifest via <code>--defer --state</code>, instead of rebuilding the entire project from scratch on every pull request. Only as trustworthy as the comparison manifest it defers to.</td></tr>
+</table>
+
 <script src="../assets/nav.js"></script>
 </body>
 </html>

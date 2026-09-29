@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 83 · read_csv(dtype=) and infer_objects(): declaring vs. best-guessing a column's real type</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 83 · ~20 min · 29 Sep 2026</p>
+<h1>read_csv(dtype=) and infer_objects(): declaring vs. best-guessing a column's real type</h1>
+<p class="byline">Lessons 80-82 all named the same standing candidate in their teaser: the memory/dtype family (<code>infer_objects()</code>, <code>read_csv(dtype=)</code>, sparse dtype, nullable boolean). Grepped all 82 lesson bodies plus the glossary first — zero hits on any of the four. Four topics is too much for one ~20-minute lesson, so today takes the two that pair naturally around one question ("what dtype does a column actually get, and who decides") and leaves sparse dtype and nullable boolean open for a future round.</p>
+
+<h2>1 · Recap: three dtype tools already covered, one question still open</h2>
+<p>Lesson 41's <code>astype()</code> converts a column that already exists and raises on genuinely bad data. Lesson 51's <code>convert_dtypes()</code> makes a best-guess pass across a whole already-loaded table. Lesson 62's <code>downcast=</code> shrinks a numeric column's width after measuring. All three act <em>after</em> the DataFrame already exists. Today's question is earlier: can the dtype be declared correctly at <code>read_csv()</code> time, before pandas ever has to guess — and, when a column ends up <code>object</code>-dtype for an incidental reason rather than a real mix of types, is there a cheap way to fix it after the fact without a manual <code>astype()</code> per column?</p>
+
+<h2>2 · SQL bridge: dtype= is the closest pandas gets to a CREATE TABLE</h2>
+<p>A SQL <code>CREATE TABLE</code> fixes each column's type before a single row is loaded — the database refuses a row that doesn't fit. <code>read_csv()</code> normally has no such schema: Lesson 2 already showed it guessing every column's dtype from the raw text, defaulting numeric columns to the widest practical type. <dfn data-en="a keyword argument on read_csv() (and related readers) taking a dict mapping column name to the pandas/NumPy dtype it should be parsed as, applied DURING parsing rather than as a separate step afterward -- the closest pandas equivalent to declaring a column's type in a SQL CREATE TABLE, and the one dtype tool here that can make read_csv() itself raise if a value cannot be parsed into the declared type" data-vn="giữ nguyên 'dtype=' (read_csv()) — tham số nhận dict {tên cột: dtype}, ép kiểu NGAY LÚC ĐỌC file chứ không phải bước riêng sau đó; giống khai kiểu cột trong CREATE TABLE của SQL nhất trong các cách ép kiểu đã học — và là cách DUY NHẤT khiến read_csv() tự báo lỗi ngay nếu có giá trị không ép được vào kiểu đã khai">read_csv(dtype=)</dfn> is the pandas equivalent of that upfront declaration — a dict of column name to dtype, applied while parsing, not bolted on afterward:</p>
+<pre><code>pd.read_csv(<span class="str">"orders_raw.csv"</span>, dtype={<span class="str">"order_id"</span>: <span class="str">"int32"</span>, <span class="str">"customer"</span>: <span class="str">"category"</span>})
+<span class="cm">-- order_id       int32   &lt;- narrower than default int64, decided at load time
+-- customer    category   &lt;- Lesson 25's memory win, applied from the very first read
+-- amount           str   &lt;- not listed in the dict, still gets the normal default
+-- order_date       str</span></code></pre>
+<p>Confirmed directly against this course's real <code>orders_raw.csv</code>: the resulting table's total memory footprint is byte-for-byte identical whether <code>dtype=</code> declares the types at load time or the same <code>astype()</code> calls run afterward on the default-loaded frame — <code>dtype=</code> is not a new memory-saving mechanism on top of Lessons 25/62, it is the same conversions, just moved earlier. The real win is fewer intermediate steps and, per Section 3, an earlier failure point.</p>
+
+<div class="callout"><strong>Gotcha, confirmed directly: a bad <code>dtype=</code> declaration fails LOUDLY, at parse time, before the DataFrame even exists.</strong> Forcing <code>amount</code> — which contains the literal string <code>"unknown"</code> — to <code>dtype={"amount": "float64"}</code> raises <code>ValueError: could not convert string to float: 'unknown'</code> immediately, and no DataFrame is returned at all. Compare this to the normal load-first-then-convert path (Lesson 3's own pattern): <code>pd.read_csv(...)</code> succeeds silently with <code>amount</code> as text, and the bad value only surfaces later, whenever something finally tries <code>pd.to_numeric(errors="coerce")</code> and quietly turns it into <code>NaN</code>. <code>dtype=</code> trades that silent, deferred discovery for a loud, immediate one — worth choosing deliberately: declare the type upfront when a bad row should stop the whole pipeline, stick with load-then-coerce when a bad row should just become a flagged <code>NaN</code> instead.</div>
+
+<p>A second gotcha, also confirmed directly: passing a column name in the <code>dtype=</code> dict that doesn't exist in the file at all — a typo, or a column that got renamed upstream — raises nothing. <code>read_csv()</code> loads normally and silently ignores the extra dict entry. This is the opposite failure mode from the bad-value case above: wrong dtype value on a real column fails loud, wrong column name in the dict fails silent. Both are worth checking <code>df.dtypes</code> against the intended schema right after loading, rather than trusting the call succeeded exactly as intended just because it didn't raise.</p>
+
+<h2>3 · infer_objects(): fixing an object column AFTER the fact, without guessing values</h2>
+<p>A different, more incidental problem: a column is <code>object</code>-dtype not because its values are genuinely mixed, but because of <em>how</em> it was built — assigned from a Python list, built via <code>.astype(object)</code> somewhere upstream, or produced by an operation that doesn't bother to infer a tighter type. The actual Python objects inside might already all be real <code>int</code>s, <code>float</code>s, or <code>bool</code>s — <code>object</code> is just the container's label, not proof the values are mixed. <dfn data-en="a Series/DataFrame method that inspects the ACTUAL Python objects already stored inside an object-dtype column and, if every element already shares one real type (all int, all float, all bool), relabels the column to that tighter dtype -- it does NOT parse strings or attempt any conversion of value content; a column that is genuinely a mix of types (or holds real strings) is returned completely unchanged" data-vn="giữ nguyên 'infer_objects()' — soi các Python object THẬT đang nằm trong cột dtype object, nếu TOÀN BỘ đã cùng 1 kiểu thật (toàn int, toàn float, toàn bool) thì đổi nhãn dtype cho khớp; KHÔNG parse chuỗi, KHÔNG ép giá trị nào cả — cột nào thật sự lẫn nhiều kiểu (hoặc chứa chuỗi thật) thì trả về y nguyên, không đổi gì">infer_objects()</dfn> is that narrow fix — it inspects what's already there and relabels, it never parses or converts value content:</p>
+<pre><code>s = pd.Series([<span class="kw">1.0</span>, <span class="kw">2.0</span>, <span class="kw">3.0</span>], dtype=object)  <span class="cm"># object label, but every element is a real Python float</span>
+s.dtype                   <span class="cm"># object</span>
+s.infer_objects().dtype   <span class="cm"># float64 -- relabeled, same 3 values, nothing parsed</span>
+
+df[<span class="str">"amount"</span>].dtype                  <span class="cm"># str -- pandas 3.0's default text dtype (Lesson 79), holds "unknown"</span>
+df[<span class="str">"amount"</span>].infer_objects().dtype  <span class="cm"># str -- UNCHANGED: "unknown" really is a string, nothing to relabel</span></code></pre>
+<p>Confirmed directly, both directions: a Series built as <code>pd.Series([1, "two", 3], dtype=object)</code> — genuinely mixed, one real string among real ints — comes back from <code>infer_objects()</code> still <code>object</code>, completely unchanged, because there is no single tighter type every element actually shares. A Series of real Python <code>bool</code> values stored as <code>object</code> correctly relabels to pandas' <code>bool</code> dtype. The method's whole contract is: look at what's really inside, relabel if it's uniform, change nothing if it isn't — it is not a substitute for <code>pd.to_numeric(errors="coerce")</code> or <code>astype()</code> on a column that needs actual string-to-number parsing.</p>
+
+<div class="callout"><strong>Where this actually comes up:</strong> Lesson 79 already established that <code>read_csv()</code> itself no longer produces <code>object</code> text columns by default in this pandas version — they come back as the new <code>str</code> dtype instead. <code>object</code> columns holding genuinely-typed values mostly appear from other sources now: a column assembled from a Python list or dict, the result of <code>df.apply()</code> returning mixed-looking objects, or data read via an older code path. <code>infer_objects()</code> is the cheap first check on any such column before reaching for a heavier, value-parsing tool.</div>
+
+<div class="interview">
+<p><strong>Q: "You're about to load a large CSV and you already know two of its columns should be narrow ints and one should be a category — what do you do, and why not just load it and fix it after?"</strong> A strong answer, out loud: <em>"I'd pass dtype= to read_csv() directly, a dict from column name to target dtype, so the conversion happens during parsing instead of as a separate pass afterward — same end memory footprint either way, I've confirmed that, but declaring it upfront means a bad value in one of those columns fails immediately with a clear error at load time, rather than silently loading as text and only surfacing later whenever something finally tries to convert it. The one thing I'd double check afterward regardless: dtype= silently ignores a dict key that doesn't match a real column name, so I always compare df.dtypes to what I intended right after loading rather than assuming the call did exactly what I asked just because it didn't raise. Separately, if I inherit an object-dtype column from somewhere other than read_csv — built from a list, say — and I suspect it's incidentally object rather than genuinely mixed, infer_objects() is the cheap first check: it relabels to a tighter dtype if every value already shares one, and changes nothing at all if the column is genuinely mixed or holds real strings, no parsing involved either way."</em> The signal: naming dtype='s real benefit (fail-fast, not extra memory savings), knowing its silent-ignore gotcha on a bad key, and correctly scoping infer_objects() as relabeling only, never parsing.</p>
+</div>
+
+<h2>4 · Why this closes the loop, not just adds a fourth tool</h2>
+<p>Lessons 25, 41, 51, and 62 all touched dtypes from a different angle, but every one of them acted on a DataFrame that already existed. <code>dtype=</code> is the missing "can this be declared before loading at all" half — the pandas answer to a SQL schema. <code>infer_objects()</code> is the missing "this object column is incidentally, not genuinely, messy" half — a narrower, cheaper cousin of Lesson 51's <code>convert_dtypes()</code> that never attempts a real parse, only a relabel. Between the five lessons, the dtype story now covers: declare at load time (<code>dtype=</code>), narrow numerics safely (<code>downcast=</code>), shrink low-cardinality text (<code>category</code>), best-guess a whole table (<code>convert_dtypes()</code>), relabel an incidentally-object column (<code>infer_objects()</code>), and convert one column deliberately with a hard failure on bad data (<code>astype()</code>).</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/83_read_csv_dtype_and_infer_objects.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/83_read_csv_dtype_and_infer_objects.py</code></pre>
+<p>Reuses <code>practice/data/orders_raw.csv</code>. Exercise 1 loads with <code>dtype={"order_id": "int32", "customer": "category"}</code> and confirms both dtypes landed as declared (Section 2). Exercise 2 confirms forcing <code>dtype={"amount": "float64"}</code> on the same file raises <code>ValueError</code> because of the real <code>"unknown"</code> value (Section 2's gotcha). Exercise 3 builds an object-dtype Series of real Python floats and confirms <code>infer_objects()</code> relabels it to <code>float64</code> (Section 3). Exercise 4 confirms <code>infer_objects()</code> leaves a genuinely mixed object-dtype Series (real int and real string together) completely unchanged (Section 3).</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: read_csv(dtype=...) produces the identical byte-for-byte memory footprint as loading normally then calling astype() afterward -- the real benefit is failing immediately at parse time on bad data, not any extra memory savings beyond what astype()/category/downcast already provide.">
+    <p class="stem">What does declaring <code>dtype=</code> in <code>read_csv()</code> actually buy you, versus loading first and calling <code>astype()</code> after?</p>
+    <button class="opt" data-ok>An earlier, louder failure point on bad values</button>
+    <button class="opt">A noticeably smaller total memory footprint, always guaranteed</button>
+    <button class="opt">Automatic silent parsing of any messy text values</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: infer_objects() only relabels a column to a tighter dtype when every element already shares one real underlying Python type. A genuinely mixed object column (real int and real string together) comes back completely unchanged, still object -- the method never parses or converts value content.">
+    <p class="stem"><code>infer_objects()</code> on a genuinely mixed object column (real ints and real strings together) does what?</p>
+    <button class="opt" data-ok>Nothing changes at all; it stays object, untouched</button>
+    <button class="opt">Every string value silently gets parsed as numbers</button>
+    <button class="opt">It raises a TypeError immediately, refusing any continue</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: a dtype= dict key naming a column that doesn't exist in the file is silently ignored -- read_csv() loads normally with no error and no warning, unlike a genuinely bad value in a real column, which raises ValueError immediately at parse time.">
+    <p class="stem">Passing a typo'd, nonexistent column name inside the <code>dtype=</code> dict to <code>read_csv()</code> does what?</p>
+    <button class="opt" data-ok>Nothing; it's silently ignored, and the load succeeds</button>
+    <button class="opt">Raises a KeyError immediately, naming the missing column</button>
+    <button class="opt">Creates one whole new empty column using it</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the pandas User Guide's <a href="https://pandas.pydata.org/docs/user_guide/io.html#specifying-column-data-types">IO tools: "Specifying column data types"</a> section (per <code>RESOURCES.md</code>'s "Docs: pandas User Guide" entry, ~8 min) covers <code>read_csv(dtype=)</code> directly; the <a href="https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.infer_objects.html">API reference for <code>infer_objects()</code></a> documents its relabel-only, no-parsing contract in full. Neither was freshly re-fetched this round — <code>WebFetch</code> to external sites was unavailable in this sandbox session; treated as long-stable reference material, this course's established fallback when a fetch tool is unavailable.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>dtype=</code> (read_csv) and <code>infer_objects()</code> are both new today, added right after Lesson 82's <code>.get_group()</code> entry.<br>
+<strong>Next lesson:</strong> sparse dtype and the nullable boolean (<code>BooleanDtype</code>/<code>pd.NA</code>) remain the standing named candidates left over from the memory/dtype family, alongside a fresh curriculum/glossary scan as always.<br><br>
+💬 Anything unclear — <code>dtype=</code>, <code>infer_objects()</code>, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

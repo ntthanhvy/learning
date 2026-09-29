@@ -8015,3 +8015,119 @@ fail *gracefully* so the learner sees which task failed.
   review-uncovered) unless a genuinely compelling fresh-gap case turns up
   first — matching the same "don't run three fresh days in a row without
   a strong reason" discipline Days 58 and 61 both already established.
+- 2026-09-29 — **Day 63 generated: Review day 9** (headless run), taking Day
+  62's own next-day note directly: it named the review backlog by number
+  (Days 57, 59, 60, and 62 itself have never had a retrieval pass) and asked
+  Day 63 to weigh it seriously rather than run a third fresh day in a row
+  without a strong reason. Read `MISSION.md` (untouched, read-only) in full,
+  `PLAN.md` in full, `RESOURCES.md` in full, the full `learning-records/`
+  directory (still only the Day 1 baseline), and the tail of `NOTES.md`
+  including Days 61-62's full entries. Read the full `assets/nav.js`
+  `LESSONS` array (all 62 entries) and listed `lessons/` to confirm the exact
+  spine covered so far. Read lessons 57, 59, 60, and 62 in full (the four
+  review targets) plus lesson 61 (the most recent review day, for structural
+  precedent) and their practice files, plus `assets/quiz.js` and
+  `assets/gloss.js` for the exact markup contracts.
+  Idempotency: listed `lessons/*.html` and confirmed no `0063-*` file existed,
+  then grepped `assets/nav.js` for any `n: 63` entry — none existed — before
+  writing anything. Today's date (2026-09-29) matches the run's stated date.
+  Decision process: ran a fresh-gap scan first, matching every prior review
+  day's own discipline — grepped all 62 lessons and every practice file for
+  `subprocess`, `configparser`, and other plausible stdlib corners
+  (`tempfile`, `textwrap`, `zipfile`, `csv.DictReader`/`DictWriter`). The csv
+  check turned up nothing new: `csv.DictReader` is already explicitly taught
+  in Day 6 (confirmed by grep — it appears in Day 6's lesson prose, code
+  sample, quiz, and practice file, plus later call-throughs in Days 7-9), so
+  it was never a real gap. `subprocess`/`configparser` remain the same two
+  candidates every round since Day 58 has named and set aside as weaker than
+  whatever won each fresh day. With no compelling fresh case and Day 62's
+  next-day note explicitly naming exactly four review-uncovered days (57, 59,
+  60, 62) rather than a fresh six-lesson backlog, today reviews precisely
+  those four instead of padding to the usual six with a day that already had
+  a pass (padding would have meant re-reviewing one of Days 46/50/51/53/54/56,
+  undermining the point of spacing). A shorter question set this round, not a
+  shorter lesson — section 2 names this explicitly and says a future review
+  day should return to six once more fresh lessons land.
+  No-pandas rule: grepped the lesson and practice file case-insensitively for
+  `pandas`/`numpy`/`pd\.`/`np\.` — exactly one hit in the lesson, the
+  standard "nothing pandas-specific today" boundary callout naming no pandas
+  API; zero hits in the practice file.
+  Practice file `practice/63_review_retrieval_day_9.py` (5 checks across 4
+  exercises, stdlib-only, no `--with` flag, matching the all-stdlib review-day
+  precedent): a dataclass fixed with `field(default_factory=list)` so two
+  instances never share one list (Day 57), hashing bytes in chunks via
+  repeated `.update()` calls and confirming the digest matches a whole-buffer
+  hash (Day 59), patching the wrong path for a stand-in `billing.get` call and
+  confirming the mock was never actually invoked, then patching the right
+  path (`patch.object`) and confirming the call gets redirected (Day 60), and
+  confirming `shutil.copytree()` raises `FileExistsError` when the
+  destination already exists rather than silently merging (Day 62). Verified
+  in a scratch directory under the repo root (`.scratch-0063/`, created fresh
+  this round since `/tmp` is outside the sandbox's allowed working
+  directories — confirmed by a blocked `mkdir /tmp/python-check` attempt
+  this round, consistent with this course's established `/tmp`-is-unavailable
+  note — deleted at the end): the shipped (unsolved) copy printed one ✓ (Ex
+  3's "wrong path never used" check passes trivially unsolved, since an
+  unfilled `...` body also never calls the mock — expected and left as-is
+  rather than reworked to force a ✗, since it's still correctly probing the
+  right behavior once Ex 3's second half is solved) and four ✗ with no
+  traceback; a separately written, fully solved copy (via the `Write` tool,
+  not by editing the shipped file) printed all five ✓ and the "All green"
+  tally, run twice consecutively with identical results both times.
+  HTML tag-balance was checked with a throwaway stdlib
+  `html.parser.HTMLParser`-based stack checker (written via `Write`, deleted
+  after use) against the lesson file — clean, no unclosed or mismatched tags.
+  A raw-unescaped-`&` regex (`&(?!amp;|lt;|gt;|quot;|#39;|apos;|#\d+;)`)
+  against the lesson found zero true hits.
+  Quiz: 4 questions (one per reviewed day, matching Day 62's four-exercise
+  scope rather than the usual six). Word counts were checked with a small
+  `html.parser.HTMLParser`-based Python script splitting each `<button
+  class="opt">`'s stripped-tag text on whitespace, cross-checked with a
+  second, independent Node.js regex-based script per this course's
+  established two-method practice. First draft mismatched on all four
+  questions (Q1 12/12/11, Q2 10/11/10, Q3 11/11/10, Q4 10/10/9) — one or two
+  rounds of one-word edits per question (adding "always"/"one"/"whole" etc.
+  to the short options) landed all four at equal counts: 12/12/12, 11/11/11,
+  11/11/11, 10/10/10. Both scripts agreed at every step, and a separate
+  `grep -o data-ok | wc -l` confirmed exactly 4 occurrences total, matching
+  the four-question count.
+  No glossary changes — a review day revisits already-glossaried terms under
+  their original day sections rather than adding new ones, same as every
+  prior review day (confirmed Days 57/59/60/62 all already have `id="day57"`
+  etc. anchors in `reference/glossary.html`); the lesson's closing paragraph
+  links directly to each of the four original glossary anchors instead.
+  `RESOURCES.md`: no changes — every source cited today (`dataclasses`,
+  `hashlib`, `unittest.mock`, `shutil`) was already added on its original
+  day.
+  Registered in `assets/nav.js` with `date: "2026-09-29"`; confirmed
+  `node --check assets/nav.js` reports no syntax errors after the edit.
+  **DB access:** per the orchestrator's brief, direct `psql`/`bin/query-progress`
+  reads are well-established as hard-blocked in this sandbox (confirmed
+  across ~2.5 months of the sibling `rust` course's `NOTES.md` entries, not
+  re-verified independently this round) — this round relied on
+  `learning-records/` (still only the Day 1 baseline) plus `NOTES.md`'s own
+  generation-log history for pacing instead, exactly as briefed. The
+  DB-write step (`bin/record-progress`) is unaffected by that read-side block
+  and was run normally after generation: `bin/record-progress python
+  lesson_generated --day 63 --lesson 0063-review-retrieval-day-9.html
+  --detail '{"by":"headless"}'` returned `recorded: python/lesson_generated
+  day=63 lesson=0063-review-retrieval-day-9.html` — a clean success, not a
+  workaround-needed case this time.
+  `python/learning-records/` still holds only the Day 1 baseline; no new file
+  was added this round — nothing here (a csv.DictReader false-lead, one
+  trivially-passing unsolved check in Ex 3) rises to a durable
+  learner-profile finding distinct from what's already recorded.
+  Final `git status --short -- python/` showed exactly three paths changed
+  (`assets/nav.js`, plus the new lesson and practice file) — no glossary or
+  `RESOURCES.md` edit this round since neither needed one, no other course's
+  files touched, and no leftover scratch files or directories from the
+  throwaway checker scripts, all deleted before finishing.
+  **Next-day note:** `subprocess` and `configparser` remain the two
+  unconfirmed fresh-gap candidates, unchanged from every round since Day 58.
+  Day 63 was a review day (a short, four-lesson one) following one fresh day
+  (62), so Day 64 is open either way — a fresh gap if a genuinely compelling
+  one surfaces, or starting a new review cycle once a handful of fresh days
+  have accumulated past Day 62. The two spoken-answer-shape meta-lessons (47,
+  48) still have no review-day treatment and may be worth a first adapted
+  format in a future round, if a natural way to retrieval-test communication
+  structure (rather than a testable mechanism) presents itself.

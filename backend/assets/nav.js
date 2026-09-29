@@ -176,6 +176,8 @@
       file: "lessons/0084-sagas-and-eventual-consistency.html" },
     { n: 85, date: "2026-09-28", title: "Read replicas: why the same query can return different answers a moment apart",
       file: "lessons/0085-read-replicas-and-replication-lag.html" },
+    { n: 86, date: "2026-09-29", title: "The write-ahead log: the fourth letter of ACID, finally named",
+      file: "lessons/0086-write-ahead-log-durability.html" },
   ];
 
   const REFS = [

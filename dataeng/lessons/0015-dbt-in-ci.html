@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 15 · dbt in CI: GitHub Actions, state:modified+, deferral</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 15 · ~20 min · 29 Sep 2026</p>
+<h1>dbt in CI: GitHub Actions, <code>state:modified+</code> and deferral</h1>
+<p class="byline">Today's tangible win: a GitHub Actions workflow, <code>.github/workflows/dbt_ci.yml</code>, that spins up a throwaway Postgres service container and runs <code>dbt build</code> automatically on every pull request against <code>food-delivery-pipeline</code> — no laptop, no manual step. Then a second, sharper version of the same workflow that builds only the models a PR actually touched, using a saved <code>manifest.json</code> as the comparison point.</p>
+
+<div class="callout"><strong>Before today — check Day 14 actually landed:</strong> this lesson wraps yesterday's exact build in CI, so confirm it locally first:
+<pre><code>cd food_delivery_pipeline
+uv run --project ../dbt_env dbt build</code></pre>
+Expected: <code>Done. PASS=26 WARN=0 ERROR=0 SKIP=0 NO-OP=0 REUSED=0 TOTAL=26</code> (Day 14's own count — the contract and exposure added no new build/test nodes). If <code>fct_orders</code> doesn't have <code>contract: {enforced: true}</code> yet, finish Day 14 first: today's second workflow diffs against that exact project shape.</div>
+
+<h2>1 · Fourteen days of "run it on my laptop." Today it runs on every PR.</h2>
+<p>Every build step so far has had the same weak point: it only proves the pipeline works on the one machine that just ran it. A teammate — or a future you, six months on — opens a pull request that changes <code>fct_orders.sql</code>, and nothing stops a typo from merging straight to <code>main</code> until someone happens to run <code>dbt build</code> by hand and notices. <dfn data-en="the practice of automatically building and testing every proposed code change before it merges, on a server rather than a developer's own machine, so a broken change is caught before it reaches main" data-vn="giữ nguyên &quot;CI&quot; (continuous integration) — tự động build/test mỗi thay đổi trước khi merge, chạy trên server chứ không phải máy dev, bắt lỗi trước khi lọt vào main">CI</dfn> is dbt's answer: a server builds the project on every pull request, using a database that exists only for the duration of that one check.</p>
+<p><a href="https://docs.github.com/en/actions">GitHub Actions</a> is the natural choice here since the repo already lives on GitHub — no new host, no new account. Today's first workflow does exactly what Day 1 through Day 14 did locally, just on GitHub's own runner instead of a laptop: bring up Postgres, load raw data, run <code>dbt build</code>.</p>
+
+<h2>2 · A disposable Postgres, alive only for one CI run</h2>
+<p>GitHub Actions can start a <dfn data-en="a container GitHub Actions starts alongside a job's own runner, reachable at localhost from every step in that job, that exists only for the duration of the job and is discarded afterward" data-vn="giữ nguyên &quot;service container&quot; — container GitHub Actions khởi cùng job, các step trong job gọi qua localhost, chỉ tồn tại trong lúc job chạy rồi bị xoá">service container</dfn> alongside a job — the same <code>postgres:17</code> image Day 1's <code>docker-compose.yml</code> already pins, started fresh for this one job and thrown away when it finishes. No state carries over between runs, which is exactly the property a CI database should have: every PR gets built against a known-clean warehouse, never one some previous run left dirty.</p>
+<pre><code><span class="cm">-- .github/workflows/dbt_ci.yml</span>
+name: dbt CI
+
+on:
+  pull_request:
+    paths:
+      - <span class="str">'food_delivery_pipeline/**'</span>
+      - <span class="str">'.github/workflows/dbt_ci.yml'</span>
+
+jobs:
+  dbt-build:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: fdp
+          POSTGRES_PASSWORD: fdp_dev_password
+          POSTGRES_DB: fdp
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Load raw data
+        run: <span class="cm">TODO -- the same command Day 1's Verify block uses, against localhost instead of docker compose's network</span>
+
+      - name: dbt build
+        working-directory: food_delivery_pipeline
+        run: uv run --with <span class="str">"dbt-postgres==1.11.0"</span> dbt build --profiles-dir .
+        env:
+          DBT_HOST: localhost
+          DBT_USER: fdp
+          DBT_PASSWORD: fdp_dev_password
+          DBT_DBNAME: fdp</code></pre>
+<p>The <code>TODO</code> is today's first real skill: fill in <code>uv run --with "psycopg[binary]" python3 scripts/generate_raw_data.py</code>, the exact command Day 1 already verified — the service container is reachable at <code>localhost:5432</code> from every step in the job, the same way <code>docker compose</code>'s network made <code>postgres</code> reachable by service name locally. The <code>env:</code> block feeds Day 2's connection fields in as environment variables rather than a committed <code>profiles.yml</code> — a CI runner has no <code>~/.dbt/</code> of your own, and a <code>profiles.yml</code> checked into the repo would be the first real secret this course has ever risked leaking. A minimal <code>profiles.yml</code> committed alongside the workflow, reading each field from <code>env_var()</code>, is what makes this resolve:</p>
+<pre><code><span class="cm">-- food_delivery_pipeline/profiles.yml -- committed; no real secret lives in this file</span>
+food_delivery_pipeline:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: <span class="str">"{{ env_var('DBT_HOST', 'localhost') }}"</span>
+      port: 5432
+      user: <span class="str">"{{ env_var('DBT_USER') }}"</span>
+      password: <span class="str">"{{ env_var('DBT_PASSWORD') }}"</span>
+      dbname: <span class="str">"{{ env_var('DBT_DBNAME') }}"</span>
+      schema: dbt_dev
+      threads: 4</code></pre>
+<p>The default falls back to <code>localhost</code>, so nothing changes for local runs — Day 2's <code>~/.dbt/profiles.yml</code> still works unmodified, since <code>DBT_HOST</code> is simply unset there. Push this workflow, open a throwaway PR (even a one-line comment change inside <code>food_delivery_pipeline/</code> is enough to trigger it), and watch the Actions tab.</p>
+<p>Expected — the workflow's <code>dbt build</code> step ends with the same line Day 14's local run did:</p>
+<pre><code>Done. PASS=26 WARN=0 ERROR=0 SKIP=0 NO-OP=0 REUSED=0 TOTAL=26</code></pre>
+<div class="callout"><strong>This alone is already worth shipping.</strong> Every future PR against this repo now gets built and tested automatically, on a clean database, before anyone reviews the diff by eye. Section 3 makes it faster — not more correct, just cheaper to run as the project grows past 10 models.</div>
+
+<h2>3 · <code>state:modified+</code>: build only what a PR actually touched</h2>
+<p>A full <code>dbt build</code> re-creates every model and re-runs every test, every single PR — fine at 10 models, wasteful at 200, where most PRs touch one file. dbt has a selector built exactly for this: <a href="https://docs.getdbt.com/reference/node-selection/methods"><code>state:</code></a> compares the current project against a previous run's <code>manifest.json</code> and can select just what changed.</p>
+<table class="gloss">
+  <tr><th>Selector</th><th>What it selects</th></tr>
+  <tr><td><code>state:modified</code></td><td>every model, test, source, macro-dependent node etc. whose SQL, config, columns or contract differ from the comparison manifest — plus anything brand new</td></tr>
+  <tr><td><code>state:modified+</code></td><td>the same, plus everything downstream of each modified node (the <code>+</code> is the same downstream-graph operator any <code>--select</code> already understands)</td></tr>
+</table>
+<p>A change to a config (<code>materialized</code>, <code>incremental_strategy</code>), a column's <code>data_type</code> in a contract, or a source's <code>freshness</code> block all count as "modified" — not just SQL text. <code>tags</code> and <code>meta</code> are deliberately excluded, since those are pure labels with no effect on what actually gets built.</p>
+<p><code>state:</code> needs something to compare against: a <code>manifest.json</code> from a prior <code>dbt parse</code>/<code>run</code>/<code>build</code>, passed via <code>--state</code>. Confirm the selector works before touching CI — save today's clean manifest as a stand-in "production" state, then make a real edit and see what gets picked up:</p>
+<pre><code>uv run --project ../dbt_env dbt parse
+mkdir -p ../prod-state
+cp target/manifest.json ../prod-state/manifest.json</code></pre>
+<p>Now add one harmless column to <code>fct_orders.sql</code> — TODO, add a real column your project can support without breaking Day 14's contract, such as <code>current_timestamp as built_at</code> — and check what <code>state:modified+</code> finds, without building anything yet:</p>
+<pre><code>uv run --project ../dbt_env dbt ls --select <span class="str">"state:modified+"</span> --resource-type model --state ../prod-state</code></pre>
+<p>Expected: exactly one line, <code>food_delivery_pipeline.fct_orders</code> — the only model whose compiled SQL actually differs from the saved manifest. (Drop <code>--resource-type model</code> and its two data tests, <code>not_null</code> and <code>unique</code> on <code>order_id</code>, show up too — <code>state:modified+</code> selects every affected resource type, not just models.) Revert the column before continuing; Section 4 wires this selector into the workflow rather than leaving it as a one-off check.</p>
+<div class="callout"><strong>Don't point <code>--state</code> and <code>--target-path</code> at the same folder.</strong> A normal <code>dbt build</code> overwrites <code>target/manifest.json</code> as part of parsing — before dbt gets a chance to diff against it — silently turning every run into a no-op comparison against itself. Keep the comparison manifest in its own directory, copied there deliberately, exactly as above.</div>
+
+<h2>4 · Deferral: don't rebuild what you're not testing</h2>
+<p>Selecting only <code>fct_orders</code> creates a new problem: <code>fct_orders</code> still has a real <code>ref('stg_orders')</code>, and <code>stg_orders</code> was never built in this CI run's schema, because it wasn't selected. A plain <code>--select state:modified+</code> build would fail the moment it tries to query a table that doesn't exist. <a href="https://docs.getdbt.com/reference/node-selection/defer"><code>--defer</code></a> is the fix: for any <code>ref()</code> that points outside the selected set, dbt resolves it against the <em>comparison manifest's</em> schema instead of failing — <code>stg_orders</code> reads from wherever the last full "production" build actually put it, not from an empty CI schema.</p>
+<pre><code><span class="cm">-- the slim-CI pattern: select only what changed, defer everything else to prod's own build</span>
+uv run --with <span class="str">"dbt-postgres==1.11.0"</span> dbt build \
+  --select <span class="str">"state:modified+"</span> \
+  --defer --state ../prod-state \
+  --profiles-dir .</code></pre>
+<p>This is the pattern dbt's own docs call <dfn data-en="a dbt CI build that selects only state:modified+ (changed models plus their downstream) and defers unselected ref()s to a prior, already-built manifest, instead of rebuilding the entire project from scratch on every pull request" data-vn="giữ nguyên &quot;slim CI&quot; — build CI chỉ chọn state:modified+ (model đổi + downstream), deferred ref() còn lại về manifest đã build trước đó, không build lại toàn bộ project mỗi PR">slim CI</dfn>: a PR that touches one model builds and tests that model plus whatever depends on it, while every unrelated model is trusted from the last known-good build rather than rebuilt for no reason. The trade-off is real and worth naming out loud: slim CI is only as trustworthy as the manifest it defers to — if <code>prod-state/manifest.json</code> is stale or was built from a broken commit, a PR can pass CI against a schema that no longer reflects reality.</p>
+<p>For today's repo, with 10 models, a full <code>dbt build</code> already finishes in seconds — slim CI's payoff shows up later, at the scale where a full rebuild takes minutes and most PRs touch one model. Wire it in now anyway, since the mechanism doesn't change with project size, only the time it saves:</p>
+<pre><code><span class="cm">-- .github/workflows/dbt_ci.yml -- new step, after checkout, replacing the "dbt build" step from Section 2</span>
+      - name: Fetch prior manifest
+        run: <span class="cm">TODO -- download prod-state/manifest.json from wherever the last main-branch build stored it (a release asset, an artifact from the last successful main-branch run, or a committed path -- pick one and say why)</span>
+
+      - name: dbt build (slim CI)
+        working-directory: food_delivery_pipeline
+        run: |
+          uv run --with <span class="str">"dbt-postgres==1.11.0"</span> dbt build \
+            --select <span class="str">"state:modified+"</span> \
+            --defer --state ../prod-state \
+            --profiles-dir .
+        env:
+          DBT_HOST: localhost
+          DBT_USER: fdp
+          DBT_PASSWORD: fdp_dev_password
+          DBT_DBNAME: fdp</code></pre>
+<p>The second <code>TODO</code> is deliberately open — GitHub Actions' own <a href="https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/store-and-share-data"><code>actions/upload-artifact</code>/<code>actions/download-artifact</code></a> pair, run on every successful <code>main</code>-branch build and fetched here, is the standard answer — worth reading before picking a different one, since a hand-rolled alternative (committing the manifest, a release asset) works but adds its own upkeep.</p>
+
+<div class="interview">
+<p><strong>Q: "Walk me through what happens when a PR changes one dbt model, from push to a green check."</strong> A strong answer, out loud: <em>"GitHub Actions starts a job with a disposable Postgres service container — same image as production, but empty and thrown away after the run. The workflow checks out the PR's code, loads whatever raw data the tests need, and instead of running a full dbt build, it runs dbt build --select state:modified+ --defer --state, pointing at a manifest.json saved from the last successful main-branch build. state:modified+ diffs the PR's compiled project against that manifest and selects only the models that actually changed plus anything downstream of them — could be config, contract, or SQL, not just text. Everything the PR didn't touch is deferred: any ref() pointing outside the selected set resolves against production's own already-built tables instead of failing on an empty CI schema. The whole thing only builds and tests what's actually at risk from this PR, and it only works because the comparison manifest is kept current — if that manifest were stale, slim CI would pass PRs against a picture of the warehouse that's already wrong."</em> The signal: naming <em>why</em> defer is needed (an unselected node's <code>ref()</code> would otherwise hit an empty schema) rather than reciting the flag combination from memory.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A service container in GitHub Actions is started fresh for that one job and discarded when the job ends, giving every PR a known-clean database with no state left over from a previous run -- the same property a CI database should always have, unlike a long-lived shared database other PRs might have already dirtied.">
+    <p class="stem">Why does the CI workflow use a Postgres <em>service container</em> rather than a long-lived shared database?</p>
+    <button class="opt" data-ok>It starts empty each job and is thrown away right after, always</button>
+    <button class="opt">It is the only way dbt-postgres can ever connect to a database</button>
+    <button class="opt">Service containers always run noticeably faster than any normal local Postgres server</button>
+  </div>
+  <div class="q" data-why="state:modified compares the current project's compiled models, tests, sources and configs against a manifest.json from a prior run, passed via --state -- not against the live database and not against git history directly. A config change, a contract's data_type edit, or a source's freshness block all count as modified, the same as a SQL text change; only tags and meta are excluded.">
+    <p class="stem">What does <code>state:modified</code> actually compare the current project against?</p>
+    <button class="opt" data-ok>A <code>manifest.json</code> from a prior run, supplied via <code>--state</code></button>
+    <button class="opt">The live database's own current table and column definitions</button>
+    <button class="opt">Nothing external; it re-derives everything from <code>git diff</code> alone</button>
+  </div>
+  <div class="q" data-why="Without --defer, a build selecting only the modified model would still contain a real ref() to an unselected upstream model that was never built in the CI run's own empty schema, and the query would fail outright. --defer resolves that ref() against the comparison manifest's own already-built schema instead, so an unselected upstream node doesn't need to exist in the CI database at all.">
+    <p class="stem">Why does <code>--select state:modified+</code> need <code>--defer</code> to actually work in CI?</p>
+    <button class="opt" data-ok>An unselected upstream model's own <code>ref()</code> would hit a table CI never built</button>
+    <button class="opt"><code>--defer</code> is always required before dbt will accept any <code>--select</code> flag at all</button>
+    <button class="opt">Without it, <code>state:modified+</code> would silently just select the whole project every single time</button>
+  </div>
+  <div class="q" data-why="Slim CI's whole selection-and-defer mechanism trusts the comparison manifest as an accurate picture of what's already correctly built. If that manifest is stale -- built from an older or broken commit -- a PR can pass CI while deferring to production tables that no longer match reality, since only the explicitly selected nodes get freshly built and checked against the live PR code.">
+    <p class="stem">What is the real risk slim CI (<code>state:modified+</code> plus <code>--defer</code>) introduces that a full <code>dbt build</code> doesn't have?</p>
+    <button class="opt" data-ok>A stale comparison manifest lets a PR pass while deferring to outdated tables</button>
+    <button class="opt">It can no longer ever catch a broken <code>ref()</code> between any two models</button>
+    <button class="opt">It makes every single CI run permanently slower than a full clean build</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> dbt's own <a href="https://docs.getdbt.com/reference/node-selection/methods">state selection method</a> and <a href="https://docs.getdbt.com/reference/node-selection/defer">defer</a> docs (both fetched live this round) are exact on what counts as "modified" and exactly how <code>ref()</code> resolution changes under <code>--defer</code> — worth rereading before wiring slim CI into a project with more than a handful of models, since the <code>--state</code>/<code>--target-path</code> collision in Section 3's callout is a real, easy-to-hit mistake the docs call out explicitly. Section 2's service-container YAML follows <a href="https://docs.github.com/en/actions/using-containerized-services/creating-postgresql-service-containers">GitHub's own Postgres service container guide</a>, worth reading directly before editing the health-check options — this round's fetch of that specific page was blocked, so the syntax here is from established, unchanged GitHub Actions convention rather than a fresh read; confirm it against the live doc before relying on it for anything beyond this course's own workflow.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 15.<br>
+<strong>Phase 2 continues</strong> along the dbt/Kafka/Airflow spine in <code>PLAN.md</code>, adapted to your questions rather than a fixed calendar — dbt's own spine (2a) is now fully covered across Days 8-15, so next up is Kafka's delivery semantics (2b): at-most/at-least/exactly-once and the idempotent producer, the concept-level sequel to Day 6's landing step.<br><br>
+💬 Anything unclear — why <code>--defer</code> needs a database-level "doesn't exist yet" check, or how to pick where <code>prod-state/manifest.json</code> actually lives? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

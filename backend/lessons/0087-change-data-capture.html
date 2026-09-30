@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 87 · Change data capture: tapping the WAL instead of polling a table</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 87 · ~20 min</p>
+<h1>Change data capture: tapping the WAL instead of polling a table</h1>
+<p class="byline">Lesson 29's outbox relay solved the dual-write problem by polling an outbox table on a timer and publishing whatever it finds. Its own "go deeper" line pointed at a bigger idea it never named: Kleppmann's <em>change data capture</em>, treating a database's writes as a stream other systems can consume. Lesson 86 then named the actual stream every write already produces — the WAL. Today connects them: a second way to get the outbox relay's job done, without polling, without an outbox table at all.</p>
+
+<h2>1 · What the relay was actually working around</h2>
+<p>Lesson 29's relay works, but notice what it's doing: waking up on a timer, running <code>SELECT ... WHERE processed_at IS NULL</code>, and hoping nothing changed between polls that it should have caught sooner. That's a real cost — polling delay, wasted queries when nothing changed, and an extra table (the outbox) that exists purely to be polled. The relay needed *some* durable, ordered record of "what changed, in what order" to read from, and building a bespoke one (the outbox table) was the simplest way to get it inside a single Postgres transaction.</p>
+<p>But Lesson 86 already named a durable, ordered record of every change that Postgres maintains anyway, for free, on every single write: the write-ahead log. If something could read the WAL directly — the same stream a replica already reads to replay changes — it wouldn't need a bespoke outbox table or a polling loop at all. That something is <dfn data-en="the general technique of capturing every row-level insert, update, and delete a database makes, as an ordered stream, so other systems can consume it -- can be built by polling a table (Lesson 29's outbox) or, more directly, by reading the database's own replication stream" data-vn="change data capture / CDC (giữ nguyên) — kỹ thuật lấy mọi insert/update/delete của DB thành 1 stream có thứ tự để hệ thống khác tiêu thụ -- có thể làm bằng polling bảng (outbox ở Lesson 29) hoặc trực tiếp đọc replication stream của DB">change data capture (CDC)</dfn>.</p>
+<div class="callout"><strong>Same goal, two mechanisms:</strong> the outbox pattern and CDC both answer "how do other systems find out what changed here?" The outbox answers it by writing a second row a poller reads. CDC answers it by reading the change stream the database was always producing regardless.</div>
+
+<h2>2 · The replica's trick, pointed at a message queue instead of a table file</h2>
+<p>Lesson 85 explained a read replica as an ordinary Postgres instance replaying the primary's shipped WAL to keep its table files current. Postgres exposes a variant of that same stream built for exactly this reuse: <dfn data-en="a Postgres feature that decodes the WAL's low-level physical format into a stream of readable row-level changes (this table, this row, insert/update/delete, before/after values) -- built specifically so external tools can consume database changes without replaying WAL into another full copy of the table files" data-vn="logical replication (giữ nguyên) — tính năng Postgres giải mã WAL thành stream các thay đổi ở mức row (bảng nào, row nào, insert/update/delete, giá trị trước/sau) -- để tool ngoài đọc được thay đổi mà không cần replay WAL thành 1 bản copy bảng đầy đủ">logical replication</dfn>. Where Lesson 85's streaming replication ships raw WAL bytes to a replica that replays them into its own table files, logical replication decodes those same bytes into readable row-level events and hands them to a consumer — no second full copy of the database required on the other end. A <dfn data-en="a Postgres-side bookmark that tracks exactly how far a logical replication consumer has read the WAL, and holds onto WAL segments the consumer hasn't consumed yet so Postgres doesn't delete them out from under it before the consumer catches up" data-vn="replication slot (giữ nguyên) — bookmark phía Postgres theo dõi consumer đã đọc WAL tới đâu, giữ lại WAL segment consumer chưa đọc để Postgres không xóa mất trước khi consumer bắt kịp">replication slot</dfn> is Postgres's bookmark for this: it remembers exactly how far a given consumer has read, and holds the relevant WAL segments so they aren't recycled before that consumer catches up — the same durability guarantee the outbox table gave a relay, provided by Postgres itself instead of an extra table.</p>
+<div class="callout"><strong>Where the actual tool sits:</strong> in practice, something like Debezium (an open-source CDC tool) opens a replication slot, decodes the logical stream, and republishes each row change to a message queue such as Kafka — the same "durable ordered stream of changes" the outbox relay produced, just sourced from Postgres's own WAL instead of a hand-maintained table.</div>
+
+<h2>3 · The trade CDC makes, compared to the outbox</h2>
+<table class="cmp">
+<tr><th></th><th>Outbox (Lesson 29)</th><th>CDC / logical replication</th></tr>
+<tr><td>Where the change record lives</td><td>a table you create and write to yourself</td><td>the WAL, which Postgres already writes for every change</td></tr>
+<tr><td>Extra write in the handler's transaction?</td><td>yes — one INSERT into outbox alongside the business write</td><td>no — capture happens outside the application entirely</td></tr>
+<tr><td>How a consumer notices new events</td><td>a relay polls the table on a timer</td><td>a consumer streams continuously from a replication slot</td></tr>
+<tr><td>What it can capture</td><td>only events the handler explicitly wrote to outbox</td><td>every row-level change to a table, including ones no handler intended to publish</td></tr>
+<tr><td>Extra moving infrastructure</td><td>a relay process your team owns and runs</td><td>a CDC tool (e.g. Debezium) plus a replication slot to operate</td></tr>
+</table>
+<p>Neither is strictly better. The outbox keeps the "what counts as an event" decision inside application code, deliberately — you write exactly the events you mean to publish, in whatever shape you choose, and nothing else leaks out. CDC captures changes the database already made, which is powerful for retrofitting event streams onto existing tables without touching handler code, but it means every column change becomes a candidate event whether or not it was meant to be one, and the event's shape is whatever the row's columns happen to be, not a shape you designed. Both still hand the same at-least-once delivery problem to whatever consumes the stream — Lesson 29's "a crash can cause a duplicate, never a silent loss" applies to CDC's consumer just as much as the outbox relay's.</p>
+
+<div class="interview">
+<p><strong>Q: "You've built the transactional outbox pattern before. When would you reach for change data capture instead?"</strong> A strong answer, out loud: <em>"They solve the same dual-write problem — getting a durable, ordered stream of changes out to other systems — but the outbox keeps that decision in application code: I write exactly the rows I mean to publish, in a shape I control, inside the same transaction as the business write. CDC instead reads Postgres's own write-ahead log through logical replication, so it captures every row-level change to a table automatically, without touching handler code at all. I'd reach for CDC when I'm retrofitting an event stream onto tables I don't want to modify, or feeding a data pipeline that wants every change regardless of whether a developer remembered to publish it. I'd stick with the outbox when I want to deliberately design what an event looks like and only emit specific ones, since CDC gives you the raw row diff, not a shape you chose."</em> The signal: naming the WAL/logical-replication mechanism specifically, not just "CDC watches the database," and picking a concrete reason to prefer one over the other rather than treating them as interchangeable.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Change data capture is the general technique of turning a database's row-level inserts, updates, and deletes into an ordered stream other systems can consume -- Lesson 29's outbox (polling a table) and logical replication (reading the WAL) are two different ways to build it.">
+    <p class="stem">What is change data capture (CDC), in general terms?</p>
+    <button class="opt" data-ok>turning a database's row changes into a consumable stream</button>
+    <button class="opt">a caching layer that stores only the newest result</button>
+    <button class="opt">a fixed schedule for taking nightly full database backups</button>
+    <button class="opt">a rule limiting how many writes one table accepts</button>
+  </div>
+  <div class="q" data-why="Logical replication decodes the WAL's low-level physical format into readable row-level change events, letting an external consumer read what changed without replaying WAL into a second full copy of the table files the way ordinary streaming replication (Lesson 85) does.">
+    <p class="stem">What does Postgres's logical replication actually provide?</p>
+    <button class="opt" data-ok>WAL changes decoded into a readable row-level event stream</button>
+    <button class="opt">a nightly export of every table into CSV files</button>
+    <button class="opt">a second index built automatically for every slow query</button>
+    <button class="opt">a manual trigger a developer runs after each release</button>
+  </div>
+  <div class="q" data-why="A replication slot is Postgres's bookmark for a logical replication consumer -- it tracks exactly how far that consumer has read and retains the relevant WAL segments so Postgres doesn't recycle them before the consumer catches up.">
+    <p class="stem">What does a replication slot exist to guarantee?</p>
+    <button class="opt" data-ok>WAL a consumer hasn't read yet won't get recycled</button>
+    <button class="opt">every table automatically gets a fresh nightly backup copy</button>
+    <button class="opt">two consumers can never read the same WAL segment</button>
+    <button class="opt">query results get cached for the next identical read</button>
+  </div>
+  <div class="q" data-why="The outbox pattern keeps event shape and selection inside application code -- a handler writes exactly the events it means to publish, in one transaction with the business row. CDC instead captures every row-level change to a table automatically from the WAL, with no application code involved in deciding what gets published or in what shape.">
+    <p class="stem">What does the outbox pattern give you that plain CDC does not?</p>
+    <button class="opt" data-ok>deliberate control over exactly which events get shaped, when</button>
+    <button class="opt">a guarantee that delivery happens exactly once, always, forever</button>
+    <button class="opt">a way to skip the write-ahead log during commit</button>
+    <button class="opt">automatic capture of every column change with zero code</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> Martin Kleppmann, <em>Designing Data-Intensive Applications</em>, ch. 11 "Change Data Capture" — the exact chapter Lesson 29 already cited as a "go deeper" pointer without this course teaching the concept itself yet; today's lesson is that follow-through. For the Postgres-specific mechanism, the PostgreSQL manual's <a href="https://www.postgresql.org/docs/current/logicaldecoding-explanation.html">Logical Decoding</a> chapter, freshly fetched this round (the sandbox network gate that blocked recent lessons' <code>WebFetch</code> checks, Lessons 79 and 81–86, was open this round) — it confirms logical decoding works by "decoding the contents of the write-ahead log ... into an application-specific form such as a stream of tuples," and that replication slots "persist independently of the connection using them and are crash-safe," retaining WAL until a consumer has processed it — exactly the mechanism and bookmark behavior described above. Sibling to the <a href="https://www.postgresql.org/docs/current/high-availability.html">High Availability, Load Balancing, and Replication</a> chapter Lesson 85 cited and the <a href="https://www.postgresql.org/docs/current/wal-intro.html">Write-Ahead Logging</a> chapter Lesson 86 cited yesterday.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially. Nếu chỗ nào chưa rõ, cứ hỏi lại bằng tiếng Việt cũng được.<br><br>
+<em>Next lesson:</em> open. Still no <code>lesson_completed</code>/quiz-outcome record exists for any lesson after 87 rounds — the honest next step remains a completion signal or a user-named track.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

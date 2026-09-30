@@ -33,6 +33,8 @@ authors for *why*. Cite inline; each lesson recommends exactly one primary sourc
   Use for: Day 60 — `Mock`/`patch()` for faking network calls, dates, and other side effects in a test; the "Where to patch" section is the primary source for the "patched the wrong path" failure mode Day 60 spends a whole section on. Standard library, unlike `pytest` itself.
 - [Docs: `shutil`](https://docs.python.org/3/library/shutil.html)
   Use for: Day 62 — copying/moving a file or a whole directory tree, `copytree()`'s destination-must-not-exist safety rule, `rmtree()`'s unrecoverable-deletion risk, and `disk_usage()`.
+- [Docs: `zipfile`](https://docs.python.org/3/library/zipfile.html)
+  Use for: Day 64 — reading and writing zip archives: `namelist()`/`open()` for inspecting or reading a member without extracting the rest, `extractall()`, `write()`/`writestr()` with `arcname` control, and the path-traversal risk of extracting an untrusted archive.
 - [PEP 8 — Style Guide for Python Code](https://peps.python.org/pep-0008/)
   Use for: naming and layout conventions, so written code looks like the ecosystem's.
 

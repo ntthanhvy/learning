@@ -162,6 +162,14 @@
   <tr><td>slim CI</td><td>giữ nguyên "slim CI" — build CI chỉ chọn state:modified+ (model đổi + downstream), deferred ref() còn lại về manifest đã build trước đó, không build lại toàn bộ project mỗi PR</td><td>A dbt CI build that selects only <code>state:modified+</code> (changed models plus their downstream) and defers unselected <code>ref()</code>s to a prior, already-built manifest via <code>--defer --state</code>, instead of rebuilding the entire project from scratch on every pull request. Only as trustworthy as the comparison manifest it defers to.</td></tr>
 </table>
 
+<h2 id="day16">Day 16 — Delivery semantics: at-most/at-least/exactly-once, the idempotent producer</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>at-most-once</td><td>giữ nguyên "at-most-once" — message có thể mất nhưng không bao giờ bị xử lý 2 lần</td><td>A delivery guarantee where a message might be silently dropped but is never processed more than once — the trade you get by committing an offset before the corresponding write happens. Day 6 explicitly rejected this ordering for order data.</td></tr>
+  <tr><td>exactly-once</td><td>giữ nguyên "exactly-once" — không mất, không xử lý 2 lần, nhưng chỉ đúng trong phạm vi 1 chặng cụ thể mà Kafka thực sự kiểm soát, không tự động lan ra hệ thống ngoài</td><td>A delivery guarantee where a message is neither lost nor processed more than once, from the point of view of one specific hop — Kafka provides this between a producer and a topic (the idempotent producer) and internally within Kafka Streams/consume-transform-produce chains, but it does not automatically extend to an arbitrary external system a consumer writes to, such as Postgres.</td></tr>
+  <tr><td>idempotent producer</td><td>giữ nguyên "idempotent producer" — enable.idempotence=true, broker tự gán producer ID + số thứ tự per-partition, retry gửi lại thì broker tự nhận ra và bỏ qua, không tự viết code dedup</td><td>A Kafka producer config (<code>enable.idempotence=true</code>) under which the broker assigns the producer a hidden producer ID and tracks a per-partition sequence number for every message it sends, so a retried send that already landed is recognized and dropped by the broker itself instead of being written a second time. Deduplicates on (producer ID, sequence number), not on any application-level field like <code>event_id</code>.</td></tr>
+</table>
+
 <script src="../assets/nav.js"></script>
 </body>
 </html>

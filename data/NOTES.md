@@ -7298,3 +7298,88 @@
   lesson=0083-read-csv-dtype-and-infer-objects.html`. The `.scratch-0083/`
   directory was deleted after verification, per this course's standing
   practice of not leaving scratch artifacts committed.
+- 2026-09-30 generation (Lesson 84): headless run. Confirmed no `0084-*`
+  lesson/nav entry and no `lesson_generated` row for course=data dated
+  2026-09-30 existed yet before starting. Read `MISSION.md` and
+  `RESOURCES.md` in full, the tail of `NOTES.md` (this generation log),
+  the single baseline `learning-records/0001-...md` (still the only file
+  there, unchanged), and the last lesson/practice pair (83) plus grepped
+  `assets/nav.js`'s tail and `reference/glossary.html`'s tail for exact
+  registration format. Lesson 83's own teaser named exactly two standing
+  candidates left from the memory/dtype family: sparse dtype and the
+  nullable boolean (`BooleanDtype`/`pd.NA`) — confirmed genuinely
+  uncovered by grepping all 83 lesson bodies plus the glossary for both
+  (zero real hits). Picked nullable boolean over sparse dtype: it plugs a
+  real gap in the missing-data story (every prior fixture/gotcha has been
+  numbers or text, never a true/false column with a gap) and extends
+  Lesson 51's nullable `Int64`/`Float64` pattern directly, while sparse
+  dtype is a narrower memory-optimization topic with less interview
+  frequency; sparse dtype is now the one remaining named candidate. Every
+  behavioral claim was probed directly first in `data/.scratch-0084/`
+  (deleted after), on the actually-installed pandas 3.0.6: confirmed
+  `pd.Series([True, False, None])` with no dtype declared silently becomes
+  `object`, not `bool` (NumPy bool has no missing-value slot); confirmed
+  `dtype="boolean"` on the same list keeps the third entry as a real
+  `pd.NA` (`is pd.NA` check, not just equality); confirmed `pd.NA ==
+  pd.NA` returns `<NA>` not `True`, and `bool(pd.NA)` raises `TypeError:
+  boolean value of NA is ambiguous`; confirmed Kleene logic directly on a
+  `[True, False, pd.NA]` boolean Series — `False & anything` and `True |
+  anything` both short-circuit away from NA (`a & False` = all False,
+  `a | True` = all True), while `True & NA` and `False | NA` genuinely
+  can't short-circuit and come back `<NA>`, and `.any()`/`.all()` follow
+  the identical short-circuit rule; confirmed filtering `df[mask]` with a
+  `boolean`-dtype mask containing `pd.NA` silently drops that row from the
+  result (no error, no inclusion) — the opposite failure mode from the
+  existing glossary `na=` entry's legacy-object-dtype case, which raises
+  `ValueError` on a mixed-NaN mask instead; confirmed the sharpest gotcha,
+  `astype(bool)` on an object column holding a real Python `None` silently
+  converts it to `False` with no warning at all, while `astype("boolean")`
+  on the same column preserves it as a visible `pd.NA`. `WebFetch` to
+  external sites was available this round (unlike several recent rounds
+  that reported it blocked) — freshly fetched the pandas User Guide's
+  "Nullable Boolean data type" page and confirmed it documents the same
+  Kleene-logic truth table (`True & NA` → NA, `False & NA` → False,
+  `True | NA` → True, `False | NA` → NA) matching every claim shipped in
+  the lesson; cited as a freshly-verified primary source rather than the
+  usual "treated as long-stable reference, fetch unavailable" fallback
+  language. The shipped (unsolved) `practice/
+  84_nullable_boolean_and_pd_na.py` was executed directly from its real
+  `practice/` location and printed exactly 4 ✗ with no traceback; a solved
+  copy (kept only in `.scratch-0084/`, not shipped) then printed all 4 ✓
+  on the first run — no bugs found in the placeholder pattern this round
+  (each exercise's blank is checked against an exact expected value/dtype/
+  identity, not a loose truthiness check, following the defensive pattern
+  Lesson 83's notes flagged as a recurring risk class). Quiz options were
+  checked and leveled with a Python word-count script (`uv run`, scratch
+  `.py` file) — iterated to reach exactly 7/7/7 words per question across
+  all three questions, 21 words per question, exactly one `data-ok` per
+  question. A separate mechanical tag-balance check (Node inline script)
+  confirmed all tags balanced (`h2` 8/8, `p` 20/20, `div` 6/6, `pre` 5/5,
+  `code` 118/118, `span` 32/32, `button` 9/9, `dfn` 2/2, `script` 3/3) and
+  found exactly one raw unescaped `&` in prose (inside an `<h2>` heading,
+  "Kleene logic: & and |") on the first pass — fixed by escaping it to
+  `&amp;`; the only remaining raw `&` afterward is the one already-
+  established `cd ~/learning/data && uv run …` shell command inside a
+  `<pre><code>` block, same precedent as every prior lesson. Checked the
+  glossary for a collision before adding anything — grepped `BooleanDtype`/
+  `pd.NA` across the full glossary, found zero existing rows for either
+  (existing `pd.NA` mentions were all incidental references inside other
+  entries' prose, e.g. the `na=`/`str dtype` rows) — added exactly two new
+  rows, `BooleanDtype` and `pd.NA`, placed directly after Lesson 83's
+  `infer_objects()` entry; re-ran the tag-balance script against the
+  glossary file afterward, confirmed it stayed balanced (`tr` 148/148,
+  `td` 441/441, `code` 972/972) with zero raw `&` introduced. Registered
+  Lesson 84 in `nav.js` with today's date (2026-09-30); `node --check`
+  confirmed it still parses as valid JavaScript after the edit, and
+  exactly one `n: 84` entry plus one `0084-*` file reference were
+  confirmed to exist. This round's topic pick leaves sparse dtype as the
+  one remaining standing candidate for tomorrow, alongside a fresh
+  curriculum/glossary scan as always. No new `data/learning-records/`
+  entry was added this round — routine lesson, no new baseline finding to
+  justify one. `bin/record-progress data lesson_generated --day 84
+  --lesson 0084-nullable-boolean-and-pd-na.html --detail
+  '{"by":"headless"}'` was run from the repo root and succeeded
+  immediately: `recorded: data/lesson_generated day=84
+  lesson=0084-nullable-boolean-and-pd-na.html`. The `.scratch-0084/`
+  directory was deleted after verification, per this course's standing
+  practice of not leaving scratch artifacts committed.

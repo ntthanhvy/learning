@@ -6662,3 +6662,57 @@
   batching, GraphQL, sliding-window/leaky-bucket rate limiting) mostly hit
   already-covered or too-incidental ground beyond the one gap chosen and is not
   being flagged as a queued candidate.
+- **2026-09-30 generation (Lesson 87):** Lesson 86's own teaser was open (no
+  named next topic, same standing note every round since no `lesson_completed`
+  has ever been recorded), so this round ran a fresh gap search rather than
+  guessing blind: checked HTTP caching headers, PUT/PATCH/idempotency depth,
+  GraphQL, DataLoader/N+1 batching, and metrics/observability depth — all
+  either already covered (Lesson 3's idempotent-verb table, Lesson 51's ETags,
+  Lesson 36's N+1) or zero-hit/not-a-fit. The clean gap found instead: Lesson
+  29's outbox pattern cited Kleppmann's "Change Data Capture" (DDIA ch. 11) as
+  a go-deeper pointer without ever teaching the concept, and Lesson 86
+  (yesterday) had just named the WAL as the physical stream every committed
+  change produces — the exact stream CDC tools read instead of polling a
+  table. Lesson 87 closes that loop: CDC as a concept, logical replication as
+  Postgres's WAL-to-row-events decoder (contrasted with Lesson 85's physical
+  streaming replication), replication slots as the durability bookmark that
+  plays the same role the outbox table played for Lesson 29's relay, and a
+  comparison table trading off the outbox's application-controlled event
+  shape against CDC's automatic, code-free capture of every row change. No Go
+  code (confirmed zero hits for `func `/`package main` before deciding this,
+  so no compile-check module was needed). Checked the glossary first for all
+  three new terms — `change data capture / CDC`, `logical replication`,
+  `replication slot` — zero collisions via case-insensitive grep, added as new
+  rows after Lesson 86's `checkpoint` row. Verification performed
+  mechanically in `/tmp/scratch-0087` (outside the repo, discarded after use
+  though the final `rm -rf` on the directory itself was blocked by this
+  session's sandbox — harmless, it's ephemeral `/tmp` scratch space, not
+  tracked by git and not under `backend/`): (1) a Node quiz-word-count script,
+  both `.split(/\s+/)` and `.split(" ")` cross-checked, first draft uneven on
+  three of four questions (a 1–3-word spread), fixed through several
+  rewrite-and-recount cycles, converged to exactly 9/9/9/9 on all four
+  questions, both counting methods agreeing, exactly one `data-ok` per
+  question; (2) an occurrence-count HTML tag-balance check on both the lesson
+  and `glossary.html` after its three-row addition — clean, no fix needed;
+  (3) a raw-unescaped-`&` regex scan and (4) a backslash-escaped-quote scan
+  across both files — zero hits in either. `node --check` against
+  `assets/nav.js` after registering Lesson 87 passed clean; re-confirmed
+  exactly one matching `n: 87` entry and exactly one matching `0087-*` lesson
+  file afterward. No new `learning-records/` file was added this round —
+  routine topical entry like Lessons 3–86, not a new baseline finding.
+  Unlike every recent round (Lessons 79, 81–86), the sandbox network-permission
+  gate was actually open this round: `WebFetch` against the PostgreSQL
+  manual's Logical Decoding chapter succeeded and confirmed the lesson's
+  core technical claims verbatim ("decoding the contents of the write-ahead
+  log ... into an application-specific form such as a stream of tuples," and
+  replication slots "persist independently of the connection using them and
+  are crash-safe") before the Go-deeper section was finalized — the citation
+  was updated to say freshly fetched rather than reusing the stale
+  blocked-gate boilerplate from prior rounds. Write path (`bin/record-progress
+  backend lesson_generated --day 87 --lesson 0087-change-data-capture.html
+  --detail '{"by":"headless"}'`, run from the repo root) succeeded with no
+  approval gate, output confirmed: `recorded: backend/lesson_generated day=87
+  lesson=0087-change-data-capture.html`. No confirmed next-lesson gap is named
+  with certainty for the round after this one — same standing note as every
+  prior round; a completion/quiz-outcome signal or a user-named track should
+  take priority over guessing blind again.

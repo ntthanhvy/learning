@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 84 · Nullable boolean (BooleanDtype) and pd.NA: a third truth value</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 84 · ~20 min · 30 Sep 2026</p>
+<h1>Nullable boolean (BooleanDtype) and pd.NA: a third truth value</h1>
+<p class="byline">Lesson 83's teaser named two standing candidates left over from the memory/dtype family: sparse dtype and the nullable boolean (<code>BooleanDtype</code>/<code>pd.NA</code>). Grepped all 83 lesson bodies plus the glossary first — zero real hits on either. Nullable boolean wins today's pick: it plugs a genuine gap in Lesson 3's missing-data story (every fixture and gotcha so far has been numbers or text; a column of True/False with a gap has never been covered), and it directly extends the nullable <code>Int64</code>/<code>Float64</code> pattern from Lesson 51 to booleans. Sparse dtype remains open for a future round.</p>
+
+<h2>1 · The gap: plain bool has no room for "missing"</h2>
+<p>Every dtype covered so far that can hold real data can also hold a gap for it: <code>float64</code> has <code>NaN</code>, nullable <code>Int64</code> (Lesson 51) has <code>&lt;NA&gt;</code>, the default <code>str</code> dtype (Lesson 79) has <code>NaN</code>. NumPy's plain <code>bool</code> is the one exception — there is no third bit pattern for "unknown," only <code>True</code> and <code>False</code>. Confirmed directly: building a Series from <code>[True, False, None]</code> with no dtype declared does not produce <code>bool</code> at all — it silently upcasts the whole column to <code>object</code>, the same "quietly gives up and falls back to a looser type" failure mode Lesson 51 already showed for numeric columns blocked by one bad string.</p>
+<pre><code>pd.Series([<span class="kw">True</span>, <span class="kw">False</span>, <span class="kw">None</span>])                  <span class="cm"># dtype: object -- NOT bool, silently</span>
+pd.Series([<span class="kw">True</span>, <span class="kw">False</span>, <span class="kw">None</span>], dtype=<span class="str">"boolean"</span>)  <span class="cm"># dtype: boolean -- True, False, &lt;NA&gt;</span></code></pre>
+<p><dfn data-en="pandas' own nullable boolean dtype, spelled lowercase \"boolean\" (distinct from NumPy's plain lowercase \"bool\", which has no missing-value slot at all) -- holds True, False, and a genuine third state, pd.NA, for a missing/unknown entry. The Series/DataFrame-wide sibling to Lesson 51's nullable Int64/Float64, applied to booleans instead of numbers" data-vn="giữ nguyên 'boolean' dtype (viết thường) — dtype boolean CÓ THỂ chứa thiếu dữ liệu của pandas, khác 'bool' thường của NumPy (không có chỗ chứa giá trị thiếu); giữ được True, False, VÀ pd.NA (trạng thái thứ 3, nghĩa là 'chưa biết') — giống hệt nullable Int64/Float64 (Lesson 51) nhưng áp cho boolean thay vì số">BooleanDtype</dfn> (its dtype string is lowercase <code>"boolean"</code>) is the fix — the exact same shape of upgrade Lesson 51's nullable <code>Int64</code>/<code>Float64</code> made for numbers, now for true/false columns. It shows up automatically too: <code>convert_dtypes()</code> (Lesson 51) already picks <code>boolean</code> on its own for an object column of real Python <code>True</code>/<code>False</code>/<code>None</code> — confirmed directly, no new syntax needed to trigger it.</p>
+
+<h2>2 · pd.NA: not the same as NaN, and not falsy either</h2>
+<p>The missing marker inside a <code>boolean</code> column is <dfn data-en="pandas' singleton marker for a genuinely missing/unknown scalar value, used by every nullable dtype (boolean, Int64, Float64, string) -- distinct from float NaN (which numpy bool/int/float use). Comparing pd.NA to anything, including itself, returns pd.NA rather than True or False, and calling bool(pd.NA) raises TypeError instead of silently picking a side -- deliberately forcing \"unknown\" to stay unknown rather than being coerced into a guess" data-vn="giữ nguyên 'pd.NA' — giá trị thiếu DUY NHẤT dùng chung cho mọi dtype nullable (boolean, Int64, Float64, string), khác NaN (float) mà bool/int/float thường của NumPy dùng; so sánh pd.NA với BẤT KỲ gì, kể cả với chính nó, đều ra pd.NA chứ không phải True/False, và gọi bool(pd.NA) sẽ báo lỗi TypeError chứ không tự chọn đại 1 phía — cố tình giữ 'chưa biết' là 'chưa biết', không ép đoán">pd.NA</dfn>, not the familiar float <code>NaN</code> from Lesson 3. Confirmed directly, and both results are easy to get wrong by assumption:</p>
+<pre><code>pd.NA == pd.NA   <span class="cm"># &lt;NA&gt; -- NOT True. "unknown equals unknown" is itself unknown</span>
+pd.NA == <span class="kw">1</span>        <span class="cm"># &lt;NA&gt; -- comparisons involving NA always propagate NA, never True/False</span>
+<span class="kw">bool</span>(pd.NA)    <span class="cm"># TypeError: boolean value of NA is ambiguous</span></code></pre>
+<p>That last line matters in practice: an <code>if</code> statement, a plain Python <code>and</code>/<code>or</code>, or anything else that calls <code>bool()</code> on a single <code>pd.NA</code> value crashes outright rather than silently treating it as falsy. This is deliberate — <code>pd.NA</code> refuses to let "unknown" get quietly coerced into a guessed side.</p>
+
+<h2>3 · Kleene logic: &amp; and | on a boolean column with NA don't behave like plain Python and/or</h2>
+<p>Element-wise <code>&amp;</code> and <code>|</code> on a <code>boolean</code>-dtype column follow three-valued (Kleene) logic instead of always propagating <code>NA</code>. Confirmed directly against a Series of <code>[True, False, pd.NA]</code>:</p>
+<pre><code>a = pd.Series([<span class="kw">True</span>, <span class="kw">False</span>, pd.NA], dtype=<span class="str">"boolean"</span>)
+a &amp; <span class="kw">False</span>   <span class="cm"># [False, False, False]  -- False wins regardless of the other side; NA never survives</span>
+a | <span class="kw">True</span>    <span class="cm"># [True,  True,  True]   -- True wins regardless of the other side; NA never survives</span>
+a &amp; <span class="kw">True</span>    <span class="cm"># [True,  False, &lt;NA&gt;]   -- can't short-circuit, so the NA passes through</span>
+a | <span class="kw">False</span>   <span class="cm"># [True,  False, &lt;NA&gt;]   -- same: nothing to short-circuit on, NA passes through</span></code></pre>
+<p>The rule: <code>False &amp; anything</code> is always <code>False</code>, and <code>True | anything</code> is always <code>True</code>, even when "anything" is unknown — that side of the logic doesn't need to know the unknown value to be certain of the answer. Only the cases that genuinely depend on the unknown value (<code>True &amp; NA</code>, <code>False | NA</code>) actually come back <code>&lt;NA&gt;</code>. <code>.any()</code> and <code>.all()</code> follow the identical short-circuit rule: confirmed directly, <code>pd.Series([True, pd.NA], dtype="boolean").any()</code> is <code>True</code> (one confirmed <code>True</code> is enough, the unknown value can't change that), while <code>.all()</code> on the same Series is <code>&lt;NA&gt;</code> in general — it only comes back a plain <code>True</code>/<code>False</code> once every non-NA value alone already decides the answer.</p>
+
+<div class="callout"><strong>Gotcha, confirmed directly: filtering a DataFrame with a boolean mask that contains pd.NA silently DROPS those rows — no error, no NaN row in the output.</strong> <code>df[mask]</code> where <code>mask</code> is <code>boolean</code>-dtype and has an <code>&lt;NA&gt;</code> entry at some row simply excludes that row from the result, treating unknown as "leave it out" rather than raising or including it. This is different from Lesson 3's plain-NaN-in-numeric-column behavior and different from the legacy <code>object</code>-dtype <code>str.contains()</code> case (glossary's <code>na=</code> entry) where a stray <code>NaN</code> mixed into a boolean-looking mask raises <code>ValueError: Cannot mask with non-boolean array containing NA</code> instead. Nullable <code>boolean</code> masks fail silently by omission; legacy mixed-NaN masks fail loudly. Worth checking row counts before and after any filter built from a nullable <code>boolean</code> column, since a row can vanish with no error at all.</div>
+
+<h2>4 · The corruption case: astype(bool) silently turns None into False</h2>
+<p>The sharpest reason to reach for <code>"boolean"</code> deliberately rather than assuming plain <code>bool</code> is fine: converting an object column holding real <code>None</code> values straight to plain <code>bool</code> does not raise and does not produce a missing marker — it silently turns every <code>None</code> into <code>False</code>, a real, wrong value indistinguishable afterward from a genuine <code>False</code>. Confirmed directly:</p>
+<pre><code>s = pd.Series([<span class="kw">True</span>, <span class="kw">False</span>, <span class="kw">None</span>], dtype=object)
+s.astype(<span class="kw">bool</span>)      <span class="cm"># [True, False, False]  -- the None is GONE, silently became False. No warning.</span>
+s.astype(<span class="str">"boolean"</span>)  <span class="cm"># [True, False, &lt;NA&gt;]   -- the None survives as a real, visible missing marker</span></code></pre>
+<p>This is the same "no crash, quietly wrong" family the glossary's <code>convert_dtypes()</code> entry already names for numeric columns — except here the corruption is worse, because a silently-invented <code>False</code> looks like a completely ordinary, valid data point. A column of "is this customer a VIP" where the real answer was never recorded should never be allowed to become a hard, confident "no."</p>
+
+<div class="interview">
+<p><strong>Q: "Why would you ever bother with the nullable boolean dtype instead of plain bool — isn't True/False already simple enough?"</strong> A strong answer, out loud: <em>"Plain NumPy bool has no missing-value slot at all — if I build a Series from a list that has a real None in it and don't declare a dtype, pandas doesn't error and doesn't give me bool, it silently falls back to object, and if I then force astype(bool) on that, every None quietly becomes False with no warning, which is a real data-corruption risk for something like an is_vip or is_verified flag where 'never recorded' and 'confirmed no' are genuinely different facts. Nullable boolean dtype, dtype='boolean', keeps a real third state, pd.NA, that survives astype cleanly. The one gotcha I'd watch for: filtering a DataFrame with a boolean-dtype mask that has NA in it doesn't raise or include that row — it just silently drops it, so I'd check row counts before and after any filter like that rather than assume every original row is accounted for."</em> The signal: naming the silent object-dtype fallback, the astype(bool)-corrupts-None trap, and the silent-row-drop filtering gotcha — three distinct failure modes, not just "it can hold NA."</p>
+</div>
+
+<h2>5 · Where this fits: the nullable-dtype family is now complete for the common cases</h2>
+<p>Lesson 51 introduced nullable <code>Int64</code>/<code>Float64</code>/<code>string</code> via <code>convert_dtypes()</code>; today's <code>boolean</code> is the fourth member of that same family, sharing the same <code>pd.NA</code> marker across all of them — a genuine missing value means the exact same thing whether the column is numbers, text, or true/false. The practical rule going forward: reach for the nullable spelling (<code>"Int64"</code>, <code>"Float64"</code>, <code>"boolean"</code>) any time a column's real-world meaning allows "we don't know yet," and keep the plain NumPy dtype only when a gap genuinely cannot occur.</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/84_nullable_boolean_and_pd_na.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/84_nullable_boolean_and_pd_na.py</code></pre>
+<p>Exercise 1 builds a plain (no dtype declared) Series from <code>[True, False, None]</code> and confirms it silently becomes <code>object</code>, not <code>bool</code> (Section 1). Exercise 2 builds the same values with <code>dtype="boolean"</code> and confirms the third entry is a real <code>pd.NA</code> (Section 1-2). Exercise 3 confirms Kleene logic on a <code>boolean</code> Series: <code>False &amp; NA</code> is <code>False</code>, but <code>True &amp; NA</code> is <code>&lt;NA&gt;</code> (Section 3). Exercise 4 confirms <code>astype(bool)</code> silently turns a real <code>None</code> into <code>False</code>, while <code>astype("boolean")</code> preserves it as <code>pd.NA</code> (Section 4).</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: pd.Series([True, False, None]) with no dtype declared does not produce bool -- NumPy's plain bool has no missing-value slot, so pandas silently falls back to the looser object dtype instead of raising or guessing.">
+    <p class="stem">Building a Series from <code>[True, False, None]</code> with no dtype declared produces what?</p>
+    <button class="opt" data-ok>Silently object dtype, not bool at all</button>
+    <button class="opt">Plain bool dtype, with None becoming False</button>
+    <button class="opt">An immediate TypeError, raised right at construction</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: astype(bool) on an object column holding a real None silently converts it to False, indistinguishable afterward from a genuine False -- no error, no warning. astype('boolean') instead preserves it as a real, visible pd.NA.">
+    <p class="stem">Calling <code>astype(bool)</code> on an object column that holds a real Python <code>None</code> does what to that value?</p>
+    <button class="opt" data-ok>Silently turns it into False, no warning</button>
+    <button class="opt">Raises a TypeError, refusing the unsafe conversion</button>
+    <button class="opt">Keeps it as a visible, genuine marker</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: filtering df[mask] where mask is boolean-dtype and contains pd.NA silently drops that row from the result -- no error is raised and the row is not included, unlike a mixed-NaN object-dtype mask, which raises ValueError instead.">
+    <p class="stem">Filtering a DataFrame with a <code>boolean</code>-dtype mask that contains <code>pd.NA</code> at some row does what to that row?</p>
+    <button class="opt" data-ok>Silently drops it, no error at all</button>
+    <button class="opt">Raises a ValueError immediately, refusing to filter</button>
+    <button class="opt">Includes it, treating unknown as real data</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the pandas User Guide's <a href="https://pandas.pydata.org/docs/user_guide/boolean.html">"Nullable Boolean data type"</a> page (per <code>RESOURCES.md</code>'s "Docs: pandas User Guide" entry, ~6 min) — freshly fetched and confirmed this round to cover <code>BooleanDtype</code> and the full Kleene-logic truth table for <code>&amp;</code>/<code>|</code>/<code>^</code> directly, matching every claim above; the <a href="https://pandas.pydata.org/docs/user_guide/missing_data.html#working-with-missing-data">"Working with missing data"</a> page documents <code>pd.NA</code>'s propagation rules in full.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>BooleanDtype</code> and <code>pd.NA</code> are both new today, added right after Lesson 83's <code>infer_objects()</code> entry.<br>
+<strong>Next lesson:</strong> sparse dtype remains the one standing named candidate left over from the memory/dtype family, alongside a fresh curriculum/glossary scan as always.<br><br>
+💬 Anything unclear — <code>boolean</code> dtype, <code>pd.NA</code>, Kleene logic, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

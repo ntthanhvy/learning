@@ -178,6 +178,8 @@
       file: "lessons/0085-read-replicas-and-replication-lag.html" },
     { n: 86, date: "2026-09-29", title: "The write-ahead log: the fourth letter of ACID, finally named",
       file: "lessons/0086-write-ahead-log-durability.html" },
+    { n: 87, date: "2026-09-30", title: "Change data capture: tapping the WAL instead of polling a table",
+      file: "lessons/0087-change-data-capture.html" },
   ];
 
   const REFS = [

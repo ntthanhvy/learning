@@ -26,6 +26,7 @@
     { n: 13, date: "2026-09-27", title: "dbt incremental strategies in depth", file: "lessons/0013-dbt-incremental-strategies.html" },
     { n: 14, date: "2026-09-28", title: "dbt docs, exposures & model contracts", file: "lessons/0014-dbt-docs-exposures-contracts.html" },
     { n: 15, date: "2026-09-29", title: "dbt in CI: GitHub Actions, state:modified+, deferral", file: "lessons/0015-dbt-in-ci.html" },
+    { n: 16, date: "2026-09-30", title: "Kafka delivery semantics & the idempotent producer", file: "lessons/0016-kafka-delivery-semantics.html" },
   ];
 
   const REFS = [

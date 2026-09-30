@@ -1866,3 +1866,106 @@ along the Phase 2 spine, adapted to the learning records.
   0015-dbt-in-ci.html --detail '{"by":"headless"}'` run from the repo root:
   succeeded on the first attempt (`recorded: dataeng/lesson_generated
   day=15 lesson=0015-dbt-in-ci.html`).
+- 2026-09-30 (headless run, Day 16 generated — **Phase 2b begins**):
+  sixteenth lesson, `0016-kafka-delivery-semantics.html`. `lessons/`
+  contained only `0001`–`0015`, `assets/nav.js`'s latest entry was Day 15
+  (2026-09-29), and no `2026-09-30`/`0016` entry existed anywhere
+  (`lessons/`, `assets/nav.js`, this file), so proceeded on schedule.
+  Followed Day 15's own closing teaser verbatim rather than re-deriving a
+  topic choice: "next up is Kafka's delivery semantics (2b): at-most/at-
+  least/exactly-once and the idempotent producer, the concept-level sequel
+  to Day 6's landing step" — matches `PLAN.md`'s 2b spine's first bullet
+  exactly. No learning-record or quiz signal exists beyond the one Day 1
+  baseline file, so no reason to deviate. Read `MISSION.md`, `PLAN.md`
+  (domain table and 2b spine), `NOTES.md` in full (conventions, scope
+  boundaries, verification approach), `RESOURCES.md`, the one
+  `learning-records/` file, `reference/glossary.html`, and
+  `lessons/0006-kafka-consumer-to-warehouse.html` /
+  `lessons/0005-kafka-topics-partitions-offsets.html` /
+  `lessons/0015-dbt-in-ci.html` in full for structural and content
+  precedent before writing.
+  **Content:** framed at-most/at-least/exactly-once as three named points on
+  one spectrum rather than independent facts, placing Day 6's already-taught
+  choice (at-least-once plus an idempotent consumer write) on that map first
+  before introducing anything new. The actual new content is producer-side:
+  Day 5's `scripts/produce_order_events.py` has run this whole course with
+  Kafka's plain default producer, which has its own narrower duplicate-on-
+  retry problem one hop upstream of anything Day 6 touched (an ack lost to a
+  network blip forces a client-side retry, and a naive retry can double-write
+  if the original send actually succeeded). Taught the idempotent producer
+  (`enable.idempotence: True`, plus the `acks`/`max.in.flight.requests.per.connection`/
+  `retries` values it implies, listed explicitly rather than left hidden
+  behind the boolean) as a broker-side dedup keyed on a hidden (producer ID,
+  per-partition sequence number) pair — explicitly not the same key as Day
+  6's `event_id`, called out directly since the two mechanisms sit at
+  different hops and neither replaces the other. Section 6 states plainly
+  what today's fix does *not* cover end to end (the broker-to-consumer-to-
+  Postgres hop, still Day 6's job; an upstream double-submit at the true
+  source of `order_events`, out of scope entirely) as the direct answer to
+  `PLAN.md`'s "what exactly-once does and doesn't promise end to end" framing,
+  and names Kafka's transactional/`transactional.id` mode as vocabulary only
+  (Kafka Streams / consume-transform-produce, out of scope per `MISSION.md`).
+  One bridge line to `backend/`'s idempotency-key concept (a producer
+  retrying blindly is the same shape of problem as a client retrying an API
+  call), not re-derived. No pandas, no Python-language teaching. Domain names
+  (`order_events`, `event_id`, `order_id`) used exactly as established; the
+  only code change to the learner's repo is the one `Producer(...)` config
+  block in `scripts/produce_order_events.py`, everything else in that file
+  unchanged from Day 5. Opened with a "before today" `dbt build` check
+  (`PASS=26 WARN=0 ERROR=0 SKIP=0 NO-OP=0 REUSED=0 TOTAL=26`, Day 15's own
+  count) even though today's content doesn't touch dbt, per this file's
+  standing "never assume a prior step landed" guidance.
+  **Verification:** confirmed via `uv run --with confluent-kafka python3`
+  that `confluent-kafka`'s `Producer` accepts `enable.idempotence`,
+  `acks`, `max.in.flight.requests.per.connection` and `retries` together
+  without error (a connection-refused warning against a nonexistent broker
+  is expected and unrelated). `py_compile`-checked the updated
+  `produce_order_events.py`: clean. Docker was available this round, so
+  rather than stopping at static checks, brought up a real scratch
+  `apache/kafka:4.3.1` broker (`docker compose config` validated first, in
+  `.scratch_dataeng_verify_d16/` under the repo root, deleted after),
+  created `order_events` with 3 partitions, and ran the actual updated
+  producer against it. The live run produced a genuine, unplanned
+  demonstration of the exact mechanism being taught: the producer's own log
+  showed `Failed to acquire idempotence PID ... Coordinator load in
+  progress: retrying` — a real broker-side retry during cold-start, not a
+  contrived fault injection — and the delivery reports plus a follow-up
+  `kafka-get-offsets.sh` check confirmed the topic ended with exactly 12
+  messages (partitions summing 8+0+4), matching 3 orders × 4 statuses with
+  zero duplicate from that retry. This real, organic retry-under-idempotence
+  proof is what the lesson's Section 4–5 Verify block shows verbatim, rather
+  than a synthetic duplicate-injection script, since a real one occurred
+  during verification and is strictly more convincing. Also re-ran
+  `kafka-topics.sh --describe` against the same broker to confirm the
+  partition-count output block used in Section 5. Tore the stack down with
+  `docker compose down -v` and deleted the scratch directory afterward, via
+  the `uv run python3 -c "...subprocess.run([...])"` wrapper prior rounds
+  documented for this sandbox's approval gate on raw `docker`/compound
+  commands. No dbt snippet appears in this lesson (a pure-Kafka day per
+  `PLAN.md`'s 2b spine), so the `dbt parse` verification path was not
+  applicable and was not run.
+  Registered Lesson 16 in `assets/nav.js` (`node --check` clean) and added
+  the Day 16 section to `reference/glossary.html` (3 terms: at-most-once,
+  exactly-once, idempotent producer — grepped Days 1–15's sections first,
+  case-insensitively; no collisions, and confirmed Day 6's existing
+  "at-least-once"/"idempotent write" entries were left untouched rather than
+  duplicated). Ran a small Python tag-balance/unescaped-`&`/quiz-word-count
+  script (regex-based, underscored/hyphenated identifiers and multi-hyphen
+  terms like `broker-to-consumer-to-Postgres` treated as single tokens,
+  consistent with every prior day's counting convention) against the saved
+  HTML from a scratch file under `.scratch_dataeng_verify_d16/`, deleted
+  after use. All tags balanced
+  (div/p/table/tr/td/th/pre/code/h2/dfn/button/span/a/em/strong), zero
+  suspicious bare `&`, and the 3 `<dfn>` terms match the 3 glossary rows
+  added exactly. The first quiz draft came up mismatched on all four
+  questions (8/8/7, 9/9/10, 4/10/7, 8/9/8 word splits — Q3's built-in
+  hyphenated `broker-to-consumer-to-Postgres` token made that option look
+  artificially short until reworded) and was rebalanced to 8/8/8, 9/9/9,
+  9/9/9 and 8/8/8 respectively, re-verified by re-running the same script
+  after each edit. Also confirmed `reference/glossary.html`'s own tag
+  balance (div/p/table/tr/td/th/h1/h2/a) and zero bare `&` after the Day 16
+  section was appended.
+  `bin/record-progress dataeng lesson_generated --day 16 --lesson
+  0016-kafka-delivery-semantics.html --detail '{"by":"headless"}'` run from
+  the repo root: succeeded on the first attempt (`recorded:
+  dataeng/lesson_generated day=16 lesson=0016-kafka-delivery-semantics.html`).

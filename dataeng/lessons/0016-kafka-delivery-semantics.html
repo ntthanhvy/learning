@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 16 · Delivery semantics: at-most/at-least/exactly-once, the idempotent producer</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 16 · ~20 min · 30 Sep 2026</p>
+<h1>Delivery semantics: at-most/at-least/exactly-once, the idempotent producer</h1>
+<p class="byline">Today's tangible win: <code>scripts/produce_order_events.py</code> gets one config line, <code>enable.idempotence: True</code>, and you watch it do real work — a genuine broker-side retry that would otherwise have written a duplicate gets absorbed silently, provably, in your own terminal. Then you can place Day 6's consumer-side fix and today's producer-side fix on the same map, and say precisely what "exactly-once" does and does not cover end to end.</p>
+
+<div class="callout"><strong>Before today — check Day 15 actually landed:</strong> this lesson only touches the Kafka producer, not dbt, but it assumes <code>food_delivery_pipeline</code> still builds cleanly:
+<pre><code>cd food_delivery_pipeline
+uv run --project ../dbt_env dbt build</code></pre>
+Expected: <code>Done. PASS=26 WARN=0 ERROR=0 SKIP=0 NO-OP=0 REUSED=0 TOTAL=26</code> (Day 15's own count — CI wiring adds no new build/test nodes). If that doesn't match, Day 16 doesn't depend on it directly, but a mismatch means something upstream broke; worth a look before continuing.</div>
+
+<h2>1 · Three names for the same underlying question</h2>
+<p>Day 6 already answered the question that matters most for this pipeline: "if a message gets processed twice, does the warehouse end up wrong?" Today names the full spectrum that question lives on, because "exactly-once" gets thrown around in interviews as if it's one simple guarantee, and treating it that way is the single most common wrong answer.</p>
+<table class="gloss">
+  <tr><th>Guarantee</th><th>What can go wrong</th><th>Where it shows up here</th></tr>
+  <tr><td><dfn data-en="a delivery guarantee where a message might be silently dropped but is never processed more than once -- the trade you get by committing an offset before the corresponding write happens" data-vn="giữ nguyên &quot;at-most-once&quot; — message có thể mất nhưng không bao giờ bị xử lý 2 lần">at-most-once</dfn></td><td>message silently lost</td><td>Day 6's rejected ordering: commit offset, <em>then</em> write</td></tr>
+  <tr><td>at-least-once</td><td>message processed more than once</td><td>Day 6's actual consumer: write, <em>then</em> commit offset</td></tr>
+  <tr><td><dfn data-en="a delivery guarantee where a message is neither lost nor processed more than once, from the point of view of one specific hop -- Kafka provides this between a producer and a topic (the idempotent producer) and internally within Kafka Streams/consume-transform-produce chains, but it does not automatically extend to an arbitrary external system a consumer writes to" data-vn="giữ nguyên &quot;exactly-once&quot; — không mất, không xử lý 2 lần, nhưng chỉ đúng trong phạm vi 1 chặng cụ thể mà Kafka thực sự kiểm soát, không tự động lan ra hệ thống ngoài">exactly-once</dfn></td><td>neither, but only for the hop Kafka actually controls</td><td>today's producer→broker hop; <strong>not</strong> automatically the broker→Postgres hop</td></tr>
+</table>
+<p>Day 6 picked at-least-once plus an idempotent write on purpose, and that choice doesn't change today. What changes is the producer side: Day 5's <code>scripts/produce_order_events.py</code> has been running this whole course with Kafka's <em>default</em> producer behavior, which has its own, narrower at-most/at-least-once question — one level upstream of anything Day 6 touched.</p>
+
+<h2>2 · The gap Day 5's producer always had</h2>
+<p>A plain Kafka producer sends a message and waits for the broker to acknowledge it. If that acknowledgment is lost — a network blip, a broker momentarily unavailable — the producer's client library doesn't know whether the broker actually got the message before the connection dropped. Its only safe option is to retry. But retrying blindly re-introduces exactly the problem Day 6 solved on the consumer side, one hop earlier: if the first send actually succeeded and only the *acknowledgment* was lost, the retry writes a second copy of the same message to the same partition. Nothing before today's config change stopped that.</p>
+<p>This is the same shape of problem as <a href="../backend/index.html">backend/</a>'s idempotency-key work — a client can't always tell whether its own request landed, so it retries, and the server needs a way to recognize "this is that same request again" — applied to a producer talking to a broker instead of an HTTP client talking to an API. The mechanism differs; the reason it's needed doesn't.</p>
+
+<h2>3 · The idempotent producer: dedup you don't have to build yourself</h2>
+<p>Kafka's <dfn data-en="a Kafka producer config (enable.idempotence=true) under which the broker assigns the producer a hidden producer ID and tracks a per-partition sequence number for every message it sends, so a retried send that already landed is recognized and dropped by the broker itself instead of being written a second time" data-vn="giữ nguyên &quot;idempotent producer&quot; — enable.idempotence=true, broker tự gán producer ID + số thứ tự per-partition, retry gửi lại thì broker tự nhận ra và bỏ qua, không tự viết code dedup">idempotent producer</dfn> is a broker-side answer, not an application-side one: turn it on, and the broker itself refuses to write a duplicate. It works by giving each producer session a hidden producer ID (PID) and having the producer tag every message with a per-partition sequence number. If a retried send arrives with a sequence number the broker has already seen from that PID on that partition, the broker recognizes it as a retry of something already written and doesn't write it again — no <code>event_id</code>, no <code>ON CONFLICT</code>, no application code at all. One config key turns it on:</p>
+<pre><code><span class="cm"># scripts/produce_order_events.py -- one new config key on the Producer()</span>
+producer = Producer(
+    {
+        <span class="str">"bootstrap.servers"</span>: BOOTSTRAP,
+        <span class="str">"enable.idempotence"</span>: <span class="kw">True</span>,
+        <span class="str">"acks"</span>: <span class="str">"all"</span>,
+        <span class="str">"max.in.flight.requests.per.connection"</span>: <span class="kw">5</span>,
+        <span class="str">"retries"</span>: <span class="kw">5</span>,
+    }
+)</code></pre>
+<p>The three lines under <code>enable.idempotence</code> are what confluent-kafka sets for you automatically the moment idempotence is on — <code>acks: "all"</code> (every in-sync replica must confirm the write, not just the leader), a capped in-flight-requests count, and retries enabled at all. They're written out explicitly here so the trade is visible rather than hidden inside a boolean: idempotence isn't free, it requires the stronger acknowledgment settings to have anything to deduplicate against.</p>
+<div class="callout"><strong>Note what key the broker dedups on: it is not <code>event_id</code>.</strong> The (PID, sequence number) pair is assigned per producer session and is invisible to your application code entirely. It has nothing to do with the <code>event_id</code> UUID Day 5's <code>make_event()</code> generates or the <code>event_id</code> primary key Day 6's consumer relies on — those two dedup mechanisms operate at completely different layers (producer→broker vs. Kafka→Postgres) and neither makes the other unnecessary.</div>
+
+<h2>4 · Build: turn it on, then watch a real retry get absorbed</h2>
+<p>Edit <code>scripts/produce_order_events.py</code>'s <code>Producer(...)</code> call to match Section 3 exactly (the four keys: <code>enable.idempotence</code>, <code>acks</code>, <code>max.in.flight.requests.per.connection</code>, <code>retries</code>). Nothing else in the file changes — the day's actual skill is knowing *why* one boolean is worth a whole lesson, not writing new send logic. Run it against your existing stack:</p>
+<pre><code>uv run --with confluent-kafka python3 scripts/produce_order_events.py</code></pre>
+<p>This round's verification ran this for real against a fresh single-broker stack (a brand-new broker still finishing its own internal startup — the group coordinator for the idempotence handshake wasn't ready yet, a completely ordinary race on a cold start). The producer's own log line shows the exact retry the idempotent producer exists for, printed before any deliveries:</p>
+<pre><code>%4|...|GETPID|rdkafka#producer-1| [thrd:main]: Failed to acquire idempotence PID
+  from broker localhost:9092/1: Broker: Coordinator load in progress: retrying
+delivered to order_events [partition 2] @ offset 0, key=101
+delivered to order_events [partition 2] @ offset 1, key=101
+delivered to order_events [partition 2] @ offset 2, key=101
+delivered to order_events [partition 2] @ offset 3, key=101
+delivered to order_events [partition 0] @ offset 0, key=102
+...
+delivered to order_events [partition 0] @ offset 7, key=103</code></pre>
+<p>That warning line is not an error to fix — it's the producer retrying its own PID handshake against a broker that briefly wasn't ready, exactly the kind of transient failure idempotence is built to make harmless. The proof is in the count, the same style of proof Day 6 used: 3 orders × 4 statuses should land as exactly 12 messages, no more, regardless of how many retries happened underneath.</p>
+
+<h2>5 · Verify: count messages per partition, confirm no duplicate landed</h2>
+<pre><code>docker compose exec kafka /opt/kafka/bin/kafka-get-offsets.sh \
+  --bootstrap-server localhost:9092 --topic order_events</code></pre>
+<p>Expected — the three partition end-offsets, summing to exactly 12 despite the retry above (your own partition numbers may differ, same caveat as Day 5: the hash-to-partition mapping depends on the key, not on run order):</p>
+<pre><code>order_events:0:8
+order_events:1:0
+order_events:2:4</code></pre>
+<p><strong>8 + 0 + 4 = 12</strong> — one message per status per order, no duplicate from the retry the log just showed you happening. Without <code>enable.idempotence</code>, that same retry has no way to be distinguished from "the first send actually failed," and a naive retry-on-timeout producer could legally have written a 13th message. Confirm the topic still has exactly 3 partitions, unchanged from Day 5:</p>
+<pre><code>docker compose exec kafka /opt/kafka/bin/kafka-topics.sh \
+  --bootstrap-server localhost:9092 --describe --topic order_events</code></pre>
+<pre><code>Topic: order_events	TopicId: &lt;...&gt;	PartitionCount: 3	ReplicationFactor: 1	Configs: min.insync.replicas=1
+	Topic: order_events	Partition: 0	Leader: 1	Replicas: 1	Isr: 1
+	Topic: order_events	Partition: 1	Leader: 1	Replicas: 1	Isr: 1
+	Topic: order_events	Partition: 2	Leader: 1	Replicas: 1	Isr: 1</code></pre>
+<p>Commit the one-line change to <code>scripts/produce_order_events.py</code>.</p>
+
+<h2>6 · What today's fix does <em>not</em> cover</h2>
+<p>This is the part worth being precise about out loud, because "we use Kafka's exactly-once" is the kind of overclaim that falls apart under one follow-up question. Today's <code>enable.idempotence</code> guarantees exactly-once for exactly one hop: producer session to broker partition. It says nothing about:</p>
+<table class="gloss">
+  <tr><th>Hop</th><th>What actually guarantees correctness there</th></tr>
+  <tr><td>Producer → broker (today)</td><td>the idempotent producer: broker-side PID + sequence-number dedup</td></tr>
+  <tr><td>Broker → consumer → Postgres (Day 6)</td><td>at-least-once delivery <em>plus</em> the consumer's own <code>ON CONFLICT (event_id) DO NOTHING</code> — a completely different mechanism, built by this course's own code, not by Kafka</td></tr>
+  <tr><td>The producer's own source of truth upstream (out of scope here)</td><td>whatever generates <code>order_events</code> in the first place — if that system double-submits an order, idempotence at any Kafka hop cannot detect it, because both submissions look like two genuinely different, valid messages</td></tr>
+</table>
+<p>Kafka does have a stronger, transactional exactly-once mode (<code>transactional.id</code>, used by Kafka Streams and consume-transform-produce pipelines) that extends this guarantee across a read-process-write cycle entirely inside Kafka. It's vocabulary for this course, not a build step: this pipeline's sink is Postgres, an external system Kafka's transactions don't reach, which is exactly why Day 6 needed its own idempotent write in the first place and why that design doesn't change today. The honest one-sentence answer to "do you have exactly-once end to end?" here is: <em>exactly-once producer-to-broker, at-least-once broker-to-warehouse made safe by an idempotent write — and that combination is what real pipelines actually run, not a single end-to-end "exactly-once" switch.</em></p>
+
+<div class="interview">
+<p><strong>Q: "Someone on your team says 'we use Kafka's exactly-once guarantee end to end.' What's your response?"</strong> A strong answer, out loud: <em>"I'd ask which hop they mean, because exactly-once isn't one setting that covers a whole pipeline. My producer sets enable.idempotence, so the broker deduplicates retried sends using a hidden producer ID and per-partition sequence number — that's a real exactly-once guarantee, but it only covers the producer-to-broker hop. From the broker to my consumer, Kafka's guarantee is at-least-once: a crash between processing a message and committing its offset means it gets redelivered. I made that safe with an idempotent write — an INSERT with ON CONFLICT DO NOTHING keyed on event_id — so a redelivered message is a no-op, not a duplicate row. Kafka does have a transactional mode that extends exactly-once across a read-process-write cycle, but that's for pipelines that stay inside Kafka end to end, like Kafka Streams. The moment you write to an external system like Postgres, you're back to needing an idempotent write on that system, same as I already have. So the honest claim is exactly-once on one hop, at-least-once made safe on the other — not one guarantee covering everything."</em> The signal: naming the specific hop each guarantee actually covers, instead of treating "exactly-once" as a single fact true or false about the whole pipeline.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="At-most-once means a message can be silently lost but is never processed twice -- the trade of committing an offset before the write happens, which Day 6 explicitly rejected for order data. At-least-once is the opposite trade (never lost, may repeat); exactly-once is neither, but only for one specific hop Kafka actually controls.">
+    <p class="stem">What does an at-most-once delivery guarantee trade away?</p>
+    <button class="opt" data-ok>May be lost, but never repeats twice, ever</button>
+    <button class="opt">May repeat twice, but never gets lost, ever</button>
+    <button class="opt">Always arrives exactly one time, no matter what</button>
+  </div>
+  <div class="q" data-why="The idempotent producer assigns each producer session a hidden producer ID and tracks a per-partition sequence number on every message. If a retried send carries a sequence number the broker already saw from that PID on that partition, the broker recognizes it as a repeat and drops it -- entirely inside Kafka, with no event_id or application code involved.">
+    <p class="stem">What does Kafka's idempotent producer actually deduplicate on?</p>
+    <button class="opt" data-ok>A hidden producer ID plus a per-partition sequence number</button>
+    <button class="opt">The same <code>event_id</code> field Day 6's own consumer used</button>
+    <button class="opt">A hash computed from each message's full JSON body</button>
+  </div>
+  <div class="q" data-why="enable.idempotence guarantees exactly-once for the producer-to-broker hop only. It says nothing about the broker-to-consumer-to-Postgres hop, which is still at-least-once and still needs Day 6's own ON CONFLICT DO NOTHING to be safe -- the two mechanisms operate at different layers and neither replaces the other.">
+    <p class="stem">Once the producer sets <code>enable.idempotence</code>, what still needs Day 6's <code>ON CONFLICT</code> fix?</p>
+    <button class="opt" data-ok>The later hop from broker through consumer into Postgres</button>
+    <button class="opt">Nothing does, one single flag now covers every hop</button>
+    <button class="opt">Only the producer's own retry logic, once fully rewritten</button>
+  </div>
+  <div class="q" data-why="Kafka's idempotent/transactional exactly-once guarantees are scoped to hops Kafka itself controls -- producer-to-broker, or a read-process-write cycle entirely inside Kafka (Streams). Writing to an external system like Postgres is outside that scope by definition, which is exactly why Day 6 needed its own idempotent write and why that design is unchanged today.">
+    <p class="stem">Why can't Kafka's exactly-once features alone make a Kafka-to-Postgres write exactly-once?</p>
+    <button class="opt" data-ok>Postgres sits outside the hops Kafka's guarantee covers</button>
+    <button class="opt">Postgres does not support unique constraints at all</button>
+    <button class="opt">Kafka's transactional mode gets disabled on Postgres sinks</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> per <code>RESOURCES.md</code>, Kleppmann's <em>Designing Data-Intensive Applications</em>, ch. 11, is this course's cited deep read on exactly why end-to-end exactly-once is so much harder than it sounds — worth it now that today gives the vocabulary to follow the argument. For the mechanism itself, the <a href="https://kafka.apache.org/documentation/#semantics">Apache Kafka Design docs' "Message Delivery Semantics" section</a> is the authoritative source on at-most/at-least/exactly-once and the idempotent/transactional producer, the same documentation Days 5–6 already cited for ordering and offsets.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 16.<br>
+<strong>Next lesson:</strong> Phase 2b continues with schema evolution — why JSON-without-a-schema bites once a producer adds or renames a field, and what a Schema Registry plus Avro or Protobuf actually buy, with one hands-on change to <code>order_events</code>'s shape and the rest at vocabulary level.<br><br>
+💬 Anything unclear — why the idempotent producer's dedup key is invisible to your own code, or where the line between "exactly-once" and "at-least-once made safe" actually falls? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

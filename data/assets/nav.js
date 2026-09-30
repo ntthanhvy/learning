@@ -172,6 +172,8 @@
       file: "lessons/0082-as-index-and-get-group.html" },
     { n: 83, date: "2026-09-29", title: "read_csv(dtype=) and infer_objects(): declaring vs. best-guessing a column's real type",
       file: "lessons/0083-read-csv-dtype-and-infer-objects.html" },
+    { n: 84, date: "2026-09-30", title: "Nullable boolean (BooleanDtype) and pd.NA: a third truth value",
+      file: "lessons/0084-nullable-boolean-and-pd-na.html" },
   ];
 
   const REFS = [

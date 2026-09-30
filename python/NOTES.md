@@ -8131,3 +8131,86 @@ fail *gracefully* so the learner sees which task failed.
   48) still have no review-day treatment and may be worth a first adapted
   format in a future round, if a natural way to retrieval-test communication
   structure (rather than a testable mechanism) presents itself.
+- 2026-09-30 — **Day 64 generated: `zipfile` — reading and writing zip
+  archives** (headless run), a fresh-topic day since Day 63 was a review
+  immediately following Day 62's own fresh material — a third review in a
+  row would have broken this course's established cadence. Read `MISSION.md`,
+  `PLAN.md`, `RESOURCES.md`, the tail of `NOTES.md` (Days 62-63's full
+  entries), and lessons 62-63 plus their practice files for structural and
+  difficulty precedent. Confirmed via grep that Day 62's own lesson text
+  explicitly named `shutil.make_archive()`/`unpack_archive()` as left out "to
+  stay to one tangible win" — a direct pointer at the real gap. A fresh-gap
+  grep across all 63 lessons and every practice file confirmed zero hits for
+  `zipfile` anywhere; `tempfile` remains a real but weaker candidate (used
+  incidentally inside practice-file checks since Day 6, never taught as its
+  own topic) and is left for a future round; `subprocess`/`configparser`
+  remain set aside as weaker still, unchanged since Day 58.
+  Lesson covers: the gap `shutil` leaves (whole directories, not archive
+  contents), `ZipFile` in read mode (`namelist()`, `open()` for one member
+  without extracting the rest, `extractall()`), `ZipFile` in write mode
+  (`write()` with `arcname` to control the stored internal path, building an
+  archive from a directory walk via `Path.rglob()`), a path-traversal safety
+  callout parallel to Day 62's `rmtree()` callout, and `shutil.make_archive()`
+  /`unpack_archive()` as the whole-directory shortcut built on `zipfile`,
+  closing the loop back to Day 62.
+  No-pandas rule: grepped case-insensitively for `pandas`/`numpy`/`pd\.`/
+  `np\.` — exactly one hit, the standard single-line boundary callout noting
+  `pandas.read_csv()` can read from inside a zip but never builds/inspects
+  one, naming no pandas API taught; zero hits in the practice file.
+  Practice file `practice/64_zipfile_reading_and_writing_archives.py` (4
+  exercises, stdlib-only, no `--with` flag): writing multiple named entries
+  into a new archive with `writestr()`, listing members without extracting,
+  reading one member's decoded text directly, and extracting everything
+  including a nested subdirectory. Verified in place: the shipped (unsolved)
+  copy printed four ✗ with no traceback; a temporary solved copy (written via
+  `Write`, then deleted after use, never editing the shipped file) printed
+  all four ✓ and the "All green" tally, run twice consecutively with
+  identical results both times.
+  HTML tag-balance was checked with a throwaway stdlib
+  `html.parser.HTMLParser`-based stack checker (written via `Write`, deleted
+  after use) — this round it actually caught a real bug: section 1's opening
+  callout `<div>` had been mistakenly closed with `</p>` instead of `</div>`,
+  fixed and re-verified clean. A raw-unescaped-`&` regex
+  (`&(?!amp;|lt;|gt;|quot;|#39;|apos;|#\d+;)`) found zero true hits.
+  Quiz: 4 questions, one per section (`namelist()`/`open()` not requiring
+  extraction, why `arcname` matters, the untrusted-archive path-traversal
+  risk, and when to reach for `zipfile` directly over `make_archive()`). Word
+  counts were checked with a small `html.parser.HTMLParser`-based Python
+  script splitting each `<button class="opt">`'s stripped-tag text on
+  whitespace, cross-checked with a second, independent Node.js regex-based
+  script per this course's established two-method practice. First draft
+  mismatched on three of the four questions; several rounds of one- or
+  two-word edits (adding "always"/"each"/"legally" etc., or trimming a word)
+  landed all twelve options at exactly 10/10/10 words per question, confirmed
+  by both scripts agreeing, plus a separate `grep -o data-ok | wc -l`
+  confirming exactly 4 occurrences.
+  Glossary: two new terms (`zip archive`, `zipfile`) added under a new
+  `id="day64"` section.
+  `RESOURCES.md`: added a new line for `zipfile` (not an extension of Day
+  62's `shutil` citation, since that citation doesn't cover archive
+  internals) naming Day 64's specific uses.
+  Registered in `assets/nav.js` with `date: "2026-09-30"`; confirmed
+  `node --check assets/nav.js` reports no syntax errors after the edit.
+  **DB access:** `bin/record-progress python lesson_generated --day 64
+  --lesson 0064-zipfile-reading-and-writing-archives.html --detail
+  '{"by":"headless"}'` was run from the repo root after generation and
+  returned a clean `recorded: ...` line, not a workaround-needed case.
+  `python/learning-records/` still holds only the Day 1 baseline; no new file
+  was added this round — a real but minor HTML-authoring slip (the `<div>`/
+  `</p>` mismatch, caught and fixed before shipping) doesn't rise to a
+  durable learner-profile finding distinct from what's already recorded.
+  Final `git status --short -- python/` showed exactly five paths changed
+  (`assets/nav.js`, `RESOURCES.md`, `reference/glossary.html`, plus the new
+  lesson and practice file) — no other course's files touched, and no
+  leftover scratch files from the throwaway checker scripts, all deleted
+  before finishing.
+  **Next-day note:** `tempfile` is now the strongest remaining fresh-gap
+  candidate — used incidentally since Day 6 but never taught as its own
+  topic (`mkdtemp()`, `TemporaryDirectory()`, `NamedTemporaryFile()`, and why
+  a context-managed temp directory cleans itself up automatically).
+  `subprocess`/`configparser` remain weaker, unchanged since Day 58. Day 64
+  was a fresh day right after Day 63's (short) review, so Day 65 is open
+  either way — `tempfile` as a fourth fresh day in a row would be worth
+  weighing against starting a new review cycle covering Day 64 (and perhaps
+  Days 61/63 if a review day ever revisits a prior review day's own content,
+  which no round has done yet).

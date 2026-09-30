@@ -132,6 +132,8 @@
       file: "lessons/0062-shutil-file-and-tree-operations.html" },
     { n: 63, date: "2026-09-29", title: "Review day 9: retrieval across four more lessons",
       file: "lessons/0063-review-retrieval-day-9.html" },
+    { n: 64, date: "2026-09-30", title: "zipfile: reading and writing zip archives",
+      file: "lessons/0064-zipfile-reading-and-writing-archives.html" },
   ];
 
   const REFS = [

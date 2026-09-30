@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 64 · zipfile: reading and writing zip archives</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 64 · ~20 min · 30 Sep 2026</p>
+<h1><code>zipfile</code>: reading and writing zip archives</h1>
+<p class="byline">Day 63 was a (short) review day covering Days 57, 59, 60, and 62, immediately after Day 62's own fresh material — so per this course's established cadence, today returns to a new topic rather than a third review in a row. Day 62's <code>shutil</code> lesson explicitly named the gap it was leaving open: <code>shutil.make_archive()</code>/<code>unpack_archive()</code> exist but were left out "to stay to one tangible win." That gap is real and squarely in scope — an ETL pipeline routinely receives a zipped data drop or needs to archive processed output — so today closes it properly with the module that actually owns archive contents: <code>zipfile</code>.</p>
+
+<div class="callout"><strong>Why today, specifically:</strong> a fresh-gap grep across all 63 lessons and every practice file confirmed zero hits for <code>zipfile</code> — genuinely untaught, and directly named as left-out scope in Day 62's own lesson text. <code>tempfile</code> was the other real candidate (used incidentally inside several practice files' checks since Day 6, but never taught as its own topic) and remains open for a future day; <code>subprocess</code> and <code>configparser</code> remain set aside as weaker, exactly as every round since Day 58 has assessed. <code>zipfile</code> won because it directly continues Day 62's own thread — from "operate on a whole directory" to "package that directory into one portable file, or unpack one someone handed you" — rather than opening an unrelated new thread.</div>
+
+<h2>1 · The problem: a directory is not a file</h2>
+<p>Day 62's <code>shutil</code> moves and copies whole directory trees on the same filesystem, but it has no answer for "send this directory to someone else as one attachment" or "here's a <code>.zip</code> a vendor sent — get the records out of it." A <dfn data-en="a single file that stores one or more other files (and the directory structure among them) in a compressed, portable container format" data-vn="giữ nguyên &quot;zip archive&quot; — 1 file duy nhất chứa bên trong nhiều file/thư mục khác, đã nén lại, để gửi đi hoặc lưu trữ gọn">zip archive</dfn> packages any number of files and folders into one compressed, portable container — the same format behind <code>.zip</code> downloads, a Java <code>.jar</code>, or a <code>docx</code> file's internals. <dfn data-en="Python's standard-library module for reading and writing zip archives: listing, extracting, and adding files without shelling out to an external zip/unzip program" data-vn="giữ nguyên &quot;zipfile&quot; — module chuẩn đọc/ghi file zip: liệt kê, giải nén, thêm file vào, không cần gọi chương trình zip/unzip bên ngoài">zipfile</dfn> reads and writes that format directly, no external program required.</p>
+
+<h2>2 · Reading an archive: <code>ZipFile</code>, <code>namelist()</code>, <code>extractall()</code></h2>
+<pre><code><span class="kw">import</span> zipfile
+
+<span class="kw">with</span> zipfile.ZipFile(<span class="str">"data/drop.zip"</span>) <span class="kw">as</span> zf:
+    zf.namelist()                    <span class="cm"># ["orders.csv", "customers.csv", "readme.txt"]</span>
+    <span class="kw">with</span> zf.<span class="kw">open</span>(<span class="str">"orders.csv"</span>) <span class="kw">as</span> f:
+        first_line = f.readline()    <span class="cm"># read one member's bytes without extracting anything to disk</span>
+    zf.extractall(<span class="str">"data/extracted"</span>)  <span class="cm"># unpack every member into this directory</span></code></pre>
+<p><code>ZipFile</code> is a <a href="../reference/glossary.html#day6">context manager</a> (Day 6) just like <code>open()</code> — the <code>with</code> block closes it automatically. <code>namelist()</code> lists every member's path inside the archive without extracting anything, which matters for a large archive: checking what's inside, or reading just one member with <code>zf.open(name)</code>, never touches disk for the other members. <code>extractall()</code> is the shortcut for "I want everything, written out as real files" — the same escape hatch Day 62's <code>copytree()</code> covers for a plain directory, but starting from a compressed container instead.</p>
+
+<div class="callout"><strong>Only extract archives from a source that's trusted:</strong> a crafted zip entry can contain a path like <code>../../etc/passwd</code>, and older Python versions would write straight through it. Modern <code>extractall()</code> guards against that specific escape, but it is still the same discipline Day 62's <code>rmtree()</code> callout applied to unvalidated paths — treat an archive from an untrusted source the way any other unvalidated input is treated, not as automatically safe just because it went through the standard library.</div>
+
+<h2>3 · Writing an archive: <code>ZipFile</code> in write mode</h2>
+<pre><code><span class="kw">import</span> zipfile
+<span class="kw">from</span> pathlib <span class="kw">import</span> Path
+
+<span class="kw">with</span> zipfile.ZipFile(<span class="str">"archive/2026-09-30.zip"</span>, <span class="str">"w"</span>) <span class="kw">as</span> zf:
+    zf.write(<span class="str">"output/report.csv"</span>, arcname=<span class="str">"report.csv"</span>)  <span class="cm"># add one file</span>
+    <span class="kw">for</span> path <span class="kw">in</span> Path(<span class="str">"output/logs"</span>).rglob(<span class="str">"*.txt"</span>):
+        zf.write(path, arcname=path.relative_to(<span class="str">"output"</span>))    <span class="cm"># add each file at a chosen internal path</span></code></pre>
+<p>The mode string works the same way Day 6's <code>open()</code> modes do: <code>"w"</code> creates a new archive (overwriting one that exists), <code>"a"</code> appends members to an existing archive. <code>arcname</code> controls the path stored <em>inside</em> the archive, which usually should not be the same as the full source path — without it, zipping <code>/home/user/output/report.csv</code> would store that entire absolute path inside the archive instead of just <code>report.csv</code>. Combining <code>Path.rglob()</code> (Day 13) with a loop is the idiom for "zip this whole directory, one file at a time, with clean internal paths."</p>
+
+<h2>4 · One-shot helpers: <code>shutil.make_archive()</code></h2>
+<p>When the whole point is "zip this entire directory, keep its structure, no per-file control needed," <code>shutil</code> — Day 62's module — has a shortcut built on top of <code>zipfile</code>:</p>
+<pre><code><span class="kw">import</span> shutil
+
+shutil.make_archive(<span class="str">"archive/2026-09-30"</span>, <span class="str">"zip"</span>, <span class="str">"output"</span>)  <span class="cm"># writes archive/2026-09-30.zip from the whole output/ tree</span>
+shutil.unpack_archive(<span class="str">"data/drop.zip"</span>, <span class="str">"data/extracted"</span>)   <span class="cm"># the extractall() shortcut, format auto-detected</span></code></pre>
+<p><code>make_archive()</code>/<code>unpack_archive()</code> are the right tool for "the whole directory, nothing fancy" — reach for <code>zipfile</code> directly instead when only some files belong in the archive, when internal paths need renaming, or when a member needs reading without extracting the rest, as in section 2.</p>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> nothing pandas-specific today — <code>pandas.read_csv()</code> can in fact read directly from a path inside a zip (via its own <code>compression=</code> handling), but building, inspecting, or selectively extracting the archive itself is never a DataFrame's job; that stays <code>zipfile</code>'s (or <code>shutil</code>'s, for the whole-tree shortcut). Not covered further here, per <code>MISSION.md</code>.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/64_zipfile_reading_and_writing_archives.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/64_zipfile_reading_and_writing_archives.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: writing several files into a new zip archive with chosen internal names, listing an archive's members without extracting anything, reading one member's bytes directly out of the archive, and extracting everything to a directory and confirming the nested structure survived.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="namelist() lists every member path inside the archive without extracting anything to disk, and zf.open(name) reads one member's bytes directly -- neither touches the other members at all. extractall() is the only one of the three that writes every member out as real files.">
+    <p class="stem">Why does <code>zf.namelist()</code> not require extracting anything first?</p>
+    <button class="opt" data-ok>it reads the archive's own listing, never touching member bytes</button>
+    <button class="opt">it silently extracts every member first, then lists the results</button>
+    <button class="opt">it only works after extractall() has already been called once</button>
+  </div>
+  <div class="q" data-why="Without arcname, zf.write(path) stores the full source path (e.g. an absolute path or a long relative one) inside the archive itself. Passing arcname explicitly controls exactly what path is stored inside the zip, independent of where the source file actually lives on disk.">
+    <p class="stem">Why pass <code>arcname=</code> to <code>zf.write()</code> instead of leaving it out?</p>
+    <button class="opt" data-ok>without it, the archive stores the full original source path</button>
+    <button class="opt">arcname is always required before any file can be added</button>
+    <button class="opt">it silently compresses the given file harder than the default</button>
+  </div>
+  <div class="q" data-why="A crafted zip member's name can contain path segments like ../../ that, on older extraction code, could write outside the intended destination directory entirely. Modern extractall() guards against that specific escape, but treating an archive from an untrusted source as automatically safe is still the wrong instinct -- the same unvalidated-path discipline Day 62's rmtree() callout already established.">
+    <p class="stem">What is the key risk to guard against when extracting a zip from an untrusted source?</p>
+    <button class="opt" data-ok>a crafted member path could try writing outside the target</button>
+    <button class="opt">zip archives can never legally contain more than one file</button>
+    <button class="opt">extractall() always refuses to run on any single nested subdirectory</button>
+  </div>
+  <div class="q" data-why="shutil.make_archive() is the whole-directory shortcut built on top of zipfile, with no per-file control over which files are included or what internal path each one gets. Reaching for zipfile.ZipFile directly is what's needed when only some files belong in the archive, when internal paths need renaming, or when one member needs reading without extracting the rest.">
+    <p class="stem">When should <code>zipfile.ZipFile</code> be used directly instead of <code>shutil.make_archive()</code>?</p>
+    <button class="opt" data-ok>when only some files belong in, or paths need control</button>
+    <button class="opt">never — make_archive() always handles every possible zip case here</button>
+    <button class="opt">only when compressing files each larger than four gigabytes total</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the standard library's <a href="https://docs.python.org/3/library/zipfile.html"><code>zipfile</code></a> docs — covers <code>ZipFile</code>'s read/write/append modes, <code>ZipInfo</code> for per-member metadata, password-protected archives, and the path-traversal protection <code>extractall()</code> applies, none covered today to stay to one tangible win. Not yet in <code>RESOURCES.md</code>; added there today alongside the other single-module stdlib citations.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day64">glossary</a> under Day 64.<br>
+This closes the gap Day 62 named directly — <code>shutil</code> moves and copies whole directories, but only <code>zipfile</code> reads or writes what's actually inside a zip archive.<br><br>
+💬 Anything unclear — <code>namelist()</code> vs <code>extractall()</code>, why <code>arcname</code> matters, or when to reach for <code>shutil.make_archive()</code> instead? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

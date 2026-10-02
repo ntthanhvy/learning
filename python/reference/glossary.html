@@ -494,6 +494,14 @@
   <tr><td>zipfile</td><td>giữ nguyên "zipfile" — module chuẩn đọc/ghi file zip: liệt kê, giải nén, thêm file vào, không cần gọi chương trình zip/unzip bên ngoài</td><td>Python's standard-library module for reading and writing zip archives directly — listing members with <code>namelist()</code>, reading one member's bytes with <code>open()</code>, extracting with <code>extractall()</code>, and adding files with <code>write()</code>/<code>writestr()</code> — with no external zip/unzip program required.</td></tr>
 </table>
 
+<h2 id="day65">Day 65 — tempfile: scratch space that cleans itself up</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>tempfile</td><td>giữ nguyên "tempfile" — module chuẩn tạo file/thư mục tạm, tên luôn duy nhất, tự dọn dẹp khi dùng xong</td><td>Python's standard-library module for creating files and directories meant to exist only for the lifetime of the current operation — <code>TemporaryDirectory()</code> and <code>NamedTemporaryFile()</code> generate a collision-proof unique name every call and, as context managers, delete themselves automatically on the way out of a <code>with</code> block.</td></tr>
+  <tr><td>TemporaryDirectory</td><td>giữ nguyên "TemporaryDirectory" — tạo 1 thư mục tạm duy nhất, xóa cả thư mục (và mọi thứ bên trong) ngay khi hết with block</td><td><code>tempfile.TemporaryDirectory()</code> creates a uniquely named directory and returns its path; the entire directory and everything written inside it, however deeply nested, is deleted the moment the enclosing <code>with</code> block exits — success or exception.</td></tr>
+  <tr><td>NamedTemporaryFile</td><td>giữ nguyên "NamedTemporaryFile" — giống open(), nhưng tên file luôn duy nhất; delete=False thì không tự xóa, phải tự dọn sau</td><td><code>tempfile.NamedTemporaryFile()</code> behaves like <code>open()</code> with a guaranteed-unique name and automatic deletion on close by default. Passing <code>delete=False</code> defers cleanup to the caller — needed when another library or process must reopen the file by its path — and the resulting path must then be removed by hand, e.g. <code>Path(path).unlink()</code>.</td></tr>
+</table>
+
 <p class="next">💬 A term here still unclear? Ask your teacher — hỏi bằng tiếng Việt cũng được.</p>
 
 <script src="../assets/nav.js"></script>

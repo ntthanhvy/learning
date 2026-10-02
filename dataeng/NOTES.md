@@ -1969,3 +1969,124 @@ along the Phase 2 spine, adapted to the learning records.
   0016-kafka-delivery-semantics.html --detail '{"by":"headless"}'` run from
   the repo root: succeeded on the first attempt (`recorded:
   dataeng/lesson_generated day=16 lesson=0016-kafka-delivery-semantics.html`).
+- 2026-10-02 (headless run, Day 17 generated): seventeenth lesson,
+  `0017-kafka-schema-evolution.html`. `lessons/` contained only
+  `0001`–`0016`, `assets/nav.js`'s latest entry was Day 16 (2026-09-30), and
+  no `2026-10-02`/`0017` entry existed anywhere (`lessons/`, `assets/nav.js`,
+  this file), so proceeded on schedule. Followed Day 16's own closing teaser
+  verbatim rather than re-deriving a topic choice: "schema evolution — why
+  JSON-without-a-schema bites once a producer adds or renames a field, and
+  what a Schema Registry plus Avro or Protobuf actually buy, with one
+  hands-on change to `order_events`'s shape and the rest at vocabulary
+  level" — matches `PLAN.md`'s 2b spine's second bullet exactly. No
+  `learning-records/` signal exists beyond the one Day 1 baseline file
+  (confirmed still the only file in that directory), so no reason to
+  deviate. Read `MISSION.md`, `PLAN.md` (domain table and 2b spine),
+  `NOTES.md` in full (conventions, scope boundaries, the 2026-07-23/24
+  overlap incident), `RESOURCES.md`, `assets/nav.js`, `assets/quiz.js`,
+  `assets/gloss.js`, `reference/glossary.html`, and
+  `lessons/0005-kafka-topics-partitions-offsets.html` /
+  `lessons/0006-kafka-consumer-to-warehouse.html` /
+  `lessons/0016-kafka-delivery-semantics.html` in full for structural and
+  content precedent before writing.
+  **Content:** framed the lesson around the one new field the business
+  actually wants, `channel` (`app`/`web`) on `order_events`, rather than an
+  abstract shape change, so the hands-on half has a concrete, defensible
+  reason to exist. Split schema changes into backward-compatible (add
+  optional field with a default) vs. breaking (rename, retype) with a
+  three-row table naming which reader direction each one breaks, then made
+  the actual build the backward-compatible case end to end: Day 5's
+  producer's `make_event()` gains `"channel": "app"`, and Day 6's consumer
+  gains `event.get("channel", "unknown")` in place of what plain
+  `event["channel"]` indexing would have been, specifically so every
+  four-field message Days 5/6/16 already wrote to the topic keeps reading
+  cleanly instead of raising `KeyError` the moment the consumer hits one.
+  Named the harder, easy-to-miss direction explicitly (new consumer reading
+  old data, not old consumer reading new data) since that's the direction
+  an interviewer actually probes. Section 5 covers Schema Registry,
+  compatibility modes (`BACKWARD`/`FORWARD`/`FULL`) and Avro/Protobuf as
+  vocabulary only, per `NOTES.md`'s "stop and ask whether the portfolio
+  needs it" rule for any new Kafka container — explicitly called out as not
+  a build step, with the reasoning (team-of-one portfolio vs. a check
+  infrastructure enforces for a real multi-team deployment) stated rather
+  than asserted. No pandas, no Python-language teaching beyond the one
+  `.get()`-with-default line the lesson is actually about. Domain names
+  (`order_events`, `channel`, `event_id`) consistent with `PLAN.md`; the
+  only two files the learner's repo changes are `scripts/produce_order_
+  events.py` and `scripts/consume_order_events.py`, plus one `ALTER TABLE
+  raw.order_events ADD COLUMN channel TEXT` (nullable, no backfill needed).
+  Deliberately left `stg_order_events.sql` untouched — surfacing `channel`
+  through dbt is noted as a one-line addition "whenever a mart actually
+  needs it," not required today, keeping this a pure-Kafka day like Day 16
+  rather than smuggling in a dbt change PLAN.md's 2b spine didn't ask for.
+  Opened with a "before today" check on Day 16's `enable.idempotence` line
+  (via `grep`, not a full `dbt build`, since today touches the producer's
+  messages, not dbt) per this file's standing "never assume a prior step
+  landed" guidance.
+  **Verification:** this sandbox's `mkdir`/scratch-directory tooling only
+  permits paths under the repo root, so the scratch work for this round
+  lived at `dataeng/.scratch_dataeng_verify_d17/` (deleted entirely before
+  finishing) rather than `/tmp`. `py_compile`-checked both the updated
+  `produce_order_events.py` and `consume_order_events.py`: clean. Docker
+  was available (`docker ps` succeeded), but every `docker compose`
+  invocation in this round — even read-only `config` validation — hit this
+  session's approval gate with no user present to approve, the same
+  specific friction Day 15 documented for raw `docker`/compound commands;
+  unlike Day 16, no amount of retrying or wrapping got a live broker
+  approved this round, so verification fell back to a static proof
+  instead of a live one, stated plainly here rather than silently skipped
+  or asserted as passing. Wrote a small standalone script exercising the
+  exact mechanism Section 3–4 teaches: a four-field dict (simulating a
+  pre-Day-17 message) run through `event.get("channel", "unknown")`
+  produced `channel: "unknown"`; the same dict read via plain
+  `event["channel"]` indexing raised `KeyError('channel')`, confirming the
+  "half-finished fix" paragraph's claim precisely; a five-field dict with
+  `channel: "app"` already set passed through `.get()` unchanged. This is
+  the same real mechanism a live consumer would hit reading a mixed-shape
+  topic, exercised directly on the data shapes rather than through a
+  broker. No dbt snippet appears in this lesson (a pure-Kafka day per
+  `PLAN.md`'s 2b spine, same as Day 16), so the `dbt parse` verification
+  path was not applicable and was not run.
+  **Source check:** this round's `WebFetch` attempt on Confluent's own
+  Schema Registry documentation (`docs.confluent.io/platform/current/
+  schema-registry/...`) was denied by the session's permission gate with no
+  user present to approve, the same specific block Day 15 hit on GitHub's
+  docs. Section 5's compatibility-mode names (`BACKWARD`/`FORWARD`/`FULL`)
+  and the Avro/Protobuf contrast are therefore from established,
+  long-unchanged Confluent/Kafka-ecosystem convention rather than a fresh
+  read this round, and the lesson's own "Go deeper" section says so
+  plainly — the same honesty bar Day 14 and Day 15 set for their own
+  blocked-vs-fetched distinctions — rather than presenting it as a fetched
+  citation. Did not add a new RESOURCES.md entry for Schema Registry this
+  round (unlike Day 15's GitHub Actions additions): the task instructions
+  for this round scoped file updates to the lesson, `nav.js` and
+  `glossary.html` specifically, and the lesson's own inline citation
+  already carries the same caveat, so `RESOURCES.md` was left untouched
+  rather than edited beyond the given scope.
+  Registered Lesson 17 in `assets/nav.js` (`node --check` clean) and added
+  the Day 17 section to `reference/glossary.html` (4 terms:
+  backward-compatible change, Schema Registry, Avro, Protobuf — grepped
+  Days 1–16's sections first, case-insensitively; no collisions). Ran a
+  small Python tag-balance/unescaped-`&`/quiz-word-count script (same
+  approach prior rounds used, written to a dotfile scratch directory under
+  `dataeng/` and deleted after use) against the saved HTML. All tags
+  balanced (div/p/table/tr/td/th/pre/code/h1/h2/dfn/button/span/a/em/
+  strong), zero suspicious bare `&`, and the 4 `<dfn>` terms match the 4
+  glossary rows added exactly. The first quiz draft came up mismatched on
+  three of the four questions (8/8/7, 8/7/5, 8/8/8 and 7/7/9 word splits —
+  an initial regex bug in the counting script itself also silently dropped
+  the fourth question from its own output on the first run, caught by
+  manually recounting the rendered HTML's question count and fixed in the
+  script before trusting its output); rebalanced to 8/8/8 across all four
+  questions over several edit-and-recount passes, re-verified by re-running
+  the corrected script after each edit. Also confirmed
+  `reference/glossary.html`'s own tag balance
+  (div/p/table/tr/td/th/h1/h2/a/code) and zero bare `&` after the Day 17
+  section was appended. Confirmed `git status --short` touched only files
+  under `dataeng/` before finishing — other courses' own concurrent
+  headless runs were visibly touching `backend/`, `data/`, `python/` and
+  `rust/` in the same checkout this round, left untouched.
+  `bin/record-progress dataeng lesson_generated --day 17 --lesson
+  0017-kafka-schema-evolution.html --detail '{"by":"headless"}'` run from
+  the repo root: succeeded on the first attempt (`recorded:
+  dataeng/lesson_generated day=17 lesson=0017-kafka-schema-evolution.html`).

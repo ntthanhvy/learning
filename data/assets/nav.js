@@ -174,6 +174,8 @@
       file: "lessons/0083-read-csv-dtype-and-infer-objects.html" },
     { n: 84, date: "2026-09-30", title: "Nullable boolean (BooleanDtype) and pd.NA: a third truth value",
       file: "lessons/0084-nullable-boolean-and-pd-na.html" },
+    { n: 85, date: "2026-10-02", title: "Sparse dtype: compressing a column that's mostly one repeated value",
+      file: "lessons/0085-sparse-dtype.html" },
   ];
 
   const REFS = [

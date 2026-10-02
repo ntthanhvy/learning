@@ -170,6 +170,15 @@
   <tr><td>idempotent producer</td><td>giữ nguyên "idempotent producer" — enable.idempotence=true, broker tự gán producer ID + số thứ tự per-partition, retry gửi lại thì broker tự nhận ra và bỏ qua, không tự viết code dedup</td><td>A Kafka producer config (<code>enable.idempotence=true</code>) under which the broker assigns the producer a hidden producer ID and tracks a per-partition sequence number for every message it sends, so a retried send that already landed is recognized and dropped by the broker itself instead of being written a second time. Deduplicates on (producer ID, sequence number), not on any application-level field like <code>event_id</code>.</td></tr>
 </table>
 
+<h2 id="day17">Day 17 — Schema evolution: why JSON-without-a-schema bites</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>backward-compatible change</td><td>giữ nguyên "backward-compatible change" — đổi schema mà code đọc theo schema CŨ vẫn đọc đúng message theo schema MỚI, thường là thêm field optional có default</td><td>A schema change where every message written under the new shape can still be correctly read by code written against the old shape — typically adding a new optional field that old readers simply ignore, or giving a field a default so its absence is never an error.</td></tr>
+  <tr><td>Schema Registry</td><td>giữ nguyên "Schema Registry" — server riêng lưu từng phiên bản schema của mỗi topic, nếu cấu hình rule tương thích (backward/forward/full) thì chặn luôn producer đăng ký schema mới phá rule đó, bắt lỗi lúc publish thay vì lúc consumer crash</td><td>A separate server that stores every version of every topic's message schema and, when configured, rejects a producer's attempt to register a new schema version that breaks a configured compatibility rule (e.g. backward) before that version is ever published to the topic — catching the mistake at publish time instead of at every consumer's crash time. Confluent's implementation is the common one; it isn't part of Apache Kafka itself.</td></tr>
+  <tr><td>Avro</td><td>giữ nguyên "Avro" — format binary gọn, schema định nghĩa riêng ngoài data, message chỉ mang schema ID, check tương thích dựa vào schema định nghĩa chứ không đoán qua payload mẫu</td><td>A compact binary serialization format with a schema defined separately from the data, commonly paired with a Schema Registry; messages carry a schema ID instead of repeating field names, and compatibility rules are checked against the schema definition directly rather than inferred from example payloads.</td></tr>
+  <tr><td>Protobuf</td><td>giữ nguyên "Protobuf" — format binary của Google, schema định nghĩa trong file .proto, sinh code theo từng ngôn ngữ, cũng hay dùng với Schema Registry giống Avro</td><td>Google's binary serialization format with schemas defined in <code>.proto</code> files and generated code per language — the other common Schema-Registry-backed format, chosen over Avro mainly for its generated-code ergonomics and wide use outside the Kafka ecosystem.</td></tr>
+</table>
+
 <script src="../assets/nav.js"></script>
 </body>
 </html>

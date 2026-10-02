@@ -6716,3 +6716,68 @@
   with certainty for the round after this one — same standing note as every
   prior round; a completion/quiz-outcome signal or a user-named track should
   take priority over guessing blind again.
+- **2026-10-02 generation (Lesson 88, headless run):** Idempotency check first:
+  `grep -c "n: 88" assets/nav.js` and `ls lessons/ | grep -c "^0088-"` both
+  returned 0 before writing anything. The two `backend/learning-records/`
+  files are still just the two baseline findings (frontend-mindset gap,
+  concurrency-vocabulary gap), neither flagging a new gap, so pacing came from
+  a fresh search against lesson content, same as every recent round. Lesson
+  87's own closing line left no named next topic, so this round swept
+  candidates: N+1/batching, GraphQL, sliding-window/leaky-bucket rate
+  limiting, CQRS, schema evolution/Avro/Protobuf — all either already covered
+  or too deep into infra-operation territory MISSION.md excludes. The clean
+  gap: `grep -rli "event sourcing" lessons/*.html reference/*.html` returned
+  zero hits, and Lesson 87 (yesterday) ended by naming CDC as one way to get a
+  change stream out of a database that still treats its tables as the real
+  thing — the natural next question is what happens if the log itself, not
+  the table, becomes the thing actually stored. That is event sourcing, and
+  it ties directly back to Lesson 46's audit logging (which kept the row and
+  bolted a history trail on) by inverting which artifact is authoritative.
+  Lesson 88 covers: event sourcing as the system of record being an
+  append-only event log instead of a mutable row, with current state computed
+  by replay rather than stored directly; projection as the derived,
+  rebuildable read-table folded from that log; a comparison table against an
+  ordinary table on five axes (what's stored, point-in-time queries, "why did
+  this change," read speed, schema-interpretation changes); and a closing
+  reframe of Lesson 87's CDC as the same two-artifact relationship with
+  authority pointed the opposite way (CDC: table real, stream derived;
+  event sourcing: log real, table/projection derived). A "Scope line" section
+  explicitly excludes CQRS, event versioning, and snapshotting as the genuine
+  operational depth MISSION.md's distributed-systems exclusion rules out,
+  matching how Lessons 72 and 87 drew the same kind of line. No Go code in
+  this lesson (confirmed zero hits for `func `/`package main` before deciding
+  this), so no compile-check module was needed. Checked the glossary first for
+  both new terms — `event sourcing`, `projection` — zero collisions via
+  case-insensitive grep (the only prior "projection"/"aggregate" hits were
+  Lesson 76's unrelated SQL window-function aggregates), added as new rows
+  after Lesson 87's `replication slot` row. Verification performed
+  mechanically in `/tmp/scratch-0088` (outside the repo, discarded after use
+  though the final `rm -rf` on the directory itself was blocked by this
+  session's sandbox — harmless, ephemeral `/tmp` scratch, not tracked by git):
+  (1) a Node quiz-word-count script, both `.split(/\s+/)` and `.split(" ")`
+  cross-checked, first draft uneven on all four questions (an up-to-3-word
+  spread per question), fixed through several rewrite-and-recount cycles —
+  including more than one overshoot where a fix for one option's count broke
+  another option already at target, caught by re-running the script rather
+  than trusted by eye — converged to exactly 10/10/10/10 on all four
+  questions, both counting methods agreeing exactly, and exactly one
+  `data-ok` per question confirmed the same way; (2) an occurrence-count HTML
+  tag-balance check across 20 tag types on both the lesson and
+  `glossary.html` after its two-row addition — clean on every pass, no fix
+  needed; (3) a raw-unescaped-`&` regex scan and (4) a backslash-escaped-quote
+  scan across both files — zero hits in either; (5) `node --check` against
+  `assets/nav.js`, `assets/gloss.js`, and `assets/quiz.js` — all clean, no
+  output. Registered Lesson 88 in `nav.js` (date 2026-10-02), re-confirmed
+  exactly one matching `n: 88` entry and exactly one matching `0088-*` lesson
+  file afterward. No new `learning-records/` file was added this round —
+  routine topical entry like Lessons 3–87, not a new baseline finding. This
+  session's sandbox network-permission gate (`WebFetch`) was checked and
+  found closed again, so the "Go deeper" section says so honestly rather than
+  presenting a freshly fetched citation — the lesson rests on RESOURCES.md's
+  already-standing Kleppmann (DDIA ch. 11) citation, the same chapter Lesson
+  29 first pointed at and Lesson 87 taught the CDC half of, with a named
+  cross-check source (Martin Fowler's "Event Sourcing" article) flagged for
+  once the gate reopens. No confirmed next-lesson gap is named with certainty
+  for the round after this one — same standing note as every prior round; a
+  completion/quiz-outcome signal or a user-named track should take priority
+  over guessing blind again.

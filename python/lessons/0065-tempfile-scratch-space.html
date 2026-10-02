@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 65 · tempfile: scratch space that cleans itself up</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 65 · ~20 min · 2 Oct 2026</p>
+<h1><code>tempfile</code>: scratch space that cleans itself up</h1>
+<p class="byline">Day 64 was fresh content (<code>zipfile</code>) right after Day 63's short review, so today is open either way per this course's established cadence — a fourth fresh day is fine as long as the topic is a genuinely compelling gap, and Day 64's own next-day note already named one directly: <code>tempfile</code> has been used <em>incidentally</em> inside this course's own practice-file checks since Day 6 (every exercise that needs a throwaway file or directory reaches for it), but it has never once been taught as its own topic. That is exactly backwards — the tool this course's own test scaffolding leans on hardest all along has been invisible to the lesson content.</p>
+
+<div class="callout"><strong>Why today, specifically:</strong> a fresh-gap grep across all 64 lessons and every practice file confirmed <code>tempfile</code> is used in at least ten practice files (6, 7, 9, 10, 11, 13, 59, 62, 63, 64) but zero lesson prose ever names or explains it — the strongest, most concrete candidate on the table, exactly as Day 64's next-day note flagged. <code>subprocess</code> and <code>configparser</code> remain weaker, unchanged since Day 58. Today also closes a real loop: Day 62's <code>rmtree()</code> callout and Day 64's path-traversal callout both warn about handling untrusted or temporary scratch space carefully — <code>tempfile</code> is the tool that makes "clean up after yourself, even if the code crashes" automatic instead of a discipline to remember by hand.</div>
+
+<h2>1 · The problem: scratch space that has to be cleaned up by hand is scratch space that leaks</h2>
+<p>A pipeline that stages a downloaded file, extracts a zip (Day 64) to inspect it, or writes an intermediate CSV before the final aggregation all need somewhere to put files that should not outlive the run. The naive approach — pick a path under <code>/tmp</code>, write to it, delete it at the end — has two real problems: a hardcoded name collides if two runs happen at once, and the cleanup step gets skipped entirely if an exception fires before reaching it. <dfn data-en="Python's standard-library module for creating files and directories meant to exist only for the lifetime of the current operation, with safe unique naming and automatic cleanup" data-vn="giữ nguyên &quot;tempfile&quot; — module chuẩn tạo file/thư mục tạm, chỉ tồn tại trong lúc chạy, tên luôn duy nhất và tự dọn dẹp khi xong">tempfile</dfn> solves both: every name it hands out is guaranteed unique even under concurrent runs, and its directory/file objects are <a href="../reference/glossary.html#day6">context managers</a> (Day 6) that delete themselves on the way out of a <code>with</code> block — success or exception, same as every other context manager this course has taught.</p>
+
+<h2>2 · A temporary directory: <code>TemporaryDirectory()</code></h2>
+<pre><code><span class="kw">import</span> tempfile
+<span class="kw">from</span> pathlib <span class="kw">import</span> Path
+
+<span class="kw">with</span> tempfile.TemporaryDirectory() <span class="kw">as</span> tmp_dir:
+    tmp_path = Path(tmp_dir)
+    (tmp_path / <span class="str">"staged.csv"</span>).write_text(<span class="str">"id,amount\n1,10\n"</span>)
+    <span class="cm"># ... read it back, pass it to another function, whatever the step needs ...</span>
+<span class="cm"># by here, tmp_dir and everything written inside it are already gone</span></code></pre>
+<p><code>TemporaryDirectory()</code> creates a brand-new, uniquely named directory and returns its path as a string; wrapping it in <code>with</code> means the entire directory — and everything written inside it, no matter how deeply nested — is deleted the moment the block exits, exactly the way Day 62's <code>rmtree()</code> deletes a tree by hand, except nothing has to remember to call it. This is the exact pattern Day 64's path-traversal callout implies but never spells out: extracting an untrusted zip into a <code>TemporaryDirectory()</code> rather than a permanent location means a bad archive's mess disappears automatically when the <code>with</code> block ends, instead of littering a real directory.</p>
+
+<h2>3 · A temporary file: <code>NamedTemporaryFile()</code></h2>
+<pre><code><span class="kw">import</span> tempfile
+
+<span class="kw">with</span> tempfile.NamedTemporaryFile(mode=<span class="str">"w"</span>, suffix=<span class="str">".csv"</span>, delete=<span class="kw">False</span>) <span class="kw">as</span> f:
+    f.write(<span class="str">"id,amount\n1,10\n"</span>)
+    staged_path = f.name   <span class="cm"># a real path on disk, usable by another process/library</span>
+<span class="cm"># file is closed but NOT deleted yet, because delete=False was passed</span>
+<span class="cm"># ... hand staged_path to something that reopens it by path ...</span></code></pre>
+<p><code>NamedTemporaryFile()</code> behaves like <code>open()</code> (Day 6) — same <code>mode</code>, same file-object methods — but with a guaranteed-unique name and, by default, automatic deletion as soon as it closes. The <code>delete=False</code> flag is the one detail worth being deliberate about: some libraries insist on reopening a file by its path rather than accepting an already-open file object, and on some platforms an open file can't be reopened by another handle while still open. Passing <code>delete=False</code> defers cleanup to the caller — meaning that path <em>must</em> be deleted manually later, usually with <code>Path(staged_path).unlink()</code>, or the "cleans itself up" benefit is lost entirely.</p>
+
+<div class="callout"><strong>Default to <code>TemporaryDirectory()</code> over <code>NamedTemporaryFile(delete=False)</code>:</strong> a directory can hold one file or fifty, needs no per-file cleanup bookkeeping, and the automatic deletion is never opted out of. Reach for <code>NamedTemporaryFile()</code> only when something specifically needs one single named file path rather than a whole scratch directory.</div>
+
+<h2>4 · Why this isn't just "pick a path under <code>/tmp</code>"</h2>
+<p><code>tempfile</code> never guesses a fixed name like <code>/tmp/staging</code> — it asks the operating system for the correct temp location (respecting <code>TMPDIR</code> if set) and generates a random, collision-proof name every time. Two pipeline runs started at once, or a retried run after a crash, never fight over the same path the way two hardcoded <code>/tmp/staging</code> runs would. This is the same "don't hand-roll what the standard library already gets right safely" lesson as Day 59's <code>hashlib</code> for content fingerprints or Day 1's garbage collection — uniqueness and cleanup are solved problems, not something to reinvent per script.</p>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> nothing pandas-specific today — <code>pandas.read_csv()</code>/<code>to_csv()</code> happily accept any path, including one inside a <code>TemporaryDirectory()</code>, but pandas has no opinion on where that scratch space comes from or how it gets cleaned up; that staging decision is this module's job in any pipeline, pandas-backed or not. Not covered further here, per <code>MISSION.md</code>.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/65_tempfile_scratch_space.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/65_tempfile_scratch_space.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: staging a file inside a <code>TemporaryDirectory()</code> and confirming the directory is gone once the <code>with</code> block exits, writing and reading back a <code>NamedTemporaryFile(delete=False)</code> and then cleaning it up by hand, confirming two calls to <code>TemporaryDirectory()</code> never collide on the same name, and staging several files in one temporary directory before aggregating them — the shape a real ETL staging step actually takes.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="TemporaryDirectory() is a context manager: the with block's exit deletes the directory and everything inside it, no matter how it was reached -- normal completion or an exception partway through. That is exactly why it is safer than a hand-written path-plus-manual-delete approach, which skips cleanup entirely if an exception fires first.">
+    <p class="stem">Why does a <code>with tempfile.TemporaryDirectory()</code> block clean up even if an exception is raised inside it?</p>
+    <button class="opt" data-ok>it is a context manager, so exit always runs</button>
+    <button class="opt">tempfile automatically retries the whole failed block once more</button>
+    <button class="opt">exceptions raised inside temp directories are always silently ignored</button>
+  </div>
+  <div class="q" data-why="Passing delete=False defers cleanup to the caller, because some libraries or platforms need to reopen the file by its path rather than accept an already-open handle. Once that flag is used, the resulting path must be deleted manually later, usually via Path(path).unlink(), or the automatic-cleanup benefit tempfile normally provides is simply lost.">
+    <p class="stem">What does passing <code>delete=False</code> to <code>NamedTemporaryFile()</code> actually change?</p>
+    <button class="opt" data-ok>cleanup becomes the caller's own job, done manually later</button>
+    <button class="opt">the temporary file instantly becomes a permanent config file</button>
+    <button class="opt">the file now gets copied automatically into every subdirectory</button>
+  </div>
+  <div class="q" data-why="tempfile asks the operating system for the correct temp location and generates a random, collision-proof name on every single call, rather than reusing one fixed string like /tmp/staging. That is precisely what prevents two concurrent or retried pipeline runs from ever fighting over the exact same path.">
+    <p class="stem">Why does <code>tempfile</code> beat hardcoding a fixed path like <code>/tmp/staging</code>?</p>
+    <button class="opt" data-ok>it generates a fresh, collision-proof unique name on each call</button>
+    <button class="opt">/tmp paths are always rejected outright by every operating system</button>
+    <button class="opt">a fixed string path is technically illegal syntax in Python</button>
+  </div>
+  <div class="q" data-why="A directory can hold any number of files with zero per-file cleanup bookkeeping, and its automatic deletion can never accidentally be opted out of the way delete=False opts a single file out. NamedTemporaryFile() only earns its keep when something specifically needs one single named file path rather than a whole scratch directory.">
+    <p class="stem">Why default to <code>TemporaryDirectory()</code> over <code>NamedTemporaryFile(delete=False)</code> for staging work?</p>
+    <button class="opt" data-ok>one directory holds many files with zero manual per-file cleanup</button>
+    <button class="opt">NamedTemporaryFile simply cannot ever legally hold any CSV formatted content</button>
+    <button class="opt">TemporaryDirectory is always faster at writing out raw file bytes</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the standard library's <a href="https://docs.python.org/3/library/tempfile.html"><code>tempfile</code></a> docs — covers <code>TemporaryDirectory()</code>, <code>NamedTemporaryFile()</code>, the lower-level <code>mkstemp()</code>/<code>mkdtemp()</code> (not covered today, since the context-manager forms already cover this course's staging needs), and the <code>TMPDIR</code>/platform-specific temp-location rules. Not yet in <code>RESOURCES.md</code>; added there today alongside the other single-module stdlib citations.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day65">glossary</a> under Day 65.<br>
+This names a tool this course's own practice files have leaned on since Day 6 without ever teaching it directly — the gap Day 64's next-day note flagged by name.<br><br>
+💬 Anything unclear — <code>TemporaryDirectory()</code> vs <code>NamedTemporaryFile()</code>, when <code>delete=False</code> is actually needed, or why a fixed <code>/tmp</code> path is the wrong instinct? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

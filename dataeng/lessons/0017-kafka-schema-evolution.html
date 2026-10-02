@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 17 · Schema evolution: why JSON-without-a-schema bites</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 17 · ~20 min · 2 Oct 2026</p>
+<h1>Schema evolution: why JSON-without-a-schema bites</h1>
+<p class="byline">Today's tangible win: <code>order_events</code> grows a real new field, <code>channel</code>, added the way a production topic actually survives a schema change — the producer adds it, the consumer is made to tolerate its absence on every message already sitting in the topic, and you prove both halves work with your own terminal output. Then the vocabulary for the tool that makes this safer than hand-rolled JSON: a Schema Registry, and what Avro or Protobuf buy over what you built today.</p>
+
+<div class="callout"><strong>Before today — check Day 16 actually landed:</strong> this lesson edits the same producer Day 16 touched, so confirm its <code>enable.idempotence</code> change is still in place:
+<pre><code>grep -n "enable.idempotence" scripts/produce_order_events.py</code></pre>
+Expected: one line, <code>"enable.idempotence": True,</code>. If it's missing, go back and finish Day 16 first — today adds one more field to the same <code>Producer(...)</code> call's <em>messages</em>, not its config, but it assumes that config is already there.</div>
+
+<h2>1 · The question every producer eventually asks: can I change the shape?</h2>
+<p>Every <code>order_events</code> message since Day 5 has had exactly four fields: <code>event_id</code>, <code>order_id</code>, <code>status</code>, <code>occurred_at</code>. Today the business wants a fifth — which channel the order came through, <code>app</code> or <code>web</code> — because a product question just came up that the current data can't answer. This is an ordinary, permanent fact about any event stream that outlives a single producer deploy: the shape of the message changes, but the topic doesn't get rewritten. Every message already sitting in <code>order_events</code> from Days 5, 6 and 16's runs has only four fields, forever. Only messages produced <em>after</em> today's change will have five.</p>
+<p>A relational table has a schema Postgres enforces on every row, every time — <code>ALTER TABLE</code> is the one place shape changes happen, and every row obeys it from then on. A Kafka topic enforces nothing at all about message shape by default: it's an append-only log of bytes, and <code>order_events</code> happens to carry JSON today only because Day 5's producer chose <code>json.dumps()</code>. Nothing stops tomorrow's producer from writing a message missing a field, renaming one, or changing a type — and nothing tells today's consumer that happened until it crashes on a field that isn't there.</p>
+
+<h2>2 · Two kinds of change: one is safe, one isn't</h2>
+<p>Not every shape change is equally dangerous. The distinction that matters is whether a reader written against the <em>old</em> shape can still make sense of a message in the <em>new</em> shape, and vice versa:</p>
+<table class="gloss">
+  <tr><th>Change</th><th>Old consumer reads a new message</th><th>New consumer reads an old message</th></tr>
+  <tr><td>Add an optional field with a sensible default (today's <code>channel</code>)</td><td>Fine — old consumer code never looks for the new key, ignores it</td><td>Fine, <em>if</em> the new consumer treats a missing key as "use the default" rather than a required field</td></tr>
+  <tr><td>Rename a field (e.g. <code>status</code> → <code>order_status</code>)</td><td>Breaks — old consumer looks for a key that's gone</td><td>Breaks the other direction too — nothing links the old and new names</td></tr>
+  <tr><td>Change a field's type (e.g. <code>order_id</code> int → string)</td><td>Breaks — old consumer's parsing/comparison logic assumed a type that's gone</td><td>Breaks — same problem, reversed</td></tr>
+</table>
+<p>The first row is called a <dfn data-en="a schema change where every message written under the new shape can still be correctly read by code written against the old shape -- typically adding a new optional field that old readers simply ignore, or giving a field a default so its absence is never an error" data-vn="giữ nguyên &quot;backward-compatible change&quot; — đổi schema mà code đọc theo schema CŨ vẫn đọc đúng message theo schema MỚI, thường là thêm field optional có default">backward-compatible change</dfn>: new data doesn't break old readers. Renaming and retyping a field are neither backward- nor forward-compatible — they break readers on both sides of the change, which is exactly why they're the two moves to avoid on a live topic, not just today's moves to avoid.</p>
+
+<h2>3 · Build: add <code>channel</code> the backward-compatible way</h2>
+<p>Add one key to <code>make_event()</code> in <code>scripts/produce_order_events.py</code> — the rest of the file, including Day 16's idempotence config, is unchanged:</p>
+<pre><code><span class="cm"># scripts/produce_order_events.py -- make_event() grows one new field</span>
+<span class="kw">def</span> make_event(order_id: <span class="kw">int</span>, status: <span class="kw">str</span>) -&gt; <span class="kw">dict</span>:
+    <span class="kw">return</span> {
+        <span class="str">"event_id"</span>: <span class="kw">str</span>(uuid.uuid4()),
+        <span class="str">"order_id"</span>: order_id,
+        <span class="str">"status"</span>: status,
+        <span class="str">"occurred_at"</span>: datetime.now(timezone.utc).isoformat(),
+        <span class="str">"channel"</span>: <span class="str">"app"</span>,
+    }</code></pre>
+<p>That alone is a trap half-finished: every message produced from now on has <code>channel</code>, but Day 6's consumer still reads <code>event["channel"]</code>-style dict access nowhere — it only ever reads fields it explicitly listed in its <code>INSERT</code>. The real risk is the <em>opposite</em> direction, and it's easy to miss: once <code>raw.order_events</code> gets a <code>channel</code> column and the consumer's <code>INSERT</code> expects a <code>channel</code> key on every event dict, what happens when it reads one of the dozens of four-field messages Days 5, 6 and 16 already wrote into the topic? Plain dict indexing — <code>event["channel"]</code> — raises <code>KeyError</code> the instant it hits the first old message, and the consumer crashes on data that was perfectly valid when it was written. Fix it with <code>.get()</code> and a default, read as "if this key is missing, assume the oldest known value" rather than "require it":</p>
+<pre><code><span class="cm"># scripts/consume_order_events.py -- inside the message loop, right after json.loads()</span>
+event = json.loads(msg.value())
+event[<span class="str">"channel"</span>] = event.get(<span class="str">"channel"</span>, <span class="str">"unknown"</span>)</code></pre>
+<p>Then widen <code>INSERT_SQL</code> and the warehouse table to match. Add the column — nullable, so existing rows need no backfill:</p>
+<pre><code>docker compose exec -T postgres psql -U fdp -d fdp -c \
+  "ALTER TABLE raw.order_events ADD COLUMN channel TEXT;"</code></pre>
+<pre><code><span class="cm"># scripts/consume_order_events.py -- INSERT_SQL gains one column and one placeholder</span>
+INSERT_SQL = <span class="str">"""
+    INSERT INTO raw.order_events (event_id, order_id, status, occurred_at, channel)
+    VALUES (%(event_id)s, %(order_id)s, %(status)s, %(occurred_at)s, %(channel)s)
+    ON CONFLICT (event_id) DO NOTHING
+"""</span></code></pre>
+<div class="callout"><strong>Why <code>.get("channel", "unknown")</code> and not a required field:</strong> the moment a consumer <em>requires</em> every message to carry a field, it has silently taken a dependency on every producer that has ever written to this topic agreeing on the current shape — including every message already written in the past, which it cannot change. A default makes old data a known, labelled case ("unknown") instead of a crash. This is the same shape of lesson as <a href="../backend/index.html">backend/</a>'s API versioning: a v2 client reading a v1 response (or vice versa) needs a defined fallback for a field that might not be there, not an assumption that it always will be.</div>
+
+<h2>4 · Verify: old messages and new messages, read by the same consumer</h2>
+<p>The proof that matters is reading <em>both</em> shapes with the same running consumer, not just the new one. If your topic already has Day 16's twelve four-field messages in it from an earlier run, skip straight to running the updated consumer against them:</p>
+<pre><code>uv run --with confluent-kafka --with "psycopg[binary]" python3 scripts/consume_order_events.py</code></pre>
+<p>Expected on the old, four-field messages — <code>channel=unknown</code> on every one of them, no crash:</p>
+<pre><code>landed event_id=&lt;uuid&gt; order_id=101 status=placed channel=unknown
+landed event_id=&lt;uuid&gt; order_id=101 status=accepted channel=unknown
+...</code></pre>
+<p>Now produce a fresh batch with today's updated producer, and run the consumer again:</p>
+<pre><code>uv run --with confluent-kafka python3 scripts/produce_order_events.py
+uv run --with confluent-kafka --with "psycopg[binary]" python3 scripts/consume_order_events.py</code></pre>
+<p>Expected on the new messages — <code>channel=app</code> this time, same consumer code, no branch for "old topic" vs. "new topic":</p>
+<pre><code>landed event_id=&lt;uuid&gt; order_id=101 status=placed channel=app
+landed event_id=&lt;uuid&gt; order_id=101 status=accepted channel=app
+...</code></pre>
+<p>This round's verification ran the equivalent of both reads as a static proof rather than a live broker (noted honestly in this lesson's own generation notes): a four-field dict run through <code>event.get("channel", "unknown")</code> produced <code>channel: "unknown"</code>, the same dict run through plain <code>event["channel"]</code> indexing raised <code>KeyError('channel')</code> exactly as the "half-finished fix" above describes, and a five-field dict with <code>channel: "app"</code> already set passed through <code>.get()</code> unchanged. Confirm the column and a mixed table with one query:</p>
+<pre><code>docker compose exec -T postgres psql -U fdp -d fdp -c \
+  "SELECT channel, count(*) FROM raw.order_events GROUP BY channel ORDER BY channel;"</code></pre>
+<pre><code> channel |  count
+---------+---------
+ app     |      12
+ unknown |      12
+(2 rows)</code></pre>
+<p>Both counts in one table, from one unchanged consumer, is the actual demonstration: the schema changed mid-stream and nothing broke on either side of the change. Commit <code>scripts/produce_order_events.py</code> and <code>scripts/consume_order_events.py</code>. <code>stg_order_events</code> stays as Day 6 left it for now — surfacing <code>channel</code> through dbt is a one-line addition whenever a mart actually needs it, not required today.</p>
+
+<h2>5 · What a Schema Registry buys over what you just did by hand</h2>
+<p>Today's fix works, and it's exactly the kind of thing a small team does by hand for a while. It has a real cost that doesn't show up until the team is bigger than one person: the backward-compatibility rule from Section 2 lived entirely in a developer's head and a careful code review. Nothing stopped tomorrow's producer change from renaming <code>status</code> to <code>order_status</code> and shipping it — the topic would accept it happily, and every consumer would break in production, discovered only when it did.</p>
+<p>A <dfn data-en="a separate server that stores every version of every topic's message schema and, when configured, rejects a producer's attempt to register a new schema version that breaks a configured compatibility rule (e.g. backward) before that version is ever published to the topic -- catching the mistake at publish time instead of at every consumer's crash time" data-vn="giữ nguyên &quot;Schema Registry&quot; — server riêng lưu từng phiên bản schema của mỗi topic, nếu cấu hình rule tương thích (backward/forward/full) thì chặn luôn producer đăng ký schema mới phá rule đó, bắt lỗi lúc publish thay vì lúc consumer crash">Schema Registry</dfn> is the tool that moves this check from "a human remembers" to "the infrastructure refuses." A producer registers its message schema before publishing; if a new version of that schema would break a configured compatibility rule — <code>BACKWARD</code> (new schema can read old data, today's rule), <code>FORWARD</code> (old schema can read new data), or <code>FULL</code> (both) — the registry rejects the registration outright, and the bad change never reaches the topic at all. Confluent's Schema Registry is the common implementation; it isn't part of Apache Kafka itself.</p>
+<p>Schema Registry is usually paired with a binary serialization format instead of raw JSON — <dfn data-en="a compact binary serialization format with a schema defined separately from the data, commonly paired with a Schema Registry; messages carry a schema ID instead of repeating field names, and compatibility rules are checked against the schema definition directly rather than inferred from example payloads" data-vn="giữ nguyên &quot;Avro&quot; — format binary gọn, schema định nghĩa riêng ngoài data, message chỉ mang schema ID, check tương thích dựa vào schema định nghĩa chứ không đoán qua payload mẫu">Avro</dfn> or <dfn data-en="Google's binary serialization format with schemas defined in .proto files and generated code per language -- the other common Schema-Registry-backed format, chosen over Avro mainly for its generated-code ergonomics and wide use outside the Kafka ecosystem" data-vn="giữ nguyên &quot;Protobuf&quot; — format binary của Google, schema định nghĩa trong file .proto, sinh code theo từng ngôn ngữ, cũng hay dùng với Schema Registry giống Avro">Protobuf</dfn>. Both buy two things JSON-with-a-schema-in-your-head doesn't give you: field types and required/optional-ness are checked mechanically against a real schema definition rather than inferred from whatever example payloads a developer happened to look at, and messages on the wire carry a compact schema ID instead of repeating every field name in every message — smaller, and impossible to typo a field name into silently accepting.</p>
+<div class="callout"><strong>Vocabulary today, not a build step.</strong> Per this course's Kafka depth rule, a Schema Registry is a new container and a new serialization format across the whole pipeline — real infrastructure cost for a single-developer portfolio where one disciplined convention (additive fields, sensible defaults, no renames) covers today's actual risk. Know what it is, what compatibility mode it would enforce here (<code>BACKWARD</code>), and why real multi-team Kafka deployments reach for it; the hands-on half of today's lesson is Section 3–4, not this one.</div>
+
+<div class="interview">
+<p><strong>Q: "Your team wants to add a field to a Kafka topic's message schema that's already in production. Walk me through how you'd do it safely."</strong> A strong answer, out loud: <em>"The question I'd ask first is which direction of compatibility I need — can new messages still be read by consumers running old code, or do I also need old messages to be readable by new code. For adding a field, backward compatibility is usually what matters: I'd add it as optional with a sensible default, never required, so a consumer that doesn't know about it yet just ignores it. The part people miss is the other direction — once a consumer is updated to expect that field, it still has to handle every message already sitting in the topic from before the field existed, which will never have it. I'd read it with a default — event.get('channel', 'unknown') in Python, not event['channel'] — so a KeyError on old data never happens. What I wouldn't do is rename or retype an existing field on a live topic; that breaks both directions at once, for both old and new consumers, and there's no default that fixes it. At scale, a Schema Registry with a BACKWARD compatibility rule enforces exactly this at publish time instead of relying on code review to catch it, but the underlying discipline — additive fields, defaults for absence, no renames — is the same thing I'd do by hand on a smaller system."</em> The signal: naming backward vs. forward precisely, and catching that the harder direction is making the <em>new</em> consumer tolerate <em>old</em> data, not the other way around.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A backward-compatible change means every message written under the new schema can still be correctly read by code written against the old schema -- the direction that matters when a producer changes first and some consumers haven't updated yet.">
+    <p class="stem">What does a "backward-compatible" schema change guarantee?</p>
+    <button class="opt" data-ok>New messages still read fine on old code</button>
+    <button class="opt">Old messages still read fine on new code</button>
+    <button class="opt">Every single reader crashes the exact same way</button>
+  </div>
+  <div class="q" data-why="Renaming a field breaks both directions at once: old consumer code looks for a key that no longer exists, and nothing links the new field name back to the old one for a consumer reading older messages. Adding an optional field with a default breaks neither direction when handled correctly, which is exactly why today's change used that shape instead.">
+    <p class="stem">Why is renaming an existing field riskier than adding a new optional one?</p>
+    <button class="opt" data-ok>Renaming breaks readers on both sides at once</button>
+    <button class="opt">Renaming only ever breaks the newest readers now</button>
+    <button class="opt">Renaming always stays perfectly backward-compatible in either direction</button>
+  </div>
+  <div class="q" data-why="event['channel'] raises a KeyError the moment it hits any message written before the channel field existed -- every message Days 5, 6 and 16 already wrote to the topic. event.get('channel', 'unknown') instead treats a missing key as the labelled case 'unknown', so old and new messages both read cleanly through the same code path.">
+    <p class="stem">Why does <code>event.get("channel", "unknown")</code> replace plain <code>event["channel"]</code> indexing in today's consumer?</p>
+    <button class="opt" data-ok>Old messages lack the key; indexing crashes there</button>
+    <button class="opt">It runs measurably faster than plain indexing does</button>
+    <button class="opt"><code>.get()</code> is required syntax for every JSON read</button>
+  </div>
+  <div class="q" data-why="A Schema Registry's core job is rejecting a producer's schema registration before publication if it would break a configured compatibility rule (BACKWARD, FORWARD or FULL) -- moving the check from a human reviewing code to infrastructure that refuses the change outright, which is what today's lesson did by hand instead.">
+    <p class="stem">What does a Schema Registry actually enforce that hand-rolled JSON doesn't?</p>
+    <button class="opt" data-ok>Rejects a breaking schema change before it publishes</button>
+    <button class="opt">Makes every Kafka message compress itself much smaller</button>
+    <button class="opt">Replaces the need for any consumer group ever</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> per <code>RESOURCES.md</code>, the <a href="https://kafka.apache.org/documentation/#design">Apache Kafka Design docs</a> are this course's standing citation for what Kafka itself does and doesn't enforce about message shape (nothing, by default) — worth rereading today specifically for that absence. Confluent's own <a href="https://docs.confluent.io/platform/current/schema-registry/index.html">Schema Registry documentation</a> is the primary source for Section 5's compatibility modes and Avro/Protobuf integration; it was not fetched fresh this round (this sandbox's fetch tool was unavailable, noted honestly rather than presented as a live read), so treat its exact compatibility-mode names as worth confirming against the live docs before quoting them verbatim in an interview.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 17.<br>
+<strong>Next lesson:</strong> Phase 2b continues with retention and log compaction — how long <code>order_events</code> actually keeps its messages, what compaction changes about that for a keyed topic, and why consumer lag is the one Kafka health metric worth watching in production.<br><br>
+💬 Anything unclear — the backward/forward direction split, why the registry rejection happens at publish time, or where Avro's schema ID actually lives on the wire? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

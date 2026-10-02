@@ -7383,3 +7383,113 @@
   lesson=0084-nullable-boolean-and-pd-na.html`. The `.scratch-0084/`
   directory was deleted after verification, per this course's standing
   practice of not leaving scratch artifacts committed.
+- 2026-10-02 generation (Lesson 85): headless run. Confirmed no `0085-*`
+  lesson/nav entry and no `lesson_generated` row for course=data dated
+  2026-10-02 existed yet before starting. Read `MISSION.md` and
+  `RESOURCES.md` in full, the tail of `NOTES.md` (this generation log),
+  the single baseline `learning-records/0001-...md` (still the only file
+  there, unchanged), and the last lesson/practice pair (84) plus grepped
+  `assets/nav.js`'s tail and `reference/glossary.html`'s tail for exact
+  registration format. Lesson 84's own teaser named exactly one standing
+  candidate left from the memory/dtype family: sparse dtype — confirmed
+  genuinely uncovered by grepping all 84 lesson bodies plus the glossary
+  (zero real hits; existing "sparse" word matches in NOTES.md/lesson prose
+  were all about this same standing-candidate naming, not the dtype
+  itself). Picked sparse dtype as today's topic — the last member of the
+  named family, closing it out; it also pairs naturally with Lesson 62
+  (memory/dtype optimization) and Lesson 34 (`get_dummies()`), both of
+  which produce exactly the kind of mostly-one-value column sparse dtype
+  targets. Every behavioral claim was probed directly first in
+  `data/.scratch-0085/` (deleted after), on the actually-installed pandas
+  3.0.6 (checked via `uv run --with pandas python3 -c "import pandas as
+  pd; print(pd.__version__)"`): confirmed `astype(pd.SparseDtype("int64",
+  fill_value=0))` on a mostly-zero Series correctly reports `dtype`
+  `Sparse[int64, 0]` and `.sparse.density` as the fraction of non-fill
+  rows; confirmed the underlying object is a real
+  `pandas.arrays.SparseArray` whose `.sp_values` holds only the non-fill
+  values, while `.values`/`.tolist()` on the Series itself still read back
+  identical to the dense original. The main finding, measured at a
+  realistic 10,000-row/2%-filled scale: `astype(pd.SparseDtype("float64",
+  fill_value=0.0))` shrank memory from 80,132 bytes dense to 2,532 bytes
+  sparse (~31.6x) — but the sharper, genuinely surprising result was that
+  leaving `fill_value=` out entirely (`astype("Sparse[float64]")`) does
+  NOT default to `0`; it defaults to the dtype's own missing-value marker
+  (`NaN` for float), so on that identical all-real-zero column the no-
+  fill_value version came back as 120,132 bytes — *larger* than the dense
+  original, not smaller, since every real `0.0` counts as "different from
+  NaN" and gets stored anyway plus bookkeeping overhead. `WebFetch` to
+  external sites was available this round — freshly fetched the pandas
+  User Guide's "Sparse data structures" page and confirmed it documents
+  the identical default-fill-value behavior (defaults to the dtype's own
+  "missing" value, not 0, unless passed explicitly) and a worked example
+  showing the same order-of-magnitude saving (its own 10,000-row mostly-
+  NaN DataFrame: 320,132 bytes dense → 228 bytes sparse); cited as a
+  freshly-verified primary source. Also confirmed directly:
+  `pd.get_dummies(sparse=True)` (Lesson 34) correctly defaults
+  `fill_value=False` on its own, with values reading back identical to
+  the dense dummies version — on a 1,000-row/10-category test, sparse used
+  about half the memory of dense (5,132 vs 10,132 bytes), a smaller ratio
+  than the 31.6x case because 10 categories means each dummy column is
+  still 10% non-fill, far less lopsided; confirmed ordinary arithmetic,
+  `.sum()`, and `groupby().sum()` all run transparently on a sparse column
+  with correct results, no special handling needed; confirmed the one real
+  follow-on gotcha, that `sparse_series + 1` shifts every value including
+  the fill itself, so `.sparse.density` on the result reports `1.0`
+  (nothing still equals the now-stale declared fill) — the compression is
+  silently gone until the column is explicitly re-cast with a fresh
+  `fill_value=`. Also confirmed `convert_dtypes()` (Lesson 51) never picks
+  `Sparse` automatically on its own — it is purely opt-in via explicit
+  `astype()`/`pd.array()`. No existing SQL equivalent was taught for this
+  one (Section 5 says so directly) — row-store databases don't have the
+  same per-repeated-value storage problem at the query layer the way an
+  in-memory pandas column does; named the nearest real cousin (a columnar
+  warehouse's own run-length encoding of low-cardinality columns) without
+  overstating it as a teachable SQL bridge. The shipped (unsolved)
+  `practice/85_sparse_dtype.py` was executed directly from its real
+  `practice/` location and printed exactly 4 ✗ with no traceback; a solved
+  copy (kept only in `.scratch-0085/`, not shipped) then printed all 4 ✓
+  on the first run after one bug was caught and fixed, the same
+  Ellipsis-happens-to-satisfy-a-loose-check risk class prior rounds'
+  notes flagged: Exercise 3's first draft passed `ex3_sparse_flag = ...`
+  straight into `sparse=ex3_sparse_flag`, and since Python's `Ellipsis` is
+  truthy, `get_dummies(sparse=...)` behaved identically to `sparse=True`
+  and the unsolved placeholder printed ✓ without ever being filled in —
+  fixed by adding an explicit `ex3_flag_is_real_true = ex3_sparse_flag is
+  True` identity check to the assertion, so an unfilled `Ellipsis` now
+  fails cleanly as ✗ (confirmed separately that `pd.SparseDtype(...,
+  fill_value=...)` and `df.groupby(...)` both already raised on a raw
+  `Ellipsis` on their own, so Exercises 1, 2, and 4 needed no equivalent
+  fix). Quiz options were checked and leveled with a Python word-count
+  script (`uv run`, scratch `.py` file) — iterated to reach exactly 6/6/6,
+  6/6/6, and 8/8/8 words per question across the three questions, exactly
+  one `data-ok` per question throughout. A separate mechanical tag-balance
+  script (scratch `.py` file) confirmed all tags balanced on the first
+  real pass (`h2` 8/8, `p` 20/20, `div` 6/6, `pre` 4/4, `code` 69/69,
+  `span` 25/25, `strong` 4/4, `em` 3/3, `a` 2/2, `button` 9/9, `dfn` 1/1,
+  `script` 3/3) and found exactly two raw `&` characters, both inside the
+  one established `cd ~/learning/data && uv run …` shell command in a
+  `<pre><code>` block (the same single `&&` every prior lesson has),
+  zero raw `&` in prose. Checked the glossary for a collision before
+  adding anything — grepped `SparseDtype`/`Sparse\[`/`sparse dtype` across
+  the full glossary, found zero existing rows (the only prior hits were
+  incidental uses of the word "sparse" in unrelated prose, e.g. Lesson
+  71) — added exactly one new row, `sparse dtype`, placed directly after
+  Lesson 84's `pd.NA` entry; re-ran the tag-balance script against the
+  glossary file afterward, confirmed it stayed balanced (`tr` 149/149,
+  `td` 444/444, `code` 993/993) with zero raw `&` introduced. Registered
+  Lesson 85 in `nav.js` with today's date (2026-10-02); `node --check`
+  confirmed it still parses as valid JavaScript after the edit, and
+  exactly one `n: 85` entry plus one `0085-*` file reference were
+  confirmed to exist. This round's topic pick closes out the named
+  memory/dtype family entirely (`infer_objects()`, `read_csv(dtype=)`,
+  nullable boolean, sparse dtype all now covered) — no standing candidate
+  is carried forward; tomorrow starts with a fresh curriculum/glossary
+  scan, same as every round without a named carry-over. No new
+  `data/learning-records/` entry was added this round — routine lesson,
+  no new baseline finding to justify one. `bin/record-progress data
+  lesson_generated --day 85 --lesson 0085-sparse-dtype.html --detail
+  '{"by":"headless"}'` was run from the repo root and succeeded
+  immediately: `recorded: data/lesson_generated day=85
+  lesson=0085-sparse-dtype.html`. The `.scratch-0085/` directory was
+  deleted after verification, per this course's standing practice of not
+  leaving scratch artifacts committed.

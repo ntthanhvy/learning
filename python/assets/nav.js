@@ -134,6 +134,8 @@
       file: "lessons/0063-review-retrieval-day-9.html" },
     { n: 64, date: "2026-09-30", title: "zipfile: reading and writing zip archives",
       file: "lessons/0064-zipfile-reading-and-writing-archives.html" },
+    { n: 65, date: "2026-10-02", title: "tempfile: scratch space that cleans itself up",
+      file: "lessons/0065-tempfile-scratch-space.html" },
   ];
 
   const REFS = [

@@ -1319,3 +1319,26 @@ by the user there; they apply here identically.
   day 9 — and dataeng lesson 15 — dbt in CI — were all generated this round
   via delegated agents run without worktree isolation; each agent's `git
   status --short` confirmed it wrote only within its own course directory.)
+- 2026-10-01 (headless 06:00 run, partial): rust verified unchanged as
+  usual and recorded its note row, but the DB shows no `lesson_generated`
+  row for backend/data/python/dataeng that day and no git commit followed
+  — that cycle died before the other four courses finished. Carried
+  forward rather than backfilled: today's cycle just generates each
+  course's next-numbered lesson, one day later than the schedule implied.
+- 2026-10-02 (headless 06:00 run, run manually late at 09:03 ICT): same as
+  every prior post-week day — verified `daily.html`, `assets/srs.js`, and
+  `assets/quiz-bank.js` are all present and unchanged (`quiz-bank.js`
+  still shows 8 `id: "k` matches — kata `k1`-`k7` plus the commented
+  example; `nav.js` still has exactly 7 `file: "lessons` entries, the 7
+  Jul 8-14 lessons only). Still the correct "daily quiz+kata" for this
+  post-week phase per PLAN.md, so nothing new was generated. A DB read via
+  the `node`-wrapped-`psql` workaround confirmed the Oct-1 gap above and
+  showed no `lesson_completed`/quiz/kata signal for any course more
+  recent than mid-July. `bin/record-progress rust note --detail` with the
+  relative-path form succeeded on the first attempt — no workaround
+  needed for this call since it has no literal `$LEARNING_DB_URL` in the
+  command text. No new learning record beyond the Day-1 baseline. (Go
+  skipped again per its own window close, now seventy-four days past it.
+  backend/data/python/dataeng lesson generation for today delegated to
+  parallel subagents, one per course, no worktree isolation — see their
+  own NOTES.md entries for detail.)

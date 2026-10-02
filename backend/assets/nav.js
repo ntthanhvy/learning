@@ -180,6 +180,8 @@
       file: "lessons/0086-write-ahead-log-durability.html" },
     { n: 87, date: "2026-09-30", title: "Change data capture: tapping the WAL instead of polling a table",
       file: "lessons/0087-change-data-capture.html" },
+    { n: 88, date: "2026-10-02", title: "Event sourcing: when the log stops being a side effect and becomes the data",
+      file: "lessons/0088-event-sourcing.html" },
   ];
 
   const REFS = [

@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 88 · Event sourcing: when the log stops being a side effect and becomes the data</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 88 · ~20 min</p>
+<h1>Event sourcing: when the log stops being a side effect and becomes the data</h1>
+<p class="byline">Lesson 87 read the WAL instead of polling a table to get a stream of changes out of Postgres — but the table was still the real thing; the stream was a side channel built on top of it. Today asks the more radical version of the same question: what if the log of changes wasn't a side channel at all, but the only thing actually stored — with every table you've ever queried in this course demoted to a cache you could delete and rebuild?</p>
+
+<h2>1 · The assumption every prior lesson made without saying so</h2>
+<p>Every lesson so far has assumed a table stores the current truth: an <code>orders</code> row has a <code>status</code> column, and when status changes, <code>UPDATE</code> overwrites it. The old value is gone — Lesson 46's audit log was the fix for exactly that loss, writing a second, append-only record of "what happened" <em>alongside</em> the mutable row, because the row itself couldn't be trusted to remember its own history. <dfn data-en="a way of storing data where the system of record is an ordered, append-only log of every event that happened to an entity (OrderPlaced, OrderPaid, OrderShipped), and current state is not stored directly anywhere -- it is computed on demand by replaying that entity's events from the start, rather than by reading a row that was overwritten in place" data-vn="event sourcing (giữ nguyên) — cách lưu dữ liệu mà bản ghi gốc là 1 log append-only chứa mọi event xảy ra với 1 entity (OrderPlaced, OrderPaid, OrderShipped), còn state hiện tại không lưu trực tiếp ở đâu cả -- phải replay lại toàn bộ event của entity đó từ đầu mới ra được, thay vì đọc 1 row đã bị ghi đè">event sourcing</dfn> takes the audit log's insight and makes it the whole design: don't keep a mutable row with a separate history table bolted on. Keep <em>only</em> the log. There is no <code>UPDATE</code>, ever — an order's status isn't a column that changes, it's a fact you derive by reading every event that ever happened to that order, in order, and folding them together: <code>OrderPlaced</code> → <code>OrderPaid</code> → <code>OrderShipped</code> tells you the current status is "shipped" without that word ever being stored as a status anywhere.</p>
+<div class="callout"><strong>Lesson 46 vs. today:</strong> audit logging kept the row <em>and added</em> a history trail next to it — two things, one derived from watching the other. Event sourcing deletes the row's privileged status entirely. The log isn't evidence of what the row did. The log is the only thing that exists; the row, if one exists at all, is a disposable cache of it.</div>
+
+<h2>2 · Reading state means replaying, and nobody wants to replay from the beginning every time</h2>
+<p>Folding thousands of events every time you need to answer "what's this order's status?" is obviously too slow past a handful of events, so practical event-sourced systems keep a <dfn data-en="a read-optimized table built by folding an entity's event log into its current shape, kept only as a derived, rebuildable cache -- if a projection is deleted entirely, replaying the full event log from scratch regenerates it exactly, because the projection holds no information the log didn't already contain" data-vn="projection (giữ nguyên) — bảng tối ưu cho đọc, được tạo ra bằng cách fold event log của 1 entity thành state hiện tại, chỉ là cache có thể rebuild lại -- xóa hết projection rồi replay lại toàn bộ log là tái tạo được y nguyên, vì projection không chứa thông tin gì mà log chưa có">projection</dfn> — an ordinary table that looks exactly like the <code>orders</code> table every earlier lesson assumed, rebuilt from the event log and refreshed as new events arrive. The projection is allowed to be wrong, stale, or missing entirely, because it holds zero information the log didn't already have; delete it and replaying every event from scratch regenerates the identical table. That's the actual trade event sourcing makes: the log is the single source of truth and is never lost or overwritten, at the cost of needing a projection (and the machinery to keep it current) just to get back the fast, simple table reads every other lesson in this course took for granted.</p>
+<div class="callout"><strong>This is CDC's shape, inverted:</strong> Lesson 87's CDC starts from a table (the real thing) and derives a change stream (the side effect) by reading the WAL. Event sourcing starts from the event stream (the real thing) and derives a table — the projection — as the side effect. Same two artifacts, opposite direction of "which one is allowed to be rebuilt from the other."</div>
+
+<h2>3 · What you get, and what it costs</h2>
+<table class="cmp">
+<tr><th></th><th>Ordinary table (Lessons 1–87)</th><th>Event-sourced log</th></tr>
+<tr><td>What's actually stored</td><td>current state, overwritten in place on every UPDATE</td><td>every event that ever happened, never overwritten or deleted</td></tr>
+<tr><td>"What was the status yesterday?"</td><td>impossible without a separate history table (Lesson 46)</td><td>replay events up to yesterday's timestamp — built in, free</td></tr>
+<tr><td>"Why did this change?"</td><td>not stored at all unless logged separately</td><td>the event itself usually carries the reason as a field</td></tr>
+<tr><td>Fast "give me the current row" read</td><td>one row lookup, immediate</td><td>needs a projection kept in sync — extra moving part</td></tr>
+<tr><td>Changing your mind about what a "status" even means</td><td>a migration rewriting existing rows</td><td>rebuild the projection with new folding logic; the log itself never changes</td></tr>
+</table>
+<p>That last row is the real payoff, not a minor one: because the log is immutable and holds raw facts rather than a pre-decided interpretation, you can change how you derive state from it — add a new projection, fix a bug in the folding logic, answer a question nobody thought to ask when the events were recorded — without ever touching old data, the same way Lesson 87's CDC consumer can start fresh from a replication slot without the source table knowing or caring. The cost is real too: every read either goes through a projection you now have to build and keep current, or replays a potentially long event history, and a bug in the folding logic doesn't corrupt the log (it's immutable) but does corrupt every projection built from that point forward until it's fixed and rebuilt.</p>
+
+<div class="interview">
+<p><strong>Q: "What's the difference between event sourcing and just keeping an audit log next to your tables?"</strong> A strong answer, out loud: <em>"An audit log, like the one in Lesson 46, is secondary — the real row still gets UPDATEd in place, and the audit trail is a best-effort record of what happened to it, usually written by a trigger or application code that could in principle be skipped. Event sourcing flips which one is authoritative: the event log is the only thing actually stored, and current state — the row you'd normally query — is a projection folded from that log, which can be deleted and rebuilt at any time because it holds no information the log didn't already have. The audit log describes a row's history; in event sourcing, there often isn't a privileged row at all, only the history, with a disposable table built on top of it for fast reads."</em> The signal: naming which artifact is authoritative and which is derived, not just "event sourcing logs everything."</p>
+</div>
+
+<h2>Scope line</h2>
+<p>MISSION.md excludes distributed systems "beyond vocabulary level," and event sourcing in real systems usually arrives bundled with CQRS (separate read/write models), event versioning across schema changes, and snapshotting strategies for logs too long to replay cheaply — all genuine operational depth this lesson stops short of. Today's goal is narrower and matches every prior pattern lesson in this course: know what the term means, recognize the trade when you see it in a design doc or a PR, and place it correctly next to CDC and audit logging rather than treating all three as the same idea with different names.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="In event sourcing the event log is the only thing actually stored, and current state is derived by replaying and folding that log -- there is no privileged mutable row being overwritten by UPDATE the way every earlier lesson in this course assumed.">
+    <p class="stem">In event sourcing, what is the actual system of record?</p>
+    <button class="opt" data-ok>an append-only log of every single event that ever happened</button>
+    <button class="opt">a single mutable row that just gets updated in place</button>
+    <button class="opt">a nightly snapshot that gets exported to a flat CSV</button>
+    <button class="opt">a cache entry kept alive for a short, fixed time</button>
+  </div>
+  <div class="q" data-why="A projection is a read-optimized table folded from an entity's event log, kept only as a derived, rebuildable cache -- deleting it and replaying the full log from scratch regenerates it exactly, because it holds no information the log didn't already contain.">
+    <p class="stem">What is a projection, in an event-sourced system?</p>
+    <button class="opt" data-ok>a rebuildable table folded straight from the event log itself</button>
+    <button class="opt">the one authoritative copy of data allowed to be overwritten</button>
+    <button class="opt">a lock held for the full length of one transaction</button>
+    <button class="opt">a fixed nightly schedule for taking every database's full backup</button>
+  </div>
+  <div class="q" data-why="Lesson 46's audit log keeps the mutable row as the real thing and adds a secondary history trail next to it. Event sourcing removes the row's privileged status entirely -- the log is the only thing stored, and any current-state table is a disposable derived projection.">
+    <p class="stem">How does event sourcing differ from Lesson 46's audit logging?</p>
+    <button class="opt" data-ok>the log itself replaces the row as the real data</button>
+    <button class="opt">audit logging and event sourcing are the exact same thing</button>
+    <button class="opt">event sourcing never once records a timestamp on any event</button>
+    <button class="opt">audit log rows get rebuilt by replaying events each time</button>
+  </div>
+  <div class="q" data-why="CDC (Lesson 87) starts from a table as the real thing and derives a change stream as a side effect by reading the WAL. Event sourcing starts from the event log as the real thing and derives a table (the projection) as the disposable side effect -- the same two artifacts, with authority pointed the opposite direction.">
+    <p class="stem">How does event sourcing relate to Lesson 87's change data capture?</p>
+    <button class="opt" data-ok>it reverses which artifact, table or log, counts as authoritative</button>
+    <button class="opt">event sourcing always depends on Postgres's logical replication feature existing</button>
+    <button class="opt">CDC and event sourcing both discard history after one read</button>
+    <button class="opt">they solve two entirely unrelated problems sharing no common shape</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> Martin Kleppmann, <em>Designing Data-Intensive Applications</em>, ch. 11 "Derivative Data" / "Event Sourcing" — the same chapter Lesson 29 first pointed at (for change data capture, taught in Lesson 87) and RESOURCES.md already cites as this course's standing data-modeling reference; the event-sourcing section is the direct extension of the "log as source of truth, table as derived index" framing the chapter builds throughout. A live source check against a web reference for this round's specific claims was not attempted — this session's sandbox network-permission gate was closed when checked, the same class of block noted honestly in Lessons 79, 81–86's rounds; the definitions above rest on the Kleppmann chapter already cited by this course rather than a freshly fetched page, and should get a live cross-check (e.g. Martin Fowler's "Event Sourcing" article, a commonly cited second source for this exact pattern) once the gate reopens.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially. Nếu chỗ nào chưa rõ, cứ hỏi lại bằng tiếng Việt cũng được.<br><br>
+<em>Next lesson:</em> open. Still no <code>lesson_completed</code>/quiz-outcome record exists for any lesson after 88 rounds — the honest next step remains a completion signal or a user-named track.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

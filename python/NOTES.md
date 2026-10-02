@@ -8214,3 +8214,113 @@ fail *gracefully* so the learner sees which task failed.
   weighing against starting a new review cycle covering Day 64 (and perhaps
   Days 61/63 if a review day ever revisits a prior review day's own content,
   which no round has done yet).
+- 2026-10-02 — **Day 65 generated: `tempfile` — scratch space that cleans
+  itself up** (headless run), taking Day 64's own next-day note directly: it
+  named `tempfile` as the strongest remaining fresh-gap candidate, used
+  incidentally inside this course's own practice-file checks since Day 6 but
+  never once taught as its own topic. Read `MISSION.md` (untouched,
+  read-only) in full, `PLAN.md` in full, `RESOURCES.md` in full, the full
+  `learning-records/` directory (still only the Day 1 baseline), and the tail
+  of `NOTES.md` including Days 62-64's full entries. Read the full
+  `assets/nav.js` `LESSONS` array and listed `lessons/`/`practice/` to
+  confirm the exact spine covered so far. Read lessons 62-64 plus their
+  practice files for structural and difficulty precedent, and `assets/quiz.js`
+  / `assets/gloss.js` for the exact markup contracts — confirmed
+  `QUIZ_COURSE`'s regex already includes `python` and was not touched.
+  Idempotency: listed `lessons/*.html` and confirmed no `0065-*` file existed,
+  then grepped `assets/nav.js` for any `n: 65` entry — none existed — before
+  writing anything. Today's date (2026-10-02) matches the run's stated date.
+  Decision process: this is a fourth fresh day in a row since Day 61's review
+  (62 fresh, 63 a short review, 64 fresh, both 62 and 64 counting as "fresh"
+  separated by only one short review) — weighed directly against Day 64's own
+  suggestion to consider a new review cycle instead. `tempfile` won because it
+  is not a new thread needing to accumulate alongside others before a review
+  sweep is worth running — it is a concrete, already-flagged, high-confidence
+  gap sitting right at Day 65, exactly the kind of "strong reason" Day 62's
+  own next-day note said would justify a third/fourth fresh day in a row. A
+  fresh-gap grep across all 64 lessons and every practice file confirmed
+  `tempfile` appears in at least ten practice files (6, 7, 9, 10, 11, 13, 59,
+  62, 63, 64) as test scaffolding, but zero lesson prose ever names or
+  explains it. `subprocess`/`configparser` remain weaker, unchanged since Day
+  58. The next review cycle is left for Day 66 or later, to cover Day 64 (and
+  now 65) once a couple more fresh lessons accumulate.
+  Lesson covers: why hand-rolled scratch paths under `/tmp` are unsafe
+  (collisions, skipped cleanup on exception), `TemporaryDirectory()` as a
+  context manager (Day 6) that deletes its whole tree automatically,
+  `NamedTemporaryFile()` behaving like `open()` (Day 6) with a unique name,
+  the `delete=False` escape hatch and why it shifts cleanup back to the
+  caller, and a closing callout naming `TemporaryDirectory()` as the default
+  over `NamedTemporaryFile(delete=False)` for staging work. Explicitly ties
+  back to Day 62's `rmtree()` callout (automatic cleanup vs. remembering to
+  delete by hand) and Day 64's path-traversal callout (extracting an
+  untrusted zip into disposable scratch space) without re-teaching either.
+  No-pandas rule: grepped case-insensitively for `pandas`/`numpy`/`pd\.`/
+  `np\.` in both the lesson and practice file — exactly one hit in the
+  lesson, the standard single-line boundary callout noting `pandas`'s
+  `read_csv()`/`to_csv()` accept any path including one inside a
+  `TemporaryDirectory()` but have no opinion on where scratch space comes
+  from, naming no pandas API taught; zero hits in the practice file.
+  Practice file `practice/65_tempfile_scratch_space.py` (4 checks, stdlib-only,
+  no `--with` flag): staging a file inside a `TemporaryDirectory()` and
+  reading it back from inside the `with` block, writing a
+  `NamedTemporaryFile(delete=False)` and cleaning it up by hand, staging
+  several files in one temp directory and aggregating them (the real ETL
+  staging shape), and a bonus check confirming two `TemporaryDirectory()`
+  calls never collide on a name. Verified in place (this sandbox's `/tmp` is
+  still unavailable — confirmed again this round by a blocked `mkdir
+  /tmp/python-check` attempt, consistent with every prior round's note — so a
+  `.scratch-0065/` directory under the repo root was used instead, deleted
+  after use): the shipped (unsolved) copy printed three ✗ and one ✓ (the
+  no-collision bonus check passes trivially unsolved, since it never calls
+  any of the TODO functions — expected and left as-is) with no traceback; a
+  separately written, fully solved copy (via the `Write` tool, not by editing
+  the shipped file) printed all four ✓ and the "All green" tally, run twice
+  consecutively with identical results both times.
+  HTML tag-balance was checked with a throwaway stdlib
+  `html.parser.HTMLParser`-based stack checker (written via `Write`, deleted
+  after use) — clean, no unclosed or mismatched tags. A raw-unescaped-`&`
+  regex (`&(?!amp;|lt;|gt;|quot;|#39;|apos;|#\d+;)`) found zero true hits.
+  Quiz: 4 questions, one per section (why `with` cleans up even on exception,
+  what `delete=False` actually changes, why unique naming beats a hardcoded
+  path, and when to default to `TemporaryDirectory()` over
+  `NamedTemporaryFile(delete=False)`). Word counts were checked with the same
+  `html.parser.HTMLParser`-based Python script used every round, cross-checked
+  with an independent Node.js regex-based script. First draft mismatched on
+  three of the four questions (Q1 12/8/8, Q3 9/10/11, Q4 10/7/9) — several
+  rounds of one-word edits (adding/trimming "always"/"ever"/"simply"/"any"
+  etc.) landed all four at equal counts: 9/9/9, 9/9/9, 10/10/10, 10/10/10,
+  confirmed by both scripts agreeing at every step, plus `grep -o data-ok |
+  wc -l` confirming exactly 4 occurrences.
+  Glossary: three new terms (`tempfile`, `TemporaryDirectory`,
+  `NamedTemporaryFile`) added under a new `id="day65"` section.
+  `RESOURCES.md`: added a new line for `tempfile` naming Day 65's specific
+  uses (`TemporaryDirectory()`/`NamedTemporaryFile()`, unique naming,
+  `delete=False`).
+  Registered in `assets/nav.js` with `date: "2026-10-02"`; confirmed
+  `node --check assets/nav.js` reports no syntax errors after the edit.
+  **DB access:** per the orchestrator's brief, direct `psql`/
+  `bin/query-progress` reads are hard-blocked in this sandbox and were not
+  attempted — relied on `learning-records/` (still only the Day 1 baseline)
+  plus `NOTES.md`'s own generation-log history for pacing instead. The
+  DB-write step (`bin/record-progress`) was run normally after generation:
+  `bin/record-progress python lesson_generated --day 65 --lesson
+  0065-tempfile-scratch-space.html --detail '{"by":"headless"}'`.
+  `python/learning-records/` still holds only the Day 1 baseline; no new file
+  was added this round — nothing here (a trivially-passing unsolved bonus
+  check, the fourth-fresh-day-in-a-row cadence call) rises to a durable
+  learner-profile finding distinct from what's already recorded.
+  Final `git status --short -- python/` showed exactly five paths changed
+  (`assets/nav.js`, `RESOURCES.md`, `reference/glossary.html`, plus the new
+  lesson and practice file) — no other course's files touched, and no
+  leftover scratch files or directories from the throwaway checker scripts,
+  all deleted before finishing.
+  **Next-day note:** `subprocess` and `configparser` remain the only two
+  previously-named fresh-gap candidates left on the table, both consistently
+  assessed as weaker than every fresh topic chosen since Day 58 — a fresh-gap
+  grep this round found no new stronger candidate. With four fresh days now
+  run since Day 61's review (62, 64, 65, counting only the two full fresh
+  days plus today — 63 was itself a short review), Day 66 should weigh a new
+  review cycle seriously, covering at minimum Day 64 and Day 65 (neither has
+  ever had a retrieval pass), and optionally reaching back to 57/59/60/62 a
+  second time if a review day ever wants to revisit prior review content,
+  which no round has done yet.

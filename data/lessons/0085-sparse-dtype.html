@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 85 · Sparse dtype: compressing a column that's mostly one repeated value</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 85 · ~20 min · 2 Oct 2026</p>
+<h1>Sparse dtype: compressing a column that's mostly one repeated value</h1>
+<p class="byline">Lesson 84's teaser named one standing candidate left over from the memory/dtype family: sparse dtype. Grepped all 84 lesson bodies plus the glossary first — zero real hits (only loose, unrelated uses of the word "sparse" in prose). It's a natural partner to Lesson 62's memory/dtype-optimization lesson and Lesson 34's <code>get_dummies()</code> — both produce exactly the kind of mostly-one-value column sparse dtype is built for.</p>
+
+<h2>1 · The shape of the problem: a column that's almost all one value</h2>
+<p>Every dtype so far has stored one real slot in memory per row, even when most of those rows hold the exact same value. A column from <code>pd.get_dummies()</code> (Lesson 34) with 10 categories is 90% <code>False</code> by construction; a sensor reading, discount amount, or error-code column is routinely 95%+ zero or empty. <dfn data-en="A pandas extension dtype, spelled as the string \"Sparse[dtype]\" in astype() or built directly via pd.SparseDtype(dtype, fill_value=...) -- stores only the values that differ from one declared 'fill_value', instead of one real memory slot per row. The rows that match fill_value are not stored at all, only implied; backed by pandas.arrays.SparseArray, not a plain NumPy array" data-vn="giữ nguyên 'Sparse' dtype — dtype đặc biệt của pandas, viết dạng \"Sparse[dtype]\" trong astype(), CHỈ lưu thật những giá trị KHÁC với 1 giá trị 'fill_value' đã khai; các hàng TRÙNG fill_value không tốn bộ nhớ thật, chỉ ngầm hiểu là fill_value — khác hẳn mảng NumPy thường (mỗi hàng đều tốn 1 ô nhớ)">sparse dtype</dfn> stores only the values that differ from one chosen <code>fill_value</code> — rows matching it aren't stored at all, only implied.</p>
+<pre><code>s_dense = pd.Series([<span class="kw">0</span>, <span class="kw">0</span>, <span class="kw">0</span>, <span class="kw">5</span>, <span class="kw">0</span>, <span class="kw">0</span>, <span class="kw">3</span>, <span class="kw">0</span>])
+s_sparse = s_dense.astype(pd.SparseDtype(<span class="str">"int64"</span>, fill_value=<span class="kw">0</span>))
+s_sparse.dtype             <span class="cm"># Sparse[int64, 0] -- the fill_value is part of the dtype itself</span>
+s_sparse.sparse.density    <span class="cm"># 0.25 -- fraction of rows that are NOT the fill_value (2 of 8)</span></code></pre>
+<p>Confirmed directly: <code>s_sparse.values</code> and <code>s_sparse.tolist()</code> return the exact same values as the dense original — reading a sparse column looks completely ordinary. Only the storage underneath changed. The underlying object is a <code>pandas.arrays.SparseArray</code>, and its own <code>.sp_values</code> attribute shows what's actually kept in memory: just <code>[5, 3]</code>, the two values that differ from <code>0</code>.</p>
+
+<h2>2 · The real win: measured memory, at realistic scale</h2>
+<p>On a tiny 8-row toy example the saving is invisible under fixed overhead. Confirmed directly at a more realistic scale — 10,000 rows, 200 of them (2%) holding a real value, the rest exactly <code>0.0</code>:</p>
+<pre><code>s_dense.memory_usage(deep=<span class="kw">True</span>)   <span class="cm"># 80,132 bytes</span>
+s_dense.astype(pd.SparseDtype(<span class="str">"float64"</span>, fill_value=<span class="kw">0.0</span>)).memory_usage(deep=<span class="kw">True</span>)
+                                      <span class="cm"># 2,532 bytes -- about 31.6x smaller</span></code></pre>
+<p>That ratio scales with how skewed the column really is: the sparser the real data (the closer density is to 0), the bigger the win. A column that's 50/50 split barely benefits at all, and can even cost more than it saves once you add the overhead of tracking which positions are "real" — sparse dtype is a tool for genuinely lopsided columns, not a default to reach for everywhere, the same selective-use discipline Lesson 62 already taught for <code>category</code>.</p>
+
+<div class="callout"><strong>Gotcha, confirmed directly: leaving out <code>fill_value=</code> does NOT default to 0 — it defaults to the dtype's own "missing" marker (<code>NaN</code> for float), and on an all-real-zero column this makes the "sparse" version bigger than the dense original, not smaller.</strong> <code>s_dense.astype("Sparse[float64]")</code> with no <code>fill_value=</code> picked <code>NaN</code> as the fill — and since the column's real values are <code>0.0</code>, not <code>NaN</code>, every single row counts as "different from the fill" and gets stored anyway, plus the bookkeeping overhead on top. On the same 10,000-row column: the shorthand string with no fill_value gave <code>120,132</code> bytes (density <code>1.0</code> — <em>larger</em> than the dense original's <code>80,132</code>), while <code>pd.SparseDtype("float64", fill_value=0.0)</code> gave the real <code>2,532</code> bytes. Always pass <code>fill_value=</code> explicitly, matching the value that actually repeats — pandas has no way to guess which value you consider "normal."</div>
+
+<h2>3 · Where it shows up without being asked for: get_dummies(sparse=True)</h2>
+<p>Lesson 34 covered <code>pd.get_dummies()</code> for one-hot encoding. It takes a <code>sparse=True</code> keyword built for exactly this dtype, since one-hot output is <code>False</code> almost everywhere by construction once there are more than a couple of categories. Confirmed directly, one-hot encoding a 1,000-row column of 10 categories:</p>
+<pre><code>pd.get_dummies(df[<span class="str">"cat"</span>]).memory_usage(deep=<span class="kw">True</span>).sum()               <span class="cm"># 10,132 bytes (dense bool)</span>
+pd.get_dummies(df[<span class="str">"cat"</span>], sparse=<span class="kw">True</span>).memory_usage(deep=<span class="kw">True</span>).sum()  <span class="cm"># 5,132 bytes (Sparse[bool, False])</span></code></pre>
+<p>Roughly half the memory here — smaller than the 31.6x case above, because with only 10 categories each dummy column is still 10% <code>True</code>, nowhere near as lopsided as the 2%-filled example. The pattern holds: more categories (lower density per dummy column) means a bigger sparse win. <code>get_dummies(sparse=True)</code> correctly defaults <code>fill_value=False</code> on its own, since <code>False</code> is unambiguously the "normal" value for a one-hot column — no manual <code>fill_value=</code> needed there.</p>
+
+<h2>4 · Ordinary operations still work — mostly</h2>
+<p>Confirmed directly: arithmetic (<code>+</code>, <code>*</code>), <code>.sum()</code>, and <code>groupby().sum()</code> on a sparse column all run normally and return correct values, no special syntax required — sparse dtype is meant to be a storage-level optimization, transparent to the rest of your code, the same "looks ordinary on the outside" design as nullable <code>Int64</code> (Lesson 51) and <code>category</code> (Lesson 62).</p>
+<p>The one gotcha worth knowing: adding a constant across the whole column (<code>s_sparse + 1</code>) shifts every value including the fill itself — <code>0 + 1 = 1</code> — so after that operation <em>nothing</em> still equals the new fill_value (still reported as the original, now-stale <code>0</code>), and <code>.sparse.density</code> correctly reports <code>1.0</code>: every row is now "non-fill," so the compression that made the column small in the first place is gone until it's explicitly re-cast with a fresh <code>fill_value=</code>. Sparse dtype survives the operation without erroring, but silently stops saving any memory the moment the data stops being lopsided.</p>
+
+<div class="interview">
+<p><strong>Q: "When would you reach for sparse dtype, and what's the catch?"</strong> A strong answer, out loud: <em>"Sparse dtype is for a column that's overwhelmingly one repeated value — a one-hot-encoded column from get_dummies(), or a metric that's zero or null almost everywhere — it only stores the values that differ from a declared fill_value, so a 2%-filled column I measured went from about 80KB dense to about 2.5KB sparse, roughly 30x smaller. The catch I'd watch for: you have to pass fill_value= explicitly and make it match the value that actually repeats — if you leave it out, pandas defaults to the dtype's missing-value marker, not 0, and on an all-zero column that's actually bigger than the dense version, not smaller, because every real zero counts as 'different from NaN' and gets stored anyway. It's also not a free win on every column — if the data's roughly 50/50, the bookkeeping overhead can cost more than it saves, so I'd check .sparse.density first and only reach for it on genuinely lopsided columns."</em> The signal: naming the fill_value default trap specifically, not just "it saves memory" — that's the detail that separates having read the docs from having actually run it.</p>
+</div>
+
+<h2>5 · SQL bridge: this has no everyday SQL equivalent — it's a client-side memory trick</h2>
+<p>There's no SQL keyword for this because the problem doesn't really exist the same way in a row-store database — a table on disk already only pays per-row overhead, not per-repeated-value overhead, and a well-indexed sparse column is usually handled at the storage-engine level (partial indexes, compression) rather than the query layer. The nearest real-world cousin is a columnar warehouse's own run-length encoding of a low-cardinality column — conceptually the same "don't store what repeats" idea, just applied automatically by the engine instead of opted into by name. The practical takeaway for an interview: sparse dtype is a pandas-specific, client-side memory optimization for a Python process holding the whole column in RAM, not a general wrangling concept to translate from SQL — know it exists and when to reach for it, but don't expect a SQL equivalent to bridge it from.</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/85_sparse_dtype.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/85_sparse_dtype.py</code></pre>
+<p>Exercise 1 casts a mostly-zero Series to <code>Sparse[int64]</code> with an explicit <code>fill_value=0</code> and confirms the dtype and density (Section 1). Exercise 2 reproduces the fill_value trap directly: casting the same real-zero column with no <code>fill_value=</code> declared should NOT shrink memory the way the explicit version does (Section 2). Exercise 3 confirms <code>get_dummies(sparse=True)</code> defaults <code>fill_value=False</code> on its own and that reading values back (<code>.tolist()</code>) matches the dense version exactly (Section 3). Exercise 4 confirms <code>groupby().sum()</code> on a sparse column returns the correct values (Section 4).</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: sparse dtype stores only the values that differ from one declared fill_value -- rows matching fill_value aren't stored at all, only implied. That's the entire mechanism behind the memory savings.">
+    <p class="stem">What does a <code>Sparse[dtype]</code> column actually store in memory?</p>
+    <button class="opt" data-ok>Only the values unlike the fill</button>
+    <button class="opt">Every value, just in smaller dtype</button>
+    <button class="opt">A compressed copy of every value</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: astype(&quot;Sparse[float64]&quot;) with no fill_value= defaults to NaN, the dtype's own missing-value marker -- not 0. On an all-real-zero column this makes the result bigger than dense, not smaller, since every real zero counts as different from NaN.">
+    <p class="stem">Casting a real all-zero column to <code>Sparse[float64]</code> with no <code>fill_value=</code> given defaults the fill to what?</p>
+    <button class="opt" data-ok>NaN, the dtype's own missing marker</button>
+    <button class="opt">Zero, matching the column's real value</button>
+    <button class="opt">Whichever value appears most often here</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: adding a constant across a sparse column shifts every value including the fill itself, so after s_sparse + 1 no row still equals the stale fill_value -- density reports 1.0 and the compression is gone until the column is explicitly re-cast with a fresh fill_value.">
+    <p class="stem">After computing <code>s_sparse + 1</code> on a <code>fill_value=0</code> sparse column, what happens to its compression?</p>
+    <button class="opt" data-ok>Gone — every row now differs from fill</button>
+    <button class="opt">Unchanged — plus one does not touch fill</button>
+    <button class="opt">Improved — addition increases the density far more</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the pandas User Guide's <a href="https://pandas.pydata.org/docs/user_guide/sparse.html">"Sparse data structures"</a> page (per <code>RESOURCES.md</code>'s "Docs: pandas User Guide" entry, ~8 min) — freshly fetched and confirmed this round to document the exact fill_value-defaulting behavior above (default fill is the dtype's own missing marker, not 0, unless passed explicitly) and a documented example showing a 10,000-row mostly-NaN DataFrame shrinking from 320,132 bytes dense to 228 bytes sparse, the same order-of-magnitude saving measured directly above.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>sparse dtype</code> is new today, added right after Lesson 84's <code>pd.NA</code> entry.<br>
+<strong>Next lesson:</strong> the named memory/dtype family (<code>infer_objects()</code>, <code>read_csv(dtype=)</code>, nullable boolean, sparse dtype) is now fully covered — tomorrow starts with a fresh curriculum/glossary scan, no standing candidate carried forward.<br><br>
+💬 Anything unclear — sparse dtype, <code>fill_value=</code>, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

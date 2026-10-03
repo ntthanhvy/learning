@@ -8324,3 +8324,97 @@ fail *gracefully* so the learner sees which task failed.
   ever had a retrieval pass), and optionally reaching back to 57/59/60/62 a
   second time if a review day ever wants to revisit prior review content,
   which no round has done yet.
+- 2026-10-03 — **Day 66 generated** (`lessons/0066-csv-dictwriter.html`),
+  overriding Day 65's own next-day note (which flagged Day 66 as a good point
+  to start a new review cycle) on explicit orchestrator instruction naming a
+  specific fresh topic instead: `csv.DictWriter`, the write-side mirror of
+  Day 6's `csv.DictReader`. Confirmed fresh via a targeted grep before writing
+  anything — `csv.DictWriter` appeared in zero of the first 65 lessons and had
+  no row in `reference/glossary.html`, even though Day 6 taught the read side
+  in full and this course's own read→clean→aggregate→write framing has always
+  implied an untaught write step. Taught `csv.DictWriter(file,
+  fieldnames=...)`; why `fieldnames=` must be passed explicitly, unlike
+  `DictReader`, which infers column names from a header row that doesn't
+  exist yet when writing a brand-new file; `writeheader()` then
+  `writerows()`/`writerow()`; the `newline=""` gotcha (text mode's own
+  `\n`→platform-native translation stacks on top of `csv`'s own `\r\n`,
+  doubling it to `\r\r\n` on Windows — framed explicitly as a real bug that
+  doesn't show up locally on Linux/macOS, not a style nicety); and
+  `extrasaction="ignore"`/`restval=` for dict keys that don't match
+  `fieldnames` exactly, tied back lightly to Day 1's names-must-point-at-something
+  framing and Day 3's dict themes without re-teaching either. No-pandas rule:
+  grepped case-insensitively for `pandas`/`numpy`/`pd\.`/`np\.` in both the
+  lesson and practice file — exactly one hit in the lesson, the standard
+  single-line `to_csv()` contrast callout, zero hits in the practice file.
+  Practice file `practice/66_csv_dictwriter.py` (3 checks, stdlib-only, no
+  `--with` flag, function-stub-with-`pass` style matching Day 65's):
+  `writeheader()`+`writerows()` round-tripped through `DictReader` inside one
+  `TemporaryDirectory()` (Day 65) block, the `newline=""` gotcha checked by
+  asserting the raw written bytes never contain doubled `\r\r\n`, and
+  `extrasaction="ignore"` dropping a dict key absent from `fieldnames`.
+  Verified in a scratch `.scratch-0066/` directory under the repo root
+  (`/tmp` unavailable to this session per every prior round's note, confirmed
+  again this round by a blocked `wc` call outside the repo's allowed
+  directories): the shipped (unsolved) copy printed three clean ✗ lines with
+  no traceback; a separately written, fully solved copy (via `Write`, not by
+  editing the shipped file) printed all three ✓ and the "All green" tally,
+  run twice consecutively with identical results both times. Also confirmed,
+  via a throwaway buggy variant omitting `newline=""`, that this sandbox's
+  Linux platform does not actually reproduce the doubled-line-ending bug
+  locally (native `\n` needs no translation here) — consistent with the
+  lesson's own text naming this a "works on Linux, breaks on Windows" trap,
+  and not a flaw in the check itself, which still correctly asserts what the
+  solved code must produce. Scratch directory and all throwaway files deleted
+  before finishing.
+  HTML tag balance was checked per-tag via `Grep` counts (`div` 7/7, `pre`
+  5/5, `h2` 7/7, `button` 12/12, `p` 19/19 using a `<p(\s|>)` pattern to avoid
+  `<pre>` false-matching `<p`, `dfn` 3/3) — all balanced, no throwaway HTML
+  parser needed this round.
+  Quiz: 4 questions, one per section (why `fieldnames=` is required, what
+  skipping `writeheader()` actually does, why `newline=""` matters, and what
+  `extrasaction="ignore"` changes). Word counts were checked with a small
+  throwaway regex-based Python script (run via `uv run python3`, deleted
+  after use, since this sandbox blocks ad hoc `python3 <script>` invocations
+  outside the repo's allowed directories) rather than by eye. First draft
+  mismatched on all four questions (Q1 10/8/8, Q2 11/9/8, Q3 11/10/8, Q4
+  10/9/10) — several rounds of one-to-two-word edits (adding "ever"/"single"/
+  "fully"/"just"/"instead"/"data"/"plain"/"at all", trimming where needed)
+  landed all four at equal counts: 10/10/10, 11/11/11, 11/11/11, 10/10/10,
+  confirmed by re-running the same script after every edit until it reported
+  "ALL OK".
+  Glossary: three new terms (`csv.DictWriter`, `fieldnames`, `extrasaction`)
+  added under a new `id="day66"` section, placed directly before the closing
+  `</table>`/`<p class="next">` footer, matching every prior day's section
+  convention (confirmed by reading Day 62/64/65's existing sections first).
+  The 3 new `<dfn data-en` tags in the lesson body match the 3 new glossary
+  rows one-for-one; no duplicate-term check needed since `csv.DictWriter`,
+  `fieldnames`, and `extrasaction` collide with no Day 1-65 entry (Day 6's
+  existing `csv.DictReader` row was left untouched and not duplicated).
+  `RESOURCES.md`: added a new `csv` docs line (it had none before, despite
+  Day 6 already relying on the module) covering both Day 6's read side and
+  today's write side in one citation, placed after the Day 65 `tempfile` line
+  per the file's day-ordered citation convention.
+  Registered in `assets/nav.js` with `date: "2026-10-03"` right after the
+  `n: 65` entry; confirmed `node --check assets/nav.js` reports no syntax
+  errors after the edit.
+  **DB access:** per every prior round's note, direct `psql`/
+  `bin/query-progress` reads remain hard-blocked in this sandbox and were not
+  attempted. The DB-write step ran normally: `bin/record-progress python
+  lesson_generated --day 66 --lesson 0066-csv-dictwriter.html --detail
+  '{"by":"headless"}'`, which returned `recorded: python/lesson_generated
+  day=66 lesson=0066-csv-dictwriter.html`.
+  `python/learning-records/` still holds only the Day 1 baseline; nothing
+  this round rises to a durable learner-profile finding distinct from what's
+  already recorded.
+  Final `git status --short -- python/` should show exactly five paths
+  changed (`assets/nav.js`, `RESOURCES.md`, `reference/glossary.html`, plus
+  the new lesson and practice file) — no other course's files touched, and no
+  leftover scratch files or directories.
+  **Next-day note:** Day 65's review-cycle recommendation still stands and
+  was deferred a second time by explicit instruction, not by choice — Day 67
+  should seriously weigh opening a new review cycle covering at minimum Day
+  64, 65, and 66 (none has ever had a retrieval pass), rather than deferring
+  a third time. `subprocess` and `configparser` remain the only two
+  previously-named fresh-gap candidates left on the table if a fifth
+  consecutive fresh day is chosen instead, both still assessed as weaker than
+  every fresh topic chosen since Day 58.

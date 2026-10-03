@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 86 · pd.read_sql(): the ETL Extract step via SQL, and its dtype traps</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 86 · ~20 min · 3 Oct 2026</p>
+<h1>pd.read_sql(): the ETL Extract step via SQL, and its dtype traps</h1>
+<p class="byline">Lesson 8's ETL aside named <code>to_csv</code>/<code>to_sql</code> as the Load step in passing; Lesson 64 later closed <code>to_csv</code>/<code>to_parquet</code> as their own lesson but left the SQL side alone. Grepped every lesson and the glossary for <code>to_sql|read_sql</code> and found exactly those two passing mentions, never a dedicated lesson — the same gap shape Lesson 64 itself closed for file output. Today closes the mirror image on the Extract side: loading a query result straight into a DataFrame, and the one dtype surprise that trips up nearly everyone moving from SQL into pandas for the first time.</p>
+
+<h2>1 · The SQL bridge: this is just SELECT, with the result landing in a DataFrame</h2>
+<p>If a SQL query already returns the exact shape of table you want, there is no reason to export it to a file first. <dfn data-en="a pandas function that runs a SQL query (or reads a whole table) against a database connection and returns the result directly as a DataFrame -- the Extract step of ETL done without an intermediate CSV/file" data-vn="giữ nguyên 'pd.read_sql()' — chạy câu SQL (hoặc đọc nguyên 1 table) qua 1 kết nối DB, trả kết quả thẳng thành DataFrame — bước Extract của ETL, không cần qua file trung gian">pd.read_sql(sql, conn)</dfn> runs the query and hands back a DataFrame directly:</p>
+<pre><code>orders = pd.read_sql(<span class="str">"SELECT * FROM orders WHERE amount > 100"</span>, conn)
+orders.dtypes  <span class="cm"># one column per SELECTed column, dtype guessed from the data that came back</span></code></pre>
+<p>Mentally this is <code>psql -c "SELECT ..."</code> piped straight into a table object instead of to a terminal or a file — the Extract half of the ETL shape Lesson 8 named, now spelled out on its own. Everything downstream (filter, groupby, merge) is unchanged from every prior lesson; only the loading step is new.</p>
+
+<h2>2 · read_sql() vs read_sql_query() vs read_sql_table()</h2>
+<p><code>pd.read_sql()</code> is a dispatcher, not its own implementation — it looks at what was passed and forwards to one of two stricter functions:</p>
+<table class="gloss">
+<tr><th>Function</th><th>Takes</th><th>SQL equivalent</th></tr>
+<tr><td><dfn data-en="the stricter sibling of read_sql() that only accepts a SQL query string (or SQLAlchemy Selectable), never a bare table name -- the explicit, unambiguous choice when the source is a query" data-vn="giữ nguyên 'read_sql_query()' — chỉ nhận câu SQL (query string), KHÔNG nhận tên table trần — lựa chọn rõ nghĩa khi nguồn là 1 query">read_sql_query()</dfn></td><td>a SQL query string</td><td><code>SELECT ...</code> with any WHERE/JOIN/GROUP BY</td></tr>
+<tr><td><dfn data-en="the stricter sibling of read_sql() that only accepts a bare table name, never a SQL query string -- pandas builds the SELECT * internally, equivalent to no WHERE/JOIN at all" data-vn="giữ nguyên 'read_sql_table()' — chỉ nhận tên table trần, KHÔNG nhận câu SQL — pandas tự ráp SELECT * bên trong, tương đương không WHERE/JOIN gì cả">read_sql_table()</dfn></td><td>a bare table name</td><td><code>SELECT * FROM table</code>, nothing else possible</td></tr>
+<tr><td><code>read_sql()</code></td><td>either one</td><td>guesses which of the two above to call</td></tr>
+</table>
+<p>Confirmed directly (pandas 3.0.5): <code>read_sql_table()</code> additionally requires a SQLAlchemy engine specifically — it needs to introspect the table's real column types through SQLAlchemy's reflection, which a plain DB-API connection can't provide. For anything with a WHERE clause, a JOIN, or an aggregation — which in practice is almost every real pull — reach for <code>read_sql_query()</code> directly rather than the bare table name, and <code>read_sql()</code> simply becomes convenient shorthand once the habit is to always pass a query string.</p>
+
+<h2>3 · Why conn must be a connection/engine object, not a raw cursor</h2>
+<p>The <code>conn</code> argument is not the live, already-executing cursor object a lower-level DB-API library hands back — it's a connection-like object pandas can introspect and run its own query through: a <dfn data-en="an object representing a live database link that a client library (e.g. SQLAlchemy, sqlite3, psycopg) can run queries over -- what pd.read_sql()'s conn= argument expects, as opposed to a cursor already mid-query" data-vn="giữ nguyên 'connection' — đối tượng đại diện 1 kết nối DB còn sống, dùng để chạy query qua nó — đúng thứ pd.read_sql() cần ở tham số conn=, khác với 1 cursor đang chạy giữa query">connection</dfn>, or for a full-featured setup, a <dfn data-en="SQLAlchemy's abstraction over a database connection pool and dialect, covering Postgres/MySQL/SQLite/etc. uniformly -- the recommended object to pass as read_sql()'s conn= for anything beyond sqlite3, since it lets pandas introspect column types and manage connection lifecycle correctly" data-vn="giữ nguyên 'SQLAlchemy engine' — lớp trừu tượng của SQLAlchemy quản lý pool kết nối + dialect DB (Postgres/MySQL/SQLite...), nên dùng làm conn= cho read_sql() khi không phải sqlite3, vì pandas cần nó để biết kiểu cột và quản lý kết nối đúng cách">SQLAlchemy engine</dfn>. Confirmed directly: pandas' own docs recommend a SQLAlchemy engine for every backend except sqlite3, which is special-cased to also accept a plain stdlib <code>sqlite3.Connection</code> directly, no SQLAlchemy required.</p>
+<pre><code><span class="kw">from</span> sqlalchemy <span class="kw">import</span> create_engine
+engine = create_engine(<span class="str">"postgresql://user:pass@host/dbname"</span>)
+orders = pd.read_sql(<span class="str">"SELECT * FROM orders"</span>, engine)   <span class="cm"># engine, not a raw psycopg cursor</span>
+
+<span class="kw">import</span> sqlite3
+conn = sqlite3.connect(<span class="str">"local.db"</span>)
+orders2 = pd.read_sql(<span class="str">"SELECT * FROM orders"</span>, conn)      <span class="cm"># sqlite3 is the one special case</span></code></pre>
+<p>A raw DB-API cursor already mid-query doesn't fit this shape at all — <code>read_sql()</code> wants to run the query itself and manage fetching every row, not consume a cursor someone else already advanced.</p>
+
+<h2>4 · params=: never f-string a SQL query</h2>
+<p>Anyone coming from a backend/SQL background who's internalized the injection lesson already knows the rule: never splice a variable into a SQL string directly. The exact same rule applies here, and it's just as easy to forget because it <em>feels</em> like harmless Python string formatting rather than a query being sent to a server:</p>
+<pre><code><span class="cm"># WRONG -- the same SQL-injection shape as any raw DB-API call</span>
+min_amount = <span class="num">100</span>
+pd.read_sql(<span class="kw">f</span><span class="str">"SELECT * FROM orders WHERE amount > {min_amount}"</span>, conn)
+
+<span class="cm"># RIGHT -- bind parameters, same idea as a parameterized query anywhere else</span>
+pd.read_sql(
+    <span class="str">"SELECT * FROM orders WHERE amount > %(min_amount)s"</span>,
+    conn,
+    params={<span class="str">"min_amount"</span>: min_amount},
+)</code></pre>
+<p><code>params=</code> passes bind values through the underlying driver the same way any parameterized query would — the input is sent as data, never concatenated into the SQL text, so a value like <code>"100; DROP TABLE orders;"</code> is just treated as a literal string to compare, not executable SQL. This is the identical defense the backend course's SQL-injection lesson teaches for any raw query — <code>pd.read_sql()</code> isn't exempt from it just because the caller is pandas instead of a web framework. The exact placeholder style (<code>%(name)s</code> vs <code>:name</code> vs <code>?</code>) depends on the underlying driver/dialect, not on pandas.</p>
+
+<h2>5 · The real interview trap: a nullable INTEGER column comes back as float64, not Int64</h2>
+<p>This is the dtype surprise worth knowing cold. A SQL <code>INTEGER</code> column that allows <code>NULL</code> and actually has at least one <code>NULL</code> row does not come back from <code>read_sql()</code> as a nullable integer — it silently gets upcast to plain <code>float64</code>, with every <code>NULL</code> becoming <code>NaN</code>:</p>
+<pre><code><span class="cm">-- SQL table: quantity INTEGER, one NULL row</span>
+pd.read_sql(<span class="str">"SELECT order_id, quantity FROM orders"</span>, conn).dtypes
+<span class="cm">-- order_id      int64
+-- quantity    float64    &lt;- an INTEGER column, silently turned into float!</span></code></pre>
+<p>Confirmed directly (pandas 3.0.5): the reasoning is identical to Lesson 51's plain-<code>int64</code>-can't-hold-NaN story — NumPy's default integer dtype has no missing-value slot, so the moment a whole-number column has even one gap, pandas must widen it to something that can represent "missing," and the historical default for that has always been <code>float64</code>, not the nullable <code>Int64</code> this course has used since Lesson 51. A quantity of <code>3</code> silently reads back as <code>3.0</code> — correct in value, but the wrong dtype for anything downstream expecting whole numbers, and a genuine <code>.0</code>-vs-missing ambiguity disappears into "it's a float now, trust the NaNs."</p>
+<p>The fix is the same nullable-dtype opt-in this course has used repeatedly: pass <dfn data-en="a pandas read_sql()/read_csv() keyword that, when set to \"numpy_nullable\", makes every returned column use pandas' own nullable dtypes (Int64, boolean, string) instead of NumPy's defaults -- so a NULL-containing INTEGER column comes back as real nullable Int64 with pd.NA, not silently upcast to float64" data-vn="giữ nguyên 'dtype_backend' — tham số của read_sql()/read_csv(), đặt \"numpy_nullable\" thì MỌI cột trả về dùng dtype nullable của pandas (Int64, boolean, string) thay vì dtype mặc định của NumPy — nên cột INTEGER có NULL trả về đúng Int64 kèm pd.NA, không bị ép lên float64 âm thầm">dtype_backend="numpy_nullable"</dfn>, or cast the column afterward:</p>
+<pre><code>pd.read_sql(<span class="str">"SELECT order_id, quantity FROM orders"</span>, conn, dtype_backend=<span class="str">"numpy_nullable"</span>).dtypes
+<span class="cm">-- order_id      Int64    &lt;- nullable, matches the SQL schema's real intent
+-- quantity      Int64    &lt;- NULL rows become pd.NA, not NaN -- no silent float upcast</span>
+
+<span class="cm"># or cast after the fact, same result for one column:</span>
+df[<span class="str">"quantity"</span>] = df[<span class="str">"quantity"</span>].astype(<span class="str">"Int64"</span>)</code></pre>
+<p>This is exactly the Lesson 84/51 nullable-dtype pattern, just arriving through a different door: a database round trip, instead of a CSV read or an object-column conversion. Same marker (<code>pd.NA</code>), same reason (NumPy's plain integer/boolean have no room for "missing"), new source.</p>
+
+<h2>6 · chunksize=: streaming a big result instead of loading it all at once</h2>
+<p>A query that returns millions of rows materialized all at once as one DataFrame can blow past available memory before any processing even starts. <dfn data-en="a pd.read_sql()/read_sql_query() keyword that, instead of returning one DataFrame, returns an iterator yielding DataFrames of at most that many rows each -- for streaming a large query result in batches rather than materializing the whole thing in memory at once" data-vn="giữ nguyên 'chunksize' — tham số của read_sql()/read_sql_query(), thay vì trả 1 DataFrame thì trả về 1 iterator, mỗi lần sinh ra 1 DataFrame tối đa bằng số dòng chỉ định — để xử lý kết quả query LỚN theo từng lô, không load hết 1 lần vào RAM">chunksize=</dfn> turns the return value into an iterator of smaller DataFrames instead of one big one:</p>
+<pre><code><span class="kw">for</span> batch <span class="kw">in</span> pd.read_sql(<span class="str">"SELECT * FROM orders"</span>, conn, chunksize=<span class="num">10_000</span>):
+    process(batch)   <span class="cm"># each `batch` is a DataFrame of at most 10,000 rows</span></code></pre>
+<p>This is the one legitimate place a <code>for</code> loop belongs in this course's pandas style — the loop is over <em>batches</em>, not rows; every batch is still processed with ordinary vectorized pandas code inside it. The SQL-side cousin is a server-side cursor fetching in pages rather than one giant resultset; <code>chunksize=</code> is pandas doing the same thing on the client side, trading one big spike in memory for many smaller, bounded ones.</p>
+
+<div class="interview">
+<p><strong>Q: "Walk me through pulling data from a database into pandas for a pipeline."</strong> A strong answer, out loud: <em>"I'd use read_sql_query() with an explicit SQL string rather than the bare-table read_sql_table(), since almost any real pull has a WHERE or JOIN. The conn= argument needs to be a real connection or engine object — a SQLAlchemy engine for anything beyond SQLite, since pandas needs to run the query itself, not consume an already-executing cursor. Any value coming from outside the code goes through params=, never an f-string — splicing a variable into the SQL text is the exact same injection risk as any raw query, pandas isn't special-cased out of that rule. The dtype gotcha I'd watch for: a nullable INTEGER column in the source table comes back as float64 if even one row is NULL, because plain NumPy int64 has no missing-value slot — I'd pass dtype_backend='numpy_nullable' to get real nullable Int64 back instead of a silent float upcast. And if the result set is large, I'd reach for chunksize= to stream it in bounded batches instead of materializing the whole query in memory at once."</em> The signal: naming the params= injection risk and the INTEGER-to-float64 dtype trap unprompted — the two places this bites someone who's only ever tested against a small, NULL-free sample table.</p>
+</div>
+
+<h2>7 · Where this fits</h2>
+<p>Lesson 8 named Extract/Transform/Load as the shape underneath every pandas chain; Lesson 64 later taught Load's file-output half (<code>to_csv</code>/<code>to_parquet</code>) on its own. Today is Extract's SQL half, closing the same kind of gap the same way: the happy path is one line, but the real content is in the traps — the injection risk hiding inside an innocent-looking f-string, and the silent <code>INTEGER</code>→<code>float64</code> dtype demotion that only shows up once a real table has a <code>NULL</code> in it.</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/86_read_sql.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/86_read_sql.py</code></pre>
+<p>Builds a small in-memory SQLite database with the stdlib <code>sqlite3</code> module (no SQLAlchemy install required, since sqlite3 connections work with <code>read_sql()</code> directly — Section 3) containing an <code>orders</code> table with a nullable <code>quantity</code> column that has one real <code>NULL</code> row. Exercise 1 runs a plain <code>read_sql_query()</code> SELECT and confirms the shape of what comes back. Exercise 2 confirms the Section 5 trap directly: the <code>NULL</code>-containing integer column comes back as <code>float64</code>, not a whole-number dtype. Exercise 3 re-reads the same query with <code>dtype_backend="numpy_nullable"</code> and confirms it comes back <code>Int64</code> with a real <code>pd.NA</code>, not <code>NaN</code>. Exercise 4 uses <code>params=</code> to safely filter by a bound value and confirms the parameterized query returns the correct filtered row count.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: a nullable INTEGER column with even one real NULL row comes back from read_sql() as plain float64, with NULL becoming NaN -- NumPy's default int64 has no missing-value slot, so pandas silently widens the whole column to float unless dtype_backend='numpy_nullable' is passed.">
+    <p class="stem">A SQL <code>INTEGER</code> column allows <code>NULL</code> and has one <code>NULL</code> row. What dtype does plain <code>pd.read_sql()</code> give that column by default?</p>
+    <button class="opt" data-ok>float64, with NULL silently becoming NaN</button>
+    <button class="opt">Int64, with NULL correctly becoming pd.NA</button>
+    <button class="opt">object, with NULL staying as None</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: splicing a variable into a SQL string with an f-string before passing it to read_sql() is the exact same SQL-injection risk as any raw DB-API query -- params= binds the value through the driver instead, sending it as data rather than executable SQL text.">
+    <p class="stem">Why should a filter value never be f-string'd directly into the SQL text passed to <code>pd.read_sql()</code>?</p>
+    <button class="opt" data-ok>Same injection risk as any raw SQL query</button>
+    <button class="opt">It makes read_sql() silently return an empty DataFrame</button>
+    <button class="opt">pandas only accepts queries shorter than one line</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: read_sql_table() requires a SQLAlchemy engine specifically, since it needs to introspect the table's real column types through SQLAlchemy's reflection -- a plain DB-API connection or cursor doesn't expose that, which is why read_sql_query() with an explicit SQL string is the safer default for anything with a WHERE or JOIN.">
+    <p class="stem">Why does <code>read_sql_table()</code> need a SQLAlchemy engine specifically, not just any connection?</p>
+    <button class="opt" data-ok>it must introspect real column types via reflection</button>
+    <button class="opt">SQLite tables cannot be queried any other way</button>
+    <button class="opt">plain connections cannot open more than one table</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: chunksize= turns read_sql()'s return value into an iterator yielding DataFrames of at most that many rows each, so a huge query result streams in bounded batches instead of materializing the entire result as one DataFrame in memory at once.">
+    <p class="stem">Passing <code>chunksize=10_000</code> to <code>pd.read_sql()</code> changes the return value into what?</p>
+    <button class="opt" data-ok>an iterator yielding bounded DataFrame batches, not one</button>
+    <button class="opt">a single DataFrame capped at 10,000 total rows</button>
+    <button class="opt">a generator yielding one raw row each time</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the pandas User Guide's <a href="https://pandas.pydata.org/docs/user_guide/io.html#sql-queries">"SQL queries"</a> section of IO tools (per <code>RESOURCES.md</code>'s "Docs: pandas User Guide" entry, ~8 min) — covers <code>read_sql()</code>/<code>read_sql_query()</code>/<code>read_sql_table()</code>/<code>to_sql()</code> together with the full <code>dtype_backend=</code> and <code>chunksize=</code> keyword reference this lesson didn't need in full.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>pd.read_sql()</code>, <code>read_sql_query()</code>, <code>read_sql_table()</code>, connection/SQLAlchemy engine, <code>dtype_backend</code>, and <code>chunksize</code> are all new today, added right after Lesson 85's <code>sparse dtype</code> entry.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-86 comes back reported as shakiest, otherwise another fresh curriculum/glossary scan for the next genuinely-uncovered pattern — this round closed the Extract-side mirror of Lesson 64's Load-side gap, so no standing named candidate carries forward.<br><br>
+💬 Anything unclear — <code>params=</code>, the <code>dtype_backend=</code> trap, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

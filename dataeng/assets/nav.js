@@ -28,6 +28,7 @@
     { n: 15, date: "2026-09-29", title: "dbt in CI: GitHub Actions, state:modified+, deferral", file: "lessons/0015-dbt-in-ci.html" },
     { n: 16, date: "2026-09-30", title: "Kafka delivery semantics & the idempotent producer", file: "lessons/0016-kafka-delivery-semantics.html" },
     { n: 17, date: "2026-10-02", title: "Schema evolution: why JSON-without-a-schema bites", file: "lessons/0017-kafka-schema-evolution.html" },
+    { n: 18, date: "2026-10-03", title: "Retention vs log compaction, and consumer lag", file: "lessons/0018-kafka-retention-compaction-and-consumer-lag.html" },
   ];
 
   const REFS = [

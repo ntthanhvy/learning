@@ -2090,3 +2090,124 @@ along the Phase 2 spine, adapted to the learning records.
   0017-kafka-schema-evolution.html --detail '{"by":"headless"}'` run from
   the repo root: succeeded on the first attempt (`recorded:
   dataeng/lesson_generated day=17 lesson=0017-kafka-schema-evolution.html`).
+- 2026-10-03 (headless run, Day 18 generated): eighteenth lesson,
+  `0018-kafka-retention-compaction-and-consumer-lag.html`. `lessons/`
+  contained only `0001`–`0017`, `assets/nav.js`'s latest entry was Day 17
+  (2026-10-02), and no `2026-10-03`/`0018` entry existed anywhere
+  (`lessons/`, `assets/nav.js`, this file), so proceeded on schedule.
+  Followed Day 17's own closing teaser verbatim rather than re-deriving a
+  topic choice: "retention and log compaction — how long `order_events`
+  actually keeps its messages, what compaction changes about that for a
+  keyed topic, and why consumer lag is the one Kafka health metric worth
+  watching in production" — matches `PLAN.md`'s 2b spine's third bullet
+  exactly ("Retention vs log compaction; consumer lag as the key health
+  metric"). No `learning-records/` signal exists beyond the one Day 1
+  baseline file (confirmed still the only file in that directory), so no
+  reason to deviate. Read `MISSION.md`, `PLAN.md` (domain table and 2b
+  spine), `NOTES.md` in full, `RESOURCES.md`, `assets/nav.js`,
+  `assets/quiz.js`, `assets/gloss.js`, `reference/glossary.html`, and
+  `lessons/0005-kafka-topics-partitions-offsets.html` /
+  `lessons/0006-kafka-consumer-to-warehouse.html` /
+  `lessons/0016-kafka-delivery-semantics.html` /
+  `lessons/0017-kafka-schema-evolution.html` in full for structural and
+  content precedent before writing.
+  **Content:** framed retention (`retention.ms`/`retention.bytes`) as the
+  real operational difference from a queue — Kafka never deletes a message
+  because a consumer read it, only because it aged out by time/size or was
+  superseded by compaction — then set an explicit `retention.ms=604800000`
+  on `order_events` via `kafka-configs.sh --alter` rather than leaving it on
+  an implicit broker default. Introduced log compaction
+  (`cleanup.policy=compact`) on a disposable scratch topic
+  (`scratch_compacted`), never on `order_events` itself, specifically
+  because Section 4's whole point is that compacting the real topic would
+  be a mistake. Built the worked-example argument `PLAN.md`'s spine and the
+  generator instructions both call for explicitly: `order_events` is keyed
+  by `order_id` since Day 5, which looks like a textbook compaction
+  candidate, but Day 6's consumer relies on seeing every status transition
+  (`placed`/`accepted`/`picked_up`/`delivered`) as distinct ordered
+  messages to compute delivery-SLA history — compaction would collapse that
+  down to "current status only" and break the event-sourcing-style replay
+  the pipeline depends on, so `order_events` stays on
+  `cleanup.policy=delete` (time-based retention) on purpose. A three-row
+  comparison table makes the contrast explicit (what the topic holds / what
+  reading order 101's history looks like / what each mode actually suits).
+  Consumer lag covered as the single most-watched Kafka health metric:
+  high-water mark (`LOG-END-OFFSET`) minus a consumer group's committed
+  offset (`CURRENT-OFFSET`), read directly off `kafka-consumer-groups.sh
+  --describe`'s `LAG` column, with the two failure modes named explicitly
+  (processing-too-slow vs. stuck/crashed, distinguished by whether the
+  group has active members). No pandas, no Python-language teaching; no
+  new Python snippet appears in this lesson at all — it is pure
+  `docker compose exec kafka ...` CLI, consistent with Days 16/17's
+  "pure-Kafka day" pattern — so the `py_compile` verification path in this
+  file was not applicable and was not run, noted here rather than silently
+  skipped. Domain names (`order_events`, `order_id`, Day 5's
+  `inspect-group`) used exactly as established; no files in the learner's
+  repo change today, only a one-time `kafka-configs.sh --alter` command
+  against the running broker, which is not something to commit. Opened
+  with a "before today" check re-reading Day 17's `channel` column
+  (`SELECT channel, count(*) FROM raw.order_events GROUP BY channel`) per
+  this file's standing "never assume a prior step landed" guidance.
+  **Verification:** this sandbox's scratch-directory tooling again only
+  permitted paths under the repo root, so scratch work lived at
+  `dataeng/.scratch_dataeng_verify_d18/` (deleted entirely before
+  finishing). Docker was available this round and, unlike Day 17, every
+  `docker compose`/`docker exec` invocation this round succeeded when
+  wrapped through `uv run python3 -c "...subprocess.run([...])"` (the same
+  workaround Days 1/5/6/16 documented), including a bare `docker compose
+  up -d` that pulled `apache/kafka:4.3.1` fresh. Brought up a real scratch
+  single-broker KRaft stack (`docker compose config` validated first),
+  created `order_events` with 3 partitions, and ran every CLI command the
+  lesson shows against it for real rather than hand-deriving the output:
+  `kafka-configs.sh --describe` confirmed no dynamic retention config
+  existed by default (empty output), then `--alter --add-config
+  retention.ms=604800000` followed by a second `--describe` confirmed the
+  exact line the lesson quotes verbatim. Created `scratch_compacted` with
+  `--config cleanup.policy=compact` and confirmed its `--describe` output,
+  including the `DEFAULT_CONFIG:log.cleanup.policy=delete` synonym the
+  lesson uses to name the broker's own default cleanup mode — a real,
+  fetched string, not guessed. Wrote and ran two small scratch-only Python
+  scripts (`produce.py`, 12 messages across 3 keyed orders, same shape as
+  Day 5's producer; `consume_partial.py`, a `lag-demo-group` consumer
+  deliberately stopped after committing 7 of 12 messages) to generate a
+  real nonexistent-until-now nonzero lag, then ran the actual
+  `kafka-consumer-groups.sh --describe --group lag-demo-group` the lesson's
+  Section 5 Verify block quotes verbatim: `LAG=5` on partition 0 (`8 − 3`),
+  `LAG=0` on partition 2, "no active members" — matching `12 − 7 = 5`
+  unprocessed messages exactly, and independently cross-checked against
+  `kafka-get-offsets.sh` showing the same `8+0+4=12` partition split Days
+  5/6/16 already established for this exact 3-order/4-status batch shape.
+  Neither scratch script is published in the lesson itself (they were
+  verification-only harnesses to produce real CLI output, not new
+  content), so no `py_compile` check was needed for lesson content, though
+  both scratch scripts ran cleanly with no import or syntax errors as a
+  side effect of actually executing them against a live broker. Tore the
+  stack down with `docker compose down -v` and deleted the entire scratch
+  directory afterward, confirmed via a repo-root `ls` that no
+  `.scratch_dataeng_verify_d18` directory or other new untracked file
+  remained outside the intended four edited/created files (the new lesson,
+  `assets/nav.js`, `reference/glossary.html`, this file). No dbt snippet
+  appears in this lesson (a pure-Kafka day per `PLAN.md`'s 2b spine, same
+  as Days 16–17), so the `dbt parse` verification path was not applicable
+  and was not run.
+  Registered Lesson 18 in `assets/nav.js` (`node --check` clean) and added
+  the Day 18 section to `reference/glossary.html` (5 terms: retention.ms,
+  retention.bytes, log compaction, consumer lag, high-water mark — grepped
+  Days 1–17's sections first, case-insensitively; no collisions). Ran a
+  small Python tag-balance/unescaped-`&`/quiz-word-count script (same
+  approach prior rounds used, written to a dotfile scratch path under
+  `dataeng/` and deleted after use) against the saved HTML. All tags
+  balanced (div/table/tr/th/td/pre/code/h1/h2/dfn/button/a/em/strong/p),
+  zero suspicious bare `&`, and all 5 `<dfn>` tags carry both `data-en` and
+  `data-vn` attributes. The first quiz draft came up mismatched on two of
+  the four questions (8/7/7 and 9/7/8 word splits) and was rebalanced to
+  8/8/8 and 9/9/9 respectively over two edit-and-recount passes, re-verified
+  by re-running the same script after each edit. Also confirmed
+  `reference/glossary.html`'s own tag balance
+  (div/p/table/tr/td/th/h1/h2/a/code) and zero bare `&` after the Day 18
+  section was appended.
+  `bin/record-progress dataeng lesson_generated --day 18 --lesson
+  0018-kafka-retention-compaction-and-consumer-lag.html --detail
+  '{"by":"headless"}'` run from the repo root: succeeded on the first
+  attempt (`recorded: dataeng/lesson_generated day=18 lesson=0018-kafka-
+  retention-compaction-and-consumer-lag.html`).

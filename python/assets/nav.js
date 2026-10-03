@@ -136,6 +136,8 @@
       file: "lessons/0064-zipfile-reading-and-writing-archives.html" },
     { n: 65, date: "2026-10-02", title: "tempfile: scratch space that cleans itself up",
       file: "lessons/0065-tempfile-scratch-space.html" },
+    { n: 66, date: "2026-10-03", title: "csv.DictWriter: the write side of Day 6's DictReader",
+      file: "lessons/0066-csv-dictwriter.html" },
   ];
 
   const REFS = [

@@ -7493,3 +7493,85 @@
   lesson=0085-sparse-dtype.html`. The `.scratch-0085/` directory was
   deleted after verification, per this course's standing practice of not
   leaving scratch artifacts committed.
+- 2026-10-03 generation (Lesson 86): closed a confirmed fresh gap named
+  directly in the task brief rather than found via a fresh scan this
+  round — `to_sql`/`read_sql` were each mentioned exactly once in passing
+  (Lesson 8's ETL aside and Lesson 64's own teaser) but never taught as
+  their own lesson, the same gap shape Lesson 64 itself closed for
+  `to_csv`/`to_parquet` on the Load side; today is the mirror image on
+  the Extract side. Re-grepped `to_sql|read_sql` across every lesson body
+  and the glossary first to confirm the gap was still real before
+  writing anything — confirmed exactly those two passing hits, zero
+  dedicated coverage. Taught `pd.read_sql()` as a dispatcher over
+  `read_sql_query()` (query string) and `read_sql_table()` (bare table
+  name, needs a real SQLAlchemy engine specifically for reflection); why
+  `conn=` wants a connection/engine object, not a raw mid-query DB-API
+  cursor, with SQLite's stdlib `sqlite3.Connection` as pandas' one
+  special-cased exception needing no SQLAlchemy at all; `params=` as the
+  non-negotiable fix for never f-string-ing a filter value into SQL text,
+  with an explicit one-line bridge to the backend course's
+  `0017-sql-injection-and-input-validation.html` lesson (named in prose,
+  not linked — confirmed this entire course has zero existing
+  cross-course relative links anywhere in `data/lessons/`, so a prose
+  mention was used instead of inventing a new link pattern unilaterally);
+  and the real interview-grade trap, confirmed directly against pandas
+  3.0.5 (`uv run --with pandas`, available this round): a SQL `INTEGER`
+  column with even one real `NULL` row comes back from `read_sql()` as
+  plain `float64`, not nullable `Int64` — the identical "NumPy's default
+  numeric dtype has no missing-value slot" story Lesson 51/84 already
+  told, now arriving through a database round trip instead of a CSV read
+  or an object-column conversion, fixed with `dtype_backend=
+  "numpy_nullable"` or an `astype("Int64")` afterward. `chunksize=` was
+  taught as the one legitimate place a `for` loop belongs in this
+  course's style (looping over *batches*, not rows) for streaming a
+  large query result instead of materializing it all at once. Used
+  `table class="gloss"` for the comparison table after confirming
+  `course.css` has no separate `.cmp`/comparison-table class — every
+  existing lesson that includes a non-glossary-page table reuses
+  `class="gloss"` directly, so that convention was followed rather than
+  inventing a new CSS class. Quiz options were leveled with a scratch
+  Python script (`uv run python3`, deleted after) rather than eyeballed
+  — iterated Q2 and Q4 through a few wording tweaks to land exactly
+  6/6/6, 8/8/8, 8/8/8, and 8/8/8 words across the four questions, one
+  `data-ok` per question throughout. A second scratch script confirmed
+  tag balance on the lesson (`div` 6/6, `table` 1/1, `tr` 4/4, `th` 3/3,
+  `td` 9/9, `pre` 7/7, `code` 88/88, `script` 3/3, `p` 27/27, `dfn` 7/7,
+  `h2` 10/10) and that all 7 new `<dfn>` tags carry both `data-en` and
+  `data-vn`; exactly 2 raw `&` characters were found, both inside the
+  one standard `cd ~/learning/data && uv run …` command, matching every
+  prior lesson's pattern. The practice file
+  (`practice/86_read_sql.py`) builds its own in-memory SQLite DB via the
+  stdlib `sqlite3` module (an `orders` table with a nullable `quantity`
+  INTEGER column carrying one real `NULL` row) so the course's standard
+  `uv run --with pandas` invocation stays dependency-light — no
+  SQLAlchemy install required, confirmed directly that `pd.read_sql_query()`
+  accepts a plain `sqlite3.Connection` and a `:name`-style `params=` dict
+  against it with no extra setup. Verified per this course's standing
+  scratch-dir convention: the shipped (unsolved) file was copied to
+  `.scratch-0086/` and run with `uv run --with pandas python3
+  .scratch-0086/86_unsolved.py` — printed exactly 4 ✗ with no raw
+  traceback; a solved copy (`86_solved.py`, filled with the real correct
+  answers) then printed all 4 ✓ and "All green" on the first run, no
+  bugs caught this round in either the unfilled-Ellipsis-satisfies-a-
+  loose-check class of bug or any other. The shipped file was also
+  re-run directly from its real `practice/` path with the exact
+  documented command and reproduced the same all-✗ result before
+  `.scratch-0086/` was deleted. Added 6 new glossary rows (`pd.read_sql()`,
+  `read_sql_query()`, `read_sql_table()`, connection/SQLAlchemy engine,
+  `dtype_backend`, `chunksize (read_sql)`) directly after Lesson 85's
+  `sparse dtype` entry, after grepping for collisions first and finding
+  none; re-ran the tag-balance script against the glossary afterward,
+  confirmed it stayed balanced (`tr` 155/155, `td` 462/462, `th` 3/3,
+  `table` 1/1, `code` 1014/1014, `em` 5/5) with zero raw `&` introduced.
+  Registered Lesson 86 in `nav.js` with today's date (2026-10-03);
+  `node --check` confirmed it still parses as valid JavaScript after the
+  edit, and exactly one `n: 86` entry plus one `0086-read-sql` file
+  reference were confirmed to exist. `bin/record-progress data
+  lesson_generated --day 86 --lesson 0086-read-sql.html --detail
+  '{"by":"headless"}'` was run from the repo root and succeeded
+  immediately: `recorded: data/lesson_generated day=86
+  lesson=0086-read-sql.html`. No new `data/learning-records/` entry was
+  added this round — routine lesson, no new baseline finding to justify
+  one. This round's topic was handed down directly rather than picked
+  from a fresh scan, so tomorrow starts with a fresh curriculum/glossary
+  scan as always, no standing named candidate carried forward.

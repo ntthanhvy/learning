@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 66 · csv.DictWriter: the write side of Day 6's DictReader</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 66 · ~20 min · 3 Oct 2026</p>
+<h1><code>csv.DictWriter</code>: the write side of Day 6's <code>DictReader</code></h1>
+<p class="byline">Day 6 taught <code>csv.DictReader</code> for turning a CSV's rows into dicts keyed by column name — but a pipeline that reads, cleans, and aggregates records eventually has to write a result back out, and Day 6 never covered that half. Today closes it: <code>csv.DictWriter</code>, the dict-in-CSV-out mirror of <code>DictReader</code>, plus the one gotcha (<code>newline=""</code>) that silently doubles line endings on Windows if skipped.</p>
+
+<div class="callout"><strong>Why today, specifically:</strong> a fresh-gap grep confirmed <code>csv.DictWriter</code> never appears in any of this course's 65 lessons or in <code>reference/glossary.html</code>, even though Day 6 taught the read side in full and this course's own capstone framing (read → clean → aggregate → write) has always implied a write step that was never actually taught. <code>csv.writer</code>/<code>csv.DictWriter</code> is the natural, concrete half-topic this leaves on the table.</div>
+
+<h2>1 · Why <code>DictWriter</code> needs <code>fieldnames=</code> and <code>DictReader</code> doesn't</h2>
+<p>Recall Day 6's <code>csv.DictReader</code>: it reads the file's first row and uses those column names as dict keys automatically — there's always a header row already sitting in the file to infer them from. Writing has the opposite problem: nothing exists on disk yet, so there is no header row to read column names from. <dfn data-en="csv.DictWriter(file, fieldnames=...) writes rows from dicts into a CSV file; fieldnames must be passed explicitly because, unlike DictReader, there is no existing header row to infer column names from when writing a brand-new file" data-vn="giữ nguyên &quot;csv.DictWriter&quot; — ghi CSV từ dict ra file, fieldnames phải khai rõ vì không có header có sẵn để suy luận như DictReader">csv.DictWriter</dfn> has to be told the column order and names up front, via a required <code>fieldnames=</code> argument:</p>
+<pre><code><span class="kw">import</span> csv
+
+rows = [
+    {<span class="str">"city"</span>: <span class="str">"Hanoi"</span>, <span class="str">"amount"</span>: <span class="kw">120</span>},
+    {<span class="str">"city"</span>: <span class="str">"Hue"</span>, <span class="str">"amount"</span>: <span class="kw">45</span>},
+]
+
+<span class="kw">with</span> <span class="kw">open</span>(<span class="str">"out.csv"</span>, <span class="str">"w"</span>, newline=<span class="str">""</span>) <span class="kw">as</span> f:
+    writer = csv.DictWriter(f, <span class="kw">fieldnames</span>=[<span class="str">"city"</span>, <span class="str">"amount"</span>])
+    writer.writeheader()
+    writer.writerows(rows)</code></pre>
+<p><dfn data-en="the fieldnames= argument to csv.DictWriter: a list naming every column, in the exact order they should appear in the written CSV's header and every data row" data-vn="giữ nguyên &quot;fieldnames&quot; — list tên cột, quyết định thứ tự cột trong file CSV ghi ra">fieldnames</dfn> does double duty: it fixes the column order in the file, and it's the whitelist <code>DictWriter</code> checks every row's keys against before writing. This is the same "names have to point at something that actually exists" idea Day 1 raised for variables, applied to dict keys instead — <code>DictWriter</code> can't write a column it was never told about, the same way Python can't look up a name nobody ever assigned.</p>
+
+<h2>2 · <code>writeheader()</code> then <code>writerows()</code> / <code>writerow()</code></h2>
+<p>Unlike <code>DictReader</code>, which consumes the header row automatically, <code>DictWriter</code> never writes one on its own — <code>writeheader()</code> has to be called explicitly, exactly once, before any data rows:</p>
+<pre><code><span class="kw">with</span> <span class="kw">open</span>(<span class="str">"out.csv"</span>, <span class="str">"w"</span>, newline=<span class="str">""</span>) <span class="kw">as</span> f:
+    writer = csv.DictWriter(f, fieldnames=[<span class="str">"city"</span>, <span class="str">"amount"</span>])
+    writer.writeheader()                 <span class="cm"># writes "city,amount\n" — skip this and the file has no column names at all</span>
+    writer.writerow({<span class="str">"city"</span>: <span class="str">"Hanoi"</span>, <span class="str">"amount"</span>: <span class="kw">120</span>})   <span class="cm"># one row at a time</span>
+    writer.writerows(rows)               <span class="cm"># or many rows at once, from any iterable of dicts</span></code></pre>
+<p><code>writerow()</code> takes one dict and writes one line; <code>writerows()</code> takes any iterable of dicts — a list, or even a generator, same as Day 5's lazy pipelines — and writes one line per dict, in the order <code>fieldnames</code> specified, regardless of what order the dict's own keys happen to be in.</p>
+
+<h2>3 · The <code>newline=""</code> gotcha</h2>
+<p>Opening the output file with plain <code>open(path, "w")</code> instead of <code>open(path, "w", newline="")</code> is a real, commonly-hit bug — not a style preference. Python's text mode translates every <code>"\n"</code> a program writes into the current platform's native line ending; on Windows that's <code>"\r\n"</code>. The <code>csv</code> module already writes its own <code>"\r\n"</code> line endings itself, per the CSV format's own rule. Stack the two translations and a row ends up with <code>"\r\r\n"</code> — an extra blank-looking character that shows up as a stray blank line in some viewers and breaks strict line counts:</p>
+<pre><code><span class="cm"># WRONG on Windows: "w" alone lets text mode ALSO translate \n -> \r\n,</span>
+<span class="cm"># stacking on top of csv's own \r\n and doubling every line ending</span>
+<span class="kw">with</span> <span class="kw">open</span>(<span class="str">"out.csv"</span>, <span class="str">"w"</span>) <span class="kw">as</span> f:
+    writer = csv.DictWriter(f, fieldnames=[<span class="str">"city"</span>, <span class="str">"amount"</span>])
+    writer.writeheader()
+
+<span class="cm"># RIGHT: newline="" disables text mode's own translation, leaving csv's</span>
+<span class="cm"># \r\n as the only line ending actually written</span>
+<span class="kw">with</span> <span class="kw">open</span>(<span class="str">"out.csv"</span>, <span class="str">"w"</span>, newline=<span class="str">""</span>) <span class="kw">as</span> f:
+    writer = csv.DictWriter(f, fieldnames=[<span class="str">"city"</span>, <span class="str">"amount"</span>])
+    writer.writeheader()</code></pre>
+<p>This is easy to miss on Linux or macOS, where the native line ending is already <code>"\n"</code> and the bug doesn't show up locally — then it ships and breaks the moment the same script runs in CI or on a teammate's Windows machine. The fix costs nothing: always pass <code>newline=""</code> to <code>open()</code> when the file is about to be handed to <code>csv.writer</code> or <code>csv.DictWriter</code>, every time, regardless of platform.</p>
+
+<h2>4 · Mismatched keys: <code>extrasaction=</code> and <code>restval=</code></h2>
+<p>Real dicts don't always match <code>fieldnames</code> exactly — a row might carry an extra key nobody asked for, or be missing one <code>fieldnames</code> expects. By default, <code>DictWriter</code> raises <code>ValueError</code> on an unexpected extra key, which is often too strict for messy, Day-3-style grouped data coming from multiple sources. <dfn data-en="extrasaction is a csv.DictWriter keyword controlling what happens when a row dict has a key not listed in fieldnames: 'raise' (the default) errors, 'ignore' silently drops the extra key instead" data-vn="giữ nguyên &quot;extrasaction&quot; — tùy chọn của DictWriter, quyết định xử lý sao khi dict có key dư so với fieldnames: raise (lỗi, mặc định) hoặc ignore (bỏ qua)">extrasaction</dfn> controls that:</p>
+<pre><code>rows = [{<span class="str">"city"</span>: <span class="str">"Hanoi"</span>, <span class="str">"amount"</span>: <span class="kw">120</span>, <span class="str">"note"</span>: <span class="str">"q3"</span>}]   <span class="cm"># "note" isn't in fieldnames</span>
+
+<span class="kw">with</span> <span class="kw">open</span>(<span class="str">"out.csv"</span>, <span class="str">"w"</span>, newline=<span class="str">""</span>) <span class="kw">as</span> f:
+    writer = csv.DictWriter(f, fieldnames=[<span class="str">"city"</span>, <span class="str">"amount"</span>], extrasaction=<span class="str">"ignore"</span>)
+    writer.writeheader()
+    writer.writerows(rows)   <span class="cm"># "note" is silently dropped instead of raising ValueError</span></code></pre>
+<p>The opposite gap — a dict <em>missing</em> a key that <code>fieldnames</code> expects — doesn't raise by default; the missing cell is written empty. <code>restval=</code> sets what to write there instead, e.g. <code>DictWriter(f, fieldnames=[...], restval="N/A")</code>. Both keywords are about the same underlying idea Day 3's dict work already established: a dict's keys are never guaranteed to match any particular set exactly, so code reading or writing one has to decide, on purpose, how to handle the keys that don't line up.</p>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> <code>DataFrame.to_csv()</code> does the <code>open</code>, <code>newline=""</code>, header, and row-writing of sections 1–3 in one eager call. Not covered here; that's <code>data/</code>'s job, and this is the only sentence in this lesson that mentions it.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/66_csv_dictwriter.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/66_csv_dictwriter.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: writing a header plus several rows with <code>writeheader()</code>/<code>writerows()</code> and reading the result back with Day 6's <code>DictReader</code> to confirm it round-trips, confirming the <code>newline=""</code> gotcha by checking the written file has no doubled line endings, and handling a dict with an extra key via <code>extrasaction="ignore"</code>.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="DictReader always has an existing header row in the file already to read column names from. DictWriter is creating a brand-new file with nothing on disk yet, so there is no header row anywhere to infer names from -- fieldnames has to be supplied explicitly up front instead.">
+    <p class="stem">Why does <code>csv.DictWriter</code> require <code>fieldnames=</code> while <code>csv.DictReader</code> does not?</p>
+    <button class="opt" data-ok>writing has no existing header row to infer names from</button>
+    <button class="opt">DictWriter simply never ever supports more than one single column</button>
+    <button class="opt">fieldnames is actually a fully optional, rarely ever used argument</button>
+  </div>
+  <div class="q" data-why="DictWriter never writes a header row automatically the way DictReader automatically consumes one. writeheader() has to be called explicitly, exactly once, before any data rows, or the output file ends up with no column names in it at all.">
+    <p class="stem">What happens if <code>writeheader()</code> is never called before <code>writerows()</code>?</p>
+    <button class="opt" data-ok>the file ends up with no header row written at all</button>
+    <button class="opt">writerows instead just raises an error and refuses to write anything</button>
+    <button class="opt">Python silently just inserts its own plain default generic header row</button>
+  </div>
+  <div class="q" data-why="Plain text mode translates every \n a program writes into the platform's native line ending, which is \r\n on Windows -- and the csv module already writes its own \r\n per the format's own rule. Stacking both translations doubles the ending into \r\r\n. newline=\"\" disables text mode's own translation, leaving csv's \r\n as the only one actually written.">
+    <p class="stem">Why pass <code>newline=""</code> when opening a file for <code>csv.DictWriter</code>?</p>
+    <button class="opt" data-ok>it stops text mode from doubling the line endings csv writes</button>
+    <button class="opt">it stops csv from ever writing out any header row content</button>
+    <button class="opt">it stops DictWriter from ever needing any fieldnames argument at all</button>
+  </div>
+  <div class="q" data-why="By default an unexpected extra key in a row dict raises ValueError, which is often too strict for messy real-world data assembled from multiple sources. Passing extrasaction=\"ignore\" instead silently drops any key not listed in fieldnames rather than raising.">
+    <p class="stem">What does passing <code>extrasaction="ignore"</code> to <code>DictWriter</code> change?</p>
+    <button class="opt" data-ok>an unlisted extra dict key gets silently dropped, not raised</button>
+    <button class="opt">every single data row silently gets written out fully twice</button>
+    <button class="opt">missing dict keys now always raise instead of writing blank</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the standard library's <a href="https://docs.python.org/3/library/csv.html"><code>csv</code></a> docs — covers <code>csv.writer</code>/<code>csv.DictWriter</code> alongside the <code>reader</code>/<code>DictReader</code> pair Day 6 already cited, including the <code>newline=""</code> rule and the full set of <code>Dialect</code> options not needed today.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day66">glossary</a> under Day 66.<br>
+This closes the write-side half of Day 6's <code>csv.DictReader</code>, left open since Day 6.<br><br>
+💬 Anything unclear — <code>fieldnames=</code>, the <code>newline=""</code> gotcha, or <code>extrasaction=</code>? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>
+</content>

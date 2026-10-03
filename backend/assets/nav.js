@@ -182,6 +182,8 @@
       file: "lessons/0087-change-data-capture.html" },
     { n: 88, date: "2026-10-02", title: "Event sourcing: when the log stops being a side effect and becomes the data",
       file: "lessons/0088-event-sourcing.html" },
+    { n: 89, date: "2026-10-03", title: "Canary releases vs. blue-green deployments: small blast radius, one layer down",
+      file: "lessons/0089-canary-releases-and-blue-green-deployments.html" },
   ];
 
   const REFS = [

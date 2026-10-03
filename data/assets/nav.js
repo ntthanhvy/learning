@@ -176,6 +176,8 @@
       file: "lessons/0084-nullable-boolean-and-pd-na.html" },
     { n: 85, date: "2026-10-02", title: "Sparse dtype: compressing a column that's mostly one repeated value",
       file: "lessons/0085-sparse-dtype.html" },
+    { n: 86, date: "2026-10-03", title: "pd.read_sql(): the ETL Extract step via SQL, and its dtype traps",
+      file: "lessons/0086-read-sql.html" },
   ];
 
   const REFS = [

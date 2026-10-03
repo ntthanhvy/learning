@@ -6781,3 +6781,74 @@
   for the round after this one — same standing note as every prior round; a
   completion/quiz-outcome signal or a user-named track should take priority
   over guessing blind again.
+- **2026-10-03 generation (Lesson 89, headless run):** Idempotency check
+  first: `ls lessons/ | grep "^0089-"` and `grep -c "n: 89" assets/nav.js`
+  both returned empty/0 before writing anything. Topic was given rather than
+  swept for: canary releases vs. blue-green deployments, closing a gap
+  confirmed by `grep -rli "canary\|blue-green\|blue/green"
+  lessons/*.html reference/*.html` returning zero hits — the term "canary
+  release" appears exactly once anywhere in the course, inside a Lesson 70
+  callout, named only in passing next to a feature flag's percentage
+  rollout, never taught on its own. Lesson 89 covers: canary release as
+  routing a small slice of traffic/instances to a new build and watching
+  metrics before widening or aborting; blue-green deployment as two full
+  identical environments with an instant all-or-nothing traffic switch and
+  equally instant rollback; a three-way `cmp` comparison table (canary vs.
+  blue-green vs. a plain rolling deploy with no strategy) on six axes; and
+  explicit cross-references to three existing lessons rather than teaching
+  any of them again — Lesson 70's feature-flag percentage rollout (same
+  small-blast-radius instinct, but gating which code path runs inside one
+  already-deployed version, not which version is running at all), Lesson
+  69's load balancer (the weighted traffic-shifting mechanism a canary
+  depends on, repurposed from capacity-splitting to version-splitting), and
+  Lesson 28's circuit breaker (automatic, millisecond, per-call trip vs.
+  these being a human or automated-gate decision made by watching a trend
+  over minutes/hours). A "Scope line" section explicitly defers Kubernetes
+  rolling-update controllers and cloud load-balancer specifics to
+  MISSION.md's infra/cloud-provider exclusion, naming them only as the one
+  line where this gets implemented, matching how Lessons 72, 87, and 88
+  drew the same kind of line. New jargon: `canary release`, `traffic
+  shifting / traffic splitting`, `blue-green deployment` — all three new,
+  confirmed via case-insensitive grep against the existing glossary before
+  writing (zero collisions), added as three new rows after Lesson 88's
+  `projection` row, same Term/Tiếng Việt/In software column order as every
+  existing row. Did not re-`dfn` feature flag, percentage rollout, load
+  balancer, or circuit breaker — all four already glossed from Lessons 28
+  and 70, used here as plain text with a cross-reference link instead.
+  Verification performed directly in the repo (no scratch dir needed this
+  round): (1) a Node word-count script per quiz question (`.split(/\s+/)`)
+  — first draft landed uneven on all four questions (spreads of 1–4 words),
+  fixed through several rewrite-and-recount cycles, including more than one
+  case where swapping one word for a same-length synonym left the count
+  unchanged and the real fix required literally adding or deleting a word
+  rather than substituting — converged to exactly 8/8/9/9 across the four
+  questions, each with exactly one `data-ok` and exactly four options,
+  re-confirmed by re-running the script after every edit rather than trusted
+  by eye; (2) an occurrence-count tag-balance check (`div`, `table`, `tr`,
+  `th`, `td`, `p`, `pre`, `button`) on the lesson — all balanced — and `tr`/
+  `td` re-checked on `glossary.html` after its three-row addition, also
+  balanced; (3) a raw-unescaped-`&` regex scan and a backslash-escaped-quote
+  scan across the lesson — zero hits on both, catching for the escaped-quote
+  bug caught in Lesson 68's round (`\\"` inside a `data-vn`/`data-en`
+  attribute) — zero hits in the new lesson or the glossary; (4) every `<dfn`
+  tag grepped and confirmed to carry both `data-en=` and `data-vn=` —
+  exactly 3 `dfn` tags, matching the 3 new terms, no orphaned attribute;
+  (5) `node --check` against `assets/nav.js` — clean, no output. Registered
+  Lesson 89 in `nav.js` (date 2026-10-03), re-confirmed via `git diff --stat`
+  that only `assets/nav.js` and `reference/glossary.html` changed among
+  tracked files (5 lines inserted total), with the new lesson file itself
+  correctly untracked/new. This session's sandbox network-permission gate
+  was checked and found closed again, so the "Go deeper" section says so
+  honestly — RESOURCES.md has no standing resource naming either term by
+  name (the closest, Twelve-Factor App, doesn't cover deploy strategies by
+  name), so the lesson cites general, widely-consistent industry usage
+  rather than inventing a fake citation, with Martin Fowler's
+  "BlueGreenDeployment" article flagged as a named candidate to fetch once
+  the gate reopens. `bin/record-progress backend lesson_generated --day 89
+  --lesson 0089-canary-releases-and-blue-green-deployments.html --detail
+  '{"by":"headless"}'` run from the repo root succeeded with no approval
+  gate, output confirmed: `recorded: backend/lesson_generated day=89
+  lesson=0089-canary-releases-and-blue-green-deployments.html`. No confirmed
+  next-lesson gap is named with certainty for the round after this one —
+  same standing note as every prior round; a completion/quiz-outcome signal
+  or a user-named track should take priority over guessing blind again.

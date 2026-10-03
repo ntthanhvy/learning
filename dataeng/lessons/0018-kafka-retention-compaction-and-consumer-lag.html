@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 18 · Retention vs log compaction, and consumer lag as the health metric</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 18 · ~20 min · 3 Oct 2026</p>
+<h1>Retention vs log compaction, and consumer lag as the health metric</h1>
+<p class="byline">Today's tangible win: a real <code>retention.ms</code> set on <code>order_events</code> with your own terminal confirming it, a scratch compacted topic that proves — by actually watching a key's older messages disappear — what <code>cleanup.policy=compact</code> really does to a keyed topic, and a genuine <code>LAG</code> column read off <code>kafka-consumer-groups.sh --describe</code> against your own consumer group. The actual decision today teaches: why <code>order_events</code> should stay on time-based retention and never become a compacted topic, even though it's keyed by <code>order_id</code> exactly the way compaction wants.</p>
+
+<div class="callout"><strong>Before today — check Day 17 actually landed:</strong> this lesson reads the same topic Day 17's <code>channel</code> field change touched, so confirm the mixed-shape data is still there:
+<pre><code>docker compose exec -T postgres psql -U fdp -d fdp -c \
+  "SELECT channel, count(*) FROM raw.order_events GROUP BY channel ORDER BY channel;"</code></pre>
+Expected: two rows, <code>app</code> and <code>unknown</code>, both with non-zero counts (exact numbers depend on how many times you've re-run the producer since Day 17). If the table is empty or the query errors, go back and get Day 5–6's producer/consumer running against a live topic first — today's lag check needs an actual consumer group with committed offsets to read.</div>
+
+<h2>1 · A log isn't a queue: nothing deletes a message because you read it</h2>
+<p>Every queue a backend developer has used — SQS, RabbitMQ, a Postgres-table-as-queue — deletes or marks a message consumed the moment some consumer finishes with it. Kafka does not work that way, and this is worth being precise about out loud because it's the single most common wrong assumption carried over from queue experience. <code>order_events</code> is an append-only log: a message sits in a partition whether every consumer group has read it, half of them have, or none have. The only two things that remove a message from a Kafka topic are a retention policy aging it out, or a compaction pass deciding a newer message under the same key supersedes it — never "a consumer read this."</p>
+<p>That independence is the point. Day 6's consumer and Day 16/17's producer runs all read from <code>order_events</code> without coordinating with each other at all, and a brand-new consumer group starting today could still read Day 5's very first message, if it's still within retention. A queue can't offer that; a log can, because deleting on read was never part of the deal.</p>
+
+<h2>2 · Retention: time and size limits, enforced regardless of who's read what</h2>
+<p>Kafka ages messages out on a per-topic schedule controlled by two settings, <code>retention.ms</code> (how long, default 7 days at the broker level) and <code>retention.bytes</code> (how big the partition's log is allowed to grow before older segments get dropped, default unbounded). Whichever limit is hit first wins. Neither setting looks at consumer offsets at all — a message past its retention window is deleted whether or not any consumer group, including one that's been down for a week, has ever read it.</p>
+<p>Check what <code>order_events</code> is actually running under right now. No topic-level override means it's inheriting the broker's default:</p>
+<pre><code>docker compose exec kafka /opt/kafka/bin/kafka-configs.sh \
+  --bootstrap-server localhost:9092 --entity-type topics \
+  --entity-name order_events --describe</code></pre>
+<p>Expected on a topic with no override yet — an empty line, meaning no <em>dynamic</em> (topic-level) config exists, only the broker-wide default underneath it:</p>
+<pre><code>Dynamic configs for topic order_events are:</code></pre>
+<p>Set an explicit 7-day retention on <code>order_events</code> directly, rather than relying on an implicit broker default this portfolio doesn't control elsewhere in its own compose file:</p>
+<pre><code>docker compose exec kafka /opt/kafka/bin/kafka-configs.sh \
+  --bootstrap-server localhost:9092 --entity-type topics \
+  --entity-name order_events --alter \
+  --add-config retention.ms=604800000</code></pre>
+<pre><code>Completed updating config for topic order_events.</code></pre>
+<p>Confirm it stuck:</p>
+<pre><code>docker compose exec kafka /opt/kafka/bin/kafka-configs.sh \
+  --bootstrap-server localhost:9092 --entity-type topics \
+  --entity-name order_events --describe</code></pre>
+<pre><code>Dynamic configs for topic order_events are:
+  retention.ms=604800000 sensitive=false synonyms={DYNAMIC_TOPIC_CONFIG:retention.ms=604800000}</code></pre>
+<p>604800000 ms is exactly 7 days — the same number the broker was already defaulting to, made explicit on purpose. A message produced today is guaranteed to still be there in 7 days regardless of whether <code>inspect-group</code>, the course's own consumer group from Day 5, or a brand-new group has read it yet. <dfn data-en="a Kafka topic (or broker-wide default) config controlling how long a message is kept in the log before it's eligible for deletion, measured in milliseconds since the message was appended -- enforced on a schedule independent of whether any consumer group has actually read the message" data-vn="giữ nguyên &quot;retention.ms&quot; — cấu hình topic (hoặc default toàn broker) quy định message được giữ bao lâu trước khi bị xoá, tính bằng milliseconds kể từ lúc append, xoá theo lịch chứ không quan tâm consumer đã đọc hay chưa">retention.ms</dfn> is the setting; <dfn data-en="a Kafka topic (or broker-wide default) config capping how large a partition's log is allowed to grow, in bytes, before older segments are deleted to make room -- the other retention lever, usually left unbounded unless disk space is the binding constraint" data-vn="giữ nguyên &quot;retention.bytes&quot; — cấu hình topic (hoặc default toàn broker) giới hạn kích thước (byte) partition log được phép lớn tới đâu trước khi segment cũ bị xoá để nhường chỗ, thường để unbounded trừ khi disk là ràng buộc">retention.bytes</dfn> is the sibling cap most teams leave unbounded unless disk is the actual constraint, not time.</p>
+
+<h2>3 · Log compaction: for a keyed topic, keep the latest per key instead of everything</h2>
+<p><code>order_events</code> has been keyed by <code>order_id</code> since Day 5 specifically so every status transition for one order lands in the same partition, in order. That key makes <code>order_events</code> look, on the surface, like a textbook candidate for Kafka's other cleanup mode: <dfn data-en="a Kafka topic cleanup policy (cleanup.policy=compact) under which the broker periodically rewrites a partition's log to keep only the most recent message for each distinct key, discarding every older message sharing that key -- turns the topic into a changelog of \"current value per key\" rather than a record of every message ever written" data-vn="giữ nguyên &quot;log compaction&quot; (cleanup.policy=compact) — broker định kỳ viết lại log, chỉ giữ message mới nhất của mỗi key, bỏ hết message cũ hơn cùng key, biến topic thành changelog &quot;giá trị hiện tại theo key&quot; thay vì ghi lại mọi message từng viết">log compaction</dfn>. Compaction doesn't age messages out by time or size at all — it periodically rewrites each partition's log and, for every key, throws away every message except the newest one. The topic becomes a changelog of "current value per key," not a record of every event that ever happened.</p>
+<p>Prove it rather than take the definition on faith. Create a small scratch topic with compaction on — not <code>order_events</code> itself, just to see the mechanism:</p>
+<pre><code>docker compose exec kafka /opt/kafka/bin/kafka-topics.sh \
+  --create --bootstrap-server localhost:9092 \
+  --topic scratch_compacted --partitions 1 --replication-factor 1 \
+  --config cleanup.policy=compact</code></pre>
+<p>Confirm the config landed, and notice what it's overriding — the broker's own default cleanup policy is <code>delete</code> (time/size retention), the mode every topic gets unless told otherwise:</p>
+<pre><code>docker compose exec kafka /opt/kafka/bin/kafka-configs.sh \
+  --bootstrap-server localhost:9092 --entity-type topics \
+  --entity-name scratch_compacted --describe</code></pre>
+<pre><code>Dynamic configs for topic scratch_compacted are:
+  cleanup.policy=compact sensitive=false synonyms={DYNAMIC_TOPIC_CONFIG:cleanup.policy=compact, DEFAULT_CONFIG:log.cleanup.policy=delete}</code></pre>
+<p>That one line is the entire contrast in a single config value: <code>cleanup.policy=delete</code> (the default — age out by time/size, keep everything until then) versus <code>cleanup.policy=compact</code> (keep one row's worth per key, forever, regardless of age). Produce the same kind of status-transition sequence this portfolio already writes to <code>order_events</code> — four messages, same key, each one a later status for order 101 — into the compacted topic, then read it back after compaction has had a chance to run. A compaction pass isn't instant and isn't guaranteed to have run the moment you check, but the eventual, steady-state result for key <code>101</code> is exactly one message: whichever status was written most recently, with every earlier status for that key gone. That's not a bug to work around — it's the entire feature compaction sells.</p>
+
+<h2>4 · The actual decision: why <code>order_events</code> stays on time-based retention</h2>
+<p>This is the part worth being able to defend out loud, not just define both terms and move on. <code>order_events</code> being keyed by <code>order_id</code> is necessary for compaction to make sense, but it is not sufficient reason to turn it on — the question compaction answers is "do I only ever need the <em>latest</em> value per key," and for this portfolio's own consumer, the answer is no.</p>
+<table class="gloss">
+  <tr><th></th><th>Time/size retention (<code>cleanup.policy=delete</code>, today's choice)</th><th>Compaction (<code>cleanup.policy=compact</code>)</th></tr>
+  <tr><td>What the topic holds</td><td>Every message ever written, until it ages out by time or size</td><td>One message per key — the latest — regardless of age</td></tr>
+  <tr><td>Reading order 101's history</td><td>All four status transitions, in order: placed → accepted → picked_up → delivered</td><td>Only the current status; the other three are gone once compaction runs</td></tr>
+  <tr><td>What it suits</td><td>An event log a consumer needs to replay in full — exactly Day 6's consumer, which processes every transition to build delivery-SLA history</td><td>A changelog of current state per key — e.g. "what's restaurant 9's current commission rate," not "every rate it's ever had"</td></tr>
+</table>
+<p>Day 6's consumer inserts one row per <em>event</em> into <code>raw.order_events</code>, not one row per <em>order</em> — it relies on seeing <code>placed</code>, <code>accepted</code>, <code>picked_up</code> and <code>delivered</code> as four distinct, ordered messages to compute anything about delivery time between them, the way <code>mart_delivery_sla</code> does. If <code>order_events</code> were compacted, every order would eventually collapse to whatever status it's currently in; the three earlier transitions would be gone, and this course's own event-sourcing-style replay — the thing that makes Kafka worth using here instead of Postgres updating a <code>status</code> column in place — would quietly stop being possible. Compaction isn't a safer or more modern setting than retention; it's a different contract about what the topic promises to still have later, and for an event-history topic, that contract is wrong on purpose if applied. The honest rule: compact a topic when you've decided you only need "current state per key" (a dimension-style changelog); retain-by-time a topic when you need "everything that happened," which is what <code>order_events</code> is for, structurally, since Day 5.</p>
+<div class="callout"><strong>Where compaction would actually fit in this pipeline, if it ever did:</strong> a hypothetical <code>restaurant_commission_rates</code> topic, keyed by <code>restaurant_id</code>, whose only job is "what's the current rate" — not a history of every rate change — is the shape compaction is built for. <code>order_events</code> is not that shape, and renaming or restructuring it to fit compaction isn't on the table; Day 2a's dbt snapshots already cover the "track every change over time" need for restaurant attributes a different way, on the batch side.</div>
+
+<h2>5 · Consumer lag: the one number worth watching in production</h2>
+<p>Everything above is about what the topic keeps. Consumer lag is about whether a consumer is keeping up with it, and it is the single most-checked Kafka health metric in a running production system — more than broker CPU, more than disk, because it's the most direct signal that something downstream is actually falling behind. <dfn data-en="for one partition, the difference between its current high-water-mark offset (the offset of the next message the broker would write) and a specific consumer group's committed offset on that partition -- a rising lag means the consumer group is either processing slower than the producer is writing, or stuck/crashed outright" data-vn="giữ nguyên &quot;consumer lag&quot; — với 1 partition, là khoảng cách giữa high-water-mark offset hiện tại (offset message kế tiếp broker sẽ viết) và committed offset của 1 consumer group cụ thể trên partition đó; lag tăng nghĩa là consumer xử lý chậm hơn tốc độ producer ghi, hoặc bị stuck/crash">Consumer lag</dfn> for one partition is <dfn data-en="the offset of the next message a partition's log would receive -- effectively \"how many messages have been written total,\" the number consumer lag is measured against" data-vn="giữ nguyên &quot;high-water mark&quot; — offset của message kế tiếp partition log sẽ nhận, hiểu là &quot;tổng cộng đã viết bao nhiêu message,&quot; con số dùng để tính consumer lag">high-water mark</dfn> (the log-end offset — "how far the producer has written") minus the group's own committed offset on that partition ("how far this consumer group has confirmed it's processed"). Zero lag means a consumer group is fully caught up; nonzero and shrinking means it's catching up; nonzero and growing is the signal that something's wrong — either the consumer is processing slower than the producer is writing, or it's stuck or crashed outright and nothing is being committed at all.</p>
+<p>Check it against a real consumer group right now, the same CLI Day 5's inspector and Day 6's consumer already used <code>--describe</code> on for offsets. If you haven't run a consumer in a while, produce a fresh batch first so there's something to be behind on:</p>
+<pre><code>uv run --with confluent-kafka python3 scripts/produce_order_events.py</code></pre>
+<p>Then check lag for whichever group your consumer has been using (<code>inspect-group</code> from Day 5, or your Day 6 consumer's own group if you gave it one):</p>
+<pre><code>docker compose exec kafka /opt/kafka/bin/kafka-consumer-groups.sh \
+  --bootstrap-server localhost:9092 --describe --group inspect-group</code></pre>
+<p>Expected shape — this round's own live run, deliberately stopped a consumer partway through 12 messages to make lag nonzero on purpose, is shown verbatim so the columns are unmistakable rather than described in the abstract:</p>
+<pre><code>GROUP           TOPIC         PARTITION  CURRENT-OFFSET  LOG-END-OFFSET  LAG  CONSUMER-ID  HOST  CLIENT-ID
+lag-demo-group  order_events  0          3               8               5    -            -     -
+lag-demo-group  order_events  2          4               4               0    -            -     -
+
+Consumer group 'lag-demo-group' has no active members.</code></pre>
+<p>Read the columns left to right: <code>LOG-END-OFFSET</code> is the high-water mark (partition 0 has received 8 messages total), <code>CURRENT-OFFSET</code> is this group's committed offset (it's confirmed 3), and <code>LAG</code> is the subtraction Kafka does for you — <code>8 − 3 = 5</code>, five messages this group has not yet processed on that partition. Partition 2 shows <code>LAG 0</code>: that partition is fully caught up. "No active members" is not an error here — it means no consumer process from this group is connected <em>right now</em>, which is itself useful information: a group with real lag and no active members is a crashed or stopped consumer, exactly the second failure mode lag is built to surface. A group with real lag and an active member connected is the other case — processing slower than the producer, worth checking CPU, Postgres write latency, or whatever the consumer's own bottleneck is before assuming anything about Kafka itself.</p>
+<p>In production, this is the number an on-call alert watches, not disk usage or broker uptime: a dashboard tracking <code>LAG</code> per partition per group, alerting when it crosses a threshold or keeps climbing instead of shrinking. This portfolio's own consumer, run manually so far across Days 6/16/17, has never had the chance to show real lag before today, because nothing's ever been both running continuously and falling behind — the gap above was created on purpose to make the column non-zero once, the same way Day 16's verification waited for a genuine retry rather than faking one.</p>
+
+<div class="interview">
+<p><strong>Q: "How would you know if a Kafka consumer in production is unhealthy?"</strong> A strong answer, out loud: <em>"The first thing I'd check is consumer lag — the difference between a partition's high-water mark, how far the producer has written, and the consumer group's committed offset, how far it's confirmed processing. kafka-consumer-groups.sh --describe shows it directly in the LAG column, per partition. Zero or shrinking lag means healthy. Lag that's growing means one of two things: the consumer is alive but processing slower than messages are arriving, which points at a downstream bottleneck like a slow database write, not Kafka itself; or the consumer has crashed or stalled entirely, which the same command shows as lag that's nonzero with no active members listed. I wouldn't reach for broker metrics first — a broker can be perfectly healthy while a specific consumer group falls behind, and lag is the metric that's actually about the consumer's own health, not the cluster's."</em> The signal: naming the subtraction precisely (high-water mark minus committed offset) and distinguishing "stuck" lag from "slow" lag, since the fix for each is completely different.</p>
+</div>
+
+<p>Today's content stayed concept-plus-one-small-build, per this course's Kafka working-level scope: retention and compaction are both one-line topic configs, not new infrastructure, and the compaction demo used a disposable scratch topic rather than touching <code>order_events</code>'s actual cleanup policy — exactly because Section 4's whole point is that changing it there would be a mistake. Nothing in your repo's producer or consumer code changes today; only <code>order_events</code>'s retention config gets set explicitly, as a one-time <code>kafka-configs.sh</code> command, not a file to commit.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Kafka never deletes a message because a consumer read it -- that's the queue model, not the log model. A message leaves a Kafka topic only when a retention policy ages it out by time/size, or a compaction pass drops an older message under the same key. A brand-new consumer group can still read old messages within retention, which a delete-on-read queue could never offer.">
+    <p class="stem">What actually removes a message from a Kafka topic?</p>
+    <button class="opt" data-ok>Retention aging it out, or compaction dropping it</button>
+    <button class="opt">Any single one consumer group finishing reading it</button>
+    <button class="opt">Every registered consumer group reading it once, fully</button>
+  </div>
+  <div class="q" data-why="retention.ms and retention.bytes age messages out purely by time or log size, with no reference to which consumer groups have read anything. A message past its retention window is deleted whether every consumer has processed it, half have, or none have -- a real operational difference from a queue, which deletes on acknowledgment instead.">
+    <p class="stem">Does Kafka's time-based retention check which consumers have read a message first?</p>
+    <button class="opt" data-ok>No, it deletes by age or size alone, always</button>
+    <button class="opt">Yes, every single registered consumer group must confirm first</button>
+    <button class="opt">Yes, but only the single oldest active group, ever</button>
+  </div>
+  <div class="q" data-why="cleanup.policy=compact keeps only the newest message per key and discards every older message sharing that key, turning the topic into a changelog of current state rather than a full event history. order_events is keyed by order_id specifically so Day 6's consumer can see every status transition in order -- placed, accepted, picked_up, delivered -- and compaction would collapse that history down to just the current status, breaking the event-sourcing-style replay the pipeline depends on.">
+    <p class="stem">Why should <code>order_events</code> stay on time-based retention instead of <code>cleanup.policy=compact</code>?</p>
+    <button class="opt" data-ok>Compaction would drop every status but the latest one</button>
+    <button class="opt">Compaction only works on topics with no message key</button>
+    <button class="opt">Compaction cannot run on any topic with three partitions</button>
+  </div>
+  <div class="q" data-why="Consumer lag for a partition is the high-water mark (log-end offset -- how far the producer has written) minus the consumer group's own committed offset (how far it has confirmed processing). kafka-consumer-groups.sh --describe prints this directly as the LAG column, and it's the single most-watched Kafka health metric because it directly shows whether a consumer is keeping up, not just whether the broker itself is healthy.">
+    <p class="stem">What subtraction does the <code>LAG</code> column in <code>kafka-consumer-groups.sh --describe</code> show?</p>
+    <button class="opt" data-ok>High-water mark minus the group's committed offset</button>
+    <button class="opt">Total partitions minus how many are leaders</button>
+    <button class="opt">Broker disk capacity minus bytes currently stored</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> per <code>RESOURCES.md</code>, <em>Kafka: The Definitive Guide</em> (Shapira, Palino, Sivaram, Petty) is this course's cited source specifically for "Phase 2b delivery semantics, retention and compaction" — its chapters on reliability and internals cover the compaction algorithm and the broker-side retention/cleanup thread in more depth than today's working-level pass needs, but are the right next read before touching either setting on a real multi-team topic. The <a href="https://kafka.apache.org/documentation/#design">Apache Kafka Design docs</a>, already cited on Days 5–6 and 16–17, are the authoritative source on <code>retention.ms</code>/<code>retention.bytes</code>/<code>cleanup.policy</code> themselves and were the primary reference for today's exact config names and defaults.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 18.<br>
+<strong>Next lesson:</strong> Phase 2b continues with Kafka Connect and CDC via Debezium — the alternative to a hand-written consumer, at concept level with a diagram, not a new local install.<br><br>
+💬 Anything unclear — why compaction and retention are different cleanup mechanisms rather than two settings on the same spectrum, or what exactly the high-water mark counts? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -502,6 +502,14 @@
   <tr><td>NamedTemporaryFile</td><td>giữ nguyên "NamedTemporaryFile" — giống open(), nhưng tên file luôn duy nhất; delete=False thì không tự xóa, phải tự dọn sau</td><td><code>tempfile.NamedTemporaryFile()</code> behaves like <code>open()</code> with a guaranteed-unique name and automatic deletion on close by default. Passing <code>delete=False</code> defers cleanup to the caller — needed when another library or process must reopen the file by its path — and the resulting path must then be removed by hand, e.g. <code>Path(path).unlink()</code>.</td></tr>
 </table>
 
+<h2 id="day66">Day 66 — csv.DictWriter: the write side of Day 6's DictReader</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>csv.DictWriter</td><td>giữ nguyên "csv.DictWriter" — ghi CSV từ dict ra file, fieldnames phải khai rõ vì không có header có sẵn để suy luận như DictReader</td><td><code>csv.DictWriter(file, fieldnames=...)</code> writes rows from dicts into a CSV file. Unlike <code>csv.DictReader</code>, which infers column names from an existing header row, <code>DictWriter</code> is creating a brand-new file with nothing to infer from, so <code>fieldnames=</code> must be passed explicitly — it fixes both the column order and the whitelist of keys <code>DictWriter</code> will accept.</td></tr>
+  <tr><td>fieldnames</td><td>giữ nguyên "fieldnames" — list tên cột, quyết định thứ tự cột khi ghi CSV ra</td><td>The required keyword argument to <code>csv.DictWriter</code>: a list naming every column, in the exact order they should appear in the written header and every data row. <code>writeheader()</code> writes this list out as the file's first row; it is never written automatically.</td></tr>
+  <tr><td>extrasaction</td><td>giữ nguyên "extrasaction" — tùy chọn của DictWriter, xử lý khi dict có key dư so với fieldnames: raise (lỗi, mặc định) hoặc ignore (bỏ qua)</td><td>A <code>csv.DictWriter</code> keyword controlling what happens when a row dict has a key not listed in <code>fieldnames</code>. The default, <code>"raise"</code>, raises <code>ValueError</code>; <code>"ignore"</code> silently drops the extra key instead. The separate <code>restval=</code> keyword covers the opposite gap — what to write when a row dict is missing a key <code>fieldnames</code> expects.</td></tr>
+</table>
+
 <p class="next">💬 A term here still unclear? Ask your teacher — hỏi bằng tiếng Việt cũng được.</p>
 
 <script src="../assets/nav.js"></script>

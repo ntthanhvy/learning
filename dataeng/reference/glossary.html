@@ -189,6 +189,14 @@
   <tr><td>high-water mark</td><td>giữ nguyên "high-water mark" — offset của message kế tiếp partition log sẽ nhận, hiểu là "tổng cộng đã viết bao nhiêu message," con số dùng để tính consumer lag</td><td>The offset of the next message a partition's log would receive — effectively "how many messages have been written total," the number consumer lag is measured against. Shown as <code>LOG-END-OFFSET</code> in <code>kafka-consumer-groups.sh --describe</code> output.</td></tr>
 </table>
 
+<h2 id="day19">Day 19 — Airflow: logical date, data interval &amp; safe backfills</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>logical_date</td><td>giữ nguyên "logical_date" — timestamp Airflow gắn cho 1 lần chạy để định danh, là đầu kỳ dữ liệu run đó đại diện, KHÔNG phải giờ thực tế chạy; Airflow 2 gọi là execution_date</td><td>The timestamp Airflow assigns to identify a specific DAG run — for a scheduled run, the start of the period that run represents, not the wall-clock time the run actually executed; for a manual or backfilled run, whatever date was requested. Called <code>execution_date</code> in Airflow 2, renamed because "execution" implied "when it ran," the wrong mental model.</td></tr>
+  <tr><td>data_interval</td><td>giữ nguyên "data_interval" — khoảng [start, end) dữ liệu mà 1 lần chạy có trách nhiệm xử lý; với @daily là đúng 1 ngày, logical_date = data_interval_start theo quy ước</td><td>The [start, end) time window a scheduled DAG run is responsible for processing — for a <code>@daily</code> schedule, exactly one calendar day. <code>logical_date</code> equals <code>data_interval_start</code> by convention, and the run is meant to process data generated during that window, which has already fully closed by the time the run executes.</td></tr>
+  <tr><td>backfill</td><td>giữ nguyên "backfill" — chủ động tạo và chạy lại DAG cho các logical_date trong quá khứ chưa chạy, hoặc cần chạy lại; bản chủ động, theo yêu cầu của thứ catchup=True làm tự động</td><td>Deliberately creating and running DAG runs for past logical dates that never ran, or that need to be rerun — the explicit, on-demand version of what <code>catchup=True</code> would have done automatically on first deploy. In Airflow 3.3.1, triggered via <code>airflow backfill create --from-date --to-date</code> (the old <code>airflow dags backfill</code> command was removed). Only safe when the tasks being backfilled are idempotent — see Day 7's <code>catchup</code> entry and this section's own idempotent-task discussion.</td></tr>
+</table>
+
 <script src="../assets/nav.js"></script>
 </body>
 </html>

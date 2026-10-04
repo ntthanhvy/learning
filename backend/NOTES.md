@@ -6852,3 +6852,113 @@
   next-lesson gap is named with certainty for the round after this one —
   same standing note as every prior round; a completion/quiz-outcome signal
   or a user-named track should take priority over guessing blind again.
+- **2026-10-04 generation (Lesson 90, headless run):** Idempotency check
+  first: `ls lessons/ | grep "^0090-"` and `grep -c "n: 90" assets/nav.js`
+  both returned empty/0 before writing anything. The two
+  `backend/learning-records/` files are still just the two baseline
+  findings (frontend-mindset gap, concurrency-vocabulary gap), neither
+  naming a fresh gap, so pacing again came from a direct sweep against
+  lesson content rather than any `course_progress` signal — direct
+  `psql`/`bin/query-progress` DB reads are hard-blocked in this sandbox,
+  confirmed by the orchestrator and consistent with nearly every prior
+  session's log entry, so no attempt was made. Lesson 89's own closing
+  line left no named next topic, so this round swept a wide set of
+  candidates by grep against `lessons/*.html` and `reference/glossary.html`:
+  database sharding, consistent hashing, bloom filters, service mesh,
+  two-phase commit (named only as what Lesson 84's sagas avoid, never
+  taught itself, and correctly out of scope — distributed-transaction
+  depth MISSION.md excludes), quorum, leader election, savepoints, TOAST —
+  all either already covered, zero-hit-but-out-of-scope, or too incidental.
+  Also checked the three-way delivery-semantics vocabulary: "at-least-once
+  delivery" already has its own glossary row (from Lesson 10), but
+  "at-most-once" and "exactly-once" are only ever used in passing inside
+  other lessons' prose (Lesson 29's outbox explicitly disclaiming it can
+  promise exactly-once), never taught as their own terms or compared
+  side-by-side — flagged as a plausible future topic but not chosen this
+  round, since a cleaner gap turned up first. That gap:
+  `grep -rli "RPO\|RTO\|disaster recovery\|point-in-time recovery"
+  lessons/*.html reference/glossary.html` returned zero real hits (one
+  false-positive substring match on "retRy" inside an unrelated word,
+  checked and discarded), and a plain `backup` search turned up only
+  incidental distractor-option usage (Lesson 82's quiz, Lesson 55's quiz)
+  with zero lessons actually teaching what a backup is or how it differs
+  from Lesson 85's read replica. Lesson 90 covers: why a replica (Lesson
+  85) protects against a machine dying but not against a correct,
+  committed, bad write that gets faithfully replicated everywhere,
+  including onto the replica — the opposite failure mode a backup exists
+  for; RPO and RTO as the two numbers that should be decided before any
+  mechanism is chosen, not after; full vs. incremental backups vs.
+  continuous WAL archiving, naming point-in-time recovery (PITR) as a
+  third job for the exact same WAL artifact Lesson 86 built for crash
+  recovery and Lesson 87 read externally for CDC — one mechanism, three
+  consumers; and a comparison table lining all three mechanisms up against
+  RPO/RTO plus restore complexity and chain-breakage risk. A closing
+  paragraph and a "Scope line" section explicitly keep the
+  backup-vs-replica distinction as the point, deferring multi-region
+  failover, backup encryption/retention policy, and cloud-provider
+  snapshot tooling to MISSION.md's distributed-systems/infra exclusions,
+  matching how Lessons 72, 87, 88, and 89 drew the same kind of line. No
+  Go code in this lesson (confirmed zero hits for `func `/`package main`
+  before deciding this), so no compile-check module was needed. Checked
+  the glossary first for all four new terms — `backup`, `RPO / Recovery
+  Point Objective`, `RTO / Recovery Time Objective`, `point-in-time
+  recovery / PITR` — zero collisions via case-insensitive grep, added as
+  four new rows after Lesson 89's `blue-green deployment` row, same
+  Term/Tiếng Việt/In software column order as every existing row (the
+  actual file order, confirmed by reading it directly rather than trusting
+  a generic column-order assumption). Did not re-`dfn` write-ahead log,
+  crash recovery, checkpoint, or read replica — all already glossed from
+  Lessons 85–86, used here as plain text with lesson cross-references
+  instead. Verification performed mechanically in a scratch dir
+  (`backend/.scratch-0090/`, deleted in full after use, confirmed gone via
+  directory listing): (1) a Node quiz-word-count script matching each
+  `<div class="q" ...>` block and splitting each option both via
+  `.split(/\s+/)` and `.split(" ")` — first draft landed uneven on all
+  four questions (spreads of 1–2 words), fixed through several
+  rewrite-and-recount cycles — including padding words like "now"/"ever"/
+  "itself" added to shorter options once meaning-preserving length
+  changes ran out — converged to exactly 9/9/9/9 across all four
+  questions, both counting methods agreeing exactly every time, confirmed
+  by re-running the script after every edit rather than trusted by eye;
+  also confirmed exactly one `data-ok` and exactly four options per
+  question; (2) an occurrence-count HTML tag-balance check across 11 tag
+  types (div, table, tr, th, td, pre, code, p, dfn, h2, button) on the
+  lesson — all balanced on the first pass — and a separate tr/td/table
+  balance check on `glossary.html` after its four-row addition, also
+  balanced; (3) a raw-unescaped-`&` regex scan and (4) a
+  backslash-escaped-quote scan across both the lesson and the glossary —
+  zero hits in all four scans; (5) every `<dfn` tag in the lesson grepped
+  and confirmed to carry both `data-en=` and `data-vn=` — exactly 4 `dfn`
+  tags, matching the 4 new terms, no orphaned attribute; (6) `node --check`
+  against `assets/nav.js` after registering Lesson 90 — clean, no output.
+  One mid-draft bug caught before any verification pass: the fourth quiz
+  question's `data-why` attribute originally had a stray `"</p>` fragment
+  pasted inside it (a copy-paste slip while drafting), which would have
+  broken the attribute and the following markup — caught on a direct
+  re-read of the file immediately after writing it, fixed before running
+  any of the scripted checks. Registered Lesson 90 in `nav.js` (date
+  2026-10-04, today's actual generation date), re-confirmed exactly one
+  matching `n: 90` entry and exactly one matching `0090-*` lesson file
+  afterward, and `git status --short -- backend/` confirmed only
+  `assets/nav.js` and `reference/glossary.html` changed among tracked
+  files plus the new lesson file itself correctly untracked/new — nothing
+  outside `backend/` touched. No new `learning-records/` file was added
+  this round — routine topical entry like Lessons 3–89, not a new baseline
+  finding. This session's sandbox network-permission gate was not probed
+  (no `WebFetch` attempt made), so the "Go deeper" section honestly says
+  so rather than presenting a freshly fetched citation — the lesson rests
+  on RESOURCES.md's already-standing PostgreSQL Manual citation (cited for
+  DDL, which also hosts the Continuous Archiving and Point-in-Time
+  Recovery chapter), with that specific chapter flagged as a named
+  candidate to fetch once the gate is actually checked. `bin/record-progress
+  backend lesson_generated --day 90 --lesson
+  0090-backups-and-disaster-recovery.html --detail '{"by":"headless"}'` run
+  from the repo root succeeded with no approval gate, output confirmed:
+  `recorded: backend/lesson_generated day=90
+  lesson=0090-backups-and-disaster-recovery.html`. No confirmed next-lesson
+  gap is named with certainty for the round after this one — same standing
+  note as every prior round; a completion/quiz-outcome signal or a
+  user-named track should take priority over guessing blind again, though
+  the at-most-once/exactly-once delivery-semantics trio (flagged above,
+  not chosen this round) is a plausible candidate if no stronger signal
+  appears first.

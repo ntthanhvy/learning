@@ -29,6 +29,7 @@
     { n: 16, date: "2026-09-30", title: "Kafka delivery semantics & the idempotent producer", file: "lessons/0016-kafka-delivery-semantics.html" },
     { n: 17, date: "2026-10-02", title: "Schema evolution: why JSON-without-a-schema bites", file: "lessons/0017-kafka-schema-evolution.html" },
     { n: 18, date: "2026-10-03", title: "Retention vs log compaction, and consumer lag", file: "lessons/0018-kafka-retention-compaction-and-consumer-lag.html" },
+    { n: 19, date: "2026-10-04", title: "Airflow: logical date, data interval & safe backfills", file: "lessons/0019-airflow-logical-date-and-backfills.html" },
   ];
 
   const REFS = [

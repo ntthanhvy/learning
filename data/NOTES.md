@@ -7575,3 +7575,102 @@
   one. This round's topic was handed down directly rather than picked
   from a fresh scan, so tomorrow starts with a fresh curriculum/glossary
   scan as always, no standing named candidate carried forward.
+- 2026-10-04 generation (Lesson 87): confirmed no `0087-*` lesson/nav entry
+  and no `lesson_generated` row for course=data dated 2026-10-04 existed yet
+  before starting. Read `MISSION.md` and `RESOURCES.md` in full, the tail of
+  `NOTES.md` (this generation log, Lessons 84-86's entries), the single
+  baseline `learning-records/0001-...md` (still the only file there,
+  unchanged), and the last lesson/practice pair (86) plus grepped
+  `assets/nav.js`'s tail and `reference/glossary.html`'s tail for exact
+  registration format. Picked `to_sql()` — named directly in the task brief
+  as the natural write-side mirror of Lesson 86's `read_sql()` and Lesson
+  64's `to_csv`/`to_parquet` Load-step lesson. Re-confirmed the gap was
+  still real before writing anything: grepped `to_sql` across every lesson
+  body and the glossary and found only the same two passing mentions Lesson
+  86 itself had already found (Lesson 8's ETL aside, Lesson 64's own
+  teaser), zero dedicated coverage, zero glossary rows. Every behavioral
+  claim was probed directly first in `data/.scratch-0087/` (deleted after),
+  on the actually-installed pandas 3.0.6 (checked via `uv run --with pandas
+  python3 -c "import pandas as pd; print(pd.__version__)"`), using the same
+  no-SQLAlchemy-needed stdlib `sqlite3` approach as Lesson 86 (confirmed
+  `sqlalchemy` is not installed in this environment — `import sqlalchemy`
+  raised `ModuleNotFoundError`, so `dtype=`/`method=`/`if_exists=` were all
+  verified against a plain `sqlite3.Connection` instead): confirmed
+  `to_sql()` returns the integer row count written; confirmed
+  `if_exists=` truly defaults to `"fail"` (via `inspect.signature`) and a
+  second write to the same table with no `if_exists=` raises `ValueError:
+  Table 'orders' already exists.` immediately; confirmed `"replace"` drops
+  and recreates the table while `"append"` keeps the schema and blindly
+  duplicates rows with zero uniqueness check on a repeated identical call
+  (3 rows -> 6 rows); confirmed the default `index=True` writes the row
+  index as a real column literally named `"index"` — the exact `to_csv()`
+  `Unnamed: 0` trap from Lesson 64, just a different literal name since SQL
+  needs a real column identifier; confirmed the dtype round-trip loss
+  mirroring Lesson 86 from the opposite direction — a nullable `Int64`
+  column with a real gap comes back `float64` through a plain
+  `to_sql()`/`read_sql()` round trip (no `dtype_backend=`), and a
+  `category` column comes back plain `str` with its categories gone
+  entirely, since SQL has no categorical column type at all; confirmed
+  `method="multi"` with `chunksize=1_000` ran noticeably faster than the
+  row-by-row default on a 20,000-row timing test, same final row count.
+  Also explored but deliberately left out of the lesson body to keep scope
+  tight: `index=` is not a simple boolean check internally — confirmed via
+  `pandas.io.sql.SQLTable._index_name`'s source that it checks `index is
+  True` specifically (not mere truthiness) before falling through to
+  `isinstance(index, str)`/`isinstance(index, list)`, meaning `index=1`
+  writes no index column at all while `index="banana"` writes one literally
+  named `"banana"` — this directly caused a real bug in the practice file's
+  own Exercise 1 draft, caught during verification: an unfilled `ex1_...
+  = ...` (`Ellipsis`) satisfied the original loose column-set check because
+  `index=Ellipsis` silently falls through to the same "no index column"
+  branch as `index=False` (neither `is True` nor a `str`/`list`), so the
+  unsolved placeholder printed a false ✓; fixed with an explicit
+  `ex1_value_is_real_false = ex1_index_value is False` identity check
+  added to the assertion, the same unfilled-Ellipsis-satisfies-a-loose-
+  check risk class prior rounds' notes have repeatedly flagged (Lessons 83,
+  85). Also confirmed a fourth `if_exists="delete_rows"` option exists
+  (deletes rows but keeps the table schema, unlike `"replace"`) but left it
+  out of the lesson entirely — three options (`fail`/`replace`/`append`)
+  already cover the real interview-relevant decision, and a fourth rarely-
+  used option would dilute rather than sharpen it. After that one bug fix,
+  the shipped (unsolved) `practice/87_to_sql.py` was executed directly from
+  its real `practice/` location and printed exactly 4 ✗ with no raw
+  traceback; a solved copy (kept only in `.scratch-0087/`, not shipped)
+  then printed all 4 ✓ and "All green" on the first run. Quiz options were
+  leveled with a scratch Python script (`uv run python3`, deleted after)
+  rather than eyeballed — iterated through a few wording tweaks (including
+  one awkward phrasing caught and smoothed on re-read, "underneath the old
+  ones there" -> "underneath the old ones") to land exactly 9/9/9, 9/9/9,
+  7/7/7, and 9/9/9 words across the four questions, one `data-ok` per
+  question throughout. A second scratch script confirmed tag balance on the
+  lesson (`h2` 9/9, `p` 23/23, `div` 6/6, `pre` 5/5, `code` 100/100, `span`
+  46/46, `button` 12/12, `dfn` 3/3, `script` 3/3, `table` 1/1, `tr` 4/4,
+  `th` 3/3, `td` 9/9, `strong` 3/3, `em` 1/1, `a` 2/2) and that all 3 new
+  `<dfn>` tags carry both `data-en` and `data-vn`; exactly 2 raw `&`
+  characters were found, both inside the one standard `cd ~/learning/data
+  && uv run …` command, matching every prior lesson's pattern, zero raw `&`
+  in prose. Used `table class="gloss"` for the `if_exists=` comparison
+  table, same precedent Lesson 86 established (no separate `.cmp` class
+  exists in `course.css`). Checked the glossary for a collision before
+  adding anything — grepped `to_sql|if_exists|method="multi"` case-
+  insensitively across the full glossary, found zero existing rows — added
+  exactly 3 new rows (`to_sql()`, `if_exists="fail"`, `method="multi"
+  (to_sql)`) directly after Lesson 86's `chunksize (read_sql)` entry; a
+  scratch tag-balance script confirmed the glossary file stayed balanced
+  afterward (`tr` 158/158, `td` 471/471, `th` 3/3, `table` 1/1, `code`
+  1024/1024, `em` 5/5) with zero raw `&` introduced. Registered Lesson 87
+  in `nav.js` with today's date (2026-10-04); `node --check` confirmed it
+  still parses as valid JavaScript after the edit, and exactly one `n: 87`
+  entry plus one `0087-to-sql` file reference were confirmed to exist.
+  `bin/record-progress data lesson_generated --day 87 --lesson
+  0087-to-sql.html --detail '{"by":"headless"}'` was run from the repo
+  root; see the tool-call result immediately following this entry's
+  authoring for the exact recorded/blocked outcome. No new
+  `data/learning-records/` entry was added this round — routine lesson, no
+  new baseline finding to justify one beyond the practice-file bug already
+  captured above. This round closed the Load-side mirror of Lesson 86's
+  Extract-side gap (ETL's Load step is now covered on both the file side,
+  Lesson 64, and the SQL side, this lesson) — no standing named candidate
+  carries forward; tomorrow starts with a fresh curriculum/glossary scan.
+  The `.scratch-0087/` directory was deleted after verification, per this
+  course's standing practice of not leaving scratch artifacts committed.

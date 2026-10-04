@@ -178,6 +178,8 @@
       file: "lessons/0085-sparse-dtype.html" },
     { n: 86, date: "2026-10-03", title: "pd.read_sql(): the ETL Extract step via SQL, and its dtype traps",
       file: "lessons/0086-read-sql.html" },
+    { n: 87, date: "2026-10-04", title: "df.to_sql(): the ETL Load step's SQL half, and its silent traps",
+      file: "lessons/0087-to-sql.html" },
   ];
 
   const REFS = [

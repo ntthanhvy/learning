@@ -138,6 +138,8 @@
       file: "lessons/0065-tempfile-scratch-space.html" },
     { n: 66, date: "2026-10-03", title: "csv.DictWriter: the write side of Day 6's DictReader",
       file: "lessons/0066-csv-dictwriter.html" },
+    { n: 67, date: "2026-10-04", title: "Review day 10: retrieval across Days 64-66",
+      file: "lessons/0067-review-retrieval-day-10.html" },
   ];
 
   const REFS = [

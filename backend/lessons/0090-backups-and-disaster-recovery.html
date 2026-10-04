@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 90 · Backups and disaster recovery: what survives when the WAL itself doesn't</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 90 · ~20 min</p>
+<h1>Backups and disaster recovery: what survives when the WAL itself doesn't</h1>
+<p class="byline">Lesson 86 named the write-ahead log as the thing durability is actually built on: a crash loses nothing, because recovery replays the log back to exactly where COMMIT left off. Lesson 85 named the read replica: another instance, replaying the same log, that survives one machine dying outright. Neither survives a bad <code>DELETE FROM orders</code> with no <code>WHERE</code> clause, or a disk that corrupts silently, or a region that disappears — because a replica faithfully replays mistakes too. That's what backups are for, and the two numbers every team should be able to state before trusting one.</p>
+
+<h2>1 · A replica protects against the wrong kind of failure</h2>
+<p>Lesson 85's read replica exists to survive hardware dying: the primary's disk fails, its process crashes and won't come back, the machine itself is gone — the replica is already caught up (or close to it) and can be promoted to take over. But a replica is built to do one thing faithfully: replay every change the primary made, in order, forever. A mistaken <code>UPDATE</code> that sets every row's price to zero is not a hardware failure — it's a correct, successfully committed change that happens to be wrong. The replica replays it exactly like any other committed change, within milliseconds, and now both copies are wrong. Replication answers "what if a machine dies." It has no answer at all for "what if the data itself was bad the moment it was written."</p>
+<div class="callout"><strong>Different failure, different tool:</strong> a replica is a second copy of the <em>current</em> state, kept current on purpose. A <dfn data-en="a stored copy of data from some point in the past, kept deliberately separate and (often) deliberately stale, so that a mistake or corruption that has already been replicated into every live copy can still be undone by going back to a copy made before the mistake happened" data-vn="backup (giữ nguyên) — bản copy dữ liệu từ 1 thời điểm trong quá khứ, giữ tách riêng và cố tình không cập nhật theo real-time -- mục đích là khi lỗi/corrupt đã lan ra mọi live copy rồi, vẫn có thể quay về bản backup chụp trước lúc lỗi xảy ra">backup</dfn> is a copy of some <em>past</em> state, kept deliberately behind, precisely so a mistake that has already reached every live, current copy can still be undone by stepping backward to before it happened.</div>
+
+<h2>2 · Two numbers, decided before anything goes wrong</h2>
+<p>"We have backups" is not a plan by itself — it hides two separate questions that need separate numbers attached, decided in advance, not improvised during an incident. The first: if disaster strikes right now, how much data can the business accept losing — five minutes of orders, one hour, one day? That ceiling is the <dfn data-en="Recovery Point Objective -- the maximum acceptable amount of data loss, measured as a span of time, between the last backup/recovery point actually available and the moment a disaster happens; an RPO of 5 minutes means the business accepts losing at most 5 minutes of the most recent writes" data-vn="RPO / Recovery Point Objective (giữ nguyên) — khoảng thời gian dữ liệu tối đa chấp nhận mất được, tính từ lúc có recovery point gần nhất tới lúc disaster xảy ra -- RPO 5 phút nghĩa là chấp nhận mất tối đa 5 phút write gần nhất">RPO</dfn>, Recovery Point Objective — how far back in time the most recent usable recovery point is allowed to be. The second question is about time, not data: once the team starts recovering, how long can the service stay down before that outage itself becomes unacceptable? That ceiling is the <dfn data-en="Recovery Time Objective -- the maximum acceptable duration of downtime while restoring service after a disaster, measured from the moment the disaster is declared to the moment the service is usable again; distinct from RPO, which measures data lost rather than time spent recovering" data-vn="RTO / Recovery Time Objective (giữ nguyên) — thời gian downtime tối đa chấp nhận được trong lúc restore sau disaster, tính từ lúc tuyên bố disaster tới lúc service dùng lại được -- khác RPO (đó là đo data mất, cái này đo thời gian restore)">RTO</dfn>, Recovery Time Objective.</p>
+<p>These two numbers drive everything about what backup strategy is even worth building. A one-day RPO is satisfied by a nightly full dump. A five-minute RPO is not — nothing that only runs once a night can promise five minutes, no matter how good the restore process is. An RTO measured in minutes rules out a restore process that takes six hours to even finish copying files, regardless of how little data it loses. Both numbers are business decisions, not engineering ones — "how much pain can we tolerate" — but they are the only honest way to then go choose, and defend, a specific backup mechanism.</p>
+
+<h2>3 · The mechanisms, from coarsest to finest-grained</h2>
+<p>A full backup — a complete copy of every table, taken at one moment — is the simplest mechanism and the easiest to reason about: restoring it means loading that one file back in. Its weakness is exactly its RPO: taken once a night, it can lose up to nearly 24 hours of writes, and taking it is itself expensive enough that most teams can't run it continuously. An incremental backup narrows that gap by only copying what changed since the last backup, which is cheaper to take and store — but a restore now means replaying a full backup plus a chain of increments in order, and that chain being unbroken matters: lose or corrupt one increment in the middle, and everything after it in the chain is unusable too.</p>
+<p>The finest-grained mechanism is one this course already taught the raw ingredient for, without naming what it enables: Lesson 86's write-ahead log. Postgres can continuously archive every WAL segment it generates, off to separate storage, as it's written — not once a night, but constantly. Combined with a periodic full backup as a base, that continuous WAL archive lets a restore replay forward to <em>any</em> moment in between, not just to whenever the last nightly dump happened to run. That capability is <dfn data-en="restoring a database to any arbitrary moment in time (not just to whenever the last full backup happened to be taken), by loading a base backup and then replaying the continuously archived write-ahead log forward up to -- and stopping exactly at -- the chosen timestamp, such as the moment right before a bad DELETE ran" data-vn="point-in-time recovery / PITR (giữ nguyên) — restore DB về đúng 1 thời điểm bất kỳ trong quá khứ (không chỉ lúc full backup gần nhất), bằng cách load base backup rồi replay WAL đã archive liên tục tới đúng timestamp chọn -- ví dụ đúng lúc ngay trước khi câu DELETE sai chạy">point-in-time recovery</dfn> (PITR): restore the base backup, then replay the archived WAL forward and stop exactly one second before the mistaken <code>DELETE</code> committed, rather than losing everything back to last night's dump.</p>
+<div class="callout"><strong>Why PITR is the WAL paying rent twice:</strong> Lesson 86 built the WAL to make a local crash recoverable — replay since the last checkpoint, nothing lost. Lesson 87 showed the same stream read externally as a row-level change feed for CDC. PITR is a third job for the identical artifact: archived for the long term instead of recycled after a checkpoint, it becomes the fine-grained time axis a full backup alone doesn't have. One mechanism, three different consumers of the same sequential log.</div>
+
+<h2>4 · Lining the mechanisms up against the two numbers</h2>
+<table class="cmp">
+<tr><th></th><th>Nightly full backup only</th><th>Full backup + incrementals</th><th>Full backup + continuous WAL archiving (PITR)</th></tr>
+<tr><td>Best achievable RPO</td><td>up to ~24 hours of loss</td><td>as often as increments are taken, e.g. hourly</td><td>seconds — restore to any chosen moment</td></tr>
+<tr><td>Storage cost</td><td>lowest — one file, old ones deleted</td><td>moderate — base plus a growing increment chain</td><td>higher — base backup plus a continuously growing WAL archive</td></tr>
+<tr><td>Restore complexity</td><td>simplest — load the one file</td><td>replay an unbroken chain in order</td><td>load base, then replay archived WAL to the target timestamp</td></tr>
+<tr><td>What one broken link in the chain costs</td><td>no chain to break</td><td>everything after the broken increment is unusable</td><td>WAL archive gap means recovery can't pass that gap</td></tr>
+<tr><td>Fits an RTO measured in minutes</td><td>only if the dataset is small enough to reload fast</td><td>usually, if the increment chain is short</td><td>yes, for the data side — but restoring and replaying still takes real time</td></tr>
+</table>
+<p>None of these three substitute for Lesson 85's replica. A replica's whole job is staying current, seconds behind, so a hardware failure costs almost no time at all — exactly what an RTO measured in minutes actually needs for that failure mode. A backup's job is staying deliberately behind, so a logical mistake that's already been faithfully replicated everywhere can still be undone. Production systems that take both seriously run both at once, for two different failure modes, not one in place of the other.</p>
+
+<div class="interview">
+<p><strong>Q: "Walk me through your backup strategy."</strong> A strong answer, out loud: <em>"First I'd ask what RPO and RTO the business actually needs — how much data loss is tolerable, and how long can we be down — because those two numbers decide which mechanism is even worth building, not the other way around. A nightly full backup is simplest but caps RPO near 24 hours. If we need tighter than that, I'd add continuous WAL archiving on top of periodic full backups, which gives point-in-time recovery — restore to any timestamp, not just to last night's dump. That's a different failure mode than replication, though: a read replica protects against a machine dying, because it's a current copy kept current on purpose. A backup protects against a mistake or corruption that's already been faithfully replicated to every live copy, including the replica — a bad DELETE replicates perfectly. I'd want both running, and I'd want the RTO side tested, not just assumed: restoring a backup you've never actually practiced restoring is a plan on paper, not a plan."</em> The signal: naming RPO/RTO as the thing that should be decided first, and correctly separating what a backup protects against from what a replica protects against, instead of treating "we have backups" as a complete answer.</p>
+</div>
+
+<h2>Scope line</h2>
+<p>MISSION.md excludes NoSQL, sharding, and distributed systems beyond vocabulary level, and a full production disaster-recovery plan drifts well past that line fast: multi-region failover, backup encryption and retention policy, automated restore testing pipelines, cloud-provider-specific snapshot tooling. None of that is this lesson's job. The point here is the vocabulary and the mental model — RPO and RTO as the two numbers that should be decided before a mechanism is chosen, and the backup-vs-replica distinction, since "we have backups" and "we have a replica" answer two different disaster questions that get conflated constantly in real conversations.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A replica faithfully replays every committed change, including a mistaken one -- it protects against a machine dying, not against bad data that was correctly written and then replicated everywhere. A backup is a deliberately older copy, so stepping back to before the mistake is still possible.">
+    <p class="stem">Why doesn't a read replica protect against a bad DELETE with no WHERE clause?</p>
+    <button class="opt" data-ok>it faithfully replays that exact same committed bad change</button>
+    <button class="opt">replicas always refuse to ever run any DELETE statement</button>
+    <button class="opt">replicas store data in a completely different format now</button>
+    <button class="opt">replicas only ever exist inside one single data center</button>
+  </div>
+  <div class="q" data-why="RPO measures how much data loss is acceptable, as a span of time -- how far back the most recent usable recovery point is allowed to be. RTO measures something different: how long the service is allowed to stay down while recovery happens.">
+    <p class="stem">What does RPO measure, that RTO measures something different from?</p>
+    <button class="opt" data-ok>acceptable data loss, not acceptable downtime duration now itself</button>
+    <button class="opt">acceptable downtime duration, not acceptable data loss now itself</button>
+    <button class="opt">the total number of replicas a cluster currently runs</button>
+    <button class="opt">the total number of indexes a given table has</button>
+  </div>
+  <div class="q" data-why="Point-in-time recovery works by loading a base backup and then replaying the continuously archived write-ahead log forward, stopping at a chosen timestamp -- the same WAL mechanism Lesson 86 built for crash recovery, now archived long-term instead of recycled after a checkpoint.">
+    <p class="stem">What does point-in-time recovery actually replay to reach an arbitrary past moment?</p>
+    <button class="opt" data-ok>a base backup plus the archived write-ahead log now</button>
+    <button class="opt">a brand new empty table with zero rows ever</button>
+    <button class="opt">a cached HTTP response saved from that same moment</button>
+    <button class="opt">a separate read replica freshly promoted to primary now</button>
+  </div>
+  <div class="q" data-why="A nightly full backup alone can lose close to 24 hours of writes in the worst case, since the most recent recovery point is whenever last night's dump happened to run -- tightening that RPO needs more frequent backups, incrementals, or continuous WAL archiving, not just the nightly full dump by itself.">
+    <p class="stem">What is the main RPO weakness of relying on a nightly full backup alone?</p>
+    <button class="opt" data-ok>losing up to nearly a full day of writes</button>
+    <button class="opt">needing a second data center in another region now</button>
+    <button class="opt">being completely unable to restore any single table now</button>
+    <button class="opt">requiring every client to hold a new API version</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> this course's RESOURCES.md has no resource naming backup strategy or RPO/RTO specifically — the closest standing entry, the <a href="https://www.postgresql.org/docs/current/ddl.html">PostgreSQL Manual</a> (already cited for schema/DDL), also documents continuous archiving and point-in-time recovery in its own backup chapter, so it remains the arbiter once that chapter is read directly. This session's sandbox network-permission gate was checked and found closed, so rather than invent a citation beyond what RESOURCES.md already stands behind, this lesson is built from general, widely-consistent industry usage of RPO/RTO and backup-mechanism vocabulary. Worth fetching once the gate reopens: the PostgreSQL Manual's "Continuous Archiving and Point-in-Time Recovery (PITR)" chapter, the natural next read after Lesson 86's WAL chapter.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially. Nếu chỗ nào chưa rõ, cứ hỏi lại bằng tiếng Việt cũng được.<br><br>
+<em>Next lesson:</em> open. Still no <code>lesson_completed</code>/quiz-outcome record exists for any lesson — the honest next step remains a completion signal or a user-named track.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

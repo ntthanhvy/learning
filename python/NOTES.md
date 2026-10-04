@@ -8418,3 +8418,124 @@ fail *gracefully* so the learner sees which task failed.
   previously-named fresh-gap candidates left on the table if a fifth
   consecutive fresh day is chosen instead, both still assessed as weaker than
   every fresh topic chosen since Day 58.
+- 2026-10-04 — **Day 67 generated: Review day 10** (headless run),
+  `lessons/0067-review-retrieval-day-10.html`, taking Day 66's own next-day
+  note directly instead of deferring a third time. Read `MISSION.md`
+  (untouched, read-only) in full and confirmed the hard no-pandas/no-NumPy
+  scope rule again, `RESOURCES.md` in full, `PLAN.md` in full, the full
+  `learning-records/` directory (still only the Day 1 baseline), and the tail
+  of `NOTES.md` including Days 63-66's full entries to recover the exact
+  wording of the carried-forward recommendation. Read the full `assets/nav.js`
+  `LESSONS` array and listed `lessons/`/`practice/` to confirm the exact spine
+  covered so far. Read lesson 63 (the most recent review day) plus its
+  practice file in full as the structural template, and lessons 64, 65, and
+  66 plus their practice files in full to source today's three retrieval
+  questions accurately from the original teaching text rather than from
+  memory. Idempotency: listed `lessons/0067-*` (none existed) and grepped
+  `assets/nav.js` for `2026-10-04` (no hit) before writing anything. Today's
+  date (2026-10-04) matches the run's stated date.
+  Decision process: the orchestrator's brief gave this real weight rather
+  than treating it as a free choice — Day 65's next-day note first flagged
+  Days 64/65 as review-worthy; Day 66 explicitly deferred it a second time on
+  direct instruction naming a specific fresh topic (`csv.DictWriter`) instead,
+  and said Day 67 should "seriously weigh" opening the review rather than
+  deferring a third time. A fresh-gap grep still ran first, matching every
+  prior review day's own discipline — `subprocess` and `configparser` remain
+  the only two candidates on the table, both unchanged and still weaker than
+  every fresh topic chosen since Day 58, confirming no new fresh topic had
+  quietly become compelling enough to justify a third deferral. With the
+  backlog now two deferrals deep and no new fresh case on the table, this run
+  did not defer a third time: today reviews exactly Days 64 (`zipfile`), 65
+  (`tempfile`), and 66 (`csv.DictWriter`) — three lessons taught back-to-back
+  that have never had a retrieval pass, following Day 63's own established
+  review-day format (fold-out answers in original teaching order, then a
+  "why these, spread this way" section, then a practice file and quiz over
+  the same material, no new syntax).
+  Lesson covers three fold-out questions in original teaching order: Day 64 —
+  why `zf.namelist()` never needs to extract anything first, and the
+  path-traversal risk `extractall()` on an untrusted archive guards against;
+  Day 65 — why a `with tempfile.TemporaryDirectory()` block cleans up even
+  after an exception, and when `delete=False` on `NamedTemporaryFile()` is
+  actually the right call; Day 66 — why `csv.DictWriter` requires
+  `fieldnames=` while `DictReader` never does, and what actually breaks when
+  `newline=""` is skipped. A closing section explains why these three were
+  interleaved this way (a safety rule, a cleanup guarantee, a
+  required-argument-and-encoding gotcha — three different mental models) and
+  names the shared throughline (a module doing fiddly or dangerous bookkeeping
+  automatically instead of by hand).
+  **New jargon: zero, by design.** Every term revisited (zip archive,
+  zipfile, tempfile, TemporaryDirectory, NamedTemporaryFile, csv.DictWriter,
+  fieldnames, extrasaction) already has a glossary entry under its original
+  day (64/65/66); none is re-defined or re-tagged with a new `<dfn>` today,
+  matching Day 63's precedent exactly. `reference/glossary.html` was not
+  touched this round — confirmed by grepping it case-insensitively for every
+  revisited term first and finding each already present under its own
+  `id="day64"`/`id="day65"`/`id="day66"` section, so no collision check or new
+  row was needed.
+  No-pandas rule: grepped case-insensitively for `pandas`/`numpy`/`pd\.`/
+  `np\.` in both the lesson and practice file — exactly one hit in the lesson,
+  the standard single-line boundary callout ("nothing pandas-specific
+  today... none of which needs a DataFrame to demonstrate"), matching Day 63's
+  wording pattern; zero hits in the practice file.
+  Practice file `practice/67_review_retrieval_day_10.py` (5 checks,
+  stdlib-only, no `--with` flag, function-stub-with-`...`/TODO-comment style
+  matching Day 63's): writing a small zip archive via `zf.writestr()` with
+  chosen member names and reading one member's bytes back via `zf.open()`
+  without extracting the rest (Day 64), staging a file inside a
+  `TemporaryDirectory()` and confirming both that it's readable inside the
+  `with` block and that its path no longer exists once the block exits (Day
+  65), and writing dict rows via `csv.DictWriter` (`fieldnames=`,
+  `writeheader()`/`writerows()`, `newline=""`, `extrasaction="ignore"` for an
+  unlisted key) then round-tripping the result back through Day 6's
+  `DictReader` (Day 66). Verified in a scratch `.scratch-0067/` directory
+  under the repo root (created directly under the repo root since `/tmp`
+  remains unavailable to this sandbox, consistent with every prior round's
+  note): the shipped (unsolved) copy printed five clean ✗ lines with no
+  traceback; a separately written, fully solved copy (via `Write`, not by
+  editing the shipped file) printed all five ✓ and the "All green" tally, run
+  twice consecutively with identical results both times. Scratch directory
+  and all throwaway checker scripts deleted before finishing — confirmed by a
+  listing showing no `.scratch-0067` remaining.
+  HTML tag balance was checked with a throwaway stdlib
+  `html.parser.HTMLParser`-based stack checker (written via `Write`, deleted
+  after use) — clean, no unclosed or mismatched tags. A raw-unescaped-`&`
+  regex (`&(?!amp;|lt;|gt;|quot;|#39;|apos;|#\d+;)`) found zero hits.
+  Quiz: 4 questions, one per retrieval question plus one extra covering Day
+  66's `newline=""` gotcha specifically (matching Day 63's four-question
+  count even though only three lessons are covered, since Day 66 alone
+  carries two distinct retrieval-worthy mechanisms). Word counts were checked
+  with a throwaway regex-based Python script (run via `uv run python3`,
+  deleted after use). First draft mismatched on all four questions (Q1
+  9/10/10, Q2 11/10/10, Q3 11/10/10, Q4 10/12/9) — several rounds of
+  one-to-two-word edits (adding "ever"/"only"/"then"/"simply"/"at all",
+  trimming "row at all" to "row") landed all four at equal counts: 10/10/10
+  each, confirmed by the same script reporting "ALL OK", plus a `data-ok`
+  count of exactly 4.
+  Glossary: no new terms, no new section — see above.
+  `RESOURCES.md`: not touched — no new module introduced today, matching Day
+  63's precedent of citing each lesson's own already-listed source instead of
+  adding a new line.
+  Registered in `assets/nav.js` with `date: "2026-10-04"` right after the
+  `n: 66` entry; confirmed `node --check assets/nav.js` reports no syntax
+  errors after the edit.
+  **DB access:** per every prior round's note, direct `psql`/
+  `bin/query-progress` reads remain hard-blocked in this sandbox and were not
+  attempted — relied on `learning-records/` (still only the Day 1 baseline)
+  plus `NOTES.md`'s own generation-log history for pacing instead.
+  `python/learning-records/` still holds only the Day 1 baseline; nothing
+  this round (a review day correctly deferring zero new jargon, a
+  twice-deferred recommendation finally actioned on explicit instruction)
+  rises to a durable learner-profile finding distinct from what's already
+  recorded.
+  Final `git status --short -- python/` showed exactly three paths changed
+  (`assets/nav.js` plus the new lesson and practice file) — fewer than a
+  fresh-content day since no glossary or `RESOURCES.md` edit was needed, no
+  other course's files touched, and no leftover scratch files or directories.
+  **Next-day note:** the Days 64-66 review backlog is now cleared — every
+  lesson through Day 66 has had at least one retrieval pass. Day 68 is open
+  either way: `subprocess` and `configparser` remain the only two
+  previously-named fresh-gap candidates, both still assessed as weaker than
+  every fresh topic chosen since Day 58, so a fresh-gap grep is worth running
+  again before defaulting to either; if nothing stronger turns up, this is
+  also a reasonable point to finally spend one of them rather than continuing
+  to set both aside.

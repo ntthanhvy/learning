@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 67 · Review day 10: retrieval across Days 64-66</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 67 · ~20 min · 4 Oct 2026</p>
+<h1>Review day 10: retrieval across Days 64-66</h1>
+<p class="byline">Day 63 (review day 9) covered Days 57, 59, 60, and 62. Since then, three fresh days ran in a row — Day 64 (<code>zipfile</code>), Day 65 (<code>tempfile</code>), Day 66 (<code>csv.DictWriter</code>) — and each day's own next-day note flagged the same thing: none of those three has ever had a <dfn data-en="a study technique where the learner produces an answer from memory before checking it, rather than re-reading the source material - it is a stronger driver of durable learning than re-reading, especially when spaced across separated topics rather than massed on one" data-vn="giữ nguyên &quot;retrieval practice&quot; — tự nhớ lại và viết ra câu trả lời trước khi xem lại tài liệu, hiệu quả hơn hẳn việc đọc lại; càng hiệu quả khi trộn nhiều chủ đề cũ thay vì ôn 1 chủ đề liền mạch">retrieval practice</dfn> pass. Day 65's note first raised it as a candidate for Day 66; Day 66 deferred it a second time on explicit instruction and said Day 67 should "seriously weigh" it rather than deferring a third time. This is that review — a tenth retrieval day, covering exactly Days 64, 65, and 66.</p>
+
+<div class="callout"><strong>Why today, specifically, and why not a fourth fresh day:</strong> a fresh-gap grep ran first anyway, matching every prior review day's own discipline — <code>subprocess</code> and <code>configparser</code> remain the only two candidates on the table, both unchanged and still assessed weaker than every fresh topic chosen since Day 58; nothing new turned up. With no compelling fresh case, and with the standing recommendation now deferred twice in a row by explicit instruction rather than by judgment, continuing to defer it a third time would need a genuinely strong reason, not just availability of another fresh topic. There isn't one — so today pays down the backlog instead: Days 64, 65, and 66, three lessons taught back-to-back that have never once been retrieved from memory.</div>
+
+<h2>1 · Three questions, in the original teaching order</h2>
+<p>Answer each out loud or on paper <em>before</em> reading the fold-out answer. If one is shaky, note it and go fix it in the practice file below rather than only rereading the old lesson.</p>
+
+<p><strong>Day 64 — <code>zipfile</code>.</strong> Why does <code>zf.namelist()</code> never need to extract anything first, and what is the one real risk to guard against when calling <code>extractall()</code> on an archive from an untrusted source?</p>
+<div class="callout">Fold-out answer: <code>namelist()</code> reads the archive's own internal listing of member paths — it never touches member bytes, extracted or not. The risk with <code>extractall()</code> on an untrusted archive is path traversal: a crafted member name like <code>../../etc/passwd</code> could, on older extraction code, write outside the intended destination entirely. Modern <code>extractall()</code> guards against that specific escape, but an untrusted archive still deserves the same caution as any other unvalidated input, the way Day 62's <code>rmtree()</code> callout already established for paths in general.</div>
+
+<p><strong>Day 65 — <code>tempfile</code>.</strong> Why does a <code>with tempfile.TemporaryDirectory()</code> block clean up its contents even when an exception is raised partway through, and when is <code>delete=False</code> on <code>NamedTemporaryFile()</code> actually the right call?</p>
+<div class="callout">Fold-out answer: <code>TemporaryDirectory()</code> is a context manager (Day 6) — the <code>with</code> block's exit always runs, whether the block finished normally or an exception interrupted it partway through, so the whole directory and everything written inside it is deleted either way. That is exactly what a hand-written path-plus-manual-delete approach cannot guarantee, since an exception before the delete line skips cleanup entirely. <code>delete=False</code> is the right call only when something else — a library, or a platform limitation — needs to reopen the file by its own path rather than accept an already-open file object; it defers cleanup to the caller, who must then delete it manually or lose the automatic-cleanup benefit.</div>
+
+<p><strong>Day 66 — <code>csv.DictWriter</code>.</strong> Why does <code>csv.DictWriter</code> require <code>fieldnames=</code> while <code>csv.DictReader</code> never does, and what actually goes wrong if a CSV file is opened for writing without <code>newline=""</code>?</p>
+<div class="callout">Fold-out answer: <code>DictReader</code> always has an existing header row already sitting in the file to read column names from. <code>DictWriter</code> is creating a brand-new file with nothing on disk yet, so there is no header row anywhere to infer names from — <code>fieldnames=</code> has to be supplied explicitly, and it doubles as the column order and the whitelist of keys <code>DictWriter</code> will accept. Skipping <code>newline=""</code> lets Python's text mode translate every <code>"\n"</code> the program writes into the platform's native line ending (<code>"\r\n"</code> on Windows) — stacked on top of the <code>csv</code> module's own <code>"\r\n"</code>, that doubles every line ending to <code>"\r\r\n"</code>. It's invisible on Linux/macOS, where the native ending is already <code>"\n"</code>, which is exactly why it ships unnoticed and then breaks on a teammate's Windows machine or in CI.</div>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> nothing pandas-specific today — this review only revisits Days 64, 65, and 66's plain-Python archive, scratch-space, and CSV-writing material, none of which needs a DataFrame to demonstrate.</div>
+
+<h2>2 · Why these three, and why no new terms today</h2>
+<p>Same interleaving logic as every prior review day: an archive-reading safety rule, then a cleanup guarantee, then a required-argument-and-encoding gotcha — three different mental models, not three variations on one. They also share a quieter throughline worth naming: all three are about a tool doing dangerous or fiddly bookkeeping automatically so a script doesn't have to get it right by hand every time — safe extraction, guaranteed-unique cleanup-on-exit, and the exact line-ending bytes a CSV reader downstream expects. Recognizing "this module already solved the annoying part, here's what it actually guarantees" is the retrieval goal today, more than recalling exact method names alone.</p>
+<p>No new jargon is introduced today on purpose — every term revisited already has a glossary entry under its original day. With today's three done, the backlog this round's note was tracking (Days 64-66) is cleared; <code>subprocess</code> and <code>configparser</code> remain the only named fresh-gap candidates still open whenever a fresh day is chosen next.</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/67_review_retrieval_day_10.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/67_review_retrieval_day_10.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. No new syntax: every mechanism below was taught in Days 64, 65, and 66. Exercises: writing a small zip archive with chosen internal names and reading one member's bytes back without extracting the rest, staging files inside a <code>TemporaryDirectory()</code> and confirming the directory is gone once the <code>with</code> block exits, and writing dict rows out with <code>csv.DictWriter</code> (header, <code>newline=""</code>, and <code>extrasaction="ignore"</code> for a mismatched key) then round-tripping the result back through Day 6's <code>DictReader</code>.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="namelist() reads the archive's own internal member listing and never touches any member's bytes, extracted or not. extractall() is the one of the three that actually writes every member out as real files, which is where a crafted member path could otherwise try to escape the destination directory.">
+    <p class="stem">Why does <code>zf.namelist()</code> never need to extract anything first?</p>
+    <button class="opt" data-ok>it only ever reads the archive's own stored member listing</button>
+    <button class="opt">it silently extracts every member first, then lists the results</button>
+    <button class="opt">it only works right after extractall() has already run once</button>
+  </div>
+  <div class="q" data-why="TemporaryDirectory() is a context manager, so the with block's exit always runs on the way out, whether the block finished normally or an exception interrupted it partway through. That guarantees the directory and everything inside it gets deleted either way, unlike a hand-written path-plus-manual-delete approach that skips cleanup entirely if an exception fires first.">
+    <p class="stem">Why does a <code>with tempfile.TemporaryDirectory()</code> block clean up even after an exception?</p>
+    <button class="opt" data-ok>it is a context manager, so block exit always runs</button>
+    <button class="opt">tempfile quietly just retries the whole failed block once more</button>
+    <button class="opt">any exception raised inside one is always silently fully ignored</button>
+  </div>
+  <div class="q" data-why="DictReader always has an existing header row already sitting in the file to read column names from. DictWriter is creating a brand-new file with nothing on disk yet, so there is no header row anywhere to infer names from -- fieldnames has to be supplied explicitly up front instead, and it also fixes the column order.">
+    <p class="stem">Why does <code>csv.DictWriter</code> require <code>fieldnames=</code> while <code>DictReader</code> does not?</p>
+    <button class="opt" data-ok>writing has no existing header row to infer names from</button>
+    <button class="opt">DictWriter simply can never support writing more than one column</button>
+    <button class="opt">fieldnames is really only an optional, rarely ever used argument</button>
+  </div>
+  <div class="q" data-why="Plain text mode translates every \n a program writes into the platform's own native line ending, which is \r\n on Windows -- and the csv module already writes its own \r\n per the format's own rule. Stacking both translations doubles the ending into \r\r\n, invisibly on Linux/macOS since their native ending is already \n, which is exactly why the bug ships unnoticed.">
+    <p class="stem">What actually goes wrong when a CSV is opened for writing without <code>newline=""</code>?</p>
+    <button class="opt" data-ok>text mode ends up doubling csv's own line endings there</button>
+    <button class="opt">csv then always flatly refuses to write any header row</button>
+    <button class="opt">DictWriter then simply stops needing any fieldnames argument at all</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> no single new source today — revisit each lesson's own citation (<a href="https://docs.python.org/3/library/zipfile.html"><code>zipfile</code></a> for Day 64, <a href="https://docs.python.org/3/library/tempfile.html"><code>tempfile</code></a> for Day 65, and <a href="https://docs.python.org/3/library/csv.html"><code>csv</code></a> for Day 66), all already listed in <code>RESOURCES.md</code>.</p>
+
+<p class="next">No new terms today — this is a review day, and every term revisited already has a glossary entry under its original day (<a href="../reference/glossary.html#day64">64</a>, <a href="../reference/glossary.html#day65">65</a>, <a href="../reference/glossary.html#day66">66</a>).<br>
+💬 Anything unclear across any of today's three? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

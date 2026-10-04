@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 19 · Airflow: logical date, data interval &amp; safe backfills</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 19 · ~20 min · 4 Oct 2026</p>
+<h1>Airflow: logical date, data interval &amp; safe backfills</h1>
+<p class="byline">Today's tangible win: run a real backfill against your own DAG for three missed days, read the exact dates Airflow assigns each run, and know precisely why that's safe to do only because <code>load_raw</code> and <code>dbt_build</code> are idempotent tasks. This is Phase 2c's first lesson — Airflow has had one day (Day 7) since the intensive week closed on 21 Sep, against eight dbt days and three Kafka days, so today goes back to finish what Day 7 only named in passing: <code>catchup</code>.</p>
+
+<div class="callout"><strong>Before today — check Day 7's DAG is still there:</strong> today adds no new task to <code>dags/food_delivery_pipeline.py</code>, it runs the existing one against different dates, so confirm the file and its two tasks still parse:
+<pre><code>AIRFLOW_HOME=<span class="str">"$(pwd)/airflow_home"</span> uv run --with <span class="str">"apache-airflow==3.3.1"</span> airflow dags list-import-errors</code></pre>
+Expected: no output (an empty import-errors report means the DAG parses cleanly). If this errors, or <code>dags/food_delivery_pipeline.py</code> doesn't exist, finish Day 7 first — today reuses that exact file unmodified.</div>
+
+<h2>1 · The date on a DAG run isn't "when it ran"</h2>
+<p>Day 7's DAG has <code>schedule="@daily"</code> and <code>start_date=datetime(2026, 9, 21)</code>, and every run so far has happened to execute on roughly the day it represents, so the distinction this lesson is about has been invisible. It stops being invisible the first time a DAG is deployed late, paused, or needs to reprocess a day that already happened — which is exactly backfilling.</p>
+<p>Every Airflow DAG run is stamped with a <dfn data-en="the timestamp Airflow assigns to identify a specific DAG run -- for a scheduled run, the start of the period that run represents, not the wall-clock time the run actually executed; for a manual or backfilled run, whatever date was requested" data-vn="giữ nguyên &quot;logical_date&quot; — timestamp Airflow gắn cho 1 lần chạy để định danh, là đầu kỳ dữ liệu run đó đại diện, KHÔNG phải giờ thực tế chạy">logical_date</dfn>, and a matching <dfn data-en="the [start, end) time window a scheduled DAG run is responsible for processing -- for a @daily schedule, exactly one calendar day; the logical_date equals data_interval_start by convention, and the run is meant to process data generated during that window, which has already fully closed by the time the run executes" data-vn="giữ nguyên &quot;data_interval&quot; — khoảng [start, end) dữ liệu mà 1 lần chạy có trách nhiệm xử lý; với @daily là đúng 1 ngày, logical_date = data_interval_start theo quy ước">data_interval</dfn> describing the window of data that run is responsible for. The run that executes at (roughly) 2026-09-29 00:05 UTC carries <code>logical_date=2026-09-28</code> and <code>data_interval=[2026-09-28, 2026-09-29)</code> — it's named for the day of data it covers, not the moment the scheduler happened to trigger it. This round verified the exact values a real Airflow 3.3.1 task sees for one logical date, via <code>{{ logical_date }}</code>, <code>{{ ds }}</code>, <code>{{ data_interval_start }}</code> and <code>{{ data_interval_end }}</code> templated into a <code>BashOperator</code>:</p>
+<pre><code>logical_date=2026-09-28 00:00:00+00:00 ds=2026-09-28 data_interval_start=2026-09-28 00:00:00+00:00 data_interval_end=2026-09-28 00:00:00+00:00</code></pre>
+<p>The naming is deliberate, not an Airflow quirk to memorize: a daily batch job's whole point is to summarize a day that has <em>already finished</em>. Day 1's <code>raw.orders</code> load and Day 6's <code>mart_delivery_sla</code> both only make sense once a day's worth of events has fully landed — a run named for "now" would be ambiguous about which day's data it's actually summarizing. <code>logical_date</code> fixes that: it's always the answer to "what day of data is this run about," independent of whatever time the scheduler or a human actually triggered it.</p>
+<div class="callout">If your own Airflow exposure (per the baseline learning record) was 2.x, the name changed: Airflow 2 called this same value <code>execution_date</code>, which this course deliberately hasn't used anywhere — Airflow 3 renamed it to <code>logical_date</code> specifically because "execution" implied "when it ran," which is exactly the wrong mental model.</div>
+
+<h2>2 · <code>catchup</code>, properly: what it actually decides</h2>
+<p>Day 7 set <code>catchup=False</code> with a one-line reason ("no real history to backfill yet") and moved on. Today names the mechanism underneath that flag: on every DAG parse, the scheduler asks "how many scheduled intervals exist between this DAG's <code>start_date</code> and now that have no DAG run yet?" <a href="https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/dag-run.html">Catchup</a> controls what happens with the answer — create a run for every one of them (<code>catchup=True</code>, the default), or skip straight to only the most recent interval (<code>catchup=False</code>).</p>
+<p>This round re-verified it for real rather than trusting Day 7's prose: a fresh scratch DAG with <code>start_date=2026-09-28</code>, <code>schedule="@daily"</code>, <code>catchup=False</code>, reserialized today (2026-10-04), had its next scheduled run computed as exactly <code>2026-10-04T00:00:00+00:00</code> — not 2026-09-28, the <code>start_date</code>, which is what <code>catchup=True</code> would have produced instead (one queued run per missed day since 28 Sep). <code>catchup</code> is a one-time decision made the moment a DAG first exists in a scheduler's eyes; it says nothing about what happens afterward, which is where backfill comes in.</p>
+
+<h2>3 · Backfill: asking for the missed runs on purpose</h2>
+<p><dfn data-en="deliberately creating and running DAG runs for past logical dates that never ran, or that need to be rerun -- the explicit, on-demand version of what catchup=True would have done automatically on first deploy" data-vn="giữ nguyên &quot;backfill&quot; — chủ động tạo và chạy lại DAG cho các logical_date trong quá khứ chưa chạy, hoặc cần chạy lại; là bản chủ động, theo yêu cầu của thứ catchup=True làm tự động">Backfill</dfn> is <code>catchup</code>'s on-demand twin: instead of the scheduler deciding automatically at deploy time, a human asks explicitly for a specific date range, any time later. A real, concrete reason this pipeline would need one: suppose <code>raw.orders</code> for 28–30 September was corrupted at the source and re-loaded after a fix — the <code>mart_delivery_sla</code> rows for those three days need recomputing, and nothing about today's schedule will do that on its own.</p>
+<p>Airflow 3 moved this to its own top-level command group — <code>airflow dags backfill</code> (the Airflow 2 spelling) no longer exists. This round confirmed the exact replacement and error message directly:</p>
+<pre><code>$ airflow dags backfill ...
+airflow command error: argument COMMAND: Command `dags backfill` has been removed. Please use `airflow backfill create`, see help above.</code></pre>
+<p>A dry run shows exactly which logical dates a backfill would create, with no actual task execution:</p>
+<pre><code>AIRFLOW_HOME=<span class="str">"$(pwd)/airflow_home"</span> uv run --with <span class="str">"apache-airflow==3.3.1"</span> airflow backfill create \
+  --dag-id food_delivery_pipeline --from-date 2026-09-28 --to-date 2026-09-30 --dry-run</code></pre>
+<p>Expected, verified against a real Airflow 3.3.1 install this round against a scratch DAG on the same schedule shape:</p>
+<pre><code>Runs to be attempted:
++---------------------------+-----------------+------------------+
+| logical_date              | partition_key   | partition_date   |
++===========================+=================+==================+
+| 2026-09-28 00:00:00+00:00 |                 |                  |
++---------------------------+-----------------+------------------+
+| 2026-09-29 00:00:00+00:00 |                 |                  |
++---------------------------+-----------------+------------------+
+| 2026-09-30 00:00:00+00:00 |                 |                  |
++---------------------------+-----------------+------------------+</code></pre>
+<p>Drop <code>--dry-run</code> to actually create the runs. This round's real (non-dry) run confirmed backfilled DagRuns get their own distinct <code>run_id</code> naming — <code>backfill__2026-09-29T00:00:00+00:00</code>, not <code>manual__&lt;timestamp&gt;</code> (a one-off manual trigger) or <code>scheduled__&lt;timestamp&gt;</code> (the normal nightly run) — so the three kinds of run are always distinguishable later in <code>airflow dags list-runs</code>, exactly the kind of detail worth being able to name when an interviewer asks how you'd know a dashboard anomaly came from a backfill rather than a bad scheduled run.</p>
+
+<h2>4 · Why this is only safe because the tasks are idempotent</h2>
+<p>Here is the part Day 7 built but never said out loud: a backfill is only a good idea if re-running <code>load_raw</code> and <code>dbt_build</code> for an already-processed date produces the same end state as running it once. If either task instead <em>appended</em> on every run — inserting new rows rather than replacing or merging — backfilling three days would silently triple-count them. This is the same idempotent-task property <a href="../backend/index.html">backend/</a> calls an idempotency key, and the same one Day 6's Kafka consumer and Day 7's own <code>fct_orders</code> merge rely on; today is the third time this course applies it, now specifically to "reprocessing a past logical date," which is the exact scenario backfilling creates on purpose rather than by accident.</p>
+<table class="gloss">
+<tr><th>Task</th><th>What a backfilled re-run does for a given logical date</th><th>Why it's still safe</th></tr>
+<tr><td><code>load_raw</code></td><td><code>DROP SCHEMA IF EXISTS raw CASCADE</code>, then reload the same fixed seed (Day 1)</td><td>Full replace, not append — a backfilled date reruns the identical deterministic load, never duplicates a row</td></tr>
+<tr><td><code>dbt_build</code></td><td><code>fct_orders</code> merges on <code>unique_key='order_id'</code> (Day 4/13); <code>mart_delivery_sla</code> is keyed by <code>sla_key</code> (Day 11) and rebuilds per-bucket, not append-only</td><td>A reprocessed date's rows replace or merge into their own existing rows by key, instead of adding a second copy next to them</td></tr>
+</table>
+<div class="callout"><strong>The gap this course's own demo loader still has:</strong> Day 7's generation log already found that <code>generate_raw_data.py</code> re-plants the same fixed 500 orders on every run rather than loading genuinely new per-day data — fine for a portfolio demo, but it means this particular DAG's <code>load_raw</code> task doesn't actually vary by logical date at all yet, so a real backfill test against it reprocesses identical data for every date rather than three distinct days' worth. A production loader would read each day's own file or API slice using <code>data_interval_start</code>/<code>data_interval_end</code> to know which rows belong to which run — worth naming as a real difference between this portfolio pipeline and a production one, the same honesty Day 7 flagged for its own loader.</div>
+
+<h2>5 · Build: run a real backfill against your own DAG</h2>
+<p>In your <code>food-delivery-pipeline</code> repo, with Day 7's <code>AIRFLOW_HOME</code> already set up:</p>
+<pre><code>AIRFLOW_HOME=<span class="str">"$(pwd)/airflow_home"</span> uv run --with <span class="str">"apache-airflow==3.3.1"</span> airflow dags reserialize
+AIRFLOW_HOME=<span class="str">"$(pwd)/airflow_home"</span> uv run --with <span class="str">"apache-airflow==3.3.1"</span> airflow backfill create \
+  --dag-id food_delivery_pipeline --from-date 2026-09-22 --to-date 2026-09-24 --dry-run</code></pre>
+<p><code>dags reserialize</code> first is today's actual TODO to figure out <em>why</em> it's needed: a fresh <code>backfill create</code> looks up the DAG from Airflow's metadata database, not by re-parsing the file on the spot, so a DAG that was never synced there (a file sitting in <code>dags/</code> that no scheduler or CLI command has touched yet) raises <code>DagNotFound</code> even though the file itself parses perfectly — confirmed directly this round by hitting exactly that error before running <code>reserialize</code>. Pick any 3-day window inside the DAG's own <code>start_date..today</code> range. Drop <code>--dry-run</code> once the dates printed look right, then confirm the three distinct <code>backfill__...</code> run IDs:</p>
+<pre><code>AIRFLOW_HOME=<span class="str">"$(pwd)/airflow_home"</span> uv run --with <span class="str">"apache-airflow==3.3.1"</span> airflow dags list-runs food_delivery_pipeline</code></pre>
+
+<div class="interview">
+<p><strong>Q: "What's the difference between logical_date and the actual run time of a DAG, and why does Airflow bother with the distinction?"</strong> A strong answer, out loud: <em>"logical_date is the start of the data interval a run is responsible for, not when the scheduler actually triggered it — a @daily run that executes just after midnight on the 29th carries logical_date 2026-09-28, because it's summarizing the 28th, a day that's just fully closed. The distinction matters the moment a run isn't exactly on time: if a DAG is paused for two days and then resumed, or a backfill reprocesses last month, every run still needs an unambiguous answer to 'what day of data is this,' completely independent of when it happened to execute. Airflow 2 called this execution_date, which conflated the two ideas; Airflow 3 renamed it to logical_date for exactly that reason."</em> The signal: naming the failure mode the distinction prevents — an ambiguous "which day is this" the moment timing and data don't line up — rather than reciting the rename as trivia.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="logical_date names the start of the data interval a run represents (e.g. 2026-09-28 for the day the 28th's data covers), not the timestamp the scheduler happened to trigger the run -- confirmed this round by templating {{ logical_date }} into a real task and reading the value Airflow actually assigned.">
+    <p class="stem">What does a DAG run's <code>logical_date</code> actually represent?</p>
+    <button class="opt" data-ok>The data interval the run is responsible for</button>
+    <button class="opt">The exact wall-clock moment the scheduler triggered it</button>
+    <button class="opt">The date someone first deployed the DAG file</button>
+  </div>
+  <div class="q" data-why="catchup controls what the scheduler does automatically the moment a DAG first exists in its eyes: create one run per missed interval since start_date (catchup=True, the default) or skip straight to only the most recent interval (catchup=False). This round re-verified that a catchup=False DAG reserialized on 2026-10-04 computed its next run as 2026-10-04, not its start_date.">
+    <p class="stem">What does <code>catchup=False</code> actually change, verified this round against a real scratch DAG?</p>
+    <button class="opt" data-ok>The scheduler skips straight to the most recent interval</button>
+    <button class="opt">It disables the DAG from ever being backfilled later</button>
+    <button class="opt">It deletes every DAG run created before today's date</button>
+  </div>
+  <div class="q" data-why="Airflow 3 removed the `airflow dags backfill` command entirely -- this round confirmed the exact current error message, which points to the real replacement, `airflow backfill create --from-date ... --to-date ...`, a new top-level command group rather than a subcommand of dags.">
+    <p class="stem">In Airflow 3.3.1, how do you actually trigger a backfill from the CLI?</p>
+    <button class="opt" data-ok><code>airflow backfill create --from-date --to-date</code></button>
+    <button class="opt"><code>airflow dags backfill --start-date --end-date</code></button>
+    <button class="opt">Only the UI, no CLI</button>
+  </div>
+  <div class="q" data-why="A backfill reprocesses already-executed logical dates on purpose, so it's only safe when the underlying tasks are idempotent -- load_raw fully replaces raw.* rather than appending, and fct_orders/mart_delivery_sla merge or rebuild by key (Day 4/11/13) rather than inserting a second copy. Without that property, backfilling three days would silently multiply every row by three.">
+    <p class="stem">Why is running a backfill over three already-processed days safe for this pipeline specifically?</p>
+    <button class="opt" data-ok>Both tasks replace or merge rows, never append</button>
+    <button class="opt">Airflow automatically deduplicates every backfilled row by itself</button>
+    <button class="opt">Backfilled runs write into a separate warehouse schema</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> Airflow's own <a href="https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/dag-run.html">DAG Runs</a> doc (logical date, data interval and catchup, read fresh this round) and <a href="https://airflow.apache.org/docs/apache-airflow/stable/best-practices.html">Best Practices</a> (idempotent tasks) are this course's cited sources for today, per <code>RESOURCES.md</code>. Maxime Beauchemin's <a href="https://maximebeauchemin.medium.com/functional-data-engineering-a-modern-paradigm-for-batch-data-processing-2327ec32c42a">"Functional Data Engineering"</a> (already cited for Day 7) is the deeper read connecting today's backfill-safety argument to idempotent, re-runnable partitions as the discipline behind reliable batch pipelines generally — today is that same discipline applied specifically to reprocessing a past date on purpose, not just re-running the latest one.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 19; today's deeper treatment of <code>catchup</code> builds on Day 7's entry rather than replacing it.<br>
+<strong>Phase 2c continues</strong> next with the TaskFlow API and why XCom is not a data transport — the second bullet of <code>PLAN.md</code>'s Airflow spine, picking Airflow back up again rather than returning to dbt or Kafka, since Airflow has now had two Phase 2 days against Kafka's three and dbt's eight.<br><br>
+💬 Anything unclear — the <code>DagNotFound</code>/<code>reserialize</code> gotcha, or why <code>logical_date</code> replaced <code>execution_date</code>? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

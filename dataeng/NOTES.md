@@ -2211,3 +2211,150 @@ along the Phase 2 spine, adapted to the learning records.
   '{"by":"headless"}'` run from the repo root: succeeded on the first
   attempt (`recorded: dataeng/lesson_generated day=18 lesson=0018-kafka-
   retention-compaction-and-consumer-lag.html`).
+- 2026-10-04 (headless 06:00 run, Day 19 generated — **Phase 2c begins**):
+  nineteenth lesson, `0019-airflow-logical-date-and-backfills.html`.
+  `lessons/` contained only `0001`–`0018`, `assets/nav.js`'s latest entry
+  was Day 18 (2026-10-03), and no `2026-10-04`/`0019` entry existed anywhere
+  (`lessons/`, `assets/nav.js`, this file), so proceeded. Direct
+  `psql "$LEARNING_DB_URL" ...` and `bin/query-progress` were not attempted
+  this round per this round's own task instructions (confirmed hard-blocked
+  in this sandbox already, consistent with every prior round's own finding),
+  so pacing came from `learning-records/` and this file alone. Read
+  `MISSION.md` (and its hard scope rule: no pandas, no Python-language
+  teaching, no re-deriving API/idempotency concepts that belong to
+  `backend/`), `RESOURCES.md`, `PLAN.md` in full (Phase 2's 2a/2b/2c/2d mix
+  and the explicit "ordering is a spine, not a schedule" caveat), this
+  entire file (all prior generation-log entries, Days 1–18), the one
+  `learning-records/` file, and `assets/nav.js` for every shipped
+  title/date, before writing anything.
+  **Topic choice — the actual judgment call this round:** counting Phase 2
+  days 8–18 (11 days), 8 were 2a (dbt: Days 8–15) and 3 were 2b (Kafka:
+  Days 16–18) — dbt well ahead of its ~50% target, Kafka slightly ahead of
+  its ~20% target, while 2c (Airflow) and 2d (portfolio/interview) sat at
+  zero days despite 20%/10% targets, and Day 18's own closing teaser
+  pointed at Kafka Connect/CDC (2b's next spine item) rather than at either
+  of the zero-day tracks. Weighed that against `PLAN.md`'s own "ordering is
+  a spine, not a schedule: adapt it to the learning records" instruction —
+  there is still only the one Day-1 baseline learning-record file and no
+  `lesson_completed`/quiz signal pointing anywhere specific, so there was no
+  learner-behavior signal to follow instead of the imbalance itself.
+  Concluded the imbalance is the strongest available signal this round and
+  overrode Day 18's own teaser deliberately: picked 2c's first spine bullet
+  ("Logical date / data interval, catchup and backfills, and idempotent
+  tasks that make backfills safe") over 2b's "Kafka Connect and CDC with
+  Debezium." This also had a second, independent justification beyond the
+  ratio: Day 7 set `catchup=False` with only a one-line reason and never
+  circled back, so today closes a real, already-open loop in this course's
+  own content rather than only responding to the day-count ratio.
+  **Content:** built on Day 7's existing `dags/food_delivery_pipeline.py`
+  without adding a new task — today runs the *same* DAG against different
+  dates rather than introducing new code, consistent with this course's
+  "don't invent a toy example when a real one from this project's own
+  history exists" pattern (Days 8/10/11/13 all did the same). Covered
+  `logical_date` vs. wall-clock execution time (the run that executes just
+  after a day closes is named for the day it summarizes, not the moment it
+  ran), `data_interval` as the `[start, end)` window a run represents,
+  `catchup` revisited in depth (Day 7 only asserted `catchup=False`'s
+  reason; today names the actual scheduler mechanism it controls), backfill
+  as `catchup`'s on-demand twin, and — the section this course's standing
+  "defense in depth" bar required — *why* a backfill is only safe here
+  because `load_raw` and `dbt_build` are idempotent tasks, bridging to
+  `backend/`'s idempotency-key concept a fourth time (Day 6 consumer, Day 7
+  batch task, now explicitly "reprocessing a past date on purpose" as the
+  scenario backfilling creates) without re-deriving it. Named the Airflow
+  2→3 rename (`execution_date` → `logical_date`) explicitly for the
+  learner's "Airflow exposure may be 2.x" baseline-record flag, same as Day
+  7 did for `BashOperator`'s import path. Flagged honestly, per this
+  course's standing honesty convention (Day 7's demo-loader gap, Day 11's
+  blocked-build note): this course's own `generate_raw_data.py` still
+  doesn't vary by logical date, so a real backfill test against it
+  reprocesses identical data for three dates rather than three distinct
+  days — named as a real gap matching Day 7's own loader-gap finding, not
+  smoothed over. No pandas, no Python-language teaching beyond what Day 7
+  already used, no re-derivation of idempotency from scratch (bridged in
+  one line each time, never a worked example) — per the hard scope rule.
+  Domain names unchanged (today touches no `raw.*`/mart table at all, pure
+  orchestration). Opened with a "before today" check confirming Day 7's DAG
+  file still parses (`airflow dags list-import-errors`, expect empty
+  output) rather than a full `dbt build`, since today adds no dbt content
+  and doesn't touch the warehouse.
+  **Verification:** Docker was available this round
+  (`docker version` succeeded via the documented `uv run python3 -c
+  "...subprocess.run(['docker','version'],...)"` wrapper), but today's
+  content is pure Airflow CLI against a local SQLite metadata store, not a
+  Postgres/Kafka stack, so no container was needed. Installed
+  `apache-airflow==3.3.1` fresh via `uv run --with` in a scratch directory
+  under `dataeng/` (`.scratch_dataeng_verify_d19/`, deleted entirely before
+  finishing) — clean install, 129 packages. Built a scratch DAG
+  (`backfill_demo`, `@daily`, `start_date=2026-09-28`, `catchup=False`) and
+  ran `airflow db migrate` against a fresh `AIRFLOW_HOME`: clean, SQLite
+  metadata created in under a second. `airflow dags list-import-errors`
+  confirmed zero parse errors. Templated `{{ logical_date }}`,
+  `{{ ds }}`, `{{ data_interval_start }}`, `{{ data_interval_end }}` into a
+  real `BashOperator` and ran `airflow dags test backfill_demo 2026-09-28`:
+  the task's own stdout is the exact string the lesson's Section 1 quotes
+  verbatim (`logical_date=2026-09-28 00:00:00+00:00 ds=2026-09-28
+  data_interval_start=2026-09-28 00:00:00+00:00
+  data_interval_end=2026-09-28 00:00:00+00:00`), confirmed real rather than
+  guessed. Separately ran `airflow dags reserialize` against the same scratch
+  DAG and read its own log output directly to confirm `catchup=False`'s
+  real effect: `next_dagrun` resolved to `2026-10-04` (the day the
+  reserialize ran), not `2026-09-28` (`start_date`) — the exact claim
+  Section 2 makes, checked against real scheduler output rather than
+  asserted from the docs. **Genuine, current-API finding this round:**
+  `airflow dags backfill` (the Airflow 2 spelling, and what an older
+  tutorial would show) errors outright in 3.3.1 — confirmed the exact
+  message, `Command 'dags backfill' has been removed. Please use 'airflow
+  backfill create'`, quoted verbatim in Section 3 — and the real replacement
+  is a new top-level `airflow backfill create` command group, not a `dags`
+  subcommand. Ran `airflow backfill create --dag-id backfill_demo
+  --from-date 2026-09-28 --to-date 2026-09-30 --dry-run`: first attempt hit
+  `DagNotFound`, because a freshly-written DAG file that was never
+  separately synced to Airflow's metadata database doesn't resolve by
+  `--dag-id` lookup even though it parses cleanly — fixed by running `dags
+  reserialize` first, and this exact gotcha (file parses fine, but
+  `backfill create` still can't find it) is what Section 5's build step has
+  the learner discover directly rather than being told. The dry run's own
+  table output (`logical_date` column, three rows for 2026-09-28/29/30, no
+  `partition_key`/`partition_date`) is quoted verbatim in Section 3. Dropped
+  `--dry-run` and ran it for real: created three `backfill__<date>` DagRuns,
+  confirmed via `airflow dags list-runs backfill_demo` showing
+  `backfill__2026-09-29T00:00:00+00:00` / `backfill__2026-09-30T00:00:00+00:00`
+  as `queued` (no scheduler running to execute them, expected for this
+  metadata-only check) alongside the earlier `manual__<timestamp>` test run
+  as `success` — confirming the three run-id naming conventions
+  (`scheduled__`/`manual__`/`backfill__`) are genuinely distinguishable in
+  real output, the fact Section 3's closing paragraph relies on. No `.py`
+  file ships in this lesson (today edits no file in the learner's repo at
+  all, only runs CLI commands against Day 7's existing DAG) and no dbt
+  snippet appears either, so **neither the `py_compile` nor the `dbt parse`
+  verification path in this file applies this round** — stated explicitly
+  here rather than silently skipped, the same as Days 16–18's pure-Kafka
+  rounds. Deleted `.scratch_dataeng_verify_d19/` entirely (DAG file, scratch
+  `AIRFLOW_HOME`, SQLite metadata db) before finishing.
+  Registered Lesson 19 in `assets/nav.js` (`node --check` clean) and added
+  the Day 19 section to `reference/glossary.html` (3 new terms:
+  `logical_date`, `data_interval`, `backfill` — grepped Days 1–18's sections
+  first, case-insensitively, no collisions; `catchup` already has a Day 7
+  entry and was deliberately left untouched rather than duplicated, with
+  the new `backfill` entry cross-referencing it instead). Ran a small Python
+  tag-balance/unescaped-`&`/quiz-word-count script against the saved HTML
+  from a scratch file inside `dataeng/` (deleted after use). Caught and
+  fixed two real markup bugs this round introduced: a `<dfn>` for
+  `data_interval` that was mistakenly closed with `</code>` instead of
+  `</dfn>`, and a `<div class="callout">` closed with `</p></div>` instead
+  of `</div>` — both fixed and reconfirmed balanced
+  (div/p/table/tr/td/th/pre/code/h1/h2/dfn/button/span/a/em/strong, all
+  matched) and zero suspicious bare `&` (two were found in the `<title>`
+  and `<h1>`, both fixed to `&amp;`). The first quiz draft came up
+  mismatched on three of the four questions (9/8/10, 7/7/10 and 10/7/10 word
+  splits); rebalanced all three to 8/8/8, 5/5/5 and 8/8/8 respectively
+  across several edit-and-recount passes, re-verified by re-running the
+  same script after each edit. Confirmed `git status --short -- dataeng/`
+  touched only `assets/nav.js`, `reference/glossary.html` and the one new
+  lesson file before finishing.
+  `bin/record-progress dataeng lesson_generated --day 19 --lesson
+  0019-airflow-logical-date-and-backfills.html --detail
+  '{"by":"headless"}'` run from the repo root: succeeded on the first
+  attempt (`recorded: dataeng/lesson_generated day=19
+  lesson=0019-airflow-logical-date-and-backfills.html`).

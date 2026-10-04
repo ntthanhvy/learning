@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 87 · df.to_sql(): the ETL Load step's SQL half, and its silent traps</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 87 · ~20 min · 4 Oct 2026</p>
+<h1>df.to_sql(): the ETL Load step's SQL half, and its silent traps</h1>
+<p class="byline">Lesson 86 taught <code>pd.read_sql()</code>, the Extract side of moving data between pandas and a database. <code>to_sql()</code> is its write-side mirror — named in the exact same Lesson 8 aside as <code>to_csv</code>, and in Lesson 64's own teaser, but never taught on its own. Re-grepped every lesson body and the glossary for <code>to_sql</code> first and confirmed only those passing mentions exist, zero dedicated coverage. Today closes it: not the happy path (one line), but the three silent traps — an existing-table collision, a default extra index column, and a dtype round-trip that quietly loses information — that mirror Lesson 64's <code>to_csv()</code> traps and Lesson 86's <code>read_sql()</code> trap, now on the Load side.</p>
+
+<h2>1 · The SQL bridge: to_sql() is CREATE TABLE + INSERT, in one call</h2>
+<p>Writing a DataFrame into a database table is the Load half of the ETL shape Lesson 8 named — the destination this time is a table, not a file. <dfn data-en="a DataFrame method that writes the DataFrame's rows into a SQL database table through a connection, creating the table first if it doesn't exist yet -- the Load step of ETL, the write-side mirror of pd.read_sql()'s Extract step" data-vn="giữ nguyên 'to_sql()' — ghi các hàng của DataFrame vào 1 table SQL qua kết nối DB, tự tạo table nếu chưa có — bước Load của ETL, ngược hướng với bước Extract của pd.read_sql()">df.to_sql(name, conn)</dfn> does the equivalent of a SQL <code>CREATE TABLE</code> (if the table is new) followed by one <code>INSERT</code> per row, inferring each column's SQL type from its pandas dtype:</p>
+<pre><code>orders = pd.DataFrame({<span class="str">"order_id"</span>: [<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>], <span class="str">"amount"</span>: [<span class="num">120.0</span>, <span class="num">35.5</span>, <span class="num">99.9</span>]})
+orders.to_sql(<span class="str">"orders"</span>, conn, index=<span class="kw">False</span>)   <span class="cm"># CREATE TABLE orders (...) ; INSERT INTO orders VALUES (...), ...</span></code></pre>
+<p>Mentally this is the write-side cousin of <code>psql</code>'s <code>\copy table FROM 'file.csv'</code>, except the source is already a DataFrame in memory rather than a file on disk — no intermediate CSV needed, the same no-intermediate-file framing Lesson 86 used for the read direction. Confirmed directly (pandas 3.0.6): <code>to_sql()</code> returns the integer number of rows written, useful for a quick sanity check in a pipeline without a separate <code>SELECT COUNT(*)</code>.</p>
+
+<h2>2 · if_exists=: the table-already-there decision pandas refuses to guess</h2>
+<p>The second call to <code>to_sql()</code> against the same table name is where the real decision lives — pandas will not silently guess what to do about a table that's already there:</p>
+<table class="gloss">
+<tr><th>if_exists=</th><th>Behavior</th><th>SQL equivalent</th></tr>
+<tr><td><code>"fail"</code> (default)</td><td>raises <code>ValueError</code>, writes nothing</td><td><code>CREATE TABLE</code> with no <code>IF NOT EXISTS</code></td></tr>
+<tr><td><code>"replace"</code></td><td>drops the whole table, recreates it, then inserts</td><td><code>DROP TABLE</code> + <code>CREATE TABLE</code> + <code>INSERT</code></td></tr>
+<tr><td><code>"append"</code></td><td>keeps the existing table and schema, inserts new rows</td><td>plain <code>INSERT INTO</code></td></tr>
+</table>
+<p>Confirmed directly (pandas 3.0.6): calling <code>to_sql()</code> a second time with no <code>if_exists=</code> at all raises <code>ValueError: Table 'orders' already exists.</code> immediately — the <dfn data-en="the default value of to_sql()'s if_exists= keyword -- raises ValueError and writes nothing at all if the target table already exists, forcing an explicit choice instead of silently guessing replace or append" data-vn="giữ nguyên 'if_exists=\"fail\"' — giá trị MẶC ĐỊNH của tham số if_exists= trong to_sql(), báo lỗi ValueError và KHÔNG ghi gì cả nếu table đích đã tồn tại, bắt buộc phải chọn rõ ràng thay vì tự đoán replace hay append">if_exists="fail"</dfn> default is a deliberate fail-loudly choice, not an oversight — it forces an explicit choice every time rather than silently picking one of the two very different behaviors below. <code>"replace"</code> and <code>"append"</code> look similar in a quick test with identical data, but they are not interchangeable in a real pipeline: <code>"replace"</code> destroys the table's existing schema and any rows a different process put there, while <code>"append"</code> keeps both and can duplicate rows if the same batch is written twice — confirmed directly, re-running an identical <code>to_sql(if_exists="append")</code> call doubles every row with zero complaint, no uniqueness check of any kind.</p>
+
+<h2>3 · The first trap: to_sql()'s default also writes an extra index column</h2>
+<p>This is the exact same trap Lesson 64 named for <code>to_csv()</code>, now on the SQL side: <code>index=</code> defaults to <code>True</code>, writing the DataFrame's row index as its own real column:</p>
+<pre><code>df = pd.DataFrame({<span class="str">"amount"</span>: [<span class="num">120.0</span>, <span class="num">35.5</span>, <span class="num">99.9</span>]}, index=[<span class="str">"a"</span>, <span class="str">"b"</span>, <span class="str">"c"</span>])
+df.to_sql(<span class="str">"t1"</span>, conn)              <span class="cm"># default index=True
+</span>pd.read_sql(<span class="str">"SELECT * FROM t1"</span>, conn).columns.tolist()
+<span class="cm">-- ['index', 'amount']    &lt;- the row index came back as a REAL column named "index"</span>
+
+df.to_sql(<span class="str">"t2"</span>, conn, index=<span class="kw">False</span>)   <span class="cm"># the fix</span>
+pd.read_sql(<span class="str">"SELECT * FROM t2"</span>, conn).columns.tolist()
+<span class="cm">-- ['amount']</span></code></pre>
+<p>Confirmed directly (pandas 3.0.6): the column is literally named <code>index</code> in the created table — plausible-looking, easy to miss in a wide table, and a problem the moment something downstream runs <code>SELECT *</code> expecting only the real business columns. Exactly the same shape as <code>to_csv()</code>'s default <code>Unnamed: 0</code> column from Lesson 64, just a different literal name because SQL table columns need a real identifier rather than CSV's blank header slot. <code>index=False</code> is correct almost every time the index is still the default <code>RangeIndex</code>; keep <code>index=True</code> (or pass <code>index_label=</code>) only when the index is a real, meaningful key worth persisting as its own column.</p>
+
+<h2>4 · The second trap: the dtype round-trip quietly loses information</h2>
+<p>A SQL column type is a coarser bucket than a pandas dtype, so writing then reading back doesn't always return the same dtype that went in:</p>
+<pre><code>df3 = pd.DataFrame({
+    <span class="str">"order_id"</span>: pd.array([<span class="num">1</span>, <span class="num">2</span>, <span class="kw">None</span>], dtype=<span class="str">"Int64"</span>),
+    <span class="str">"status"</span>: pd.Categorical([<span class="str">"paid"</span>, <span class="str">"paid"</span>, <span class="str">"refunded"</span>]),
+})
+df3.dtypes
+<span class="cm">-- order_id      Int64
+-- status     category</span>
+
+df3.to_sql(<span class="str">"t3"</span>, conn, index=<span class="kw">False</span>)
+pd.read_sql(<span class="str">"SELECT * FROM t3"</span>, conn).dtypes
+<span class="cm">-- order_id    float64   &lt;- nullable Int64 demoted to plain float64
+-- status          str   &lt;- category demoted to plain string, no categories remembered</span></code></pre>
+<p>Confirmed directly (pandas 3.0.6): this is Lesson 86's exact trap arriving from the opposite direction — the nullable <code>Int64</code> with a real gap gets written as a SQL <code>INTEGER</code> column, and reading it back with no <code>dtype_backend="numpy_nullable"</code> on the <code>read_sql()</code> side upcasts it to <code>float64</code> again, the identical "NumPy's default integer has no missing-value slot" story from Lessons 51/84/86. <code>category</code> fares worse — SQL has no categorical column type at all, so it's written as plain text and the category labels/ordering are gone the moment it round-trips; nothing on the read side can bring that back except re-declaring <code>astype("category")</code> manually afterward. Neither loss raises an error or a warning — both are silent, and both are fixed the same way Lesson 86 already taught: declare the wanted dtype explicitly on the way back out with <code>dtype_backend=</code> or <code>astype()</code>, since <code>to_sql()</code>/<code>read_sql()</code> round-trips never restore it on their own.</p>
+
+<h2>5 · method="multi" and chunksize=: writing a large DataFrame efficiently</h2>
+<p>The default <code>to_sql()</code> write issues one <code>INSERT</code> statement per row, which is slow at real scale. <dfn data-en="a to_sql() keyword that batches multiple rows into a single multi-row INSERT statement instead of one INSERT per row -- a meaningful speedup for a large write, at the cost of a batch failing as one all-or-nothing unit instead of row by row" data-vn="giữ nguyên 'method=\"multi\"' — tham số của to_sql(), gộp nhiều hàng vào 1 câu INSERT duy nhất (multi-row) thay vì mỗi hàng 1 câu INSERT riêng — nhanh hơn rõ rệt khi ghi nhiều hàng, nhưng cả lô thất bại/thành công CÙNG LÚC, không còn theo từng hàng">method="multi"</dfn> batches many rows into a single multi-row <code>INSERT</code> statement instead, pairing naturally with <code>chunksize=</code> to cap how many rows go into each batch:</p>
+<pre><code>df.to_sql(<span class="str">"big_table"</span>, conn, index=<span class="kw">False</span>, if_exists=<span class="str">"append"</span>,
+          method=<span class="str">"multi"</span>, chunksize=<span class="num">1_000</span>)</code></pre>
+<p>Confirmed directly (pandas 3.0.6, 20,000-row test): <code>method="multi"</code> with <code>chunksize=1_000</code> ran noticeably faster than the row-by-row default on identical data, with the same final row count — the SQL-side cousin of Lesson 86's own <code>chunksize=</code> on the read side, except here it batches the write instead of streaming the read. The trade-off worth naming out loud in an interview: a multi-row batch commits or fails as one unit, so a bad value deep in a 1,000-row batch rolls back that whole batch, not just the one bad row — a different failure granularity than the slower one-row-at-a-time default.</p>
+
+<div class="interview">
+<p><strong>Q: "You've got a cleaned DataFrame ready to land in a database table. Walk me through to_sql()."</strong> A strong answer, out loud: <em>"First decision is if_exists= — it defaults to 'fail' and raises ValueError if the table's already there, which is deliberate: pandas won't guess between replace, which drops and recreates the whole table, and append, which keeps the schema and existing rows but has no uniqueness check, so re-running the same append blindly duplicates every row. Second, I'd pass index=False explicitly unless the index is a real meaningful key — the default writes it as a literal extra column named 'index', the same trap to_csv() has with its default 'Unnamed: 0' column. Third, I'd expect dtype loss on the round-trip: a nullable Int64 column with a gap comes back as float64 unless I ask for dtype_backend='numpy_nullable' on the read side, and a category column loses its categories entirely since SQL has no categorical type at all — both silent, no error. And if the write is large, I'd use method='multi' with a chunksize= to batch the inserts instead of one row at a time, knowing a bad row now fails its whole batch rather than just itself."</em> The signal: naming the if_exists='fail' default, the index='index' column, and the dtype round-trip loss unprompted — the three places a first-time to_sql() call looks fine and isn't.</p>
+</div>
+
+<h2>6 · Where this fits</h2>
+<p>Lesson 86 closed Extract's SQL half; today closes Load's SQL half, completing the same square Lesson 64 drew for file output (<code>to_csv</code>/<code>to_parquet</code>) and Lesson 86 drew for file input's cousin. The happy path is still one line — <code>df.to_sql(name, conn, index=False, if_exists=...)</code> — but exactly like every other Load-stage lesson, the value is in naming the silent failure shapes before they bite: an unplanned collision with an existing table, a junk index column nobody asked for, and dtype information that simply doesn't survive the trip through SQL's type system.</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/87_to_sql.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/87_to_sql.py</code></pre>
+<p>Builds a small in-memory SQLite database with the stdlib <code>sqlite3</code> module (same no-SQLAlchemy-needed approach as Lesson 86's practice file). Exercise 1 writes a DataFrame with <code>index=False</code> and confirms no junk <code>index</code> column comes back. Exercise 2 confirms the Section 2 trap directly: writing to the same table name a second time with no <code>if_exists=</code> raises <code>ValueError</code>. Exercise 3 uses <code>if_exists="append"</code> and confirms the row count doubles (no uniqueness check). Exercise 4 round-trips a nullable <code>Int64</code> column through <code>to_sql()</code>/plain <code>read_sql()</code> and confirms the Section 4 trap: it comes back <code>float64</code>, not <code>Int64</code>.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: to_sql()'s if_exists= keyword defaults to 'fail', which raises ValueError and writes nothing if the target table already exists -- a deliberate choice forcing an explicit replace/append decision rather than silently guessing one.">
+    <p class="stem">Calling <code>df.to_sql("orders", conn)</code> a second time against the same existing table, with no <code>if_exists=</code> passed, does what?</p>
+    <button class="opt" data-ok>raises ValueError right away, writing nothing at all here</button>
+    <button class="opt">silently appends the new rows underneath the old ones</button>
+    <button class="opt">silently replaces the whole table with the new data</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: to_sql() defaults to index=True, writing the row index as a real column literally named 'index' in the created table -- the same shape as to_csv()'s default 'Unnamed: 0' column from Lesson 64, just a different literal name since SQL needs a real column identifier.">
+    <p class="stem">What does <code>df.to_sql("t", conn)</code> write by default that a careless later <code>SELECT *</code> picks up as a junk column?</p>
+    <button class="opt" data-ok>the row index, as a real column named "index"</button>
+    <button class="opt">a duplicate of every column, each suffixed with "_copy"</button>
+    <button class="opt">the DataFrame's own dtypes, serialized as plain JSON text</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: a nullable Int64 column with a real gap, written with to_sql() then read back with plain read_sql() (no dtype_backend=), comes back float64 -- the identical NumPy-integer-has-no-missing-slot story from Lessons 51/84/86, now arriving from the write side instead of the read side.">
+    <p class="stem">A nullable <code>Int64</code> column with a real missing value is written with <code>to_sql()</code>, then read back with plain <code>read_sql()</code>. What dtype comes back?</p>
+    <button class="opt" data-ok>float64, since SQL INTEGER round-trips through NumPy</button>
+    <button class="opt">Int64, identical to what was written originally</button>
+    <button class="opt">object, holding the original pd.NA markers intact</button>
+  </div>
+  <div class="q" data-why="Confirmed directly (20,000-row test): method='multi' batches many rows into one multi-row INSERT per chunk rather than one INSERT per row, running noticeably faster -- but a batch now fails or succeeds as one all-or-nothing unit, a different failure granularity than the row-by-row default.">
+    <p class="stem">What does <code>method="multi"</code> change about how <code>to_sql()</code> writes rows?</p>
+    <button class="opt" data-ok>batches many rows together into fewer multi-row INSERT statements</button>
+    <button class="opt">writes every single row inside its own separate transaction</button>
+    <button class="opt">switches the destination table to an in-memory only engine</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the pandas User Guide's <a href="https://pandas.pydata.org/docs/user_guide/io.html#sql-queries">"SQL queries"</a> section of IO tools (per <code>RESOURCES.md</code>'s "Docs: pandas User Guide" entry, ~8 min) — the same page Lesson 86 cited, covering <code>to_sql()</code>'s full <code>if_exists=</code>/<code>dtype=</code>/<code>method=</code> keyword reference this lesson didn't need in full.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>to_sql()</code>, <code>if_exists="fail"</code>, and <code>method="multi"</code> are all new today, added right after Lesson 86's <code>chunksize (read_sql)</code> entry.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-87 comes back reported as shakiest, otherwise another fresh curriculum/glossary scan for the next genuinely-uncovered pattern — this round closed the Load-side mirror of Lesson 86's Extract-side gap, so no standing named candidate carries forward.<br><br>
+💬 Anything unclear — <code>if_exists=</code>, the index column trap, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -184,6 +184,8 @@
       file: "lessons/0088-event-sourcing.html" },
     { n: 89, date: "2026-10-03", title: "Canary releases vs. blue-green deployments: small blast radius, one layer down",
       file: "lessons/0089-canary-releases-and-blue-green-deployments.html" },
+    { n: 90, date: "2026-10-04", title: "Backups and disaster recovery: what survives when the WAL itself doesn't",
+      file: "lessons/0090-backups-and-disaster-recovery.html" },
   ];
 
   const REFS = [

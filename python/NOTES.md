@@ -8539,3 +8539,114 @@ fail *gracefully* so the learner sees which task failed.
   again before defaulting to either; if nothing stronger turns up, this is
   also a reasonable point to finally spend one of them rather than continuing
   to set both aside.
+- 2026-10-05 — **Day 68 generated: `subprocess`** (headless run),
+  `lessons/0068-subprocess-running-external-commands.html`. Read `MISSION.md`
+  (untouched, read-only) in full and reconfirmed the hard no-pandas/no-NumPy
+  scope rule, `NOTES.md` in full (583KB — read via targeted grep/offset
+  rather than one pass, since a single whole-file read exceeded the tool's
+  size limit), `PLAN.md` in full, `RESOURCES.md` in full, the full
+  `learning-records/` directory (still only the Day 1 baseline), and the tail
+  of the Generation log including Days 66-67's full entries. Read the full
+  `assets/nav.js` `LESSONS` array and listed `lessons/`/`practice/` to
+  confirm the exact 67-lesson spine covered so far. Read lesson 66
+  (`csv.DictWriter`, the most recent fresh-content day) and its practice file
+  in full as the structural/style template, since Day 67 was a review day
+  and not representative of a fresh-content lesson's shape.
+  Decision process: Day 67's next-day note left today open either way —
+  reopen a fresh-gap grep before defaulting to `subprocess`/`configparser`,
+  or spend one of them since both have been named as the only two candidates
+  since Day 58 with nothing stronger ever surfacing. Re-ran the fresh-gap
+  grep (`subprocess|configparser` case-insensitive across all lessons,
+  practice files, and `NOTES.md`) before deciding: `configparser` had zero
+  hits anywhere; `subprocess` had exactly one hit, a passing mention in Day
+  39's `argparse` lesson ("no subprocess needed" for CLI testability) that
+  never explains what a subprocess actually is — confirming it as taught
+  nowhere, same conclusion every prior round reached. No new candidate
+  emerged, and Day 67 cleared the full retrieval backlog through Day 66, so
+  today is correctly a fresh-content day, not a third review day in a row and
+  not a fourth fresh day forcing a review either (this is the first fresh day
+  immediately after a review, well inside every cadence rule in this file).
+  Chose `subprocess` over `configparser`: it is the more broadly useful of
+  the two for this course's data/pipeline framing (shelling out to another
+  tool mid-pipeline is common; reading `.ini`-style config files is rarer in
+  this course's own examples) and was named first in every prior round's
+  candidate list.
+  Lesson covers `subprocess.run()` as the one function used almost always;
+  the list-of-arguments form vs. `shell=True`'s injection risk on untrusted
+  input (a concrete `rm -rf .`-via-`;` example, the same "never trust
+  unsanitized input" instinct Day 39's `argparse` and Day 64's path-traversal
+  callouts both already raised in different contexts); `returncode` and
+  `check=True` raising `CalledProcessError` automatically, bridged to Day 8's
+  "fail loud" exception instinct; and keeping captured `stdout`/`stderr`
+  separate via `capture_output=True`.
+  **New jargon: 3 terms** (`subprocess.run()`, `shell=True`, `returncode`),
+  each with a `<dfn data-en`/`data-vn` tag. Checked `reference/glossary.html`
+  case-insensitively for all three first — zero collisions with any Day
+  1-67 entry — before appending a new `id="day68"` section directly before
+  the closing `<p class="next">` footer, matching every prior day's
+  convention exactly (confirmed by reading Day 62/64/65/66's sections first).
+  No-pandas rule: grepped case-insensitively for `pandas`/`numpy`/`pd\.`/
+  `np\.` in both the lesson and practice file — exactly one hit in the
+  lesson, the standard single-line "Where pandas goes from here" boundary
+  callout (pandas has no subprocess-launching API of its own), matching
+  every prior fresh-content day's pattern; zero hits in the practice file.
+  Practice file `practice/68_subprocess_running_external_commands.py` (3
+  checks, stdlib-only, no `--with` flag, function-stub-with-TODO-comment
+  style matching Day 66's): running a command as a list of arguments and
+  capturing `stdout` as text via `sys.executable -c ...` (portable — no
+  dependency on a `python3` binary existing on PATH), triggering
+  `CalledProcessError` with `check=True` and reading `.returncode` off the
+  caught exception, and confirming `stdout`/`stderr` come back as two
+  separate captured strings rather than merged. Verified in a scratch
+  `.scratch-0068/` directory created directly under the repo root — `/tmp`
+  remains unavailable to this sandbox (confirmed again this round: `ls /tmp`
+  was blocked by the sandbox's directory allowlist), consistent with every
+  prior round's note. The shipped (unsolved) copy printed three clean ✗
+  lines with no traceback; a separately written, fully solved copy (via
+  `Write`, not by editing the shipped file) printed all three ✓ and the "All
+  green" tally, run twice consecutively with identical results both times.
+  Also ran the shipped file directly from its real `python/practice/` path
+  as a final check, confirming the same three clean ✗ lines outside the
+  scratch copy too. Scratch directory deleted before finishing — confirmed
+  by a listing showing no `.scratch-0068` remaining.
+  HTML tag balance was checked with a throwaway stdlib
+  `html.parser.HTMLParser`-based stack checker (written via `Write`, deleted
+  after use) — clean, no unclosed or mismatched tags. A raw-unescaped-`&`
+  regex (`&(?!amp;|lt;|gt;|quot;|#39;|apos;|#\d+;)`) found zero hits.
+  Quiz: 4 questions, one per section (list-vs-`shell=True`, `check=True`,
+  `returncode` meaning, `stdout`/`stderr` separation). Word counts were
+  checked with a throwaway regex-based Python script (run via `uv run
+  python3`, deleted after use). First draft mismatched on all four questions
+  (Q1 11/10/9, Q2 10/9/9, Q3 8/8/9, Q4 10/9/9) — several rounds of
+  one-to-two-word edits (adding "overall"/"than before"/"instead of
+  returning quietly"/"full"/"itself"/"always"/"too", trimming where needed)
+  landed all four at equal counts: 11/11/11, 11/11/11, 9/9/9, 11/11/11,
+  confirmed by the same script reporting "ALL OK", plus a `data-ok` count of
+  exactly 4.
+  `RESOURCES.md`: added a new `subprocess` docs line (it had none before),
+  placed directly after the Day 66 `csv` line per the file's day-ordered
+  citation convention.
+  Registered in `assets/nav.js` with `date: "2026-10-05"` right after the
+  `n: 67` entry; confirmed `node --check assets/nav.js` reports no syntax
+  errors after the edit.
+  **DB access:** per every prior round's note, direct `psql`/
+  `bin/query-progress` reads remain hard-blocked in this sandbox and were not
+  attempted — the orchestrator's brief stated the DB had already been
+  checked (no completion signal since mid-July, no `lesson_generated` row for
+  2026-10-05 yet) rather than this round re-querying it directly.
+  `python/learning-records/` still holds only the Day 1 baseline; nothing
+  this round (a routine fresh-content day choosing between two long-named
+  candidates, no surprising difficulty signal) rises to a durable
+  learner-profile finding distinct from what's already recorded.
+  Final `git status --short -- python/` should show exactly five paths
+  changed (`assets/nav.js`, `RESOURCES.md`, `reference/glossary.html`, plus
+  the new lesson and practice file) — no other course's files touched, and no
+  leftover scratch files or directories.
+  **Next-day note:** both long-standing fresh-gap candidates are now spent —
+  `configparser` is the last one named since Day 58, with nothing else
+  flagged as stronger in any round's grep. Day 69 should run a fresh-gap
+  grep with an open mind rather than assuming `configparser` is the only
+  option, and should also weigh whether Days 67-68 (two lessons, one review
+  one fresh) are due a future review pass once a few more fresh days
+  accumulate — no review backlog exists yet immediately after Day 68, so
+  there is no urgency, but the pattern is worth tracking.

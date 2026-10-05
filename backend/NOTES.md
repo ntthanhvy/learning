@@ -6962,3 +6962,104 @@
   the at-most-once/exactly-once delivery-semantics trio (flagged above,
   not chosen this round) is a plausible candidate if no stronger signal
   appears first.
+- **2026-10-05 generation (Lesson 91, headless run):** Idempotency check
+  first: `grep -c "n: 91" assets/nav.js` and `ls lessons/ | grep -c "^0091-"`
+  both returned 0 before writing anything. Per the orchestrator's confirmed
+  state, no `lesson_completed`/quiz/kata signal exists more recent than
+  mid-July for this course, so generation proceeded conservatively rather
+  than assuming completion of recent lessons. The two `backend/learning-
+  records/` files are still just the two baseline findings (frontend-mindset
+  gap, concurrency-vocabulary gap), neither naming a fresh gap. Topic was
+  given rather than freshly swept: Lesson 90's own closing note named the
+  at-least-once/at-most-once/exactly-once delivery-semantics trio as "a
+  plausible candidate if no stronger signal appears first," and no stronger
+  signal existed, so this round took it. Re-confirmed the gap directly
+  before writing: `at-least-once delivery` already has its own glossary row
+  (from Lesson 10) and is reused by Lessons 26, 29, and 87, but `at-most-
+  once` and `exactly-once` appear only inside other lessons' prose, code
+  comments, and one quiz distractor — Lesson 29's outbox pattern explicitly
+  disclaiming it can promise exactly-once, Lesson 72 and Lesson 87 both
+  naming exactly-once only as something out of scope — never taught as
+  their own terms or compared side-by-side, confirmed via `grep -rli
+  "at-most-once\|at most once"` and `"exactly-once\|exactly once"` against
+  every lesson file before committing to the topic. Lesson 91 covers: the
+  three delivery guarantees as three answers to "what survives a crash
+  mid-delivery" (at-most-once: never duplicated, can be silently lost;
+  at-least-once: never lost, can be duplicated — Lesson 10's term; exactly-
+  once: neither, the one everyone wants); the "uncomfortable fact" that
+  strict exactly-once delivery is not achievable in the general case across
+  independent processes on an unreliable network (the acknowledgment itself
+  can be lost, forcing the same retry-or-not fork); what real systems that
+  advertise exactly-once actually build instead — ordinary at-least-once
+  delivery paired with an idempotent receiver, named as the same shape
+  Lesson 10's job queue, Lesson 26's idempotency key, and Lesson 29's outbox
+  relay already each independently use; a comparison table lining all three
+  guarantees up on loss/duplication risk, receiver work required, and when
+  each is the right choice; and a closing paragraph naming at-most-once as
+  a legitimate deliberate choice for low-stakes work, not a lesser option.
+  A "Scope line" section explicitly excludes the two-generals-problem proof
+  and specific broker exactly-once-mode internals as the distributed-systems
+  depth MISSION.md rules out, matching how Lessons 72, 84, and 87-90 each
+  drew the same kind of line. No Go code in this lesson (confirmed zero hits
+  for `func `/`package main`/`import (` before deciding this), so no
+  compile-check module was needed. Checked the glossary first for both new
+  terms — `at-most-once delivery`, `exactly-once delivery` — zero collisions
+  via case-insensitive grep, added as two new rows after Lesson 90's
+  `point-in-time recovery / PITR` row, same Term/Tiếng Việt/In software
+  column order as every existing row. Did not re-`dfn` at-least-once
+  delivery or idempotency key — both already glossed from Lessons 10 and 26,
+  used here as plain text with lesson cross-references instead. Verification
+  performed mechanically in `backend/.scratch-0091/` (deleted in full after
+  use, confirmed gone via directory listing): (1) a Node quiz-word-count
+  script matching each `<div class="q" ...>` block and splitting every
+  option both via `.split(/\s+/)` and `.split(" ")` — first draft landed
+  uneven on all four questions (spreads of 1–3 words), fixed through several
+  rewrite-and-recount cycles per option, including more than one case where
+  a straight word swap left the count unchanged and the real fix required
+  adding a word rather than substituting one — converged to exactly 8/8/8/8
+  on Q1 and 9/9/9/9 on Q2, Q3, and Q4, both counting methods agreeing
+  exactly, and exactly one `data-ok` and four options per question confirmed
+  the same way; (2) an occurrence-count HTML tag-balance check across 22 tag
+  types on the lesson — clean on the first pass after fixing one self-caught
+  bug (see below) — and a separate table/tr/td/th/p balance check on
+  `glossary.html` after its two-row addition, also balanced; (3) a
+  raw-unescaped-`&` regex scan and (4) a backslash-escaped-quote scan across
+  both files — zero hits in either; (5) every `<dfn` tag in the lesson
+  grepped and confirmed to carry both `data-en=` and `data-vn=` — exactly 2
+  `dfn` tags, matching the 2 new terms, no orphaned attribute; (6)
+  `node --check` against `assets/nav.js`, `assets/gloss.js`, and
+  `assets/quiz.js` — all clean, no output. Two bugs caught and fixed before
+  shipping: a `<dfn>` tag drafted with no visible text content before a
+  separate `<strong>At-most-once delivery</strong>` label (the term itself
+  wasn't actually wrapped by the tag it was meant to gloss), fixed by moving
+  the term text inside the `<dfn>` itself per every other lesson's
+  convention; and a stray `</p>` left inside a `<div class="callout">` that
+  never opened a `<p>` (the same shape of bug Lesson 85's and Lesson 90's
+  rounds each independently caught), fixed by deleting the stray tag — both
+  found on a direct re-read of the file, not by the mechanical checks, which
+  came back clean only after the fixes were applied. A live `WebFetch`
+  attempt against `dataintensive.net` (RESOURCES.md's standing DDIA
+  citation, already pointed at by Lessons 29 and 88 for the same chapter 11)
+  was blocked outright by this session's permission gate with no interactive
+  approver present — consistent with most prior rounds (79, 81-86, 89, 90),
+  though Lesson 87's round did find the gate open once. Rather than present
+  invented or stale content as freshly fetched, the "Go deeper" section says
+  the gate was checked and found closed, and builds the lesson from Lesson
+  10's already-established at-least-once vocabulary plus general,
+  widely-consistent industry usage of its two siblings, naming DDIA ch. 11's
+  exactly-once-semantics section as the citation to fetch once the gate
+  reopens. Registered Lesson 91 in `nav.js` (date 2026-10-05, today's actual
+  generation date), re-confirmed exactly one matching `n: 91` entry and
+  exactly one matching `0091-*` lesson file afterward. No new
+  `learning-records/` file was added this round — routine topical entry
+  like Lessons 3–90, not a new baseline finding; this was the rare round
+  where the next topic was already named by the prior round's own closing
+  note rather than requiring a fresh corpus sweep. `bin/record-progress
+  backend lesson_generated --day 91 --lesson
+  0091-delivery-semantics-exactly-once-myth.html --detail
+  '{"by":"headless"}'` run from the repo root is the last step of this
+  round — see immediately after this entry (or the orchestrator's own log)
+  for its confirmed outcome. No confirmed next-lesson gap is named with
+  certainty for the round after this one — same standing note as every
+  prior round; a completion/quiz-outcome signal or a user-named track should
+  take priority over guessing blind again.

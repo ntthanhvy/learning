@@ -2358,3 +2358,104 @@ along the Phase 2 spine, adapted to the learning records.
   '{"by":"headless"}'` run from the repo root: succeeded on the first
   attempt (`recorded: dataeng/lesson_generated day=19
   lesson=0019-airflow-logical-date-and-backfills.html`).
+- 2026-10-05 (headless run, Day 20 generated): twentieth lesson,
+  `0020-airflow-taskflow-and-xcom.html`. `lessons/` contained only
+  `0001`–`0019`, `assets/nav.js`'s latest entry was Day 19 (2026-10-04), and
+  no `2026-10-05`/`0020` entry existed anywhere (`lessons/`, `assets/nav.js`,
+  this file), so proceeded. No `lesson_completed`/quiz/kata signal more
+  recent than mid-July exists for any course (per the orchestrator's own
+  pre-check) and `learning-records/` still holds only the one Day-1 baseline
+  file, so there was no new learner-behavior signal to deviate from the spine
+  with. Read `MISSION.md` (hard scope rule: no pandas, no Python-language
+  teaching, no re-deriving API/idempotency concepts owned by `backend/`),
+  `NOTES.md` in full (conventions, verification rules, and the last several
+  generation-log entries), `PLAN.md` in full (the domain table and 2c's
+  spine), `RESOURCES.md`, the one `learning-records/` file, and
+  `lessons/0017`–`0019` in full for structural and voice precedent, plus
+  `lessons/0007-airflow-orchestrates-dbt.html` for the existing
+  `dags/food_delivery_pipeline.py` shape, before writing anything.
+  **Topic choice:** Day 19's own closing line named today's topic verbatim —
+  "the TaskFlow API and why XCom is not a data transport," `PLAN.md`'s 2c
+  spine's second bullet — continuing Airflow rather than returning to dbt or
+  Kafka, consistent with Day 19's own day-count-ratio reasoning (Airflow at
+  one day against Kafka's three and dbt's eight before today).
+  **Content:** put the classic `BashOperator`/`PythonOperator`-plus-`>>`
+  style (Day 7's own shape) directly beside a TaskFlow (`@dag`/`@task`)
+  rewrite of the same two-task DAG, named the one real difference (TaskFlow
+  infers both the task dependency and the XCom push/pull from a plain
+  function call) and the one thing that doesn't change (it's still XCom
+  underneath, confirmed by reading XCom's row shape out of Airflow's own
+  metadata database directly). Framed "why XCom is not a data transport" as
+  a direct consequence of where XCom physically lives, not an arbitrary
+  rule, using this project's own domain for the concrete failure case (a
+  tempting `dbt_build(load_raw())` rewrite that would serialize all of
+  `raw.orders` into one XCom row, instead of the correct shape Day 7 already
+  uses — one task writes to Postgres, the next reads from Postgres itself).
+  Build step is a new, independent DAG file (`raw_row_count_check.py`, two
+  TODOs: a real `psycopg` count query and a threshold check) rather than
+  editing Day 7's DAG, since today's point is additive vocabulary/style, not
+  a refactor of existing orchestration. No pandas, no Python-language
+  teaching beyond what Day 7 already used, no re-derivation of idempotency —
+  one bridge line each to `data/` (passing a whole DataFrame through a
+  queue) and `backend/` (API payload-size instincts), per the overlap rule.
+  Domain names unchanged (`raw.orders`); today adds no new mart or topic.
+  Opened with a "before today" check confirming Day 7/19's existing DAG
+  still parses (`airflow dags list-import-errors`, expect no output) rather
+  than a `dbt build` check, since today is pure Airflow content touching no
+  dbt model, matching Day 19's own precedent for a non-dbt day.
+  **Verification:** installed `apache-airflow==3.3.1` fresh via `uv run
+  --with` in a scratch directory under `dataeng/`
+  (`.scratch_dataeng_verify_d20/`, deleted entirely before finishing) —
+  clean install, 129 packages. Wrote a scratch TaskFlow DAG
+  (`taskflow_demo.py`, two `@task` functions, `report(count_raw_orders())`)
+  and ran `uv run python3 -m py_compile` on it first (clean) before anything
+  else. Ran `airflow db migrate` against a fresh scratch `AIRFLOW_HOME`:
+  clean, SQLite metadata created in under a second. `airflow dags
+  list-import-errors` confirmed zero parse errors. Used the real,
+  current-API `DagBag` import path Day 7's round already found
+  (`airflow.dag_processing.dagbag.DagBag`, not the deprecated
+  `airflow.models.dagbag` one, which this round re-confirmed throws
+  `TypeError: DagBag.__init__() got an unexpected keyword argument
+  'include_examples'` on 3.3.1, consistent with Day 7's own finding) to
+  parse the DAG directly: `tasks: ['count_raw_orders', 'report']`,
+  `deps: [('count_raw_orders', 'report')]` — confirming TaskFlow's inferred
+  dependency is real, not asserted. Ran `airflow dags test taskflow_demo
+  2026-09-28` for real: the task log's own lines, `Done. Returned value was:
+  orders=500` and `Pushing xcom`, are quoted verbatim in the lesson, not
+  invented. **The genuinely new check this round, never done by a prior
+  Airflow day:** queried the scratch run's own `airflow.db` SQLite file
+  directly (`SELECT dag_id, task_id, key, value FROM xcom`) and got back
+  two real rows, `taskflow_demo|count_raw_orders|return_value|500` and
+  `taskflow_demo|report|return_value|"orders=500"` — this is what the
+  lesson's Section 2/5 XCom-row output is built from, a real queried value,
+  not a documented-but-unverified claim about where XCom lives. Also wrote
+  the lesson's own build-step file (`raw_row_count_check.py`, with its two
+  TODOs left as `...` bodies) into the scratch `dags/` folder and confirmed
+  it also produces zero import errors despite the stubbed task bodies,
+  matching this course's "partial code with TODOs" convention for a
+  day's-actual-skill section. No dbt snippet appears in this lesson (a pure
+  Airflow day, like Day 19), so the `dbt parse` verification path does not
+  apply this round — stated here rather than silently skipped. Deleted
+  `.scratch_dataeng_verify_d20/` entirely (both DAG files, the scratch
+  `AIRFLOW_HOME`, SQLite metadata db, and the check script) before
+  finishing.
+  Registered Lesson 20 in `assets/nav.js` (`node --check` clean) and added
+  the Day 20 section to `reference/glossary.html` (2 new terms: TaskFlow
+  API, XCom — grepped Days 1–19's sections first, case-insensitively, no
+  collisions). Ran a small Python tag-balance/unescaped-`&`/quiz-word-count
+  script (from the same scratch directory, deleted with it) against the
+  saved lesson HTML and the updated glossary. Lesson: all checked tags
+  balanced (div/p/pre/code/h1/h2/dfn/button/span/a/em/strong — no `<table>`
+  in this lesson, so that tag was absent rather than mismatched), zero
+  suspicious bare `&`. The first quiz draft came up mismatched on three of
+  the four questions (7/8/6, 8/7/8 and 7/8/8 word splits); rebalanced all
+  three to 7/7/7, 8/8/8 and 8/8/8 respectively across several
+  edit-and-recount passes, re-verified by re-running the same script after
+  each edit; final state all four questions 9/9/9, 7/7/7, 8/8/8, 8/8/8.
+  Glossary: all tags balanced, zero bare `&`. Confirmed via `grep -ni
+  "taskflow\|xcom" reference/glossary.html` before appending that neither
+  term already existed.
+  `bin/record-progress dataeng lesson_generated --day 20 --lesson
+  0020-airflow-taskflow-and-xcom.html --detail '{"by":"headless"}'` run from
+  the repo root: succeeded on the first attempt (`recorded:
+  dataeng/lesson_generated day=20 lesson=0020-airflow-taskflow-and-xcom.html`).

@@ -197,6 +197,13 @@
   <tr><td>backfill</td><td>giữ nguyên "backfill" — chủ động tạo và chạy lại DAG cho các logical_date trong quá khứ chưa chạy, hoặc cần chạy lại; bản chủ động, theo yêu cầu của thứ catchup=True làm tự động</td><td>Deliberately creating and running DAG runs for past logical dates that never ran, or that need to be rerun — the explicit, on-demand version of what <code>catchup=True</code> would have done automatically on first deploy. In Airflow 3.3.1, triggered via <code>airflow backfill create --from-date --to-date</code> (the old <code>airflow dags backfill</code> command was removed). Only safe when the tasks being backfilled are idempotent — see Day 7's <code>catchup</code> entry and this section's own idempotent-task discussion.</td></tr>
 </table>
 
+<h2 id="day20">Day 20 — Airflow TaskFlow API, and why XCom is not a data transport</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>TaskFlow API</td><td>giữ nguyên "TaskFlow API" — cách viết DAG bằng hàm Python thường + @task, gọi hàm này với kết quả hàm kia vừa khai báo phụ thuộc vừa tự động truyền dữ liệu qua XCom, không cần dựng class operator rồi nối bằng &gt;&gt;</td><td>An Airflow authoring style where a plain Python function decorated with <code>@task</code> becomes a task, and calling one decorated function with another's return value both declares the dependency between them and passes data through XCom automatically, instead of instantiating operator classes and chaining them with <code>&gt;&gt;</code>. Compiles to the same DAG shape as the classic style — confirmed this round via a real <code>DagBag</code> parse.</td></tr>
+  <tr><td>XCom</td><td>giữ nguyên "XCom" (cross-communication) — cơ chế Airflow truyền giá trị nhỏ giữa các task, lưu thành 1 dòng key/value trong metadata database của Airflow, TaskFlow tự ghi khi return, task sau đọc qua tham số hàm hoặc xcom_pull thủ công</td><td>Airflow's built-in mechanism for small values passed between tasks — a key/value row stored in Airflow's own metadata database (<code>dag_id</code>, <code>task_id</code>, <code>key</code>, <code>value</code>), written automatically by a TaskFlow-decorated task's return value or manually via <code>xcom_push</code>, and read by a downstream task's function argument or <code>xcom_pull</code>. Bounded by what a database row and the webserver UI can reasonably hold — not a transport for a dataset. Confirmed this round by querying a real run's XCom row directly out of SQLite.</td></tr>
+</table>
+
 <script src="../assets/nav.js"></script>
 </body>
 </html>

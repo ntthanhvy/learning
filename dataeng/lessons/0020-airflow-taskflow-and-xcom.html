@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 20 · Airflow TaskFlow API, and why XCom is not a data transport</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 20 · ~20 min · 5 Oct 2026</p>
+<h1>Airflow TaskFlow API, and why XCom is not a data transport</h1>
+<p class="byline">Today's tangible win: rewrite a two-task flow as plain Python functions using <code>@task</code>, watch Airflow infer the dependency and the data hand-off from the function call itself, then read the actual row that hand-off writes into Airflow's own metadata database — and know exactly why that row is the reason XCom is for small signals, never for passing a dataset between tasks.</p>
+
+<div class="callout"><strong>Before today — check Day 19's DAG still parses:</strong> today adds a second DAG file next to Day 7/19's <code>dags/food_delivery_pipeline.py</code> rather than changing it, so confirm your existing one is still intact first:
+<pre><code>AIRFLOW_HOME="$(pwd)/airflow_home" uv run --with "apache-airflow==3.3.1" airflow dags list-import-errors</code></pre>
+Expected: no output. If <code>dags/food_delivery_pipeline.py</code> is missing or errors, fix that first — today's new file sits beside it, unrelated to whatever broke.</div>
+
+<h2>1 · The <code>BashOperator</code> style vs. writing a task as a function</h2>
+<p>Every task this course has built so far — Day 7's <code>load_raw</code>/<code>dbt_build</code> — is an instance of an operator class, wired together explicitly with <code>&gt;&gt;</code>. That's the classic style, and it's the right choice when a task is really "run this external command" with nothing Python-specific about it. The <dfn data-en="an Airflow authoring style where a plain Python function decorated with @task becomes a task, and calling one decorated function with another's return value both declares the dependency between them and passes data through XCom automatically, instead of instantiating operator classes and chaining them with >>" data-vn="giữ nguyên &quot;TaskFlow API&quot; — cách viết DAG bằng hàm Python thường + @task, gọi hàm này với kết quả hàm kia vừa khai báo phụ thuộc vừa tự động truyền dữ liệu qua XCom, không cần dựng class operator rồi nối bằng >></dfn> TaskFlow API is a different style for the common case where a task's logic actually is Python: write a plain function, decorate it with <code>@task</code>, and call it like a function.</p>
+<p>Here is the exact comparison, both producing the same two-task DAG. Classic style, explicit dependency and manual XCom calls:</p>
+<pre><code><span class="kw">from</span> airflow.providers.standard.operators.python <span class="kw">import</span> PythonOperator
+
+<span class="kw">def</span> _count(**context):
+    context[<span class="str">"ti"</span>].xcom_push(key=<span class="str">"order_count"</span>, value=<span class="kw">500</span>)
+
+<span class="kw">def</span> _report(**context):
+    n = context[<span class="str">"ti"</span>].xcom_pull(task_ids=<span class="str">"count_raw_orders"</span>, key=<span class="str">"order_count"</span>)
+    <span class="kw">print</span>(<span class="str">f"orders={n}"</span>)
+
+count_raw_orders = PythonOperator(task_id=<span class="str">"count_raw_orders"</span>, python_callable=_count)
+report = PythonOperator(task_id=<span class="str">"report"</span>, python_callable=_report)
+count_raw_orders &gt;&gt; report</code></pre>
+<p>TaskFlow style, verified this round against a real Airflow 3.3.1 install:</p>
+<pre><code><span class="kw">from</span> airflow.sdk <span class="kw">import</span> dag, task
+
+<span class="kw">@dag</span>(schedule=<span class="str">"@daily"</span>, start_date=..., catchup=<span class="kw">False</span>)
+<span class="kw">def</span> taskflow_demo():
+    <span class="kw">@task</span>
+    <span class="kw">def</span> count_raw_orders() -&gt; <span class="kw">int</span>:
+        <span class="kw">return</span> <span class="kw">500</span>
+
+    <span class="kw">@task</span>
+    <span class="kw">def</span> report(order_count: <span class="kw">int</span>) -&gt; <span class="kw">str</span>:
+        <span class="kw">return</span> <span class="str">f"orders={order_count}"</span>
+
+    report(count_raw_orders())
+
+taskflow_demo()</code></pre>
+<p>Both DAGs are identical once parsed. This round's own <code>DagBag</code> inspection of the TaskFlow version (Airflow 3's real loader, not just <code>py_compile</code>) confirms it:</p>
+<pre><code>tasks: ['count_raw_orders', 'report']
+deps: [('count_raw_orders', 'report')]</code></pre>
+<p>Nowhere in the TaskFlow version is <code>&gt;&gt;</code> written, and nowhere is <code>xcom_push</code>/<code>xcom_pull</code> called by hand — <code>report(count_raw_orders())</code> is a plain Python function call, and Airflow reads that call to build both the task dependency <em>and</em> the data hand-off between them. This is the whole value of TaskFlow: for a function-shaped task, it removes two kinds of boilerplate (manual XCom plumbing, manual <code>&gt;&gt;</code> wiring) that add nothing once the dependency is just "this function's argument is that function's return value."</p>
+
+<h2>2 · What TaskFlow is actually doing underneath: it's still XCom</h2>
+<p>TaskFlow does not invent a new way to move data between tasks — it is 100% sugar over the same mechanism Day 7's two <code>BashOperator</code>s never needed, because they never passed Python values to each other. <dfn data-en="Airflow's built-in mechanism for small values passed between tasks -- a key/value row stored in Airflow's own metadata database (dag_id, task_id, key, value), written automatically by a TaskFlow-decorated task's return value or manually via xcom_push, and read by a downstream task's function argument or xcom_pull" data-vn="giữ nguyên &quot;XCom&quot; (cross-communication) — cơ chế Airflow truyền giá trị nhỏ giữa các task, lưu thành 1 dòng key/value trong metadata database của Airflow, TaskFlow tự ghi khi return, task sau đọc qua tham số hàm hoặc xcom_pull thủ công">XCom</dfn> ("cross-communication") is that one mechanism, and this round confirmed exactly what it stores by querying the scratch run's metadata database directly after <code>airflow dags test taskflow_demo 2026-09-28</code>:</p>
+<pre><code>sqlite3 airflow_home/airflow.db \
+  "SELECT dag_id, task_id, key, value FROM xcom;"</code></pre>
+<p>Real output from this round's run:</p>
+<pre><code>taskflow_demo|count_raw_orders|return_value|500
+taskflow_demo|report|return_value|"orders=500"</code></pre>
+<p>Two rows, one per <code>@task</code>-decorated function, each keyed <code>return_value</code> by default (the key a plain <code>return</code> uses; <code>xcom_push</code>'s explicit <code>key=</code> argument is for anything named differently). <code>report</code>'s own task log from the same run names the exact moment this happens:</p>
+<pre><code>Done. Returned value was: orders=500
+Pushing xcom</code></pre>
+<p>The task finishes, Airflow serializes its return value, and writes it as a row in the same SQLite (or Postgres, in production) database that stores every DAG run, task state and log pointer Day 7 already called "bookkeeping about runs and tasks, never your actual data." XCom values live in exactly that bookkeeping database — not in a queue, not in object storage, not anywhere built for moving real datasets.</p>
+
+<h2>3 · Why that makes XCom the wrong tool for a dataset</h2>
+<p>This is the actual decision today's title is about, and it follows directly from Section 2 rather than being a rule to memorize: if XCom's value sits as one row in Airflow's own metadata table, then the size and shape of what you can put there is bounded by "something a database row and a web UI can reasonably hold," not by "whatever your pipeline needs to move." <a href="https://airflow.apache.org/docs/apache-airflow/stable/best-practices.html">Airflow's own Best Practices</a> doc is explicit that XCom is meant for small values — a count, an ID, a status string, a short file path — and names moving a large dataset through it as a mistake to avoid, not a scaling question.</p>
+<p>Put concretely, against this project's own domain: Day 1's <code>raw.orders</code> is 500 rows; a real production day could be millions. A tempting-looking TaskFlow rewrite of Day 7's DAG might try <code>dbt_build(load_raw())</code> where <code>load_raw</code> <em>returns the loaded rows</em> so <code>dbt_build</code> can "use" them directly in Python — that would serialize the entire orders table into one XCom row, bloating the metadata database, slowing down every webserver page that lists recent runs, and solving a problem that already has a correct answer: the data already lives in Postgres the moment <code>load_raw</code> finishes. The right shape, and the one Day 7 already uses, is for <code>load_raw</code> to return nothing (or a tiny confirmation), and for <code>dbt_build</code> to independently query the warehouse itself — the warehouse is the data transport, XCom is only for the small signal that one step finished and the next can start.</p>
+<div class="callout">This is the same lesson as <a href="../data/index.html">data/</a>'s own warning against passing a whole DataFrame through a message queue, and <a href="../backend/index.html">backend/</a>'s API-payload-size instincts, applied here to Airflow specifically: a pipe meant for coordination signals breaks down, often silently at first, the moment it's asked to carry the payload itself.</div>
+
+<h2>4 · Build: add a small, genuinely useful TaskFlow task to your own DAG</h2>
+<p>In your <code>food-delivery-pipeline</code> repo, add a new file, <code>dags/raw_row_count_check.py</code>, independent of Day 7's existing DAG (today doesn't touch that file):</p>
+<pre><code><span class="cm">"""Standalone check: count raw.orders after a load, using TaskFlow.
+
+A small, genuinely XCom-appropriate value (one integer) passed between two
+tasks -- the shape XCom is actually for, not a stand-in for a real dataset.
+"""</span>
+<span class="kw">from</span> __future__ <span class="kw">import</span> annotations
+
+<span class="kw">from</span> datetime <span class="kw">import</span> datetime
+
+<span class="kw">from</span> airflow.sdk <span class="kw">import</span> dag, task
+
+
+<span class="kw">@dag</span>(
+    dag_id=<span class="str">"raw_row_count_check"</span>,
+    schedule=<span class="str">"@daily"</span>,
+    start_date=datetime(<span class="kw">2026</span>, <span class="kw">9</span>, <span class="kw">21</span>),
+    catchup=<span class="kw">False</span>,
+)
+<span class="kw">def</span> raw_row_count_check():
+    <span class="kw">@task</span>
+    <span class="kw">def</span> count_orders() -&gt; <span class="kw">int</span>:
+        <span class="cm"># TODO: connect to the fdp Postgres (psycopg, same credentials as</span>
+        <span class="cm"># scripts/generate_raw_data.py) and return</span>
+        <span class="cm"># `SELECT count(*) FROM raw.orders` as a plain int.</span>
+        ...
+
+    <span class="kw">@task</span>
+    <span class="kw">def</span> flag_if_short(order_count: <span class="kw">int</span>) -&gt; <span class="kw">None</span>:
+        <span class="cm"># TODO: raise ValueError if order_count &lt; 1, so the task (and the</span>
+        <span class="cm"># DAG run) actually fails when the load produced zero rows --</span>
+        <span class="cm"># this is the day's real skill: a function taking the prior</span>
+        <span class="cm"># task's XCom'd return value as a plain argument, no xcom_pull.</span>
+        ...
+
+    flag_if_short(count_orders())
+
+
+raw_row_count_check()
+</code></pre>
+<p>Fill in both TODOs: a real <code>psycopg</code> count query (same connection shape as Day 1's seed script) and a real threshold check. The point isn't the SQL — it's noticing that <code>flag_if_short(count_orders())</code> is the entire wiring: no <code>&gt;&gt;</code>, no <code>xcom_pull</code>, and the single integer it passes is exactly the kind of value Section 3 says XCom is for.</p>
+
+<h2>5 · Verify</h2>
+<pre><code>AIRFLOW_HOME="$(pwd)/airflow_home" uv run --with "apache-airflow==3.3.1" airflow dags list-import-errors
+AIRFLOW_HOME="$(pwd)/airflow_home" uv run --with "apache-airflow==3.3.1" airflow dags test raw_row_count_check 2026-10-05</code></pre>
+<p>Expected: <code>list-import-errors</code> prints nothing, and the test run's log for <code>count_orders</code> ends with a line shaped like <code>Done. Returned value was: 500</code> (your own real <code>raw.orders</code> count) followed by <code>Pushing xcom</code> — the same two lines this round's own verification run produced. If <code>flag_if_short</code> raises, the count was 0 and <code>load_raw</code> needs to run first. Confirm the row landed in the metadata database directly, the same check this round ran for real:</p>
+<pre><code>sqlite3 airflow_home/airflow.db \
+  "SELECT dag_id, task_id, key, value FROM xcom WHERE dag_id='raw_row_count_check';"</code></pre>
+<p>Expected: one row, <code>raw_row_count_check|count_orders|return_value|&lt;your count&gt;</code> — seeing your own number sitting in that table, not just trusting the log line, is today's actual proof that TaskFlow's "automatic" data hand-off is the same plain database row Section 2 described, nothing more magical underneath.</p>
+
+<div class="interview">
+<p><strong>Q: "Your DAG needs task A's output in task B. Would you use XCom, and how do you decide?"</strong> A strong answer, out loud: <em>"It depends entirely on the size and shape of what's being passed. XCom is a row in Airflow's own metadata database — fine for a count, an ID, a short status, anything a database column and the Airflow UI can hold comfortably. The moment it's an actual dataset — rows from a table, a file's contents — XCom is the wrong transport, because now the metadata database is holding the data payload instead of just bookkeeping about the run. The right pattern there is what my DAG already does: one task writes to the real data store, Postgres in this case, and the next task reads from that store itself. TaskFlow's @task syntax makes the small-value case nicer to write by inferring the XCom push/pull from a plain function call, but it doesn't change where the boundary is — it's still exactly XCom underneath, with the same size ceiling."</em> The signal: naming XCom's actual storage location as the reason for the size boundary, not reciting "XCom is for small data" as an unexplained rule.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="TaskFlow's @task decorator turns a plain Python function into a task, and calling one decorated function with another's return value both declares the task dependency and passes the value through XCom automatically -- confirmed this round via a real DagBag parse showing the inferred dependency with no >> ever written.">
+    <p class="stem">What does writing <code>report(count_raw_orders())</code> under <code>@task</code> actually produce?</p>
+    <button class="opt" data-ok>A real task dependency plus an automatic XCom hand-off</button>
+    <button class="opt">Only a dependency; XCom still needs a manual call</button>
+    <button class="opt">Two unrelated tasks that happen to run in order</button>
+  </div>
+  <div class="q" data-why="Querying the scratch run's own airflow.db this round showed the XCom value stored as a literal row in the xcom table (dag_id, task_id, key, value) -- the same metadata database that stores DAG runs and task states, confirmed directly rather than assumed from the docs.">
+    <p class="stem">Where does an XCom value actually get stored, confirmed this round by querying it directly?</p>
+    <button class="opt" data-ok>One row inside Airflow's own metadata database</button>
+    <button class="opt">A temporary file inside the DAG's folder</button>
+    <button class="opt">An in-memory queue shared between all workers</button>
+  </div>
+  <div class="q" data-why="Because XCom values live as rows in Airflow's own metadata database, passing a large dataset through XCom bloats that database and slows the webserver -- the correct pattern, which this course's own load_raw/dbt_build DAG already uses, is for one task to write to the real data store (Postgres) and the next task to read from that store itself.">
+    <p class="stem">Why is passing an entire loaded table through XCom a mistake, not just a style choice?</p>
+    <button class="opt" data-ok>It stores a dataset in the metadata database</button>
+    <button class="opt">XCom only ever accepts strings, never other types</button>
+    <button class="opt">XCom values vanish the moment a task finishes</button>
+  </div>
+  <div class="q" data-why="TaskFlow and the classic operator-plus->>-plus-xcom_pull style compile to identical DAGs once parsed -- this round's DagBag inspection of the TaskFlow version showed the same tasks-and-deps shape a classic-style DAG with explicit xcom_push/xcom_pull calls would produce. TaskFlow removes boilerplate for function-shaped tasks; it does not add a new data-passing mechanism.">
+    <p class="stem">How does a TaskFlow DAG differ from the same logic written with <code>PythonOperator</code> and manual <code>xcom_push</code>/<code>xcom_pull</code>, once both are parsed?</p>
+    <button class="opt" data-ok>The same DAG; TaskFlow just removes the boilerplate</button>
+    <button class="opt">TaskFlow DAGs skip XCom, pass values in memory</button>
+    <button class="opt">TaskFlow DAGs cannot declare any retries or schedules</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> Airflow's own <a href="https://airflow.apache.org/docs/apache-airflow/stable/tutorial/taskflow.html">TaskFlow tutorial</a> (cited in <code>RESOURCES.md</code> for exactly this lesson) and the <a href="https://airflow.apache.org/docs/apache-airflow/stable/best-practices.html">Best Practices</a> doc's XCom sizing guidance (already this course's Day 7 source for idempotent tasks, reread this round for its XCom-specific wording) are the two sources for today's content.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 20.<br>
+<strong>Phase 2c continues</strong> next with Assets — triggering the dbt DAG when <code>raw.order_events</code> is updated instead of by a fixed clock schedule, the third bullet of <code>PLAN.md</code>'s Airflow spine.<br><br>
+💬 Anything unclear — why TaskFlow still "is" XCom underneath, or where the dataset-vs-signal line actually sits for your own DAG? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

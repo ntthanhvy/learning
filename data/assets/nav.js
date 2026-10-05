@@ -180,6 +180,8 @@
       file: "lessons/0086-read-sql.html" },
     { n: 87, date: "2026-10-04", title: "df.to_sql(): the ETL Load step's SQL half, and its silent traps",
       file: "lessons/0087-to-sql.html" },
+    { n: 88, date: "2026-10-05", title: "value_counts(normalize=True): percentages, and a silent denominator trap",
+      file: "lessons/0088-value-counts-normalize.html" },
   ];
 
   const REFS = [

@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 88 · value_counts(normalize=True): counts become percentages, and a silent denominator trap</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 88 · ~20 min · 5 Oct 2026</p>
+<h1>value_counts(normalize=True): counts become percentages, and a silent denominator trap</h1>
+<p class="byline">Lesson 10 taught <code>value_counts()</code> as the one-column answer to "how many of each" — raw counts, sorted descending. Grepped every lesson body and the glossary for <code>normalize=True</code> first and found zero dedicated coverage: the only existing <code>normalize=</code> glossary row covers <code>crosstab()</code>/<code>pivot_table()</code>'s version of the same idea, never <code>value_counts()</code>'s own. The interview question is almost never "how many" alone — it's "what <em>percentage</em>" ("what share of orders came from each region?") — and today's trap is a real one: the default silently drops missing values from <em>both</em> the count and the denominator, so a "100%" breakdown can quietly describe fewer rows than the table actually has.</p>
+
+<h2>1 · normalize=True: counts become proportions of the whole</h2>
+<p>SQL answers "what percentage of rows have each value" with a <code>COUNT(*) / SUM(COUNT(*)) OVER ()</code> window dance, or a second query for the grand total. <dfn data-en="a value_counts() keyword that divides every count by the total count instead of returning raw counts, turning the result into proportions (0 to 1) that sum to 1 -- the one-line fix for the COUNT(*) + divide-by-total pattern that SQL usually needs two steps for" data-vn="giữ nguyên 'value_counts(normalize=True)' — chia mỗi số đếm cho tổng số đếm, trả về tỉ lệ (0 đến 1) cộng lại bằng 1 — thay cho kiểu SQL phải COUNT(*) rồi chia cho tổng ở bước riêng">value_counts(normalize=True)</dfn> does it in one call — same split-count as before, each count divided by the total:</p>
+<pre><code>orders = pd.DataFrame({<span class="str">"region"</span>: [<span class="str">"North"</span>, <span class="str">"North"</span>, <span class="str">"North"</span>, <span class="str">"South"</span>, <span class="str">"South"</span>]})
+orders[<span class="str">"region"</span>].value_counts()
+<span class="cm"># region
+# North    3
+# South    2
+# Name: count, dtype: int64</span>
+
+orders[<span class="str">"region"</span>].value_counts(normalize=<span class="kw">True</span>)
+<span class="cm"># region
+# North    0.6
+# South    0.4
+# Name: proportion, dtype: float64</span></code></pre>
+<p>Confirmed directly (pandas 3.0.6): the result Series is literally named <code>"proportion"</code> instead of <code>"count"</code>, and the values sum to exactly <code>1.0</code>. Multiply by 100 and round for a human-facing percentage — <code>(s.value_counts(normalize=True) * 100).round(1)</code> — the result is still proportions underneath; the <code>* 100</code> is purely a display choice, nothing pandas tracks as a separate mode.</p>
+
+<h2>2 · The trap: dropna=True is the default, and it changes the denominator too</h2>
+<p>This is the part that bites silently. <code>value_counts()</code> drops missing values by default — not surprising on its own — but with <code>normalize=True</code>, that same default also removes them from the <em>denominator</em>, not just the numerator:</p>
+<pre><code>s = pd.Series([<span class="str">"North"</span>, <span class="str">"South"</span>, <span class="str">"North"</span>, <span class="str">"North"</span>, <span class="str">"South"</span>, <span class="kw">None</span>])
+<span class="cm"># 6 rows total, 1 of them missing</span>
+
+s.value_counts(normalize=<span class="kw">True</span>)                  <span class="cm"># dropna=True, the default
+</span><span class="cm"># region
+# North    0.6
+# South    0.4
+# Name: proportion, dtype: float64   &lt;- sums to 1.0, but only over the 5 non-null rows
+
+</span>s.value_counts(normalize=<span class="kw">True</span>, dropna=<span class="kw">False</span>)
+<span class="cm"># North    0.500000
+# South    0.333333
+# NaN      0.166667
+# Name: proportion, dtype: float64   &lt;- sums to 1.0 over all 6 rows, NaN gets its own share</span></code></pre>
+<p>Confirmed directly (pandas 3.0.6): the <code>dropna=True</code> default version reports North as 60% — true only of the 5 rows that have a region at all. If a caller reads that "60%" as "60% of all orders," they are wrong by a margin that grows with however much data is missing, and nothing about the output looks incomplete — the proportions still sum cleanly to 1.0, just over a smaller table than the one being described. The fix is the same habit as every other missing-data lesson in this course: check <code>isna().sum()</code> first, and pass <code>dropna=False</code> explicitly whenever "percentage of all rows" is the actual question being asked.</p>
+
+<h2>3 · Per-group percentages: groupby(...)[col].value_counts(normalize=True)</h2>
+<p>The single most common shape this gets asked in: "within each customer, what percentage of their orders came from each region" — a per-group breakdown, not a table-wide one. Chaining <code>value_counts(normalize=True)</code> straight onto a <code>groupby</code> selection normalizes <em>within each group</em>, not across the whole table:</p>
+<pre><code>df = pd.DataFrame({
+    <span class="str">"customer"</span>: [<span class="str">"An"</span>, <span class="str">"An"</span>, <span class="str">"An"</span>, <span class="str">"Binh"</span>, <span class="str">"Binh"</span>],
+    <span class="str">"region"</span>:   [<span class="str">"North"</span>, <span class="str">"North"</span>, <span class="str">"South"</span>, <span class="str">"North"</span>, <span class="str">"South"</span>],
+})
+df.groupby(<span class="str">"customer"</span>)[<span class="str">"region"</span>].value_counts(normalize=<span class="kw">True</span>)
+<span class="cm"># customer  region
+# An        North     0.666667
+#           South     0.333333
+# Binh      North     0.500000
+#           South     0.500000
+# Name: proportion, dtype: float64</span></code></pre>
+<p>Confirmed directly (pandas 3.0.6): each customer's own two rows sum to <code>1.0</code> independently — An's 0.667+0.333 and Binh's 0.5+0.5 are two separate totals, not one table-wide total of <code>2.0</code>. This is <code>groupby</code>'s split–apply–combine from Lesson 4 applying <code>value_counts()</code> as the per-group function, the same mental shift Lesson 16's <code>transform()</code> and Lesson 61's <code>groupby().apply()</code> both leaned on: the grouping changes what "the whole" means for <code>normalize=True</code>'s denominator.</p>
+
+<div class="interview">
+<p><strong>Q: "What percentage of orders came from each region, and does it change per customer?"</strong> A strong answer, out loud: <em>"Table-wide, that's orders['region'].value_counts(normalize=True) — one call, proportions sum to 1. First thing I'd check before trusting it is whether region has any nulls, because normalize=True's default dropna=True quietly drops them from both the count and the denominator, so the percentages would describe only the non-null rows, not the whole table — I'd pass dropna=False if I actually want 'percentage of everything.' For the per-customer version, I'd chain groupby('customer')['region'].value_counts(normalize=True) — that normalizes within each customer's own group, so every customer's percentages sum to 1 independently rather than one table-wide total."</em> The signal: naming the dropna=True denominator trap unprompted, and knowing groupby changes what "the whole" means for normalize=True.</p>
+</div>
+
+<h2>4 · Where this fits</h2>
+<p>This is Lesson 10's <code>value_counts()</code> with one keyword added, but the keyword earns its own lesson because the trap is genuinely silent — no error, no warning, a result that still sums to a clean 1.0 either way. The habit from every prior missing-data lesson applies again: know whether nulls exist in the column before reading a <code>normalize=True</code> percentage as "of everything," and remember that a <code>groupby</code> in front of it resets the denominator to each group, not the whole table.</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/88_value_counts_normalize.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/88_value_counts_normalize.py</code></pre>
+<p>Exercise 1 confirms the basic <code>normalize=True</code> proportions on a small inline Series. Exercise 2 confirms the Section 2 trap directly: with a real missing value present, the default <code>dropna=True</code> proportions sum to 1.0 over fewer rows than <code>dropna=False</code>'s proportions do, and the two give different percentages for the same value. Exercise 3 confirms the Section 3 per-group shape: each group's own proportions sum to 1.0 independently via <code>groupby(...)[col].value_counts(normalize=True)</code>.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: value_counts(normalize=True) divides every count by the total count instead of returning raw counts, and the resulting Series is named 'proportion' with values summing to exactly 1.0.">
+    <p class="stem">What does <code>value_counts(normalize=True)</code> return instead of raw counts?</p>
+    <button class="opt" data-ok>each count divided by the total, summing to one</button>
+    <button class="opt">each count divided by its own local group's size</button>
+    <button class="opt">only the single most frequent value's raw count here</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: dropna=True is value_counts()'s default even with normalize=True, which removes missing rows from BOTH the numerator and the denominator -- so the reported percentages describe only the non-null rows, not the whole table, with no warning that anything was excluded.">
+    <p class="stem">With a column that has real missing values, <code>value_counts(normalize=True)</code>'s default <code>dropna=True</code> does what to the percentages?</p>
+    <button class="opt" data-ok>silently computes them over just the non-null rows only</button>
+    <button class="opt">raises a loud warning and refuses to compute them</button>
+    <button class="opt">counts every missing value as its own zero category</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: groupby('customer')['region'].value_counts(normalize=True) normalizes WITHIN each group independently -- each customer's own proportions sum to 1.0 on their own, not to one shared table-wide total.">
+    <p class="stem">In <code>df.groupby("customer")["region"].value_counts(normalize=True)</code>, what do the proportions sum to?</p>
+    <button class="opt" data-ok>1.0 within each separate customer's own small group</button>
+    <button class="opt">1.0 once, shared across the entire whole table</button>
+    <button class="opt">the total row count across the whole table</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the pandas User Guide's <a href="https://pandas.pydata.org/docs/reference/api/pandas.Series.value_counts.html">API reference for <code>Series.value_counts()</code></a> (per <code>RESOURCES.md</code>'s "Docs: pandas User Guide" entry, ~5 min) — the full <code>normalize=</code>/<code>sort=</code>/<code>bins=</code>/<code>dropna=</code> keyword list, including the <code>bins=</code> option this lesson left out to keep scope tight (it reroutes to <code>pd.cut()</code>-style binning, already covered in Lesson 12).</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>value_counts(normalize=True)</code> is new today, added right after Lesson 87's <code>method="multi" (to_sql)</code> entry.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-88 comes back reported as shakiest, otherwise another fresh curriculum/glossary scan for the next genuinely-uncovered pattern — no standing named candidate carries forward from today.<br><br>
+💬 Anything unclear — the dropna=True denominator trap, the per-group normalize shape, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

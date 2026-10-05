@@ -30,6 +30,7 @@
     { n: 17, date: "2026-10-02", title: "Schema evolution: why JSON-without-a-schema bites", file: "lessons/0017-kafka-schema-evolution.html" },
     { n: 18, date: "2026-10-03", title: "Retention vs log compaction, and consumer lag", file: "lessons/0018-kafka-retention-compaction-and-consumer-lag.html" },
     { n: 19, date: "2026-10-04", title: "Airflow: logical date, data interval & safe backfills", file: "lessons/0019-airflow-logical-date-and-backfills.html" },
+    { n: 20, date: "2026-10-05", title: "Airflow TaskFlow API, and why XCom is not a data transport", file: "lessons/0020-airflow-taskflow-and-xcom.html" },
   ];
 
   const REFS = [

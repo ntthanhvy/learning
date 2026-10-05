@@ -7674,3 +7674,77 @@
   carries forward; tomorrow starts with a fresh curriculum/glossary scan.
   The `.scratch-0087/` directory was deleted after verification, per this
   course's standing practice of not leaving scratch artifacts committed.
+- 2026-10-05 generation (Lesson 88): confirmed no `0088-*` lesson/nav entry
+  and no `lesson_generated` row for course=data dated 2026-10-05 existed yet
+  before starting. Read `MISSION.md` and `RESOURCES.md` in full, the tail
+  of `NOTES.md` (this generation log, Lessons 85-87's entries), the single
+  baseline `learning-records/0001-...md` (still the only file there,
+  unchanged), the last two lesson/practice pairs (86, 87), and grepped
+  `assets/nav.js`'s tail and `reference/glossary.html`'s tail for the exact
+  registration format. Lesson 87's own teaser named no standing candidate
+  ("no standing named candidate carries forward"), so this round did a
+  fresh curriculum/glossary scan: pulled every lesson's `<h1>` across all 87
+  files and grepped the glossary for gaps. Picked `value_counts
+  (normalize=True)` — Lesson 10 taught plain `value_counts()` (raw counts)
+  but the `normalize=` glossary row only covers `crosstab()`/`pivot_table()`
+  's version, never `value_counts()`'s own; a genuine, high-frequency
+  interview gap ("what percentage of X came from each Y" is at least as
+  common as "how many"). Every behavioral claim was probed directly first
+  in `.scratch-0088/` (deleted after), on the actually-installed pandas
+  3.0.6: confirmed `normalize=True` returns a Series named `"proportion"`
+  summing to exactly `1.0`; confirmed the real trap — `dropna=True` is the
+  default even with `normalize=True`, and it drops missing rows from BOTH
+  the numerator and the denominator, so a column with 1 real NaN out of 6
+  rows reports percentages as if only 5 rows existed, with no warning and
+  still summing cleanly to `1.0` either way; confirmed chaining `groupby
+  (...)[col].value_counts(normalize=True)` normalizes WITHIN each group
+  independently (each group's own slice sums to 1.0 separately, not one
+  shared table-wide total) via a direct 2-group probe. Quiz options were
+  leveled with a scratch Python script (`uv run python3`, deleted after) —
+  iterated a few rounds (10/9/9 -> 9/9/9, 8/8/9 -> 8/8/8 for Q3, catching
+  one overcounted "grand total" phrase and one undercounted option along
+  the way) to land exactly 9/9/9, 9/9/9, 8/8/8 across the three questions,
+  one `data-ok` per question throughout; a second scratch script confirmed
+  tag balance (`h2` 7/7, `p` 18/18, `div` 5/5, `pre` 4/4, `code` 53/53,
+  `span` 40/40, `button` 9/9, `dfn` 1/1, `script` 3/3, `strong` 3/3, `em`
+  5/5, `a` 2/2) and exactly 2 raw `&` characters, both inside the standard
+  `cd ~/learning/data && uv run …` command, matching every prior lesson.
+  The shipped (unsolved) `practice/88_value_counts_normalize.py` was first
+  executed in `.scratch-0088/` and caught a real bug before shipping:
+  Exercise 1's unfilled `ex1_normalize_value = ...` silently passed
+  `normalize=Ellipsis` through to `value_counts()`, and because `bool(...)
+  is True`, pandas treated it identically to `normalize=True` and the
+  placeholder printed a false ✓ — the same unfilled-Ellipsis-satisfies-a-
+  loose-check risk class prior rounds have repeatedly flagged (Lessons 83,
+  85, 87). Fixed with an explicit `ex1_value_is_real_true = ex1_
+  normalize_value is True` identity check (and the matching `is False`
+  guard added to Exercise 2 defensively, though that one already failed
+  correctly since `dropna=Ellipsis` is also truthy and behaves like the
+  `True` default, giving identical before/after results). After that fix,
+  the shipped (unsolved) file printed exactly 3 ✗ with no raw traceback,
+  then a solved copy (kept only in `.scratch-0088/`, not shipped) printed
+  all 3 ✓ and "All green" on the first run; the shipped file was then
+  re-executed directly from its real `practice/` path and still printed
+  all 3 ✗ as expected. Checked the glossary for a collision before adding
+  anything — grepped `normalize` case-insensitively, found only the
+  existing `crosstab()`/`pivot_table()` row — added exactly 1 new row
+  (`value_counts(normalize=True)`) directly after Lesson 87's `method=
+  "multi" (to_sql)` entry; a scratch tag-balance script confirmed the
+  glossary file stayed balanced afterward (`tr` 159/159, `td` 474/474,
+  `th` 3/3, `table` 1/1, `code` 1028/1028, `em` 5/5) with zero raw `&`
+  introduced. Registered Lesson 88 in `nav.js` with today's date
+  (2026-10-05); `node --check` confirmed it still parses as valid
+  JavaScript after the edit, and exactly one `n: 88` entry plus one
+  `0088-value-counts-normalize` file reference were confirmed to exist.
+  `bin/record-progress data lesson_generated --day 88 --lesson
+  0088-value-counts-normalize.html --detail '{"by":"headless"}'` was run
+  from the repo root; see the tool-call result immediately following this
+  entry's authoring for the exact recorded/blocked outcome. No new
+  `data/learning-records/` entry was added this round — routine lesson, no
+  new baseline finding to justify one beyond the practice-file bug already
+  captured above. This round closed a genuine gap adjacent to Lesson 10's
+  drill rather than extending the ETL/SQL thread Lessons 86-87 just
+  finished — no standing named candidate carries forward; tomorrow starts
+  with a fresh curriculum/glossary scan. The `.scratch-0088/` directory was
+  deleted after verification, per this course's standing practice of not
+  leaving scratch artifacts committed.

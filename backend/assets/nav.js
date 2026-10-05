@@ -186,6 +186,8 @@
       file: "lessons/0089-canary-releases-and-blue-green-deployments.html" },
     { n: 90, date: "2026-10-04", title: "Backups and disaster recovery: what survives when the WAL itself doesn't",
       file: "lessons/0090-backups-and-disaster-recovery.html" },
+    { n: 91, date: "2026-10-05", title: "Delivery semantics: the three guarantees hiding behind every retry",
+      file: "lessons/0091-delivery-semantics-exactly-once-myth.html" },
   ];
 
   const REFS = [

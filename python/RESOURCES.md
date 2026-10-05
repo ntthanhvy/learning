@@ -39,6 +39,8 @@ authors for *why*. Cite inline; each lesson recommends exactly one primary sourc
   Use for: Day 65 — `TemporaryDirectory()` and `NamedTemporaryFile()` as self-cleaning scratch space for pipeline staging, collision-proof unique naming, and the `delete=False` escape hatch for code that needs to reopen a temp file by path.
 - [Docs: `csv`](https://docs.python.org/3/library/csv.html)
   Use for: Day 6 — `csv.reader`/`csv.DictReader` for the read side; Day 66 — `csv.writer`/`csv.DictWriter`, `fieldnames=`, the `newline=""` rule for avoiding doubled line endings, and `extrasaction=`/`restval=` for mismatched dict keys.
+- [Docs: `subprocess`](https://docs.python.org/3/library/subprocess.html)
+  Use for: Day 68 — `subprocess.run()`, the list-of-arguments form vs. the injection risk of `shell=True`, `returncode`/`check=True`, and separating captured `stdout` from `stderr`.
 - [PEP 8 — Style Guide for Python Code](https://peps.python.org/pep-0008/)
   Use for: naming and layout conventions, so written code looks like the ecosystem's.
 

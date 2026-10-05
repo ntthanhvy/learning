@@ -140,6 +140,8 @@
       file: "lessons/0066-csv-dictwriter.html" },
     { n: 67, date: "2026-10-04", title: "Review day 10: retrieval across Days 64-66",
       file: "lessons/0067-review-retrieval-day-10.html" },
+    { n: 68, date: "2026-10-05", title: "subprocess: running another program from Python",
+      file: "lessons/0068-subprocess-running-external-commands.html" },
   ];
 
   const REFS = [

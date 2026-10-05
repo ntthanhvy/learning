@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 68 · subprocess: running another program from Python</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 68 · ~20 min · 5 Oct 2026</p>
+<h1><code>subprocess</code>: running another program from Python</h1>
+<p class="byline">Every pipeline eventually needs something that already exists as a command-line tool — <code>git</code>, a shell script, a compiled binary, another language's interpreter — rather than a Python import. <code>subprocess</code> is the standard-library way to launch one, wait for it, capture what it printed, and check whether it actually succeeded, instead of shelling out blind and hoping.</p>
+
+<div class="callout"><strong>Why today, specifically:</strong> a fresh-gap grep across all 67 lessons and every practice file confirmed <code>subprocess</code> has never been taught, despite being one of the two remaining named candidates since Day 58 (the other, <code>configparser</code>, stays on the table). Day 39's <code>argparse</code> lesson even mentions "no subprocess needed" for testing a CLI in passing, without ever explaining what a subprocess is. Review day 10 (67) cleared the retrieval backlog through Day 66, so today is a fresh-content day rather than another review.</div>
+
+<h2>1 · <code>run()</code>: launch, wait, get a result back</h2>
+<p>The one function used almost every time is <code>subprocess.run()</code>. It takes a list of strings — the program name, then each argument, exactly as they'd be typed at a shell, but split apart instead of joined into one string — starts that program, waits for it to finish, and returns a result object:</p>
+<pre><code><span class="kw">import</span> subprocess
+
+result = subprocess.run([<span class="str">"echo"</span>, <span class="str">"hello"</span>, <span class="str">"world"</span>], capture_output=<span class="kw">True</span>, text=<span class="kw">True</span>)
+<span class="kw">print</span>(result.returncode)   <span class="cm"># 0 -- the process's exit status; 0 means success by convention</span>
+<span class="kw">print</span>(result.stdout)       <span class="cm"># "hello world\n" -- captured because capture_output=True</span></code></pre>
+<p><dfn data-en="subprocess.run(args) launches an external program given as a list of strings (program name, then each argument), waits for it to finish, and returns a CompletedProcess holding its exit code and captured output" data-vn="giữ nguyên &quot;subprocess.run&quot; — chạy 1 chương trình ngoài (list string: tên lệnh + từng argument), đợi nó chạy xong, trả về kết quả gồm exit code và output">subprocess.run()</dfn> is a blocking call — the line after it doesn't execute until the external program exits, the same way a regular function call blocks until it returns. <code>capture_output=True</code> captures the program's printed output instead of letting it go straight to the terminal; <code>text=True</code> decodes that output as a string instead of raw bytes, the same decode step Day 6's file-reading lessons already covered for files.</p>
+
+<h2>2 · Argument lists, not one shell string</h2>
+<p>The list-of-strings form is the default for a reason: each element is passed to the program exactly as one argument, with no shell involved to reinterpret spaces, quotes, or special characters. Building a single command string instead and asking the shell to parse it is where real bugs — and real security holes — come from:</p>
+<pre><code><span class="cm"># SAFE: each argument is its own list element, no shell parsing involved</span>
+filename = <span class="str">"my file.txt"</span>   <span class="cm"># a space in the name -- no special-casing needed</span>
+subprocess.run([<span class="str">"cat"</span>, filename])
+
+<span class="cm"># DANGEROUS: shell=True hands a raw string to the shell to interpret,</span>
+<span class="cm"># so untrusted input can inject extra commands</span>
+user_input = <span class="str">"file.txt; rm -rf ."</span>
+subprocess.run(<span class="str">f"cat {user_input}"</span>, shell=<span class="kw">True</span>)   <span class="cm"># runs the rm too!</span></code></pre>
+<p><dfn data-en="shell=True on subprocess.run() passes the command as one raw string to the system shell for parsing, which lets shell metacharacters in untrusted input inject extra commands -- the list-of-arguments form avoids the shell entirely and is the default-safe choice" data-vn="giữ nguyên &quot;shell=True&quot; — truyền lệnh dạng 1 chuỗi để shell tự parse, nguy hiểm vì input không tin được có thể chèn thêm lệnh khác; dùng list argument thay vì string là cách an toàn mặc định">shell=True</dfn> is sometimes needed for genuine shell features like pipes or wildcards, but it should never be combined with a string built from untrusted input — the <code>rm -rf .</code> above runs because the shell sees a <code>;</code> and treats it as "command, then another command," not because <code>cat</code> did anything wrong. The list form sidesteps the whole class of bug: a filename containing <code>;</code> is just a filename, with no shell around to notice.</p>
+
+<h2>3 · Checking success: <code>returncode</code> and <code>check=True</code></h2>
+<p>A finished process almost always reports whether it worked via its exit code: <dfn data-en="returncode is the integer exit status a finished process reports back -- 0 conventionally means success, any nonzero value means some kind of failure, with the specific nonzero meaning defined by that particular program" data-vn="giữ nguyên &quot;returncode&quot; — mã số process trả về khi chạy xong, quy ước 0 là thành công, khác 0 là có lỗi (ý nghĩa cụ thể tùy chương trình)">returncode</dfn> is <code>0</code> by convention for success, nonzero for failure. <code>subprocess.run()</code> never raises an exception on a nonzero exit by default — it just hands back the result and lets the caller decide. <code>check=True</code> changes that, raising if the command failed, the same "fail loud instead of silently continuing" instinct Day 8's exceptions lesson taught:</p>
+<pre><code><span class="cm"># default: silently returns, even if the command failed -- the caller must remember to check</span>
+result = subprocess.run([<span class="str">"ls"</span>, <span class="str">"/no/such/path"</span>], capture_output=<span class="kw">True</span>, text=<span class="kw">True</span>)
+<span class="kw">if</span> result.returncode != <span class="kw">0</span>:
+    <span class="kw">print</span>(<span class="str">"ls failed:"</span>, result.stderr)
+
+<span class="cm"># check=True: raises CalledProcessError automatically on a nonzero exit</span>
+<span class="kw">try</span>:
+    subprocess.run([<span class="str">"ls"</span>, <span class="str">"/no/such/path"</span>], check=<span class="kw">True</span>, capture_output=<span class="kw">True</span>, text=<span class="kw">True</span>)
+<span class="kw">except</span> subprocess.CalledProcessError <span class="kw">as</span> e:
+    <span class="kw">print</span>(<span class="str">"ls failed with code"</span>, e.returncode)</code></pre>
+<p><code>check=True</code> is the right default for a pipeline step that can't sensibly continue if the external command failed — reading a nonzero <code>returncode</code> by hand is easy to forget in exactly the branch that matters least often and breaks loudest in production.</p>
+
+<h2>4 · Separating <code>stdout</code> from <code>stderr</code></h2>
+<p>A process has two separate output streams: standard output for its actual result, and standard error for diagnostics and error messages. <code>capture_output=True</code> captures both, kept apart on <code>result.stdout</code> and <code>result.stderr</code> rather than merged into one blob — the same separation a well-behaved CLI tool keeps so a caller can use the real output while still seeing what went wrong:</p>
+<pre><code>result = subprocess.run(
+    [<span class="str">"python3"</span>, <span class="str">"-c"</span>, <span class="str">"import sys; print('ok'); print('warn', file=sys.stderr)"</span>],
+    capture_output=<span class="kw">True</span>, text=<span class="kw">True</span>,
+)
+<span class="kw">print</span>(<span class="str">"stdout:"</span>, <span class="kw">repr</span>(result.stdout))   <span class="cm"># "ok\n"</span>
+<span class="kw">print</span>(<span class="str">"stderr:"</span>, <span class="kw">repr</span>(result.stderr))   <span class="cm"># "warn\n"</span></code></pre>
+<p>Without <code>capture_output=True</code>, both streams go straight to the terminal the Python process itself is running in, and <code>result.stdout</code>/<code>result.stderr</code> are <code>None</code> — fine for a script whose only goal is a side effect, wrong for a pipeline step that needs the external program's output as data to parse further.</p>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> nothing pandas-specific today — pandas has no subprocess-launching API of its own; a pipeline that shells out to another tool before or after a <code>DataFrame</code> step uses this exact module either way. Not covered further here, per <code>MISSION.md</code>.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/68_subprocess_running_external_commands.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/68_subprocess_running_external_commands.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: running a command as an argument list and capturing its <code>stdout</code> as text, checking a <code>returncode</code> by hand versus letting <code>check=True</code> raise <code>CalledProcessError</code> on failure, and keeping <code>stdout</code>/<code>stderr</code> separate for a command that writes to both.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Passing arguments as a list means each element reaches the program exactly as one argument, with no shell involved to reinterpret spaces, quotes, or special characters like ; -- shell=True instead hands a raw string to the shell to parse, which lets shell metacharacters in untrusted input inject extra commands.">
+    <p class="stem">Why is passing a list of arguments to <code>subprocess.run()</code> safer than <code>shell=True</code> with a built string?</p>
+    <button class="opt" data-ok>no shell parses the arguments, so injection via input is avoided</button>
+    <button class="opt">a list form always just simply runs noticeably much faster overall</button>
+    <button class="opt">shell=True never actually accepts more than just one single short argument</button>
+  </div>
+  <div class="q" data-why="subprocess.run() never raises on a nonzero exit code by default -- it just returns a result and leaves checking returncode up to the caller, who can easily forget. check=True changes that by raising CalledProcessError automatically whenever the command's exit code is nonzero.">
+    <p class="stem">What does <code>check=True</code> change about <code>subprocess.run()</code>'s behavior?</p>
+    <button class="opt" data-ok>a nonzero exit code now raises CalledProcessError instead of returning quietly</button>
+    <button class="opt">the external command now always simply runs noticeably faster than before</button>
+    <button class="opt">captured stdout now always gets fully returned as raw bytes instead</button>
+  </div>
+  <div class="q" data-why="A returncode of 0 means success by convention; any nonzero value means some kind of failure, with the specific meaning defined by that particular program. subprocess.run() does not interpret this for you unless check=True is passed.">
+    <p class="stem">What does a <code>returncode</code> of <code>0</code> conventionally mean after <code>subprocess.run()</code>?</p>
+    <button class="opt" data-ok>the external command finished and reported full success overall</button>
+    <button class="opt">the external command actually printed zero total bytes out</button>
+    <button class="opt">the external command is still currently running right now</button>
+  </div>
+  <div class="q" data-why="stdout and stderr are two separate streams a process writes to: stdout for its actual result, stderr for diagnostics and error messages. capture_output=True captures both but keeps them apart on result.stdout and result.stderr rather than merging them into one combined blob.">
+    <p class="stem">With <code>capture_output=True</code>, how are a command's <code>stdout</code> and <code>stderr</code> returned?</p>
+    <button class="opt" data-ok>kept separate, as two distinct attributes on the result object itself</button>
+    <button class="opt">merged together always into one single combined text blob instead always</button>
+    <button class="opt">neither stream is ever captured without also always passing text=True too</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the standard library's <a href="https://docs.python.org/3/library/subprocess.html"><code>subprocess</code></a> docs — covers <code>run()</code> in full plus the lower-level <code>Popen</code> API for streaming or interactive processes, not needed for today's one-shot-command use case.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day68">glossary</a> under Day 68.<br>
+This closes one of the two remaining fresh-gap candidates named since Day 58; <code>configparser</code> remains the other.<br><br>
+💬 Anything unclear — the list-vs-<code>shell=True</code> distinction, <code>check=True</code>, or <code>stdout</code>/<code>stderr</code> separation? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

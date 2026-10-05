@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 91 · Delivery semantics: the three guarantees hiding behind every retry</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 91 · ~20 min</p>
+<h1>Delivery semantics: the three guarantees hiding behind every retry</h1>
+<p class="byline">Lesson 10 named <em>at-least-once delivery</em> for background jobs, and it already has its own glossary row — a job might run twice, but it's never silently dropped. Lessons 26, 29, and 87 all leaned on that same guarantee without ever naming its two siblings: the opposite failure mode, and the guarantee everyone secretly wishes they had. Ninety lessons in, "exactly-once" has appeared six times in passing, always as something a mechanism explicitly does <em>not</em> promise, and never once taught as its own term next to the other two. Today names all three side by side.</p>
+
+<h2>1 · Three answers to "what happens on a crash mid-delivery"</h2>
+<p>Every queue, every retry, every message handoff between two systems has to answer the same question: a crash or a network failure happens at the worst possible moment — right between "the work happened" and "the system was told the work happened" — so what does the receiver end up with? There are exactly three possible answers, and each has a name.</p>
+<p><dfn data-en="a delivery guarantee where the sender gives up after a failure instead of retrying, so a message or job is sent at most one time -- it may arrive zero times (silently lost) or exactly once, but never more than once, trading away durability for the simplicity of never producing a duplicate" data-vn="at-most-once delivery (giữ nguyên) — sender không retry khi fail, nên message/job gửi tối đa 1 lần -- có thể bị mất (0 lần) hoặc tới đúng 1 lần, nhưng không bao giờ lặp lại -- đánh đổi: không bao giờ duplicate, nhưng có thể mất việc">At-most-once delivery</dfn> is what you get by doing nothing extra: send it, and if it fails, don't retry. Zero duplicates, ever — but a crash between "sent" and "confirmed" means the message is gone for good, silently. <strong>At-least-once delivery</strong>, Lesson 10's term, is the opposite trade: retry until confirmed, which means a crash in that same window produces a duplicate instead of a loss — the work happened, but the sender couldn't tell, so it tries again. And <dfn data-en="a delivery guarantee where a message or job is delivered and processed exactly one time, with no possibility of either loss or duplication, even across crashes and retries -- in a system of fully independent components connected only by an unreliable network, this guarantee cannot be achieved in the general case, which is why most real systems instead build it out of at-least-once delivery plus an idempotent receiver" data-vn="exactly-once delivery (giữ nguyên) — message/job được xử lý đúng 1 lần duy nhất, không mất không duplicate, kể cả qua crash/retry -- với hệ thống gồm các thành phần độc lập nối qua network không đáng tin cậy, guarantee này KHÔNG đạt được ở trường hợp tổng quát -- nên hầu hết hệ thống thật build nó từ at-least-once + idempotent receiver">exactly-once delivery</dfn> is the one everyone actually wants: never lost, never duplicated, no matter how many crashes happen along the way.</p>
+<div class="callout"><strong>The uncomfortable fact:</strong> exactly-once delivery, in the strict sense — guaranteed by the network and the messaging system alone, across two fully independent processes — is not achievable in the general case. The sender can never be <em>certain</em> the receiver got a message without an acknowledgment, and that acknowledgment can itself be lost, which puts the sender right back at the same fork: retry (risking a duplicate) or don't (risking a loss). This isn't a tooling gap waiting on a smarter queue — it's a consequence of networks being unreliable, the same root cause behind Lesson 84's reason two-phase commit makes a poor practical fit for independent services.</div>
+
+<h2>2 · So what do systems that advertise "exactly-once" actually mean?</h2>
+<p>Lesson 29's outbox pattern said it outright: "no practical mechanism across two separate systems can promise [exactly-once] delivery." Lesson 87's CDC lesson and Lesson 72's event-driven vocabulary lesson both drew the same boundary. When a real system claims exactly-once, it almost never means exactly-once <em>delivery</em> in the strict network sense — it means exactly-once <em>processing effect</em>, built on top of ordinary at-least-once delivery plus one more ingredient this course already has a name for: an idempotent receiver. Lesson 26's idempotency key is exactly that ingredient. The message or job may physically arrive twice — delivery is still only at-least-once — but the receiver recognizes the duplicate and plays back the first result instead of redoing the work, so the <em>observable effect</em> is as if it happened exactly once.</p>
+<div class="callout"><strong>The pattern repeats across three lessons:</strong> Lesson 10's job queue (retry until confirmed, handler checks a <code>sent_at</code> column first), Lesson 26's idempotency key (retry the POST, server replays the remembered result), and Lesson 29's outbox relay (retry the publish, subscriber checks "have I already shipped this order?" first) are the same shape three times. None of them achieve exactly-once delivery. All three achieve exactly-once <em>effect</em>, by pairing at-least-once delivery with an idempotent consumer. That pairing — not a smarter queue — is how "exactly-once" gets built in practice.</div>
+
+<h2>3 · Lining up what each guarantee costs and who has to do the work</h2>
+<table class="cmp">
+<tr><th></th><th>At-most-once</th><th>At-least-once</th><th>"Exactly-once" (effect)</th></tr>
+<tr><td>Can a message be silently lost</td><td>yes — the defining risk</td><td>no — retried until confirmed</td><td>no — inherits at-least-once's retry</td></tr>
+<tr><td>Can a message be duplicated</td><td>no — never retried</td><td>yes — the defining risk</td><td>may arrive twice, but effect runs once</td></tr>
+<tr><td>Extra work required of the receiver</td><td>none</td><td>must tolerate duplicates safely</td><td>must detect and dedupe duplicates</td></tr>
+<tr><td>Where this course already named it</td><td>new today</td><td>Lesson 10 (jobs), reused by 26, 29, 87</td><td>Lesson 26's idempotency key is the mechanism</td></tr>
+<tr><td>When it's actually the right choice</td><td>a dropped metric/log line nobody will miss</td><td>anything where losing work is worse than retrying it</td><td>anything where both loss and duplication are unacceptable</td></tr>
+</table>
+<p>At-most-once is not a lesser, forgotten option — it's the correct choice for a specific class of work: a best-effort metrics ping, a non-critical log line, a cache-warming hint. Losing one occasionally is cheaper than the bookkeeping either of the other two guarantees demands. The mistake isn't choosing at-most-once; it's choosing it by accident, for something like a payment or an order, by writing a handler that doesn't retry and never noticing the silent-loss risk that choice carries.</p>
+
+<div class="interview">
+<p><strong>Q: "Does your event system guarantee exactly-once delivery?"</strong> A strong answer, out loud: <em>"No system I'd build claims strict exactly-once delivery, because across two independent processes connected by an unreliable network, that's not achievable in the general case — the sender can never be fully certain the receiver got a message, since the acknowledgment itself can be lost. What I'd actually build is at-least-once delivery, same as our outbox relay already does: retry until confirmed, which means an occasional duplicate instead of a silent loss. Then I'd make the consumer idempotent — check whether this message's effect already happened before applying it again, the same idempotency-key pattern we use for retried POSTs. The combination behaves like exactly-once from the outside, even though delivery itself is only at-least-once underneath. If a vendor claims true exactly-once delivery, I'd ask what they mean by it, because usually it's this same pairing with a different name."</em> The signal: not treating "exactly-once" as a checkbox a tool provides, and correctly locating where the real work happens — the idempotent receiver, not the delivery mechanism.</p>
+</div>
+
+<h2>Scope line</h2>
+<p>MISSION.md excludes distributed systems beyond vocabulary level, and the formal proof of why exactly-once delivery is impossible — the two-generals-problem framing, consensus-protocol depth, or how a specific message broker's "exactly-once" mode is actually implemented internally — drifts past that line. The point here is the vocabulary and the trade-off: three names for three failure modes, and the recognition that "exactly-once" in practice always means at-least-once delivery plus an idempotent receiver, not a fourth, better delivery mechanism.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="At-most-once delivery never retries after a failure, so a message lost between sending and confirmation is gone for good with no second attempt -- the trade for guaranteeing zero duplicates ever.">
+    <p class="stem">What is the defining risk of choosing at-most-once delivery?</p>
+    <button class="opt" data-ok>a message can be silently lost forever now</button>
+    <button class="opt">a message always gets delivered twice over now</button>
+    <button class="opt">every message now requires its own database transaction</button>
+    <button class="opt">every single retry always doubles the total latency</button>
+  </div>
+  <div class="q" data-why="Strict exactly-once delivery across two independent processes connected by an unreliable network is not achievable in the general case -- the sender can never be certain the receiver got a message, since the acknowledgment itself can also be lost, forcing the same retry-or-not fork at-least-once and at-most-once already represent.">
+    <p class="stem">Why can't strict exactly-once delivery be guaranteed between two independent systems?</p>
+    <button class="opt" data-ok>an acknowledgment can be lost just like any message</button>
+    <button class="opt">databases are now physically always incapable of all retries</button>
+    <button class="opt">HTTP forbids sending the same exact request body twice</button>
+    <button class="opt">queues can now only ever support just one consumer</button>
+  </div>
+  <div class="q" data-why="Real systems that advertise exactly-once almost always mean exactly-once processing effect, not strict delivery -- they pair ordinary at-least-once delivery (retry until confirmed) with an idempotent receiver that recognizes and discards duplicates, the same pattern Lesson 26's idempotency key and Lesson 29's outbox relay already use.">
+    <p class="stem">What do most systems actually mean when they advertise "exactly-once"?</p>
+    <button class="opt" data-ok>at-least-once delivery now always paired with an idempotent receiver</button>
+    <button class="opt">a queue that can physically never lose a message</button>
+    <button class="opt">a network protocol that never once drops a packet</button>
+    <button class="opt">a database that now fully disallows all concurrent transactions</button>
+  </div>
+  <div class="q" data-why="At-most-once is the correct, deliberate choice for low-stakes work where an occasional silent loss is cheaper than the bookkeeping at-least-once or exactly-once effect demand -- a best-effort metric or log line being dropped occasionally is an acceptable trade, unlike a payment or an order.">
+    <p class="stem">When is choosing at-most-once delivery actually the right call?</p>
+    <button class="opt" data-ok>for low-stakes work where an occasional loss is fine</button>
+    <button class="opt">for literally every single payment and order flow now</button>
+    <button class="opt">whenever a consumer cannot ever tolerate any duplicate now</button>
+    <button class="opt">only when there is no network connection at all</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> this course's RESOURCES.md names <a href="https://dataintensive.net">Designing Data-Intensive Applications</a> as "the backend book," and its chapter 11 (Stream Processing) is the standard treatment of delivery semantics — it's also the same chapter Lesson 29 and Lesson 88 already pointed at for the outbox pattern and event sourcing, so this lesson's vocabulary sits in the same chapter as material already cited. This session's sandbox network-permission gate was checked and found closed, so rather than present a freshly fetched citation, this lesson is built from the at-least-once vocabulary Lesson 10 already established plus general, widely-consistent industry usage of its two siblings. Worth reading directly once the gate reopens: DDIA chapter 11's section on exactly-once semantics for the formal argument behind today's "uncomfortable fact" callout.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially. Nếu chỗ nào chưa rõ, cứ hỏi lại bằng tiếng Việt cũng được.<br><br>
+<em>Next lesson:</em> open. Still no <code>lesson_completed</code>/quiz-outcome record exists for any lesson after 91 rounds — the honest next step remains a completion signal or a user-named track.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

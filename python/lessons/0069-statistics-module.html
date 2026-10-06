@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 69 · statistics: summary numbers without pandas</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 69 · ~20 min · 6 Oct 2026</p>
+<h1><code>statistics</code>: summary numbers without pandas</h1>
+<p class="byline"><code>MISSION.md</code>'s own definition of this course's win is "read, clean, reshape, <strong>aggregate</strong>, write" — and every aggregation so far has been a count or a group (Day 3's <code>Counter</code>, Day 27's <code>groupby</code>). None has ever answered "what's the typical value here?" The standard-library <code>statistics</code> module is the plain-list answer to that, with no <code>DataFrame</code> involved.</p>
+
+<div class="callout"><strong>Why today, specifically:</strong> a fresh-gap grep across all 68 lessons and every practice file confirmed <code>statistics</code> has never been taught — the only new finding this round, since <code>configparser</code> (the other long-standing named candidate) is still on the table but narrower. <code>statistics</code> was named and set aside twice before, on Days 56 and 57, each time against a stronger competing module (<code>operator</code>, then <code>dataclasses.field()</code>); with both of those now taught and no stronger fresh case turning up this round, it is the better fit left — squarely inside <code>MISSION.md</code>'s own "aggregate them" success criterion, unlike <code>configparser</code>, which only reads one narrow config-file format <code>pathlib</code>/plain <code>dict</code>s already cover.</div>
+
+<h2>1 · <code>mean()</code>, <code>median()</code>, <code>mode()</code>: three different "typical"</h2>
+<p>A single list of numbers rarely has one obvious "typical value" — it has three different ones, and they disagree the moment the data is skewed:</p>
+<pre><code><span class="kw">import</span> statistics
+
+amounts = [<span class="kw">20</span>, <span class="kw">25</span>, <span class="kw">22</span>, <span class="kw">21</span>, <span class="kw">500</span>]   <span class="cm"># four normal orders, one huge outlier</span>
+
+<span class="kw">print</span>(statistics.mean(amounts))     <span class="cm"># 117.6 -- dragged hard toward the outlier</span>
+<span class="kw">print</span>(statistics.median(amounts))   <span class="cm"># 22 -- the middle value once sorted, outlier barely matters</span>
+<span class="kw">print</span>(statistics.mode(amounts))     <span class="cm"># 20 -- the single most frequent value (first one, here, since all are unique except ties)</span></code></pre>
+<p><dfn data-en="statistics.mean(data) returns the arithmetic average -- sum divided by count -- of a list or any iterable of numbers, as a plain float (or Fraction for exact input types)" data-vn="giữ nguyên &quot;mean&quot; — trung bình cộng (tổng chia số lượng), dễ bị kéo lệch bởi outlier">mean()</dfn> is the familiar sum-divided-by-count average, and exactly because of that it is sensitive to outliers — one huge value drags it far from where most of the data actually sits. <dfn data-en="statistics.median(data) returns the middle value once the data is sorted (or the average of the two middle values for an even-length list) -- far less sensitive to outliers than mean()" data-vn="giữ nguyên &quot;median&quot; — giá trị ở giữa sau khi sắp xếp, ít bị outlier ảnh hưởng hơn mean">median()</dfn> sorts the data first and takes the middle, which is why the one huge value above barely moves it. <dfn data-en="statistics.mode(data) returns the single most frequently occurring value in the data -- useful for categorical or discrete data where 'average' doesn't make sense" data-vn="giữ nguyên &quot;mode&quot; — giá trị xuất hiện nhiều lần nhất, hợp với dữ liệu rời rạc/phân loại">mode()</dfn> answers a different question entirely — not "what's central" but "what repeats most" — and is the only one of the three that also makes sense on non-numeric, categorical data like a list of city names.</p>
+
+<div class="callout"><strong>Bridge from SQL:</strong> <code>statistics.mean(amounts)</code> is <code>AVG(amount)</code> run on a Python list instead of a result set — same arithmetic, no query involved. SQL has no built-in <code>MEDIAN()</code> in most dialects; this module gives Python that for free.</div>
+
+<h2>2 · Spread: <code>stdev()</code> and <code>variance()</code></h2>
+<p>A single "typical value" hides how spread out the data actually is — two lists can share the same mean while one clusters tightly and the other swings wildly. <dfn data-en="statistics.stdev(data) returns the sample standard deviation, a measure of how spread out values are around the mean, in the same units as the original data" data-vn="giữ nguyên &quot;stdev&quot; — độ lệch chuẩn, đo mức độ phân tán của dữ liệu quanh mean, cùng đơn vị với dữ liệu gốc">stdev()</dfn> measures exactly that, in the same units as the data itself:</p>
+<pre><code>tight  = [<span class="kw">48</span>, <span class="kw">50</span>, <span class="kw">52</span>, <span class="kw">49</span>, <span class="kw">51</span>]    <span class="cm"># mean 50, clustered close</span>
+spread = [<span class="kw">10</span>, <span class="kw">90</span>, <span class="kw">50</span>, <span class="kw">95</span>, <span class="kw">5</span>]     <span class="cm"># mean 50, swinging wildly</span>
+
+<span class="kw">print</span>(statistics.mean(tight), statistics.stdev(tight))     <span class="cm"># 50.0, ~1.58 -- small spread</span>
+<span class="kw">print</span>(statistics.mean(spread), statistics.stdev(spread))   <span class="cm"># 50.0, ~45.6 -- same mean, huge spread</span></code></pre>
+<p><code>stdev()</code> requires at least two data points — it raises <code>StatisticsError</code> on a single-item or empty input, since "how spread out is one number" isn't a meaningful question. <code>statistics.variance()</code> returns the same spread measure before the final square root (<code>stdev()</code> is just <code>variance() ** 0.5</code>) — reach for <code>stdev()</code> directly almost always, since it's in the data's own units and <code>variance()</code>'s squared units are rarely what a report needs.</p>
+
+<h2>3 · Why a plain function beats hand-rolling the formula</h2>
+<p>Every one of these is a short loop someone could write by hand — <code>sum(data) / len(data)</code> for <code>mean()</code>, sort-then-index for <code>median()</code> — and that is exactly the trap. A hand-rolled <code>mean()</code> silently returns the wrong thing on an empty list (<code>ZeroDivisionError</code> if careless, or a wrong answer if not), and a hand-rolled <code>median()</code> is easy to get off-by-one on an even-length list (the median of four numbers is the <em>average</em> of the two middle ones, not either one alone):</p>
+<pre><code><span class="cm"># a believable-looking bug: forgetting the even-length-list case entirely</span>
+<span class="kw">def</span> bad_median(data):
+    data = <span class="kw">sorted</span>(data)
+    <span class="kw">return</span> data[<span class="kw">len</span>(data) // <span class="kw">2</span>]   <span class="cm"># wrong for even-length input -- picks one middle value, not their average</span>
+
+<span class="kw">print</span>(bad_median([<span class="kw">1</span>, <span class="kw">2</span>, <span class="kw">3</span>, <span class="kw">4</span>]))        <span class="cm"># 3 -- wrong, real median is 2.5</span>
+<span class="kw">print</span>(statistics.median([<span class="kw">1</span>, <span class="kw">2</span>, <span class="kw">3</span>, <span class="kw">4</span>]))   <span class="cm"># 2.5 -- correct</span></code></pre>
+<p>The standard library has already gotten the edge cases right once, for everyone — the same argument Day 59's <code>hashlib</code> made for not hand-rolling a hash function, and Day 56's <code>operator</code> module made for not hand-rolling a <code>lambda</code> for something with a name already.</p>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> <code>df["amount"].mean()</code>/<code>.median()</code>/<code>.std()</code>, or <code>.describe()</code> for all of them plus quartiles in one call, compute the identical statistics over a <code>DataFrame</code> column instead of a plain list — vectorized across potentially millions of rows, with the column's own index and dtype handling built in. Not demonstrated here; that's <code>data/</code>'s job, and this is the only sentence in this lesson that names it.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/69_statistics_module.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/69_statistics_module.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: computing <code>mean()</code> and <code>median()</code> over a list with an outlier and confirming they disagree, finding the <code>mode()</code> of a list of repeated category labels, computing <code>stdev()</code> for two same-mean lists and confirming the spread differs, and grouping rows by key (Day 3's <code>defaultdict</code>) before computing each group's own <code>mean()</code> — the exact "aggregate per group" shape a real pipeline needs.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="mean() sums every value and divides by the count, so one very large or very small outlier pulls it far from where most of the data actually sits. median() sorts the data first and takes the middle value, so a single extreme outlier barely moves it at all.">
+    <p class="stem">Why can <code>mean()</code> and <code>median()</code> give very different answers on the same list?</p>
+    <button class="opt" data-ok>mean is pulled by outliers; median, the sorted middle, mostly ignores them</button>
+    <button class="opt">median simply always equals the mean rounded to the nearest whole integer</button>
+    <button class="opt">mean only ever works correctly on lists that contain no repeated values</button>
+  </div>
+  <div class="q" data-why="mode() returns the single most frequently occurring value in the data, which is a different question from mean/median's 'what is central' -- it is the only one of the three that also makes sense on non-numeric, categorical data like city names.">
+    <p class="stem">What question does <code>statistics.mode()</code> answer that <code>mean()</code>/<code>median()</code> don't?</p>
+    <button class="opt" data-ok>which single value occurs in the data the most number of times</button>
+    <button class="opt">which single value sits exactly in the numeric middle of the data</button>
+    <button class="opt">which single value is the biggest across the whole list of data</button>
+  </div>
+  <div class="q" data-why="Two lists can share the identical mean while one clusters its values tightly around it and the other swings wildly far from it. stdev() measures exactly that spread, in the same units as the original data, which the mean alone never reveals.">
+    <p class="stem">Why might two lists share the same <code>mean()</code> but have very different <code>stdev()</code> values?</p>
+    <button class="opt" data-ok>the mean alone says nothing about how spread out the values are</button>
+    <button class="opt">stdev always only measures the single largest value in a given list</button>
+    <button class="opt">one of the two lists must contain at least one duplicate number</button>
+  </div>
+  <div class="q" data-why="A hand-rolled median that always returns the one middle index is wrong for every even-length list, where the correct median is the average of the two middle values, not either one alone -- an easy, believable off-by-one mistake the library has already gotten right.">
+    <p class="stem">What's the specific bug risk in hand-rolling a <code>median()</code> instead of calling <code>statistics.median()</code>?</p>
+    <button class="opt" data-ok>getting the even-length case wrong, picking one middle value instead of their average</button>
+    <button class="opt">a hand-rolled version always runs remarkably much more slowly than the library one</button>
+    <button class="opt">Python actually blocks any attempt to write a custom median function at all</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the standard library's <a href="https://docs.python.org/3/library/statistics.html"><code>statistics</code></a> docs — covers today's <code>mean()</code>/<code>median()</code>/<code>mode()</code>/<code>stdev()</code>/<code>variance()</code> plus grouped and weighted variants, and the exact <code>StatisticsError</code> conditions (empty input, no unique mode under strict mode) not needed for today's examples.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day69">glossary</a> under Day 69.<br>
+<code>configparser</code> remains the one previously-named fresh-gap candidate still on the table.<br><br>
+💬 Anything unclear — <code>mean()</code> vs <code>median()</code>, what <code>stdev()</code> actually measures, or why the library beats hand-rolling it? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

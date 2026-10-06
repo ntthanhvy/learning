@@ -7748,3 +7748,120 @@
   with a fresh curriculum/glossary scan. The `.scratch-0088/` directory was
   deleted after verification, per this course's standing practice of not
   leaving scratch artifacts committed.
+- 2026-10-06 generation (Lesson 89): confirmed no `0089-*` lesson/nav entry
+  and no `lesson_generated` row for course=data dated 2026-10-06 existed yet
+  before starting (per the orchestrator's own prior DB check this morning —
+  no `lesson_completed`/quiz/kata signal for any course more recent than
+  mid-July either, same steady state as every recent round). Read
+  `MISSION.md` and `RESOURCES.md` in full (neither modified), the tail of
+  `NOTES.md` (this generation log, Lessons 85-88's entries), the single
+  baseline `learning-records/0001-...md` (still the only file there,
+  unchanged), the last two lesson/practice pairs (87, 88), and
+  `assets/nav.js` in full for the exact registration format. Lesson 88's own
+  teaser named no standing candidate ("no standing named candidate carries
+  forward"), so this round delegated a fresh gap-scan sub-agent per this
+  course's established practice: it grepped ~28 candidate pandas/NumPy
+  topics (groupby `.first()`/`.last()`, `nsmallest()`, `.T`/`transpose()`,
+  `Series.mode()`, `MultiIndex.from_product()`, `str.cat()`/`pad()`/
+  `startswith()`, `np.clip`/`np.vectorize`, `pd.testing.assert_frame_equal`,
+  and others already well-covered like `duplicated(keep=)`, `applymap()`,
+  `pipe()`, `concat(keys=)`, `groupby().size()` vs `.count()`) across all 88
+  lesson bodies and the glossary, flagging real hits vs. teaser-only
+  mentions. It recommended `pd.testing.assert_frame_equal()` as the top
+  pick. Independently re-confirmed the gap myself before committing to it:
+  grepped `assert_frame_equal|assert_series_equal` case-insensitively across
+  every lesson body and the glossary, zero hits anywhere — a genuine gap.
+  Picked it over the sub-agent's other two suggestions (`Series.mode()`,
+  `MultiIndex.from_product()`): it's the natural automated-test sibling of
+  Lesson 54's `.equals()`/`.compare()` (re-read Lesson 54 in full as
+  structural precedent), directly reusable in any take-home "clean this
+  dataset" interview exercise per MISSION.md's own success criteria, and has
+  a genuine, verifiable silent-behavior-difference hook versus `.equals()`
+  (floating-point tolerance) rather than being a drier standalone API-surface
+  topic. Every behavioral claim was probed directly first in
+  `data/.scratch-0089/` (deleted after), on the actually-installed pandas
+  3.0.6 (confirmed via `uv run --with pandas python3 -c "import pandas as
+  pd; print(pd.__version__)"`): confirmed `assert_frame_equal()` returns
+  `None` and raises nothing on a genuine copy; confirmed it is dtype-strict
+  by default (`float32` vs `float64` raises `AssertionError` even with
+  identical values, same strictness as Lesson 54's `.equals()`); confirmed
+  `check_dtype=False` relaxes that specific check and lets the comparison
+  pass; confirmed the real behavioral difference from `.equals()` that
+  earns this lesson its own slot — a `1e-9` float drift passes
+  `assert_frame_equal()` silently by default (small built-in tolerance) but
+  `.equals()` on the identical pair returns `False` (no tolerance concept at
+  all); confirmed a larger `0.01` drift fails by default but passes once
+  `rtol=0.1` is passed explicitly, and that `check_exact=True` removes the
+  default tolerance entirely, failing even on a `1e-6` drift; confirmed
+  `check_like=True` sorts both frames by index/column *labels* before
+  comparing, so shuffled row/column *order* stops mattering as long as the
+  underlying labels still match (tested a frame reindexed to `[1, 0, 3, 2]`
+  from the original `[0, 1, 2, 3]` labels — fails by default, passes under
+  `check_like=True`); confirmed a shape mismatch (extra row) raises
+  `AssertionError`, not the `ValueError` Lesson 54 found for `.compare()` on
+  a shape mismatch — a deliberate, confirmed difference called out nowhere
+  in the shipped lesson body since it didn't earn its own section, but worth
+  recording here in case a future lesson wants it; confirmed
+  `assert_series_equal()` exists as the identical Series-level sibling; used
+  `inspect.signature()` to confirm the real keyword defaults
+  (`check_dtype=True`, `check_like=False`, `check_exact`/`rtol`/`atol` all
+  internally defaulting to pandas' own no-default sentinel, which resolves
+  to a small relative/absolute tolerance for floats unless overridden) rather
+  than asserting them from memory. Cross-checked the official pandas docs
+  via `WebFetch` (available this round): fetched both the `pandas.testing`
+  reference index page and the dedicated `assert_frame_equal()` API page,
+  which confirmed the exact default values found by direct probing
+  (`check_dtype=True`, `check_exact` defaults effectively to tolerance-based
+  for floats with documented `rtol=1e-5`/`atol=1e-8`, `check_like=False`,
+  raises `AssertionError` on mismatch, returns `None`/no output on match) —
+  cited as a freshly-verified primary source, not the "treated as
+  long-stable reference" fallback language some recent rounds used when
+  `WebFetch` was unavailable. The shipped (unsolved)
+  `practice/89_assert_frame_equal.py` was executed directly from its real
+  `practice/` location and printed exactly 3 ✗ with no raw traceback; a
+  solved copy (kept only in `.scratch-0089/`, not shipped) then printed all
+  3 ✓ and "All green" on the first run — no bugs found in the placeholder
+  pattern this round (each exercise's blank is checked with an explicit `is
+  True`/`is False` identity check rather than a loose truthiness check,
+  following the defensive pattern this course's notes have repeatedly
+  flagged as a recurring risk class, Lessons 83/85/87/88 — double-checked
+  directly that `bool(...)` is `True` but `... is True`/`... is False` are
+  both `False`, so an unfilled Ellipsis placeholder cannot slip past any of
+  the three exercises' checks). The shipped file was re-run once more
+  directly from `practice/` after the scratch-dir verification and
+  reproduced the identical all-✗ result. Quiz options were drafted, then
+  mechanically word-counted with a scratch Python script (`uv run python3`)
+  isolating each `<div class="q">` block by regex span — iterated through a
+  few rewrite cycles (first draft came out 10/8/8, 8/8/7, 9/7/8) until all
+  three questions landed level (8/8/8, 8/8/8, 9/9/9 option words), with
+  exactly one `data-ok` per question throughout. A separate mechanical
+  tag-balance script confirmed all tags balanced on the first real pass
+  (`h2` 7/7, `p` 18/18, `div` 5/5, `pre` 4/4, `code` 71/71, `span` 20/20,
+  `strong` 3/3, `em` 5/5, `a` 2/2, `button` 9/9, `dfn` 1/1, `script` 3/3,
+  `table` 1/1, `tr` 3/3, `th` 3/3, `td` 6/6) and found exactly two raw `&`
+  characters, both inside the one established `cd ~/learning/data && uv
+  run …` shell command in a `<pre><code>` block, matching every prior
+  lesson's pattern, zero raw `&` in prose; also confirmed the one new
+  `<dfn>` tag carries both `data-en` and `data-vn`. Checked the glossary for
+  a collision before adding anything — grepped
+  `assert_frame_equal|assert_series_equal|pandas.testing` case-insensitively
+  across the full glossary, found zero existing rows — added exactly one
+  new row, `assert_frame_equal()`, directly after Lesson 88's `value_counts
+  (normalize=True)` entry; re-ran the tag-balance script against the
+  glossary file afterward, confirmed it stayed balanced (`tr` 160/160, `td`
+  477/477, `th` 3/3, `table` 1/1, `code` 1040/1040, `em` 5/5, `a` 1/1, `p`
+  3/3) with zero raw `&` introduced. Registered Lesson 89 in `nav.js` with
+  today's date (2026-10-06); `node --check` confirmed it still parses as
+  valid JavaScript after the edit, and exactly one `n: 89` entry plus one
+  `0089-assert-frame-equal` file reference were confirmed to exist. This
+  round closed a genuine gap adjacent to Lesson 54's `.equals()`/`.compare()`
+  rather than following any ETL/SQL thread — no standing named candidate
+  carries forward; tomorrow starts with a fresh curriculum/glossary scan. No
+  new `data/learning-records/` entry was added this round — routine lesson,
+  no new baseline finding to justify one. The `.scratch-0089/` directory was
+  deleted after verification, per this course's standing practice of not
+  leaving scratch artifacts committed. `bin/record-progress data
+  lesson_generated --day 89 --lesson 0089-assert-frame-equal.html --detail
+  '{"by":"headless"}'` was run from the repo root; see the tool-call result
+  immediately following this entry's authoring for the exact
+  recorded/blocked outcome.

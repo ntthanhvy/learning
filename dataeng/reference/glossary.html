@@ -204,6 +204,13 @@
   <tr><td>XCom</td><td>giữ nguyên "XCom" (cross-communication) — cơ chế Airflow truyền giá trị nhỏ giữa các task, lưu thành 1 dòng key/value trong metadata database của Airflow, TaskFlow tự ghi khi return, task sau đọc qua tham số hàm hoặc xcom_pull thủ công</td><td>Airflow's built-in mechanism for small values passed between tasks — a key/value row stored in Airflow's own metadata database (<code>dag_id</code>, <code>task_id</code>, <code>key</code>, <code>value</code>), written automatically by a TaskFlow-decorated task's return value or manually via <code>xcom_push</code>, and read by a downstream task's function argument or <code>xcom_pull</code>. Bounded by what a database row and the webserver UI can reasonably hold — not a transport for a dataset. Confirmed this round by querying a real run's XCom row directly out of SQLite.</td></tr>
 </table>
 
+<h2 id="day21">Day 21 — Airflow Assets: data-aware scheduling</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>Asset</td><td>giữ nguyên "Asset" — đối tượng Airflow đại diện 1 dữ liệu cụ thể (bảng, file...), 1 task khai báo mình tạo ra nó qua outlets=, 1 DAG khác được lên lịch chạy khi Asset đó cập nhật qua schedule=, thay vì chạy theo giờ cố định</td><td>An Airflow object representing a specific piece of data (a table, a file, an API response) that a task can declare it produces (<code>outlets=</code>) or that a DAG can be scheduled to run whenever one or more of them is updated (<code>schedule=[asset]</code>) — the mechanism behind data-aware scheduling, as opposed to a DAG that only runs on a fixed clock interval. Matched across DAG files by its name/URI string, not by shared Python objects or imports — confirmed this round via <code>airflow assets details</code> showing a real producer/consumer link.</td></tr>
+  <tr><td>outlets=</td><td>giữ nguyên "outlets" — tham số task (hoặc @task) khai báo danh sách Asset task này tạo ra; khi task chạy thành công, Airflow tự ghi 1 asset event, không liên quan tới dữ liệu có thực sự thay đổi hay không</td><td>A task (or <code>@task</code>-decorated function) argument listing the Assets that task produces — on task success, Airflow writes a real row to its own <code>asset_event</code> table recording which asset changed, confirmed this round by querying that table directly after a live <code>dags test</code> run. Fires on task success, not on whether the underlying data actually changed, so the task's own logic has to make "no real change" a reason not to trigger, not just a successful no-op.</td></tr>
+</table>
+
 <script src="../assets/nav.js"></script>
 </body>
 </html>

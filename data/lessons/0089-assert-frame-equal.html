@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 89 · pd.testing.assert_frame_equal(): comparing tables for a real test, not a printout</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 89 · ~20 min · 6 Oct 2026</p>
+<h1>pd.testing.assert_frame_equal(): comparing tables for a real test, not a printout</h1>
+<p class="byline">Lesson 54 taught <code>.equals()</code> (one True/False) and <code>.compare()</code> (which cells differ) for checking whether two DataFrames match. A fresh curriculum/glossary scan today confirmed neither lesson, nor any other, ever mentions <code>pandas.testing</code> itself — the module built specifically for writing an automated <em>test</em> that a transform's output is correct, the exact skill a take-home "clean this dataset" interview exercise is graded on. The gap it closes: <code>.equals()</code> is all-or-nothing strict (a <code>float32</code> vs <code>float64</code> column fails even when every value matches), which makes it a poor fit for testing numeric pipelines where small floating-point rounding is expected and fine.</p>
+
+<h2>1 · assert_frame_equal(): pass silently, fail with a readable diff</h2>
+<p>SQL has no built-in "assert these two result sets match" statement — that check normally lives in whatever test framework wraps the query. pandas ships its own equivalent for DataFrames: <dfn data-en="a function in the pandas.testing module that compares two DataFrames and raises AssertionError with a readable diff if they don't match closely enough -- returns None (no output at all) if they do, the same pass-silently convention as Python's built-in assert" data-vn="giữ nguyên 'assert_frame_equal()' — so sánh 2 DataFrame, raise AssertionError kèm diff dễ đọc nếu không khớp; nếu khớp thì trả về None, không in gì cả, giống quy ước assert thường của Python">assert_frame_equal()</dfn> from <code>pandas.testing</code>. Confirmed directly (pandas 3.0.6): on a genuine copy, it returns <code>None</code> and prints nothing — the same "silent on success" convention as Python's own <code>assert</code> keyword:</p>
+<pre><code><span class="kw">import</span> pandas <span class="kw">as</span> pd
+<span class="kw">import</span> pandas.testing <span class="kw">as</span> pdt
+
+clean = pd.DataFrame({
+    <span class="str">"customer"</span>: [<span class="str">"An"</span>, <span class="str">"Binh"</span>],
+    <span class="str">"amount"</span>:   [<span class="kw">120.0</span>, <span class="kw">35.5</span>],
+})
+
+pdt.assert_frame_equal(clean, clean.copy())
+<span class="cm"># (nothing printed -- the check passed)</span></code></pre>
+<p>Change one value and the failure is loud, specific, and tells you exactly where to look — this is the real reason to reach for it over <code>.equals()</code> inside a test: <code>.equals()</code> only ever tells you <em>whether</em> two frames match; <code>assert_frame_equal()</code> tells you <em>why they don't</em>, in the same call:</p>
+<pre><code>changed = clean.copy()
+changed.loc[<span class="kw">1</span>, <span class="str">"amount"</span>] = <span class="kw">999.0</span>
+pdt.assert_frame_equal(clean, changed)
+<span class="cm"># AssertionError: DataFrame.iloc[:, 1] (column name="amount") are different
+#
+# DataFrame.iloc[:, 1] (column name="amount") values are different (50.0 %)
+# [index]: [0, 1]
+# [left]:  [120.0, 35.5]
+# [right]: [120.0, 999.0]
+# At positional index 1, first diff: 35.5 != 999.0</span></code></pre>
+
+<h2>2 · Floats are compared with tolerance by default — unlike .equals()</h2>
+<p>This is the behavior that actually earns <code>assert_frame_equal()</code> its own lesson rather than being a footnote on Lesson 54. Confirmed directly: a difference of <code>1e-9</code> in a float column passes with no error at all — floats are compared with a small default relative/absolute tolerance (the same idea as NumPy's <code>allclose</code>), not bit-for-bit:</p>
+<pre><code>drifted = clean.copy()
+drifted[<span class="str">"amount"</span>] = drifted[<span class="str">"amount"</span>] + <span class="kw">1e-9</span>
+pdt.assert_frame_equal(clean, drifted)
+<span class="cm"># (nothing printed -- passes; 1e-9 is well inside the default tolerance)</span>
+
+clean.equals(drifted)
+<span class="cm"># False  -- .equals() has no tolerance concept at all, any difference fails</span></code></pre>
+<p>A real-world difference — say <code>0.01</code> off, the kind a rounding or re-aggregation bug actually produces — is big enough to fail even with the default tolerance, exactly as it should. For a case that genuinely needs a looser tolerance (comparing results from two different floating-point code paths that are expected to round slightly differently), <code>rtol=</code>/<code>atol=</code> widen it explicitly, or <code>check_exact=True</code> tightens it to bit-for-bit — the opposite knob, useful once a pipeline is expected to produce byte-identical output and any drift at all is itself a bug worth catching.</p>
+
+<h2>3 · check_dtype and check_like: two more strictness knobs</h2>
+<p>Two keywords make <code>assert_frame_equal()</code> flexible about exactly what "matching" means, each confirmed directly against the real behavior rather than assumed:</p>
+<table class="gloss">
+  <tr><th>Keyword</th><th>Default</th><th>What it relaxes</th></tr>
+  <tr><td><code>check_dtype=</code></td><td><code>True</code></td><td>Set <code>False</code> to let a <code>float32</code> column match an equal-valued <code>float64</code> column — the exact case Lesson 54's <code>.equals()</code> could never do.</td></tr>
+  <tr><td><code>check_like=</code></td><td><code>False</code></td><td>Set <code>True</code> to sort both frames by their index and column <em>labels</em> before comparing, so row/column order stops mattering — the labels still have to match, just not their on-disk order.</td></tr>
+</table>
+<p>Confirmed directly: with <code>check_dtype=False</code>, the <code>float32</code>-vs-<code>float64</code> comparison from Lesson 54 that made <code>.equals()</code> return <code>False</code> now passes cleanly through <code>assert_frame_equal()</code>. And confirmed: a DataFrame whose rows were shuffled but still carry the same index labels (<code>[0, 1, 2, 3]</code> rearranged, not reset to a fresh default range) fails under the default row-order-sensitive comparison, but passes with <code>check_like=True</code> once both sides are label-sorted first.</p>
+
+<div class="interview">
+<p><strong>Q: "How would you write an automated test confirming your cleaning function's output is correct?"</strong> A strong answer, out loud: <em>"I'd build the expected DataFrame by hand for a small known input, run the real function, and call pandas.testing.assert_frame_equal(expected, actual) — it raises AssertionError with a readable cell-level diff on any mismatch, and returns None silently when it passes, same convention as a plain assert. The one thing I'd decide deliberately is check_dtype and check_exact: floats get a small default tolerance, which is usually right for a numeric pipeline, but I'd set check_exact=True if even tiny drift should count as a bug, or check_dtype=False if I only care about the values matching, not the exact bit-width."</em> The signal: naming the default float tolerance unprompted, and knowing it's the reason to prefer this over .equals() inside an actual test.</p>
+</div>
+
+<h2>4 · Where this fits</h2>
+<p>Lesson 54's <code>.equals()</code>/<code>.compare()</code> are for interactive checking — "did this change, and where?" — read at a REPL or notebook cell. <code>assert_frame_equal()</code> is the same idea aimed at an automated test: it raises instead of returning a value, which is exactly what a test runner (or a plain <code>assert</code>-driven script, like this course's own practice files) needs to fail loudly. <code>assert_series_equal()</code> is the identical tool one level down, for comparing two Series directly rather than whole DataFrames.</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/89_assert_frame_equal.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/89_assert_frame_equal.py</code></pre>
+<p>Exercise 1 confirms a genuine copy passes silently (Section 1). Exercise 2 confirms the Section 2 tolerance behavior: a <code>1e-9</code> float drift passes by default but fails once <code>check_exact=True</code> is set. Exercise 3 confirms the Section 3 <code>check_dtype=False</code> escape hatch on a <code>float32</code>-vs-<code>float64</code> mismatch that <code>.equals()</code> could never pass.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: assert_frame_equal() returns None and prints nothing when the two DataFrames match -- the same silent-on-success convention as Python's own assert keyword, unlike .equals() which always returns an explicit True.">
+    <p class="stem">What does <code>pdt.assert_frame_equal(df1, df2)</code> return when the two DataFrames genuinely match?</p>
+    <button class="opt" data-ok>None, printing nothing, same as a plain assert</button>
+    <button class="opt">the boolean value True, same as calling equals()</button>
+    <button class="opt">an empty DataFrame with every row dropped out</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: a tiny float difference like 1e-9 passes assert_frame_equal() by default because floats are compared with a small relative/absolute tolerance, unlike .equals() which has no tolerance concept and fails on any difference at all.">
+    <p class="stem">Why can a <code>1e-9</code> float difference pass <code>assert_frame_equal()</code> but fail <code>.equals()</code>?</p>
+    <button class="opt" data-ok>assert_frame_equal compares floats with a small default tolerance</button>
+    <button class="opt">equals() rounds every float column before comparing values</button>
+    <button class="opt">assert_frame_equal always skips every float column entirely, silently</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: check_dtype=False relaxes the dtype-matching rule, letting a float32 column compare equal to a value-identical float64 column -- the one strictness .equals() could never relax, since it always checks dtype.">
+    <p class="stem">What does <code>check_dtype=False</code> let <code>assert_frame_equal()</code> do that <code>.equals()</code> never can?</p>
+    <button class="opt" data-ok>match a float32 column against an equal-valued float64 column</button>
+    <button class="opt">skip comparing the DataFrame's whole row index entirely always</button>
+    <button class="opt">ignore every column whose name contains a typo somewhere</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the pandas User Guide's <a href="https://pandas.pydata.org/docs/reference/testing.html">API reference for <code>pandas.testing</code></a> (per <code>RESOURCES.md</code>'s "Docs: pandas User Guide" entry, ~5 min) — the full <code>assert_frame_equal()</code>/<code>assert_series_equal()</code>/<code>assert_index_equal()</code> keyword list, including <code>check_categorical=</code> and <code>check_freq=</code>, left out today to keep scope on the two knobs (<code>check_dtype=</code>, floating-point tolerance) that actually come up when testing a cleaning pipeline.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>assert_frame_equal()</code> is new today, added right after Lesson 88's <code>value_counts(normalize=True)</code> entry.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-89 comes back reported as shakiest, otherwise another fresh curriculum/glossary scan for the next genuinely-uncovered pattern — no standing named candidate carries forward from today.<br><br>
+💬 Anything unclear — the default float tolerance, the check_dtype=False escape hatch, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 92 · Savepoints: rolling back part of a transaction, not all of it</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 92 · ~20 min</p>
+<h1>Savepoints: rolling back part of a transaction, not all of it</h1>
+<p class="byline">Lesson 6 taught a transaction as all-or-nothing: <code>COMMIT</code> keeps everything, <code>ROLLBACK</code> discards everything, no middle option. Lesson 40's deadlock retry backstop throws away the <em>whole</em> transaction and starts over. Ninety-one lessons in, one real middle option between those two has never come up: undoing just the last few statements of a transaction while keeping everything before them. Today names it.</p>
+
+<h2>1 · The gap between "commit everything" and "discard everything"</h2>
+<p>Picture a handler that processes a batch: insert a parent <code>order</code> row, then loop over ten line items inserting each one. Item 7 violates a <code>CHECK</code> constraint (Lesson 60) — bad quantity, say. Lesson 6's transaction model gives exactly two outcomes: let the whole transaction fail and <code>ROLLBACK</code>, losing the order and the six good line items with it, or catch the error and keep going, which Postgres won't actually let you do — once a statement inside a transaction errors, Postgres marks the <em>entire</em> transaction aborted, and every statement after that point fails too, even an otherwise-valid one, until a <code>ROLLBACK</code> clears it.</p>
+<div class="callout"><strong>Frontend-habit trap:</strong> a <code>try/catch</code> around one bad array item, skipping it and continuing the loop, is the instinctive fix — and it silently does not work inside a Postgres transaction. Catching the error in your Go code stops your program from crashing, but it does not un-abort the transaction on the database side; the very next statement you send still comes back <code>current transaction is aborted, commands ignored until end of transaction block</code>.</div>
+<p>A <dfn data-en="a named marker set inside an open transaction with SAVEPOINT name, which a later ROLLBACK TO SAVEPOINT name can roll back to -- undoing every statement issued after that marker while keeping every statement issued before it, and leaving the transaction still open and still committable afterward" data-vn="savepoint (giữ nguyên) — một mốc có tên đặt trong transaction đang mở bằng SAVEPOINT name, sau đó ROLLBACK TO SAVEPOINT name sẽ undo mọi statement ra lệnh sau mốc đó, giữ nguyên mọi statement trước đó -- transaction vẫn mở, vẫn commit được bình thường">savepoint</dfn> is the actual middle option: a named marker set inside the still-open transaction, which a later rollback can return to without discarding anything issued before it.</p>
+<pre><code>BEGIN;
+INSERT INTO orders (id, customer_id) VALUES (501, 42);
+
+SAVEPOINT before_item;
+INSERT INTO order_items (order_id, qty) VALUES (501, -3);  -- fails the CHECK constraint
+<span class="cm">-- transaction is now aborted, but only back to the savepoint</span>
+ROLLBACK TO SAVEPOINT before_item;
+<span class="cm">-- the order row is still there; try the item again correctly, or skip it</span>
+INSERT INTO order_items (order_id, qty) VALUES (501, 3);
+
+COMMIT;  <span class="cm">-- order row + the one good item both land; the failed attempt never did</span></code></pre>
+
+<h2>2 · What a savepoint actually buys, and what it costs</h2>
+<p><code>ROLLBACK TO SAVEPOINT before_item</code> undoes every statement issued after that marker — exactly the failed <code>INSERT</code>, nothing more — and leaves the transaction itself still open, still holding the order row, still committable. A plain <code>ROLLBACK</code> with no savepoint is the all-or-nothing option Lesson 6 already taught: it discards the entire transaction back to <code>BEGIN</code>, order row included. A savepoint doesn't replace that option; it adds a second, narrower one.</p>
+<div class="cmp-wrap">
+<table class="cmp">
+<thead><tr><th></th><th>Plain <code>ROLLBACK</code></th><th><code>ROLLBACK TO SAVEPOINT</code></th></tr></thead>
+<tbody>
+<tr><th>What's undone</th><td>every statement since <code>BEGIN</code></td><td>every statement since that <code>SAVEPOINT</code> only</td></tr>
+<tr><th>What survives</th><td>nothing — transaction ends</td><td>everything before the savepoint; transaction stays open</td></tr>
+<tr><th>Can you still <code>COMMIT</code> after</th><td>no — there's nothing left to commit</td><td>yes — commit whatever's left once ready</td></tr>
+<tr><th>Typical use</th><td>the operation as a whole failed</td><td>one sub-step failed; the rest should still land</td></tr>
+</tbody>
+</table>
+</div>
+<p>A savepoint isn't free, and it isn't a second transaction. Postgres has to keep enough bookkeeping to undo back to that exact point, which means every open savepoint holds a small amount of extra internal state for as long as the transaction stays open — cheap for a handful of savepoints in a short-lived handler, but not something to set in a loop running thousands of times inside one transaction without a reason. And it's strictly a single-transaction trick: once you call <code>COMMIT</code> or <code>ROLLBACK</code> on the outer transaction, every savepoint inside it is gone along with it. There's no such thing as a savepoint that outlives its own transaction.</p>
+
+<h2>3 · Where this actually shows up: a Go batch handler</h2>
+<p>A worker inserting a batch of line items, skipping any row that fails validation instead of discarding the whole batch, is the shape this earns its keep in — the <code>sql.Tx</code> equivalent of the manual SQL above, using <code>SAVEPOINT</code>/<code>RELEASE SAVEPOINT</code>/<code>ROLLBACK TO SAVEPOINT</code> as plain SQL statements sent through the same connection:</p>
+<pre><code><span class="cm">// insertItemsSkippingBad inserts each item inside its own savepoint, so one
+// row failing a CHECK constraint only loses that row -- the transaction as a
+// whole, and every already-inserted item, survives.</span>
+<span class="kw">func</span> insertItemsSkippingBad(ctx context.Context, tx *sql.Tx, orderID <span class="ty">int64</span>, items []Item) (inserted, skipped <span class="ty">int</span>, err error) {
+    <span class="kw">for</span> _, it := <span class="kw">range</span> items {
+        <span class="kw">if</span> _, err := tx.ExecContext(ctx, <span class="st">`SAVEPOINT before_item`</span>); err != <span class="kw">nil</span> {
+            <span class="kw">return</span> inserted, skipped, fmt.Errorf(<span class="st">"set savepoint: %w"</span>, err)
+        }
+        _, insErr := tx.ExecContext(ctx,
+            <span class="st">`INSERT INTO order_items (order_id, qty) VALUES ($1, $2)`</span>, orderID, it.Qty)
+        <span class="kw">if</span> insErr != <span class="kw">nil</span> {
+            <span class="cm">// this item's statement failed -- roll back only to the savepoint,</span>
+            <span class="cm">// not the whole transaction, then move on to the next item</span>
+            <span class="kw">if</span> _, rbErr := tx.ExecContext(ctx, <span class="st">`ROLLBACK TO SAVEPOINT before_item`</span>); rbErr != <span class="kw">nil</span> {
+                <span class="kw">return</span> inserted, skipped, fmt.Errorf(<span class="st">"rollback to savepoint: %w"</span>, rbErr)
+            }
+            skipped++
+            <span class="kw">continue</span>
+        }
+        <span class="kw">if</span> _, err := tx.ExecContext(ctx, <span class="st">`RELEASE SAVEPOINT before_item`</span>); err != <span class="kw">nil</span> {
+            <span class="kw">return</span> inserted, skipped, fmt.Errorf(<span class="st">"release savepoint: %w"</span>, err)
+        }
+        inserted++
+    }
+    <span class="kw">return</span> inserted, skipped, <span class="kw">nil</span>
+}</code></pre>
+<p><code>RELEASE SAVEPOINT</code> on the success path discards the marker itself (there's nothing left to roll back to, so keeping it around would be pure waste) without touching the row it just inserted. The caller still decides whether to <code>Commit()</code> or <code>Rollback()</code> the outer transaction once the loop finishes — a savepoint changes what one bad statement does to everything around it, not who makes the final call.</p>
+
+<div class="interview">
+<p><strong>Q: "Your batch-import job inserts a thousand rows inside one transaction. Row 400 fails a constraint, and right now that kills the whole import. How would you fix it?"</strong> A strong answer, out loud: <em>"Postgres aborts the entire transaction the instant one statement inside it errors — catching that error in application code doesn't undo the abort, the very next statement on that connection still fails until something rolls back. The fix is wrapping each row's insert in its own SAVEPOINT: if that row's statement fails, ROLLBACK TO SAVEPOINT undoes just that one insert and leaves every earlier row, and the open transaction, intact. RELEASE SAVEPOINT cleans up the marker on the success path. I'd still decide separately whether the whole import commits or rolls back at the end — savepoints control what one bad row does, not the final commit decision."</em> The signal: naming that a transaction-wide abort is Postgres's actual behavior on any statement error, not a configuration choice, and that a savepoint is the fix at the per-statement level, not a replacement for the outer transaction.</p>
+</div>
+
+<h2>Scope line</h2>
+<p>Postgres implements nested-transaction-like behavior as explicit <code>SAVEPOINT</code>/<code>RELEASE</code>/<code>ROLLBACK TO</code> statements rather than true nested transactions — some ORMs simulate "nested transactions" by generating savepoints under the hood automatically, but that's a library convenience layered on this same mechanism, not a different database feature, and MISSION.md's ORM exclusion means this lesson stops at the plain SQL. Multi-statement locking order (Lesson 40) and isolation-level conflicts (Lesson 37) still apply exactly as before inside a transaction that also uses savepoints — a savepoint changes what gets undone on a per-statement failure, not how concurrent transactions see each other.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Postgres marks the entire transaction aborted the instant one statement inside it errors -- every later statement fails too, even a valid one, until something issues a ROLLBACK (to the start, or to a savepoint) to clear the aborted state. Catching the error in application code never changes this on the database side.">
+    <p class="stem">What does Postgres actually do once one statement inside a transaction errors?</p>
+    <button class="opt" data-ok>it aborts the whole transaction until a rollback clears it</button>
+    <button class="opt">it skips just that one statement and keeps going normally</button>
+    <button class="opt">it automatically retries that exact same statement one more time</button>
+    <button class="opt">it silently commits every statement that was issued before error</button>
+  </div>
+  <div class="q" data-why="ROLLBACK TO SAVEPOINT undoes only the statements issued after that named marker, leaving every statement issued before it intact and the transaction itself still open and still committable -- a plain ROLLBACK with no savepoint discards everything back to BEGIN instead.">
+    <p class="stem">What does <code>ROLLBACK TO SAVEPOINT before_item</code> undo?</p>
+    <button class="opt" data-ok>only statements issued after that exact named savepoint marker</button>
+    <button class="opt">every statement issued since the transaction's own BEGIN itself</button>
+    <button class="opt">every table the current transaction has ever touched before</button>
+    <button class="opt">the single most recent COMMIT across the whole database</button>
+  </div>
+  <div class="q" data-why="Every open savepoint holds a small amount of extra bookkeeping state for as long as its transaction stays open -- cheap for a handful of savepoints, but not something to set in a tight loop running thousands of times inside one long transaction for no reason.">
+    <p class="stem">What's the actual cost of setting a savepoint inside an open transaction?</p>
+    <button class="opt" data-ok>a small amount of bookkeeping state while it stays open</button>
+    <button class="opt">a completely separate standalone database connection all on its own</button>
+    <button class="opt">an entirely new independent transaction with its own commit now</button>
+    <button class="opt">a full table lock held across every row in it</button>
+  </div>
+  <div class="q" data-why="A savepoint only ever exists inside the single transaction that defined it -- once that outer transaction either commits or rolls back, every savepoint inside it is gone along with it; there is no savepoint that survives past its own transaction's end.">
+    <p class="stem">What happens to a savepoint once its outer transaction commits or rolls back?</p>
+    <button class="opt" data-ok>it disappears along with the transaction that held it</button>
+    <button class="opt">it keeps running as its own independent transaction now</button>
+    <button class="opt">it automatically becomes a permanent row lock instead now</button>
+    <button class="opt">it gets promoted into a brand new outer transaction</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> RESOURCES.md already cites the <a href="https://www.postgresql.org/docs/current/ddl.html">PostgreSQL Manual</a> generally for schema/constraint mechanics (extended by Lessons 6, 19, 21, 34, 38, 39, and 40 into specific mechanisms); this session's sandbox network-permission gate was open, and a live <code>WebFetch</code> against the Manual's own <a href="https://www.postgresql.org/docs/current/sql-savepoint.html">SQL Commands reference for SAVEPOINT</a> confirmed today's core claims directly from the source: "a savepoint is a special mark inside a transaction that allows all commands that are executed after it was established to be rolled back, restoring the transaction state to what it was at the time of the savepoint," and that savepoints can only be established inside a transaction block — confirming they don't outlive it. The Manual's own worked example matches this lesson's shape exactly: insert 1, savepoint, insert 2, roll back to the savepoint, insert 3, commit — only 1 and 3 land.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially. Nếu chỗ nào chưa rõ, cứ hỏi lại bằng tiếng Việt cũng được.<br><br>
+<em>Next lesson:</em> open. Still no <code>lesson_completed</code>/quiz-outcome record exists for any lesson after 92 rounds — the honest next step remains a completion signal or a user-named track.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

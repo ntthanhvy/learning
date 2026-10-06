@@ -7063,3 +7063,99 @@
   certainty for the round after this one — same standing note as every
   prior round; a completion/quiz-outcome signal or a user-named track should
   take priority over guessing blind again.
+- **2026-10-06 generation (Lesson 92, headless run):** Idempotency check
+  first: `grep -c "n: 92" assets/nav.js` and `ls lessons/ | grep -c "^0092-"`
+  both returned 0 before writing anything. Per the orchestrator's confirmed
+  state, no `lesson_completed`/quiz/kata signal exists more recent than
+  mid-July for this course, so generation proceeded conservatively. The two
+  `backend/learning-records/` files are still just the two baseline findings
+  (frontend-mindset gap, concurrency-vocabulary gap), neither naming a fresh
+  gap, and Lesson 91's own closing line left no named next topic — so this
+  round ran a fresh gap search rather than guessing blind, per NOTES.md's own
+  standing instruction. Swept a wide set of candidates against every lesson's
+  filename and content: sharding/consistent hashing (correctly out of scope
+  per MISSION.md, one incidental hit in Lesson 90's prose, never taught),
+  GraphQL (zero hits, and arguably framework-adjacent, which MISSION.md also
+  excludes), HTTP caching header depth beyond ETags (Cache-Control/Vary —
+  Lesson 51 already covers the ETag/304 mechanism and ties it back to Lesson
+  9's Cache-Control, no real gap), gRPC/HTTP2 (three incidental mentions in
+  Lessons 50/69/71, never taught, but too close to protocol/framework depth
+  to be a clean fit), mocking/test doubles (already taught in real depth by
+  Lessons 42 and 45 — confirmed by reading both in full, not just grepping
+  for the word), and `Retry-After`/429/503 (already well covered across
+  Lessons 11, 66, 67, and 71). The clean gap found instead: `grep -rli
+  "savepoint" lessons/*.html reference/glossary.html` returned zero hits.
+  Lesson 6 teaches a transaction as strictly all-or-nothing (COMMIT keeps
+  everything, ROLLBACK discards everything) and Lesson 40's deadlock-retry
+  backstop discards the *whole* transaction and starts over — neither ever
+  mentions the real middle option Postgres provides: a named SAVEPOINT inside
+  an open transaction that ROLLBACK TO can return to without discarding
+  statements issued before it. Confirmed via direct re-reads of Lessons 6 and
+  40 in full (not just a grep) that both explicitly teach the all-or-nothing
+  framing with no partial-rollback escape hatch named anywhere. Squarely a
+  Postgres transaction-mechanics topic — in scope, not touching the
+  distributed-systems/ORM exclusions — and a natural extension of Lessons 6,
+  37, and 40 rather than a disconnected topic. Lesson 92 covers: the concrete
+  failure Postgres's all-or-nothing default forces (one bad statement aborts
+  the entire transaction, and a Go-side try/catch does not un-abort it on the
+  database side — confirmed this is real Postgres behavior, not an invented
+  claim, via the live fetch below); SAVEPOINT / ROLLBACK TO SAVEPOINT /
+  RELEASE SAVEPOINT as the actual middle option, with a plain-SQL worked
+  example; a comparison table contrasting plain ROLLBACK against ROLLBACK TO
+  SAVEPOINT on four axes (what's undone, what survives, whether COMMIT is
+  still possible after, typical use); the real cost (small bookkeeping state
+  per open savepoint, and savepoints never outliving their own transaction);
+  and a closing Go `database/sql` batch-insert handler using
+  SAVEPOINT/ROLLBACK TO/RELEASE per item to skip bad rows without losing good
+  ones already inserted. A "Scope line" section explicitly names ORM-level
+  automatic nested-transaction simulation as the one layer this stops short
+  of, per MISSION.md's ORM exclusion. Checked the glossary first for the one
+  new term — `savepoint` — zero collisions via case-insensitive grep, added
+  as a new row after Lesson 91's `exactly-once delivery` row. The Go snippet
+  (`insertItemsSkippingBad`) was compile-checked clean with `go build`/`go
+  vet` in a scratch module (`.scratch-0092/gomod/`, deleted after, confirmed
+  gone via directory listing). Verification performed mechanically: (1) a
+  Node quiz-word-count script matching each `<div class="q" data-why="...">`
+  block and splitting every option both via `.split(/\s+/)` and
+  `.split(" ")` — first draft landed uneven on all four questions (spreads of
+  1–4 words), fixed through several rewrite-and-recount cycles per option —
+  converged to exactly 10/10/10/10 on Q1 and Q3, 9/9/9/9 on Q2 and Q4, both
+  counting methods agreeing exactly, and exactly one `data-ok` and four
+  options per question confirmed the same way; (2) an occurrence-count HTML
+  tag-balance check across 22 tag types on the lesson — caught one real bug
+  on the first pass: a `<div class="callout">` that opened directly with
+  `<strong>` (no `<p>`, matching every other callout's convention) but closed
+  with a stray leftover `</p></div>` from an earlier draft, unbalancing `<p>`
+  by one — the same shape of self-inserted bug Lessons 85, 90, and 91's
+  rounds each independently caught; fixed by deleting the stray `</p>`,
+  re-ran the check, clean on the second pass — and a separate check on
+  `glossary.html` after its one-row addition, balanced on the first pass; (3)
+  a raw-unescaped-`&` regex scan and (4) a backslash-escaped-quote scan
+  across both files — zero hits in all four scans; (5) every `<dfn` tag in
+  the lesson grepped and confirmed to carry both `data-en=` and `data-vn=` —
+  exactly 1 `dfn` tag, matching the 1 new term, no orphaned attribute; (6)
+  `node --check` against `assets/nav.js`, `assets/gloss.js`, and
+  `assets/quiz.js` — all clean, no output. Registered Lesson 92 in `nav.js`
+  (date 2026-10-06, today's actual generation date), re-confirmed exactly one
+  matching `n: 92` entry and exactly one matching `0092-*` lesson file
+  afterward. No new `learning-records/` file was added this round — routine
+  topical entry like Lessons 3–91, not a new baseline finding. This session's
+  sandbox network-permission gate was open this round (unlike most recent
+  rounds): a live `WebFetch` against the PostgreSQL Manual's own SQL Commands
+  reference page for `SAVEPOINT` succeeded and confirmed the lesson's core
+  claims verbatim — "a savepoint is a special mark inside a transaction that
+  allows all commands that are executed after it was established to be
+  rolled back, restoring the transaction state to what it was at the time of
+  the savepoint" — and that savepoints can only be established inside a
+  transaction block, confirming they don't survive past it; the Manual's own
+  worked example (insert 1, savepoint, insert 2, roll back to savepoint,
+  insert 3, commit — only 1 and 3 land) matches this lesson's example
+  exactly, so the "Go deeper" section cites the fetch as genuinely fresh
+  rather than reusing stale blocked-gate boilerplate. `bin/record-progress
+  backend lesson_generated --day 92 --lesson
+  0092-savepoints-partial-rollback.html --detail '{"by":"headless"}'` run
+  from the repo root is the last step of this round — see immediately after
+  this entry for its confirmed output. No confirmed next-lesson gap is named
+  with certainty for the round after this one — same standing note as every
+  prior round; a completion/quiz-outcome signal or a user-named track should
+  take priority over guessing blind again.

@@ -8650,3 +8650,146 @@ fail *gracefully* so the learner sees which task failed.
   one fresh) are due a future review pass once a few more fresh days
   accumulate — no review backlog exists yet immediately after Day 68, so
   there is no urgency, but the pattern is worth tracking.
+- 2026-10-06 — **Day 69 generated: `statistics` — summary numbers without
+  pandas** (headless run), `lessons/0069-statistics-module.html`. Read
+  `MISSION.md` (untouched, read-only) in full and reconfirmed the hard
+  no-pandas/no-NumPy scope rule, `PLAN.md` in full, `RESOURCES.md` in full,
+  the full `learning-records/` directory (still only the Day 1 baseline), and
+  the tail of `NOTES.md` (read in two large chunks via offset/limit, since a
+  single whole-file read exceeds the tool's size limit) including Days
+  66-68's full entries to recover the exact next-day note wording. Read the
+  full `assets/nav.js` `LESSONS` array (all 68 entries) and listed
+  `lessons/`/`practice/` to confirm the exact spine covered so far. Read
+  lesson 68 (`subprocess`, the most recent fresh-content day) and its
+  practice file in full as the structural/style template, plus
+  `assets/quiz.js` and `assets/gloss.js` for the exact markup contracts.
+  Idempotency: listed `lessons/0069-*` (none existed) and grepped
+  `assets/nav.js` for `n: 69` (no hit) before writing anything. Today's date
+  (2026-10-06) matches the run's stated date.
+  Decision process: Day 68's next-day note explicitly asked Day 69 to run a
+  fresh-gap grep with an open mind rather than defaulting to `configparser`,
+  the only previously-named candidate left. Grepped all 68 lessons and every
+  practice file for a wide set of plausible stdlib corners beyond the
+  standing two candidates — `textwrap`, `string.Template`, `glob`/`fnmatch`
+  (already covered: Day 13's `Path.glob()`/`.rglob()`), `secrets`,
+  `statistics`, `difflib`, `pprint`, `io.StringIO`/`BytesIO`, `pickle`,
+  `base64`, `sqlite3`, `ChainMap`/`OrderedDict`, and several others —
+  confirming `itertools.groupby`/`functools.reduce` were already taught
+  (Days 27/36) and ruling those out as false leads. `statistics` came back
+  as a genuine zero-hit module and, unlike `configparser`, maps directly
+  onto `MISSION.md`'s own stated success criterion — "read, clean, reshape,
+  **aggregate**, write" — which until today every aggregation lesson had
+  answered with a count or a group (Day 3's `Counter`, Day 27's `groupby`)
+  but never a summary statistic (typical value, spread). `statistics` had
+  been named and set aside twice before, on Days 56 and 57, each time
+  against a stronger competing module (`operator`, then
+  `dataclasses.field()`) — with both of those now taught and no stronger
+  fresh case turning up this round, revisiting it was correct rather than
+  defaulting to `configparser`, which remains narrower (one config-file
+  format already adequately covered by `pathlib`/plain `dict`s). Dispatched
+  a subagent to confirm `data/`'s own pandas-based descriptive-stats lesson
+  (`data/lessons/0049-describe.html`, `.describe()`/`.mean()`/`.std()` on a
+  `DataFrame`) doesn't make `statistics` on a plain list duplicate work —
+  confirmed distinct: no index, no dtype inference, no vectorization,
+  analogous to Day 3's dict/set-grouping-without-pandas and Day 56's
+  `operator` precedents (same underlying math concept, non-overlapping tool
+  surface), safely in scope as language/stdlib material.
+  Lesson covers `mean()` vs `median()` disagreeing on skewed data (an
+  outlier list drags the mean but barely moves the median), `mode()` as a
+  third, different question ("what repeats most," not "what's central" —
+  the only one of the three meaningful on categorical data), `stdev()`/
+  `variance()` showing two same-mean lists can have very different spread,
+  and a closing section on why a hand-rolled `median()` is an easy
+  off-by-one bug on even-length lists (picking one middle value instead of
+  averaging the two), bridging to Day 59's `hashlib` and Day 56's `operator`
+  "don't hand-roll what the library already got right" argument. Bridged
+  from SQL: `mean()` framed as `AVG()` run on a plain list, with a note that
+  most SQL dialects have no built-in `MEDIAN()`.
+  **New jargon: 4 terms** (`mean()`, `median()`, `mode()`, `stdev()`), each
+  with a `<dfn data-en`/`data-vn` tag. Checked `reference/glossary.html`
+  case-insensitively for all four plus `statistics` first — zero collisions
+  with any Day 1-68 entry — before appending a new `id="day69"` section
+  directly before the closing `<p class="next">` footer, matching every
+  prior day's convention (confirmed by reading Day 66/68's sections first).
+  No-pandas rule: grepped case-insensitively for `pandas`/`numpy`/`pd\.`/
+  `np\.` in both the lesson and practice file — three hits in the lesson
+  (the `<title>`, the `<h1>`, both naming "without pandas" in the title
+  exactly as Day 3's own title does, plus the single "Where pandas goes from
+  here" boundary callout naming `df[...].mean()`/`.median()`/`.std()`/
+  `.describe()` without demonstrating any of them) and one hit in the
+  practice file's own top-of-file comment (also just naming the lesson
+  title, not an API call) — all compliant with the one-contrast-sentence
+  allowance, zero pandas/NumPy code actually run anywhere.
+  Practice file `practice/69_statistics_module.py` (4 checks, stdlib-only,
+  no `--with` flag, function-stub-with-TODO-comment style matching Day
+  68's): `mean()`/`median()` on an outlier-skewed list, `mode()` on repeated
+  category labels, `stdev()` telling apart two same-mean, differently-spread
+  lists, and a per-group aggregation exercise reusing Day 3's
+  `defaultdict(list)` grouping pattern to compute each group's own `mean()`
+  — the real "aggregate per group" shape `MISSION.md` names directly.
+  Verified in a scratch `.scratch-0069/` directory created directly under
+  the repo root (`/tmp` remains unavailable to this sandbox, consistent with
+  every prior round's note): the shipped (unsolved) copy printed four clean
+  ✗ lines with no traceback; a separately written, fully solved copy (via
+  `Write`, not by editing the shipped file) printed all four ✓ and the "All
+  green" tally, run twice consecutively with identical results both times.
+  Also ran the shipped file directly from its real `python/practice/` path
+  as a final check, confirming the same four clean ✗ lines outside the
+  scratch copy too, and re-verified the solved copy a second time from a
+  separate final scratch directory after the glossary/quiz edits, also run
+  twice consecutively with identical results. All scratch directories
+  deleted before finishing — confirmed by a listing showing no
+  `.scratch-0069*` remaining.
+  HTML tag balance was checked with a throwaway stdlib
+  `html.parser.HTMLParser`-based stack checker (written via `Write`, deleted
+  after use) against both the lesson file and the full (now-modified)
+  glossary — clean on the first pass for both, no unclosed or mismatched
+  tags. A raw-unescaped-`&` regex (`&(?!amp;|lt;|gt;|quot;|#39;|apos;|#\d+;)`)
+  against both files found zero hits.
+  Quiz: 4 questions, one per section (`mean()` vs `median()` under an
+  outlier, what `mode()` answers that the other two don't, why two lists can
+  share a mean but differ in `stdev()`, and the even-length off-by-one risk
+  of hand-rolling `median()`). Word counts were checked with a throwaway
+  `html.parser.HTMLParser`-based Python script splitting each `<button
+  class="opt">`'s stripped-tag text on whitespace, cross-checked with a
+  second, independent Node.js regex-based script per this course's
+  established two-method practice. First draft mismatched on three of the
+  four questions (Q1 12/11/11, Q2 12/12/13, Q4 13/12/13; Q3 was already
+  12/12/12) — several rounds of one-word edits (adding/trimming "of"/"while
+  the"/"instead of"/"actually"/etc., and restoring a dropped "median" token
+  in Q1's correct option after an edit that fixed the count but lost
+  clarity) landed all four at equal counts: 12/12/12, 12/12/12, 12/12/12,
+  13/13/13, confirmed by both scripts agreeing at every step, plus a
+  separate `grep -o data-ok | wc -l` confirming exactly 4 occurrences,
+  matching the four-question count.
+  `RESOURCES.md`: added a new `statistics` docs line (it had none before),
+  placed directly after the Day 68 `subprocess` line per the file's
+  day-ordered citation convention.
+  Registered in `assets/nav.js` with `date: "2026-10-06"` right after the
+  `n: 68` entry; confirmed `node --check assets/nav.js` reports no syntax
+  errors after the edit.
+  **DB access:** per the orchestrator's brief, the DB had already been
+  checked moments before this run started — latest row `lesson_generated
+  day=68` with nothing for day 69, no completion/quiz/kata signal more
+  recent than mid-July — so this round deferred to that pre-run confirmation
+  plus its own on-disk idempotency check rather than re-querying directly.
+  `python/learning-records/` still holds only the Day 1 baseline; nothing
+  this round (a two-round-deferred candidate finally revisited and
+  confirmed non-duplicative of `data/`'s pandas-based stats lesson) rises to
+  a durable learner-profile finding distinct from what's already recorded.
+  Final `git status --short -- python/` showed exactly five paths changed
+  (`assets/nav.js`, `RESOURCES.md`, `reference/glossary.html`, plus the new
+  lesson and practice file) — no other course's files touched (confirmed
+  despite unrelated concurrent in-progress changes visible under
+  `backend/`/`data/` from other parallel sessions), and no leftover scratch
+  files or directories.
+  **Next-day note:** `configparser` is now the only previously-named
+  fresh-gap candidate left on the table, unchanged since Day 58 — Day 70
+  should still run its own open-minded fresh-gap scan rather than assuming
+  it by default, per this round's own experience that a module twice set
+  aside (`statistics`) can still turn out to be the better choice once the
+  competing candidates it lost to are taught. No review backlog exists yet
+  (Day 68 has never had a retrieval pass, and now neither has Day 69) — Day
+  70 is open either way, and should weigh starting a review cycle covering
+  Days 67-69 once one or two more fresh days accumulate, per Day 68's own
+  carried-forward observation.

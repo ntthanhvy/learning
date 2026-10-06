@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 21 · Airflow Assets: data-aware scheduling</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 21 · ~20 min · 6 Oct 2026</p>
+<h1>Airflow Assets: data-aware scheduling</h1>
+<p class="byline">Today's tangible win: trigger <code>dbt_build</code> because <code>raw.order_events</code> actually changed, not because the clock hit midnight — and read the real producer/consumer link Airflow stores for that relationship, queried directly out of its own metadata database, not asserted from the docs.</p>
+
+<div class="callout"><strong>Before today — check Day 20's DAG still parses:</strong> today adds two new DAG files; it doesn't touch <code>dags/food_delivery_pipeline.py</code> or Day 20's <code>raw_row_count_check.py</code>. Confirm both are still intact:
+<pre><code>AIRFLOW_HOME="$(pwd)/airflow_home" uv run --with "apache-airflow==3.3.1" airflow dags list-import-errors</code></pre>
+Expected: no output. If either file is missing or errors, fix that first — today's new files sit beside them.</div>
+
+<h2>1 · The gap a <code>@daily</code> schedule can't close</h2>
+<p>Day 7's <code>food_delivery_pipeline</code> DAG runs <code>dbt_build</code> on a fixed clock, <code>schedule="@daily"</code>. That's a real limitation this course has carried since Day 7 without naming it: <code>raw.order_events</code> doesn't fill up once a day on a schedule — Day 6's Kafka consumer lands rows continuously, whenever the stream has something to deliver, as its own long-running process entirely outside Airflow. A clock-scheduled <code>dbt_build</code> is always either early (today's events haven't all landed yet) or late (new events sat unprocessed for hours before the next midnight run) — it has no way to know when <code>raw.order_events</code> actually changed, because nothing tells it.</p>
+<p>An <dfn data-en="an Airflow object representing a specific piece of data (a table, a file, an API response) that a task can declare it produces (via outlets) or that a DAG can be scheduled to run whenever one or more of them is updated (via schedule=) -- the mechanism behind data-aware scheduling, as opposed to a DAG that only runs on a fixed clock interval" data-vn="giữ nguyên &quot;Asset&quot; — đối tượng Airflow đại diện 1 dữ liệu cụ thể (bảng, file...), 1 task khai báo mình tạo ra nó qua outlets=, 1 DAG khác được lên lịch chạy khi Asset đó cập nhật qua schedule=, thay vì chạy theo giờ cố định">Asset</dfn> fixes exactly this: it's Airflow's own object for "a piece of data exists," and a task can declare it <em>produces</em> one (<code>outlets=</code>), while a separate DAG can be <em>scheduled</em> to run the moment that Asset is marked updated (<code>schedule=[asset]</code>), instead of on a clock. This round confirmed the class is real and importable against the pinned 3.3.1 install:</p>
+<pre><code><span class="kw">from</span> airflow.sdk <span class="kw">import</span> Asset
+order_events_asset = Asset(<span class="str">"postgres://fdp/raw.order_events"</span>)</code></pre>
+<p>The string is a name/URI, not a live connection — Airflow never actually reads <code>raw.order_events</code> itself to check this. It's an identifier a task declares against, nothing more; the actual proof that the data changed still has to come from a task that checked.</p>
+
+<h2>2 · Two roles: producing an Asset, scheduling on one</h2>
+<p>This round built both halves as two small, real scratch DAGs — a task that marks the Asset updated, and a separate DAG scheduled by it — to see the actual mechanics before writing today's build step. Producing is a task-level <dfn data-en="a task (or @task-decorated function) argument listing the Assets that task produces -- on task success, Airflow writes a row to its own asset_event table recording which asset changed, regardless of whether the underlying data actually changed" data-vn="giữ nguyên &quot;outlets&quot; — tham số task khai báo danh sách Asset task này tạo ra; khi task chạy thành công, Airflow tự ghi 1 asset event, không liên quan tới dữ liệu có thực sự thay đổi hay không">outlets=</dfn> argument, confirmed against a real <code>BashOperator</code>:</p>
+<pre><code><span class="kw">from</span> airflow.sdk <span class="kw">import</span> DAG, Asset
+<span class="kw">from</span> airflow.providers.standard.operators.bash <span class="kw">import</span> BashOperator
+
+order_events_asset = Asset(<span class="str">"postgres://fdp/raw.order_events"</span>)
+
+<span class="kw">with</span> DAG(dag_id=<span class="str">"producer_dag"</span>, schedule=<span class="str">"@daily"</span>, start_date=..., catchup=<span class="kw">False</span>) <span class="kw">as</span> dag:
+    check = BashOperator(task_id=<span class="str">"check_events"</span>, bash_command=<span class="str">"..."</span>, outlets=[order_events_asset])</code></pre>
+<p>Scheduling on it is a DAG-level <code>schedule=</code> argument taking a list of Assets instead of a cron string:</p>
+<pre><code><span class="kw">with</span> DAG(dag_id=<span class="str">"dbt_build_on_events"</span>, schedule=[order_events_asset], start_date=..., catchup=<span class="kw">False</span>) <span class="kw">as</span> dag:
+    dbt_build = BashOperator(task_id=<span class="str">"dbt_build"</span>, bash_command=<span class="str">"..."</span>)</code></pre>
+<p>This round's own <code>DagBag</code> parse of the scheduled-side DAG confirms <code>schedule=[asset]</code> compiles to a real, named timetable rather than silently falling back to something else:</p>
+<pre><code>consumer schedule: AssetTriggeredTimetable(asset_condition=AssetAll(Asset(name='postgres://fdp/raw.order_events', ...)))</code></pre>
+<p><code>AssetAll</code> is the condition class Airflow uses even for a single asset — it reads as "wait until every asset in this list has a fresh event," and composing two assets with Python's own <code>&amp;</code>/<code>|</code> operators (confirmed this round) produces <code>AssetAll</code>/<code>AssetAny</code> respectively, for a DAG that should wait on more than one upstream. Today's build only needs one asset, so this is vocabulary for now — worth knowing the names exist the day a mart depends on two independently-updating sources.</p>
+
+<h2>3 · The real link, read out of Airflow's own database</h2>
+<p>Declaring the same <code>Asset("postgres://fdp/raw.order_events")</code> string in two different DAG files is what connects them — Airflow matches assets by that identifier, not by Python object identity, so the producer and scheduled DAGs never import each other. This round confirmed the link is a real, queryable relationship, not just inferred from matching strings, via <code>airflow assets details</code> run against the live scratch metadata database after both DAGs were parsed:</p>
+<pre><code>uri              | postgres://fdp/raw.order_events
+scheduled_dags   | {'dag_id': 'dbt_build_on_events', ...}
+producing_tasks  | {'dag_id': 'order_events_landed', 'task_id': 'check_order_events_grew', ...}</code></pre>
+<p>Both sides of the relationship are visible from either DAG's perspective, confirmed by inspecting the exact same asset after running the producing task for real: <code>airflow dags test order_events_landed 2026-10-06</code> produced a genuine new row in Airflow's <code>asset_event</code> table —</p>
+<pre><code>sqlite3 airflow_home/airflow.db \
+  "SELECT a.name, ae.source_dag_id, ae.source_task_id, ae.timestamp FROM asset_event ae JOIN asset a ON a.id = ae.asset_id;"</code></pre>
+<pre><code>postgres://fdp/raw.order_events|order_events_landed|check_order_events_grew|2026-10-06 02:52:39.516831</code></pre>
+<p>That's the actual mechanism underneath "data-aware scheduling": a task finishes, Airflow writes one row recording which asset it touched and when, and a DAG scheduled on that asset is queued the next time the (here, otherwise idle) scheduler looks for new asset events — the same metadata-database pattern Day 20 found XCom uses, now storing "this asset changed" instead of "here's a small value," and still not a place to put the actual <code>order_events</code> rows themselves.</p>
+<div class="callout"><strong>An honest limit of this round's verification:</strong> <code>airflow dags test</code> runs a DAG directly and skips the scheduler's own loop entirely (the same thing Day 7 and Day 19 found for other commands) — it does write the real <code>asset_event</code> row shown above, but <code>airflow assets details</code>'s own <code>last_asset_event</code> field stayed <code>None</code> afterward rather than reflecting it, because that particular summary field is only updated by the scheduler's asset manager, a code path <code>dags test</code> doesn't run through. The event row itself (and therefore the trigger a live scheduler would act on) is real and confirmed; that one convenience field in the CLI's own summary output is not, and this round says so rather than papering over it.</div>
+
+<h2>4 · Why this isn't just Day 19's <code>catchup</code> in disguise</h2>
+<p>It's worth being precise about what changed, since both topics are about "when does a run happen": <code>catchup</code>/backfill (Day 19) is still entirely clock-driven — every run corresponds to some calendar interval, whether created automatically or requested on demand. An Asset-scheduled DAG has no calendar interval behind it at all; it runs purely because an event fired, whenever that happens to be, and <code>catchup</code>/<code>logical_date</code> questions don't really apply the same way. The two features solve different problems and can combine (a clock-scheduled producer whose output triggers an event-scheduled consumer, exactly today's shape), but naming them as the same idea would be wrong.</p>
+
+<h2>5 · Build: split <code>dbt_build</code> off the clock</h2>
+<p>In your <code>food-delivery-pipeline</code> repo, leave <code>dags/food_delivery_pipeline.py</code> (<code>load_raw &gt;&gt; dbt_build</code>, <code>@daily</code>) exactly as Day 7 built it — it still owns the batch-loaded tables (<code>raw.restaurants</code>/<code>raw.couriers</code>/<code>raw.orders</code>), which really do only change once a day. Add two new files instead.</p>
+<p><code>dags/order_events_landed.py</code> — a small, scheduled check that marks the Asset updated once it sees <code>raw.order_events</code> actually grew since its last check (TODO is the day's real skill: compare this run's count against the prior run's, using a tiny on-disk or Variable-backed cursor — anything that proves "grew," not just "is nonzero"):</p>
+<pre><code><span class="kw">from</span> __future__ <span class="kw">import</span> annotations
+
+<span class="kw">from</span> datetime <span class="kw">import</span> datetime
+
+<span class="kw">from</span> airflow.sdk <span class="kw">import</span> DAG, Asset, task
+
+order_events_asset = Asset(<span class="str">"postgres://fdp/raw.order_events"</span>)
+
+<span class="kw">with</span> DAG(
+    dag_id=<span class="str">"order_events_landed"</span>,
+    schedule=<span class="str">"*/10 * * * *"</span>,
+    start_date=datetime(<span class="kw">2026</span>, <span class="kw">9</span>, <span class="kw">21</span>),
+    catchup=<span class="kw">False</span>,
+) <span class="kw">as</span> dag:
+    <span class="kw">@task</span>(outlets=[order_events_asset])
+    <span class="kw">def</span> check_order_events_grew() -&gt; <span class="kw">int</span>:
+        <span class="cm"># TODO: SELECT count(*) FROM raw.order_events (psycopg, same credentials</span>
+        <span class="cm"># as scripts/consume_order_events.py), compare against the count from</span>
+        <span class="cm"># this DAG's own last successful run, and only let this task actually</span>
+        <span class="cm"># mark the asset "produced" (i.e. not raise) when the count grew --</span>
+        <span class="cm"># an outlet fires whenever the task succeeds, regardless of whether</span>
+        <span class="cm"># anything really changed, so a no-op success would trigger dbt_build</span>
+        <span class="cm"># for nothing every 10 minutes.</span>
+        ...
+
+    check_order_events_grew()</code></pre>
+<p><code>dags/dbt_build_on_events.py</code> — the same <code>dbt build</code> command Day 7's <code>dbt_build</code> task runs, now scheduled by the asset instead of a cron string:</p>
+<pre><code><span class="kw">from</span> __future__ <span class="kw">import</span> annotations
+
+<span class="kw">from</span> datetime <span class="kw">import</span> datetime
+
+<span class="kw">from</span> airflow.sdk <span class="kw">import</span> DAG, Asset
+<span class="kw">from</span> airflow.providers.standard.operators.bash <span class="kw">import</span> BashOperator
+
+order_events_asset = Asset(<span class="str">"postgres://fdp/raw.order_events"</span>)
+REPO_DIR = <span class="str">"/opt/airflow/food-delivery-pipeline"</span>  <span class="cm"># same path Day 7 used</span>
+
+<span class="kw">with</span> DAG(
+    dag_id=<span class="str">"dbt_build_on_events"</span>,
+    schedule=[order_events_asset],
+    start_date=datetime(<span class="kw">2026</span>, <span class="kw">9</span>, <span class="kw">21</span>),
+    catchup=<span class="kw">False</span>,
+) <span class="kw">as</span> dag:
+    dbt_build = BashOperator(
+        task_id=<span class="str">"dbt_build"</span>,
+        bash_command=(
+            <span class="str">f"cd {REPO_DIR}/warehouse &amp;&amp; "</span>
+            <span class="str">"uv run --with 'dbt-postgres==1.11.0' dbt build --profiles-dir ."</span>
+        ),
+    )</code></pre>
+<p>Fill in <code>check_order_events_grew</code>'s TODO. The point isn't the SQL (plain <code>psycopg</code>, same shape as every prior script) — it's that an <code>outlets=</code> task fires its asset event on <em>success</em>, not on "did the data really change," so a correct version has to make "no growth" a reason not to succeed in the triggering sense, or <code>dbt_build</code> would run needlessly every ten minutes regardless of whether Kafka delivered anything.</p>
+
+<h2>6 · Verify</h2>
+<pre><code>AIRFLOW_HOME="$(pwd)/airflow_home" uv run --with "apache-airflow==3.3.1" airflow dags list-import-errors
+AIRFLOW_HOME="$(pwd)/airflow_home" uv run --with "apache-airflow==3.3.1" airflow dags reserialize
+AIRFLOW_HOME="$(pwd)/airflow_home" uv run --with "apache-airflow==3.3.1" airflow assets details --name postgres://fdp/raw.order_events</code></pre>
+<p>Expected: <code>list-import-errors</code> prints nothing, and <code>assets details</code> shows your own <code>scheduled_dags</code> entry for <code>dbt_build_on_events</code> and <code>producing_tasks</code> entry for <code>order_events_landed.check_order_events_grew</code> — the same two-sided link this round's real scratch run produced:</p>
+<pre><code>scheduled_dags   | {'dag_id': 'dbt_build_on_events', ...}
+producing_tasks  | {'dag_id': 'order_events_landed', 'task_id': 'check_order_events_grew', ...}</code></pre>
+<p>Then run the producing DAG for one logical date and confirm a real asset event lands:</p>
+<pre><code>AIRFLOW_HOME="$(pwd)/airflow_home" uv run --with "apache-airflow==3.3.1" airflow dags test order_events_landed 2026-10-06
+sqlite3 airflow_home/airflow.db \
+  "SELECT a.name, ae.source_dag_id, ae.source_task_id FROM asset_event ae JOIN asset a ON a.id = ae.asset_id ORDER BY ae.id DESC LIMIT 1;"</code></pre>
+<p>Expected: one row, <code>postgres://fdp/raw.order_events|order_events_landed|check_order_events_grew</code> — seeing the real row land, the same check this round ran, rather than trusting that <code>outlets=</code> did something.</p>
+
+<div class="interview">
+<p><strong>Q: "Your batch dbt job runs nightly, but your streaming data lands continuously. How would you fix the mismatch?"</strong> A strong answer, out loud: <em>"A clock schedule is the wrong trigger when the thing you're reacting to doesn't happen on a clock — Kafka delivers order events continuously, so a nightly dbt_build is always either early or stale by hours. Airflow's Assets feature fixes this directly: one task declares, via outlets, that it produced a specific piece of data, and a separate DAG is scheduled on that asset instead of a cron string, so it only runs when there's actually something new. In my pipeline, a small scheduled check watches raw.order_events for real growth and marks the asset updated only then, and the dbt_build DAG is scheduled on that asset instead of @daily. The nightly dbt_build for the batch-loaded restaurant/courier/order tables stays exactly as it was, because those really do only change once a day — the fix is scoped to the table that doesn't behave that way, not a wholesale rewrite."</em> The signal: scoping the fix to the actual mismatch (one table, not the whole DAG) rather than claiming Assets replace clock scheduling everywhere.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A clock schedule like @daily has no way to know whether raw.order_events actually changed since the last run -- Day 6's Kafka consumer lands rows continuously as its own process, outside Airflow entirely, so a fixed-interval dbt_build is always either early (events not all landed) or late (new events sat unprocessed for hours). Assets fix this by letting a DAG be scheduled on a data event instead of a time interval.">
+    <p class="stem">Why can't <code>schedule="@daily"</code> correctly react to <code>raw.order_events</code>?</p>
+    <button class="opt" data-ok>Order events land continuously, not once a day</button>
+    <button class="opt">Daily schedules are removed in Airflow 3 entirely</button>
+    <button class="opt">Kafka topics simply cannot be read by Airflow</button>
+  </div>
+  <div class="q" data-why="outlets= is a task-level argument declaring that task produces a given Asset, firing an asset event in Airflow's own metadata database on success -- schedule=[asset] is a DAG-level argument that schedules an entire DAG to run when one or more of its listed Assets receives a new event. Confirmed this round via a real DagBag parse (AssetTriggeredTimetable) and a real asset_event row written by a live dags test run.">
+    <p class="stem">What is the actual difference between a task's <code>outlets=</code> and a DAG's <code>schedule=[asset]</code>?</p>
+    <button class="opt" data-ok>One produces an asset, the other reacts to it</button>
+    <button class="opt">They are two names for the exact same argument</button>
+    <button class="opt"><code>outlets=</code> only ever works inside the newer TaskFlow-style tasks</button>
+  </div>
+  <div class="q" data-why="This round confirmed via airflow assets details, run against a real scratch metadata database after both DAGs were parsed, that the producer and consumer sides of an asset relationship are linked purely by declaring the identical Asset name/URI string in each file -- Airflow matches on that identifier, not on importing one DAG file from another or sharing a Python object.">
+    <p class="stem">How do two separate DAG files actually get linked through the same Asset, confirmed this round?</p>
+    <button class="opt" data-ok>By declaring the exact identical Asset name/URI string</button>
+    <button class="opt">One DAG file must directly import the other</button>
+    <button class="opt">Both DAGs need to share one exact dag_id</button>
+  </div>
+  <div class="q" data-why="An outlets= task's asset event fires whenever the task succeeds, not specifically when the underlying data actually changed -- so a check_order_events_grew task that always returns success regardless of real growth would trigger dbt_build_on_events needlessly on every scheduled check, even when Kafka delivered nothing new. The task's own logic has to make 'no growth' a real failure-to-trigger case, not just a successful no-op.">
+    <p class="stem">What's the real risk in today's build step if <code>check_order_events_grew</code> always reports success?</p>
+    <button class="opt" data-ok><code>dbt_build_on_events</code> would run for no new data</button>
+    <button class="opt">Airflow would silently delete the Asset definition</button>
+    <button class="opt">Airflow would stop running <code>food_delivery_pipeline</code> entirely too</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> this round's content comes from directly exercising a real Airflow 3.3.1 install against the pinned version (<code>Asset</code>'s constructor signature, <code>outlets=</code>, <code>schedule=[asset]</code>, the <code>AssetTriggeredTimetable</code>/<code>AssetAll</code>/<code>AssetAny</code> classes, and <code>airflow assets details</code>'s real output) rather than a fresh doc fetch — a <code>WebFetch</code> attempt on Airflow's own <a href="https://airflow.apache.org/docs/apache-airflow/stable/authoring-and-scheduling/assets.html">Assets (data-aware scheduling)</a> page (cited in <code>RESOURCES.md</code> for exactly this lesson) was denied by this session's permission gate with no user present to approve, the same specific block prior rounds (Days 15, 17) have hit on other docs pages — said here plainly rather than presented as a fetched citation. Treat that page as the next thing to read, especially its own coverage of <code>AssetAlias</code> and dynamic/runtime-named assets, both out of scope for today's single fixed asset.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 21.<br>
+<strong>Phase 2c continues</strong> next with connections, variables and secrets — never hard-coding credentials in a DAG, the fourth bullet of <code>PLAN.md</code>'s Airflow spine, and a real gap in every DAG this course has built so far (Day 7's <code>REPO_DIR</code> and every <code>dbt</code>/<code>psycopg</code> command have hard-coded paths and relied on ambient credentials).<br><br>
+💬 Anything unclear — why <code>outlets=</code> fires on success rather than on real change, or how this differs from Day 19's backfill/catchup? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

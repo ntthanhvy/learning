@@ -142,6 +142,8 @@
       file: "lessons/0067-review-retrieval-day-10.html" },
     { n: 68, date: "2026-10-05", title: "subprocess: running another program from Python",
       file: "lessons/0068-subprocess-running-external-commands.html" },
+    { n: 69, date: "2026-10-06", title: "statistics: summary numbers without pandas",
+      file: "lessons/0069-statistics-module.html" },
   ];
 
   const REFS = [

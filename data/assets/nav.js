@@ -182,6 +182,8 @@
       file: "lessons/0087-to-sql.html" },
     { n: 88, date: "2026-10-05", title: "value_counts(normalize=True): percentages, and a silent denominator trap",
       file: "lessons/0088-value-counts-normalize.html" },
+    { n: 89, date: "2026-10-06", title: "pd.testing.assert_frame_equal(): comparing tables for a real test",
+      file: "lessons/0089-assert-frame-equal.html" },
   ];
 
   const REFS = [

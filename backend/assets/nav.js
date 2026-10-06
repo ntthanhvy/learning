@@ -188,6 +188,8 @@
       file: "lessons/0090-backups-and-disaster-recovery.html" },
     { n: 91, date: "2026-10-05", title: "Delivery semantics: the three guarantees hiding behind every retry",
       file: "lessons/0091-delivery-semantics-exactly-once-myth.html" },
+    { n: 92, date: "2026-10-06", title: "Savepoints: rolling back part of a transaction, not all of it",
+      file: "lessons/0092-savepoints-partial-rollback.html" },
   ];
 
   const REFS = [

@@ -31,6 +31,7 @@
     { n: 18, date: "2026-10-03", title: "Retention vs log compaction, and consumer lag", file: "lessons/0018-kafka-retention-compaction-and-consumer-lag.html" },
     { n: 19, date: "2026-10-04", title: "Airflow: logical date, data interval & safe backfills", file: "lessons/0019-airflow-logical-date-and-backfills.html" },
     { n: 20, date: "2026-10-05", title: "Airflow TaskFlow API, and why XCom is not a data transport", file: "lessons/0020-airflow-taskflow-and-xcom.html" },
+    { n: 21, date: "2026-10-06", title: "Airflow Assets: data-aware scheduling", file: "lessons/0021-airflow-assets.html" },
   ];
 
   const REFS = [

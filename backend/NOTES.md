@@ -7159,3 +7159,90 @@
   with certainty for the round after this one — same standing note as every
   prior round; a completion/quiz-outcome signal or a user-named track should
   take priority over guessing blind again.
+- **2026-10-07 generation (Lesson 93, headless run):** Idempotency check
+  first: the orchestrator's own Neon query confirmed no `lesson_generated`
+  row for backend dated 2026-10-07 existed yet, and `grep -c "n: 93"
+  assets/nav.js` plus `ls lessons/ | grep -c "^0093-"` both returned 0 before
+  writing anything. The two `backend/learning-records/` files are still just
+  the two baseline findings, neither naming a fresh gap, and Lesson 92's own
+  closing line again left no named next topic, so this round ran a fresh gap
+  search per NOTES.md's standing instruction rather than guessing blind.
+  Swept constraint-adjacent and protocol-adjacent candidates against every
+  lesson's filename and content: lock escalation, composite/covering/GIN
+  indexes, query-plan/EXPLAIN depth (correctly out of scope — Go week's Days
+  5-6 own this per MISSION.md), autovacuum/table bloat, GraphQL/gRPC/protobuf
+  (framework/protocol-adjacent, MISSION.md excludes frameworks), sharding and
+  consistent hashing (already named out of scope by Lesson 90's round), and
+  HTTP/2 framing details (three incidental mentions only, too close to
+  protocol depth). The clean gap found instead: zero hits anywhere for
+  "deferrable" across lessons/*.html and reference/glossary.html. Lesson 38
+  taught the four FK referential actions but silently assumed immediate,
+  per-statement constraint checking throughout; Lesson 60's CHECK
+  constraints and Lesson 35's unique-violation handling made the same
+  unstated assumption. Confirmed via a direct full re-read of Lesson 38 that
+  it never once names a timing alternative. A natural, in-scope extension of
+  Lessons 6, 35, 38, and 60 — plain Postgres constraint mechanics, not an
+  ORM or distributed-systems topic. Lesson 93 covers: the concrete failure
+  (a two-row position swap under `UNIQUE(list_id, position)` failing
+  statement-by-statement even though the end state is valid, because Postgres
+  checks UNIQUE/PK/FK/EXCLUDE constraints after each statement by default);
+  `DEFERRABLE`/`INITIALLY IMMEDIATE`/`INITIALLY DEFERRED` and `SET
+  CONSTRAINTS ... DEFERRED` as the fix, with a plain-SQL worked example; a
+  three-row comparison table (`NOT DEFERRABLE` / `DEFERRABLE INITIALLY
+  IMMEDIATE` / `DEFERRABLE INITIALLY DEFERRED`) covering default mode and
+  whether `SET CONSTRAINTS` can still change it; the fixed exception (`NOT
+  NULL`/`CHECK` can never be deferred, only UNIQUE/PK/FK/EXCLUDE can, because
+  only those judge more than one row at once); and a closing Go
+  `database/sql` `swapDisplayOrder` function issuing `SET CONSTRAINTS` as
+  plain SQL through the same `*sql.Tx`. A "Scope line" section distinguishes
+  this from Lesson 92's savepoints (what gets undone on failure, not when a
+  constraint is checked) and Lesson 37's isolation levels (cross-transaction
+  visibility, not single-transaction constraint timing). Checked the
+  glossary first for the one new term — `deferrable` — zero collisions via
+  case-insensitive grep, added as a new row after Lesson 92's `savepoint`
+  row, same Term/Tiếng Việt/In software column order as every existing row.
+  The Go snippet (`swapDisplayOrder`) was compile-checked clean with `go
+  build`/`go vet` in a scratch module (`.scratch-0093/gomod/`, deleted after,
+  confirmed gone via directory listing). Verification performed
+  mechanically: (1) a Node quiz-word-count script matching each `<div
+  class="q" data-why="...">` block and splitting every option both via
+  `.split(/\s+/)` and `.split(" ")` — first draft landed uneven on all four
+  questions (spreads of 1-3 words), fixed through several rewrite-and-recount
+  cycles per option, including more than one case where a straight word swap
+  left the count unchanged and the real fix required adding a word rather
+  than substituting one — converged to exactly 10/10/10/10 across all four
+  questions, both counting methods agreeing exactly, and exactly one
+  `data-ok` and four options per question confirmed the same way; (2) an
+  occurrence-count HTML tag-balance check across common tag types on the
+  lesson — clean on the first pass, no stray-tag bug this round; and a
+  separate table/tr/td/th/p balance check on `glossary.html` after its
+  one-row addition, also balanced on the first pass; (3) a raw-unescaped-`&`
+  regex scan and (4) a backslash-escaped-quote scan across both files — zero
+  hits in all four scans; (5) every `<dfn` tag in the lesson grepped and
+  confirmed to carry both `data-en=` and `data-vn=` — exactly 1 `dfn` tag,
+  matching the 1 new term, no orphaned attribute; (6) `node --check` against
+  `assets/nav.js`, `assets/gloss.js`, and `assets/quiz.js` — all clean, no
+  output. Registered Lesson 93 in `nav.js` (date 2026-10-07, today's actual
+  generation date), re-confirmed exactly one matching `n: 93` entry and
+  exactly one matching `0093-*` lesson file afterward. No new
+  `learning-records/` file was added this round — routine topical entry like
+  Lessons 3-92, not a new baseline finding. This session's sandbox
+  network-permission gate was open this round: a live `WebFetch` against the
+  PostgreSQL Manual's own SQL Commands reference page for `SET CONSTRAINTS`
+  succeeded and confirmed the lesson's core claims verbatim — "a constraint
+  is given one of three characteristics: DEFERRABLE INITIALLY DEFERRED,
+  DEFERRABLE INITIALLY IMMEDIATE, or NOT DEFERRABLE," that "IMMEDIATE
+  constraints are checked at the end of each statement. DEFERRED constraints
+  are not checked until transaction commit," and that "only UNIQUE, PRIMARY
+  KEY, REFERENCES (foreign key), and EXCLUDE constraints are affected by
+  this setting. NOT NULL and CHECK constraints are always checked
+  immediately" — so the "Go deeper" section cites the fetch as genuinely
+  fresh. `bin/record-progress backend lesson_generated --day 93 --lesson
+  0093-deferrable-constraints.html --detail '{"by":"headless"}'` run from
+  the repo root is the last step of this round — see immediately after this
+  entry for its confirmed output. No confirmed next-lesson gap is named with
+  certainty for the round after this one — same standing note as every prior
+  round; a completion/quiz-outcome signal or a user-named track should take
+  priority over guessing blind again.</new_string>
+</invoke>
+

@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 93 · Deferrable constraints: checking at commit instead of mid-transaction</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 93 · ~20 min</p>
+<h1>Deferrable constraints: checking at commit instead of mid-transaction</h1>
+<p class="byline">Lesson 38 named four things a foreign key can do when its parent disappears, but it quietly assumed <em>when</em> Postgres checks the constraint: immediately, after every statement. Lesson 60's <code>CHECK</code> constraints and Lesson 35's unique violations made the same silent assumption. Ninety-two lessons in, the one question none of them asked out loud: does a constraint have to be checked that instant, or can it wait?</p>
+
+<h2>1 · The swap that shouldn't be possible, and clearly is</h2>
+<p>A todo list has a <code>UNIQUE (list_id, position)</code> constraint — two items in the same list can't share a position, which is exactly the kind of rule Lesson 60 taught a row to enforce on itself. Now swap item A (position 1) and item B (position 2). The obvious way to write it is two plain <code>UPDATE</code>s:</p>
+<pre><code>UPDATE items SET position = 2 WHERE list_id = 9 AND position = 1;  <span class="cm">-- item A -> 2</span>
+UPDATE items SET position = 1 WHERE list_id = 9 AND position = 2;  <span class="cm">-- item B -> 1</span></code></pre>
+<p>The instant the first <code>UPDATE</code> runs, item A and item B both sit at position 2 — for exactly one statement's width of time, the table holds two rows that violate the constraint. By default, Postgres checks a <code>UNIQUE</code> constraint at the end of <em>each statement</em>, not at the end of the transaction, so the first <code>UPDATE</code> itself fails with a unique violation before the second one ever gets to run and fix things back up. The swap is logically fine once both statements have landed; Postgres just never lets you reach that end state one statement at a time.</p>
+
+<h2>2 · <code>DEFERRABLE</code>: a constraint that waits until commit to look</h2>
+<p>A <dfn data-en="a constraint timing option, set when the constraint is created, naming whether Postgres is allowed to delay checking it until the transaction commits instead of checking it after every statement that touches it" data-vn="deferrable (giữ nguyên) — tùy chọn thời điểm check, khai lúc tạo constraint, cho biết Postgres có được delay check tới lúc commit hay phải check ngay sau mỗi statement">deferrable</dfn> constraint is Postgres's answer: a <code>UNIQUE</code>, <code>PRIMARY KEY</code>, <code>FOREIGN KEY</code>, or <code>EXCLUDE</code> constraint can be declared <code>DEFERRABLE</code>, which allows its check to be pushed all the way to <code>COMMIT</code> instead of running after every statement. It isn't automatic — the constraint has to opt in when it's created:</p>
+<pre><code>ALTER TABLE items
+  ADD CONSTRAINT unique_list_position UNIQUE (list_id, position) DEFERRABLE INITIALLY IMMEDIATE;</code></pre>
+<p><code>INITIALLY IMMEDIATE</code> means every transaction still checks this constraint after each statement by default, same as before — <code>DEFERRABLE</code> alone only grants <em>permission</em> to delay it. A transaction that actually wants the delay has to ask for it with <code>SET CONSTRAINTS</code>:</p>
+<pre><code>BEGIN;
+SET CONSTRAINTS unique_list_position DEFERRED;
+
+UPDATE items SET position = 2 WHERE list_id = 9 AND position = 1;  <span class="cm">-- two rows at position 2 right now -- not checked yet</span>
+UPDATE items SET position = 1 WHERE list_id = 9 AND position = 2;  <span class="cm">-- back to one row per position</span>
+
+COMMIT;  <span class="cm">-- the constraint is checked here, against the final state, and passes</span></code></pre>
+<p>Nothing about the rule changed — two items still can never permanently share a position. What changed is <em>when</em> Postgres looks: once, at <code>COMMIT</code>, against whatever the data looks like by then, instead of after every single statement along the way.</p>
+<div class="callout"><strong>Frontend-habit trap:</strong> this can read like "Postgres skips validation for a while," the same way a frontend form might skip client-side validation until final submit. It doesn't skip anything — the constraint still fires, with the same rule, on the same data. The only thing that moves is the checkpoint: end-of-statement versus end-of-transaction. If the transaction never reaches a valid state by <code>COMMIT</code>, the constraint still fails and the whole transaction still rolls back.</div>
+
+<h2>3 · <code>INITIALLY DEFERRED</code>, and what can't be deferred at all</h2>
+<p>Declaring the constraint <code>DEFERRABLE INITIALLY DEFERRED</code> instead flips the default, so every transaction starts in deferred mode for that constraint without needing its own <code>SET CONSTRAINTS</code> call — useful when almost every transaction touching that table needs the delay, and <code>IMMEDIATE</code> would be the rare exception instead of the rule.</p>
+<div class="cmp-wrap">
+<table class="cmp">
+<thead><tr><th>Declaration</th><th>Default mode each transaction starts in</th><th>Can a transaction still change it with <code>SET CONSTRAINTS</code>?</th></tr></thead>
+<tbody>
+<tr><th><code>NOT DEFERRABLE</code> (the default if you say nothing)</th><td>always checked immediately</td><td>no — this is the one combination <code>SET CONSTRAINTS</code> cannot touch</td></tr>
+<tr><th><code>DEFERRABLE INITIALLY IMMEDIATE</code></th><td>checked after each statement</td><td>yes — can switch to deferred mid-transaction</td></tr>
+<tr><th><code>DEFERRABLE INITIALLY DEFERRED</code></th><td>checked only at <code>COMMIT</code></td><td>yes — can switch to immediate mid-transaction</td></tr>
+</tbody>
+</table>
+</div>
+<p>Two constraint types never get a choice in the matter: <code>NOT NULL</code> and <code>CHECK</code> (Lesson 60) are always checked immediately, on the row being inserted or modified, no matter what <code>DEFERRABLE</code> says — only <code>UNIQUE</code>, <code>PRIMARY KEY</code>, <code>FOREIGN KEY</code>, and <code>EXCLUDE</code> can ever be deferred. That lines up with the actual use case: the swap-style problem only ever comes from a constraint that spans <em>multiple rows at once</em> (two rows can't share a position, a child row's key must point at an existing parent) — a single row's own shape, which is all <code>NOT NULL</code> and <code>CHECK</code> ever judge, is never mid-transaction-inconsistent the way two rows briefly colliding can be.</p>
+
+<h2>4 · Where this actually shows up: the same swap, in Go</h2>
+<p>The Go side changes by exactly one statement — <code>SET CONSTRAINTS</code> is sent as plain SQL through the same transaction, the same shape Lesson 92's savepoint calls used:</p>
+<pre><code><span class="cm">// swapDisplayOrder exchanges two items' positions inside a UNIQUE(list_id,
+// position) constraint. Deferring the constraint to COMMIT lets both
+// UPDATEs land before Postgres checks -- without it, the first UPDATE alone
+// would violate the constraint and never let the second one run.</span>
+<span class="kw">func</span> swapDisplayOrder(ctx context.Context, tx *sql.Tx, listID <span class="ty">int64</span>, posA, posB <span class="ty">int</span>) error {
+    <span class="kw">if</span> _, err := tx.ExecContext(ctx,
+        <span class="st">`SET CONSTRAINTS unique_list_position DEFERRED`</span>); err != <span class="kw">nil</span> {
+        <span class="kw">return</span> fmt.Errorf(<span class="st">"defer constraint: %w"</span>, err)
+    }
+    <span class="kw">if</span> _, err := tx.ExecContext(ctx,
+        <span class="st">`UPDATE items SET position = $1 WHERE list_id = $2 AND position = $3`</span>,
+        posB, listID, posA); err != <span class="kw">nil</span> {
+        <span class="kw">return</span> fmt.Errorf(<span class="st">"move first row: %w"</span>, err)
+    }
+    <span class="kw">if</span> _, err := tx.ExecContext(ctx,
+        <span class="st">`UPDATE items SET position = $1 WHERE list_id = $2 AND position = $3`</span>,
+        posA, listID, posB); err != <span class="kw">nil</span> {
+        <span class="kw">return</span> fmt.Errorf(<span class="st">"move second row: %w"</span>, err)
+    }
+    <span class="cm">// caller still calls tx.Commit() -- that's the moment Postgres actually
+    // checks unique_list_position against the finished swap</span>
+    <span class="kw">return</span> <span class="kw">nil</span>
+}</code></pre>
+<p><code>SET CONSTRAINTS</code> only affects the current transaction — it's not a schema change, and the next transaction starts back at whatever <code>INITIALLY</code> mode the constraint was declared with. If the two <code>UPDATE</code>s above somehow still can't produce a valid final state (say, a bug wrote two items to the exact same position with nothing to swap them back out of), <code>COMMIT</code> itself fails with a unique violation, and the whole transaction rolls back — deferring doesn't weaken the guarantee, it just moves the deadline.</p>
+
+<div class="interview">
+<p><strong>Q: "You need to swap the sort positions of two rows under a UNIQUE(list_id, position) constraint. Two plain UPDATE statements fail partway through. Why, and how would you fix it?"</strong> A strong answer, out loud: <em>"Postgres checks a UNIQUE constraint after each statement by default, and the first UPDATE alone puts two rows at the same position for a moment — that's an immediate violation, even though the end state after both UPDATEs is perfectly valid. The fix is marking that constraint DEFERRABLE and running SET CONSTRAINTS ... DEFERRED at the start of the transaction, so Postgres only checks it once, at COMMIT, against the final state instead of after each statement. It's not skipping validation — the same rule still has to hold by commit time, or the transaction still fails."</em> The signal: naming the default per-statement timing as the actual cause, not just reaching for a workaround like a temporary throwaway position value.</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>DEFERRABLE</code>/<code>INITIALLY DEFERRED</code>/<code>SET CONSTRAINTS</code> as Postgres's own constraint-timing mechanism — a different axis from Lesson 92's <code>SAVEPOINT</code> (which controls what gets undone on a per-statement failure) and Lesson 37's isolation levels (which control what concurrent transactions can see of each other). A deferred constraint still only ever affects the single transaction that set it; it is not a way to make a constraint optional, weaker, or visible to other transactions any differently than before.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="By default Postgres checks a UNIQUE constraint at the end of each statement, not at the end of the transaction -- so the first UPDATE in a two-row swap already violates it the instant it runs, before the second UPDATE ever gets a chance to restore a valid state.">
+    <p class="stem">Why does a two-statement UPDATE swap under a UNIQUE constraint fail by default?</p>
+    <button class="opt" data-ok>the constraint is checked right after each statement, not commit</button>
+    <button class="opt">Postgres does not allow any UPDATE statements inside one transaction</button>
+    <button class="opt">UNIQUE constraints can never apply to more than one column</button>
+    <button class="opt">the two UPDATE statements must always run inside one query</button>
+  </div>
+  <div class="q" data-why="DEFERRABLE only grants permission for a constraint's check to be delayed until COMMIT -- it does not by itself change when checking happens. A transaction still has to actively request the delay with SET CONSTRAINTS, unless the constraint was declared INITIALLY DEFERRED.">
+    <p class="stem">What does declaring a constraint plain <code>DEFERRABLE</code> (with <code>INITIALLY IMMEDIATE</code>) actually change?</p>
+    <button class="opt" data-ok>it allows one transaction to delay the check until commit</button>
+    <button class="opt">it instantly stops that one constraint from ever being enforced</button>
+    <button class="opt">it makes every future transaction check it at commit always</button>
+    <button class="opt">it converts that constraint into just an ordinary CHECK constraint</button>
+  </div>
+  <div class="q" data-why="NOT NULL and CHECK constraints are always checked immediately, on the row being inserted or modified, regardless of DEFERRABLE -- only UNIQUE, PRIMARY KEY, FOREIGN KEY, and EXCLUDE constraints can ever be deferred, because only those judge more than one row at once.">
+    <p class="stem">Which constraint type can never be made <code>DEFERRABLE</code>, no matter what?</p>
+    <button class="opt" data-ok>a plain CHECK constraint on just one column's own value</button>
+    <button class="opt">a UNIQUE constraint spanning across two entirely different table columns</button>
+    <button class="opt">a FOREIGN KEY constraint referencing another table's own primary key</button>
+    <button class="opt">a PRIMARY KEY constraint declared directly on the table itself</button>
+  </div>
+  <div class="q" data-why="Deferring a constraint only changes when Postgres looks, never what rule it enforces or whether it enforces it at all. If the transaction still has not reached a valid state by COMMIT, the deferred check still fails there and the entire transaction still rolls back, same as any other constraint violation.">
+    <p class="stem">If a deferred constraint is still violated once <code>COMMIT</code> actually runs, what happens?</p>
+    <button class="opt" data-ok>COMMIT itself fails and the whole transaction rolls right back</button>
+    <button class="opt">Postgres quietly ignores that one specific violation going forward now</button>
+    <button class="opt">only the single most recent statement gets rolled back now</button>
+    <button class="opt">the constraint becomes permanently and fully disabled from that point</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> RESOURCES.md's standing <a href="https://www.postgresql.org/docs/current/ddl.html">PostgreSQL Manual</a> citation for constraints (already extended by Lessons 19, 21, 34, 38, and 60 into specific mechanisms); this session's sandbox network-permission gate was open, and a live <code>WebFetch</code> against the Manual's own <a href="https://www.postgresql.org/docs/current/sql-set-constraints.html">SQL Commands reference for <code>SET CONSTRAINTS</code></a> confirmed today's core claims verbatim from the source: "a constraint is given one of three characteristics: <code>DEFERRABLE INITIALLY DEFERRED</code>, <code>DEFERRABLE INITIALLY IMMEDIATE</code>, or <code>NOT DEFERRABLE</code>," that "<code>IMMEDIATE</code> constraints are checked at the end of each statement. <code>DEFERRED</code> constraints are not checked until transaction commit," and that "only <code>UNIQUE</code>, <code>PRIMARY KEY</code>, <code>REFERENCES</code> (foreign key), and <code>EXCLUDE</code> constraints are affected by this setting. <code>NOT NULL</code> and <code>CHECK</code> constraints are always checked immediately."</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially. Nếu chỗ nào chưa rõ, cứ hỏi lại bằng tiếng Việt cũng được.<br><br>
+<em>Next lesson:</em> open. Still no <code>lesson_completed</code>/quiz-outcome record exists for any lesson after 93 rounds — the honest next step remains a completion signal or a user-named track.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

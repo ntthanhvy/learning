@@ -144,6 +144,8 @@
       file: "lessons/0068-subprocess-running-external-commands.html" },
     { n: 69, date: "2026-10-06", title: "statistics: summary numbers without pandas",
       file: "lessons/0069-statistics-module.html" },
+    { n: 70, date: "2026-10-07", title: "decimal: exact arithmetic for money",
+      file: "lessons/0070-decimal-exact-arithmetic.html" },
   ];
 
   const REFS = [

@@ -184,6 +184,8 @@
       file: "lessons/0088-value-counts-normalize.html" },
     { n: 89, date: "2026-10-06", title: "pd.testing.assert_frame_equal(): comparing tables for a real test",
       file: "lessons/0089-assert-frame-equal.html" },
+    { n: 90, date: "2026-10-07", title: ".T / transpose(): flipping rows and columns, and the dtype trap",
+      file: "lessons/0090-transpose.html" },
   ];
 
   const REFS = [

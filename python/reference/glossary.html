@@ -527,6 +527,14 @@
   <tr><td>stdev()</td><td>giữ nguyên "stdev" — độ lệch chuẩn, đo mức độ phân tán của dữ liệu quanh mean, cùng đơn vị với dữ liệu gốc</td><td><code>statistics.stdev(data)</code> returns the sample standard deviation — how spread out values are around the mean, in the same units as the original data. Requires at least two data points; raises <code>StatisticsError</code> otherwise. <code>variance()</code> is the same measure before the final square root.</td></tr>
 </table>
 
+<h2 id="day70">Day 70 — decimal: exact arithmetic for money</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>float</td><td>giữ nguyên "float" — số thực lưu theo hệ nhị phân (base 2); hầu hết số thập phân như 0.1 không có dạng nhị phân chính xác hữu hạn, nên bị xấp xỉ, tích lũy sai số nhỏ khi tính toán</td><td>A float (binary floating-point number) stores values in base 2, the way computer hardware works natively. Most decimal fractions like 0.1 have no exact finite representation in base 2, so they are stored as the closest approximation, which can make arithmetic on them accumulate tiny rounding errors.</td></tr>
+  <tr><td>Decimal</td><td>giữ nguyên "Decimal" — kiểu số lưu theo hệ thập phân (base 10) thay vì nhị phân, nên số thập phân như 0.10 được lưu chính xác; nên tạo từ string, không phải từ float, để không bị lỗi float lọt vào</td><td>The <code>decimal</code> module's <code>Decimal</code> type stores numbers in base 10 instead of binary, so decimal fractions that matter to money (like 0.10) are represented exactly rather than approximated. Construct it from a string, not a float, to avoid importing float's existing imprecision — <code>Decimal("0.1")</code> is exact, <code>Decimal(0.1)</code> is not.</td></tr>
+  <tr><td>quantize()</td><td>giữ nguyên "quantize" — hàm làm tròn Decimal về số chữ số thập phân cố định, có chọn rõ kiểu làm tròn (ví dụ ROUND_HALF_UP), là cách làm tròn tiền đúng và kiểm chứng được</td><td>The <code>quantize()</code> method rounds a <code>Decimal</code> to a fixed number of decimal places using an explicit rounding rule (e.g. <code>ROUND_HALF_UP</code>) — the correct, auditable way to round money, unlike float's <code>round()</code>, whose behavior at exact halfway points can surprise people unfamiliar with it.</td></tr>
+</table>
+
 <p class="next">💬 A term here still unclear? Ask your teacher — hỏi bằng tiếng Việt cũng được.</p>
 
 <script src="../assets/nav.js"></script>

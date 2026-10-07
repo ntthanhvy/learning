@@ -8793,3 +8793,140 @@ fail *gracefully* so the learner sees which task failed.
   70 is open either way, and should weigh starting a review cycle covering
   Days 67-69 once one or two more fresh days accumulate, per Day 68's own
   carried-forward observation.
+- 2026-10-07 — **Day 70 generated: `decimal` — exact arithmetic for money**
+  (headless run). Ran `date` (confirmed 2026-10-07). Read `MISSION.md`
+  (untouched, read-only) and `PLAN.md` in full to reconfirm the Phase-2
+  spine and the no-pandas/no-NumPy scope rule, the tail of `NOTES.md`
+  (including Day 69's full entry) for the exact next-day note and
+  narrative-log convention, `RESOURCES.md` in full, and
+  `learning-records/` (still only the Day 1 baseline). Confirmed via the
+  orchestrator's pre-run DB check that the last `lesson_generated` row for
+  python was day=69 recorded 2026-10-06, with no completion/quiz/kata
+  signal more recent than mid-July — no weak-spot signal, normal sequential
+  progression. Idempotency: listed `lessons/0070-*` (none existed) and
+  grepped `assets/nav.js` for `n: 70` (no hit) before writing anything.
+  Listed `lessons/` (highest existing: 0069) and `practice/` to confirm the
+  spine covered so far, and read Day 69's full lesson and practice file as
+  the structural/style template plus `assets/gloss.js`/`quiz.js` for the
+  exact markup contracts.
+  Decision process: `PLAN.md`'s literal Phase 2 spine (2a/2b) is fully
+  exhausted — it maps exactly onto Days 8-26, confirmed by reading every
+  filename from 0008 through 0026 against the spine's own bullet list; Days
+  27-69 are all open-ended fresh-gap stdlib/language topics beyond that
+  spine, matching Day 69's note that `PLAN.md` is "a spine, not a
+  schedule." Ran a fresh-gap grep across all 69 lessons and every practice
+  file for `configparser` (confirmed still untaught, the one standing named
+  candidate) plus a wide independent set of stdlib corners —
+  `json.dump`/`load` (already covered, Days 6-7), `uuid`, `decimal`,
+  `sqlite3`, `concurrent.futures`/`threading`, `tomllib`, `pickle`,
+  `textwrap`, `secrets`, `difflib`, `pprint`, `weakref`, `calendar`,
+  `zoneinfo`, `inspect`, `graphlib`, and others. `uuid`, `decimal`,
+  `sqlite3`, `concurrent.futures`/`threading`, `tomllib`, and `pickle` all
+  came back as genuine zero-hit modules. Chose `decimal` over the other
+  zero-hit candidates: `uuid` is too thin alone for a full lesson;
+  `sqlite3` and `concurrent.futures`/`threading` are reasonable future
+  candidates but `decimal` maps most directly onto a gap no prior lesson
+  had ever touched — a dedicated search for any float-precision/rounding-
+  error discussion anywhere in the course (`0.1 + 0.2`, "floating point,"
+  "rounding error") came back with zero hits, meaning every prior lesson
+  that summed or aggregated numbers (Day 3's `Counter`, Day 27's
+  `groupby`, Day 69's `statistics.mean()`) had implicitly assumed `float`
+  arithmetic was exact. This is squarely inside `MISSION.md`'s "read,
+  clean, reshape, aggregate, write" framing — summing prices/amounts is
+  exactly the realistic pipeline task this gap sits under — and is
+  unambiguously language/stdlib material, not pandas/NumPy (pandas has its
+  own, explicitly out-of-scope decimal-dtype-vs-float64 story). Chose to
+  leave `configparser`, `sqlite3`, `uuid`, `concurrent.futures`, `tomllib`,
+  and `pickle` all on the table as named candidates for a future round
+  rather than picking a second topic today, per this course's one-lesson/
+  ~20-min-per-day constraint.
+  Lesson covers why `0.1 + 0.2 != 0.3` (float's base-2 storage of base-10
+  fractions), `Decimal` built from a string vs. the classic
+  `Decimal(0.1)` float-construction trap (the float literal has already
+  lost precision before `Decimal` ever sees it), a six-price summation
+  showing `float` drifts to `28.63000000000001` while `Decimal` holds
+  exactly `28.63`, and `quantize()` with an explicit `ROUND_HALF_UP` mode
+  for rounding to cents. Bridged from SQL: framed as the same reason
+  `NUMERIC`/`DECIMAL` column types exist alongside `FLOAT`/`REAL` in a
+  schema. Closing "Where pandas goes from here" callout names
+  `dtype=object` columns and the float64-vectorization trade-off without
+  demonstrating any pandas code — the one allowed contrast sentence.
+  **New jargon: 3 terms** (`float`, `Decimal`, `quantize()`), each with a
+  `<dfn data-en`/`data-vn` tag. Checked `reference/glossary.html`
+  case-insensitively for all three terms first — zero collisions with any
+  Day 1-69 entry (confirmed via grep for `>Decimal<` and `>quantize()<`
+  specifically, since `float` as a bare word appears only inside prose,
+  not as a prior `<dfn>` term) — before appending a new `id="day70"`
+  section directly before the closing `<p class="next">` footer, matching
+  Day 69's own convention.
+  No-pandas rule: grepped case-insensitively for `pandas`/`numpy`/`pd\.`/
+  `np\.` in both the lesson and practice file — two hits in the lesson (the
+  byline's "with no pandas involved" and the single "Where pandas goes
+  from here" boundary callout naming `DataFrame`/`dtype=object`/`float64`
+  without demonstrating any pandas call) and zero hits in the practice
+  file — compliant with the one-contrast-sentence allowance, zero
+  pandas/NumPy code actually run anywhere.
+  Practice file `practice/70_decimal_exact_arithmetic.py` (4 checks,
+  stdlib-only, no `--with` flag, function-stub-with-TODO-comment style
+  matching Day 69's): confirming `0.1 + 0.2 != 0.3` with plain floats,
+  building a `Decimal` correctly from a string, summing a list of six price
+  strings exactly with `Decimal` (the same values from the lesson, checked
+  against the exact `Decimal("28.63")`), and rounding a `Decimal` to
+  exactly two places with `quantize(..., rounding=ROUND_HALF_UP)`.
+  Verified in a scratch `.scratch-0070/` directory created directly under
+  the repo root (`/tmp` remains unavailable to this sandbox, consistent
+  with every prior round's note): the shipped (unsolved) copy printed four
+  clean ✗ lines with no traceback; a separately written, fully solved copy
+  (via `Write`, not by editing the shipped file) printed all four ✓ and the
+  "All green" tally, run twice consecutively with identical results both
+  times. Also ran the shipped file directly from its real `python/practice/`
+  path as a final check, confirming the same four clean ✗ lines outside the
+  scratch copy too. Scratch directory deleted before finishing — confirmed
+  by a listing showing no `.scratch-0070` remaining (a separate throwaway
+  `.scratch-check.py` validation script, written directly under the repo
+  root since `/tmp` write access for scripts proved inconsistent this
+  round, was also deleted after use).
+  HTML tag balance and a raw-unescaped-`&` regex
+  (`&(?!amp;|lt;|gt;|quot;|#39;|apos;|#\d+;)`) were checked against both the
+  lesson file and the full (now-modified) glossary with a throwaway stdlib
+  `html.parser.HTMLParser`-based stack checker — clean on first pass for
+  both files, zero unescaped `&`, no unclosed or mismatched tags.
+  Quiz: 4 questions, one per section (why `0.1 + 0.2 != 0.3`, why
+  `Decimal(0.1)` still shows trailing float-precision digits, why summing
+  price strings with `Decimal` avoids `float`'s drift, and what
+  `quantize(..., rounding=ROUND_HALF_UP)` actually does). Word counts were
+  checked with a Node.js regex-based script matching this course's
+  established practice, cross-checked for tag balance separately; several
+  rounds of one-word edits landed all four questions at equal option word
+  counts (13/13/13, 12/12/12, 13/13/13, 13/13/13), confirmed by a
+  `grep -o data-ok | wc -l` count of exactly 4, matching the four-question
+  count.
+  `RESOURCES.md`: added a new `decimal` docs line, placed directly after
+  the Day 69 `statistics` line per the file's day-ordered citation
+  convention.
+  Registered in `assets/nav.js` with `date: "2026-10-07"` right after the
+  `n: 69` entry; confirmed `node --check assets/nav.js` reports no syntax
+  errors after the edit.
+  **DB access:** per the orchestrator's brief, the DB had already been
+  checked moments before this run started — latest row `lesson_generated
+  day=69` with nothing for day 70, no completion/quiz/kata signal more
+  recent than mid-July — so this round deferred to that pre-run
+  confirmation plus its own on-disk idempotency check rather than
+  re-querying directly. `python/learning-records/` still holds only the Day
+  1 baseline; nothing this round rises to a durable learner-profile finding
+  distinct from what's already recorded.
+  Final `git status --short -- python/` showed exactly five paths changed
+  (`assets/nav.js`, `RESOURCES.md`, `reference/glossary.html`, plus the new
+  lesson and practice file) — no other course's files touched (confirmed
+  despite unrelated concurrent in-progress changes visible under
+  `backend/`/`data/`/`dataeng/` from other parallel sessions), and no
+  leftover scratch files or directories.
+  **Next-day note:** `configparser`, `sqlite3`, `uuid`,
+  `concurrent.futures`/`threading`, `tomllib`, and `pickle` are all now
+  named, confirmed-untaught fresh-gap candidates on the table — Day 71
+  should weigh these against its own fresh scan rather than assuming any
+  one by default, same lesson as Day 69's revisiting of `statistics`. No
+  review backlog exists yet (Days 68-70 have never had a retrieval pass) —
+  Day 71 should weigh starting a review cycle covering Days 68-70 once one
+  or two more fresh days accumulate, consistent with Day 68's
+  carried-forward observation.

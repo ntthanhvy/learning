@@ -190,6 +190,8 @@
       file: "lessons/0091-delivery-semantics-exactly-once-myth.html" },
     { n: 92, date: "2026-10-06", title: "Savepoints: rolling back part of a transaction, not all of it",
       file: "lessons/0092-savepoints-partial-rollback.html" },
+    { n: 93, date: "2026-10-07", title: "Deferrable constraints: checking at commit instead of mid-transaction",
+      file: "lessons/0093-deferrable-constraints.html" },
   ];
 
   const REFS = [

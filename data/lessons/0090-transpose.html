@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 90 · .T / transpose(): flipping rows and columns, and the dtype trap</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 90 · ~20 min · 7 Oct 2026</p>
+<h1>.T / transpose(): flipping rows and columns, and the dtype trap</h1>
+<p class="byline">A fresh curriculum/glossary scan today (no standing candidate carried forward from Lesson 89) found a genuine zero-hit gap: <code>DataFrame.T</code>/<code>transpose()</code> has never appeared anywhere in 89 lessons, despite being one of the most common "flip this table" interview asks and a staple of the <code>df.describe().T</code> idiom. It earns its own lesson, rather than a footnote, for a real silent trap: transposing a DataFrame with mixed column dtypes forces every cell into one shared dtype, and a row-wise operation afterward can silently do the wrong thing instead of raising.</p>
+
+<h2>1 · .T: rows become columns, columns become rows</h2>
+<p>SQL tables don't transpose — there's no statement that turns columns into rows and vice versa, because a result set's columns are fixed by the query's <code>SELECT</code> list, not swappable at will. pandas has no such restriction: <dfn data-en="a DataFrame/Series property (not a method -- no parentheses) that returns a new object with rows and columns swapped: the old column labels become the new row index, and the old row index becomes the new column labels" data-vn="giữ nguyên '.T' — ĐÂY LÀ property (không phải method, không có dấu ngoặc), trả về object mới với hàng/cột đảo chỗ: tên cột cũ thành index hàng mới, index hàng cũ thành tên cột mới">.T</dfn> (a property, no parentheses — <code>transpose()</code> is the identical method form) swaps the two axes outright:</p>
+<pre><code>df = pd.DataFrame({<span class="str">"a"</span>: [<span class="kw">1</span>, <span class="kw">2</span>], <span class="str">"b"</span>: [<span class="kw">3</span>, <span class="kw">4</span>]})
+df.T
+<span class="cm">--    0  1
+-- a  1  2
+-- b  3  4</span></code></pre>
+<p>When every original column already shares one dtype (here, both <code>int64</code>), the transposed frame keeps it — no conversion needed, nothing to watch for yet. The trap only shows up once the columns disagree.</p>
+
+<h2>2 · The trap: mixed dtypes silently upcast the whole frame</h2>
+<p>Confirmed directly (pandas 3.0.6): a DataFrame with one <code>int64</code> column and one <code>float64</code> column transposes into a frame where <strong>every</strong> cell is <code>float64</code> — including the originally-integer row:</p>
+<pre><code>df = pd.DataFrame({<span class="str">"count"</span>: [<span class="kw">10</span>, <span class="kw">20</span>], <span class="str">"ratio"</span>: [<span class="kw">0.5</span>, <span class="kw">0.75</span>]})
+df.dtypes
+<span class="cm">-- count      int64
+-- ratio    float64</span>
+df.T.dtypes
+<span class="cm">-- 0    float64
+-- 1    float64   (BOTH columns upcast -- "count" lost its int64 identity)</span></code></pre>
+<p>This happens because a DataFrame stores each column as its own array, but after transposing, what used to be two separate *columns* (each free to have its own dtype) are now two separate *rows* within the same columns — and every column in a DataFrame must share one dtype per column. pandas resolves the conflict the same way <code>pd.concat()</code> resolves a mixed-dtype stack: it finds the smallest dtype that can hold every value without losing precision, here <code>float64</code>. Mix in actual text and the escalation goes all the way to <code>object</code> — confirmed directly, a <code>name</code> column (strings) next to a <code>score</code> column (ints) transposes into an all-<code>object</code> frame, with the integers now stored as plain Python <code>int</code> objects inside an object-dtype array rather than a fast numeric array.</p>
+
+<h2>3 · Why that's dangerous: a row-wise op can silently do the wrong thing</h2>
+<p>The real danger isn't that object dtype is slower — it's that a whole-frame numeric operation no longer raises an error on the mismatched row; it just produces nonsense for that row, mixed in with correct numbers everywhere else. Confirmed directly:</p>
+<pre><code>df = pd.DataFrame({<span class="str">"name"</span>: [<span class="str">"An"</span>, <span class="str">"Binh"</span>], <span class="str">"score"</span>: [<span class="kw">90</span>, <span class="kw">85</span>]})
+flipped = df.T
+flipped
+<span class="cm">--            0     1
+-- name     An  Binh
+-- score    90    85</span>
+flipped.sum(axis=<span class="kw">1</span>)
+<span class="cm">-- name     AnBinh
+-- score       175
+-- dtype: object</span></code></pre>
+<p>No exception anywhere. The <code>score</code> row summed correctly to <code>175</code>; the <code>name</code> row "summed" by string-concatenating to <code>"AnBinh"</code>, because <code>+</code> on two Python strings means concatenation, and <code>.sum(axis=1)</code> just applies <code>+</code> across each row's values regardless of what they actually are. A loop-shaped mental model ("sum every row") silently produced a result that looks like a real answer in both rows — this is exactly the "no crash, wrong value" shape this course has flagged before (Lesson 26's SettingWithCopy, Lesson 73's stale docstring): the bug doesn't announce itself. The practical guard: <strong>check <code>df.dtypes</code> before transposing</strong>, and if they're mixed, either transpose only the numeric columns (<code>df.select_dtypes("number").T</code>, Lesson 25) or avoid relying on whole-frame row-wise math on the transposed result at all.</p>
+
+<h2>4 · Where .T actually earns its keep: describe().T</h2>
+<p>The one place every pandas user reaches for <code>.T</code> without a second thought: <code>df.describe()</code> (Lesson 49) puts each statistic — <code>count</code>, <code>mean</code>, <code>std</code>, <code>min</code>, quartiles, <code>max</code> — as a <em>row</em> and each original column as a column, which reads fine for 2-3 columns but becomes an unreadably wide table for a real dataset with 15+ numeric columns. Since <code>describe()</code>'s own output is already all one dtype (every statistic is a float, whether the source column was) its transpose has no dtype trap at all — <code>.T</code> here is purely cosmetic, flipping the wide table on its side so each original column gets one tidy row of stats:</p>
+<pre><code>df.describe().T
+<span class="cm">--        count  mean       std   min   25%  50%   75%   max
+-- a        2.0   1.5  0.707107   1.0  1.25  1.5  1.75   2.0</span></code></pre>
+<p>Round-tripping doesn't undo the damage, either, confirmed directly: <code>df.T.T</code> does <strong>not</strong> restore the original per-column dtypes once an upcast already happened — the upcast to <code>float64</code> (or <code>object</code>) is baked in the moment <code>.T</code> runs the first time, and transposing back just flips the already-upcast frame a second time.</p>
+
+<div class="interview">
+<p><strong>Q: "When would .T actually break something, not just rearrange it?"</strong> A strong answer, out loud: <em>"Transposing forces every column into one shared dtype, since a DataFrame's columns each need a single dtype but the old columns are now rows sharing new columns. If the original columns had mixed types — say an int column and a float column — the whole transposed frame silently upcasts to float64, or to object if there's a string column involved. That's mostly harmless for something like describe().T, where every value is already a float. But if I then run a row-wise operation like sum(axis=1) on that transposed frame, a text row doesn't raise an error — it just string-concatenates instead of erroring, and I'd get a wrong-looking-right answer mixed in with correct numeric rows. So I check dtypes before transposing, and I'm careful about trusting whole-frame math after a transpose that mixed types."</em> The signal: naming the upcast-to-shared-dtype mechanism, not just "it flips the table," and knowing the failure mode is silent wrong output, not a crash.</p>
+</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/90_transpose.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/90_transpose.py</code></pre>
+<p>Exercise 1 confirms <code>.T</code> flips rows/columns and keeps the shared <code>int64</code> dtype when nothing conflicts (Section 1). Exercise 2 confirms the Section 2 trap: mixing <code>int64</code> and <code>float64</code> columns upcasts the whole transposed frame to <code>float64</code>. Exercise 3 confirms Section 3's sharper version: mixing strings and numbers upcasts to <code>object</code>, and <code>sum(axis=1)</code> then silently string-concatenates the text row instead of raising.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: transposing a frame with one int64 and one float64 column produces a transposed frame where every cell is float64 -- pandas finds the smallest shared dtype that can hold every value, the same resolution pd.concat() uses for a mixed-dtype stack.">
+    <p class="stem">A DataFrame has one <code>int64</code> column and one <code>float64</code> column. What dtype does the whole <code>df.T</code> result end up holding?</p>
+    <button class="opt" data-ok>float64 for every cell, pandas finds one shared dtype</button>
+    <button class="opt">int64 for every cell, since integers came first here</button>
+    <button class="opt">each row keeps its own original separate dtype intact</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: sum(axis=1) on an object-dtype transposed frame raises nothing -- it silently string-concatenates the text row (producing a joined string) while correctly summing the numeric row, since + on two Python strings means concatenation, not addition.">
+    <p class="stem">After transposing a DataFrame with a string column and a number column, what happens when you call <code>.sum(axis=1)</code> on the result?</p>
+    <button class="opt" data-ok>no error; the text row silently string-concatenates instead</button>
+    <button class="opt">a TypeError is raised immediately, naming the mismatched row</button>
+    <button class="opt">the string row is dropped automatically, numbers stay</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: df.describe() already returns an all-float table (every statistic is numeric), so .T on its output has no dtype trap at all -- it's purely cosmetic, turning a wide one-row-per-statistic table into one tidy row per original column.">
+    <p class="stem">Why is <code>df.describe().T</code> safe to use freely, unlike transposing an arbitrary mixed-dtype DataFrame?</p>
+    <button class="opt" data-ok>describe()'s own output is already all-float, no upcast occurs</button>
+    <button class="opt">describe() output has one row, so .T does nothing</button>
+    <button class="opt">transpose() always skips over any DataFrame made by describe()</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the pandas User Guide's <a href="https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.transpose.html">API reference for <code>DataFrame.transpose()</code></a> (per <code>RESOURCES.md</code>'s "Docs: pandas User Guide" entry, ~5 min) — documents the exact dtype-resolution rule referenced above and the little-used <code>copy=</code> keyword, left out today to keep scope on the dtype trap that actually bites in practice.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>.T</code> is new today, added right after Lesson 89's <code>assert_frame_equal()</code> entry.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-90 comes back reported as shakiest, otherwise another fresh curriculum/glossary scan for the next genuinely-uncovered pattern — no standing named candidate carries forward from today.<br><br>
+💬 Anything unclear — the dtype-upcast trap, the describe().T idiom, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

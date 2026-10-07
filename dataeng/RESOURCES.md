@@ -81,6 +81,8 @@ before Phase 2.
   Idempotent tasks, top-level code, testing DAGs. Use for: Day 7's "safe re-run" requirement.
 - [Docs: Assets (data-aware scheduling)](https://airflow.apache.org/docs/apache-airflow/stable/authoring-and-scheduling/assets.html)
   Use for: Phase 2c, triggering dbt when raw data lands.
+- [Docs: Connections &amp; Hooks](https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/connections.html) · [Variables](https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/variables.html)
+  `AIRFLOW_CONN_<ID>`/`AIRFLOW_VAR_<KEY>` env-var resolution, the UI form, and secrets-backend options (Vault, AWS Secrets Manager) beyond this course's local-only scope. Use for: Day 22, the primary source.
 - [Docs: Astronomer Cosmos](https://astronomer.github.io/astronomer-cosmos/) · [Astronomer: Orchestrate dbt Core with Airflow and Cosmos](https://www.astronomer.io/docs/learn/airflow-dbt)
   Running each dbt model as an Airflow task. Use for: Phase 2c. Some Astronomer pages still show Airflow 2 code, so check imports against the Airflow 3 docs.
 

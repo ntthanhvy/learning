@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 22 · Airflow Connections, Variables &amp; never hard-coding credentials</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 22 · ~20 min · 7 Oct 2026</p>
+<h1>Airflow Connections, Variables &amp; never hard-coding credentials</h1>
+<p class="byline">Today's tangible win: pull your Postgres host/user/password out of every DAG's own source code and into an Airflow Connection, read back with a one-line lookup — confirmed this round against a real Airflow 3.3.1 install that the exact same DAG resolves to real, different connection details depending only on environment, with nothing in the DAG file itself ever changing.</p>
+
+<div class="callout"><strong>Before today — check Day 21's DAGs still parse:</strong> today adds one new file and doesn't touch <code>dags/food_delivery_pipeline.py</code>, <code>dags/raw_row_count_check.py</code>, <code>dags/order_events_landed.py</code> or <code>dags/dbt_build_on_events.py</code>. Confirm all four are still intact:
+<pre><code>AIRFLOW_HOME="$(pwd)/airflow_home" uv run --with "apache-airflow==3.3.1" airflow dags list-import-errors</code></pre>
+This round's own real run of that exact command printed <code>No data found</code> on a clean scratch install, not blank output — current Airflow 3.3.1 names the no-errors case explicitly rather than staying silent. If your run shows anything else, fix that first — today's new file sits beside the existing four, unrelated to whatever broke.</div>
+
+<h2>1 · The credential this course has been hard-coding since Day 7</h2>
+<p>Every DAG this course has built carries a secret worth naming honestly: Day 7's two <code>BashOperator</code>s run <code>dbt</code> and <code>psycopg</code> commands that reach your <code>fdp</code> Postgres over <code>localhost:5432</code> using whatever credentials your shell environment or <code>profiles.yml</code> already had lying around — never passed through Airflow at all. That's fine for a single laptop with one database, but it's exactly the shape of thing that breaks the moment there's a second environment: a DAG hard-coding <code>localhost:5432</code> can't also run against a staging warehouse without editing the DAG file itself and redeploying it, and a DAG with a password typed directly into its own source puts that password in your repo's git history forever, visible to anyone who can read the code. <code>REPO_DIR = "/opt/airflow/food-delivery-pipeline"</code> in Day 7's DAG is the same category of problem in miniature — a path baked into code that has to change by hand for every environment that isn't this one laptop.</p>
+<p>Airflow has had an answer to this since well before version 3: a <dfn data-en="an Airflow object storing how to reach one external system -- host, port, login, password, schema, extra config -- keyed by a conn_id string, stored outside DAG code (environment variable, the metadata database, or a secrets backend) and looked up by ID at task-run time instead of being written into the DAG file" data-vn="giữ nguyên &quot;Connection&quot; — object Airflow lưu cách kết nối tới 1 hệ thống ngoài (host, port, login, password, schema...), định danh bằng conn_id, lưu ngoài code DAG (env var, metadata database, hoặc secrets backend), tra bằng ID lúc task chạy thay vì ghi cứng vào file DAG">Connection</dfn>: one named record holding everything needed to reach one external system, looked up by a short ID string instead of typed into every DAG that needs it.</p>
+
+<h2>2 · Defining a Connection without ever touching the Airflow UI</h2>
+<p>The UI's Admin → Connections form is the most commonly screenshotted way to create one, but it isn't the only way, and it's the wrong one for something you want checked into version control and reproduced identically on a teammate's machine or in CI. This round confirmed the environment-variable form works exactly as documented against a real 3.3.1 install: setting <code>AIRFLOW_CONN_&lt;CONN_ID&gt;</code> (the ID upper-cased) to a URI string makes that connection resolve with no database write and no UI click at all.</p>
+<pre><code><span class="kw">export</span> AIRFLOW_CONN_FDP_PG=<span class="str">"postgres://fdp_user:fdp_pass@localhost:5432/fdp"</span></code></pre>
+<p>Reading it back in Python, confirmed this round:</p>
+<pre><code><span class="kw">from</span> airflow.sdk.bases.hook <span class="kw">import</span> BaseHook
+
+conn = BaseHook.get_connection(<span class="str">"fdp_pg"</span>)
+<span class="kw">print</span>(conn.host, conn.port, conn.login, conn.schema)</code></pre>
+<p>Real output from this round's run, against that exact env var: <code>localhost 5432 fdp_user fdp</code> — the URI's pieces parsed into named fields (<code>.host</code>/<code>.port</code>/<code>.login</code>/<code>.password</code>/<code>.schema</code>), confirmed as a real, live object rather than the raw string handed back unparsed. The CLI gives the same lookup without writing any Python:</p>
+<pre><code>AIRFLOW_HOME=<span class="str">"$(pwd)/airflow_home"</span> AIRFLOW_CONN_FDP_PG=<span class="str">"postgres://fdp_user:fdp_pass@localhost:5432/fdp"</span> \
+  uv run --with <span class="str">"apache-airflow==3.3.1"</span> airflow connections get fdp_pg</code></pre>
+<p>Real output this round (abridged to the columns that matter):</p>
+<pre><code>conn_id | conn_type | host      | schema | login    | password | port
+fdp_pg  | postgres  | localhost | fdp    | fdp_user | fdp_pass | 5432</code></pre>
+<div class="callout"><strong>A real caution this round's own output surfaced:</strong> <code>airflow connections get</code> prints the password in plain text by default. Airflow's secrets masker hides values it considers long/complex enough to be a real secret in task <em>logs</em>, but a short demo password like <code>fdp_pass</code> was explicitly skipped this round with the warning <code>Skipping masking for a secret as it's too short</code> — worth knowing before screenshotting a terminal, and a reason a real deployment uses a long, generated password rather than a short memorable one.</div>
+<p>Nothing about this depends on where the environment variable actually comes from — a plain shell export today, a container's <code>environment:</code> block in <code>docker-compose.yml</code> tomorrow, or a secrets manager injecting it at deploy time later. The DAG code that reads the connection never changes across any of those; only where the value is set does.</p>
+
+<h2>3 · Variables: the same idea for a non-secret config value</h2>
+<p>A <dfn data-en="an Airflow key/value store for a single configuration value that isn't a connection to an external system -- a threshold, a feature flag, a file path -- set via AIRFLOW_VAR_KEYNAME environment variables, the CLI, or the UI, and looked up by key at task-run time via Variable.get(), the same never-hard-code principle as a Connection but for config rather than credentials" data-vn="giữ nguyên &quot;Variable&quot; — key/value Airflow lưu 1 giá trị config không phải kết nối hệ thống ngoài (ngưỡng, feature flag, đường dẫn...), set qua AIRFLOW_VAR_KEYNAME, CLI, hoặc UI, tra bằng Variable.get() lúc task chạy, cùng nguyên tắc không ghi cứng như Connection nhưng cho config thay vì credential">Variable</dfn> is Airflow's matching mechanism for a config value that isn't a connection to an external system — a threshold, a feature flag, a file path. Day 10's dbt <code>{{ var() }}</code> (project-level, read by dbt at compile time) and today's Airflow Variable (orchestration-level, read by a task at run time) solve the same "don't hard-code a magic number" problem one layer apart; they don't share storage and a change to one never touches the other. Confirmed this round, the same environment-variable pattern as Connections, one level simpler (a plain value, not a parsed URI):</p>
+<pre><code><span class="kw">export</span> AIRFLOW_VAR_SLA_THRESHOLD_MINUTES=<span class="str">"45"</span></code></pre>
+<pre><code><span class="kw">from</span> airflow.sdk <span class="kw">import</span> Variable
+minutes = Variable.get(<span class="str">"sla_threshold_minutes"</span>)  <span class="cm"># "45", always a str</span></code></pre>
+<p>Real CLI output this round: <code>airflow variables get sla_threshold_minutes</code> printed <code>45</code> directly, confirming the same env-var-first resolution Connections use. <code>Variable.get()</code> always returns a string unless <code>deserialize_json=True</code> is passed — a real gotcha if the TODO below forgets to cast it before comparing to an integer.</p>
+
+<h2>4 · Build: read the warehouse connection from a Connection, not a literal</h2>
+<p>In your <code>food-delivery-pipeline</code> repo, add <code>dags/dbt_build_with_connection.py</code>. It runs the same <code>dbt build</code> command Day 7's <code>dbt_build</code> task runs, but gets every Postgres credential from a Connection instead of relying on ambient environment state or a hard-coded string:</p>
+<pre><code><span class="kw">from</span> __future__ <span class="kw">import</span> annotations
+
+<span class="kw">from</span> datetime <span class="kw">import</span> datetime, timedelta
+
+<span class="kw">from</span> airflow.providers.standard.operators.bash <span class="kw">import</span> BashOperator
+<span class="kw">from</span> airflow.sdk <span class="kw">import</span> DAG
+<span class="kw">from</span> airflow.sdk.bases.hook <span class="kw">import</span> BaseHook
+
+REPO_DIR = <span class="str">"/opt/airflow/food-delivery-pipeline"</span>  <span class="cm"># same path Day 7 used</span>
+
+
+<span class="kw">def</span> _dbt_build_command() -&gt; <span class="kw">str</span>:
+    <span class="cm"># TODO: call BaseHook.get_connection("fdp_pg") and build the bash_command</span>
+    <span class="cm"># string from its .host/.port/.login/.password/.schema fields (PGHOST=/</span>
+    <span class="cm"># PGPORT=/PGUSER=/PGPASSWORD=/PGDATABASE= env assignments ahead of the</span>
+    <span class="cm"># dbt command, the same vars psql and dbt-postgres both already read) --</span>
+    <span class="cm"># this is the day's real skill, not the dbt command itself.</span>
+    ...
+
+
+<span class="kw">with</span> DAG(
+    dag_id=<span class="str">"dbt_build_with_connection"</span>,
+    schedule=<span class="str">"@daily"</span>,
+    start_date=datetime(<span class="kw">2026</span>, <span class="kw">9</span>, <span class="kw">21</span>),
+    catchup=<span class="kw">False</span>,
+) <span class="kw">as</span> dag:
+    dbt_build = BashOperator(
+        task_id=<span class="str">"dbt_build"</span>,
+        bash_command=_dbt_build_command(),
+        retries=<span class="kw">2</span>,
+        retry_delay=timedelta(minutes=<span class="kw">5</span>),
+    )</code></pre>
+<p>Fill in <code>_dbt_build_command</code>'s TODO. The point isn't the dbt command — it's that <code>BaseHook.get_connection("fdp_pg")</code> is the only place this DAG ever learns a host, port, login or password, and that value can change entirely by changing <code>AIRFLOW_CONN_FDP_PG</code> wherever Airflow runs, with this file never edited. Define the connection once (shell export, or your Docker Compose <code>environment:</code> block) with the credentials your Day 1 compose stack already uses:</p>
+<pre><code><span class="kw">export</span> AIRFLOW_CONN_FDP_PG=<span class="str">"postgres://fdp_user:fdp_pass@localhost:5432/fdp"</span></code></pre>
+<div class="callout">Day 7's original <code>load_raw</code>/<code>dbt_build</code> DAG is deliberately left unchanged today, the same "never assume, always say why" convention this course has used for every file it doesn't touch on a given day — rewriting a DAG that already works isn't today's point, and Phase 2d's portfolio polish is a more natural place to sweep every DAG at once than doing it piecemeal mid-lesson.</div>
+
+<h2>5 · Verify</h2>
+<pre><code><span class="kw">export</span> AIRFLOW_CONN_FDP_PG=<span class="str">"postgres://fdp_user:fdp_pass@localhost:5432/fdp"</span>
+AIRFLOW_HOME=<span class="str">"$(pwd)/airflow_home"</span> uv run --with <span class="str">"apache-airflow==3.3.1"</span> airflow dags list-import-errors
+AIRFLOW_HOME=<span class="str">"$(pwd)/airflow_home"</span> uv run --with <span class="str">"apache-airflow==3.3.1"</span> airflow connections get fdp_pg</code></pre>
+<p>Expected: <code>list-import-errors</code> prints <code>No data found</code> (not blank — see the "before today" callout), and <code>connections get</code> shows your own <code>host</code>/<code>port</code>/<code>login</code>/<code>schema</code> matching your compose stack's real credentials, the same shape of row this round's own run produced:</p>
+<pre><code>conn_id | conn_type | host      | schema | login    | password | port
+fdp_pg  | postgres  | localhost | fdp    | fdp_user | fdp_pass | 5432</code></pre>
+<p>Then confirm the DAG actually resolved its <code>bash_command</code> from that connection, not a literal, by printing the parsed task's real command:</p>
+<pre><code>AIRFLOW_HOME=<span class="str">"$(pwd)/airflow_home"</span> uv run --with <span class="str">"apache-airflow==3.3.1"</span> python3 -c <span class="str">"
+from airflow.dag_processing.dagbag import DagBag
+bag = DagBag(dag_folder='dags')
+print(bag.get_dag('dbt_build_with_connection').get_task('dbt_build').bash_command)
+"</span></code></pre>
+<p>Expected: a line containing <code>PGHOST=localhost PGPORT=5432 PGUSER=fdp_user PGPASSWORD=fdp_pass PGDATABASE=fdp</code> ahead of the <code>dbt build</code> call — this round's own identical check against the scratch version of this exact DAG produced that line verbatim, confirming the connection lookup really substitutes real values at parse time rather than leaving a placeholder.</p>
+
+<div class="interview">
+<p><strong>Q: "How do you keep database credentials out of your Airflow DAG code?"</strong> A strong answer, out loud: <em>"Airflow Connections. Instead of writing a host, port, username and password directly into a DAG file, you define a Connection once — as an environment variable, through the UI, or via a secrets backend in a real deployment — keyed by a short ID, and the DAG looks it up at run time with BaseHook.get_connection. The DAG file itself never contains a credential; it contains a connection ID string, which isn't a secret. That means the exact same DAG code can run against a local Postgres, a staging warehouse or production just by changing which environment it's deployed into, with zero code changes and nothing sensitive ever committed to git. Non-secret config that still shouldn't be hard-coded — a threshold, a flag — gets the same treatment through Variables instead."</em> The signal: naming environment-driven resolution as the actual mechanism, not just reciting "don't hard-code secrets" as a slogan.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="An Airflow Connection stores everything needed to reach one external system (host, port, login, password, schema) keyed by a conn_id string, defined outside the DAG file (an environment variable, the UI, or a secrets backend) and looked up at run time via BaseHook.get_connection -- confirmed this round against a real Airflow 3.3.1 install that the same DAG resolves different real values purely from environment, with the DAG file itself never changing.">
+    <p class="stem">What problem does an Airflow Connection actually solve?</p>
+    <button class="opt" data-ok>Credentials live outside the DAG file, looked up by ID</button>
+    <button class="opt">It makes every single DAG run twice as fast automatically</button>
+    <button class="opt">It fully replaces the need for a real Postgres password</button>
+  </div>
+  <div class="q" data-why="Setting AIRFLOW_CONN_FDP_PG to a URI string and calling BaseHook.get_connection('fdp_pg') is a real, confirmed-this-round way to define and read a Connection with zero UI clicks and zero database writes -- the same value could instead come from the UI form or a secrets backend, but environment variables are the form that is naturally version-controllable and reproducible across machines.">
+    <p class="stem">How did this round define a Connection without opening the Airflow UI?</p>
+    <button class="opt" data-ok>A single exported <code>AIRFLOW_CONN_&lt;ID&gt;</code> plain shell environment variable</button>
+    <button class="opt">By editing Airflow's own core source code directly</button>
+    <button class="opt">Connections simply cannot exist without the web UI</button>
+  </div>
+  <div class="q" data-why="Variable.get() always returns a plain string unless deserialize_json=True is passed, confirmed this round (Variable.get('sla_threshold_minutes') returned the string '45', not the int 45) -- a real gotcha if a TODO compares it directly to an int without casting first.">
+    <p class="stem">What type does <code>Variable.get("sla_threshold_minutes")</code> return by default, confirmed this round?</p>
+    <button class="opt" data-ok>A plain string, always, unless told otherwise explicitly</button>
+    <button class="opt">Whatever Python type the stored value looks like</button>
+    <button class="opt">A dedicated Airflow Variable object, never a string</button>
+  </div>
+  <div class="q" data-why="This round's real airflow connections get output printed the password in plain text, and the secrets masker explicitly logged 'Skipping masking for a secret as it's too short' for a short demo password -- Airflow's log masking only reliably hides values it judges complex/long enough to be a real secret, which is itself a reason production credentials should be long and generated, not short and memorable.">
+    <p class="stem">What did this round's real <code>airflow connections get</code> output reveal about password masking?</p>
+    <button class="opt" data-ok>A short demo password printed fully unmasked in plain text</button>
+    <button class="opt">Airflow refuses to ever display any connection field at all</button>
+    <button class="opt">Passwords stay always fully encrypted and unreadable even to admins</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> this round's content comes from directly exercising a real Airflow 3.3.1 install (<code>Connection</code>'s and <code>Variable.get()</code>'s real signatures, the <code>AIRFLOW_CONN_&lt;ID&gt;</code>/<code>AIRFLOW_VAR_&lt;KEY&gt;</code> environment-variable resolution, <code>BaseHook.get_connection</code>, and the CLI's real <code>connections get</code>/<code>variables get</code> output including the masking warning) rather than a doc fetch. Read Airflow's own <a href="https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/connections.html">Connections &amp; Hooks</a> and <a href="https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/variables.html">Variables</a> pages next — both are the natural next read for secrets-backend options (Hashicorp Vault, AWS Secrets Manager) this lesson deliberately left at vocabulary level, since this course's own deployment target is one laptop with no cloud account, per <code>MISSION.md</code>'s constraints.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 22.<br>
+<strong>Phase 2c continues</strong> next with Cosmos — running each dbt model as its own Airflow task instead of one <code>dbt build</code> shell call, and the trade-off between the two, the fifth bullet of <code>PLAN.md</code>'s Airflow spine.<br><br>
+💬 Anything unclear — why a Connection ID isn't itself a secret, or how this would change once a real secrets backend sits behind it? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

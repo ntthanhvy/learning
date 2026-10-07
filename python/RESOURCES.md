@@ -43,6 +43,8 @@ authors for *why*. Cite inline; each lesson recommends exactly one primary sourc
   Use for: Day 68 — `subprocess.run()`, the list-of-arguments form vs. the injection risk of `shell=True`, `returncode`/`check=True`, and separating captured `stdout` from `stderr`.
 - [Docs: `statistics`](https://docs.python.org/3/library/statistics.html)
   Use for: Day 69 — `mean()`/`median()`/`mode()`/`stdev()`/`variance()` on a plain list or iterable, and why each answers a different "typical value" or "spread" question.
+- [Docs: `decimal`](https://docs.python.org/3/library/decimal.html)
+  Use for: Day 70 — `Decimal` for exact base-10 arithmetic, the float-construction trap (`Decimal(0.1)` vs. `Decimal("0.1")`), and `quantize()` with an explicit rounding mode for rounding money to cents.
 - [PEP 8 — Style Guide for Python Code](https://peps.python.org/pep-0008/)
   Use for: naming and layout conventions, so written code looks like the ecosystem's.
 

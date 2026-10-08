@@ -2595,3 +2595,129 @@ along the Phase 2 spine, adapted to the learning records.
   run from the repo root: succeeded on the first attempt (`recorded:
   dataeng/lesson_generated day=22
   lesson=0022-airflow-connections-and-variables.html`).
+- 2026-10-08 (headless run, Day 23 generated): twenty-third lesson,
+  `0023-kafka-connect-and-cdc-with-debezium.html`. `lessons/` contained only
+  `0001`–`0022`, `assets/nav.js`'s latest entry was Day 22 (2026-10-07), and
+  the DB's latest row (per the orchestrator's own pre-check) was
+  `lesson_generated day=22` recorded 2026-10-07 with no fresh
+  `lesson_completed`/quiz/kata signal since mid-July, so no learner-behavior
+  override applied — proceeded sequentially. Read `MISSION.md` in full (hard
+  scope rule: no pandas, no Python-language teaching, no re-deriving
+  API/idempotency concepts owned by `backend/`), `PLAN.md` in full (2b/2c
+  remaining spine items), `RESOURCES.md`, the one `learning-records/`
+  baseline, `reference/glossary.html`'s full term list, `assets/nav.js`, and
+  `lessons/0022` plus `lessons/0018` in full for structural/voice precedent
+  (most recent Airflow and most recent Kafka days respectively), and the
+  last ~200 lines of this file for conventions, before writing anything.
+  **Topic choice — the proportion reasoning:** counting Phase 2 days 8–22
+  (15 days): dbt (Days 8–15) = 8/15 ≈ 53% against a 50% target, Kafka (Days
+  16–18) = 3/15 = 20% exactly on its 20% target, Airflow (Days 19–22) =
+  4/15 ≈ 27% already *above* its 20% target. By the day-count ratio alone
+  Airflow looks ahead, not behind — but `PLAN.md`'s 2c spine still has two
+  items left (Cosmos; sensors/deferrable operators/SLAs) against 2b's one
+  remaining item (Kafka Connect/CDC with Debezium — the "stream processing
+  vocabulary" item is explicitly lightweight and pairs naturally with
+  another topic later, so not counted as a full remaining item). Weighed
+  that against a second signal this round weighted more heavily than the
+  raw ratio: Day 18's own closing line explicitly named "Kafka Connect and
+  CDC via Debezium" as its next-lesson pointer, and no lesson since has
+  picked it up (Days 19–22 all went to Airflow instead, per Day 19's own
+  documented ratio-override reasoning at the time, which was itself correct
+  given the state then). With Kafka now sitting exactly at its target share
+  and carrying one real open loop from its own prior lesson, while Airflow
+  sits above target with two items left but no open loop pointing at either
+  specifically, picked Kafka Connect/CDC with Debezium — closing 2b's long-
+  dangling thread rather than deepening Airflow's already-ahead share
+  further. This leaves 2b fully covered except the vocabulary-only stream-
+  processing item, and both 2c items (Cosmos, sensors/SLAs) explicitly open
+  for the next round(s).
+  **Content:** framed CDC as the general name for what Day 6's hand-written
+  producer/consumer already does narrowly (one hand-instrumented topic,
+  `order_events`), then introduced Kafka Connect (the framework: connectors,
+  source vs. sink, workers) and Debezium (a specific source connector that
+  reads a database's write-ahead/replication log instead of polling) as the
+  general-purpose alternative. Included an ASCII diagram (plain `<pre>`
+  block, the same convention Day 7's own architecture diagram used — no new
+  diagram tooling introduced) contrasting Day 6's explicit-publish path
+  against Debezium's log-tailing path side by side, per `PLAN.md`'s own
+  "concept plus a diagram" framing for this spine item. Section 5 is the
+  actual decision content this course's "defense in depth" bar requires:  a
+  table trading off capture scope, new infrastructure, code-vs-config, and
+  "right fit here," landing on a concrete, revisitable threshold (many
+  source tables, or ones nobody controls the write path for) rather than a
+  blanket "CDC is for big teams" claim. **Build step, deliberately not a new
+  container:** per this course's Kafka working-level scope and matching Day
+  17's own "vocabulary, not a build" call for Schema Registry, today does
+  not stand up a Kafka Connect worker or a real Debezium connector (real
+  infrastructure cost — a JVM worker, Postgres logical replication, a
+  replication slot to monitor — this single-developer portfolio doesn't
+  need yet). Instead the build step is a new, reasoned bullet in
+  `README.md`'s own `Decisions` section (started Day 7), the same artifact
+  Day 7 shipped and no lesson since has added to — explicitly framed as the
+  one tangible, buildable artifact available for a concept-level day. No
+  pandas, no Python-language teaching, no re-derivation of idempotency/API
+  concepts from scratch — the interview-answer section bridges to a "domain
+  event vs. row-change event" distinction using this project's own
+  `order_events` rather than an abstract example. Domain names unchanged
+  (`raw.restaurants`, `raw.couriers`, `order_events`); today adds no new
+  mart, topic or table — it is reasoning about an alternative path not
+  taken, confirmed honest rather than silently implying a new topic exists.
+  Opened with a lightweight "before today" check (`test -f
+  dags/dbt_build_with_connection.py`) rather than a full
+  `list-import-errors` or `dbt build` run, since today touches neither
+  Airflow nor dbt and the only real repo-state dependency is that prior
+  days' files still exist before adding a new README bullet alongside them.
+  **Verification:** this round's web-fetch tool was unavailable (confirmed
+  by a direct failed attempt against both `kafka.apache.org/documentation/#connect`
+  and `debezium.io/documentation/reference/stable/architecture.html`, which
+  both returned a permissions error rather than content) — the same gap Day
+  17 hit with its own fetch tool, stated honestly in the lesson's own "Go
+  deeper" section and here, rather than silently presented as a live-checked
+  source. Content is reasoned from this course's established, stable
+  understanding of Kafka Connect's connector/source/sink/worker model and
+  Debezium's log-based CDC architecture, both long-stable, well-documented
+  designs unlikely to have shifted since training — but exact config field
+  names are explicitly flagged as worth confirming against the live docs
+  before quoting them in an interview, consistent with Day 17's own
+  precedent for the same gap. No dbt snippet and no Airflow DAG appear in
+  this lesson (pure Kafka-concept content, no code file shipped to the
+  learner's repo at all — only a README bullet), so neither the `dbt parse`
+  nor the `py_compile`/`DagBag` verification path applies this round —
+  stated explicitly rather than silently skipped, the same honesty
+  convention Days 16–18 and 19 used for their own non-applicable paths.
+  What *was* run for real: a scratch Python tag-balance/bare-`&`/`dfn`-
+  attribute-completeness/quiz-word-count script (written fresh this round,
+  deleted with its scratch dir before finishing) against the saved lesson
+  HTML. All checked tags balanced on the first pass
+  (div/p/table/tr/td/th/pre/code/h1/h2/dfn/button/a/em/strong), zero bare
+  `&`, and all 4 `<dfn>` tags carried both `data-en` and `data-vn`
+  attributes. The quiz needed real rebalancing work: the first draft came
+  up mismatched on all four questions; iterated through several
+  edit-and-recount passes (catching that simple word-swaps without changing
+  word *count* don't fix a mismatch, since "database" → "table" preserves
+  length) until all four landed exactly even — three questions 9/9/9, one
+  10/10/10 — reconfirmed by re-running the same script after the final
+  edit. Also ran the same tag-balance/bare-`&` check against
+  `reference/glossary.html` after appending the Day 23 section: balanced,
+  zero bare `&`. Deleted both scratch directories
+  (`.scratch_dataeng_verify_d23/` and a second `.scratch_d23_glos/` used for
+  the glossary-only check) entirely before finishing.
+  Registered Lesson 23 in `assets/nav.js` (`node --check` clean) and added
+  the Day 23 section to `reference/glossary.html` (4 new terms: Change data
+  capture (CDC), Kafka Connect, Connector, Debezium — grepped
+  Days 1–22's sections first, case-insensitively, no collisions). Added two
+  new primary-source links to `RESOURCES.md`'s Kafka section (Kafka Connect
+  docs, Debezium architecture docs), flagging the Debezium one as not
+  live-fetched this round, matching the lesson's own honesty note. Ran
+  `git status --short -- dataeng/` and confirmed only `RESOURCES.md`,
+  `assets/nav.js`, `reference/glossary.html` and the one new lesson file
+  changed before finishing.
+  **Carried forward for next round:** Phase 2b is now fully covered except
+  the vocabulary-only "when stream processing is warranted" item (small
+  enough to fold into a future lesson rather than standing alone); Phase 2c
+  still has two open items (Cosmos: dbt models as individual Airflow tasks;
+  sensors vs. deferrable operators, retries/SLAs/alerting) and is the most
+  natural next pick on both the remaining-spine-items count and the
+  day-count ratio once this round's Kafka close-out is accounted for; Phase
+  2d (portfolio/interview) still has zero days and should be seriously
+  considered within the next 2-3 rounds given dbt's 8-day head start.

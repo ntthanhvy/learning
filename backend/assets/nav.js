@@ -192,6 +192,8 @@
       file: "lessons/0092-savepoints-partial-rollback.html" },
     { n: 93, date: "2026-10-07", title: "Deferrable constraints: checking at commit instead of mid-transaction",
       file: "lessons/0093-deferrable-constraints.html" },
+    { n: 94, date: "2026-10-08", title: "Lock modes: why ALTER TABLE blocks reads that FOR UPDATE never touches",
+      file: "lessons/0094-postgres-lock-modes.html" },
   ];
 
   const REFS = [

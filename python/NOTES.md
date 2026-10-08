@@ -8930,3 +8930,144 @@ fail *gracefully* so the learner sees which task failed.
   Day 71 should weigh starting a review cycle covering Days 68-70 once one
   or two more fresh days accumulate, consistent with Day 68's
   carried-forward observation.
+- 2026-10-08 — **Day 71 generated: review day 11 — retrieval across Days
+  68-70** (headless run). Ran `date` (confirmed 2026-10-08). Read
+  `MISSION.md` (untouched, read-only) and `PLAN.md` in full to reconfirm
+  the Phase-2 spine and the no-pandas/no-NumPy scope rule, the tail of
+  `NOTES.md` (through Day 70's full entry) for the exact next-day note and
+  narrative-log convention, and `RESOURCES.md`. `learning-records/` still
+  holds only the Day 1 baseline. Confirmed via the orchestrator's pre-run
+  DB check that the last `lesson_generated` row for python was day=70
+  recorded 2026-10-07, with nothing yet for day 71 — no completion/quiz/
+  kata signal more recent than mid-July, normal sequential progression.
+  Idempotency: listed `lessons/0071-*` (none existed) and grepped
+  `assets/nav.js` for `n: 71` (no hit) before writing anything.
+  Decision process: Day 70's next-day note put two options on the table —
+  pick one fresh topic from the standing candidate list (`configparser`,
+  `sqlite3`, `uuid`, `concurrent.futures`/`threading`, `tomllib`,
+  `pickle`), or start a review cycle for Days 68-70, which have never had
+  a retrieval pass. Ran the fresh-gap grep first anyway, per every prior
+  review day's own discipline — all six named candidates confirmed still
+  untaught via `ls lessons/` and content grep, with no new candidate
+  surfacing and no single one standing out strongly enough to justify a
+  fourth fresh day in a row. Noticed the exact same shape that triggered
+  review day 10: three fresh days (68, 69, 70) accumulated back-to-back
+  since the prior review (67, which covered 64-66), none ever retrieved.
+  That precedent — review fires once three fresh, never-retrieved days
+  stack up, rather than letting the backlog grow indefinitely — weighed
+  more than any one open candidate's individual merit, so chose the review
+  day. Days 68-70 also interleave well thematically: all three are
+  "the standard library already solved a dangerous or imprecise thing by
+  hand" lessons (safe process launching, correct summary statistics, exact
+  decimal arithmetic), matching this course's established review-day
+  practice of grouping lessons that contrast rather than repeat.
+  Read Day 67's full lesson and practice file as the direct structural
+  template (fold-out-answer callouts, interleaving rationale paragraph,
+  no-new-terms framing) plus Days 68, 69, and 70's full lessons to source
+  the three retrieval questions and fold-out answers verbatim-accurate to
+  the original teaching.
+  Lesson covers, in original teaching order: Day 68's list-argument-vs-
+  shell=True safety rule plus what `check=True` changes; Day 69's
+  `mean()`-vs-`median()` outlier disagreement plus the even-length
+  hand-rolled-`median()` bug risk; and Day 70's `0.1 + 0.2 != 0.3` float
+  storage explanation plus why `Decimal(0.1)` doesn't fix a float literal's
+  already-lost precision. Closing section names the shared throughline
+  (each lesson is "the obvious hand-written approach breaks on a specific
+  input the standard library already handles") rather than treating the
+  three as unrelated. "Where pandas goes from here" callout states plainly
+  that nothing pandas-specific applies today, the same boundary framing
+  Day 67 used — no pandas API demonstrated.
+  **No new jargon** — review day, every term revisited already has a
+  `<dfn>` entry under its original day (68, 69, 70); confirmed by design
+  (no new `<dfn>` tags written) rather than needing a glossary grep, same
+  as every prior review day. The one re-displayed term, "retrieval
+  practice," reuses Day 43's/every-prior-review-day's own existing
+  glossary entry via `<dfn>` rather than redefining it — confirmed via
+  `grep -i "retrieval practice" reference/glossary.html`, which found the
+  one pre-existing row and nothing requiring a new entry.
+  No-pandas rule: grepped case-insensitively for `pandas`/`numpy`/`pd\.`/
+  `np\.` — one hit in the lesson (the "Where pandas goes from here"
+  boundary callout stating nothing pandas-specific applies, no
+  `DataFrame`/API call demonstrated) and zero hits in the practice file —
+  compliant with the one-contrast-sentence allowance.
+  Practice file `practice/71_review_retrieval_day_11.py` (7 checks,
+  stdlib-only, no `--with` flag, function-stub-with-TODO-comment style
+  matching Day 67's review-day practice shape, one pair of exercises per
+  reviewed day plus a third pair for Day 70 since it had two distinct
+  teaching points): running a command as an argument list and capturing
+  `stdout`, confirming `check=True` surfaces `CalledProcessError.returncode`
+  on failure and reports `0` on success; computing `mean()`/`median()` on
+  an outlier list and confirming they disagree, plus confirming two
+  same-mean lists can have very different `stdev()`; and summing price
+  strings exactly with `Decimal` plus confirming a plain `float` sum
+  detectably drifts from that exact total.
+  One real bug caught during verification: the first draft of the
+  float-drift check compared `float_total != float(sum_prices_exactly(...))`
+  — converting the exact `Decimal` total back down to `float` for the
+  comparison. On this machine's Python 3.12.3, `repr(float_total)` for the
+  lesson's six-price example prints a clean `28.63` rather than the
+  `28.63000000000001` the Day 70 lesson shows (float repr/output can
+  legitimately vary slightly by platform/version even though the
+  underlying binary imprecision is still present), so rounding the
+  `Decimal` back to `float` for comparison masked the drift entirely and
+  the check never passed even when solved correctly. Fixed by comparing
+  `Decimal(float_total) != sum_prices_exactly(raw_prices)` instead —
+  converting the float up to `Decimal` (which exposes its full, non-
+  rounded binary value) rather than rounding the `Decimal` down to `float`
+  — confirmed this reliably detects the drift regardless of how `float`'s
+  own `repr()` happens to round for display on a given platform.
+  Verified in a scratch `.scratch-0071/` directory created directly under
+  the repo root (`/tmp` remains unavailable to this sandbox): the shipped
+  (unsolved) copy printed seven clean ✗ lines with no traceback, both from
+  the scratch copy and from the real `python/practice/` path directly; a
+  separately written, fully solved copy (via `Edit`, not by modifying the
+  shipped file in place — edits applied to a `cp`-duplicated scratch copy)
+  printed all seven ✓ and the "All green" tally, run twice consecutively
+  with identical results both times. Scratch directory and both throwaway
+  check scripts deleted before finishing — confirmed by a listing showing
+  no `.scratch-0071` or loose `.scratch-*.py` files remaining.
+  HTML tag balance and a raw-unescaped-`&` regex
+  (`&(?!amp;|lt;|gt;|quot;|#39;|apos;|#\d+;)`) were checked against the
+  lesson file with a throwaway stdlib `html.parser.HTMLParser`-based stack
+  checker — clean, zero unescaped `&`, no unclosed or mismatched tags.
+  Quiz: 4 questions, one per retrieval point (list-vs-shell=True safety,
+  what `check=True` changes, why `mean()`/`median()` disagree, why
+  `Decimal(0.1)` doesn't fix float imprecision). Word counts were checked
+  with a throwaway Python `html.parser`-based script, cross-checked with
+  an independent Node.js regex-based script per this course's established
+  two-method practice. First draft mismatched on two of the four questions
+  (Q2 11/11/12, Q4 11/11/13) — iterative one-word trims and additions
+  (dropping a redundant "instead always"/"therefore...as data" tail,
+  swapping "actually" back in once a trim overshot by one word) landed all
+  four at equal counts: 11/11/11, 11/11/11, 12/12/12, 11/11/11, confirmed
+  by both scripts agreeing at every step, plus a `data-ok` count of
+  exactly 4 matching the four-question count.
+  `RESOURCES.md`: no new line added — a review day cites each lesson's own
+  existing citation (`subprocess` Day 68, `statistics` Day 69, `decimal`
+  Day 70 — all already present) rather than adding a new entry, same as
+  every prior review day.
+  Registered in `assets/nav.js` with `date: "2026-10-08"` right after the
+  `n: 70` entry; confirmed `node --check assets/nav.js` reports no syntax
+  errors after the edit.
+  **DB access:** per the orchestrator's brief, the DB had already been
+  checked moments before this run started — latest row `lesson_generated
+  day=70` recorded 2026-10-07, nothing yet for day 71 — so this round
+  deferred to that pre-run confirmation plus its own on-disk idempotency
+  check rather than re-querying directly. `python/learning-records/` still
+  holds only the Day 1 baseline; nothing this round rises to a durable
+  learner-profile finding distinct from what's already recorded.
+  Final `git status --short -- python/` is expected to show exactly four
+  paths changed (`assets/nav.js`, plus the new lesson and practice file,
+  plus this `NOTES.md` entry) — no `reference/glossary.html` change this
+  round since no new terms were introduced, a review-day difference from
+  the fresh-content days before it — no other course's files touched, and
+  no leftover scratch files or directories.
+  **Next-day note:** the Days 68-70 review backlog is now cleared. Six
+  named, confirmed-untaught fresh-gap candidates remain on the table for
+  Day 72 to weigh against its own fresh scan: `configparser`, `sqlite3`,
+  `uuid`, `concurrent.futures`/`threading`, `tomllib`, and `pickle`. No new
+  review backlog exists yet — Day 71 itself has not been retrieved, and
+  none of Days 68-70 needs a second pass yet either. Day 72 should default
+  toward a fresh topic from that list unless its own scan turns up a
+  stronger candidate, since the review cycle just completed and no new
+  backlog has had time to accumulate.

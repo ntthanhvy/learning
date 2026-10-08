@@ -7973,3 +7973,123 @@
   data lesson_generated --day 90 --lesson 0090-transpose.html --detail
   '{"by":"headless"}'` was run from the repo root; it recorded successfully
   (`recorded: data/lesson_generated day=90 lesson=0090-transpose.html`).
+- 2026-10-08 generation (Lesson 91): headless run, zero prior context.
+  Confirmed via `date`, then read MISSION.md and RESOURCES.md in full
+  (neither modified), the tail of NOTES.md (this log, Lessons 85-90's
+  entries), assets/nav.js in full for the registration format, and the
+  last lesson/practice pair (90) as structural precedent. Idempotency was
+  pre-confirmed by the orchestrator (course_progress shows lesson_generated
+  day=90 recorded 2026-10-07, nothing yet for day=91) and independently
+  re-checked: no `0091-*` file existed in data/lessons/ before this round
+  started. Lesson 90's own teaser named no standing candidate ("no standing
+  named candidate carries forward"), so this round delegated a fresh
+  gap-scan sub-agent per this course's established practice: it checked
+  ~20 candidate pandas/NumPy topics (Series.mode(), MultiIndex.from_product(),
+  str.cat()/pad()/zfill(), np.vectorize(), np.clip() distinct from pandas
+  .clip(), DataFrame.insert()/.pop(), pd.merge_ordered(), nunique(axis=1),
+  idxmax(axis=1)/idxmin(axis=1), Index.get_loc(), pd.IntervalIndex,
+  np.argmax()/np.argmin(), pd.merge(how="cross"), explode() on multiple
+  columns, and others already well-covered like str.startswith/endswith,
+  pd.cut(), melt() var_name/value_name, concat(axis=1), nsmallest(),
+  pd.wide_to_long(), Series.diff(), Series.map() function form,
+  rank(pct=True)) against every lesson body and the glossary. It flagged
+  idxmax(axis=1)/idxmin(axis=1) as the top pick, noting Lesson 20's own
+  "Primary source" footer literally named it as deferred: "covers axis=1
+  (finding which COLUMN holds the max per row, instead of which row), and
+  how ties and all-NaN rows/columns are handled in that direction, neither
+  covered in today's lesson." Runner-up candidates were pd.merge(how="cross")
+  (zero hits, classic cartesian-join interview ask, genuine silent
+  row-count-explosion gotcha) and np.argmax()/np.argmin() vs idxmax()/
+  idxmin() (zero hits, pairs with the top pick). Independently
+  re-confirmed before committing: read Lesson 20 in full, confirmed its
+  exact deferred wording; grepped `idxmax.*axis|idxmin.*axis` case-
+  insensitively across every lesson body, only Lesson 20 itself matched
+  (the deferred mention, not actual coverage); grepped the glossary for
+  any axis=1-on-idxmax row, zero hits (the existing idxmax()/idxmin() row
+  only documents the default axis=0 case). Picked it over the cross-join
+  and argmax runner-ups because it's the course's own pre-planted gap
+  (closing an explicit promise rather than opening a fresh tangent),
+  stays in continuity with Lesson 20's "value vs. label" framing, and
+  bundles naturally with the argmax-vs-idxmax distinction as a secondary
+  angle inside the same lesson rather than needing its own slot. Every
+  behavioral claim was probed directly first in `data/.scratch-0091/`
+  (deleted after), on the actually-installed pandas 3.0.6 (confirmed via
+  `uv run --with pandas python3 -c "import pandas as pd; print(pd.__version__)"`):
+  confirmed `idxmax(axis=1)` returns a Series keyed by the original row
+  labels, with column names as values; confirmed a flat 3-way tie across
+  one row resolves to the first column by POSITION (left to right), not
+  alphabetically -- reordering the columns (same values) changed which
+  name won the tie; confirmed a row with only SOME NaN values silently
+  skips them under the default `skipna=True` and returns the best name
+  among what's left; confirmed a row that's ENTIRELY NaN raises
+  `ValueError: Encountered all NA values` regardless of `skipna`; confirmed
+  `skipna=False` raises that same `ValueError` on ANY NaN in a row, even a
+  single one among otherwise-real values, not only on a fully-empty row --
+  three genuinely distinct outcomes from what looks like one NaN-handling
+  knob; confirmed via `inspect.signature()` the real keyword defaults
+  (`axis=0, skipna=True, numeric_only=False`) rather than asserting them
+  from memory; confirmed `np.argmax(arr, axis=1)` returns raw integer
+  positions, not column labels, by calling it on the same data's
+  `.to_numpy()` array and comparing against `idxmax(axis=1)` directly;
+  confirmed a mixed object-dtype row (string next to int) raises
+  `TypeError: '>' not supported between instances of 'str' and 'int'`
+  rather than returning a nonsense comparison. Cross-checked the official
+  pandas docs via `WebFetch` (available this round): fetched the
+  `DataFrame.idxmax()` API reference page, which confirmed the exact
+  signature and defaults found by direct probing, the "index of first
+  occurrence of maximum" tie-breaking rule, and the all-NA `ValueError`
+  behavior -- cited as a freshly-verified primary source. The shipped
+  (unsolved) `practice/91_idxmax_axis1.py` was executed directly from its
+  real `practice/` location and printed exactly 3 ✗ with no raw traceback.
+  Caught and fixed the exact bug class flagged by Lesson 90's own note
+  before it ever shipped: Exercise 1's checks originally compared
+  `ex1_best_subjects["An"] == "math"` directly (a `numpy.bool_`/pandas
+  scalar-comparison result) and fed it straight into an `is True` identity
+  check in the final assertion lambda -- `numpy.bool_(True) is True` is
+  `False` in Python, which would have silently broken the check for a
+  fully-correct solve. Caught this by building a separate solved copy in
+  `.scratch-0091/`, filling in all three blanks correctly, and seeing it
+  fail before the fix; wrapped both comparisons in `bool(...)` at the
+  point of assignment (`ex1_an_is_math = bool(...)`, `ex1_binh_is_sci =
+  bool(...)`), confirmed the solved copy then printed all 3 ✓ and "All
+  green" on the next run. The shipped file was re-run once more directly
+  from `practice/` after the fix and reproduced the identical all-✗
+  result, confirming the fix didn't change the unsolved baseline. Quiz
+  options were drafted, then mechanically word-counted with a scratch
+  Python script (`uv run python3`, deleted after) isolating each
+  `<div class="q">` block by regex span -- iterated through a few rewrite
+  cycles (first draft came out 8/8/8, 9/8/9, 11/8/9) until all three
+  questions landed level (8/8/8, 9/9/9, 10/10/10 option words), one
+  `data-ok` per question throughout. A separate mechanical tag-balance
+  script confirmed all tags balanced (h1 1/1, h2 7/7, p 18/18, div 5/5,
+  pre 4/4, code 55/55, span 26/26, strong 8/8, em 7/7, a 2/2, button 9/9,
+  dfn 1/1, script 3/3) and found exactly two raw `&` characters, both
+  inside the one established `cd ~/learning/data && uv run ...` shell
+  command, matching every prior lesson's pattern, zero raw `&` in prose;
+  also confirmed the one new `<dfn>` tag carries both `data-en` and
+  `data-vn`. Checked the glossary for a collision before adding anything --
+  grepped `idxmax(axis|axis=1.*idxmax` case-insensitively across the full
+  glossary, found zero existing rows covering the axis=1 direction (the
+  existing idxmax()/idxmin() row only documents axis=0) -- added exactly
+  one new row, "idxmax(axis=1) / idxmin(axis=1)", directly after Lesson
+  90's ".T (transpose())" entry; re-ran the tag-balance script against the
+  glossary file afterward, confirmed it stayed balanced (tr 162/162, td
+  483/483, th 3/3, table 1/1, code 1057/1057, em 5/5, a 1/1, p 3/3) with
+  zero raw `&` introduced. Registered Lesson 91 in `nav.js` with today's
+  date (2026-10-08); `node --check` confirmed it still parses as valid
+  JavaScript after the edit, and exactly one `n: 91` entry plus one
+  `0091-idxmax-axis1` file reference were confirmed to exist. This round
+  closed the course's own pre-planted gap from Lesson 20 -- the standing
+  candidates not used today (pd.merge(how="cross"), np.argmax()/np.argmin()
+  as a possible standalone angle if it ever needs more depth than the
+  secondary mention given here) carry forward as open options; no single
+  one is named as THE next pick, since tomorrow should still run its own
+  fresh curriculum/glossary scan rather than assume these remain the best
+  available gap by then. No new data/learning-records/ entry was added
+  this round -- routine lesson, no new baseline finding to justify one.
+  The `.scratch-0091/` directory was deleted after verification, per this
+  course's standing practice of not leaving scratch artifacts committed.
+  `bin/record-progress data lesson_generated --day 91 --lesson
+  0091-idxmax-axis1.html --detail '{"by":"headless"}'` was run from the
+  repo root; see the tool-call result immediately following this entry's
+  authoring for the exact recorded/blocked outcome.

@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 23 · Kafka Connect and CDC with Debezium</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 23 · ~20 min · 8 Oct 2026</p>
+<h1>Kafka Connect and CDC with Debezium</h1>
+<p class="byline">Today's tangible win: the vocabulary and a diagram for the <em>other</em> way order data could reach Kafka — not Day 5–6's hand-written producer/consumer pair, but a framework (Kafka Connect) running a connector (Debezium) that tails Postgres's own write-ahead log and turns every row change into an event, with no application code polling anything. Then a new line in your repo's README <code>Decisions</code> section arguing, concretely, why this portfolio keeps the hand-written path instead.</p>
+
+<div class="callout"><strong>Before today — confirm Day 22's files are intact:</strong> today edits only <code>README.md</code> and touches no DAG, so a full <code>list-import-errors</code> check is overkill, but confirm the file Day 22 built still exists before adding to the repo around it:
+<pre><code>test -f dags/dbt_build_with_connection.py &amp;&amp; echo "present"</code></pre>
+Expected: <code>present</code>. If missing, Day 22's build step didn't land — go back and finish it first; today's content doesn't depend on it technically, but this course's own README now assumes every prior day's file is where it says it is.</div>
+
+<h2>1 · Day 6's consumer, named for what it actually is: a polling CDC pipeline you wrote by hand</h2>
+<p>Day 6 built a real, working path from a change in the business ("an order was placed") to a row in <code>raw.order_events</code>: a Python producer publishes a JSON event to Kafka, a Python consumer reads it and does <code>INSERT ... ON CONFLICT (event_id) DO NOTHING</code>. That pipeline works today because every status change already has an explicit "please tell Kafka about this" step written into the application code producing orders. <code>raw.restaurants</code> and <code>raw.couriers</code> have no such step — Day 1's loader writes them straight into Postgres with a plain batch CSV load, and nothing announces a change to anyone. If a restaurant's <code>commission_rate</code> changes tomorrow, Kafka never hears about it; only Day 9's dbt snapshot, run on dbt's own schedule, would ever notice.</p>
+<p><dfn data-en="change data capture: a technique for turning row-level inserts, updates and deletes already happening in a source database into a stream of events, without adding any new code to whatever wrote those rows in the first place" data-vn="giữ nguyên &quot;CDC&quot; (change data capture) — kỹ thuật biến các thay đổi insert/update/delete đang xảy ra sẵn trong database nguồn thành stream event, không cần thêm code vào nơi đã viết các row đó">Change data capture (CDC)</dfn> is the general name for closing that gap: turning row-level changes a database is already making into a stream of events, without touching the code that made them. Day 6's producer is hand-written CDC for exactly one table's worth of logic (order status), wired in on purpose. The alternative this lesson covers is a framework that does CDC for <em>any</em> table, including ones like <code>raw.restaurants</code> that nobody instrumented.</p>
+
+<h2>2 · Kafka Connect: a framework for moving data in and out of Kafka without writing a producer or consumer</h2>
+<p><dfn data-en="a framework that ships with Kafka for moving data between Kafka and other systems using pre-built, configuration-driven plugins called connectors, instead of hand-written producer/consumer code -- a source connector reads from an external system and writes to a Kafka topic; a sink connector reads from a topic and writes to an external system" data-vn="giữ nguyên &quot;Kafka Connect&quot; — framework đi kèm Kafka để chuyển dữ liệu vào/ra Kafka bằng plugin cấu hình sẵn gọi là connector, thay vì tự viết producer/consumer; source connector đọc từ hệ thống ngoài viết vào topic, sink connector đọc từ topic viết ra hệ thống ngoài">Kafka Connect</dfn> is a framework, shipped with Kafka itself, whose whole job is moving data into or out of Kafka through configuration rather than code. You don't write a producer loop or a consumer loop; you write (or more often, just fill in) a JSON config for a <dfn data-en="a Kafka Connect plugin, configured rather than coded, that either reads from an external system and writes to a Kafka topic (source connector) or reads from a topic and writes to an external system (sink connector) -- the unit of reusable logic Kafka Connect runs" data-vn="giữ nguyên &quot;connector&quot; — plugin Kafka Connect, cấu hình chứ không code, đọc từ hệ thống ngoài viết vào topic (source connector) hoặc đọc từ topic viết ra hệ thống ngoài (sink connector) — đơn vị logic tái dùng được mà Kafka Connect chạy">connector</dfn>, and a Connect worker process runs it. A <strong>source connector</strong> reads from an external system (a database, an API, a filesystem) and writes to a Kafka topic; a <strong>sink connector</strong> reads from a topic and writes to an external system (Postgres, Elasticsearch, S3). Day 6's hand-written consumer is, structurally, a sink you built from scratch — Connect's pitch is that most of that plumbing (retries, offset tracking, scaling across more workers, restart-on-crash) is already solved once, by the framework, for every connector that uses it.</p>
+<p>Connect itself knows nothing about any particular database or API — that logic lives in the connector plugin. Debezium is the best-known source connector for CDC specifically.</p>
+
+<h2>3 · Debezium: a source connector that tails the database's own log instead of asking it questions</h2>
+<p>The naive way to notice "something changed in <code>raw.restaurants</code>" is polling: run <code>SELECT * FROM raw.restaurants WHERE updated_at &gt; :last_check</code> on a timer. That requires a reliable <code>updated_at</code> column (a deleted row leaves no trace to poll for at all), and it either checks too often (wasted load) or too rarely (stale data). <dfn data-en="an open-source Kafka Connect source connector that performs change data capture by reading a database's own write-ahead/replication log directly, rather than polling with SELECT queries -- captures inserts, updates and deletes (including deletes, which a timestamp-polling query cannot see) as structured before/after events, with one Kafka topic created per captured table" data-vn="giữ nguyên &quot;Debezium&quot; — Kafka Connect source connector mã nguồn mở làm CDC bằng cách đọc trực tiếp write-ahead/replication log của database, không polling bằng SELECT; bắt được insert/update/delete (cả delete, thứ query polling theo timestamp không thấy được) thành event before/after có cấu trúc, mỗi table bắt được tạo 1 topic Kafka riêng">Debezium</dfn> instead reads the database's own internal replication log — Postgres's write-ahead log (WAL) via logical replication, MySQL's binlog, and so on — the same mechanism a read replica uses to stay in sync. Every row-level insert, update and delete the database already recorded for its own replication purposes becomes a structured Debezium event, with no extra query load on the table and no missed deletes, because a delete is a real entry in that log even though it leaves no row behind to poll for.</p>
+<p>A Debezium change event isn't just "something changed" — it carries the actual data, structured as <code>before</code> (the row's prior state, or <code>null</code> on insert) and <code>after</code> (the row's new state, or <code>null</code> on delete), plus an <code>op</code> field (<code>c</code>/<code>u</code>/<code>d</code>/<code>r</code> for create/update/delete/read-during-initial-snapshot). One Kafka topic gets created per captured table automatically — a hypothetical Debezium setup on this portfolio's own Postgres would produce something like <code>fdp.public.restaurants</code>, one topic, with every row change to that one table landing there in order.</p>
+
+<h2>4 · The two paths, side by side</h2>
+<pre><code>Day 6's path (hand-written, what this repo actually runs):
+
+  Python app code ──▶ Producer.produce() ──▶ topic:order_events ──▶ Python consumer ──▶ raw.order_events
+  (an explicit "publish        (you wrote                              (you wrote the loop,
+   this event" call            the message                              the INSERT, the
+   you added on purpose)       shape)                                   offset-commit timing)
+
+
+Debezium's path (CDC, not used in this repo, shown for contrast):
+
+  Postgres raw.restaurants ──▶ WAL (already being written           ──▶ topic:fdp.public.restaurants ──▶ (a sink connector,
+  UPDATE commission_rate       for replication, with no app               one topic per table,              or your own consumer,
+  (an ordinary SQL statement,  code change needed to produce it)          auto-created by Debezium)          reads from here)
+   no "publish an event"
+   call anywhere)</code></pre>
+<p>The structural difference the diagram is pointing at: Day 6's path requires a human to have added a line of code saying "and also tell Kafka." Debezium's path requires nothing from the application at all — an ordinary <code>UPDATE</code> statement someone runs directly in <code>psql</code>, with zero awareness that Kafka exists, still produces an event, because Debezium is watching the log every write already goes through, not the application.</p>
+
+<h2>5 · The trade-off: why this portfolio keeps the hand-written consumer</h2>
+<table class="gloss">
+  <tr><th></th><th>Day 6's hand-written consumer</th><th>Kafka Connect + Debezium</th></tr>
+  <tr><td>What it captures</td><td>Only what the application explicitly publishes — exactly <code>order_events</code>' four statuses, on purpose, nothing else</td><td>Every row-level change to every captured table, including ones nobody thought to instrument</td></tr>
+  <tr><td>New infrastructure</td><td>None beyond the Kafka broker this course already runs</td><td>A Connect worker process (its own JVM, its own config store) plus Postgres logical replication enabled and a replication slot per connector</td></tr>
+  <tr><td>Code to write</td><td>One producer script, one consumer script — both already written, both debuggable with a Python stack trace</td><td>None (a connector is configuration, not code) — but debugging a stuck connector means reading Connect's own logs and replication-slot state, a different skill</td></tr>
+  <tr><td>Right fit here</td><td>Yes — one topic, one event shape, a single developer who can read the two scripts end to end in five minutes</td><td>Would be the right call if restaurants/couriers needed real-time change capture too, or if there were many source tables and writing a hand-rolled producer for each stopped scaling</td></tr>
+</table>
+<p>The honest decision isn't "hand-written is worse" or "Debezium is overkill" in the abstract — it's that CDC earns its operational cost (a Connect cluster, replication slots to monitor, one more moving part that can fall behind or fail silently) when there are enough source tables, or a strict enough real-time requirement on tables nobody controls the write path for, that hand-writing a producer per table stops being the cheaper option. This portfolio has exactly one event-producing concern (<code>order_events</code>) with full control over the producer's code, so Day 6's approach stays correct — but a `raw.restaurants`-style table whose <code>commission_rate</code> needed to reach a mart within seconds of changing, not whenever dbt's next snapshot run happens, is precisely the shape of problem Debezium exists for.</p>
+
+<h2>6 · Build: write the decision into the README, not a new container</h2>
+<p>Per this course's Kafka working-level scope, today stays concept-plus-diagram rather than standing up a Connect worker and a Debezium connector — real infrastructure cost (a JVM worker, Postgres logical replication, a replication slot to monitor) this single-developer portfolio doesn't need yet, the same "vocabulary, not a build" call Day 17 made for Schema Registry. The build step is adding the decision itself, reasoned through rather than asserted, to the <code>Decisions</code> section Day 7 started:</p>
+<pre><code>- **Hand-written consumer over Kafka Connect + Debezium** — `order_events`
+  has exactly one producer (this repo's own code) and one event shape, so a
+  ~40-line consumer script is both the simplest option and the one most
+  debuggable by a single developer. Debezium would earn its keep if
+  `raw.restaurants` or `raw.couriers` needed real-time change capture too —
+  CDC straight off Postgres's write-ahead log, no code change to the writer
+  required — but today those tables only change via Day 1's batch loader and
+  Day 9's snapshot on dbt's schedule is fast enough. Revisit if a source
+  table appears that nobody here controls the write path for.</code></pre>
+<p>Add that bullet to <code>README.md</code>'s existing <code>Decisions</code> list (after Day 7's "Orchestration is <code>BashOperator</code>, not Cosmos" line reads naturally, since both are "simpler tool chosen on purpose, with a named threshold for revisiting it" decisions). Commit it.</p>
+
+<div class="interview">
+<p><strong>Q: "Your order events come from a hand-written Kafka producer. Why not just use CDC off the orders table directly?"</strong> A strong answer, out loud: <em>"Those are solving different problems. CDC with something like Debezium captures row-level changes already happening in a database — inserts, updates, deletes — by reading the database's own replication log, with no code change required from whatever's writing those rows. My order_events topic isn't a row changing in a table; it's a domain event — 'this order was accepted' — that the application explicitly decides to publish, with a shape I control, at the moment that matters to the business, not at the moment a row happens to change. If I had a table changing underneath me that I didn't control the write path for, or needed change capture on many tables without writing a producer for each one, Debezium is exactly the right tool, because it trades a new piece of infrastructure — a Kafka Connect worker and a replication slot — for not having to instrument the write side at all. For one table with one producer I already own, hand-writing it is simpler and more debuggable, and that's the actual trade-off, not 'CDC is advanced' versus 'manual is basic.'"</em> The signal: distinguishing a domain event from a row-change event, and naming the real infrastructure cost CDC trades away rather than treating it as strictly superior.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Change data capture (CDC) turns row-level inserts, updates and deletes a database is already making into a stream of events, without any new code in whatever wrote those rows. Day 6's hand-written producer/consumer only captures what the application explicitly publishes, which is a form of CDC applied to exactly one hand-instrumented concern -- not a general mechanism for every table.">
+    <p class="stem">What problem does change data capture (CDC) solve that Day 6's hand-written producer doesn't, for an uninstrumented table?</p>
+    <button class="opt" data-ok>Captures every row change with zero new application code</button>
+    <button class="opt">Makes a Kafka topic deliver every message much faster</button>
+    <button class="opt">Removes the need for a table's own primary key</button>
+  </div>
+  <div class="q" data-why="Debezium reads a database's own write-ahead/replication log directly, the same mechanism a read replica already uses -- not by running SELECT queries on a timer. That avoids both the extra query load of polling and the missed-deletes problem, since a delete leaves no row behind for a timestamp-based SELECT to find, but is a real entry in the replication log.">
+    <p class="stem">How does Debezium detect a change, instead of running a polling <code>SELECT</code> query?</p>
+    <button class="opt" data-ok>By reading the database's own write-ahead replication log directly</button>
+    <button class="opt">By running a fresh SELECT COUNT query every second</button>
+    <button class="opt">By having the application call a Debezium API directly</button>
+  </div>
+  <div class="q" data-why="Kafka Connect is the general framework, shipped with Kafka, for moving data in or out of Kafka through configured connectors instead of hand-written producer/consumer code -- a source connector reads from an external system into a topic, a sink connector reads from a topic into an external system. Debezium is specifically a source connector that does CDC; it is one connector that runs inside Connect, not the framework itself.">
+    <p class="stem">What is the actual relationship between Kafka Connect and Debezium?</p>
+    <button class="opt" data-ok>Connect is the framework; Debezium is one real connector</button>
+    <button class="opt">They are two unrelated, directly competing Kafka distributions today</button>
+    <button class="opt">Debezium fully replaces Kafka Connect in every modern setup</button>
+  </div>
+  <div class="q" data-why="This portfolio's own Decisions section argues for keeping the hand-written consumer because order_events has exactly one producer this repo controls and one simple event shape -- CDC's real cost (a Connect worker, Postgres logical replication, a replication slot to monitor) earns itself back once there are many source tables, or ones nobody controls the write path for, not for one well-understood producer already owned end to end.">
+    <p class="stem">Per today's README decision, when would Debezium actually be the better call for this portfolio?</p>
+    <button class="opt" data-ok>Many source tables, or ones with no controlled write path</button>
+    <button class="opt">Never, a hand-written consumer is always the simplest tool pick</button>
+    <button class="opt">Only once Kafka itself is fully removed from the pipeline</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> this lesson is vocabulary-plus-diagram, consistent with <code>PLAN.md</code>'s own framing of this spine item ("concept plus a diagram"), reasoned from this course's established understanding of Kafka Connect's connector/worker/task model and Debezium's log-based CDC architecture rather than a fresh fetch this round — this sandbox's web-fetch tool was unavailable this round (noted honestly, the same gap Day 17 hit), so treat exact config field names as worth confirming against the live docs before quoting them in an interview. Read the <a href="https://kafka.apache.org/documentation/#connect">Kafka Connect section of the Apache Kafka docs</a> for the connector/source/sink/worker vocabulary, and <a href="https://debezium.io/documentation/reference/stable/architecture.html">Debezium's own architecture page</a> for exactly how it attaches to Postgres logical replication and what a real change-event payload looks like.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 23.<br>
+<strong>Phase 2b is now fully covered</strong> (delivery semantics, schema evolution, retention/compaction/lag, and today's Connect/CDC) except "when stream processing is warranted vs. land-it-and-let-dbt-do-it," vocabulary-only and small enough to pair with another topic later. <strong>Next lesson</strong> likely returns to Phase 2c: Cosmos (dbt models as individual Airflow tasks) or sensors/deferrable operators/SLAs, both still open.<br><br>
+💬 Anything unclear — the difference between a domain event and a row-change event, or what actually happens to a Debezium connector if Postgres's replication slot fills up? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

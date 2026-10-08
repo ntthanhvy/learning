@@ -68,6 +68,10 @@ before Phase 2.
   Producer/consumer API, delivery callbacks, manual commits. Use for: Days 5–6 code.
 - [Book: _Kafka: The Definitive Guide_, 2nd ed. — Shapira, Palino, Sivaram, Petty](https://www.confluent.io/resources/kafka-the-definitive-guide-v2/)
   Deep reference, free download from Confluent (registration). Use for: Phase 2b delivery semantics, retention and compaction.
+- [Docs: Kafka Connect — Apache Kafka Documentation](https://kafka.apache.org/documentation/#connect)
+  The connector/source/sink/worker/task vocabulary, straight from the project that ships the framework. Use for: Phase 2b's Kafka Connect and CDC lesson, the primary source for Connect itself.
+- [Docs: Debezium Architecture](https://debezium.io/documentation/reference/stable/architecture.html)
+  How Debezium attaches to a database's write-ahead/replication log as a Kafka Connect source connector, and the shape of a real change event (before/after, one topic per table). Use for: Phase 2b's Kafka Connect and CDC lesson, the primary source for Debezium specifically. Not fetched live on 2026-10-08 (this sandbox's fetch tool was unavailable that round, same gap Day 17 hit) — confirm exact field names against the live page before quoting them in an interview.
 
 ## Knowledge — Airflow (working level)
 

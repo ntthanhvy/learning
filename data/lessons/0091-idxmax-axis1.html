@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 91 · idxmax(axis=1) / idxmin(axis=1): which COLUMN, not which row</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 91 · ~20 min · 8 Oct 2026</p>
+<h1>idxmax(axis=1) / idxmin(axis=1): which COLUMN, not which row</h1>
+<p class="byline">Lesson 20's own "Primary source" footer named this directly as deferred — "covers <code>axis=1</code> (finding which COLUMN holds the max per row, instead of which row), and how ties and all-NaN rows/columns are handled in that direction, neither covered in today's lesson." A fresh curriculum/glossary scan today re-confirmed it's still a genuine zero-hit gap 71 lessons later, and it is a real, distinct interview question: "for each student, which subject was their best?" needs the exact opposite axis from Lesson 20's "for each customer, which order was biggest?"</p>
+
+<h2>1 · Same method, flipped axis: now it answers "which column"</h2>
+<p>Lesson 20 covered <code>idxmax()</code>/<code>idxmin()</code> with the default <code>axis=0</code>: called on a single column, it returns the row label holding that column's max/min. Pass <dfn data-en="the axis argument to DataFrame idxmax()/idxmin(); axis=1 (or the string 'columns') makes the method operate ACROSS each row instead of down each column, returning for every row the COLUMN NAME holding that row's max/min value, not a row label" data-vn="giữ nguyên 'axis=1' — tham số của idxmax()/idxmin(), bắt phương thức chạy NGANG qua từng hàng thay vì dọc theo từng cột, trả về cho mỗi hàng TÊN CỘT có giá trị lớn/nhỏ nhất của hàng đó, không phải nhãn hàng">axis=1</dfn> (or the string <code>"columns"</code>) and the whole question flips: now it's called on a DataFrame with several numeric columns, and for <strong>every row</strong> it returns the <strong>column name</strong> holding that row's max/min — the same method, pointed the other way:</p>
+<pre><code>scores = pd.DataFrame({
+    <span class="str">"math"</span>: [<span class="kw">90</span>, <span class="kw">70</span>, <span class="kw">60</span>],
+    <span class="str">"sci"</span>:  [<span class="kw">80</span>, <span class="kw">95</span>, <span class="kw">60</span>],
+    <span class="str">"art"</span>:  [<span class="kw">70</span>, <span class="kw">60</span>, <span class="kw">60</span>],
+}, index=[<span class="str">"An"</span>, <span class="str">"Binh"</span>, <span class="str">"Chi"</span>])
+
+scores.idxmax(axis=<span class="kw">1</span>)
+<span class="cm">-- An      math
+-- Binh     sci
+-- Chi     math
+-- dtype: str</span></code></pre>
+<p>Confirmed directly (pandas 3.0.6): the result's <em>index</em> is still the original row labels (<code>An</code>, <code>Binh</code>, <code>Chi</code>) — but the <em>values</em> are now column names (<code>"math"</code>, <code>"sci"</code>), not row labels. An's best subject was math (90); Binh's was science (95). "For each student, which subject was their best?" is exactly the row-wise twin of Lesson 20's "for each customer, which order was biggest?" — same tool, transposed intent.</p>
+
+<h2>2 · Ties: first column wins, by position — same rule as Lesson 20's row ties</h2>
+<p>Chi's row is <code>math=60, sci=60, art=60</code> — a flat three-way tie. Confirmed directly, <code>scores.idxmax(axis=1)["Chi"]</code> returns <code>"math"</code>, the first column in column order, not the first alphabetically and not an arbitrary pick. This is the documented rule, matching Lesson 20's own row-wise tie behavior exactly: the official pandas docs for <code>idxmax()</code> state it returns the "index of first occurrence of maximum" — on <code>axis=1</code> that means first by <strong>column position</strong>, left to right. Reordering the columns (without changing any values) would change which name wins the tie, which is easy to miss if the DataFrame's column order came from a dict literal or a prior <code>.reindex()</code> rather than something deliberately sorted.</p>
+
+<h2>3 · The real trap: an all-NaN row raises, but a partial-NaN row doesn't</h2>
+<p>Confirmed directly (pandas 3.0.6): with the default <code>skipna=True</code>, a row with <em>some</em> NaN values quietly skips them and returns the best name among what's left:</p>
+<pre><code>scores2 = scores.astype(float)
+scores2.loc[<span class="str">"Chi"</span>, <span class="str">"math"</span>] = np.nan   <span class="cm"># Chi: math=NaN, sci=60, art=60</span>
+scores2.idxmax(axis=<span class="kw">1</span>)
+<span class="cm">-- An      math
+-- Binh     sci
+-- Chi      sci    (NaN silently skipped; tie between sci/art broken by position again)
+-- dtype: str</span></code></pre>
+<p>But a row that's <strong>entirely</strong> NaN has nothing left to skip to, and that's where the behavior sharpens into a real guard, not a silent gap: <code>idxmax(axis=1)</code> raises <code>ValueError: Encountered all NA values</code> rather than returning NaN or some placeholder. Passing <code>skipna=False</code> goes further still — confirmed directly, it raises that same <code>ValueError</code> the instant <em>any</em> NA is encountered in a row, even just one among otherwise-real values, rather than only on a fully-empty row. The three behaviors are easy to conflate: partial-NaN-with-default-skipna silently succeeds, partial-NaN-with-<code>skipna=False</code> raises, and all-NaN raises regardless of <code>skipna</code>. An interview-shaped version of this: running <code>idxmax(axis=1)</code> across a batch of rows where most are clean but one row came in fully empty from an upstream join — that one row crashes the whole call unless it's filtered or imputed first, rather than quietly producing a NaN that could be checked for later.</p>
+
+<h2>4 · Don't confuse this with NumPy's np.argmax(axis=1) — it returns a position, not a label</h2>
+<p>A genuinely common mix-up: NumPy's own <code>np.argmax(arr, axis=1)</code> looks like it should be the array-level version of the same idea, but it returns an <strong>integer position</strong> within each row, not a column <em>label</em> — and those two can silently disagree the moment a DataFrame's columns aren't already sitting at position 0, 1, 2... in label order:</p>
+<pre><code>np.argmax(scores.to_numpy(), axis=<span class="kw">1</span>)
+<span class="cm">-- array([0, 1, 0])   -- plain positions: 0, 1, 2 ... no column names at all</span>
+scores.idxmax(axis=<span class="kw">1</span>)
+<span class="cm">-- An      math
+-- Binh     sci
+-- Chi     math        -- same winners here, but only because columns are still in original order</span></code></pre>
+<p>On this particular DataFrame the two happen to agree once translated back (position <code>0</code> is <code>"math"</code>), but <code>np.argmax()</code> has no concept of column names at all — it works on the raw NumPy array underneath, after <code>.to_numpy()</code> has already thrown the labels away. Reorder or drop a column and the position-to-name mapping silently shifts while <code>idxmax(axis=1)</code> keeps tracking the real label through any reordering. The safe rule: reach for <code>np.argmax</code>/<code>np.argmin</code> only when a plain array position is genuinely what's wanted (e.g. inside a NumPy-only numeric routine); reach for pandas' <code>idxmax(axis=1)</code>/<code>idxmin(axis=1)</code> any time the answer needs to be a real column <em>name</em> that survives column reordering.</p>
+
+<div class="interview">
+<p><strong>Q: "How would you find, for each row, which column holds the highest value — and what should I watch out for?"</strong> A strong answer, out loud: <em>"idxmax(axis=1) — same method as the row-wise case, just with the axis flipped, so instead of returning which row has the max per column, it returns which column has the max per row, as a Series keyed by the original row labels. Two things to watch for: ties resolve to the first column by position, left to right, not alphabetically — so column order matters even when no value changed. And NaN handling has three distinct outcomes, not one: a row with some NaNs just skips them under the default skipna=True; the same partial-NaN row raises a ValueError if I pass skipna=False; and a row that's entirely NaN raises that same ValueError no matter what skipna is set to, since there's nothing left to compare. I'd also never reach for np.argmax(axis=1) here instead — that returns a raw position in the underlying array, not a column name, and it'll silently point at the wrong column the moment the DataFrame's columns get reordered."</em> The signal: naming all three NaN outcomes distinctly, not just "it handles missing values," and flagging the np.argmax position-vs-label trap unprompted.</p>
+</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/91_idxmax_axis1.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/91_idxmax_axis1.py</code></pre>
+<p>Exercise 1 confirms <code>idxmax(axis=1)</code> returns the column name holding each row's max, keyed by the original row labels (Section 1). Exercise 2 confirms the Section 2 tie rule: an all-tied row resolves to the first column by position. Exercise 3 confirms Section 3's NaN split: a partial-NaN row succeeds silently under default <code>skipna=True</code>, but an all-NaN row raises <code>ValueError</code>.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: scores.idxmax(axis=1) returns a Series whose index is the original row labels and whose values are the COLUMN NAMES holding each row's max value -- the row-wise mirror of the default axis=0 case from Lesson 20, which returns a row label instead.">
+    <p class="stem">What does <code>df.idxmax(axis=1)</code> return, for each row?</p>
+    <button class="opt" data-ok>the column name holding that row's max value</button>
+    <button class="opt">the row label holding the overall max value</button>
+    <button class="opt">the numeric position of the largest column index</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: when every value in a row ties exactly, idxmax(axis=1) returns the first column by POSITION (left to right in the DataFrame's actual column order), matching the documented 'first occurrence of maximum' rule -- not alphabetical order and not a random pick.">
+    <p class="stem">A row has three columns that all tie at the same max value. Which column name does <code>idxmax(axis=1)</code> return?</p>
+    <button class="opt" data-ok>the first tied column by position, left to right</button>
+    <button class="opt">the tied column name that sorts first, alphabetically speaking</button>
+    <button class="opt">all three tied column names, joined into one string</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: with the default skipna=True, a row with SOME NaN values silently skips them and returns the best name among what remains. A row that is ENTIRELY NaN has nothing left to compare, so idxmax(axis=1) raises ValueError regardless of the skipna setting.">
+    <p class="stem">A row has one NaN and two real numbers. Under the default <code>skipna=True</code>, what does <code>idxmax(axis=1)</code> do with that row?</p>
+    <button class="opt" data-ok>skips the one NaN, picks the best of the reals</button>
+    <button class="opt">raises a ValueError right away, exactly like an all-NaN row</button>
+    <button class="opt">returns NaN itself as that row's own answer, no error</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the pandas API reference for <a href="https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.idxmax.html"><code>DataFrame.idxmax()</code></a> (per <code>RESOURCES.md</code>'s "Docs: pandas User Guide" entry, ~5 min) — documents the exact signature (<code>axis=0, skipna=True, numeric_only=False</code>), the "first occurrence of maximum" tie rule, and the all-NA <code>ValueError</code>, all independently confirmed directly against pandas 3.0.6 above.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>axis=1</code> (on <code>idxmax()</code>/<code>idxmin()</code>) is new today, added right after Lesson 90's <code>.T (transpose())</code> entry.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-91 comes back reported as shakiest, otherwise another fresh curriculum/glossary scan for the next genuinely-uncovered pattern — no standing named candidate carries forward from today (this round closed the one Lesson 20 had named).<br><br>
+💬 Anything unclear — the axis flip, the tie rule, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

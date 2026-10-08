@@ -146,6 +146,8 @@
       file: "lessons/0069-statistics-module.html" },
     { n: 70, date: "2026-10-07", title: "decimal: exact arithmetic for money",
       file: "lessons/0070-decimal-exact-arithmetic.html" },
+    { n: 71, date: "2026-10-08", title: "Review day 11: retrieval across Days 68-70",
+      file: "lessons/0071-review-retrieval-day-11.html" },
   ];
 
   const REFS = [

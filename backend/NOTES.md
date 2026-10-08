@@ -7243,6 +7243,109 @@
   entry for its confirmed output. No confirmed next-lesson gap is named with
   certainty for the round after this one — same standing note as every prior
   round; a completion/quiz-outcome signal or a user-named track should take
-  priority over guessing blind again.</new_string>
-</invoke>
+  priority over guessing blind again. (Note: the two stray lines
+  `</new_string>` / `</invoke>` that previously sat here were a leftover
+  artifact from an earlier session's malformed tool call accidentally
+  written into this file — removed as part of this entry's append, no
+  content was otherwise lost.)
+- **2026-10-08 generation (Lesson 94, headless run):** Idempotency check
+  first: `ls lessons/ | grep -c "^0094-"` and `grep -c "n: 94" assets/nav.js`
+  both returned 0 before writing anything (the orchestrator's own DB check
+  had already confirmed no `lesson_generated` row existed for today). The
+  two `backend/learning-records/` files are still just the two original
+  baseline findings (frontend-mindset gap, concurrency-vocabulary gap),
+  neither naming a fresh gap, and Lesson 93's own closing line again left no
+  named next topic, so this round ran a fresh gap search per NOTES.md's
+  standing instruction rather than guessing blind. Swept a wide set of
+  candidates against every lesson's filename and full content: request
+  coalescing/debounce (already taught, Lesson 57 and glossary), composite
+  index design and GIN/GiST/BRIN index internals (index selectivity is
+  Lesson 5's territory and EXPLAIN-level depth is explicitly the Go week's
+  per MISSION.md), autovacuum/table bloat mechanics (Lesson 39 already names
+  VACUUM's purpose at the concept level; deeper tuning reads as ops-depth
+  rather than a conceptual gap), sparse fieldsets/field-selection query
+  params and batch/bulk API endpoint design (zero hits, but thin — closer to
+  a REST-convention footnote than a 20-minute lesson's worth of new mental
+  model), and token-bucket-adjacent rate-limiting algorithm depth (Lesson 11
+  and the glossary already cover token bucket by name). The clean, high-value
+  gap found instead: `grep -rli "lock escalation\|access exclusive\|row
+  exclusive\|lock mode" lessons/*.html reference/glossary.html` returned
+  zero hits anywhere. Five different lessons (6, 33, 40, 56, 61) all use the
+  word "lock" extensively — Lesson 6's `SELECT ... FOR UPDATE` row lock,
+  Lesson 40's deadlock between two row locks, Lesson 56's advisory locks,
+  Lesson 61's `lock_timeout` — and Lesson 19 explicitly contrasts plain
+  `CREATE INDEX` ("takes a lock on the table for the entire build") against
+  `CREATE INDEX CONCURRENTLY`, but not one of the five ever names that
+  Postgres has multiple distinct table-level lock *modes* with different
+  blocking behavior, or that a plain `ALTER TABLE` blocks even reads (not
+  just writes) because it takes a stronger mode than any row lock or
+  `CREATE INDEX` ever does. Confirmed via direct re-reads of Lessons 6, 19,
+  and 40 in full (not just a grep) that all three use "lock" as if it were
+  a single undifferentiated state. Squarely a Postgres concurrency-control
+  mechanics topic — in scope, not touching the distributed-systems/ORM
+  exclusions — and a natural extension of Lessons 6, 19, 40, 56, and 61
+  rather than a disconnected topic. Lesson 94 covers: the concrete
+  contradiction (Lesson 6's row lock never blocks an unrelated `SELECT`, but
+  a live `ALTER TABLE ADD COLUMN` blocks every `SELECT` against that table);
+  a four-row table of the lock modes that matter most for ordinary backend
+  work (`ACCESS SHARE` / `ROW EXCLUSIVE` / `SHARE UPDATE EXCLUSIVE` /
+  `ACCESS EXCLUSIVE`) naming what takes each and what each blocks; a direct
+  re-explanation of Lesson 19's `CREATE INDEX CONCURRENTLY` trade-off through
+  the actual lock-mode mechanism (`SHARE` vs. the weaker `SHARE UPDATE
+  EXCLUSIVE`) instead of just the previously-asserted symptom; and a closing
+  Go `database/sql` `lockWaiters` function querying `pg_locks` joined against
+  `pg_stat_activity` to find live lock-mode contention during an incident. A
+  "Scope line" section distinguishes this from Lesson 6/33's row-level lock
+  mechanics, Lesson 40's deadlock detector, and Lesson 56's advisory locks —
+  all three stay correct as taught; this lesson only names the table-level
+  mode system underneath the word "lock" they were all already using.
+  Checked the glossary first for the one new term — `lock mode` — zero
+  collisions via case-insensitive grep (`lock escalation`, `access
+  exclusive`, `row exclusive`, and `lock mode` itself all returned nothing),
+  added as a new row after Lesson 93's `deferrable` row, same Term/Tiếng
+  Việt/In software column order as every existing row. The Go snippet
+  (`lockWaiters` plus the `LockWait` struct) was compile-checked clean with
+  `go build`/`go vet` in a scratch module (`.scratch-0094/gomod/`, deleted
+  after, confirmed gone via directory listing). Verification performed
+  mechanically: (1) a Node quiz-word-count script matching the `<div
+  class="quiz">` block and splitting every option both via `.split(/\s+/)`
+  and `.split(" ")` — first draft landed uneven on all four questions
+  (spreads of 1–3 words per question), fixed through several
+  rewrite-and-recount cycles per option, including more than one case where
+  a straight word swap left the count unchanged and the real fix required
+  either adding/removing a word or swapping to a differently-sized synonym —
+  converged to exactly 10/10/10/10 on Q1, 9/9/9/9 on Q2, 12/12/12/12 on Q3,
+  and 10/10/10/10 on Q4, both counting methods agreeing exactly, and exactly
+  one `data-ok` and four options per question confirmed the same way; (2) a
+  Node occurrence-count HTML tag-balance check across 21 tag types on the
+  lesson — clean on the first pass, no stray-tag bug this round; and a
+  separate table/tr/th/td/p balance check on `glossary.html` after its
+  one-row addition, also balanced on the first pass; (3) a raw-unescaped-`&`
+  regex scan and (4) a backslash-escaped-quote scan across both files — zero
+  hits in all four scans; (5) the lesson's `<dfn` tag grepped and confirmed
+  to carry both `data-en=` and `data-vn=` — exactly 1 `dfn` tag, matching the
+  1 new term, no orphaned attribute; (6) `node --check` against
+  `assets/nav.js`, `assets/gloss.js`, and `assets/quiz.js` — all clean, no
+  output. Registered Lesson 94 in `nav.js` (date 2026-10-08, today's actual
+  generation date), re-confirmed exactly one matching `n: 94` entry and
+  exactly one matching `0094-*` lesson file afterward. No new
+  `learning-records/` file was added this round — routine topical entry like
+  Lessons 3-93, not a new baseline finding. This session's sandbox
+  network-permission gate was open this round: a live `WebFetch` against the
+  PostgreSQL Manual's own Explicit Locking chapter confirmed the lesson's
+  core claims verbatim — that a plain `SELECT` takes `ACCESS SHARE`, that
+  "`UPDATE`, `DELETE`, `INSERT`, and `MERGE` acquire" `ROW EXCLUSIVE`, that
+  plain `CREATE INDEX` takes `SHARE` while `CREATE INDEX CONCURRENTLY` takes
+  the weaker `SHARE UPDATE EXCLUSIVE`, and that "only an `ACCESS EXCLUSIVE`
+  lock blocks a `SELECT` (without `FOR UPDATE`/`SHARE`) statement" — and a
+  second fetch against the `ALTER TABLE` reference page confirmed "an
+  `ACCESS EXCLUSIVE` lock is acquired unless explicitly noted" for its
+  subforms, so the "Go deeper" section cites both fetches as genuinely
+  fresh. `bin/record-progress backend lesson_generated --day 94 --lesson
+  0094-postgres-lock-modes.html --detail '{"by":"headless"}'` run from the
+  repo root is the last step of this round — see immediately after this
+  entry for its confirmed output. No confirmed next-lesson gap is named with
+  certainty for the round after this one — same standing note as every
+  prior round; a completion/quiz-outcome signal or a user-named track should
+  take priority over guessing blind again.
 

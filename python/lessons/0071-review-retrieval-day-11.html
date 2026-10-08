@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 71 · Review day 11: retrieval across Days 68-70</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 71 · ~20 min · 8 Oct 2026</p>
+<h1>Review day 11: retrieval across Days 68-70</h1>
+<p class="byline">Day 67 (review day 10) covered Days 64, 65, and 66. Since then, three fresh days ran in a row — Day 68 (<code>subprocess</code>), Day 69 (<code>statistics</code>), Day 70 (<code>decimal</code>) — and none of the three has ever had a <dfn data-en="a study technique where the learner produces an answer from memory before checking it, rather than re-reading the source material - it is a stronger driver of durable learning than re-reading, especially when spaced across separated topics rather than massed on one" data-vn="giữ nguyên &quot;retrieval practice&quot; — tự nhớ lại và viết ra câu trả lời trước khi xem lại tài liệu, hiệu quả hơn hẳn việc đọc lại; càng hiệu quả khi trộn nhiều chủ đề cũ thay vì ôn 1 chủ đề liền mạch">retrieval practice</dfn> pass. This is that review — an eleventh retrieval day, covering exactly Days 68, 69, and 70, the same three-fresh-days-accumulated rhythm that triggered review day 10.</p>
+
+<div class="callout"><strong>Why today, specifically, and why not a fourth fresh day:</strong> a fresh-gap grep ran first anyway, matching every prior review day's own discipline — <code>configparser</code>, <code>sqlite3</code>, <code>uuid</code>, <code>concurrent.futures</code>/<code>threading</code>, <code>tomllib</code>, and <code>pickle</code> all remain on the table as named, confirmed-untaught candidates, with no single one standing out strongly enough today to justify a fourth fresh day in a row over paying down a three-day retrieval backlog that has existed since Day 68 landed. Days 68-70 are also a natural group: all three are "the standard library already solved a dangerous or imprecise thing by hand" lessons — safe process launching, correct summary statistics, exact decimal arithmetic — which interleaves well for retrieval the same way Day 67's archive/cleanup/CSV trio did.</div>
+
+<h2>1 · Three questions, in the original teaching order</h2>
+<p>Answer each out loud or on paper <em>before</em> reading the fold-out answer. If one is shaky, note it and go fix it in the practice file below rather than only rereading the old lesson.</p>
+
+<p><strong>Day 68 — <code>subprocess</code>.</strong> Why is passing a list of arguments to <code>subprocess.run()</code> safer than building one string and passing <code>shell=True</code>, and what does <code>check=True</code> actually change?</p>
+<div class="callout">Fold-out answer: the list form passes each element to the program as exactly one argument, with no shell involved to reinterpret spaces, quotes, or special characters like <code>;</code>. <code>shell=True</code> hands a raw string to the system shell to parse instead, so untrusted input containing shell metacharacters can inject extra commands. <code>check=True</code> changes <code>subprocess.run()</code> from silently returning a result on a nonzero exit code (leaving the caller to remember to check <code>returncode</code> by hand) to raising <code>CalledProcessError</code> automatically whenever the command fails.</div>
+
+<p><strong>Day 69 — <code>statistics</code>.</strong> Why can <code>mean()</code> and <code>median()</code> disagree sharply on the same list, and what is the specific bug risk in hand-rolling a <code>median()</code> instead of calling <code>statistics.median()</code>?</p>
+<div class="callout">Fold-out answer: <code>mean()</code> sums every value and divides by the count, so one extreme outlier drags it far from where most of the data sits. <code>median()</code> sorts first and takes the middle, so that same outlier barely moves it. A hand-rolled <code>median()</code> commonly gets the even-length case wrong — picking one of the two middle values instead of averaging them — the exact off-by-one the standard library has already gotten right so no one has to re-solve it per pipeline.</div>
+
+<p><strong>Day 70 — <code>decimal</code>.</strong> Why does <code>0.1 + 0.2 == 0.3</code> evaluate to <code>False</code> in plain Python, and why doesn't wrapping a float literal in <code>Decimal()</code> fix that?</p>
+<div class="callout">Fold-out answer: <code>float</code> stores numbers in base 2, and most decimal fractions — including 0.1, 0.2, and 0.3 — have no exact, finite binary representation, so each is stored as the closest approximation; adding two approximations produces a result that is extremely close to, but not exactly, 0.3. <code>Decimal(0.1)</code> doesn't fix this because the float literal has already lost precision the moment Python parsed it — <code>Decimal</code> just displays that already-imprecise binary value in full exact digits. The fix is constructing <code>Decimal</code> from a string (or int), never from a float, so no float step ever gets a chance to lose precision first.</div>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> nothing pandas-specific today — this review only revisits Days 68, 69, and 70's plain-Python process-launching, summary-statistics, and exact-arithmetic material, none of which needs a <code>DataFrame</code> to demonstrate.</div>
+
+<h2>2 · Why these three, and why no new terms today</h2>
+<p>Same interleaving logic as every prior review day: a process-safety rule, then a statistics-method mismatch, then a number-representation gotcha — three different mental models, not three variations on one. They also share a throughline worth naming out loud: each lesson is a case of "the obvious hand-written version looks fine until a specific input breaks it" — a shell-interpreted string that accepts injected commands, a sort-then-index median that mishandles even-length lists, and a float sum that drifts by fractions of a cent until it's printed. Recognizing "where does the obvious approach quietly break, and what already-tested tool avoids that" is the retrieval goal today, more than recalling exact function names alone.</p>
+<p>No new jargon is introduced today on purpose — every term revisited already has a glossary entry under its original day. With today's three done, the backlog this round's note was tracking (Days 68-70) is cleared; <code>configparser</code>, <code>sqlite3</code>, <code>uuid</code>, <code>concurrent.futures</code>/<code>threading</code>, <code>tomllib</code>, and <code>pickle</code> all remain the named fresh-gap candidates still open whenever a fresh day is chosen next.</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/71_review_retrieval_day_11.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/71_review_retrieval_day_11.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. No new syntax: every mechanism below was taught in Days 68, 69, and 70. Exercises: running a command as an argument list and checking <code>returncode</code> by hand versus letting <code>check=True</code> raise on failure, computing <code>mean()</code>/<code>median()</code> on a list with an outlier and confirming they disagree, and summing a list of price strings exactly with <code>Decimal</code> where a plain <code>float</code> sum drifts.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="The list form passes each argument to the program exactly as one element, with no shell involved to reinterpret spaces, quotes, or special characters such as a semicolon. shell=True instead hands a raw string to the system shell to parse, so shell metacharacters hidden in untrusted input can inject and run extra commands.">
+    <p class="stem">Why is a list of arguments to <code>subprocess.run()</code> safer than a built string with <code>shell=True</code>?</p>
+    <button class="opt" data-ok>no shell parses the arguments, so injected commands are avoided entirely</button>
+    <button class="opt">a list argument form always simply executes noticeably much faster overall</button>
+    <button class="opt">shell=True never actually accepts more than just one single short argument</button>
+  </div>
+  <div class="q" data-why="subprocess.run() never raises on a nonzero exit code by default -- it just returns a result object and leaves checking returncode up to the caller, who can easily forget that step. check=True changes that by raising CalledProcessError automatically whenever the command's exit code comes back nonzero.">
+    <p class="stem">What does passing <code>check=True</code> change about <code>subprocess.run()</code>'s behavior?</p>
+    <button class="opt" data-ok>a nonzero exit code now raises CalledProcessError instead of returning quietly</button>
+    <button class="opt">the external command now always simply runs noticeably faster than before</button>
+    <button class="opt">captured output now always gets fully returned as raw bytes always</button>
+  </div>
+  <div class="q" data-why="mean() sums every value and divides by the count, so one very large or very small outlier pulls the result far from where most of the data actually sits. median() sorts the data first and takes the middle value, so that same single extreme outlier barely moves it at all.">
+    <p class="stem">Why can <code>statistics.mean()</code> and <code>median()</code> disagree sharply on the same list?</p>
+    <button class="opt" data-ok>mean is pulled hard by outliers; the sorted-middle median mostly ignores them</button>
+    <button class="opt">median always simply equals the mean rounded to the nearest whole integer</button>
+    <button class="opt">mean only ever works correctly on lists that contain no repeated values</button>
+  </div>
+  <div class="q" data-why="A float literal like 0.1 has already lost precision the moment Python parsed the source code, long before Decimal() ever receives it -- Decimal(0.1) just displays that already-imprecise binary value in full exact digits rather than fixing anything. Building Decimal from a string instead avoids any float step that could lose precision first.">
+    <p class="stem">Why doesn't wrapping a float literal in <code>Decimal(0.1)</code> give an exact <code>0.1</code>?</p>
+    <button class="opt" data-ok>the float literal already lost precision before Decimal ever received it</button>
+    <button class="opt">Decimal always displays every single number with extra trailing zero digits</button>
+    <button class="opt">0.1 is actually a reserved keyword and therefore cannot be stored</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> no single new source today — revisit each lesson's own citation (<a href="https://docs.python.org/3/library/subprocess.html"><code>subprocess</code></a> for Day 68, <a href="https://docs.python.org/3/library/statistics.html"><code>statistics</code></a> for Day 69, and <a href="https://docs.python.org/3/library/decimal.html"><code>decimal</code></a> for Day 70), all already listed in <code>RESOURCES.md</code>.</p>
+
+<p class="next">No new terms today — this is a review day, and every term revisited already has a glossary entry under its original day (<a href="../reference/glossary.html#day68">68</a>, <a href="../reference/glossary.html#day69">69</a>, <a href="../reference/glossary.html#day70">70</a>).<br>
+💬 Anything unclear across any of today's three? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

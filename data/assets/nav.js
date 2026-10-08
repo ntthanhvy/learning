@@ -186,6 +186,8 @@
       file: "lessons/0089-assert-frame-equal.html" },
     { n: 90, date: "2026-10-07", title: ".T / transpose(): flipping rows and columns, and the dtype trap",
       file: "lessons/0090-transpose.html" },
+    { n: 91, date: "2026-10-08", title: "idxmax(axis=1) / idxmin(axis=1): which COLUMN, not which row",
+      file: "lessons/0091-idxmax-axis1.html" },
   ];
 
   const REFS = [

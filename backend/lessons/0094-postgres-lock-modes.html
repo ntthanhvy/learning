@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 94 · Lock modes: why ALTER TABLE blocks reads that FOR UPDATE never touches</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 94 · ~20 min</p>
+<h1>Lock modes: why ALTER TABLE blocks reads that FOR UPDATE never touches</h1>
+<p class="byline">Lesson 6's <code>SELECT ... FOR UPDATE</code> blocks other writers but never blocks a plain read. Lesson 19 said a plain <code>CREATE INDEX</code> blocks writes for the whole build — and never mentioned that some DDL blocks reads too. Both lessons used the word "lock" as if there were only one kind. There isn't: Postgres has eight table-level lock strengths, and which one a statement takes decides exactly who it blocks.</p>
+
+<h2>1 · The same word, two very different blast radiuses</h2>
+<p>Lesson 40's funds transfer took a row lock with <code>SELECT ... FOR UPDATE</code> on two specific rows. While that lock is held, another transaction trying to <code>UPDATE</code> or <code>FOR UPDATE</code> those same two rows waits — but a plain <code>SELECT * FROM accounts</code> from a totally unrelated request sails straight through, unaffected. Now compare a routine deploy running this migration against the same table, live, in production:</p>
+<pre><code>ALTER TABLE accounts ADD COLUMN risk_score INT;</code></pre>
+<p>This one statement blocks every <code>SELECT</code> against <code>accounts</code>, anywhere in the app, for as long as it runs. Both statements "take a lock." One lets reads through; the other stops them cold. The difference isn't a bug in either lesson — it's that Postgres's locks come in a <dfn data-en="one of several distinct named lock strengths a statement can take on a table, each permitting or blocking a different set of other statements running at the same time -- not a single on/off 'locked' state" data-vn="lock mode (giữ nguyên) — 1 trong nhiều mức khóa khác nhau mà 1 câu lệnh có thể lấy trên table, mỗi mức cho/chặn 1 nhóm câu lệnh khác đang chạy song song -- không phải kiểu khóa/không khóa đơn giản">lock mode</dfn>, each naming a different set of other modes it conflicts with.</p>
+
+<h2>2 · Four modes that cover almost everything you'll actually hit</h2>
+<p>Postgres defines eight table-level lock modes; four of them explain nearly every lock question that comes up in ordinary backend work:</p>
+<div class="cmp-wrap">
+<table class="cmp">
+<thead><tr><th>Mode</th><th>Taken by</th><th>Blocks</th></tr></thead>
+<tbody>
+<tr><th>ACCESS SHARE</th><td>a plain <code>SELECT</code></td><td>only conflicts with ACCESS EXCLUSIVE — the weakest mode there is</td></tr>
+<tr><th>ROW EXCLUSIVE</th><td><code>UPDATE</code>, <code>DELETE</code>, <code>INSERT</code></td><td>other writers on the same rows — never blocks a plain <code>SELECT</code></td></tr>
+<tr><th>SHARE UPDATE EXCLUSIVE</th><td><code>VACUUM</code>, <code>CREATE INDEX CONCURRENTLY</code></td><td>other schema changes and itself — still lets reads <em>and</em> writes through</td></tr>
+<tr><th>ACCESS EXCLUSIVE</th><td>plain <code>CREATE INDEX</code>, most <code>ALTER TABLE</code>, <code>DROP TABLE</code>, <code>TRUNCATE</code></td><td>everything — the only mode that blocks even a plain <code>SELECT</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>Read that table as a strength ordering. <code>ACCESS SHARE</code> is so weak it only conflicts with the single strongest mode. <code>ROW EXCLUSIVE</code> — what every ordinary write takes — conflicts with other writers but still leaves every reader alone, which is exactly why Lesson 6's row lock never stops an unrelated <code>SELECT</code>. <code>ACCESS EXCLUSIVE</code> sits at the opposite end: it conflicts with literally every other mode, including <code>ACCESS SHARE</code>, which is the specific fact that makes a live <code>ALTER TABLE</code> freeze reads, not just writes.</p>
+<div class="callout"><strong>Frontend-habit trap:</strong> "locked" sounds like one binary state — like a mutex, held or not. A Postgres table-level lock is a <em>mode</em>, not a boolean; the real question is never "is it locked" but "which mode, and does that mode conflict with what I'm trying to do." A row already under <code>ROW EXCLUSIVE</code> from an <code>UPDATE</code> is completely unlocked from a reader's point of view.</div>
+
+<h2>3 · Lesson 19's CONCURRENTLY, now with the actual mechanism</h2>
+<p>Lesson 19 said a plain <code>CREATE INDEX</code> blocks writes for the whole build, and <code>CREATE INDEX CONCURRENTLY</code> avoids that at the cost of a slower, retry-on-failure build. The lock table says exactly why: plain <code>CREATE INDEX</code> takes <code>SHARE</code>, which conflicts with <code>ROW EXCLUSIVE</code> — so every <code>INSERT</code>/<code>UPDATE</code>/<code>DELETE</code> queues up until the index finishes. <code>CREATE INDEX CONCURRENTLY</code> takes the weaker <code>SHARE UPDATE EXCLUSIVE</code> instead, which does <em>not</em> conflict with <code>ROW EXCLUSIVE</code> — writes keep flowing the entire time. Neither form ever takes <code>ACCESS EXCLUSIVE</code>, so reads were never blocked by either one; the trade Lesson 19 described was always about writes specifically, and the lock table is the reason.</p>
+<p>The same lock table also explains the Lesson 19 symptom from the other direction: a plain <code>ALTER TABLE ADD COLUMN</code> takes <code>ACCESS EXCLUSIVE</code> by default — the PostgreSQL Manual states it directly: an <code>ACCESS EXCLUSIVE</code> lock is acquired for an <code>ALTER TABLE</code> statement "unless explicitly noted" otherwise for that specific subform. That's a stronger lock than <code>CREATE INDEX</code> ever takes, which is why adding a column to a live, high-traffic table is the riskier of the two operations — it stops reads, not just writes, for however long the statement takes.</p>
+
+<h2>4 · Checking it from Go before you ship a migration</h2>
+<p>A migration tool can't tell you which lock mode a statement will take, but Postgres can — <code>pg_locks</code> joined against <code>pg_stat_activity</code> shows exactly what mode is currently held or being waited for, which is the first thing to check when a deploy seems to be hanging:</p>
+<pre><code><span class="cm">// lockWaiters reports any session currently waiting to acquire a lock,
+// along with the mode it wants and the query that's blocking it -- the
+// first query to run when a migration or a deploy seems to be stuck.</span>
+<span class="kw">func</span> lockWaiters(ctx context.Context, db *sql.DB) ([]LockWait, error) {
+    rows, err := db.QueryContext(ctx, <span class="st">`
+        SELECT blocked.pid, blocked.mode, blocking.query
+        FROM pg_locks blocked
+        JOIN pg_locks blocking
+          ON blocking.locktype = blocked.locktype
+         AND blocking.relation = blocked.relation
+         AND blocking.granted
+        JOIN pg_stat_activity ON pg_stat_activity.pid = blocking.pid
+        WHERE NOT blocked.granted`</span>)
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        <span class="kw">return</span> <span class="kw">nil</span>, fmt.Errorf(<span class="st">"query lock waiters: %w"</span>, err)
+    }
+    <span class="kw">defer</span> rows.Close()
+
+    <span class="kw">var</span> waits []LockWait
+    <span class="kw">for</span> rows.Next() {
+        <span class="kw">var</span> w LockWait
+        <span class="kw">if</span> err := rows.Scan(&amp;w.PID, &amp;w.Mode, &amp;w.BlockingQuery); err != <span class="kw">nil</span> {
+            <span class="kw">return</span> <span class="kw">nil</span>, fmt.Errorf(<span class="st">"scan lock wait: %w"</span>, err)
+        }
+        waits = append(waits, w)
+    }
+    <span class="kw">return</span> waits, rows.Err()
+}
+
+<span class="kw">type</span> LockWait <span class="kw">struct</span> {
+    PID           <span class="ty">int</span>
+    Mode          <span class="ty">string</span>
+    BlockingQuery <span class="ty">string</span>
+}</code></pre>
+<p>A waiting <code>Mode</code> of <code>AccessExclusiveLock</code> blocked behind an ordinary-looking <code>SELECT</code> is the signature of exactly today's trap: some earlier statement — an in-progress <code>ALTER TABLE</code>, or a transaction that opened one and never committed — is holding <code>ACCESS EXCLUSIVE</code>, and every read in the app is now queued behind it, not just the writes.</p>
+
+<div class="interview">
+<p><strong>Q: "A routine ALTER TABLE ADD COLUMN migration took down read traffic on a busy table for thirty seconds during deploy. Someone says 'but it's just adding a column, it should be instant.' What actually happened?"</strong> A strong answer, out loud: <em>"Adding a column itself is near-instant, but ALTER TABLE takes an ACCESS EXCLUSIVE lock by default, and that's the one lock mode that blocks even a plain SELECT, not just writes. If the table had any ongoing long-running query or transaction holding a weaker lock first, the ALTER had to queue up behind it, and then every read that arrived afterward queued up behind the ALTER in turn — so the thirty seconds wasn't the column add, it was every reader stacked up behind one ACCESS EXCLUSIVE lock. The fix is making sure nothing long-running touches that table around deploy time, and for add-column-with-default specifically, checking whether the Postgres version needs a full rewrite or not before assuming it's cheap."</em> The signal: naming the specific lock mode and that it blocks reads, not reaching for "the database was just slow."</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers table-level lock <em>modes</em> — the strength classification deciding which statements conflict with which. It doesn't cover row-level lock mechanics (Lesson 6's <code>FOR UPDATE</code>, Lesson 33's optimistic version columns), Postgres's deadlock detector (Lesson 40), or application-level advisory locks (Lesson 56) — all three are still correct as taught; today just names the table underneath the word "lock" that all of them were already using.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="ROW EXCLUSIVE, the mode an UPDATE/DELETE/INSERT takes, only conflicts with other writer modes -- it does not conflict with ACCESS SHARE, the mode a plain SELECT takes, so an ordinary write never blocks an unrelated read.">
+    <p class="stem">Why does an ordinary <code>UPDATE</code> never block a plain <code>SELECT</code> on an unrelated row?</p>
+    <button class="opt" data-ok>its lock mode never conflicts with a plain reader's mode</button>
+    <button class="opt">Postgres skips all table locking for any ordinary write statement</button>
+    <button class="opt">SELECT statements always get routed to a separate read replica</button>
+    <button class="opt">UPDATE commands are never permitted inside an open transaction block</button>
+  </div>
+  <div class="q" data-why="ACCESS EXCLUSIVE is the one lock mode that conflicts with every other mode, including ACCESS SHARE -- the mode a plain SELECT takes -- which is why most ALTER TABLE forms, holding ACCESS EXCLUSIVE by default, block reads and not merely writes.">
+    <p class="stem">Which lock mode is the only one that blocks a plain <code>SELECT</code>?</p>
+    <button class="opt" data-ok>ACCESS EXCLUSIVE, the mode most ALTER TABLE forms take</button>
+    <button class="opt">ROW EXCLUSIVE, the mode an ordinary UPDATE statement takes</button>
+    <button class="opt">ACCESS SHARE, the mode the SELECT statement itself takes</button>
+    <button class="opt">SHARE UPDATE EXCLUSIVE, the mode a routine VACUUM takes</button>
+  </div>
+  <div class="q" data-why="Plain CREATE INDEX takes SHARE, which conflicts with ROW EXCLUSIVE and so blocks every write for the whole build. CREATE INDEX CONCURRENTLY instead takes the weaker SHARE UPDATE EXCLUSIVE, which does not conflict with ROW EXCLUSIVE, letting writes keep flowing throughout the whole build.">
+    <p class="stem">What lock-mode difference lets <code>CREATE INDEX CONCURRENTLY</code> avoid blocking writes?</p>
+    <button class="opt" data-ok>it takes a weaker lock mode that does not conflict with writers</button>
+    <button class="opt">it skips taking any real lock on the table, start to end</button>
+    <button class="opt">it runs the entire index build inside a fully separate, idle database</button>
+    <button class="opt">it takes the exact same lock mode, only released a bit sooner</button>
+  </div>
+  <div class="q" data-why="pg_locks joined against pg_stat_activity shows which session currently holds a given lock mode and which session is waiting for it -- the direct way to see the actual mode in play, rather than guessing from symptoms alone during an incident.">
+    <p class="stem">How would you find which lock mode is actually blocking a stuck deploy, right now?</p>
+    <button class="opt" data-ok>query pg_locks joined with pg_stat_activity to find the waiters now</button>
+    <button class="opt">just restart the whole database server and hope it clears</button>
+    <button class="opt">rewrite the migration to use a completely different table, elsewhere</button>
+    <button class="opt">add a brand new index on every single column involved</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> RESOURCES.md's standing <a href="https://www.postgresql.org/docs/current/ddl.html">PostgreSQL Manual</a> citation for constraints and schema, extended today into its own <a href="https://www.postgresql.org/docs/current/explicit-locking.html">Explicit Locking</a> chapter — already the citation Lesson 40 used for the deadlock detector, read one level up today into the table-level lock mode list itself. This session's sandbox network-permission gate was open: a live <code>WebFetch</code> against that chapter's table confirmed today's claims verbatim — that a plain <code>SELECT</code> takes <code>ACCESS SHARE</code>, that "`UPDATE`, `DELETE`, `INSERT`, and `MERGE` acquire" <code>ROW EXCLUSIVE</code>, that plain <code>CREATE INDEX</code> takes <code>SHARE</code> while <code>CREATE INDEX CONCURRENTLY</code> takes the weaker <code>SHARE UPDATE EXCLUSIVE</code>, and that "only an `ACCESS EXCLUSIVE` lock blocks a `SELECT` (without `FOR UPDATE`/`SHARE`) statement" — and a second fetch against the <a href="https://www.postgresql.org/docs/current/sql-altertable.html"><code>ALTER TABLE</code> reference page</a> confirmed "an `ACCESS EXCLUSIVE` lock is acquired unless explicitly noted" for its subforms.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially. Nếu chỗ nào chưa rõ, cứ hỏi lại bằng tiếng Việt cũng được.<br><br>
+<em>Next lesson:</em> open. Still no <code>lesson_completed</code>/quiz-outcome record exists for any lesson after 94 rounds — the honest next step remains a completion signal or a user-named track.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

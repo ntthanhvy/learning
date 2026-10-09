@@ -8093,3 +8093,101 @@
   0091-idxmax-axis1.html --detail '{"by":"headless"}'` was run from the
   repo root; see the tool-call result immediately following this entry's
   authoring for the exact recorded/blocked outcome.
+- 2026-10-09 generation (Lesson 92): headless run, zero prior context.
+  Confirmed via `date` (Fri Oct 9 2026), then read MISSION.md and
+  RESOURCES.md in full (neither modified), the tail of NOTES.md (this log,
+  Lessons 90-91's entries), the full `learning-records/` baseline note, and
+  `assets/nav.js` in full for the registration format. Idempotency was
+  pre-confirmed by the orchestrator (course_progress shows lesson_generated
+  day=91 recorded 2026-10-08, nothing yet for day=92) and independently
+  re-checked: no `0092-*` file existed in `data/lessons/` and no `n: 92`
+  entry existed in `nav.js` before this round started. Lesson 91's own
+  teaser named two standing candidates, neither promoted to THE next pick:
+  `pd.merge(how="cross")` (zero hits, classic cartesian-join interview ask)
+  and `np.argmax()`/`np.argmin()` as a possible standalone lesson (already
+  given a secondary mention inside Lesson 91 itself). Independently
+  re-confirmed both before choosing: grepped `cross` case-insensitively
+  across every lesson body — four lessons (5, 21, 29, 58) mention "cross"
+  only in passing (concat axis cross-references, an `isin()` aside, a
+  merge_asof note), none teach `how="cross"` itself; grepped the glossary
+  for `cross join|how=.cross|cartesian`, the only hit was `explode()`'s own
+  SQL-cousin note mentioning `CROSS JOIN LATERAL unnest()` in passing, not
+  an actual cross-join row. `np.argmax()` by contrast already has real
+  (if secondary) coverage in Lesson 91 Section 4, making it the weaker
+  gap of the two. Picked `pd.merge(how="cross")`: a genuine zero-coverage,
+  high-frequency interview topic (generating a combination scaffold before
+  joining real data onto it) with a sharp, teachable gotcha (row count
+  multiplies, not adds) distinct from every `how=` value Lesson 5 already
+  covered. Every behavioral claim was probed directly first in
+  `data/.scratch-0092/` (deleted after), on the actually-installed pandas
+  3.0.6 (confirmed via `uv run --with pandas python3 -c "import pandas as
+  pd; print(pd.__version__)"` inside the probe script): confirmed
+  `pd.merge(left, right, how="cross")` on a 3-row and a 2-row frame
+  produces exactly 6 rows, the full cartesian product, in the same order
+  `itertools.product()` would generate it; confirmed passing `on=`
+  alongside `how="cross"` raises `MergeError: Can not pass on, right_on,
+  left_on or set right_index=True or left_index=True` immediately, not a
+  silent ignore; confirmed overlapping column names across the two frames
+  still resolve with the ordinary default `suffixes=("_x", "_y")` from
+  Lesson 5; confirmed the row-count-multiplication trap directly at scale —
+  two 1,000-row frames crossed into exactly 1,000,000 rows, not 2,000;
+  confirmed per-column dtypes survive a cross join unchanged (an `Int64`
+  column stayed `Int64`, a string column stayed `str`); confirmed crossing
+  an empty frame against a non-empty one yields 0 rows with both frames'
+  columns present. Cross-checked the official pandas docs via `WebFetch`:
+  fetched the "Merge, join, concatenate and compare" user guide page, which
+  named `cross` as the direct `CROSS JOIN` equivalent ("create the
+  cartesian product of rows of both frames") and showed a worked multi-
+  column example matching the directly-probed semantics — cited as a
+  freshly-verified primary source; noted the docs page itself doesn't
+  explicitly state the `on=`/`MergeError` restriction, which the direct
+  probing confirmed independently, going further than the cited page. The
+  shipped (unsolved) `practice/92_merge_cross.py` was executed directly
+  from its real `practice/` location and printed exactly 3 ✗ with no raw
+  traceback. Built a solved copy in `.scratch-0092/`, filling in all three
+  blanks correctly (all three checks already used `bool(...)`-wrapped
+  comparisons at the point of assignment from the start, per Lessons 90/91's
+  now-standing practice of avoiding the `numpy.bool_`/`is True` identity-
+  check trap preemptively rather than catching it after the fact this
+  round); it printed all 3 ✓ and "All green" on the first run. The shipped
+  file was re-run once more directly from `practice/` after building the
+  solved copy and reproduced the identical all-✗ result, confirming the
+  solved copy's edits didn't leak back into the shipped baseline. Quiz
+  options were drafted, then mechanically word-counted with a scratch
+  Python script (`uv run python3`, deleted after) isolating each
+  `<div class="q">` block by regex span — the first draft came out 8/9/8,
+  8/9/9, 7/7/10; one option in Q3 was rephrased twice (from "capped at the
+  larger of the two inputs" through "capped at the bigger input, same as a
+  join" down to "capped at the bigger input") until all three questions
+  landed level (8/9/8, 8/9/9, 7/7/7 option words), one `data-ok` per
+  question throughout. A separate mechanical tag-balance script confirmed
+  all tags balanced (h1 1/1, h2 6/6, p 17/17, div 5/5, pre 4/4, code 44/44,
+  span 18/18, strong 3/3, em 4/4, a 2/2, button 9/9, dfn 1/1, script 3/3)
+  and found exactly two raw `&` characters, both inside the one established
+  `cd ~/learning/data && uv run ...` shell command, matching every prior
+  lesson's pattern, zero raw `&` in prose; also confirmed the one new
+  `<dfn>` tag carries both `data-en` and `data-vn`. Checked the glossary
+  for a collision before adding anything — grepped `cross join|how=.cross|
+  cartesian` case-insensitively across the full glossary, found zero
+  existing rows (only `explode()`'s unrelated SQL-cousin mention) — added
+  exactly one new row, "cross join (how=\"cross\")", directly after Lesson
+  91's "idxmax(axis=1) / idxmin(axis=1)" entry; re-ran the tag-balance
+  script against the glossary file afterward, confirmed it stayed balanced
+  (tr 163/163, td 486/486, th 3/3, table 1/1, code 1068/1068, em 5/5, a
+  1/1, p 3/3) with zero raw `&` introduced. Registered Lesson 92 in
+  `nav.js` with today's date (2026-10-09); `node --check` confirmed it
+  still parses as valid JavaScript after the edit, and exactly one `n: 92`
+  entry plus one `0092-merge-how-cross` file reference were confirmed to
+  exist. This round closed a fresh, high-frequency gap with no standing
+  lineage to a prior lesson's explicit promise (unlike Lessons 20→91's
+  idxmax deferral) — the one candidate not used today, `np.argmax()`/
+  `np.argmin()` as its own standalone lesson, carries forward as an open
+  option but is not named as THE next pick; tomorrow should still run its
+  own fresh curriculum/glossary scan. No new `data/learning-records/`
+  entry was added this round — routine lesson, no new baseline finding to
+  justify one. The `.scratch-0092/` directory was deleted after
+  verification, per this course's standing practice of not leaving scratch
+  artifacts committed. `bin/record-progress data lesson_generated --day 92
+  --lesson 0092-merge-how-cross.html --detail '{"by":"headless"}'` was run
+  from the repo root; it recorded successfully (`recorded:
+  data/lesson_generated day=92 lesson=0092-merge-how-cross.html`).

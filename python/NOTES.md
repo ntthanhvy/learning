@@ -9071,3 +9071,155 @@ fail *gracefully* so the learner sees which task failed.
   toward a fresh topic from that list unless its own scan turns up a
   stronger candidate, since the review cycle just completed and no new
   backlog has had time to accumulate.
+- 2026-10-09 — **Day 72 generated: `pickle` — serializing Python objects**
+  (headless run). Ran `date` (confirmed 2026-10-09, Fri). Read `MISSION.md`
+  (untouched, read-only) and `PLAN.md` in full to reconfirm the Phase-2
+  spine and the no-pandas/no-NumPy scope rule, the tail of `NOTES.md`
+  (through Day 71's full entry) for the exact next-day note and
+  narrative-log convention, `RESOURCES.md` in full, and `learning-records/`
+  (still only the Day 1 baseline). Per the orchestrator's brief, the DB had
+  already been checked moments before this run started — latest row
+  `lesson_generated day=71` recorded 2026-10-08, nothing yet for day 72, no
+  completion/quiz/kata signal more recent than mid-July — so this round
+  deferred to that pre-run confirmation plus its own on-disk idempotency
+  check rather than re-querying directly. Idempotency: listed
+  `lessons/0072-*` (none existed) and grepped `assets/nav.js` for `n: 72`
+  (no hit) before writing anything. Listed `lessons/` (highest existing:
+  0071) to confirm the spine covered so far.
+  Decision process: Day 71's next-day note put six named, confirmed-
+  untaught candidates on the table — `configparser`, `sqlite3`, `uuid`,
+  `concurrent.futures`/`threading`, `tomllib`, `pickle` — and said Day 72
+  should default toward one of them since the Days 68-70 review cycle had
+  just closed with no new backlog yet. Before picking, re-ran the
+  fresh-gap grep across all 71 lessons and every practice file for each of
+  the six names, rather than trusting the list at face value — this caught
+  a real correction: `sqlite3` is not actually untaught, it's the whole
+  vehicle Day 21 uses to teach PostgreSQL DB-API concepts against a
+  throwaway in-memory database (`sqlite3.connect(":memory:")`, parameterized
+  `execute()`, `fetchall()`), and `tomllib` is not untaught either — Day 10
+  parses a `pyproject.toml`-shaped file with it directly, exercises and all.
+  Both had been carried forward as "candidates" on five straight next-day
+  notes (Days 68-71) without anyone re-checking whether they were already
+  covered; this round's grep caught it by reading the actual matching lines
+  instead of just counting hits. That leaves `configparser` (narrow, reads
+  one config format `pathlib`/plain `dict`s already cover — set aside every
+  round since Day 58), `uuid` (named in Day 70's note as "too thin alone
+  for a full lesson"), and `concurrent.futures`/`threading` (closer to
+  `MISSION.md`'s explicit concurrency-internals boundary than to data/
+  backend work) as the only genuinely open, genuinely untaught candidates.
+  Chose `pickle` anyway, as a fresh pick beyond the narrowed list, because
+  it closes a concrete, long-standing gap none of the three narrowed
+  candidates do: Day 6 taught `json` for structured I/O and Day 7's own
+  capstone builds a `dataclass` record every day since, but nothing has
+  ever shown how to save a `dataclass` instance (or a `set`, or any custom
+  object) to disk and load it back — `json.dumps()` raises `TypeError` on
+  exactly that object. `pickle` is squarely stdlib/language material (not
+  pandas — pandas' own `.to_pickle()`/`read_pickle()` sit on top of this
+  same module, named once in the closing boundary callout and nowhere
+  else) and comes with a genuinely important safety lesson (never unpickle
+  untrusted data, since reconstructing an object can execute arbitrary
+  code) that has no analog anywhere earlier in the course.
+  Read Day 70's full lesson and practice file as the direct structural
+  template (byline contrast sentence, "Why today" callout, SQL bridge,
+  pandas boundary callout, quiz shape) plus Day 6's `json` section to
+  source the exact contrast ("`json` can't hold a `dataclass`") accurately
+  to how Day 6 originally taught it.
+  Lesson covers, in order: the concrete gap (`json.dumps()` raising
+  `TypeError` on a `dataclass` instance Day 7's capstone builds daily),
+  `pickle.dumps()`/`loads()` round-tripping that exact object with no
+  hand-conversion, `dump()`/`load()` against an already-open binary file
+  and the `"wb"`/`"rb"` mode requirement (contrasted with Day 6's text-mode
+  `"w"`/`"r"`), and the untrusted-data code-execution risk with the
+  standard library's own documentation cited as the source of the warning.
+  Bridged from SQL: framed as the same choice as storing an opaque blob in
+  a `BYTEA`/`BLOB` column instead of normalized fields. Closing "Where
+  pandas goes from here" callout names `DataFrame.to_pickle()`/
+  `pd.read_pickle()` as built on this same module, without demonstrating
+  either.
+  **New jargon: 2 terms** (`pickle`, "pickle security risk"), each with a
+  `<dfn data-en`/`data-vn` tag. Checked `reference/glossary.html`
+  case-insensitively for `pickle` first — the only hit was Day 71's own
+  candidate-list mention in prose, not a prior `<dfn>` entry — confirming
+  no collision, before appending a new `id="day72"` section directly
+  before the closing `<p class="next">` footer, matching Day 70's own
+  convention (Day 71 was a review day and added no glossary section, so
+  Day 70's is the most recent precedent).
+  No-pandas rule: grepped case-insensitively for `pandas`/`numpy`/`pd\.`/
+  `np\.` in both the lesson and practice file — exactly one hit in the
+  lesson (the single "Where pandas goes from here" boundary callout naming
+  `DataFrame.to_pickle()`/`pd.read_pickle()` without demonstrating either)
+  and zero hits in the practice file — compliant with the one-contrast-
+  sentence allowance, zero pandas/NumPy code actually run anywhere.
+  Practice file `practice/72_pickle_serializing_python_objects.py` (4
+  checks, stdlib-only, no `--with` flag, function-stub-with-TODO-comment
+  style matching Day 70's): round-tripping a `dataclass` instance through
+  `pickle.dumps()`/`loads()` that `json` cannot serialize directly, writing
+  then reading back a list of such objects through a binary file opened
+  with `"wb"`/`"rb"` via `dump()`/`load()`, confirming a restored object is
+  `==` to the original but not the same object (`is` is `False`), and a
+  short free-text exercise asking for an explanation of the untrusted-data
+  risk, checked by substring match on "pickl"/"code" rather than exact
+  wording.
+  Verified in a scratch `.scratch-0072/` directory created directly under
+  the repo root (`/tmp` remains unavailable to this sandbox for file
+  persistence across tool calls, consistent with every prior round's
+  note): the shipped (unsolved) copy printed four clean ✗ lines with no
+  traceback; a separately written, fully solved copy (via `Edit` on a
+  `cp`-duplicated scratch copy, not by editing the shipped file in place)
+  printed all four ✓ and the "All green" tally, run twice consecutively
+  with identical results both times. Also ran the shipped file directly
+  from its real `python/practice/` path as a final check, confirming the
+  same four clean ✗ lines outside the scratch copy too. Scratch directory
+  deleted before finishing — confirmed by a listing showing no
+  `.scratch-0072` remaining.
+  HTML tag balance and a raw-unescaped-`&` regex
+  (`&(?!amp;|lt;|gt;|quot;|#39;|apos;|#\d+;)`) were checked against both
+  the lesson file and the full (now-modified) glossary with a throwaway
+  stdlib `html.parser.HTMLParser`-based stack checker (written to `/tmp`
+  since it never touches the repo, left there rather than deleted since
+  this sandbox blocks removing files outside the allowed working
+  directory) — clean on both files, zero unescaped `&`, no unclosed or
+  mismatched tags.
+  Quiz: 4 questions, one per section (why `json.dumps()` fails on a
+  `dataclass`, why `pickle` succeeds where `json` can't, why the file mode
+  must be `"wb"`/`"rb"` not `"w"`/`"r"`, why unpickling untrusted data is
+  dangerous). Word counts were checked with a Node.js regex-based script
+  matching this course's established practice; first draft mismatched on
+  two of the four questions (Q1 12/10/12, Q3 11/11/12) — one-word edits
+  (lengthening a trimmed wrong option back out, matching a target word
+  count rather than guessing) landed all four at equal counts: 12/12/12,
+  10/10/10, 11/11/11, 10/10/10, confirmed by a `data-ok` count of exactly 4
+  matching the four-question count.
+  `RESOURCES.md`: added a new `pickle` docs line, placed directly after
+  the Day 70 `decimal` line per the file's day-ordered citation convention.
+  Registered in `assets/nav.js` with `date: "2026-10-09"` right after the
+  `n: 71` entry; confirmed `node --check assets/nav.js` reports no syntax
+  errors after the edit.
+  **DB access:** per the orchestrator's brief, the DB had already been
+  checked moments before this run started — latest row `lesson_generated
+  day=71` with nothing for day 72, no completion/quiz/kata signal more
+  recent than mid-July — so this round deferred to that pre-run
+  confirmation rather than re-querying directly; `bin/record-progress
+  python lesson_generated --day 72 --lesson
+  0072-pickle-serializing-python-objects.html --detail '{"by":"headless"}'`
+  ran successfully from the repo root on the first attempt.
+  `python/learning-records/` still holds only the Day 1 baseline — nothing
+  this round (catching two stale candidates on the standing list) rises to
+  a durable learner-profile finding distinct from what's already recorded.
+  Final `git status --short -- python/` is expected to show exactly five
+  paths changed (`assets/nav.js`, `RESOURCES.md`, `reference/glossary.html`,
+  plus the new lesson and practice file, plus this `NOTES.md` entry) — no
+  other course's files touched, and no leftover scratch files or
+  directories under the repo (the one throwaway checker script left under
+  `/tmp` is outside the repo and does not appear in `git status`).
+  **Next-day note:** `configparser`, `uuid`, and `concurrent.futures`/
+  `threading` are the only candidates still genuinely open and untaught —
+  `sqlite3` and `tomllib` should be struck from the candidate list for good
+  from here on, since both are already taught (Days 21 and 10
+  respectively) and only stayed on the list due to five rounds of
+  unchecked carry-forward. No review backlog exists yet — Day 72 itself
+  has not been retrieved, and neither has Day 71. Day 73 should weigh
+  starting a review cycle covering Days 71-72 (just two lessons, thinner
+  than the usual three-lesson trigger) against waiting for one more fresh
+  day first, or picking a fresh topic from the three remaining open
+  candidates.

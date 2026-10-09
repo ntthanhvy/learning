@@ -7348,4 +7348,110 @@
   certainty for the round after this one — same standing note as every
   prior round; a completion/quiz-outcome signal or a user-named track should
   take priority over guessing blind again.
+- **2026-10-09 generation (Lesson 95, headless run):** Confirmed the actual
+  date first with `date` (2026-10-09). Idempotency check next:
+  `ls lessons/ | grep -c "^0095-"` and `grep -c "n: 95" assets/nav.js` both
+  returned 0 before writing anything, matching the orchestrator's own DB
+  check that no `lesson_generated`/quiz/kata signal exists for backend more
+  recent than mid-July. The two `backend/learning-records/` files are still
+  just the two original baseline findings (frontend-mindset gap,
+  concurrency-vocabulary gap), neither naming a fresh gap, and Lesson 94's
+  own closing line again left no named next topic, so this round ran a
+  fresh gap search per NOTES.md's standing instruction rather than guessing
+  blind. Swept a wide set of candidates against every lesson's filename and
+  content: statement timeout/idle-in-transaction (already Lesson 61),
+  connection pooling/PgBouncer (Lessons 18 and 79), prepared statements
+  (Lesson 17), N+1 (Lesson 36), keyset/cursor pagination (Lesson 15),
+  optimistic/pessimistic locking (Lessons 6 and 33), upsert/ON CONFLICT
+  (Lesson 35), graceful shutdown/health checks/circuit breakers/backpressure
+  (Lessons 11, 27, 28, 47, 50), feature flags (Lesson 70), MVCC/serializable/
+  phantom reads (Lessons 37 and 39) — all already taught, confirmed via
+  case-insensitive grep across `lessons/*.html` and `reference/glossary.html`
+  before moving to the next candidate. The clean gap found instead:
+  `grep -rli "SKIP LOCKED\|skip locked"` across every lesson and the
+  glossary returned zero hits, and `NOWAIT` (case-sensitive, to avoid
+  matching unrelated prose) returned only one hit, inside Lesson 61's title
+  comparison table, never explained there either. Lesson 10's background-
+  jobs worker calls an entirely opaque `dequeueJob(ctx)` — "claim one pending
+  row" — with no mechanism shown; Lesson 6 teaches `SELECT ... FOR UPDATE`
+  as blocking the second transaction, full stop; Lesson 94 (yesterday) named
+  four table-level lock modes but stayed row-lock-agnostic about what happens
+  when many sessions all want different rows from the same table at once.
+  Confirmed via direct re-reads of Lessons 6, 10, and 94 in full that none of
+  the three ever names a way for concurrent row-lock attempts to avoid
+  blocking each other on *different* candidate rows. Squarely a Postgres
+  row-locking-mechanics topic — in scope, a direct extension of Lessons 6,
+  10, and 94 rather than a disconnected topic, and a natural "finally show
+  the mechanism" callback the way Lesson 92 did for Lesson 6's all-or-nothing
+  claim. Lesson 95 covers: the concrete waste (two workers running the
+  identical `SELECT ... FOR UPDATE LIMIT 1` against a queue table — the
+  second one blocks on the first's row for no good reason, since a hundred
+  other pending rows sit available); `FOR UPDATE SKIP LOCKED` as the fix,
+  with a plain-SQL worked example contrasted directly against the blocking
+  version; a three-column comparison table (plain `FOR UPDATE` / `FOR UPDATE
+  NOWAIT` / `FOR UPDATE SKIP LOCKED`) covering what each does when a targeted
+  row is already locked and what shape of caller each fits; and a closing Go
+  `pgxpool` `dequeueJob` function that is explicitly Lesson 10's own
+  previously-opaque `dequeueJob(ctx)` shown for real, run concurrently by
+  multiple workers with no contention between them. A "Scope line" section
+  distinguishes this from Lesson 56's advisory locks (no row at all, a
+  different shape of coordination) and Lesson 94's table-level lock modes
+  (this stays inside row-level `FOR UPDATE`, never escalating to a table
+  lock). Checked the glossary first for the one new term — `SKIP LOCKED` —
+  zero collisions via case-insensitive grep, added as a new row after Lesson
+  94's `lock mode` row, same Term/Tiếng Việt/In software column order as
+  every existing row. The Go snippet (`dequeueJob`) was compile-checked in a
+  scratch module (`.scratch-0095/gomod/`, deleted after, confirmed gone via
+  directory listing) using a minimal hand-written interface stand-in for
+  `pgxpool`/`pgx` types (to avoid a real network dependency in the scratch
+  module) — this caught a real bug on the first `go build`: the query-row
+  scan line used `err :=` when `err` was already declared earlier in the
+  same function scope via `tx, err := db.Begin(ctx)`, which is an actual
+  Go compile error ("no new variables on left side of :="), not a style
+  nit; fixed by changing it to plain `err =`, re-ran `go build`/`go vet`,
+  both clean on the second pass. Verification performed mechanically: (1) a
+  Node quiz-word-count script matching each `<div class="q" data-why="...">`
+  block and splitting every option both via `.split(/\s+/)` and
+  `.split(" ")` — first draft landed uneven on all four questions (spreads
+  of 1-3 words), fixed through several rewrite-and-recount cycles per
+  option, including one case where a word was dropped but the recount still
+  came up short by one and needed a second trim — converged to exactly
+  8/8/8/8 on Q1 and 9/9/9/9 on Q2, Q3, and Q4, both counting methods
+  agreeing exactly, and exactly one `data-ok` and four options per question
+  confirmed the same way; (2) a Node occurrence-count HTML tag-balance check
+  across 20 tag types on the lesson — clean on the first pass, no stray-tag
+  bug this round; and a separate table/tr/th/td/p balance check on
+  `glossary.html` after its one-row addition, also balanced on the first
+  pass; (3) a raw-unescaped-`&` regex scan and (4) a backslash-escaped-quote
+  scan across both files — zero hits in all four scans; (5) the lesson's
+  `<dfn` tag grepped and confirmed to carry both `data-en=` and `data-vn=` —
+  exactly 1 `dfn` tag, matching the 1 new term, no orphaned attribute; (6)
+  `node --check` against `assets/nav.js`, `assets/gloss.js`, and
+  `assets/quiz.js` — all clean, no output, both before and after the nav.js
+  edit; (7) a basic HTML well-formedness check (DOCTYPE present, `<html>`/
+  `<head>`/`<body>`/`<title>` each opened and closed exactly once, all three
+  script tags present with `nav.js` last) — clean. Registered Lesson 95 in
+  `nav.js` (date 2026-10-09, today's actual generation date), re-confirmed
+  exactly one matching `n: 95` entry and exactly one matching `0095-*`
+  lesson file afterward. No new `learning-records/` file was added this
+  round — routine topical entry like Lessons 3-94, not a new baseline
+  finding. This session's sandbox network-permission gate was open this
+  round: a live `WebFetch` against the PostgreSQL Manual's `SELECT`
+  reference page's "The Locking Clause" section succeeded and confirmed the
+  lesson's core claims verbatim — "With `NOWAIT`, the statement reports an
+  error, rather than waiting, if a selected row cannot be locked
+  immediately. With `SKIP LOCKED`, any selected rows that cannot be
+  immediately locked are skipped," and that this "can be used to avoid lock
+  contention with multiple consumers accessing a queue-like table" (while
+  explicitly giving "an inconsistent view of the data" unsuitable for
+  general-purpose work) — the Manual's own named scenario matching this
+  lesson's exact framing, so the "Go deeper" section cites the fetch as
+  genuinely fresh. `bin/record-progress backend lesson_generated --day 95
+  --lesson 0095-skip-locked-job-claiming.html --detail '{"by":"headless"}'`
+  run from the repo root succeeded on the first attempt, output confirmed:
+  `recorded: backend/lesson_generated day=95
+  lesson=0095-skip-locked-job-claiming.html`. No confirmed next-lesson gap
+  is named with certainty for the round after this one — same standing note
+  as every prior round; a completion/quiz-outcome signal or a user-named
+  track should take priority over guessing blind again.
 

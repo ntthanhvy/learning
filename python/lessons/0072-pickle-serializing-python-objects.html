@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 72 · pickle: serializing Python objects</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 72 · ~20 min · 9 Oct 2026</p>
+<h1><code>pickle</code>: serializing Python objects</h1>
+<p class="byline">Day 6's <code>json</code> module round-trips dicts, lists, strings, and numbers to text — but a <code>dataclass</code> instance, a <code>set</code>, or a <code>datetime</code> all fail with <code>TypeError: Object of type ... is not JSON serializable</code>. The standard-library <code>pickle</code> module round-trips almost any Python object, by writing Python's own binary representation instead of text — at the cost of being Python-only, and dangerous to use on data you don't trust.</p>
+
+<div class="callout"><strong>Why today, specifically:</strong> a fresh-gap grep across all 71 lessons and every practice file confirmed <code>pickle</code> has never been taught, despite being named as a standing candidate since Day 70's note. Of the other open candidates, <code>configparser</code> remains narrower work <code>pathlib</code>/plain <code>dict</code>s already cover, <code>uuid</code> is too thin alone for a full lesson, and <code>concurrent.futures</code>/<code>threading</code> sits closer to <code>MISSION.md</code>'s explicit concurrency boundary than to data or backend work. <code>pickle</code> wins because it closes a real, concrete gap left wide open since Day 6: Day 7's own capstone builds a <code>dataclass</code> record, and nothing in the course has ever shown how to save one to disk and load it back, since <code>json.dump</code> cannot handle it directly.</div>
+
+<h2>1 · The gap: <code>json</code> can't hold a <code>dataclass</code>, a <code>set</code>, or a <code>datetime</code></h2>
+<p>Try handing <code>json.dump</code> something Day 7's capstone already builds every day — a <code>dataclass</code> instance:</p>
+<pre><code><span class="kw">import</span> json
+<span class="kw">from</span> dataclasses <span class="kw">import</span> dataclass
+
+<span class="kw">@dataclass</span>
+<span class="kw">class</span> Order:
+    city: <span class="kw">str</span>
+    amount: <span class="kw">float</span>
+
+order = Order(<span class="str">"Hanoi"</span>, <span class="kw">120.0</span>)
+json.dumps(order)   <span class="cm"># TypeError: Object of type Order is not JSON serializable</span></code></pre>
+<p><code>json</code> only knows how to write the handful of types its format defines — strings, numbers, booleans, <code>None</code>, lists, and dicts of those. A <code>dataclass</code> instance, a <code>set</code>, a <code>datetime</code>, or a trained lookup structure built by hand are all invisible to it; writing one out means hand-converting it to a plain dict first (and remembering how to convert it back).</p>
+
+<h2>2 · <code>pickle.dumps()</code>/<code>loads()</code>: Python's own binary format</h2>
+<p>The <dfn data-en="the pickle module serializes almost any Python object -- including custom classes, dataclass instances, sets, and datetimes -- into a Python-specific binary byte string, and deserializes it back into an equivalent object; dumps()/loads() work with bytes in memory, dump()/load() work with an already-open binary file" data-vn="giữ nguyên &quot;pickle&quot; — module chuyển gần như mọi object Python (class tự định nghĩa, dataclass, set, datetime...) thành bytes nhị phân riêng của Python, và chuyển ngược lại; dumps()/loads() làm với bytes, dump()/load() làm với file nhị phân đã mở">pickle</dfn> module instead writes Python's own internal representation of an object, as bytes, and can rebuild the exact same object from those bytes later — no hand-conversion required, because it isn't limited to a fixed set of types:</p>
+<pre><code><span class="kw">import</span> pickle
+<span class="kw">from</span> dataclasses <span class="kw">import</span> dataclass
+
+<span class="kw">@dataclass</span>
+<span class="kw">class</span> Order:
+    city: <span class="kw">str</span>
+    amount: <span class="kw">float</span>
+
+order = Order(<span class="str">"Hanoi"</span>, <span class="kw">120.0</span>)
+
+data = pickle.dumps(order)     <span class="cm"># bytes -- Python's own binary format, not text</span>
+restored = pickle.loads(data)  <span class="cm"># a brand-new Order, equal to the original</span>
+
+restored == order               <span class="cm"># True</span>
+restored <span class="kw">is</span> order               <span class="cm"># False -- a genuinely new object, not the same one</span></code></pre>
+<p><code>dumps()</code> ("dump to a string of bytes") and <code>loads()</code> ("load from a string of bytes") mirror <code>json.dumps()</code>/<code>json.loads()</code> by name on purpose — same shape, different format underneath. A <code>set</code>, a <code>datetime</code>, or a nested mix of custom classes all round-trip the same way, with no extra code, because <code>pickle</code> is not reading a fixed text grammar — it is walking Python's own object structure directly.</p>
+
+<h2>3 · Writing to and reading from a file: <code>dump()</code>/<code>load()</code></h2>
+<p>Just like <code>json</code>, <code>pickle</code> has a second pair of functions for an already-open file object instead of in-memory bytes — and the file must be opened in <em>binary</em> mode (<code>"wb"</code>/<code>"rb"</code>), since pickled data is bytes, not text:</p>
+<pre><code><span class="kw">import</span> pickle
+
+orders = [Order(<span class="str">"Hanoi"</span>, <span class="kw">120.0</span>), Order(<span class="str">"Hue"</span>, <span class="kw">75.5</span>)]
+
+<span class="kw">with</span> <span class="kw">open</span>(<span class="str">"orders.pkl"</span>, <span class="str">"wb"</span>) <span class="kw">as</span> f:   <span class="cm"># "wb" -- write BINARY, not "w"</span>
+    pickle.dump(orders, f)
+
+<span class="kw">with</span> <span class="kw">open</span>(<span class="str">"orders.pkl"</span>, <span class="str">"rb"</span>) <span class="kw">as</span> f:   <span class="cm"># "rb" -- read BINARY, not "r"</span>
+    restored = pickle.load(f)
+
+restored == orders   <span class="cm"># True -- the whole list of dataclass instances, back intact</span></code></pre>
+<p>Opening a pickle file with plain <code>"w"</code>/<code>"r"</code> instead of <code>"wb"</code>/<code>"rb"</code> is the most common first mistake — text mode tries to decode the bytes as a string and either raises a <code>UnicodeDecodeError</code> or corrupts the data. Day 6's <code>with</code> block is unchanged; only the mode string and the pair of functions differ from a <code>json</code> round trip.</p>
+
+<div class="callout"><strong>Bridge from SQL:</strong> this is the same shape as storing a serialized blob in a <code>BYTEA</code>/<code>BLOB</code> column instead of normalized columns — convenient for an opaque payload you'll only ever read back in the same application, wrong the moment another system needs to query the fields inside it.</div>
+
+<h2>4 · Why not to <code>pickle.load()</code> data you don't trust</h2>
+<p>Unpickling is not just reading data back — it can execute arbitrary code. Rebuilding an object can call that class's own methods during construction, and a <dfn data-en="a specially crafted pickle byte string can cause arbitrary code to run on the machine that calls pickle.load()/loads() on it, because reconstructing an object during unpickling can invoke that object's own code; this makes unpickling data from an untrusted or unauthenticated source a genuine security vulnerability, unlike parsing JSON text, which has no comparable code-execution path" data-vn="giữ nguyên &quot;pickle security risk&quot; — dữ liệu pickle độc hại có thể chạy code tùy ý khi bị load(), vì việc dựng lại object có thể gọi code của chính object đó; json không có lỗ hổng tương tự">maliciously crafted pickle byte string</dfn> can abuse that to run arbitrary code the instant <code>pickle.load()</code> touches it — there is no equivalent risk in parsing JSON text, which only ever produces the fixed handful of safe built-in types from section 1. The standard library's own documentation states this plainly: never unpickle data received from an untrusted or unauthenticated source.</p>
+<p>The rule in practice: <code>pickle</code> is the right tool for a program's <em>own</em> cache, checkpoint, or scratch file — data it wrote itself and is reading back later, on the same trusted machine. It is the wrong tool the moment the bytes might have come from a network request, a file upload, or any other party you don't fully control; <code>json</code> (Day 6) is the safe default for anything crossing that boundary, which is also why JSON, not <code>pickle</code>, is the universal format for APIs.</p>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> a <code>DataFrame</code> has its own <code>.to_pickle()</code>/<code>pd.read_pickle()</code> methods, built on this same stdlib module, for caching a whole table faster than re-parsing a CSV each run — not demonstrated here; that choice belongs to <code>data/</code>.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/72_pickle_serializing_python_objects.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/72_pickle_serializing_python_objects.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: round-tripping a <code>dataclass</code> instance through <code>pickle.dumps()</code>/<code>loads()</code> that <code>json</code> cannot serialize directly, writing then reading back a list of objects through a binary file with <code>dump()</code>/<code>load()</code>, confirming a restored object is equal but not the same object as the original, and explaining in a short string why an untrusted pickle byte string is unsafe to load.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="json only knows how to write the fixed set of types its text format defines -- strings, numbers, booleans, None, lists, and dicts of those. A dataclass instance is a custom Python type outside that set, so json.dumps() raises TypeError on it unless it is first hand-converted to a plain dict.">
+    <p class="stem">Why does <code>json.dumps()</code> raise <code>TypeError</code> on a <code>dataclass</code> instance?</p>
+    <button class="opt" data-ok>json only writes a fixed set of built-in types, not custom classes</button>
+    <button class="opt">dataclasses are simply not treated as real objects until they get printed</button>
+    <button class="opt">json requires every field to be renamed before it ever gets saved</button>
+  </div>
+  <div class="q" data-why="pickle writes Python's own internal binary representation of an object rather than a fixed text grammar, so it can serialize almost any Python object -- custom classes, dataclass instances, sets, datetimes -- with no hand-conversion step, unlike json which is limited to its own fixed set of text-representable types.">
+    <p class="stem">Why can <code>pickle</code> serialize a <code>dataclass</code> instance that <code>json</code> cannot?</p>
+    <button class="opt" data-ok>it writes Python's own binary object representation, not fixed text</button>
+    <button class="opt">pickle quietly converts every dataclass into plain JSON text first</button>
+    <button class="opt">dataclasses are simply forbidden from ever being written as text</button>
+  </div>
+  <div class="q" data-why="Pickled data is bytes, not text, so the file must be opened in binary mode -- 'wb' for writing, 'rb' for reading -- not the plain text 'w'/'r' modes Day 6 used for json and csv. Opening in text mode tries to decode the bytes as a string and either errors or corrupts the data.">
+    <p class="stem">Why must a pickle file be opened with <code>"wb"</code>/<code>"rb"</code> instead of plain <code>"w"</code>/<code>"r"</code>?</p>
+    <button class="opt" data-ok>pickled data is raw bytes, which text mode cannot decode safely</button>
+    <button class="opt">binary mode is only required once files grow past one gigabyte</button>
+    <button class="opt">plain "w" mode is actually never a real, valid file mode</button>
+  </div>
+  <div class="q" data-why="Reconstructing an object during unpickling can invoke that object's own code, so a maliciously crafted pickle byte string can be built to run arbitrary code the instant pickle.load()/loads() touches it. JSON parsing has no comparable code-execution path, since it only ever produces the fixed safe built-in types.">
+    <p class="stem">Why is calling <code>pickle.load()</code> on data from an untrusted source dangerous?</p>
+    <button class="opt" data-ok>rebuilding the object can be crafted to run arbitrary code</button>
+    <button class="opt">untrusted pickle files are always several times larger on disk</button>
+    <button class="opt">pickle simply refuses outright to open any unfamiliar byte string</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the standard library's <a href="https://docs.python.org/3/library/pickle.html"><code>pickle</code></a> docs — covers today's <code>dumps()</code>/<code>loads()</code>/<code>dump()</code>/<code>load()</code> plus the "what can be pickled" rules and, directly under a bold warning, the exact untrusted-data risk section 4 summarizes.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day72">glossary</a> under Day 72.<br>
+<code>configparser</code>, <code>uuid</code>, and <code>concurrent.futures</code>/<code>threading</code> remain the standing fresh-gap candidates still on the table.<br><br>
+💬 Anything unclear — why <code>json</code> can't hold a <code>dataclass</code>, the <code>"wb"</code>/<code>"rb"</code> mode rule, or the untrusted-data risk? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

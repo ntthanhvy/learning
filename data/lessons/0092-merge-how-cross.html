@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 92 · pd.merge(how="cross"): every row paired with every row</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 92 · ~20 min · 9 Oct 2026</p>
+<h1>pd.merge(how="cross"): every row paired with every row</h1>
+<p class="byline">Lesson 5 mapped <code>how=</code> onto the SQL joins already known — inner, left, right, outer. There's a fifth one SQL also has, and pandas added a dedicated spelling for it in 1.2: <code>CROSS JOIN</code>. It needs no shared key at all, because it isn't matching rows — it's pairing <em>every</em> row on one side with <em>every</em> row on the other. Zero lessons and zero glossary rows have covered it on its own merits so far; today closes that.</p>
+
+<h2>1 · No key, no matching — just every combination</h2>
+<p>Every <code>how=</code> Lesson 5 covered answers "which rows share a key value?" <dfn data-en="a pd.merge() how= value that produces the cartesian product of both DataFrames' rows: every row of the left frame paired with every row of the right frame, with no key column involved at all" data-vn="giữ nguyên 'cross join' — giá trị how= của pd.merge(), ghép MỌI hàng bên trái với MỌI hàng bên phải, không cần cột khóa, không có khái niệm 'khớp' gì cả">how="cross"</dfn> asks a different question entirely: "what does every possible combination of a row from each side look like?" No <code>on=</code> needed, because there's no key to match — every left row is paired with every right row, full stop:</p>
+<pre><code>sizes = pd.DataFrame({<span class="str">"size"</span>: [<span class="str">"S"</span>, <span class="str">"M"</span>, <span class="str">"L"</span>]})
+colors = pd.DataFrame({<span class="str">"color"</span>: [<span class="str">"red"</span>, <span class="str">"blue"</span>]})
+
+pd.merge(sizes, colors, how=<span class="str">"cross"</span>)
+<span class="cm">--   size color
+-- 0    S   red
+-- 1    S  blue
+-- 2    M   red
+-- 3    M  blue
+-- 4    L   red
+-- 5    L  blue</span></code></pre>
+<p>Confirmed directly (pandas 3.0.6): 3 rows × 2 rows produced exactly 6 rows — every size shown against every color, in the same order <code>itertools.product()</code> would generate it. The SQL equivalent is the literal <code>CROSS JOIN</code> keyword — <code>SELECT * FROM sizes CROSS JOIN colors</code> — or, just as commonly, the implicit version written as <code>SELECT * FROM sizes, colors</code> with no <code>WHERE</code> clause at all. The real-world use: generating every valid combination before filtering or scoring it (every product variant × every warehouse, every date in a range × every store ID) — the classic "I need a scaffold of all combinations, then I'll join real data onto it" interview task.</p>
+
+<h2>2 · on=, left_on=, right_on= are flatly incompatible with it</h2>
+<p>Because a cross join has no key, pandas doesn't silently ignore a key argument if one is passed — it raises. Confirmed directly:</p>
+<pre><code>pd.merge(sizes, colors, how=<span class="str">"cross"</span>, on=<span class="str">"size"</span>)
+<span class="cm">-- MergeError: Can not pass on, right_on, left_on or set
+--             right_index=True or left_index=True</span></code></pre>
+<p>That's a fast, loud failure rather than a silent wrong answer — a reassuring contrast to several of this course's past traps (Lesson 57's row-multiplying merges, Lesson 89's loose equality checks). The one thing worth remembering going in: a cross join is the one <code>how=</code> value that is never spelled with <code>on=</code> at all — if a key genuinely matters, it isn't a cross join, it's an inner/left/right/outer merge with that key named.</p>
+
+<h2>3 · The real trap: row count multiplies, it doesn't add</h2>
+<p>Every other <code>how=</code> caps the output somewhere near the bigger input's row count (outer joins add unmatched rows; inner joins can only shrink). A cross join does neither — output rows = left rows × right rows, confirmed directly with two 1,000-row frames:</p>
+<pre><code>left  = pd.DataFrame({<span class="str">"a"</span>: range(<span class="kw">1000</span>)})
+right = pd.DataFrame({<span class="str">"b"</span>: range(<span class="kw">1000</span>)})
+len(pd.merge(left, right, how=<span class="str">"cross"</span>))
+<span class="cm">-- 1000000</span></code></pre>
+<p>1,000 rows joined to 1,000 rows produced one million — not 2,000, not 1,000. This is the sharpest version of Lesson 57's "row-multiplication" warning, except there's no <code>validate=</code> guard that applies here (that argument itself raises the same <code>MergeError</code> as <code>on=</code>, since it also implies a key). The only real defense is arithmetic done <em>before</em> running it: know both row counts, multiply them, and sanity-check that the product is actually the scaffold size wanted — not an accidental cross join from a dropped or mistyped <code>on=</code> elsewhere in a pipeline, which silently degrades into exactly this blowup with no key column to match against at all. Column-name collisions resolve exactly like any other merge, too — confirmed directly, two frames both named <code>"x"</code> cross-joined into columns named <code>"x_x"</code> and <code>"x_y"</code>, the same default <code>suffixes=("_x", "_y")</code> from Lesson 5.</p>
+
+<div class="interview">
+<p><strong>Q: "How would you generate a row for every combination of product size and color, before any real inventory data exists yet?"</strong> A strong answer, out loud: <em>"pd.merge with how='cross' — it's the cartesian product of both frames' rows, no shared key needed, so it's the right tool specifically when I want every combination rather than every match. I'd build a sizes DataFrame and a colors DataFrame and cross-join them to get the full scaffold, then left-merge real inventory counts onto that scaffold afterward so missing combinations show up as NaN instead of silently not existing. The one thing I'd watch is the row count — it multiplies, not adds, so crossing two reasonably-sized frames can blow up fast, and pandas won't let me pass on= with it at all, which is actually a safety rail: if I think I need a key, that's a sign I don't actually want a cross join."</em> The signal: naming the multiplicative row-count risk unprompted, and knowing a cross join is often step one of a two-step pipeline (scaffold, then fill), not the final answer by itself.</p>
+</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/92_merge_cross.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/92_merge_cross.py</code></pre>
+<p>Exercise 1 confirms a cross join of a 3-row and a 2-row frame produces 6 rows, every combination (Section 1). Exercise 2 confirms passing <code>on=</code> alongside <code>how="cross"</code> raises <code>MergeError</code> (Section 2). Exercise 3 confirms the row-count multiplication: crossing a 4-row frame with a 5-row frame produces 20 rows, not 9 (Section 3).</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: pd.merge(sizes, colors, how='cross') on a 3-row and a 2-row frame produced exactly 6 rows -- every row of the left frame paired with every row of the right frame, with no key column involved at all, unlike every other how= value.">
+    <p class="stem">What does <code>pd.merge(left, right, how="cross")</code> produce?</p>
+    <button class="opt" data-ok>every left row paired with every right row</button>
+    <button class="opt">only the rows whose key columns happen to match</button>
+    <button class="opt">every left row stacked above every right row</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: pd.merge(sizes, colors, how='cross', on='size') raises MergeError('Can not pass on, right_on, left_on or set right_index=True or left_index=True') -- a cross join has no key at all, so pandas raises loudly instead of silently ignoring the argument.">
+    <p class="stem">What happens if <code>on="size"</code> is passed together with <code>how="cross"</code>?</p>
+    <button class="opt" data-ok>it raises MergeError right away, no silent ignore</button>
+    <button class="opt">it quietly filters to rows matching on that column</button>
+    <button class="opt">it works fine and just adds that column once</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: crossing a 1000-row frame with a 1000-row frame produced exactly 1,000,000 rows, not 2,000 -- a cross join's output row count is always left_rows times right_rows, the sharpest version of Lesson 57's row-multiplication warning.">
+    <p class="stem">Crossing a 1,000-row frame with another 1,000-row frame via <code>how="cross"</code> produces how many rows?</p>
+    <button class="opt" data-ok>1,000,000 — the two counts multiplied together</button>
+    <button class="opt">2,000 — the two counts added together</button>
+    <button class="opt">1,000 — capped at the bigger input</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official pandas User Guide's <a href="https://pandas.pydata.org/docs/user_guide/merging.html">"Merge, join, concatenate and compare"</a> page (per <code>RESOURCES.md</code>'s "Docs: pandas User Guide" entry, ~5 min) — its join-type table names <code>cross</code> as the direct <code>CROSS JOIN</code> equivalent ("create the cartesian product of rows of both frames") and shows a worked multi-column example; the <code>on=</code>/<code>MergeError</code> restriction and the row-count-multiplication behavior above were independently confirmed directly against pandas 3.0.6, going further than that page states explicitly.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>cross join</code> (<code>how="cross"</code>) is new today, added right after Lesson 91's <code>idxmax(axis=1) / idxmin(axis=1)</code> entry.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-92 comes back reported as shakiest, otherwise another fresh curriculum/glossary scan for the next genuinely-uncovered pattern — <code>np.argmax()</code>/<code>np.argmin()</code> as their own standalone lesson remains an open option (Lesson 91 only gave them a secondary mention), but no single candidate is named as THE next pick.<br><br>
+💬 Anything unclear — the cartesian-product framing, the <code>on=</code> restriction, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

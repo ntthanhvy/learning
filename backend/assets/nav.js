@@ -194,6 +194,8 @@
       file: "lessons/0093-deferrable-constraints.html" },
     { n: 94, date: "2026-10-08", title: "Lock modes: why ALTER TABLE blocks reads that FOR UPDATE never touches",
       file: "lessons/0094-postgres-lock-modes.html" },
+    { n: 95, date: "2026-10-09", title: "SKIP LOCKED: claiming one job off a queue table without blocking",
+      file: "lessons/0095-skip-locked-job-claiming.html" },
   ];
 
   const REFS = [

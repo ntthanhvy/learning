@@ -188,6 +188,8 @@
       file: "lessons/0090-transpose.html" },
     { n: 91, date: "2026-10-08", title: "idxmax(axis=1) / idxmin(axis=1): which COLUMN, not which row",
       file: "lessons/0091-idxmax-axis1.html" },
+    { n: 92, date: "2026-10-09", title: "pd.merge(how=\"cross\"): every row paired with every row",
+      file: "lessons/0092-merge-how-cross.html" },
   ];
 
   const REFS = [

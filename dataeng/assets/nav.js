@@ -34,6 +34,7 @@
     { n: 21, date: "2026-10-06", title: "Airflow Assets: data-aware scheduling", file: "lessons/0021-airflow-assets.html" },
     { n: 22, date: "2026-10-07", title: "Airflow Connections, Variables & never hard-coding credentials", file: "lessons/0022-airflow-connections-and-variables.html" },
     { n: 23, date: "2026-10-08", title: "Kafka Connect and CDC with Debezium", file: "lessons/0023-kafka-connect-and-cdc-with-debezium.html" },
+    { n: 24, date: "2026-10-09", title: "Cosmos: dbt models as individual Airflow tasks", file: "lessons/0024-airflow-cosmos-dbt-as-tasks.html" },
   ];
 
   const REFS = [

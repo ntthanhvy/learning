@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 95 · SKIP LOCKED: claiming one job off a queue table without blocking the others</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 95 · ~20 min</p>
+<h1>SKIP LOCKED: claiming one job off a queue table without blocking the others</h1>
+<p class="byline">Lesson 10's worker called an unexplained <code>dequeueJob(ctx)</code> — "claim one pending row" — and moved on without saying how a claim actually works when several workers poll the same table at once. Lesson 94 named four table-level lock modes but stopped at row locks still being single-row, single-claimant tools. Today is the missing mechanism: the exact row-lock option that lets many workers claim different rows from the same queue table at the same time, none of them waiting on the others.</p>
+
+<h2>1 · What a naive claim actually does under two workers</h2>
+<p>The obvious way to "claim one pending row" is Lesson 6's own pattern: lock it, check it's still pending, mark it taken.</p>
+<pre><code><span class="kw">BEGIN</span>;
+<span class="kw">SELECT</span> id <span class="kw">FROM</span> jobs <span class="kw">WHERE</span> status = <span class="st">'pending'</span> <span class="kw">ORDER BY</span> id <span class="kw">LIMIT</span> <span class="kw">1</span> <span class="kw">FOR UPDATE</span>;
+<span class="cm">-- mark it running, do the work, COMMIT</span></code></pre>
+<p>With one worker, this is fine. With two workers polling the same table at the same instant, both run the identical <code>SELECT ... FOR UPDATE</code>. Postgres can only grant that row lock to one of them; Lesson 6 already established what happens next — the second transaction's <code>FOR UPDATE</code> <em>blocks</em>, waiting for the first to commit or roll back. It isn't stuck forever, and it isn't a deadlock (Lesson 40 — that needs a cycle, and there's only one lock here), but it is pure waste: the second worker sits idle for the entire first job's duration, just to discover — once it finally gets the lock — that row is no longer <code>pending</code> and it has to go find a different one. The table holds a hundred other pending rows that second worker could have claimed immediately; nothing about the correct behavior required it to queue up behind row <code>1</code> specifically.</p>
+
+<h2>2 · SKIP LOCKED: skip what's already taken, don't wait for it</h2>
+<p>Postgres's locking clause takes an option for exactly this: <dfn data-en="an option on SELECT ... FOR UPDATE/SHARE that omits any row another uncommitted transaction already has locked, instead of waiting for it -- the PostgreSQL Manual names this explicitly for avoiding lock contention on a queue-like table with multiple consumers" data-vn="SKIP LOCKED (giữ nguyên) — tùy chọn trong SELECT ... FOR UPDATE, cho phép bỏ qua (không chờ) những row mà transaction khác đang giữ lock, chọn tiếp row khác thay vì đứng chờ -- PostgreSQL Manual nêu rõ dùng option này để tránh lock contention trên bảng dạng queue có nhiều consumer cùng lấy việc">SKIP LOCKED</dfn>. Added to the same query:</p>
+<pre><code><span class="kw">BEGIN</span>;
+<span class="kw">SELECT</span> id <span class="kw">FROM</span> jobs <span class="kw">WHERE</span> status = <span class="st">'pending'</span>
+  <span class="kw">ORDER BY</span> id <span class="kw">LIMIT</span> <span class="kw">1</span>
+  <span class="kw">FOR UPDATE</span> <span class="kw">SKIP LOCKED</span>;
+<span class="cm">-- mark it running, do the work, COMMIT</span></code></pre>
+<p>Now the second worker's query doesn't block on row <code>1</code> at all. Postgres sees that row is already locked by another uncommitted transaction, silently omits it from the result, and moves on to consider the next <code>pending</code> row in order — handing the second worker row <code>2</code> immediately, no waiting. Both workers proceed in parallel, each with a different row genuinely locked, neither blocking the other. The <code>ORDER BY id LIMIT 1</code> still picks the same "oldest pending" row deterministically for whichever worker gets there first; <code>SKIP LOCKED</code> only changes what happens when that row turns out to already be claimed.</p>
+<div class="callout"><strong>Frontend-habit trap:</strong> this looks like it's "skipping" rows at the application level, the way you might filter an array — it isn't. The skip happens inside Postgres's own row visibility check, before any row data is even returned to the client; the application never sees the locked row at all, so there's no app-side branching to write for the skip itself.</div>
+
+<h2>3 · The sibling option, and why it's the wrong tool here</h2>
+<p>Postgres's locking clause has a second option, <code>NOWAIT</code>, that sounds similar but answers a different question. Where <code>SKIP LOCKED</code> quietly moves past a locked row to find a different one, <code>NOWAIT</code> makes the whole statement fail immediately with an error the moment any targeted row turns out to be already locked — no skipping, no substitute row, just an error the caller must catch.</p>
+<div class="cmp-wrap">
+<table class="cmp">
+<thead><tr><th></th><th>Plain <code>FOR UPDATE</code></th><th><code>FOR UPDATE NOWAIT</code></th><th><code>FOR UPDATE SKIP LOCKED</code></th></tr></thead>
+<tbody>
+<tr><th>Row already locked by another tx</th><td>waits until that lock is released</td><td>errors out immediately, no wait</td><td>silently omitted, keeps looking</td></tr>
+<tr><th>Caller must handle</th><td>normal latency, no error</td><td>a specific lock-not-available error</td><td>nothing extra — fewer rows back is fine</td></tr>
+<tr><th>Fits</th><td>one known row, worth waiting for</td><td>"tell me now if I can't have it"</td><td>"give me any one free row, I don't care which"</td></tr>
+</tbody>
+</table>
+</div>
+<p>A queue worker claiming "any one pending job, I don't care which" is squarely the third column: it has no reason to wait on a specific row (any pending row will do) and no reason to error out either (a locked row just means another worker already has something to do — not a failure). <code>NOWAIT</code> fits a narrower case this course hasn't needed yet: code that targets one specific row it actually requires, and wants to know immediately rather than queue behind it.</p>
+
+<h2>4 · Lesson 10's dequeueJob, finally shown</h2>
+<p>Lesson 10 enqueued jobs into a plain table and called an opaque <code>dequeueJob(ctx)</code> to "claim one pending row," without saying how. This is that function, for real, with multiple workers running it concurrently against the same table:</p>
+<pre><code><span class="cm">// dequeueJob claims exactly one pending job row and marks it running, in one
+// transaction. SKIP LOCKED means a second worker calling this concurrently
+// never waits behind a row a first worker already claimed -- it just gets
+// handed the next pending row instead, so N workers polling in parallel
+// each get distinct work with no contention between them.</span>
+<span class="kw">func</span> dequeueJob(ctx context.Context, db *pgxpool.Pool) (*Job, <span class="ty">bool</span>, error) {
+    tx, err := db.Begin(ctx)
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        <span class="kw">return</span> <span class="kw">nil</span>, <span class="kw">false</span>, err
+    }
+    <span class="kw">defer</span> tx.Rollback(ctx) <span class="cm">// no-op once Commit succeeds below</span>
+
+    <span class="kw">var</span> j Job
+    err = tx.QueryRow(ctx, <span class="st">`
+        SELECT id, kind, payload FROM jobs
+        WHERE status = 'pending'
+        ORDER BY id
+        LIMIT 1
+        FOR UPDATE SKIP LOCKED`</span>,
+    ).Scan(&amp;j.ID, &amp;j.Kind, &amp;j.Payload)
+    <span class="kw">if</span> err == pgx.ErrNoRows {
+        <span class="kw">return</span> <span class="kw">nil</span>, <span class="kw">false</span>, <span class="kw">nil</span> <span class="cm">// nothing pending right now, not an error</span>
+    }
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        <span class="kw">return</span> <span class="kw">nil</span>, <span class="kw">false</span>, err
+    }
+
+    <span class="kw">if</span> _, err := tx.Exec(ctx, <span class="st">`UPDATE jobs SET status = 'running' WHERE id = $1`</span>, j.ID); err != <span class="kw">nil</span> {
+        <span class="kw">return</span> <span class="kw">nil</span>, <span class="kw">false</span>, err
+    }
+    <span class="kw">return</span> &amp;j, <span class="kw">true</span>, tx.Commit(ctx)
+}
+
+<span class="kw">type</span> Job <span class="kw">struct</span> {
+    ID      <span class="ty">int64</span>
+    Kind    <span class="ty">string</span>
+    Payload []<span class="ty">byte</span>
+}</code></pre>
+<p>The row lock is held only until this one transaction commits, right after marking the row <code>running</code> — by the time a second worker's own <code>dequeueJob</code> call runs its query, the first row is no longer even <code>pending</code>, so it's excluded by the <code>WHERE</code> clause rather than relying on the skip at all. <code>SKIP LOCKED</code> matters in the narrower window while that first transaction is still open: any worker racing in during that window skips straight past it instead of blocking.</p>
+
+<div class="interview">
+<p><strong>Q: "We run four worker instances polling the same Postgres jobs table. Someone notices that under load, workers seem to be fighting over the same rows instead of spreading out the work. What would you check, and how would you fix it?"</strong> A strong answer, out loud: <em>"First I'd check whether the claim query is a plain SELECT ... FOR UPDATE — if so, every worker that doesn't win the lock on a given row just blocks and waits for it, instead of moving on to a different pending row, which is the exact 'fighting over rows' symptom. The fix is adding SKIP LOCKED to that same query: a worker that hits a row another worker already has locked just skips it and keeps looking, so four workers polling at once each land on a different pending row instead of queuing up behind one. I'd specifically avoid NOWAIT here, since that errors out instead of looking further, which isn't what we want when any pending row is an acceptable claim."</em> The signal: naming SKIP LOCKED specifically, not just "add retries" or "poll less often," and explaining why NOWAIT is the wrong option for this shape of problem.</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers one locking-clause option for claiming rows out of a queue-like table without contention. It doesn't cover Lesson 56's advisory locks (coordinating logic with no row behind it at all, a different shape of problem), Lesson 94's table-level lock modes (this stays entirely inside row-level <code>FOR UPDATE</code> locking, never escalating to a table lock), or dedicated queue systems like SQS/RabbitMQ named in Lesson 10 as an alternative to a plain jobs table — <code>SKIP LOCKED</code> is specifically the Postgres-native answer when the queue is just a table.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A plain SELECT ... FOR UPDATE on a row another uncommitted transaction already holds simply waits for that lock to be released, the same blocking behavior Lesson 6 taught for a single contested row -- it does not look for a different row instead.">
+    <p class="stem">With a plain <code>SELECT ... FOR UPDATE</code> and no extra option, what happens when a second worker's query targets a row a first worker already locked?</p>
+    <button class="opt" data-ok>the second query waits until that lock releases</button>
+    <button class="opt">the second query instantly errors out right then</button>
+    <button class="opt">Postgres silently merges both workers into one transaction</button>
+    <button class="opt">the second query returns that same row twice</button>
+  </div>
+  <div class="q" data-why="SKIP LOCKED omits any row currently locked by another uncommitted transaction and moves on to consider the next candidate row instead, rather than waiting for that lock the way plain FOR UPDATE does.">
+    <p class="stem">What does adding <code>SKIP LOCKED</code> to a <code>FOR UPDATE</code> query change about a row another transaction already has locked?</p>
+    <button class="opt" data-ok>that locked row gets omitted, a different row returned</button>
+    <button class="opt">the query now waits twice as long before answering</button>
+    <button class="opt">that locked row gets force-unlocked from the other transaction</button>
+    <button class="opt">the query always returns every row, locked or not</button>
+  </div>
+  <div class="q" data-why="NOWAIT makes the statement fail immediately with an error the instant a targeted row turns out to be locked, instead of skipping past it to look for a different row -- the opposite behavior from SKIP LOCKED, suited to code that needs one specific row rather than any available one.">
+    <p class="stem">Why is <code>NOWAIT</code> a poor fit for a worker that just wants any one available pending job?</p>
+    <button class="opt" data-ok>it errors out instead of moving to another row</button>
+    <button class="opt">NOWAIT and SKIP LOCKED behave in an identical way</button>
+    <button class="opt">NOWAIT can only ever target one fixed, named table</button>
+    <button class="opt">NOWAIT silently claims every pending row available right now</button>
+  </div>
+  <div class="q" data-why="The PostgreSQL Manual names this exact scenario directly: skipping locked rows gives an inconsistent view unsuitable for general-purpose work, but is the documented way to avoid lock contention between multiple consumers claiming work from one queue-like table.">
+    <p class="stem">What scenario does the PostgreSQL Manual itself name <code>SKIP LOCKED</code> as the right tool for?</p>
+    <button class="opt" data-ok>multiple consumers claiming rows off one shared queue table</button>
+    <button class="opt">a single reporting query run by one lone process</button>
+    <button class="opt">enforcing a brand new foreign key across two tables</button>
+    <button class="opt">replicating every committed row out to a read replica</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> RESOURCES.md's standing <a href="https://www.postgresql.org/docs/current/ddl.html">PostgreSQL Manual</a> citation, extended today into the <code>SELECT</code> reference page's own <a href="https://www.postgresql.org/docs/current/sql-select.html#SQL-FOR-UPDATE-SHARE">"The Locking Clause"</a> section — already the chapter Lesson 6's <code>FOR UPDATE</code> and Lesson 94's lock modes drew from, read one section further into its <code>NOWAIT</code>/<code>SKIP LOCKED</code> options. This session's sandbox network-permission gate was open: a live <code>WebFetch</code> against that section confirmed today's claims verbatim — "With <code>NOWAIT</code>, the statement reports an error, rather than waiting, if a selected row cannot be locked immediately. With <code>SKIP LOCKED</code>, any selected rows that cannot be immediately locked are skipped" — and that skipping locked rows, while giving "an inconsistent view of the data" unsuitable for general-purpose work, "can be used to avoid lock contention with multiple consumers accessing a queue-like table," which is this lesson's exact scenario, named by the Manual itself, not inferred.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially. Nếu chỗ nào chưa rõ, cứ hỏi lại bằng tiếng Việt cũng được.<br><br>
+<em>Next lesson:</em> open. Still no <code>lesson_completed</code>/quiz-outcome record exists for any lesson after 95 rounds — the honest next step remains a completion signal or a user-named track.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

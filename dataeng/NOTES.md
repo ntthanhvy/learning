@@ -2721,3 +2721,149 @@ along the Phase 2 spine, adapted to the learning records.
   day-count ratio once this round's Kafka close-out is accounted for; Phase
   2d (portfolio/interview) still has zero days and should be seriously
   considered within the next 2-3 rounds given dbt's 8-day head start.
+- 2026-10-09 (headless 06:00 run, Day 24 generated): twenty-fourth lesson,
+  `0024-airflow-cosmos-dbt-as-tasks.html`. Confirmed via `date` that the real
+  run date is 2026-10-09. `lessons/` contained only `0001`–`0023`,
+  `assets/nav.js`'s latest entry was Day 23 (2026-10-08), and no
+  `0024`/`2026-10-09` entry existed anywhere (`lessons/`, `assets/nav.js`,
+  this file), so proceeded. The orchestrator's own pre-check (a node-wrapped
+  `psql` read, since direct `psql "$LEARNING_DB_URL"` is blocked by this
+  sandbox's static analysis) found the latest `dataeng` row was
+  `lesson_generated day=23` with no `lesson_completed`/quiz/kata signal for
+  this course more recent than mid-July, and `learning-records/` still holds
+  only the one Day-1 baseline file — no weak-spot signal, so normal
+  sequential progression applied. Read `MISSION.md`, `PLAN.md`, `NOTES.md`
+  (conventions sections plus the full generation log, in two reads given its
+  length), `RESOURCES.md`, the one `learning-records/` file, and
+  `assets/nav.js` in full, then `lessons/0022-airflow-connections-and-variables.html`,
+  `lessons/0021-airflow-assets.html` and `lessons/0007-airflow-orchestrates-dbt.html`
+  in full for structural/voice precedent and to confirm Day 7's own closing
+  "decisions" section already named Cosmos as "a real upgrade, but not a Day
+  7 prerequisite," before writing anything.
+  **Topic choice:** Day 23's own carried-forward note named Phase 2c's two
+  remaining items explicitly — Cosmos (dbt models as individual Airflow
+  tasks) and sensors/deferrable operators/SLAs/alerting — and flagged Cosmos
+  as the more natural next pick once Day 23's Kafka close-out was accounted
+  for. No new learning-record or quiz signal exists to suggest deviating.
+  Followed that pointer directly, closing Phase 2c's Cosmos item.
+  **Content:** framed Cosmos as the fix to a limit Day 7 already named
+  honestly rather than a brand-new problem: one `BashOperator` running
+  `dbt build` means Airflow only ever sees one task's exit code, with no
+  visibility into which of several models actually failed. Verified
+  `astronomer-cosmos==1.15.1` (the exact version pinned in `RESOURCES.md`)
+  directly against a real install before writing a word — `DbtTaskGroup`,
+  `ProjectConfig`, `ProfileConfig`, `ExecutionConfig` and
+  `PostgresUserPasswordProfileMapping`'s real constructor signatures via
+  `inspect.signature`, confirming `PostgresUserPasswordProfileMapping` takes
+  a `conn_id` and so bridges directly to Day 22's own `fdp_pg` Connection.
+  Built a real scratch dbt project (three models shaped like this course's
+  own staging/marts, one carrying a `unique`/`not_null` test) and ran it
+  through a real `DbtTaskGroup`, parsed with Airflow's own `DagBag` — this is
+  what surfaced the lesson's real content, not documentation: a tested model
+  splits into `<model>.run` and `<model>.test` tasks, and a downstream model
+  waits on the *test* task specifically, not just the run; dependency edges
+  are read straight off the dbt project's own `ref()` graph with nothing
+  hand-wired in the DAG file. **The genuine gotcha this round found by
+  actually running it, not by reading docs:** `ExecutionConfig()`'s default
+  `dbt_executable_path` resolves to whatever `dbt` binary happens to be on
+  `PATH` at DAG-parse time — a real, persistent-ish path, not the
+  self-contained `uv run --with "dbt-postgres==1.11.0" dbt build` every
+  `BashOperator` in this course has used since Day 7. Confirmed the practical
+  fix (`dbt_executable_path` passed explicitly, pointing at a persistent dbt
+  venv) is genuinely accepted and used: a live `DbtTaskGroup` built with an
+  explicit path ran `dbt ls` through that exact path and returned real
+  nodes. Section 5's trade-off table and the threshold for switching
+  ("once pinpointing one failing model from one log gets hard") is this
+  round's own direct answer to Day 7's closing interview question about
+  Cosmos, not a restatement of Astronomer's marketing framing. No pandas, no
+  Python-language teaching beyond what Day 7/22 already used, no
+  re-derivation of idempotency/API concepts — none applicable to a pure
+  Airflow-orchestration day. Domain names unchanged; today adds one new DAG
+  file (`dbt_cosmos_demo.py`) alongside Day 7's and Day 22's, explicitly not
+  replacing either, with a one-line reason (Day 7's own "decisions" section
+  already defended `BashOperator` for seven models; today gives evidence to
+  revisit that later, not a mandate to rewrite now). The TODO (the day's real
+  skill) wires `_profile_config()` to Day 22's `fdp_pg` Connection via
+  `PostgresUserPasswordProfileMapping`, deliberately reusing Day 22's
+  mechanism rather than inventing a second credential path. Opened with a
+  "before today" `list-import-errors` check against Day 7/22's existing DAGs
+  rather than assuming Day 23's (non-code) build step changed anything, since
+  today only adds one new file beside them.
+  **Verification:** installed `astronomer-cosmos==1.15.1` fresh via `uv run
+  --with` in a scratch dir (`.scratch_dataeng_verify_d24/` under the repo
+  root, deleted entirely before finishing) alongside the pinned
+  `apache-airflow==3.3.1` and `dbt-postgres==1.11.0` — clean install,
+  confirmed real version string and file path. Inspected every Cosmos class
+  used in the lesson via `inspect.signature` before writing a single line of
+  lesson prose, rather than trusting memory of the package's API. Built a
+  real three-model scratch dbt project (`stg_restaurants`, `stg_orders` with
+  a `unique`/`not_null` test on `order_id`, `dim_restaurants` joining both)
+  and a real `dbt_cosmos_demo.py` DAG using `DbtTaskGroup`; `py_compile` was
+  clean on it first. `airflow db migrate` against a fresh scratch
+  `AIRFLOW_HOME` succeeded in under a second (consistent with every prior
+  Airflow day's finding). A real `DagBag` parse (the current
+  `airflow.dag_processing.dagbag.DagBag` import path every Airflow day since
+  Day 7 has confirmed) came back with zero import errors and the exact task
+  list `['dbt_models.dim_restaurants_run', 'dbt_models.stg_orders.run',
+  'dbt_models.stg_orders.test', 'dbt_models.stg_restaurants_run']` with
+  `dim_restaurants_run` depending on both `stg_restaurants_run` and
+  `stg_orders.test` — quoted verbatim in Section 2, a real queried value, not
+  invented. Confirmed the `dbt_executable_path` default and the explicit-path
+  fix both for real: `ExecutionConfig().dbt_executable_path` resolved to a
+  live temp-venv `dbt` path on this machine (quoted in Section 3's shape, not
+  the literal path, since that path is this sandbox's own artifact and not
+  stable); then built a second live `DbtTaskGroup` with
+  `dbt_executable_path` passed explicitly and confirmed via the real
+  subprocess log that Cosmos's own `dbt ls` call shelled out through that
+  exact path and returned real nodes, and that the fully-filled-in DAG (TODO
+  filled, for verification only) ran end to end with return code 0 against a
+  properly migrated scratch `AIRFLOW_HOME`, printing
+  `tasks: ['dbt_models.stg_restaurants_run']`. Extracted the exact published
+  DAG code block back out of the finished lesson HTML (stripping `<span>`
+  markup and unescaping entities, the same method Day 22's round used) and
+  ran `py_compile` against that extracted text specifically — clean — then
+  separately confirmed the TODO-stub version's own failure mode is the
+  placeholder `REPO_DIR` path not existing (the same category of limitation
+  Day 7's own placeholder `REPO_DIR` always carried), not something new
+  introduced by today's `_profile_config()` TODO shape. **Not attempted this
+  round, stated plainly rather than silently skipped:** actually creating a
+  persistent virtual environment (`uv venv` / `uv tool install`) was blocked
+  outright by this sandbox's approval gate as a persistent-state change, so
+  Section 3's "create one persistent venv" fix is verified as a *mechanism*
+  (the `dbt_executable_path` parameter genuinely works and is genuinely
+  used) but the exact `uv venv`/`uv pip install` command sequence itself was
+  not executed end-to-end here — flagged in the lesson's own callout rather
+  than presented as fully observed. No dbt-model SQL ships in this lesson (a
+  pure Airflow-orchestration day, same shape as Days 19–22), so the `dbt
+  parse` verification path does not apply — stated here rather than silently
+  skipped. Deleted every scratch directory (`.scratch_dataeng_verify_d24/`
+  and later throwaway check scripts outside `dataeng/`) before finishing.
+  Registered Lesson 24 in `assets/nav.js` (`node --check` clean) and added
+  the Day 24 section to `reference/glossary.html` (3 new terms: Cosmos,
+  DbtTaskGroup, ExecutionMode.LOCAL — grepped Days 1–23's sections first,
+  case-insensitively via `grep -nio`, no collisions). Ran a small Python
+  tag-balance/bare-`&`/dfn-attribute-completeness/quiz-word-count script
+  (from a scratch file outside `dataeng/`, deleted after use) against both
+  the saved lesson HTML and the updated glossary. All checked tags balanced
+  on both files (div/p/table/tr/td/th/pre/code/h1/h2/dfn/button/span/a/em/
+  strong), zero bare `&` in either, and all 3 `<dfn>` tags in the lesson
+  carry both `data-en`/`data-vn` and match the 3 glossary rows added exactly
+  (added two `<dfn>` tags for `DbtTaskGroup`/`ExecutionMode.LOCAL` after an
+  initial draft only glossed `Cosmos`, catching the mismatch against the
+  glossary's own 3-term section before finishing). The first quiz draft came
+  up mismatched on all four questions; iterated through several
+  edit-and-recount passes (same lesson this file has repeated before: a
+  word-swap that doesn't change word *count* doesn't fix a mismatch) until
+  all four landed exactly even — three questions 8/8/8, one 6/6/6 — confirmed
+  by re-running the same script after the final edit.
+  `bin/record-progress dataeng lesson_generated --day 24 --lesson
+  0024-airflow-cosmos-dbt-as-tasks.html --detail '{"by":"headless"}'` run
+  from the repo root (relative path, not absolute): succeeded on the first
+  attempt (`recorded: dataeng/lesson_generated day=24
+  lesson=0024-airflow-cosmos-dbt-as-tasks.html`).
+  **Carried forward for next round:** Phase 2c now has exactly one open spine
+  item left — sensors vs. deferrable operators, retries/SLAs/alerting — the
+  natural next pick unless a fresh learning-record or quiz signal says
+  otherwise. Phase 2d (portfolio/interview) still has zero days against
+  dbt's 8-day head start and Kafka/Airflow's own growing count, and is worth
+  serious consideration within the next round or two.

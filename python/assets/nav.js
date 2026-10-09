@@ -148,6 +148,8 @@
       file: "lessons/0070-decimal-exact-arithmetic.html" },
     { n: 71, date: "2026-10-08", title: "Review day 11: retrieval across Days 68-70",
       file: "lessons/0071-review-retrieval-day-11.html" },
+    { n: 72, date: "2026-10-09", title: "pickle: serializing Python objects",
+      file: "lessons/0072-pickle-serializing-python-objects.html" },
   ];
 
   const REFS = [

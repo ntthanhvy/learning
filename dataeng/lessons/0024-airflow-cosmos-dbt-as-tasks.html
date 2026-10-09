@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 24 · Cosmos: dbt models as individual Airflow tasks</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 24 · ~20 min · 9 Oct 2026</p>
+<h1>Cosmos: dbt models as individual Airflow tasks</h1>
+<p class="byline">Today's tangible win: replace one opaque <code>dbt_build</code> <code>BashOperator</code> with a real Airflow task per dbt model, confirmed this round against a live install that Cosmos genuinely expands your project's own staging/marts graph into per-model <code>.run</code>/<code>.test</code> tasks with dependency edges inferred straight from <code>ref()</code> — not asserted from the docs.</p>
+
+<div class="callout"><strong>Before today — confirm Day 7/22's DAGs still parse:</strong> today adds one new file; it doesn't touch <code>dags/food_delivery_pipeline.py</code> or Day 22's <code>dbt_build_with_connection.py</code>.
+<pre><code>AIRFLOW_HOME="$(pwd)/airflow_home" uv run --with "apache-airflow==3.3.1" airflow dags list-import-errors</code></pre>
+Expected: <code>No data found</code> (Day 22's own run confirmed this is current Airflow 3.3.1's real no-errors wording, not blank output). If either file is missing or errors, fix that first — today's new file sits beside them, replacing neither.</div>
+
+<h2>1 · The thing Day 7 already named as a trade-off</h2>
+<p>Day 7 built <code>dags/food_delivery_pipeline.py</code> deliberately coarse: one <code>BashOperator</code> runs <code>dbt build</code> as a single shell command, and Airflow only ever sees whether that one subprocess's exit code was zero or not. That is a real limit, named honestly back then rather than discovered now: if <code>dim_restaurants</code> fails but every staging model succeeded, Airflow's own graph view shows exactly one red box — <code>dbt_build</code> — with no visibility into which of today's eight models actually broke, and no way to retry just that one model without re-running the whole command.</p>
+<p><a href="https://astronomer.github.io/astronomer-cosmos/"><dfn data-en="an open-source package that parses a dbt project at DAG-parse time and renders it as a real Airflow TaskGroup, with one Airflow task per dbt model (and a separate task per model's tests) instead of one task running the whole dbt build command -- dependency edges between tasks are inferred directly from the dbt project's own ref() graph" data-vn="giữ nguyên &quot;Cosmos&quot; — package parse dbt project lúc Airflow parse DAG, biến thành TaskGroup thật với 1 Airflow task / dbt model (và task riêng cho test của model đó) thay vì 1 task chạy cả dbt build; cạnh phụ thuộc giữa task suy ra thẳng từ đồ thị ref() của dbt">Cosmos</dfn></a> is the fix PLAN.md named back on Day 7 as "a real upgrade, but not a Day 7 prerequisite": it reads your dbt project the same way <code>dbt ls</code> does, and turns every model and every model's tests into its own Airflow task, wired together by the exact dependency edges your <code>ref()</code> calls already declare.</p>
+
+<h2>2 · What Cosmos actually builds — confirmed against a real project, not a toy</h2>
+<p>This round built a scratch dbt project shaped like this course's own (<code>stg_restaurants</code>, <code>stg_orders</code> with a <code>unique</code>/<code>not_null</code> test on <code>order_id</code>, <code>dim_restaurants</code> joining both) and ran it through Cosmos's <dfn data-en="the Cosmos class used inside an Airflow DAG to embed a whole dbt project (or a selection of it) as a TaskGroup, taking a ProjectConfig (where the dbt project lives), a ProfileConfig (how to reach the warehouse), and an ExecutionConfig (how dbt actually gets invoked)" data-vn="giữ nguyên &quot;DbtTaskGroup&quot; — class Cosmos dùng trong 1 DAG Airflow để nhúng cả dbt project (hoặc 1 phần) thành TaskGroup; nhận ProjectConfig (đường dẫn project), ProfileConfig (cách kết nối warehouse), ExecutionConfig (cách thực thi dbt)">DbtTaskGroup</dfn> for real, parsed with Airflow's own <code>DagBag</code>. The resulting tasks, read directly off that parse:</p>
+<pre><code>dbt_models.stg_restaurants_run
+dbt_models.stg_orders.run
+dbt_models.stg_orders.test
+dbt_models.dim_restaurants_run
+
+dim_restaurants_run upstream = [stg_orders.test, stg_restaurants_run]
+stg_orders.test      upstream = [stg_orders.run]</code></pre>
+<p>Three things worth naming from that real output, not from the docs: a model with no test gets one task (<code>&lt;model&gt;_run</code>); a model with a test gets <em>two</em> tasks, <code>.run</code> then <code>.test</code>; and <code>dim_restaurants_run</code> waits on <code>stg_orders.test</code>, not just <code>stg_orders.run</code> — Cosmos makes a downstream model wait for its upstream's tests to pass, which a single <code>dbt build</code> call also does internally, but today you can see that exact dependency as a real edge in Airflow's own graph view instead of it being invisible inside one task.</p>
+
+<h2>3 · The one gotcha this round found by actually running it</h2>
+<p>Every <code>BashOperator</code> this course has written since Day 7 invokes dbt the same way: <code>uv run --with "dbt-postgres==1.11.0" dbt build</code>, a self-contained command that needs nothing pre-installed. Cosmos's default execution mode, <dfn data-en="Cosmos's default execution mode: it shells out to a literal dbt executable path, resolved once at DAG-parse time, rather than a fresh self-contained install on every invocation" data-vn="giữ nguyên &quot;ExecutionMode.LOCAL&quot; — execution mode mặc định của Cosmos: chạy dbt bằng cách gọi 1 file thực thi dbt có sẵn trên máy, resolve 1 lần lúc Airflow parse DAG, khác với cài mới mỗi lần gọi">ExecutionMode.LOCAL</dfn>, works differently — it shells out to a literal <code>dbt</code> executable path, resolved <em>once at DAG-parse time</em>, not re-installed by <code>uv</code> on every run. Confirmed this round directly from a live install:</p>
+<pre><code><span class="kw">from</span> cosmos <span class="kw">import</span> ExecutionConfig
+ExecutionConfig().dbt_executable_path
+<span class="cm"># /path/to/some/temp/venv/bin/dbt — whatever's on PATH right now</span></code></pre>
+<p>That default is a real, current-version finding (astronomer-cosmos 1.15.1, pinned in <code>RESOURCES.md</code>), not a hypothetical: on a fresh machine with no persistent dbt install, Cosmos's <code>LOCAL</code> mode has nothing to find, and a DAG using it will fail to parse with a "no such file" style error — <code>uv run --with</code>'s whole appeal all week has been never needing a persistent install, and this is the one place in this course that assumption breaks.</p>
+<div class="callout"><strong>The practical fix, matching this course's tooling:</strong> create one persistent virtual environment with dbt installed once (<code>uv venv dbt_venv &amp;&amp; uv pip install --python dbt_venv/bin/python "dbt-postgres==1.11.0"</code>), then pass that environment's real <code>dbt</code> path to <code>ExecutionConfig</code> explicitly rather than relying on the default. This round confirmed <code>ExecutionConfig(execution_mode=ExecutionMode.LOCAL, dbt_executable_path=&lt;path&gt;)</code> is accepted and genuinely used — Cosmos's own <code>dbt ls</code> call (what discovers your models and builds the task list) ran through that exact path and returned real nodes. Creating the persistent venv itself was not re-exercised against a live Postgres this round (this sandbox's own policy blocks creating a new persistent virtualenv outside a scratch cleanup), so test that one command on your own machine before trusting it blindly.</div>
+
+<h2>4 · Build: a second, parallel DAG — not a replacement</h2>
+<p>In your <code>food-delivery-pipeline</code> repo, add <code>dags/dbt_cosmos_demo.py</code> alongside Day 7's DAG, not instead of it — today is about seeing the trade-off side by side, and Day 7's own closing "decisions" section already defended <code>BashOperator</code> as the right call for seven models; nothing about today changes that decision, it gives you the evidence to revisit it later if the project grows. The TODO is the day's real skill: wiring <code>ProfileConfig</code> to Day 22's own <code>fdp_pg</code> Connection instead of a hard-coded profile, so today's lesson and Day 22's both apply to the same file.</p>
+<pre><code><span class="kw">from</span> __future__ <span class="kw">import</span> annotations
+
+<span class="kw">from</span> datetime <span class="kw">import</span> datetime
+
+<span class="kw">from</span> airflow.sdk <span class="kw">import</span> DAG
+<span class="kw">from</span> cosmos <span class="kw">import</span> DbtTaskGroup, ExecutionConfig, ExecutionMode, ProfileConfig, ProjectConfig
+<span class="kw">from</span> cosmos.profiles <span class="kw">import</span> PostgresUserPasswordProfileMapping
+
+REPO_DIR = <span class="str">"/opt/airflow/food-delivery-pipeline"</span>  <span class="cm"># same path Day 7 used</span>
+DBT_EXECUTABLE = <span class="str">"/opt/airflow/dbt_venv/bin/dbt"</span>  <span class="cm"># the persistent venv from Section 3</span>
+
+
+<span class="kw">def</span> _profile_config() -&gt; ProfileConfig:
+    <span class="cm"># TODO: wire this to Day 22's "fdp_pg" Connection via</span>
+    <span class="cm"># PostgresUserPasswordProfileMapping(conn_id="fdp_pg", profile_args={"schema": "public"})</span>
+    <span class="cm"># instead of a literal host/port/login -- the day's real skill: making</span>
+    <span class="cm"># this DAG share the exact same never-hard-code Connection Day 22 built,</span>
+    <span class="cm"># rather than inventing a second, parallel credential path.</span>
+    ...
+
+
+<span class="kw">with</span> DAG(
+    dag_id=<span class="str">"dbt_cosmos_demo"</span>,
+    schedule=<span class="str">"@daily"</span>,
+    start_date=datetime(<span class="kw">2026</span>, <span class="kw">9</span>, <span class="kw">21</span>),
+    catchup=<span class="kw">False</span>,
+) <span class="kw">as</span> dag:
+    dbt_models = DbtTaskGroup(
+        group_id=<span class="str">"dbt_models"</span>,
+        project_config=ProjectConfig(<span class="str">f"{REPO_DIR}/warehouse"</span>),
+        profile_config=_profile_config(),
+        execution_config=ExecutionConfig(
+            execution_mode=ExecutionMode.LOCAL,
+            dbt_executable_path=DBT_EXECUTABLE,
+        ),
+    )</code></pre>
+<p>Fill in <code>_profile_config</code>'s TODO. The point isn't learning a new credential mechanism — it's reusing the one Day 22 already built, confirming Connections are genuinely reusable across every tool that needs database access, not just hand-written <code>BashOperator</code> strings.</p>
+
+<h2>5 · The actual trade-off, stated as a threshold</h2>
+<table class="gloss">
+<tr><th></th><th><code>BashOperator</code> (Day 7)</th><th>Cosmos <code>DbtTaskGroup</code> (today)</th></tr>
+<tr><td>Airflow tasks</td><td>1, for the whole <code>dbt build</code></td><td>1 per model, 1 per model's tests</td></tr>
+<tr><td>Retry granularity</td><td>whole command re-runs</td><td>just the failed model/test re-runs</td></tr>
+<tr><td>Graph view</td><td>one box, no model-level detail</td><td>full per-model graph, matches <code>dbt docs</code></td></tr>
+<tr><td>Setup cost</td><td>none — <code>uv run --with</code> is self-contained</td><td>one persistent dbt install, pinned and maintained</td></tr>
+<tr><td>Parse-time cost</td><td>none — nothing runs at DAG-parse time</td><td><code>dbt ls</code> runs on every DAG parse to build the task list</td></tr>
+</table>
+<p>For this project's size — seven models, one failure mode anyone debugging would just read the dbt log for anyway — Day 7's own call stands: the setup cost (a maintained, persistent dbt venv instead of zero infrastructure) isn't paid back yet. The threshold where it flips is concrete, not a vibe: enough models that "which one failed" stops being obvious from one log, or enough runtime that retrying one model instead of the whole build actually saves meaningful time. Name that threshold out loud rather than treating either choice as universally correct.</p>
+
+<h2>6 · Verify</h2>
+<pre><code>AIRFLOW_HOME="$(pwd)/airflow_home" uv run --with "apache-airflow==3.3.1" --with "astronomer-cosmos==1.15.1" --with "dbt-postgres==1.11.0" \
+  airflow dags list-import-errors
+AIRFLOW_HOME="$(pwd)/airflow_home" uv run --with "apache-airflow==3.3.1" --with "astronomer-cosmos==1.15.1" --with "dbt-postgres==1.11.0" python3 -c "
+from airflow.dag_processing.dagbag import DagBag
+bag = DagBag(dag_folder='dags')
+dag = bag.get_dag('dbt_cosmos_demo')
+print(sorted(t.task_id for t in dag.tasks))
+"</code></pre>
+<p>Expected: <code>list-import-errors</code> prints <code>No data found</code>, and the task list shows one task per model plus one <code>.test</code> task per model carrying a schema test — for this project's current seven models, the same shape this round's own scratch run produced for a three-model slice:</p>
+<pre><code>['dbt_models.dim_restaurants_run', 'dbt_models.stg_orders.run', 'dbt_models.stg_orders.test', 'dbt_models.stg_restaurants_run']</code></pre>
+<p>If <code>dbt_executable_path</code> points at nothing real, this is the exact failure Section 3 described: a parse-time error naming that path, not a vague DAG import failure — confirming you can read the real error message once you've hit it rather than being surprised by it.</p>
+
+<div class="interview">
+<p><strong>Q: "Your dbt project runs inside Airflow as one BashOperator. When would you switch to Cosmos instead?"</strong> A strong answer, out loud: <em>"Cosmos parses the dbt project at DAG-parse time and renders one Airflow task per model, with dependency edges taken straight from the project's own ref() graph — so a failure shows up as one red box for the model that actually broke, and a retry only re-runs that model, not the whole build. The cost is real: Cosmos needs a persistent dbt install Airflow can shell out to, not the uv run --with pattern that makes every other script in this project self-contained, and dbt ls runs on every single DAG parse to rebuild the task list. For a project with a handful of models, that setup cost isn't worth it — one BashOperator and a readable dbt log tells you everything. I'd switch once the project is big enough that 'which model failed' stops being obvious from one log, or once retry time on the whole build starts actually costing something."</em> The signal: stating Cosmos's real mechanism (parses the project, builds real per-model tasks) and a concrete switch condition, not just "Cosmos is more production-grade."</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed this round via a real DagBag parse of a DbtTaskGroup: a model with a declared test produces two tasks, <model>.run and <model>.test, and any downstream model depending on it waits on the .test task specifically, not just .run -- mirroring the same test-before-downstream-build ordering a single dbt build command already does internally, but now visible as a real Airflow task edge.">
+    <p class="stem">Confirmed this round: what happens to a dbt model that has a schema test, under Cosmos?</p>
+    <button class="opt" data-ok>A run task, plus a separate test task</button>
+    <button class="opt">It is silently skipped entirely by Cosmos today</button>
+    <button class="opt">One task that always just ignores it fully</button>
+  </div>
+  <div class="q" data-why="Confirmed this round by inspecting a live ExecutionConfig(): its default dbt_executable_path resolves to whatever dbt binary happens to be on PATH at DAG-parse time, a real executable path on disk -- unlike every BashOperator this course has written since Day 7, which installs dbt fresh and self-contained on every single invocation via uv run --with.">
+    <p class="stem">What did this round confirm about Cosmos's default <code>LOCAL</code> execution mode?</p>
+    <button class="opt" data-ok>A persistent dbt path, resolved once at parse</button>
+    <button class="opt">No dbt installation needed anywhere, at all, ever</button>
+    <button class="opt">A fresh dbt reinstall on every single run</button>
+  </div>
+  <div class="q" data-why="Confirmed this round via a real DagBag parse: Cosmos infers task dependencies directly from the dbt project's own ref() graph -- dim_restaurants_run waited on both stg_restaurants_run and stg_orders.test because dim_restaurants.sql actually refs() both staging models, with no dependency hand-written anywhere in the DAG file itself.">
+    <p class="stem">Where do a Cosmos DAG's task dependency edges actually come from?</p>
+    <button class="opt" data-ok>The dbt project's own <code>ref()</code> graph</button>
+    <button class="opt">Hand-written <code>&gt;&gt;</code> operators in the file</button>
+    <button class="opt">Alphabetical order of each model's name</button>
+  </div>
+  <div class="q" data-why="This course's own house-style threshold (Day 7's own decision, revisited here with Cosmos's real costs now confirmed) is that per-model task granularity only pays for its setup cost -- a persistent dbt install, and a dbt ls call on every DAG parse -- once a project is big enough that a single failing model is genuinely hard to spot from one dbt build log, or retrying the whole build is itself expensive. A handful of models with one readable log does not meet that bar.">
+    <p class="stem">Per today's stated threshold, when does Cosmos's setup cost actually pay off?</p>
+    <button class="opt" data-ok>Once spotting one failing model gets genuinely hard</button>
+    <button class="opt">Immediately, for any dbt project, regardless of size</button>
+    <button class="opt">Only once Kafka also happens to join in</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> this round's content comes from directly exercising a real <code>astronomer-cosmos==1.15.1</code> install against the pinned <code>apache-airflow==3.3.1</code> and <code>dbt-postgres==1.11.0</code> (<code>DbtTaskGroup</code>, <code>ProjectConfig</code>, <code>ProfileConfig</code>, <code>ExecutionConfig</code>, and <code>PostgresUserPasswordProfileMapping</code>'s real constructor signatures, plus a real <code>DagBag</code> parse of the resulting per-model/per-test task graph) rather than a fresh doc fetch. Read the <a href="https://astronomer.github.io/astronomer-cosmos/">Astronomer Cosmos docs</a> next, especially its own execution-mode comparison page (<code>LOCAL</code> vs. <code>VIRTUALENV</code> vs. <code>KUBERNETES</code> — only <code>LOCAL</code> was exercised this round, since the others need infrastructure this course's single-laptop scope doesn't carry) — cited in <code>RESOURCES.md</code> for exactly this lesson, alongside Astronomer's own <a href="https://www.astronomer.io/docs/learn/airflow-dbt">"Orchestrate dbt Core with Airflow and Cosmos"</a> guide, which the same page warns may still show Airflow 2 code in places, so check every import against Day 7/20's confirmed Airflow 3 paths before copying it.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 24.<br>
+<strong>Phase 2c's spine is now fully covered</strong> except sensors vs. deferrable operators and SLAs/alerting — the next natural Airflow topic. Phase 2d (portfolio &amp; interview) still has zero days against dbt's eight, and is worth serious consideration within the next couple of rounds.<br><br>
+💬 Anything unclear — why Cosmos needs a persistent dbt install when nothing else in this course does, or how the execution-mode trade-offs change with Kubernetes in the mix? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

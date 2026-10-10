@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 73 · concurrent.futures: running I/O-bound work at the same time</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 73 · ~20 min · 10 Oct 2026</p>
+<h1><code>concurrent.futures</code>: running I/O-bound work at the same time</h1>
+<p class="byline">Every pipeline so far has done one thing, then the next thing, in order — read a file, then parse it, then write the result. That is fine when each step is fast. It falls apart the moment a step is "wait for a slow thing to respond": ten URLs fetched one at a time wait ten times longer than they need to, even though the CPU spends almost all of that time doing nothing but waiting. <code>concurrent.futures</code> is the standard-library way to run several such waits at once.</p>
+
+<div class="callout"><strong>Why today, specifically:</strong> a fresh-gap grep across all 72 lessons and every practice file confirmed <code>concurrent.futures</code>, <code>threading</code>, and the Global Interpreter Lock have never been taught — one of the three candidates open since Day 70's note (<code>configparser</code>, <code>uuid</code>, <code>concurrent.futures</code>/<code>threading</code>), and the only one of the three with real weight: Day 71 reviewed Days 68-70 and today is only the first fresh lesson since, one short of this course's usual three-fresh-lesson review trigger (Days 64-66 → review 67, Days 68-70 → review 71), so a fresh topic was the right call over an early review. This one also sets up Phase 2b directly — Day 20's planned FastAPI lesson already names a "thread pool" and "blocking call" without this module ever having been taught as the thing underneath them.</div>
+
+<h2>1 · The problem: waiting is not the same as working</h2>
+<p>Imagine fetching data from five slow endpoints that each take about one second to respond. Doing it the way every lesson so far has done things — a plain loop — takes about five seconds, because each request waits for the previous one to fully finish before starting:</p>
+<pre><code><span class="kw">import</span> time
+
+<span class="kw">def</span> fetch(n):
+    time.sleep(<span class="kw">1</span>)   <span class="cm"># stands in for a slow network call</span>
+    <span class="kw">return</span> <span class="str">f"result {n}"</span>
+
+start = time.perf_counter()
+results = [fetch(n) <span class="kw">for</span> n <span class="kw">in</span> <span class="kw">range</span>(<span class="kw">5</span>)]
+<span class="kw">print</span>(time.perf_counter() - start)   <span class="cm"># ~5.0 seconds</span></code></pre>
+<p>Nothing in that loop is actually using the CPU during <code>time.sleep(1)</code> — it is purely waiting. <dfn data-en="I/O-bound work spends most of its time waiting on something external (network response, disk, another process) rather than doing CPU computation; this is the kind of work concurrent.futures and threading speed up, because the CPU is free to start other waits while one is still pending" data-vn="giữ nguyên &quot;I/O-bound&quot; — công việc chủ yếu là chờ cái gì đó bên ngoài (network, disk...) chứ không tính toán nhiều; đây là loại việc concurrent.futures/threading giúp nhanh hơn, vì CPU rảnh để bắt đầu chờ việc khác trong lúc vẫn đang chờ việc cũ">I/O-bound</dfn> work like this is exactly what running things at the same time speeds up: while one wait is pending, the CPU is free to go start another one instead of sitting idle.</p>
+
+<h2>2 · <code>ThreadPoolExecutor</code>: run several calls at once, collect the results</h2>
+<p>The <dfn data-en="concurrent.futures.ThreadPoolExecutor runs a function many times concurrently across a fixed pool of background threads; submit(fn, arg) or map(fn, iterable) starts the calls, and the executor collects each result (or exception) as it finishes, instead of the calling code waiting for one call to finish before starting the next" data-vn="giữ nguyên &quot;ThreadPoolExecutor&quot; — chạy 1 hàm nhiều lần cùng lúc trên 1 nhóm thread nền cố định; submit()/map() khởi động các lần gọi, executor tự thu lại kết quả (hoặc exception) khi từng cái xong, không cần đợi cái trước xong mới chạy cái sau">ThreadPoolExecutor</dfn> from <code>concurrent.futures</code> is the easiest way to do that. <code>with</code> (Day 6) manages its startup and shutdown; <code>.map()</code> applies a function to every item of an iterable, the same shape as the built-in <code>map()</code>, but running several calls concurrently instead of one after another:</p>
+<pre><code><span class="kw">import</span> time
+<span class="kw">from</span> concurrent.futures <span class="kw">import</span> ThreadPoolExecutor
+
+<span class="kw">def</span> fetch(n):
+    time.sleep(<span class="kw">1</span>)
+    <span class="kw">return</span> <span class="str">f"result {n}"</span>
+
+start = time.perf_counter()
+<span class="kw">with</span> ThreadPoolExecutor(max_workers=<span class="kw">5</span>) <span class="kw">as</span> pool:
+    results = <span class="kw">list</span>(pool.map(fetch, <span class="kw">range</span>(<span class="kw">5</span>)))
+<span class="kw">print</span>(time.perf_counter() - start)   <span class="cm"># ~1.0 second, not ~5.0</span>
+<span class="kw">print</span>(results)                       <span class="cm"># ["result 0", "result 1", ..., "result 4"] -- same order as input</span></code></pre>
+<p>Same five calls, same one-second wait each, but all five waits overlap instead of stacking up — total time tracks the slowest single call, not their sum. <code>max_workers=5</code> caps how many threads run at once; <code>.map()</code> still returns results in the same order the inputs were given, even though the calls themselves may finish in a different order.</p>
+
+<div class="callout"><strong>Bridge from SQL:</strong> this is the same idea as a connection pool issuing several queries concurrently instead of one connection running them strictly one after another — overlapping independent waits instead of serializing them for no reason.</div>
+
+<h2>3 · <code>submit()</code> and <code>Future</code>: when calls need different arguments or you need the first one done</h2>
+<p><code>.map()</code> assumes every call uses the same function with one argument each, in a fixed order. <code>submit()</code> is more flexible: it starts one call immediately and hands back a <dfn data-en="a Future is an object returned immediately by executor.submit(fn, *args), representing a call that may still be running in the background; calling .result() on it blocks until that specific call finishes and returns its value (or re-raises its exception)" data-vn="giữ nguyên &quot;Future&quot; — object trả về ngay khi gọi submit(fn, *args), đại diện cho 1 lần gọi có thể vẫn đang chạy nền; gọi .result() sẽ block tới khi đúng lần gọi đó xong và trả về giá trị (hoặc raise lại exception của nó)">Future</dfn> — a placeholder for a result that may not exist yet. Calling <code>.result()</code> on it blocks until that specific call finishes:</p>
+<pre><code><span class="kw">import</span> time
+<span class="kw">from</span> concurrent.futures <span class="kw">import</span> ThreadPoolExecutor
+
+<span class="kw">def</span> fetch(name, delay):
+    time.sleep(delay)
+    <span class="kw">return</span> <span class="str">f"{name} done"</span>
+
+<span class="kw">with</span> ThreadPoolExecutor(max_workers=<span class="kw">3</span>) <span class="kw">as</span> pool:
+    future_a = pool.submit(fetch, <span class="str">"slow"</span>, <span class="kw">2</span>)
+    future_b = pool.submit(fetch, <span class="str">"fast"</span>, <span class="kw">0.1</span>)
+
+    <span class="kw">print</span>(future_b.result())   <span class="cm"># "fast done" -- ready almost immediately</span>
+    <span class="kw">print</span>(future_a.result())   <span class="cm"># "slow done" -- this line blocks until the 2s call finishes</span></code></pre>
+<p>Both calls were already running concurrently the moment <code>submit()</code> returned; asking for <code>future_b</code>'s result first costs nothing extra, because it was likely already done. If a submitted call raises an exception instead of returning, <code>.result()</code> re-raises that same exception at the point it's called, rather than swallowing it — a failure inside a background thread does not vanish silently.</p>
+
+<h2>4 · Why threads help here but wouldn't for pure computation</h2>
+<p>CPython — the standard Python interpreter this course runs on — has a <dfn data-en="the Global Interpreter Lock (GIL) is a CPython-specific lock that lets only one thread execute Python bytecode at a time, even on a multi-core machine; it is released automatically during a blocking I/O call (network, disk, time.sleep), which is exactly why threading speeds up I/O-bound work but not CPU-bound number-crunching" data-vn="giữ nguyên &quot;Global Interpreter Lock&quot;/&quot;GIL&quot; — khóa riêng của CPython, chỉ cho 1 thread chạy bytecode Python tại 1 thời điểm, dù máy có nhiều core; GIL tự nhả ra trong lúc chờ I/O (network, disk, time.sleep), đó là lý do threading giúp việc chờ I/O nhanh hơn nhưng không giúp việc tính toán CPU nặng">Global Interpreter Lock (GIL)</dfn>: only one thread runs Python bytecode at any instant, even on a machine with many CPU cores. That sounds like it should make threads useless for speeding anything up — but the GIL is released automatically the moment a thread blocks on I/O (a network call, a disk read, <code>time.sleep()</code>), which is precisely the case in every example above. While one thread is waiting on I/O with the GIL released, another thread is free to run.</p>
+<p>Pure number-crunching is the opposite case: a thread doing arithmetic never blocks on I/O, so it never releases the GIL, and running the same computation across several threads does not go faster — sometimes it's even slightly slower from the added overhead. That CPU-bound case needs <code>concurrent.futures.ProcessPoolExecutor</code> instead, which sidesteps the GIL by using separate OS processes rather than threads — named here as the boundary, not demonstrated, since this course's pipelines are I/O-bound (files, subprocesses, eventually a database and HTTP calls) rather than CPU-bound.</p>
+
+<h2>5 · <code>threading</code> itself: what <code>concurrent.futures</code> sits on top of</h2>
+<p><code>concurrent.futures</code> is deliberately the easier entry point; the lower-level <code>threading</code> module it's built on is still worth recognizing by sight, because it appears in other people's code constantly. The one concept worth knowing without writing it by hand today: a <dfn data-en="a race condition happens when two or more threads read and write the same shared mutable state without coordination, so the final result depends on the unpredictable order the threads happen to interleave in -- the classic fix is a threading.Lock, acquired before touching the shared state and released after" data-vn="giữ nguyên &quot;race condition&quot; — xảy ra khi 2+ thread cùng đọc/ghi 1 state chung mà không có cơ chế đồng bộ, nên kết quả cuối phụ thuộc vào thứ tự chạy xen kẽ không đoán trước được; cách sửa kinh điển là threading.Lock, acquire trước khi đụng vào state chung và release sau">race condition</dfn> happens when two threads read and modify the same shared value without coordinating, so the final result depends on unpredictable timing rather than the code's logic. The fix, <code>threading.Lock</code>, acquires exclusive access before touching the shared value and releases it after — a mechanism named here so it's recognizable in the wild, not exercised today, since every example above gives each thread its own independent work with no shared state to corrupt.</p>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> nothing pandas-specific today — concurrent I/O (fetching several files or API responses before building a <code>DataFrame</code> from them) is exactly this module's job either way; pandas itself has no threading API of its own. Not covered further here, per <code>MISSION.md</code>.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/73_concurrent_futures_threadpoolexecutor.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/73_concurrent_futures_threadpoolexecutor.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: timing a plain loop of five simulated slow calls against the same five calls run through <code>ThreadPoolExecutor.map()</code> and confirming the concurrent version is meaningfully faster, using <code>submit()</code> plus <code>.result()</code> to fetch two differently-timed calls and reading the faster one back first, and confirming an exception raised inside a submitted call re-surfaces at <code>.result()</code> instead of disappearing silently.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="I/O-bound work spends most of its time waiting on something external (network, disk) rather than using the CPU. Running several such waits concurrently overlaps the idle waiting time instead of stacking each wait one after another, so total time tracks the slowest single call rather than the sum of all of them.">
+    <p class="stem">Why does <code>ThreadPoolExecutor.map()</code> finish five one-second simulated calls in about one second, not five?</p>
+    <button class="opt" data-ok>the five waits overlap concurrently instead of running one after another</button>
+    <button class="opt">time.sleep() secretly runs much faster whenever called from inside a thread</button>
+    <button class="opt">ThreadPoolExecutor always skips every call after the very first one entirely</button>
+  </div>
+  <div class="q" data-why="executor.submit(fn, *args) starts the call immediately in the background and returns a Future right away, without waiting for the call to finish. Calling .result() on that Future is what actually blocks, and only until that specific call completes.">
+    <p class="stem">What does <code>executor.submit(fn, arg)</code> return right away, before the call has finished?</p>
+    <button class="opt" data-ok>a Future object representing the call that may still be running</button>
+    <button class="opt">the final return value of fn, already fully computed and ready</button>
+    <button class="opt">nothing at all -- submit() always blocks until fn completely finishes</button>
+  </div>
+  <div class="q" data-why="CPython's GIL lets only one thread run Python bytecode at a time, but it is released automatically while a thread is blocked on I/O (network, disk, time.sleep), letting another thread run during that wait. A thread doing pure CPU computation never blocks on I/O, so it never releases the GIL, and threading provides no speedup for that case.">
+    <p class="stem">Why does threading speed up I/O-bound waiting but not CPU-bound number-crunching in CPython?</p>
+    <button class="opt" data-ok>the GIL releases during I/O waits but stays held during pure computation</button>
+    <button class="opt">CPU-bound code is simply always already fast enough to not need threads</button>
+    <button class="opt">threading literally refuses to ever run any function that does real math</button>
+  </div>
+  <div class="q" data-why="A race condition happens when multiple threads read and write the same shared mutable state without coordinating, so the outcome depends on unpredictable interleaving rather than program logic. A threading.Lock fixes this by letting only one thread hold exclusive access to the shared state at a time.">
+    <p class="stem">What causes a race condition between two threads?</p>
+    <button class="opt" data-ok>uncoordinated reads and writes to the same shared mutable state by both</button>
+    <button class="opt">one single thread running its own code slightly slower than usual today</button>
+    <button class="opt">two threads that never touch any shared state of any kind whatsoever</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the standard library's <a href="https://docs.python.org/3/library/concurrent.futures.html"><code>concurrent.futures</code></a> docs — covers <code>ThreadPoolExecutor</code>/<code>ProcessPoolExecutor</code>, <code>submit()</code>/<code>map()</code>, <code>Future</code>, and the <code>as_completed()</code> helper for processing results as they finish rather than in submission order, not needed for today's two patterns.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day73">glossary</a> under Day 73.<br>
+<code>configparser</code> and <code>uuid</code> remain the two previously-named fresh-gap candidates still on the table.<br><br>
+💬 Anything unclear — <code>ThreadPoolExecutor</code> vs. <code>submit()</code>, the GIL, or why threads don't speed up computation? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

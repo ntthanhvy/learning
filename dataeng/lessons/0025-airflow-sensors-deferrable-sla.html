@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 25 · Airflow sensors, deferrable operators &amp; deadline alerts</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 25 · ~20 min · 10 Oct 2026</p>
+<h1>Airflow sensors, deferrable operators &amp; deadline alerts</h1>
+<p class="byline">Today's tangible win: a DAG that waits for the raw files to land instead of assuming they already have, without tying up a worker slot while it waits — confirmed this round against a real Airflow 3.3.1 install that <code>deferrable=True</code> really does hand control to the triggerer, and that the thing most tutorials still call "SLA" was removed in Airflow 3.0 and replaced by a different, confirmed-real mechanism.</p>
+
+<div class="callout"><strong>Before today — confirm Day 22/24's DAGs still parse:</strong> today adds one new file; it doesn't touch <code>dags/food_delivery_pipeline.py</code>, <code>dags/dbt_build_with_connection.py</code> or <code>dags/dbt_cosmos_demo.py</code>.
+<pre><code>AIRFLOW_HOME="$(pwd)/airflow_home" uv run --with "apache-airflow==3.3.1" airflow dags list-import-errors</code></pre>
+Expected: <code>No data found</code> (Day 22's and Day 24's own runs confirmed this is current Airflow 3.3.1's real no-errors wording, not blank output). If your run shows anything else, fix that first — today's new file sits beside the existing three, replacing none of them.</div>
+
+<h2>1 · The assumption every DAG so far has quietly made</h2>
+<p>Day 7's <code>load_raw</code> task runs a seed script that assumes the day's raw CSVs are simply there, ready, the instant the DAG fires. On a laptop running a deterministic generator, that assumption always holds. In a real deployment it rarely does: an upstream batch export finishes "sometime between 2am and 6am," not on your DAG's own clock, and a scheduled run that starts at a fixed time has no idea whether today's files have actually landed yet.</p>
+<p>A <dfn data-en="an Airflow operator whose job is to wait: it checks a condition (a file exists, an upstream task finished, a row exists in a table) and only lets the DAG continue once that condition is true, instead of doing any data work itself" data-vn="giữ nguyên &quot;sensor&quot; — operator Airflow chuyên để chờ: kiểm tra 1 điều kiện (file tồn tại, task khác đã xong, 1 row đã có trong bảng) và chỉ cho DAG tiếp tục khi điều kiện đó đúng, bản thân không xử lý dữ liệu gì cả">sensor</dfn> is Airflow's answer: an operator whose only job is to check a condition — repeatedly, on an interval — and let the DAG move on once it's true. Today builds one for exactly the gap Day 7 glossed over: wait for <code>raw/orders.csv</code> to actually exist before running <code>dbt build</code> against it.</p>
+
+<h2>2 · Two ways a sensor can wait, confirmed on a real install</h2>
+<p>The naive implementation of "check every 30 seconds" is a loop that blocks: the task holds a worker slot the entire time it's waiting, doing nothing but sleeping and re-checking. Airflow has had a cheaper option since well before version 3 — <code>mode="reschedule"</code> — where the sensor gives the worker slot back between checks and is simply rescheduled to try again later, instead of sitting there burning a slot. Confirmed directly from <code>BaseSensorOperator</code>'s real constructor on a live 3.3.1 install:</p>
+<pre><code>poke_interval: timedelta | float = 60
+timeout: timedelta | float | None = None
+mode: str = 'poke'          <span class="cm"># the default: blocks a worker slot the whole time</span>
+exponential_backoff: bool = False</code></pre>
+<p><code>mode="reschedule"</code> is an improvement, but it still needs a worker process to wake up, re-check, and (if still false) go back to sleep — on a scheduler with hundreds of waiting sensors, that is hundreds of repeated wake-ups. <dfn data-en="an Airflow 2.2+ mechanism where a sensor (or any operator) suspends itself entirely -- its worker slot is freed completely, and a separate, lightweight triggerer process watches the condition asynchronously, waking the task back up only once the condition is actually met" data-vn="giữ nguyên &quot;deferrable operator&quot; — cơ chế từ Airflow 2.2+: 1 sensor (hoặc operator khác) tự &quot;nhường&quot; hoàn toàn, trả lại worker slot, giao cho 1 process riêng nhẹ hơn gọi là triggerer theo dõi điều kiện bất đồng bộ, chỉ đánh thức task khi điều kiện thật sự đúng">Deferrable operators</dfn> go one step further: the task suspends itself completely, freeing its worker slot entirely, and a separate, lightweight <code>triggerer</code> process (asyncio-based, can watch thousands of conditions in one process) does the actual waiting. The worker only gets woken back up once the condition is genuinely true.</p>
+<p>Confirmed this round by reading <code>FileSensor.execute</code>'s real source on a live 3.3.1 install, the exact branch that fires when <code>deferrable=True</code>:</p>
+<pre><code><span class="kw">elif</span> <span class="kw">not</span> self.poke(context=context):
+    self.defer(
+        timeout=datetime.timedelta(seconds=self.timeout),
+        trigger=FileTrigger(filepath=self.path, poke_interval=self.poke_interval),
+        method_name=<span class="str">"execute_complete"</span>,
+    )</code></pre>
+<p><code>self.defer(...)</code> is the real mechanism — it hands a <code>Trigger</code> object to the triggerer and tells Airflow which method to resume at once that trigger fires. The sensor's own worker slot is released the moment <code>defer()</code> is called, not held until the file shows up.</p>
+
+<h2>3 · The other half of today: what happened to "SLA"</h2>
+<p>Older Airflow tutorials (and plenty still live on the web) teach an <code>sla=timedelta(...)</code> argument on a task, checked by the scheduler and surfaced in a dedicated UI tab. Tried that directly against a real Airflow 3.3.1 install this round:</p>
+<pre><code>Dummy(task_id=<span class="str">"t"</span>, sla=timedelta(minutes=<span class="kw">5</span>))
+<span class="cm"># warning: The SLA feature is removed in Airflow 3.0, replaced with Deadline Alerts in &gt;=3.1
+# AttributeError: 'Dummy' object has no attribute 'sla'</span></code></pre>
+<p>That is a real, current-version finding, not a hypothetical: the old per-task <code>sla</code> kwarg still parses without error (so an old DAG won't crash on import) but is silently inert — reading <code>task.sla</code> back afterward raises <code>AttributeError</code>, confirming nothing is actually checking it. The replacement, confirmed working end to end this round, is a <dfn data-en="an Airflow 3.1+ mechanism (DAG(deadline=DeadlineAlert(...))) that fires a callback if a chosen reference point (a DAG run's logical date, queued time, or a fixed datetime) plus an interval passes without the condition the alert cares about being met -- the direct, currently-supported replacement for the Airflow 2.x per-task sla= kwarg, which still parses but does nothing in Airflow 3" data-vn="giữ nguyên &quot;Deadline Alert&quot; — cơ chế Airflow 3.1+ (DAG(deadline=DeadlineAlert(...))) tự gọi callback nếu quá 1 khoảng interval tính từ 1 điểm mốc (logical date, queued time, hoặc giờ cố định) mà chưa đạt điều kiện mong muốn — thay thế chính thức cho tham số sla= cũ của từng task ở Airflow 2.x, tham số cũ vẫn parse được nhưng không còn tác dụng gì ở Airflow 3">Deadline Alert</dfn>, declared on the DAG itself rather than one task:</p>
+<pre><code><span class="kw">from</span> airflow.sdk <span class="kw">import</span> DAG, DeadlineAlert
+<span class="kw">from</span> airflow.sdk.definitions.deadline <span class="kw">import</span> DeadlineReference, SyncCallback
+
+<span class="kw">def</span> _alert_sla_breach(**context):
+    <span class="kw">print</span>(<span class="str">f"SLA BREACH: dbt_build has not finished within 30 minutes"</span>)
+
+<span class="kw">with</span> DAG(
+    dag_id=<span class="str">"raw_files_sensor_demo"</span>,
+    deadline=DeadlineAlert(
+        reference=DeadlineReference.DAGRUN_LOGICAL_DATE,
+        interval=timedelta(minutes=<span class="kw">30</span>),
+        callback=SyncCallback(_alert_sla_breach),
+    ),
+    ...
+) <span class="kw">as</span> dag:
+    ...</code></pre>
+<p>Confirmed directly against a live install: <code>DeadlineReference.DAGRUN_LOGICAL_DATE</code> measures from the run's logical date (other options exist for queued time or a fixed datetime); the <code>callback</code> must be wrapped in <code>SyncCallback</code> or <code>AsyncCallback</code>, and <code>AsyncCallback</code> specifically requires a real <code>async def</code> coroutine — passing it a plain function raised <code>AttributeError: ... is not awaitable</code> this round, a genuine gotcha worth knowing before picking the wrong wrapper. <code>SyncCallback</code> accepts an ordinary function, which is what today's build uses.</p>
+
+<h2>4 · Build: a sensor-gated, deadline-alerted DAG</h2>
+<p>In your <code>food-delivery-pipeline</code> repo, add <code>dags/raw_files_sensor_demo.py</code> alongside Day 7's DAG, not instead of it — same "second DAG, side by side" pattern Day 24 used for Cosmos. The sensor and the deadline wiring are given in full (new syntax today, not the day's skill); the day's actual skill is the TODO inside the callback, reading real run context instead of a bare print:</p>
+<pre><code><span class="kw">from</span> __future__ <span class="kw">import</span> annotations
+
+<span class="kw">from</span> datetime <span class="kw">import</span> datetime, timedelta
+
+<span class="kw">from</span> airflow.providers.standard.operators.bash <span class="kw">import</span> BashOperator
+<span class="kw">from</span> airflow.providers.standard.sensors.filesystem <span class="kw">import</span> FileSensor
+<span class="kw">from</span> airflow.sdk <span class="kw">import</span> DAG, DeadlineAlert
+<span class="kw">from</span> airflow.sdk.definitions.deadline <span class="kw">import</span> DeadlineReference, SyncCallback
+
+REPO_DIR = <span class="str">"/opt/airflow/food-delivery-pipeline"</span>  <span class="cm"># same path Day 7 used</span>
+
+
+<span class="kw">def</span> _alert_sla_breach(**context) -&gt; <span class="kw">None</span>:
+    <span class="cm"># TODO: today's real skill -- read context["dag_run"] (run_id, logical_date,
+    # state) and log which specific run missed the deadline, instead of this
+    # bare print. A real deployment would call Slack/PagerDuty here; printing
+    # proves the callback itself genuinely fires, which is the point today.</span>
+    <span class="kw">print</span>(<span class="str">"SLA BREACH: dbt_build has not finished within 30 minutes of its logical date"</span>)
+
+
+<span class="kw">with</span> DAG(
+    dag_id=<span class="str">"raw_files_sensor_demo"</span>,
+    schedule=<span class="str">"@daily"</span>,
+    start_date=datetime(<span class="kw">2026</span>, <span class="kw">9</span>, <span class="kw">21</span>),
+    catchup=<span class="kw">False</span>,
+    deadline=DeadlineAlert(
+        reference=DeadlineReference.DAGRUN_LOGICAL_DATE,
+        interval=timedelta(minutes=<span class="kw">30</span>),
+        callback=SyncCallback(_alert_sla_breach),
+    ),
+) <span class="kw">as</span> dag:
+    wait_for_raw_files = FileSensor(
+        task_id=<span class="str">"wait_for_raw_files"</span>,
+        filepath=<span class="str">"/opt/airflow/data/raw/orders.csv"</span>,
+        poke_interval=<span class="kw">30</span>,
+        timeout=<span class="kw">60</span> * <span class="kw">60</span>,
+        mode=<span class="str">"reschedule"</span>,
+        deferrable=<span class="kw">True</span>,
+    )
+
+    dbt_build = BashOperator(
+        task_id=<span class="str">"dbt_build"</span>,
+        bash_command=<span class="str">f"cd {REPO_DIR}/warehouse &amp;&amp; uv run --with 'dbt-postgres==1.11.0' dbt build"</span>,
+        retries=<span class="kw">2</span>,
+        retry_delay=timedelta(minutes=<span class="kw">5</span>),
+    )
+
+    wait_for_raw_files &gt;&gt; dbt_build</code></pre>
+<p>Fill in <code>_alert_sla_breach</code>'s TODO. The sensor itself needs no edit — <code>mode="reschedule"</code> plus <code>deferrable=True</code> together are what make it cheap to leave running: the task gives up its worker slot both between reschedule attempts <em>and</em> while deferred, waiting on the triggerer instead.</p>
+<div class="callout"><code>deferrable=True</code> needs a running <code>triggerer</code> process to actually resume the task once its trigger fires — <code>airflow standalone</code> (Day 7's setup) starts one automatically; a hand-assembled scheduler-only deployment would need to run <code>airflow triggerer</code> as its own process. Worth naming in an interview: a deferred task with no triggerer running simply never resumes, which looks identical to a stuck DAG from the UI alone.</div>
+
+<h2>5 · The retries this course already has, named precisely</h2>
+<p>Day 7's own <code>retries=2</code>/<code>retry_delay=timedelta(minutes=5)</code> on <code>dbt_build</code> (glossary Day 7) answers a different question than today's deadline alert: retries re-run a <em>failed</em> task automatically; a deadline alert fires on a task (or run) that is simply <em>late</em>, whether or not it ever fails. A `dbt_build` stuck waiting on a lock isn't failing — it's running, slowly — and no number of retries would ever catch that; only a deadline watching elapsed time does. The two are complementary, not alternatives: this project's real DAG should keep both.</p>
+
+<h2>6 · Verify</h2>
+<pre><code>AIRFLOW_HOME="$(pwd)/airflow_home" uv run --with "apache-airflow==3.3.1" airflow db migrate
+AIRFLOW_HOME="$(pwd)/airflow_home" uv run --with "apache-airflow==3.3.1" airflow dags list-import-errors
+AIRFLOW_HOME="$(pwd)/airflow_home" uv run --with "apache-airflow==3.3.1" python3 -c "
+from airflow.dag_processing.dagbag import DagBag
+bag = DagBag(dag_folder='dags')
+dag = bag.get_dag('raw_files_sensor_demo')
+t = dag.get_task('wait_for_raw_files')
+print(sorted(x.task_id for x in dag.tasks))
+print(t.mode, t.deferrable, t.poke_interval)
+print(dag.deadline[0].interval)
+"</code></pre>
+<p>Expected: <code>list-import-errors</code> prints <code>No data found</code>, and the script's output matches this round's own real run against the identical DAG code:</p>
+<pre><code>['dbt_build', 'wait_for_raw_files']
+reschedule True 30.0
+0:30:00</code></pre>
+<p>If <code>filepath</code> points at nothing that will ever exist on your machine, the sensor will defer and then hit its own <code>timeout</code> (one hour here) and fail loudly rather than hang forever — confirm that by pointing it at a real path under your repo's own raw-data directory before trusting the happy path.</p>
+
+<div class="interview">
+<p><strong>Q: "When would you reach for a deferrable sensor instead of a plain poke-mode one?"</strong> A strong answer, out loud: <em>"A plain sensor in poke mode blocks a worker slot the entire time it's waiting — fine for a handful of short waits, expensive at scale, since every waiting sensor ties up a slot doing nothing but sleeping and re-checking. mode='reschedule' helps by giving the slot back between checks, but a worker still has to wake up repeatedly to re-poll. A deferrable operator goes further: it suspends the task completely and hands the actual waiting to a separate triggerer process, which can watch thousands of conditions asynchronously in one lightweight process. I'd reach for deferrable whenever a wait is long or there are many of them running concurrently — exactly the shape of a pipeline waiting on upstream files or an external system's completion, not a two-second check."</em> The signal: naming the worker-slot cost specifically, and the triggerer as the actual mechanism, not just "it's more efficient."</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed this round by reading FileSensor.execute's real source: when deferrable=True, a failed poke calls self.defer(trigger=..., method_name=...), which hands the wait to the triggerer process and releases the task's own worker slot immediately -- the worker is not held until the condition becomes true, unlike plain poke mode.">
+    <p class="stem">Confirmed this round: what does a deferrable sensor's worker slot do while the sensor waits?</p>
+    <button class="opt" data-ok>Released right away; the triggerer waits in its place</button>
+    <button class="opt">Stays held the whole time, same as poke mode</button>
+    <button class="opt">Doubles in size to cover the whole remaining wait</button>
+  </div>
+  <div class="q" data-why="Confirmed this round against a live Airflow 3.3.1 install: passing sla=timedelta(...) to a task still parses without error, but reading task.sla back afterward raises AttributeError, and a real warning states the SLA feature was removed in Airflow 3.0, replaced with Deadline Alerts in 3.1+. The old kwarg is silently inert, not actively enforced.">
+    <p class="stem">Confirmed this round: what happens to the old per-task <code>sla=</code> kwarg on Airflow 3.3.1?</p>
+    <button class="opt" data-ok>It parses fine but does nothing; real checks were removed</button>
+    <button class="opt">It raises an import error on every single DAG file</button>
+    <button class="opt">It works exactly the same as every Airflow 2.x release</button>
+  </div>
+  <div class="q" data-why="Confirmed this round: a deadline alert fires on elapsed time past a reference point (DeadlineReference.DAGRUN_LOGICAL_DATE plus an interval), regardless of whether the task ever actually fails -- a task stuck running slowly (e.g. waiting on a database lock) never triggers retries, since it never fails, but a deadline alert watching elapsed time still fires.">
+    <p class="stem">Why don't Day 7's <code>retries</code> catch a task that is simply running too slowly, never failing?</p>
+    <button class="opt" data-ok>Retries only re-run a task that actually fails</button>
+    <button class="opt">Retries and deadlines are really just one thing</button>
+    <button class="opt">Slow tasks always fail automatically before too long</button>
+  </div>
+  <div class="q" data-why="Confirmed this round: AsyncCallback(plain_function) raised 'AttributeError: ... is not awaitable', because AsyncCallback specifically requires a real async def coroutine function. SyncCallback accepts an ordinary function, which is what today's DAG actually uses for its deadline alert.">
+    <p class="stem">Confirmed this round: why did wrapping a plain function in <code>AsyncCallback</code> fail?</p>
+    <button class="opt" data-ok><code>AsyncCallback</code> needs a real <code>async def</code> coroutine function</button>
+    <button class="opt">Callbacks can never wrap any plain Python function</button>
+    <button class="opt"><code>DeadlineAlert</code> simply does not exist in Airflow 3</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> this round's content comes from directly exercising a real Airflow 3.3.1 install (<code>BaseSensorOperator</code>'s and <code>FileSensor</code>'s real constructor signatures and <code>execute</code> source, a live attempt at the old <code>sla=</code> kwarg confirming its removal, and a working <code>DeadlineAlert</code>/<code>DeadlineReference</code>/<code>SyncCallback</code> construction parsed through a real <code>DagBag</code>) rather than a doc fetch. Read Airflow's own <a href="https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/sensors.html">Sensors</a> and <a href="https://airflow.apache.org/docs/apache-airflow/stable/authoring-and-scheduling/deferring.html">Deferrable Operators &amp; Triggers</a> pages next, both cited in <code>RESOURCES.md</code>'s Airflow section — the deferring page's own triggerer-architecture diagram is worth rereading before running one outside <code>airflow standalone</code> for the first time.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 25.<br>
+<strong>Phase 2c's spine is now fully covered.</strong> Phase 2d (portfolio &amp; interview) still has zero days against dbt's eight and Kafka/Airflow's own growing counts — the next round should seriously consider starting it rather than inventing a seventh Airflow lesson the spine never asked for.<br><br>
+💬 Anything unclear — why a deferred task needs a live triggerer process, or how Deadline Alerts would change once a real alerting backend sits behind the callback? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

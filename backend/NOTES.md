@@ -7454,4 +7454,114 @@
   is named with certainty for the round after this one — same standing note
   as every prior round; a completion/quiz-outcome signal or a user-named
   track should take priority over guessing blind again.
+- **2026-10-10 generation (Lesson 96, headless run):** Confirmed the actual
+  date first with `date` (2026-10-10, +07 local). Idempotency check next:
+  `ls lessons/ | tail -5` showed no `0096-*` file and the `nav.js` LESSONS
+  array ended at `n: 95, date: "2026-10-09"` with no `n: 96` entry — matching
+  the orchestrator's own DB check that no `lesson_completed`/quiz/kata signal
+  exists for backend more recent than mid-July (only `lesson_generated`/
+  `note` administrative rows). The two `backend/learning-records/` files are
+  still just the two original baseline findings (frontend-mindset gap,
+  concurrency-vocabulary gap), neither naming a fresh gap, and Lesson 95's
+  own closing line again left no named next topic, so this round ran a
+  fresh gap search per NOTES.md's standing instruction rather than guessing
+  blind. Swept a wide set of candidates against every lesson's filename and
+  content via case-insensitive grep across `lessons/*.html` and
+  `reference/glossary.html` before moving to each next one: HTTP caching/
+  Cache-Control depth (already Lessons 9, 51, 57), zero-downtime migration/
+  backfill/expand-contract (already thoroughly Lesson 19, with its own
+  worked Go example and interview question), GIN/GiST/BRIN index internals
+  (GIN is already named and explained in Lessons 44 and 54, full-text search
+  specifically), sparse fieldsets/field selection and batch/bulk API
+  endpoints (zero hits, but thin — a REST-convention footnote, not a
+  20-minute lesson's worth of new mental model, same verdict as the
+  2026-10-08 round reached for the same candidate), leader election and
+  consistent hashing (zero hits each, but both lean into distributed-systems
+  depth that MISSION.md explicitly scopes out — "distributed systems beyond
+  vocabulary level"), HMAC/digital signatures (already Lesson 30's webhook
+  signature verification), and HATEOAS/hypermedia (zero hits, a real
+  RESOURCES.md-named API-design gap, but judged a weaker fit than the gap
+  chosen below — hypermedia controls are a bigger paradigm shift with less
+  direct connective tissue to what Lesson 11 already teaches, better saved
+  for a round with more room to build the case from scratch). The clean gap
+  chosen instead: `grep -rli "ratelimit-limit\|ratelimit-remaining\|
+  ratelimit-reset\|rate limit header" lessons/*.html reference/glossary.html`
+  returned zero hits, while `Retry-After` itself is taught across four
+  separate lessons (11, 66, 67, 71) as the one and only signal a rate-limited
+  client ever gets — always fired at the moment of rejection, never before.
+  Confirmed via a direct re-read of Lesson 11 in full that its middleware
+  sets `Retry-After` solely inside the `if !allowed` branch and nothing else
+  on any successful response — no header anywhere reports the bucket's live
+  state to a client that hasn't been rejected yet. Squarely an API-design/
+  HTTP-semantics topic, a direct extension of Lesson 11 rather than a
+  disconnected one, and it also answers part of RESOURCES.md's named gap
+  ("no vetted resource yet for API design specifically... resource modeling,
+  versioning, error contracts") from the API-contract angle rather than
+  introducing an unrelated new primary source. Lesson 96 covers: the concrete
+  blind spot (a client sees nothing about its quota until the exact response
+  that rejects it); the `RateLimit-Limit`/`RateLimit-Remaining`/
+  `RateLimit-Reset` header family, including the older non-standard
+  `X-RateLimit-*` spelling still shipped by GitHub/Stripe/Twitter-X and why
+  it exists (the deprecated `X-`-prefix convention); a worked extension of
+  Lesson 11's own `rateLimit` middleware and `bucket` struct, adding a
+  `check()` method that reports `(allowed, remaining, resetSecs)` and setting
+  all three headers on every response, not only the rejected one; and a
+  closing "why every response, not just the 429" section tying the fix back
+  to the same bursting rationale Lesson 11 already gave the token bucket. A
+  "Scope line" section distinguishes this from Lesson 11's token-bucket
+  algorithm itself (unchanged — same bucket, same refill math) and Lesson
+  71's load shedding (a different trigger, server capacity signals rather
+  than a per-client quota; these headers don't apply there). Checked the
+  glossary first for the one new term — `rate-limit response headers` —
+  zero collisions via case-insensitive grep, added as a new row after Lesson
+  95's `SKIP LOCKED` row, same Term/Tiếng Việt/English column order as every
+  existing row (verified by direct inspection of the file's actual column
+  order before writing the new row, rather than assuming it from the task
+  brief, which had it backwards). The Go snippet (`bucket.check` plus the
+  rewritten `rateLimit` middleware) was compile-checked in a scratch module;
+  the repo's sandbox blocks `cd` outside the allowed working directory, so
+  the scratch module had to live at `.scratch-0096/gomod/` under the repo
+  root itself rather than under `/tmp` as prior rounds did — `go build ./...`
+  and `go vet ./...` both ran clean on the first pass, no bugs caught this
+  time, and the scratch directory was deleted afterward, confirmed gone via
+  a failed `ls`. Verification performed mechanically: (1) a Node
+  quiz-word-count script matching each `<div class="q" data-why="...">`
+  block and splitting every option both via `.split(/\s+/)` and
+  `.split(" ")` — first draft landed uneven on all four questions (spreads of
+  2-3 words), fixed through several rewrite-and-recount cycles per option —
+  converged to exactly 9/9/9/9 on all four questions, both counting methods
+  agreeing exactly, and exactly one `data-ok` and four options per question
+  confirmed the same way; (2) a Node occurrence-count HTML tag-balance check
+  across 20 tag types on the lesson — clean after one fix (a stray `</p>`
+  left inside a `.callout` div from an early draft, caught by this exact
+  check and removed); and a separate div/p/table/tr/td/th/script/html/head/
+  body/title balance check on `glossary.html` after its one-row addition,
+  also balanced; (3) a raw-unescaped-`&` regex scan across both files — zero
+  hits; (4) the lesson's `<dfn` tag grepped and confirmed to carry both
+  `data-en=` and `data-vn=` — exactly 1 `dfn` tag, matching the 1 new term,
+  no orphaned attribute; (5) `node --check` against `assets/nav.js`,
+  `assets/gloss.js`, and `assets/quiz.js` — all clean, no output, both
+  before and after the `nav.js` edit; (6) a basic HTML well-formedness check
+  (exactly one `<!DOCTYPE html>`, one `<html>`/`</html>`, three script tags
+  present with `nav.js` last) — clean. Registered Lesson 96 in `nav.js`
+  (date 2026-10-10, today's actual generation date), right after the `n: 95`
+  entry. No new `learning-records/` file was added this round — routine
+  topical entry like Lessons 3-95, not a new baseline finding. This session's
+  sandbox network-permission gate was closed this round (`WebFetch` request
+  was not granted) — unlike the 2026-10-08 and 2026-10-09 rounds, no live
+  fetch was performed, so the "Go deeper" section is explicit that the
+  `RateLimit-*` header names come from well-established, broadly-documented
+  convention (already shipped by GitHub, Stripe, Twitter/X) rather than a
+  fresh citation, and flags a live-fetch confirmation against the IETF
+  `RateLimit` header-field draft as worth doing in a future round when the
+  gate is open. `bin/record-progress backend lesson_generated --day 96
+  --lesson 0096-rate-limit-response-headers.html --detail '{"by":"headless"}'`
+  run from the repo root succeeded on the first attempt, output confirmed:
+  `recorded: backend/lesson_generated day=96
+  lesson=0096-rate-limit-response-headers.html`. No confirmed next-lesson gap
+  is named with certainty for the round after this one — same standing note
+  as every prior round; a completion/quiz-outcome signal or a user-named
+  track should take priority over guessing blind again. HATEOAS/hypermedia
+  (zero hits, named above) is the strongest candidate on the table if no
+  fresher signal appears first.
 

@@ -2867,3 +2867,151 @@ along the Phase 2 spine, adapted to the learning records.
   otherwise. Phase 2d (portfolio/interview) still has zero days against
   dbt's 8-day head start and Kafka/Airflow's own growing count, and is worth
   serious consideration within the next round or two.
+- 2026-10-10 (headless run, Day 25 generated — **Phase 2c spine complete**):
+  twenty-fifth lesson, `0025-airflow-sensors-deferrable-sla.html`. Per the
+  orchestrator's own pre-check, the latest `dataeng` row in `course_progress`
+  was `lesson_generated day=24` (2026-10-09) with no `lesson_completed`/
+  quiz/kata signal for this course more recent than mid-July — only
+  administrative `note`/`lesson_generated` rows — so there was no fresh
+  completion-gap signal to target. Independently confirmed `lessons/`
+  contained only `0001`–`0024`, `assets/nav.js`'s latest entry was `n: 24`
+  (2026-10-09), and no `0025`/`2026-10-10` entry existed anywhere
+  (`lessons/`, `assets/nav.js`, this file), so proceeded on schedule. Read
+  `MISSION.md`, `PLAN.md` and `RESOURCES.md` in full, this file's
+  conventions sections and the last several generation-log entries,
+  `learning-records/0001-baseline-sql-strong-pipeline-tools-new.md` (still
+  the only file there — nothing new or durable enough about the learner to
+  warrant a second one this round), and `lessons/0024-airflow-cosmos-dbt-as-tasks.html`
+  and `lessons/0022-airflow-connections-and-variables.html` in full for
+  structural and voice precedent before writing anything.
+  **Topic choice:** Day 24's own closing note (carried forward above)
+  flagged exactly one open item left in `PLAN.md`'s 2c spine — "Sensors vs.
+  deferrable operators; retries, SLAs/deadlines and alerting" — and flagged
+  Phase 2d (portfolio/interview, still zero days) as worth serious
+  consideration "within the next round or two." Weighed both directly:
+  Phase 2d has now been flagged as due for two consecutive rounds (Day 23's
+  and Day 24's own closing notes), which is a real signal, but with no fresh
+  learning-record or quiz signal to justify jumping the spine's own stated
+  order early, and with one concrete spine item still genuinely open and
+  due, finishing 2c first was judged the more disciplined choice — leaves
+  Phase 2c cleanly closed rather than abandoned one bullet short, and gives
+  2d a clean, deliberate start next round instead of a rushed one squeezed
+  in alongside a half-finished 2c. Noted explicitly in this lesson's own
+  closing line that the next round should seriously consider 2d now rather
+  than inventing a seventh Airflow topic the spine never asked for.
+  **Content:** covered sensors as the operator whose job is only to wait
+  (the gap Day 7's `load_raw` task quietly assumed away — raw CSVs just
+  "being there" the instant the DAG fires), the worker-slot cost of
+  `mode="poke"` (default, blocks the whole wait) vs. `mode="reschedule"`
+  (frees the slot between checks but still needs repeated wake-ups), and
+  deferrable operators as the real fix: `self.defer(trigger=..., method_name=...)`
+  hands the wait entirely to a separate `triggerer` process, freeing the
+  worker slot completely rather than periodically. For
+  "SLAs/deadlines and alerting," rather than teach the old Airflow 2.x
+  per-task `sla=` kwarg most tutorials still show, checked it directly
+  against a live Airflow 3.3.1 install first — found it parses without
+  error but is dead: a real warning states "The SLA feature is removed in
+  Airflow 3.0, replaced with Deadline Alerts in &gt;=3.1," and reading
+  `task.sla` back afterward raises `AttributeError`. Taught the real,
+  current replacement instead: `DAG(deadline=DeadlineAlert(reference=...,
+  interval=..., callback=...))`, with `DeadlineReference.DAGRUN_LOGICAL_DATE`
+  as the reference point and `SyncCallback` wrapping a plain function (found
+  by hitting it directly that `AsyncCallback` requires a real `async def`
+  coroutine — a plain function raised `AttributeError: ... is not
+  awaitable` — a genuine, checked-not-assumed gotcha written into the lesson
+  rather than smoothed over). Built `dags/raw_files_sensor_demo.py` in full
+  as scaffolding (new syntax today, same reasoning as every prior
+  full-script day), a `FileSensor` with `mode="reschedule"` +
+  `deferrable=True` gating a `dbt_build` `BashOperator`, second DAG
+  alongside Day 7/22/24's rather than replacing any of them. Left the day's
+  actual skill as a TODO inside the deadline callback itself (reading real
+  `context["dag_run"]` fields instead of a bare `print`), consistent with
+  Day 24's own "new syntax given in full, TODO is the reasoning skill"
+  convention. Closed with a short section naming retries and deadline
+  alerts as complementary, not overlapping: retries only re-run a task that
+  actually *fails*; a deadline alert fires on elapsed time regardless of
+  failure, catching the "running, just too slowly" case retries structurally
+  cannot. No pandas, no Python-language teaching, no re-derivation of
+  idempotency/API concepts — none applicable to a pure Airflow-orchestration
+  day. Domain names used exactly as established (`dbt_build`, `REPO_DIR`,
+  Day 7's `start_date`). Opened with an explicit "before today" check
+  (`airflow dags list-import-errors`, expect `No data found`, Day 22/24's
+  own confirmed current wording) rather than assuming Day 22/24's DAGs still
+  parse.
+  **Verification:** this is a pure Airflow-orchestration lesson with no dbt
+  SQL at all, so the `dbt parse` verification path in this file's
+  "Verifying code before shipping" section does not apply and was not run —
+  stated here explicitly per that section's own instruction, rather than
+  silently skipped. Installed `apache-airflow==3.3.1` fresh via `uv run
+  --with` (direct invocation, not blocked this round) and exercised it for
+  real rather than only reading docs: confirmed `BaseSensorOperator`'s real
+  constructor signature (`poke_interval`, `timeout`, `mode='poke'` default,
+  `exponential_backoff`) and `FileSensor`'s real constructor
+  (`deferrable: bool = False`, `start_from_trigger`), read
+  `FileSensor.execute`'s actual source directly (confirmed the
+  `self.defer(...)` branch fires only when `deferrable=True` and the first
+  poke fails, with a code comment in the real source explaining exactly why
+  the sync and deferred branches must not both run), and confirmed
+  `airflow.sdk.bases.sensor.BaseSensorOperator` is the current import path
+  while `airflow.sensors.base.BaseSensorOperator` still resolves but emits a
+  live `DeprecatedImportWarning` — a genuine, current 2.x-vs-3.x import-path
+  finding for this course's "may have edited 2.x-era DAGs" learner, not
+  assumed from memory. Confirmed the `sla=` removal and `DeadlineAlert`
+  replacement directly as described above (constructed a real `DAG` with a
+  `DeadlineAlert`, read `dag.deadline[0].reference`/`.interval` back as real
+  objects — `dag.deadline` is stored as a list, a real shape worth knowing
+  rather than guessed — and hit the `AsyncCallback`-needs-a-coroutine error
+  directly). Built the exact scratch DAG file this lesson's Section 4 shows,
+  ran `uv run --with "apache-airflow==3.3.1" airflow db migrate` then a real
+  `DagBag` parse against it: `import_errors: {}`, tasks
+  `['dbt_build', 'wait_for_raw_files']`, `t.mode == "reschedule"`,
+  `t.deferrable == True`, `t.poke_interval == 30.0`,
+  `dag.deadline[0].interval == 0:30:00` — all real output, used verbatim in
+  the lesson's Verify block. Also ran `airflow dags list-import-errors`
+  directly against that scratch `AIRFLOW_HOME`: printed `No data found`,
+  confirming the "before today" callout's claimed wording is current and
+  real, not carried over unchecked from Day 22/24. As a final check
+  (following Day 7/24's own "verify the published block, not just the
+  draft" precedent), extracted the exact DAG code block out of the finished
+  lesson HTML itself via a small regex/unescape script, `py_compile`'d it
+  clean, copied it into a second fresh scratch `dags/` folder, and re-ran
+  the identical `db migrate` + `DagBag` parse against that extracted file —
+  byte-identical results to the draft-stage run above, confirming the
+  published lesson's own code block is what was actually tested. Both
+  compound `cd &amp;&amp;` invocations and some direct multi-line `uv run`
+  calls hit this session's approval gate outright this round (consistent
+  with every prior round's documented friction); the
+  `uv run python3 -c "...subprocess.run([...])"` wrapper with absolute
+  paths and an explicit `env` dict, rather than `cd`, got every Airflow CLI
+  and DagBag-parse call through. Docker was not exercised this round (no
+  live Postgres/Kafka needed for a pure sensor/deadline-alert DAG-parse
+  day). Deleted every scratch directory and extraction script (outside
+  `dataeng/`) before finishing.
+  Registered Lesson 25 in `assets/nav.js` (`node --check` clean) and added
+  the Day 25 section to `reference/glossary.html` (3 terms: sensor,
+  deferrable operator, Deadline Alert — grepped Days 1–24's sections first,
+  case-insensitively, no collisions; Day 7's existing generic "retries" row
+  was deliberately left alone and referenced in prose rather than
+  re-`<dfn>`-ed, since today's new content is deadline alerts, not retries
+  themselves). Ran a small Python tag-balance/unescaped-`&amp;`/quiz-word-count
+  script (from a scratch file outside `dataeng/`, deleted after use) against
+  both the lesson and the updated `reference/glossary.html`: all tags
+  balanced (div/p/table/tr/td/th/ul/li/pre/code/h2/dfn/button/span/a) on
+  both files, zero suspicious bare `&amp;` on either. The first quiz draft
+  came up mismatched on three of the four questions (8/11/9, 12/10/8,
+  7/9/8 word splits); rebalanced through several edit-and-recount passes to
+  9/9/9, 8/8/8 and 8/8/8 respectively (one question landed correctly,
+  10/10/10, on the first draft), re-verified by re-running the same script
+  after each edit. All 3 `<dfn>` terms carry both `data-en`/`data-vn`.
+  `bin/record-progress dataeng lesson_generated --day 25 --lesson
+  0025-airflow-sensors-deferrable-sla.html --detail '{"by":"headless"}'`
+  succeeded on the first attempt, run from the repo root:
+  `recorded: dataeng/lesson_generated day=25 lesson=0025-airflow-sensors-deferrable-sla.html`.
+  **Carried forward for next round:** Phase 2c's spine is now fully covered
+  (logical date/backfills, TaskFlow/XCom, Assets, Connections/Variables,
+  Cosmos, sensors/deferrable/deadline alerts — all six bullets). The next
+  round should seriously consider starting Phase 2d (portfolio &amp;
+  interview, still zero days) rather than manufacturing a seventh Airflow
+  topic the spine never asked for — this is now the third consecutive
+  round's closing note saying so (Days 23, 24 and this one), which is itself
+  a signal worth not ignoring again.

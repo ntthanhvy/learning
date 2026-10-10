@@ -35,6 +35,7 @@
     { n: 22, date: "2026-10-07", title: "Airflow Connections, Variables & never hard-coding credentials", file: "lessons/0022-airflow-connections-and-variables.html" },
     { n: 23, date: "2026-10-08", title: "Kafka Connect and CDC with Debezium", file: "lessons/0023-kafka-connect-and-cdc-with-debezium.html" },
     { n: 24, date: "2026-10-09", title: "Cosmos: dbt models as individual Airflow tasks", file: "lessons/0024-airflow-cosmos-dbt-as-tasks.html" },
+    { n: 25, date: "2026-10-10", title: "Airflow sensors, deferrable operators & deadline alerts", file: "lessons/0025-airflow-sensors-deferrable-sla.html" },
   ];
 
   const REFS = [

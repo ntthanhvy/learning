@@ -1342,3 +1342,24 @@ by the user there; they apply here identically.
   backend/data/python/dataeng lesson generation for today delegated to
   parallel subagents, one per course, no worktree isolation — see their
   own NOTES.md entries for detail.)
+- 2026-10-10 (headless 06:00 run): same as every prior post-week day —
+  verified `daily.html`, `assets/srs.js`, and `assets/quiz-bank.js` are
+  all present and unchanged (`quiz-bank.js` still shows 8 `id: "k`
+  matches — kata `k1`-`k7` plus the commented example; `nav.js` still has
+  exactly 7 `file: "lessons` entries, the 7 Jul 8-14 lessons only). Still
+  the correct "daily quiz+kata" for this post-week phase per PLAN.md, so
+  nothing new was generated. A DB read via the `node`-wrapped-`psql`
+  workaround (`process.env.LEARNING_DB_URL`) succeeded on the first
+  attempt and showed no `lesson_completed`/quiz/kata signal for any
+  course more recent than mid-July — only `lesson_generated`/`note` rows.
+  `bin/record-progress rust note --detail '...'` (relative-path form)
+  succeeded on the first attempt. No new learning record beyond the Day-1
+  baseline. (Go skipped again per its own window close, now eighty-two
+  days past it. backend lesson 96 — rate-limit response headers — data
+  lesson 93 — `np.argmax()`/`np.argmin()` — python Day 73 —
+  `concurrent.futures`/`ThreadPoolExecutor` — and dataeng lesson 25 —
+  Airflow sensors, deferrable operators & Deadline Alerts — were all
+  generated this round via delegated agents run without worktree
+  isolation; a stray `__pycache__/` left at the repo root by one agent's
+  verification run was removed before finishing. See each course's own
+  NOTES.md entry for detail.)

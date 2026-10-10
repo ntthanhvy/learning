@@ -8191,3 +8191,132 @@
   --lesson 0092-merge-how-cross.html --detail '{"by":"headless"}'` was run
   from the repo root; it recorded successfully (`recorded:
   data/lesson_generated day=92 lesson=0092-merge-how-cross.html`).
+- 2026-10-10 generation (Lesson 93): headless run, zero prior context.
+  Confirmed via the orchestrator-supplied date (Sat Oct 10 2026), then read
+  MISSION.md in full (not modified), the full RESOURCES.md, the tail of
+  NOTES.md (this log, Lessons 90-92's entries, ~300 lines), the one
+  `learning-records/` baseline file (0001, unchanged since mid-July — no
+  new durable finding to fold in), and `assets/nav.js` in full for the
+  registration format and a title-level skim of all 92 prior lessons'
+  pandas/NumPy surface area. Idempotency was pre-confirmed by the
+  orchestrator (Neon `course_progress` shows only `lesson_generated`/`note`
+  rows, nothing past mid-July for quiz/kata/lesson_completed signals — no
+  fresh completion-gap to target) and independently re-checked: `ls
+  data/lessons | tail -5` showed `0092-merge-how-cross.html` as the latest,
+  and `nav.js`'s tail ended at `n: 92, date: "2026-10-09"` with no
+  2026-10-10 entry — Lesson 93 was confirmed not yet generated before this
+  round started. Lesson 92's own teaser named one standing candidate, not
+  promoted to THE next pick and explicitly flagged to still need a fresh
+  scan: `np.argmax()`/`np.argmin()` as its own standalone lesson (already
+  given a brief secondary mention inside Lesson 91 Section 4, contrasting
+  it against `idxmax(axis=1)`). Ran a fresh scan rather than taking it on
+  faith, per that same teaser's explicit instruction: grepped
+  `argmax|argmin` case-insensitively across every lesson body (only
+  Lessons 91 and 92 matched — both secondary mentions, neither teaching it
+  on its own merits) and across the glossary (only one hit, buried inside
+  the `idxmax(axis=1)` row's own contrast note, not a standalone row);
+  checked roughly a dozen other candidate gaps the same way (`np.select()`,
+  `qcut()`, `crosstab()`, `get_dummies()`, `convert_dtypes()`,
+  `Categorical`, `cumcount()`, `factorize()`, `searchsorted()`,
+  `memory_usage()`, `str.extract()`, `combine_first()`, `np.vectorize()`,
+  `Series.mode()`, `MultiIndex.from_product()`, `nunique(axis=1)`,
+  `IntervalIndex`, `merge_ordered()`, `str.pad()`/`str.zfill()`,
+  `Index.get_loc()`) — every one of those already has real lesson
+  coverage (confirmed via title-level nav.js skim plus targeted greps),
+  leaving `np.argmax()`/`np.argmin()` as the only genuine zero-coverage gap
+  among the candidates considered. Picked it: real interview relevance
+  (any "which position/index" numeric question), a direct, natural pairing
+  with the course's existing `idxmax()`/`idxmin()` thread (Lessons 20, 91),
+  and — confirmed by direct probing before committing — enough genuinely
+  new depth to justify its own slot rather than staying a footnote: the
+  no-`axis=` flatten-first default (never covered; Lesson 91's mention was
+  only ever `axis=1`), and a real NumPy-vs-pandas NaN-handling divergence
+  neither prior lesson touched at all. Every behavioral claim was probed
+  directly first in `data/.scratch-0093/` (deleted after), on the
+  actually-installed numpy 2.5.3 / pandas 3.0.6 (confirmed via `uv run
+  --with pandas --with numpy python3 -c "import numpy, pandas;
+  print(numpy.__version__, pandas.__version__)"` inside the probe script):
+  confirmed `np.argmax()` called with no `axis=` on a 2-D array flattens it
+  into one 1-D sequence first and returns a single flat position, distinct
+  from the per-row/per-column results `axis=1`/`axis=0` give; confirmed
+  `np.unravel_index()` correctly translates that flat position back to the
+  true `(row, col)` location; confirmed a flat multi-way tie resolves to
+  the first occurrence by position, matching `idxmax()`'s own documented
+  rule exactly; confirmed via `inspect.signature()` that `np.argmax()`'s
+  real signature (`a, axis=None, out=None, *, keepdims=<no value>`) has no
+  `skipna` parameter at all, unlike `pd.Series.argmax()`'s real signature
+  (`axis=None, skipna=True, ...`); confirmed the consequence directly on
+  `[1.0, nan, 3.0]` — plain `np.argmax()` returns position 1, landing on
+  the NaN itself, while `pd.Series(...).argmax()` on the identical values
+  returns position 2, the genuine maximum, skipping the NaN as its
+  `skipna=True` default promises; confirmed `np.nanargmax()` on the same
+  array returns 2, matching the Series behavior, as the NaN-safe fix for a
+  plain array; confirmed both an empty array (`np.argmax(np.array([]))`)
+  and an all-NaN Series raise `ValueError` rather than returning a
+  meaningless position, the empty-array message distinct from
+  (`"attempt to get argmax of an empty sequence"`) but parallel to the
+  all-NA Series message Lesson 91 already met
+  (`"Encountered all NA values"`). Cross-checked the official NumPy docs
+  via `WebFetch` (available this round): fetched the `numpy.argmax()` API
+  reference page, which confirmed the flatten-on-no-axis behavior verbatim
+  ("the index is into the flattened array"), the first-occurrence tie
+  rule, and the `keepdims=` keyword, and named `np.nanargmax()` in its "See
+  also" section — cited as a freshly-verified primary source; noted the
+  docs page itself doesn't state NaN behavior explicitly, which the direct
+  probing above confirmed independently, going further than that page
+  states. The shipped (unsolved) `practice/93_np_argmax_argmin.py` was
+  executed directly from its real `practice/` location and printed exactly
+  3 ✗ with no raw traceback. Built a solved copy in `.scratch-0093/`,
+  filling in all five blanks correctly (all checks used `bool(...)`-wrapped
+  comparisons at the point of assignment from the start, continuing
+  Lessons 90-92's now-standing practice of avoiding the `numpy.bool_`/
+  `is True` identity-check trap preemptively); it printed all 3 ✓ and "All
+  green" on the first run. The shipped file was re-run once more directly
+  from `practice/` after building the solved copy and reproduced the
+  identical all-✗ result, confirming the solved copy's edits never leaked
+  back into the shipped baseline. Quiz options were drafted, then
+  mechanically word-counted with a scratch Python script (`uv run
+  python3`, deleted after) isolating each `<div class="q">` block by regex
+  span and splitting on whitespace (so a code token like `np.argmax()`
+  counts as one word, consistent with every prior round's convention) —
+  the first draft came out 9/8/9, 11/10/9, 5/6/9; several options were
+  rephrased (padding "itself" to "itself, as a fix", "right to left" to
+  "read left to right", trimming "automatically"/"immediately" variants)
+  across a handful of iterations until all three questions landed exactly
+  level (9/9/9, 10/10/10, 9/9/9 option words), one `data-ok` per question
+  throughout. A separate mechanical tag-balance script confirmed all tags
+  balanced (a 2/2, body 1/1, button 9/9, code 61/61, dfn 1/1, div 5/5, em
+  2/2, h1 1/1, h2 6/6, head 1/1, html 1/1, p 19/19, pre 6/6, script 3/3,
+  span 23/23, strong 5/5, title 1/1) and found exactly two raw `&`
+  characters, both inside the one established `cd ~/learning/data && uv
+  run ...` shell command, matching every prior lesson's pattern, zero raw
+  `&` in prose; also confirmed the one new `<dfn>` tag carries both
+  `data-en` and `data-vn`. Checked the glossary for a collision before
+  adding anything — grepped `argmax|argmin` case-insensitively across the
+  full glossary, found only the one existing mention buried inside the
+  `idxmax(axis=1)` row's own contrast note, no standalone row — added
+  exactly one new row, "np.argmax() / np.argmin()", directly after Lesson
+  92's "cross join (how=\"cross\")" entry; re-ran the tag-balance script
+  against the glossary file afterward, confirmed it stayed balanced (a
+  1/1, body 1/1, code 1080/1080, em 7/7, h1 1/1, head 1/1, html 1/1, p 3/3,
+  script 1/1, table 1/1, td 489/489, th 3/3, title 1/1, tr 164/164) with
+  zero raw `&` introduced. Registered Lesson 93 in `nav.js` with today's
+  date (2026-10-10); `node --check` confirmed it still parses as valid
+  JavaScript after the edit, and exactly one `n: 93` entry plus one
+  `0093-np-argmax-argmin` file reference were confirmed to exist. This
+  round closed the one standing candidate carried forward by both Lessons
+  91 and 92 (`np.argmax()`/`np.argmin()` as its own lesson) — no new
+  standing candidate is named as THE next pick, since the fresh scan run
+  this round found every other checked gap already covered; tomorrow
+  should still run its own fresh curriculum/glossary scan rather than
+  assume nothing new has opened up by then. No new `data/learning-records/`
+  entry was added this round — routine lesson, no new baseline finding to
+  justify one (the Neon `course_progress` completion-gap signal remains
+  stale past mid-July, unchanged from this round's starting context, which
+  is itself not a new finding since it was already known entering this
+  round). The `.scratch-0093/` directory was deleted after verification,
+  per this course's standing practice of not leaving scratch artifacts
+  committed. `bin/record-progress data lesson_generated --day 93 --lesson
+  0093-np-argmax-argmin.html --detail '{"by":"headless"}'` was run from the
+  repo root; it recorded successfully (`recorded: data/lesson_generated
+  day=93 lesson=0093-np-argmax-argmin.html`).

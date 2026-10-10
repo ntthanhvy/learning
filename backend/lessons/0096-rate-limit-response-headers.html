@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 96 · Rate-limit headers: telling a client its quota before it gets rejected</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 96 · ~20 min</p>
+<h1>Rate-limit headers: telling a client its quota before it gets rejected</h1>
+<p class="byline">Lesson 11 gave the token bucket a voice for exactly one moment: the instant it rejects a request, via <code>429</code> and <code>Retry-After</code>. Every request before that moment — including the one that empties the bucket — goes out silent, with no way for the client to know it was close to the limit at all. Today: the response headers that make a client's remaining quota visible on every single response, rejected or not.</p>
+
+<h2>1 · Retry-After only speaks after the damage is done</h2>
+<p>Lesson 11's middleware sets <code>Retry-After</code> on the one response that gets rejected. That's genuinely useful — it tells an already-blocked client when retrying is worth attempting — but it only fires once the bucket is already empty. A well-behaved client calling the API in a loop has no visibility before that point: it can't tell the difference between "20 requests left" and "1 request left" on any of the successful calls leading up to the rejection, because nothing on those responses says anything about the bucket at all. The first signal it ever gets is the 429 itself.</p>
+<p>A client that could see its own remaining quota on every response could slow itself down voluntarily, before hitting the wall — exactly the way a gas gauge lets a driver plan a stop before the tank is empty, not after the engine cuts out.</p>
+
+<h2>2 · Three headers, one on every response</h2>
+<p>The fix is a small family of <dfn data-en="a set of HTTP response headers -- commonly RateLimit-Limit, RateLimit-Remaining, and RateLimit-Reset -- that a server attaches to every response (not just rejections) to tell the client its current quota, how much of it is left, and when the window resets" data-vn="rate-limit response headers (giữ nguyên) — nhóm header HTTP (RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset) server gắn vào MỌI response để báo quota hiện tại, còn lại bao nhiêu, và khi nào reset -- không chỉ gắn lúc từ chối request">rate-limit response headers</dfn>, attached to every response the token bucket middleware touches, success or rejection alike:</p>
+<table class="gloss">
+  <tr><th>Header</th><th>Meaning</th></tr>
+  <tr><td><code>RateLimit-Limit</code></td><td>the bucket's total capacity in this window (Lesson 11's <code>capacity</code>)</td></tr>
+  <tr><td><code>RateLimit-Remaining</code></td><td>tokens left right now, after this request's own cost was taken</td></tr>
+  <tr><td><code>RateLimit-Reset</code></td><td>seconds until the bucket is back to full capacity</td></tr>
+</table>
+<p>(Many existing APIs — GitHub, Twitter/X, Stripe among them — ship the older, non-standardized <code>X-RateLimit-Limit</code> / <code>X-RateLimit-Remaining</code> / <code>X-RateLimit-Reset</code> spelling, from the now-deprecated general convention of prefixing custom headers with <code>X-</code>. The unprefixed <code>RateLimit-*</code> family is the newer, standardization-track naming; the three fields mean the same thing either way, and a client should check for whichever spelling an API actually documents.)</p>
+<p>Extending Lesson 11's middleware to set all three on every response, not just the rejected one:</p>
+<pre><code><span class="kw">func</span> rateLimit(next http.Handler, buckets *sync.Map) http.Handler {
+    <span class="kw">return</span> http.HandlerFunc(<span class="kw">func</span>(w http.ResponseWriter, r *http.Request) {
+        key := r.Header.Get(<span class="kw">"X-API-Key"</span>)
+        raw, _ := buckets.LoadOrStore(key, &amp;bucket{tokens: 20, capacity: 20, refillPerSec: 10, last: time.Now()})
+        b := raw.(*bucket)
+
+        allowed, remaining, resetSecs := b.check() <span class="cm">// same bucket math, now reporting state</span>
+
+        w.Header().Set(<span class="kw">"RateLimit-Limit"</span>, strconv.Itoa(<span class="kw">int</span>(b.capacity)))
+        w.Header().Set(<span class="kw">"RateLimit-Remaining"</span>, strconv.Itoa(remaining))
+        w.Header().Set(<span class="kw">"RateLimit-Reset"</span>, strconv.Itoa(resetSecs))
+
+        <span class="kw">if</span> !allowed {
+            w.Header().Set(<span class="kw">"Retry-After"</span>, <span class="kw">"1"</span>)
+            w.WriteHeader(http.StatusTooManyRequests) <span class="cm">// 429</span>
+            <span class="kw">return</span>
+        }
+        next.ServeHTTP(w, r)
+    })
+}</code></pre>
+<p>The headers now ride along on the 19th successful request the same as the 21st rejected one. A client reading <code>RateLimit-Remaining: 1</code> on an ordinary <code>200 OK</code> has everything it needs to pause itself for a beat, entirely on its own initiative, with no 429 ever having to happen at all.</p>
+<div class="callout"><strong>Frontend-habit trap:</strong> this looks like it belongs in the response body — <code>{"remaining": 1}</code> added to the JSON — the way a frontend dev is used to surfacing app-level state. It deliberately doesn't live there. Quota is metadata about the HTTP exchange itself, not about the resource being fetched, which is exactly the same header-vs-body line Lesson 51's ETag drew: the thing being described sits in the body, information about the response describing it sits in a header. A generic HTTP client, proxy, or logging middleware can read a header without knowing anything about this particular API's JSON shape.</div>
+
+<h2>3 · Why every response, not just the rejected one</h2>
+<p>It would be simpler to only set these headers on the 429 — that's the one request that actually needs an explanation. The reason to set them on every response instead is the same reason Lesson 11's token bucket allows bursts in the first place: a client that only ever sees its quota at the moment of rejection has no way to behave any better than a client that saw nothing at all, because by definition it's already too late. Reporting the quota continuously turns a hard stop into a visible, approaching one — a client library can watch <code>RateLimit-Remaining</code> trend toward zero across several calls and start spacing out its own requests well before the server ever has to say no.</p>
+
+<div class="interview">
+<p><strong>Q: "A partner team integrating with our API keeps getting surprised by 429s. What would you add?"</strong> A strong answer, out loud: <em>"Right now the only signal we send is the 429 itself, with Retry-After telling them when to try again — but that's after they've already been rejected. I'd add RateLimit-Limit, RateLimit-Remaining, and RateLimit-Reset headers to every response, not just the rejected ones, so their client can see its quota trending down on ordinary successful calls and throttle itself before ever hitting the wall. It's the same token bucket and the same 429 underneath — this is purely about making the existing state visible earlier, so the partner's own client can be well-behaved instead of just reactive."</em> The signal: naming that the fix is visibility on successful responses, not a change to the limiting logic itself.</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers only making an existing rate limiter's state visible to the client on every response. It doesn't revisit Lesson 11's token-bucket algorithm itself (still the same bucket, same refill math) or Lesson 71's load shedding (a different trigger — server-side capacity signals, not a per-client quota — and these headers don't apply there, since a shed request was never about that client's own limit).</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Retry-After is set only on the rejected 429 response, after the bucket is already empty -- it tells a blocked client when to try again, but gives no visibility into the quota on any of the successful requests that led up to the rejection.">
+    <p class="stem">What is the limitation of Lesson 11's <code>Retry-After</code> header on its own?</p>
+    <button class="opt" data-ok>it only appears once a request is already rejected</button>
+    <button class="opt">it cannot be read by any known HTTP client</button>
+    <button class="opt">it silently increases the whole bucket's total capacity size</button>
+    <button class="opt">it only works correctly over an encrypted HTTPS connection</button>
+  </div>
+  <div class="q" data-why="RateLimit-Remaining reports tokens left after the current request's own cost, RateLimit-Limit reports total bucket capacity, and RateLimit-Reset reports seconds until the bucket refills to full -- together they expose the bucket's live state on every response.">
+    <p class="stem">What does the <code>RateLimit-Remaining</code> header report on a given response?</p>
+    <button class="opt" data-ok>tokens left in the bucket after this request's cost</button>
+    <button class="opt">the total number of registered API keys system-wide total</button>
+    <button class="opt">how many requests this specific client has sent ever</button>
+    <button class="opt">the server's current average response latency overall right now</button>
+  </div>
+  <div class="q" data-why="Setting the quota headers on every response, not only the rejected 429, lets a client see its remaining quota trending toward zero across ordinary successful calls and throttle itself voluntarily before ever being rejected -- visibility only at rejection time is already too late to act on.">
+    <p class="stem">Why attach the rate-limit headers to successful responses too, not only the 429?</p>
+    <button class="opt" data-ok>so a client can throttle itself before being rejected</button>
+    <button class="opt">HTTP requires every response to carry identical headers set</button>
+    <button class="opt">it lets the server skip computing the bucket math</button>
+    <button class="opt">successful responses are otherwise rejected by most web browsers</button>
+  </div>
+  <div class="q" data-why="Quota is metadata describing the HTTP exchange itself, not data about the resource being fetched -- the same header-versus-body distinction Lesson 51's ETag relied on -- so a generic client, proxy, or logging layer can read it without knowing this API's particular JSON response shape.">
+    <p class="stem">Why do rate-limit headers belong in the HTTP headers rather than the JSON response body?</p>
+    <button class="opt" data-ok>they describe the exchange itself, not the resource returned</button>
+    <button class="opt">JSON bodies cannot ever legally contain any numeric field</button>
+    <button class="opt">headers are encrypted while JSON response bodies never are</button>
+    <button class="opt">body fields are always cached longer than any header</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> RESOURCES.md's standing <a href="https://developer.mozilla.org/en-US/docs/Web/HTTP">MDN HTTP Guide</a> citation — the arbiter for header semantics generally; look up <code>Retry-After</code> (already linked from Lesson 67) alongside the IETF's <code>RateLimit</code> header-field draft for the exact field names and reset-time format, since this specific header family is newer than most of MDN's longest-stable reference pages. This session's sandbox network-permission gate was closed for this round (no live fetch performed) — the header names and semantics above come from the well-established, broadly-documented convention already shipped by GitHub, Stripe, and Twitter/X's public APIs, not from a fresh citation; worth a live-fetch confirmation against the IETF draft text in a future round when the gate is open.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially. Nếu chỗ nào chưa rõ, cứ hỏi lại bằng tiếng Việt cũng được.<br><br>
+<em>Next lesson:</em> open. Still no <code>lesson_completed</code>/quiz-outcome record exists for any lesson after 96 rounds — the honest next step remains a completion signal or a user-named track.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

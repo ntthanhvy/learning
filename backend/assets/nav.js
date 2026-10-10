@@ -196,6 +196,8 @@
       file: "lessons/0094-postgres-lock-modes.html" },
     { n: 95, date: "2026-10-09", title: "SKIP LOCKED: claiming one job off a queue table without blocking",
       file: "lessons/0095-skip-locked-job-claiming.html" },
+    { n: 96, date: "2026-10-10", title: "Rate-limit headers: telling a client its quota before it gets rejected",
+      file: "lessons/0096-rate-limit-response-headers.html" },
   ];
 
   const REFS = [

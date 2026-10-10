@@ -9223,3 +9223,173 @@ fail *gracefully* so the learner sees which task failed.
   than the usual three-lesson trigger) against waiting for one more fresh
   day first, or picking a fresh topic from the three remaining open
   candidates.
+- 2026-10-10 — **Day 73 generated: `concurrent.futures` — running
+  I/O-bound work at the same time** (headless run). Ran `date` (confirmed
+  2026-10-10, Sat). Read `MISSION.md` (untouched, read-only), `PLAN.md` in
+  full to reconfirm the Phase-2 spine and the no-pandas/no-NumPy scope
+  rule, `RESOURCES.md` in full, and `learning-records/` (still only the
+  Day 1 baseline — nothing new). Per the orchestrator's brief the DB had
+  already been checked moments before this run started — no
+  `lesson_completed`/quiz/kata signal for `python` more recent than
+  mid-July, only `lesson_generated`/administrative rows — so no fresh
+  completion-gap signal to target this round either. Idempotency: listed
+  `lessons/` (tail showed highest existing file `0072-pickle-...html`) and
+  grepped `assets/nav.js` for `2026-10-10` (no hit) before writing
+  anything — confirmed not already generated.
+  Decision process — fresh topic vs. review day: reviewed the actual
+  review-day cadence from `nav.js` titles rather than assuming the
+  "roughly six lessons" pattern from early in the course still held.
+  Days 43/44/45 reviewed six-lesson spans each, but the cadence visibly
+  tightened from Day 58 onward: Day 58 reviewed six, Day 61 six, Day 63
+  four, then Day 67 reviewed only Days 64-66 (three) and Day 71 reviewed
+  only Days 68-70 (three) — the settled recent cadence is a review every
+  three fresh lessons, not six. Since Day 71's review closed out
+  Days 68-70, only Day 72 (`pickle`) has been fresh since — one lesson,
+  not three — so a Days-71-72 review (which would also mean reviewing a
+  review day, Day 71 itself, an awkward precedent with no match anywhere
+  in the log) was too early by the established pattern. Fresh topic was
+  the right call, confirming Day 72's own next-day note's instinct to
+  weigh the two options rather than defaulting to review.
+  Among the three candidates Day 72 left open — `configparser`, `uuid`,
+  `concurrent.futures`/`threading` — re-ran the fresh-gap grep for all
+  three across all 72 lessons and every practice file first, rather than
+  trusting the carried-forward list at face value the way Day 72 caught
+  two stale entries doing: all three confirmed still genuinely untaught,
+  no further corrections needed this round. Chose `concurrent.futures`
+  over the other two for weight and forward value: `configparser` remains
+  narrow (one config format `pathlib`/plain `dict`s already cover,
+  correctly set aside every round since Day 58); `uuid` remains thin
+  (Day 70's own note called it "too thin alone for a full lesson," and
+  nothing since has changed that). `concurrent.futures` is substantial
+  enough alone (`ThreadPoolExecutor`, `submit()`/`Future.result()`, the
+  GIL's I/O-release behavior, a `threading`/race-condition sighting) and
+  it is not actually the asyncio-internals territory `MISSION.md` rules
+  out — `MISSION.md` excludes "async beyond what a FastAPI service needs
+  — no deep asyncio event-loop internals," which is about `asyncio`'s
+  cooperative event loop specifically, not the separate, simpler
+  thread/process-pool concurrency `concurrent.futures` provides. Reread
+  `MISSION.md`'s Out-of-scope section directly before committing to this
+  to make sure that boundary was being read correctly rather than assumed.
+  This choice also sets up `PLAN.md`'s own planned Phase 2b Day 20
+  (`async`/`await`, blocking-call traps) — that lesson's glossary entry
+  already names a "thread pool" and "blocking call" (checked
+  `reference/glossary.html` directly, found both at `id="day20"`) without
+  the underlying module ever having been taught; today closes that
+  forward gap.
+  Read Day 70's and Day 68's full lessons and practice files as the
+  direct structural templates (byline contrast sentence, "Why today"
+  callout, SQL bridge, pandas boundary callout, quiz shape, practice-file
+  function-stub-with-TODO-comment style with a `check()` harness printing
+  ✓/✗). Grepped `reference/glossary.html` case-insensitively for `thread`,
+  `concurrent`, `executor`, `future`, `gil`, `race condition`, and `lock`
+  before writing any new `<dfn>` — found Day 20's planned "thread pool"
+  and "blocking call" entries (FastAPI-specific concepts, not stdlib API
+  names) and nothing else; no collision with today's five new terms.
+  Lesson covers, in order: the concrete problem (a plain loop over five
+  slow calls takes ~5x longer than it needs to, since nothing is using
+  the CPU during each wait), `ThreadPoolExecutor.map()` running the same
+  calls concurrently with `with`, `submit()`/`Future.result()` for
+  differently-timed calls and exception propagation, the GIL explaining
+  *why* this helps I/O-bound work but not CPU-bound computation (with
+  `ProcessPoolExecutor` named as the CPU-bound answer, not demonstrated),
+  and `threading`/race conditions/`Lock` named for recognition without
+  being exercised, since every worked example gives each thread its own
+  independent work with no shared state to corrupt. Bridged from SQL as a
+  connection pool running several queries concurrently instead of
+  serializing them. Closing "Where pandas goes from here" callout notes
+  pandas has no threading API of its own and that concurrent I/O before
+  building a `DataFrame` is this module's job either way.
+  **New jargon: 5 terms** (`I/O-bound`, `ThreadPoolExecutor`, `Future`,
+  `Global Interpreter Lock (GIL)`, `race condition`), each with a
+  `<dfn data-en`/`data-vn` tag, confirmed by a Node.js regex count against
+  the lesson file (5 `<dfn` tags, each matching both attributes). Appended
+  a new `id="day73"` glossary section directly before the closing
+  `<p class="next">` footer, matching Day 72's own convention (the most
+  recent precedent, since Day 71 was a review day and added nothing).
+  No-pandas rule: grepped case-insensitively for `pandas`/`numpy`/`pd\.`/
+  `np\.` in both the lesson and practice file — exactly one hit in the
+  lesson (the single "Where pandas goes from here" boundary callout,
+  stating pandas has no threading API of its own, no pandas code shown)
+  and zero hits in the practice file — compliant with the
+  one-contrast-sentence allowance.
+  Practice file `practice/73_concurrent_futures_threadpoolexecutor.py` (4
+  checks, stdlib-only, no `--with` flag, function-stub-with-TODO-comment
+  style matching Days 68-70's): writing both a plain-loop
+  `sequential_calls()` and a `ThreadPoolExecutor.map()`-based
+  `concurrent_calls()` over the same inputs and confirming they agree
+  (Ex 1a) and that the concurrent version is meaningfully faster — checked
+  by asserting the concurrent run takes under half the sequential run's
+  wall-clock time rather than a brittle fixed threshold (Ex 1b);
+  `submit()`+`Future.result()` reading a fast call's result back before a
+  slow one that was submitted first (Ex 2); and confirming a `ValueError`
+  raised inside a `submit()`ed call re-surfaces at `.result()` instead of
+  disappearing silently (Ex 3).
+  Verified in a scratch `.scratch-0073/` directory created directly under
+  the repo root: the shipped (unsolved) copy printed four clean ✗ lines
+  with no traceback; a separately written, fully solved copy (via `Edit`
+  on a `cp`-duplicated scratch copy, not by editing the shipped file in
+  place) printed all four ✓ and the "All green" tally, run twice
+  consecutively with identical results both times. Also ran the shipped
+  file directly from its real `python/practice/` path as a final check,
+  confirming the same four clean ✗ lines outside the scratch copy too.
+  Scratch directory deleted before finishing.
+  HTML tag balance and a raw-unescaped-`&` regex
+  (`&(?!amp;|lt;|gt;|quot;|#39;|apos;|#\d+;)`) were checked against both
+  the lesson file and the full (now-modified) glossary with a throwaway
+  Node.js regex-based tag-stack checker (written to a scratch
+  `.scratch-0073check/` directory under the repo root rather than `/tmp`,
+  since this sandbox round flagged reading back a `/tmp` script as
+  needing approval; deleted immediately after use) — clean on both files,
+  zero unescaped `&`, no unclosed or mismatched tags.
+  Quiz: 4 questions, one per section (why `ThreadPoolExecutor.map()`
+  finishes five 1-second calls in ~1 second not ~5, what `submit()`
+  returns before a call finishes, why threading helps I/O-bound waiting
+  but not CPU-bound computation, what causes a race condition). Word
+  counts were checked with a Node.js regex-based script matching this
+  course's established practice; first draft mismatched on two of the
+  four questions (Q2 7/11/11, Q3 12/12/13) — word-count-matching edits
+  (lengthening the short option, trimming the long one) landed all four
+  at equal counts: 11/11/11, 11/11/11, 12/12/12, 12/12/12, confirmed by a
+  `data-ok` count of exactly 4 matching the four-question count, re-run
+  after each edit per this course's own "recount after edits" rule rather
+  than trusting the fix on the first pass.
+  `RESOURCES.md`: added a new `concurrent.futures` docs line, placed
+  directly after the Day 72 `pickle` line per the file's day-ordered
+  citation convention.
+  Registered in `assets/nav.js` with `date: "2026-10-10"` right after the
+  `n: 72` entry; confirmed `node --check assets/nav.js` reports no syntax
+  errors after the edit.
+  **DB access:** per the orchestrator's brief, the DB had already been
+  checked moments before this run started — no completion/quiz/kata
+  signal for `python` more recent than mid-July, only administrative
+  rows — so this round deferred to that pre-run confirmation rather than
+  re-querying directly; `bin/record-progress python lesson_generated
+  --day 73 --lesson 0073-concurrent-futures-threadpoolexecutor.html
+  --detail '{"by":"headless"}'` ran successfully from the repo root on
+  the first attempt.
+  `python/learning-records/` still holds only the Day 1 baseline — picking
+  between three already-known candidates and confirming a review cadence
+  from `nav.js` evidence is generation-process bookkeeping, not a new,
+  durable fact about the learner distinct from what Day 1's record
+  already says.
+  Final `git status --short -- python/` is expected to show exactly five
+  paths changed (`assets/nav.js`, `RESOURCES.md`, `reference/glossary.html`,
+  plus the new lesson and practice file, plus this `NOTES.md` entry) — no
+  other course's files touched, and no leftover scratch files or
+  directories under the repo.
+  **Next-day note:** `configparser` and `uuid` are the only candidates
+  still open and untaught, both already weighed and set aside multiple
+  rounds running for being narrower/thinner than the alternative chosen
+  instead — neither should keep being carried forward unexamined the way
+  `sqlite3`/`tomllib` were before Day 72 caught it; re-verify both are
+  still actually untaught before relying on this note rather than
+  trusting the carry-forward. No review backlog exists yet in the sense
+  of a lesson going stale unretrieved, but the cadence math now supports
+  one: Days 71 (review)-72-73 means Days 72-73 are the fresh pair since
+  the last review, one short of the settled three-fresh-lesson trigger
+  (confirmed from `nav.js`: Day 67 reviewed Days 64-66, Day 71 reviewed
+  Days 68-70, both three-lesson spans). Day 74 should default to a review
+  of Days 72-73 if no fresh urgent gap has appeared, or stretch to one
+  more fresh lesson (one of `configparser`/`uuid`) and make Days 72-74 a
+  three-lesson review on Day 75 instead — either satisfies the pattern;
+  prefer whichever the Day 74 generator's own fresh-gap scan suggests.

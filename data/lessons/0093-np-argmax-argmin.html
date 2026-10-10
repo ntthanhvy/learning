@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 93 · np.argmax() / np.argmin(): positions, flattening, and a NaN trap idxmax() doesn't have</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 93 · ~20 min · 10 Oct 2026</p>
+<h1>np.argmax() / np.argmin(): positions, flattening, and a NaN trap idxmax() doesn't have</h1>
+<p class="byline">Lessons 91 and 92 both mentioned <code>np.argmax()</code> in passing — once as the position-vs-label contrast to <code>idxmax(axis=1)</code>, once as a carried-forward open candidate — but neither gave it its own depth. A fresh scan today confirmed it's still a real zero-coverage gap on its own merits, and it earns the slot: there are two behaviors here that have nothing to do with the axis=1 angle already taught, and one of them is a genuine silent-wrong-answer trap that <code>idxmax()</code> simply doesn't have.</p>
+
+<h2>1 · No axis= at all flattens the whole array first — a different default from idxmax()</h2>
+<p>Lesson 20's <code>idxmax()</code> defaults to <code>axis=0</code> — one answer per column. <dfn data-en="a NumPy function returning the integer position of the maximum value in an array; called with no axis= argument, it flattens a multi-dimensional array into one 1-D sequence first and returns a single flat index into that flattened version, not a per-row or per-column result" data-vn="giữ nguyên 'np.argmax()' — hàm NumPy trả về VỊ TRÍ (số nguyên) của giá trị lớn nhất trong mảng; nếu KHÔNG truyền axis=, nó san phẳng (flatten) cả mảng nhiều chiều thành 1 dãy 1 chiều trước, rồi trả về 1 vị trí DUY NHẤT trong dãy đã san phẳng đó, không phải kết quả theo từng hàng/cột">np.argmax()</dfn> has no such default at all — called with no <code>axis=</code>, it collapses the entire array into one flat sequence first, then returns a single integer position into <em>that</em>:</p>
+<pre><code>arr = np.array([[<span class="kw">3</span>, <span class="kw">7</span>, <span class="kw">2</span>],
+                [<span class="kw">5</span>, <span class="kw">5</span>, <span class="kw">1</span>],
+                [<span class="kw">0</span>, <span class="kw">0</span>, <span class="kw">0</span>]])
+
+np.argmax(arr)
+<span class="cm">-- 1   (flattened: [3,7,2,5,5,1,0,0,0] -- position 1 is the 7)</span>
+
+np.argmax(arr, axis=<span class="kw">1</span>)
+<span class="cm">-- array([1, 0, 0])   -- NOW one answer per row, position within each row</span></code></pre>
+<p>Confirmed directly against the official NumPy docs (which state it plainly: "the index is into the flattened array") and by probing it: leaving off <code>axis=</code> on a 2-D array doesn't raise, doesn't error, and doesn't even look wrong at a glance — it just silently answers a completely different question than "which row/column." Translating a flat index back to a real <code>(row, col)</code> position needs <code>np.unravel_index()</code>:</p>
+<pre><code>flat = np.argmax(arr)
+np.unravel_index(flat, arr.shape)
+<span class="cm">-- (0, 1)   -- row 0, column 1 -- confirmed: arr[0, 1] is indeed 7, the true max</span></code></pre>
+<p>The interview-shaped trap: calling <code>np.argmax(df.to_numpy())</code> on a DataFrame and expecting a per-row or per-column answer without ever typing <code>axis=</code> — it silently returns a flat position into the whole table instead, one number where several were expected, with no error to flag the mistake.</p>
+
+<h2>2 · Ties resolve to the first occurrence, by position — same rule as idxmax()</h2>
+<p>This part matches what Lessons 20 and 91 already established for <code>idxmax()</code>/<code>idxmin()</code>, confirmed directly here too so the rule can be trusted across both tools: a flat three-way tie resolves to the earliest position, not the largest or an arbitrary pick.</p>
+<pre><code>tie = np.array([<span class="kw">4</span>, <span class="kw">9</span>, <span class="kw">9</span>, <span class="kw">2</span>])
+np.argmax(tie)
+<span class="cm">-- 1   -- the FIRST 9 (index 1), not index 2</span></code></pre>
+<p>One tie rule, consistently applied across <code>idxmax()</code>, <code>idxmin()</code>, <code>np.argmax()</code>, and <code>np.argmin()</code> — nothing new to memorize here, just confirming it travels.</p>
+
+<h2>3 · The real trap: a NaN can silently win np.argmax(), where idxmax() would have skipped it</h2>
+<p>Lesson 91 taught that <code>idxmax(axis=1)</code>'s default <code>skipna=True</code> quietly skips NaN values and returns the best real value among what's left. <code>np.argmax()</code> has <strong>no <code>skipna</code> parameter at all</strong> — confirmed directly via <code>inspect.signature()</code>, its signature is only <code>(a, axis=None, out=None, *, keepdims=&lt;no value&gt;)</code> — and that absence isn't cosmetic, it changes the actual answer:</p>
+<pre><code>nan_arr = np.array([<span class="kw">1.0</span>, np.nan, <span class="kw">3.0</span>])
+
+np.argmax(nan_arr)
+<span class="cm">-- 1   -- points AT the NaN itself, not at 3.0, the real max</span>
+
+pd.Series(nan_arr).argmax()
+<span class="cm">-- 2   -- pandas' own Series.argmax() DOES skip the NaN, lands on 3.0</span></code></pre>
+<p>Confirmed directly: <code>pd.Series.argmax()</code> carries a real <code>skipna=True</code> keyword in its signature (<code>inspect.signature()</code> shows <code>axis=None, skipna=True</code>) and correctly returns position 2, the genuine maximum — but the plain NumPy array version, with no such keyword to reach for, lands on the NaN at position 1 instead, because NaN comparisons are never reliably ordered. That's the sharpest trap in this lesson: <strong>the exact same method name, <code>.argmax()</code>, gives two different answers on data that only differs in whether it's wrapped in a Series</strong> — no crash either way, just a silently different integer. The fix when NaN is a real possibility and a plain NumPy array (not a Series) is in hand: <code>np.nanargmax()</code>, confirmed directly to return 2 on the same array, skipping the NaN exactly like pandas does by default.</p>
+<pre><code>np.nanargmax(nan_arr)
+<span class="cm">-- 2   -- matches Series.argmax(); the NaN-safe NumPy sibling</span></code></pre>
+<p>Both an all-NaN array and an empty array raise rather than returning a meaningless position — confirmed directly, <code>np.argmax(np.array([]))</code> raises <code>ValueError: attempt to get argmax of an empty sequence</code>, and <code>pd.Series([np.nan, np.nan]).argmax()</code> raises <code>ValueError: Encountered all NA values</code>, the identical message Lesson 91 already met on <code>idxmax()</code>'s all-NA case. So the loud failure only shows up at the extreme (nothing left to compare); the quiet, wrong-answer failure shows up at the much more common case of "just one NaN mixed into real data."</p>
+
+<div class="interview">
+<p><strong>Q: "What's the difference between np.argmax() and idxmax(), and when would a NaN bite me?"</strong> A strong answer, out loud: <em>"np.argmax() returns a raw integer position in the underlying array, not a label — and if I call it with no axis= on a multi-dimensional array, it flattens the whole thing first and gives me one flat position, not a per-row or per-column answer, so I'd need np.unravel_index() to translate that back. idxmax() instead returns the real pandas label and respects axis= as 'per row' or 'per column' directly. The NaN trap is the one I'd watch hardest: np.argmax() has no skipna option at all, so if a NaN is sitting in the data, it can actually win — the position it returns points at the NaN itself, not the real maximum, silently, no error. pandas' own Series.argmax() does skip NaN by default because it has a real skipna=True keyword, so the exact same .argmax() name gives two different answers depending on whether the data's wrapped in a Series or sitting in a raw NumPy array. If I'm on a raw array and NaN is possible, np.nanargmax() is the NaN-safe fix."</em> The signal: naming the flatten-by-default behavior and the NaN divergence as two separate, unrelated gotchas, not blurring them into one vague "be careful" — and knowing np.nanargmax() by name as the fix.</p>
+</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/93_np_argmax_argmin.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/93_np_argmax_argmin.py</code></pre>
+<p>Exercise 1 confirms <code>np.argmax()</code> with no <code>axis=</code> on a 2-D array returns a single flat position, and that <code>np.unravel_index()</code> translates it back to the true <code>(row, col)</code> (Section 1). Exercise 2 confirms the same first-occurrence tie rule already known from <code>idxmax()</code> (Section 2). Exercise 3 confirms the NaN divergence: <code>np.argmax()</code> on a raw array with a NaN present lands on the NaN's own position, while <code>np.nanargmax()</code> on the same array correctly skips it and finds the real max (Section 3).</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: np.argmax(arr) on a 2-D array with no axis= flattens the array into one 1-D sequence first, then returns a single integer position into that flattened version -- not a per-row or per-column result. np.unravel_index() is needed to translate it back to a real (row, col) pair.">
+    <p class="stem">Calling <code>np.argmax(arr)</code> on a 2-D array with no <code>axis=</code> returns what?</p>
+    <button class="opt" data-ok>one flat position into the whole array, flattened first</button>
+    <button class="opt">one position for every row, read left to right</button>
+    <button class="opt">a tuple holding both the row and column positions</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: np.argmax() has no skipna parameter in its signature at all, so np.argmax() on [1.0, nan, 3.0] returns position 1, pointing at the NaN itself, not the real max at position 2 -- while pd.Series.argmax() has a real skipna=True default and correctly returns 2 on the identical data.">
+    <p class="stem">A raw NumPy array is <code>[1.0, nan, 3.0]</code>. What does plain <code>np.argmax()</code> return on it, and why?</p>
+    <button class="opt" data-ok>position 1, the NaN -- there's no skipna option here</button>
+    <button class="opt">position 2, the real max -- NaN is skipped automatically</button>
+    <button class="opt">a ValueError -- any NaN present always raises right away</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: np.nanargmax() on the array [1.0, nan, 3.0] returns 2, the real maximum's position, skipping the NaN -- matching pandas' own Series.argmax() default behavior, and serving as the NaN-safe fix for plain NumPy arrays where np.argmax() alone would land on the NaN.">
+    <p class="stem">What's the fix for the NaN trap when working with a plain NumPy array, not a Series?</p>
+    <button class="opt" data-ok>switch to np.nanargmax(), which skips NaN the same way</button>
+    <button class="opt">pass skipna=True straight into np.argmax() itself, as a fix</button>
+    <button class="opt">nothing -- np.argmax() already skips every NaN by default</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official <a href="https://numpy.org/doc/stable/reference/generated/numpy.argmax.html">NumPy API reference for <code>numpy.argmax()</code></a> (per <code>RESOURCES.md</code>'s "Docs: NumPy fundamentals" entry, ~5 min) — confirms the flatten-on-no-axis behavior verbatim ("the index is into the flattened array"), the first-occurrence tie rule, and the <code>keepdims=</code> keyword, and names <code>np.nanargmax()</code> as the related NaN-safe function; the docs page itself doesn't state NaN behavior explicitly, which the direct probing above confirmed independently, going further than that page states.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>np.argmax()</code> is new today, added right after Lesson 92's <code>cross join (how="cross")</code> entry.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-93 comes back reported as shakiest, otherwise another fresh curriculum/glossary scan for the next genuinely-uncovered pattern — no single standing candidate carries forward from today, since this round closed the one most recently flagged (the <code>np.argmax()</code>/<code>np.argmin()</code> standalone gap named open by Lessons 91 and 92).<br><br>
+💬 Anything unclear — the flatten-by-default default, the NaN divergence, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

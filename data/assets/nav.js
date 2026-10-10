@@ -190,6 +190,8 @@
       file: "lessons/0091-idxmax-axis1.html" },
     { n: 92, date: "2026-10-09", title: "pd.merge(how=\"cross\"): every row paired with every row",
       file: "lessons/0092-merge-how-cross.html" },
+    { n: 93, date: "2026-10-10", title: "np.argmax() / np.argmin(): positions, flattening, and a NaN trap idxmax() doesn't have",
+      file: "lessons/0093-np-argmax-argmin.html" },
   ];
 
   const REFS = [

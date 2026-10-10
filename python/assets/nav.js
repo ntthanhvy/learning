@@ -150,6 +150,8 @@
       file: "lessons/0071-review-retrieval-day-11.html" },
     { n: 72, date: "2026-10-09", title: "pickle: serializing Python objects",
       file: "lessons/0072-pickle-serializing-python-objects.html" },
+    { n: 73, date: "2026-10-10", title: "concurrent.futures: running I/O-bound work at the same time",
+      file: "lessons/0073-concurrent-futures-threadpoolexecutor.html" },
   ];
 
   const REFS = [

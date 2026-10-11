@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 97 · HATEOAS: letting the response say what to do next</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 97 · ~20 min</p>
+<h1>HATEOAS: letting the response say what to do next</h1>
+<p class="byline">Lesson 3 fixed the API contract's nouns and verbs: resources, GET/POST/PATCH/DELETE, status codes. One question it left open: once a client has <code>GET /orders/42</code> back, how does it know whether it's still allowed to cancel that order, or pay for it, or that doing either one even requires a different URL? Today's answer: stop making the client guess, and put the available next moves inside the response itself.</p>
+
+<h2>1 · The client is hard-coding what the server already knows</h2>
+<p>A typical JSON API returns the order and nothing else:</p>
+<pre><code>{ <span class="kw">"id"</span>: 42, <span class="kw">"status"</span>: <span class="kw">"pending"</span>, <span class="kw">"total_cents"</span>: 5000 }</code></pre>
+<p>To let the user cancel this order, the frontend has to already know — baked into its own code, from reading the docs once — that canceling means <code>PATCH /orders/42</code> with <code>{"status": "canceled"}</code>, and that this is only valid while <code>status</code> is <code>"pending"</code>. Every client reimplements that rule independently. When the backend adds a new state that also blocks cancellation (say, <code>"packed"</code>), every one of those independent copies is wrong until someone remembers to update all of them — the server changed the rule, but the rule's enforcement lived on the other side of the network the whole time.</p>
+
+<h2>2 · Put the next moves in the response</h2>
+<p><dfn data-en="an architectural constraint for REST APIs: a response includes links (and the actions those links allow) describing what a client may legitimately do next from the current state, so the client follows links discovered at runtime instead of hard-coding URLs and rules out of band -- the acronym literally spells Hypermedia As The Engine Of Application State" data-vn="HATEOAS (giữ nguyên) — API trả kèm link mô tả bước tiếp theo được phép làm, client đi theo link lúc runtime thay vì hard-code URL/luật ở ngoài -- viết tắt của Hypermedia As The Engine Of Application State">HATEOAS</dfn> is the constraint that fixes this: the server, which already knows the order's state and the rules around it, attaches the legal next actions directly to the response.</p>
+<pre><code>{
+  <span class="kw">"id"</span>: 42,
+  <span class="kw">"status"</span>: <span class="kw">"pending"</span>,
+  <span class="kw">"total_cents"</span>: 5000,
+  <span class="kw">"links"</span>: [
+    { <span class="kw">"rel"</span>: <span class="kw">"self"</span>,   <span class="kw">"href"</span>: <span class="kw">"/orders/42"</span>,          <span class="kw">"method"</span>: <span class="kw">"GET"</span> },
+    { <span class="kw">"rel"</span>: <span class="kw">"cancel"</span>, <span class="kw">"href"</span>: <span class="kw">"/orders/42"</span>,          <span class="kw">"method"</span>: <span class="kw">"PATCH"</span> },
+    { <span class="kw">"rel"</span>: <span class="kw">"pay"</span>,    <span class="kw">"href"</span>: <span class="kw">"/orders/42/payment"</span>, <span class="kw">"method"</span>: <span class="kw">"POST"</span> }
+  ]
+}</code></pre>
+<p>Once the order ships, the server simply stops including the <code>cancel</code> <dfn data-en="one named link inside a hypermedia response, describing one specific action or related resource the client may follow from here -- the rel value (e.g. self, cancel, next) names what the link means, not just where it points" data-vn="link relation / rel (giữ nguyên) — 1 link được đặt tên trong response hypermedia, mô tả 1 hành động/tài nguyên liên quan có thể đi tới từ đây -- giá trị rel (self, cancel, next...) nói link đó NGHĨA LÀ GÌ, không chỉ trỏ tới đâu">link relation</dfn> — a client that checks "does this response offer a cancel link?" instead of "is status == pending?" never needs updating when the rule changes, because it never encoded the rule in the first place. The frontend becomes a follower of links, not a reimplementer of business rules.</p>
+
+<h2>3 · This is pagination's own trick, generalized</h2>
+<p>This isn't a new idea — Lesson 15's cursor pagination already does exactly this for one specific case: <code>{"next_cursor": "...", "has_more": true}</code> tells the client whether a next page exists and how to fetch it, instead of the client computing page math itself from a total count. HATEOAS is the same move — "the response carries the next step" — applied to every state transition a resource can have, not only "is there more data."</p>
+<div class="callout"><strong>Frontend-habit trap:</strong> this looks a lot like a feature flag check (<code>if (flags.canCancelOrders)</code>) — a boolean the frontend already knows how to branch on. The difference is who decides and how current the answer is: a feature flag is a global, rarely-changing toggle fetched separately and often cached; a hypermedia link is computed fresh, per-resource, per-request, from that exact order's current state — the presence of <code>cancel</code> on order 42 says nothing about order 43, and both are only as stale as the response they arrived in.</div>
+
+<h2>4 · Why most APIs skip it anyway</h2>
+<p>HATEOAS is Roy Fielding's own original REST dissertation's most-cited and least-adopted constraint. The honest trade-off: it pays off when a client follows links generically (a browser following <code>&lt;a href&gt;</code> is the canonical example) and when the rules governing valid next actions actually change often enough to matter. Most internal APIs are consumed by one team's own frontend, deployed together, where "update the docs and the client in the same PR" is cheap enough that the generality doesn't earn its complexity — which is why most real-world JSON APIs (including every one built in this course so far) skip it, and why it's still worth naming: so "we chose not to" is a decision, not a gap nobody noticed.</p>
+
+<div class="interview">
+<p><strong>Q: "What does HATEOAS mean, and would you use it here?"</strong> A strong answer, out loud: <em>"It's the REST constraint where the server includes the valid next actions as links in the response, instead of the client hard-coding which state transitions are legal — so changing the business rule only requires a server-side change, not updating every client. I'd reach for it when clients are generic or third-party and the transition rules shift independently of client releases; for an internal API where our own frontend ships in lockstep with the backend, the coordination cost it removes isn't worth the extra response shape and client-side link-following logic — I'd rather keep the simpler contract and accept that both sides redeploy together."</em> The signal: naming the real trade-off instead of treating HATEOAS as something every "proper" REST API must have.</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers only the mental model: links describing legal next actions, attached to a resource's own response. It doesn't cover any specific hypermedia media type's full spec (HAL, JSON:API, Siren each standardize their own <code>links</code>/<code>rel</code> shape slightly differently) or GraphQL's very different answer to "what can I do from here" — those are implementation choices on top of the idea taught today, not needed to reason about whether to use it at all.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Without HATEOAS, every client independently hard-codes which state transitions are legal (e.g. status == pending means cancel is allowed) -- so when the server's rule changes, every client's copy of that rule is wrong until each one is separately updated.">
+    <p class="stem">What problem does HATEOAS solve for a client reading an order's JSON?</p>
+    <button class="opt" data-ok>clients must hard-code rules the server already knows</button>
+    <button class="opt">servers cannot ever return more than one resource</button>
+    <button class="opt">JSON bodies are always too large for browsers</button>
+    <button class="opt">databases always reject writes without a valid session</button>
+  </div>
+  <div class="q" data-why="A link relation (rel) names what a specific link means -- cancel, pay, self -- so the client can ask 'is a cancel link present' rather than re-deriving the rule itself from raw status fields.">
+    <p class="stem">What does a link's <code>rel</code> value describe in a hypermedia response?</p>
+    <button class="opt" data-ok>what that one specific link action means</button>
+    <button class="opt">how many bytes the whole response contains</button>
+    <button class="opt">which database index the server just used</button>
+    <button class="opt">the exact server region that handled it</button>
+  </div>
+  <div class="q" data-why="Lesson 15's cursor pagination already tells the client whether a next page exists and how to fetch it, instead of the client computing it from a total count -- HATEOAS generalizes that same 'response carries the next step' idea to every state transition, not just paging.">
+    <p class="stem">Which earlier lesson already used this same "response carries the next step" idea?</p>
+    <button class="opt" data-ok>cursor pagination's own next-cursor response field</button>
+    <button class="opt">password hashing's slow deliberate hash algorithm</button>
+    <button class="opt">the outbox pattern's atomic event write</button>
+    <button class="opt">connection pool sizing under sudden load</button>
+  </div>
+  <div class="q" data-why="HATEOAS earns its cost mainly for generic or third-party clients that must discover valid transitions at runtime, independent of their own release schedule; an internal API whose one frontend deploys in lockstep with the backend can usually just update both together more cheaply.">
+    <p class="stem">Why do most internal, single-frontend APIs skip HATEOAS entirely?</p>
+    <button class="opt" data-ok>client and server code already deploy together always</button>
+    <button class="opt">HTTP itself technically forbids any extra JSON fields</button>
+    <button class="opt">hypermedia links cannot ever be cached by proxies</button>
+    <button class="opt">REST formally requires every API to use GraphQL</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> RESOURCES.md's standing <a href="https://developer.mozilla.org/en-US/docs/Web/HTTP">MDN HTTP Guide</a> citation doesn't cover this one directly — the actual primary source is Roy Fielding's dissertation chapter 5 ("Representational State Transfer"), the original definition of the constraint; search for "hypermedia as the engine of application state" within it. This session's sandbox network-permission gate was closed for this round (no live fetch performed, same as the 2026-10-10 round) — recommend a live-fetch confirmation against Fielding's text, or against a concrete implementation spec like the <a href="https://developer.mozilla.org/en-US/docs/Web/HTTP">MDN</a>-adjacent HAL or JSON:API specs, in a future round when the gate is open. This also closes the API-design gap RESOURCES.md has flagged since early in the course ("no vetted resource yet for API design specifically... resource modeling, versioning, error contracts") from the discoverability angle — Lessons 3, 15, 16, and 83 covered the rest.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially. Nếu chỗ nào chưa rõ, cứ hỏi lại bằng tiếng Việt cũng được.<br><br>
+<em>Next lesson:</em> open. Still no <code>lesson_completed</code>/quiz-outcome record exists for any lesson after 97 rounds — the honest next step remains a completion signal or a user-named track.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

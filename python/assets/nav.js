@@ -152,6 +152,8 @@
       file: "lessons/0072-pickle-serializing-python-objects.html" },
     { n: 73, date: "2026-10-10", title: "concurrent.futures: running I/O-bound work at the same time",
       file: "lessons/0073-concurrent-futures-threadpoolexecutor.html" },
+    { n: 74, date: "2026-10-11", title: "uuid & configparser",
+      file: "lessons/0074-uuid-and-configparser.html" },
   ];
 
   const REFS = [

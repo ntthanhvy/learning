@@ -7564,4 +7564,90 @@
   track should take priority over guessing blind again. HATEOAS/hypermedia
   (zero hits, named above) is the strongest candidate on the table if no
   fresher signal appears first.
+- **2026-10-11 generation (Lesson 97, headless run):** Idempotency check
+  first: `ls lessons/ | tail -5` showed no `0097-*` file and `nav.js`
+  LESSONS ended at `n: 96, date: "2026-10-10"` with no `n: 97` entry, so
+  this round was clear to proceed. Both `backend/learning-records/` files
+  are still the two original baseline findings (frontend-mindset gap,
+  concurrency-vocabulary gap) and name no fresh topic, and Lesson 96's own
+  closing line named its successor candidate explicitly: HATEOAS/hypermedia,
+  flagged "the strongest candidate on the table if no fresher signal
+  appears first" after a wide gap sweep that round found everything else
+  either already covered or out of MISSION.md's scope. Re-ran the check
+  myself before committing to it — `grep -rli "hateoas\|hypermedia"
+  lessons/*.html reference/glossary.html` returned zero hits, confirming
+  the gap is still open and no fresher signal (no new learning-records
+  entry, no changed teaser) had appeared since. Lesson 97 covers: the
+  concrete blind spot (a client reading `GET /orders/42` back must already
+  know out-of-band that canceling means `PATCH` with a specific body, valid
+  only in certain states — the rule lives on the client's side of the wire
+  even though the server is the one that actually knows it); the HATEOAS
+  constraint itself (server attaches `links`/`rel` describing legal next
+  actions to the resource's own response); an explicit tie-back to Lesson
+  15's cursor pagination as the same "response carries the next step" move
+  already in use, just generalized; a frontend-habit callout distinguishing
+  a hypermedia link (fresh, per-resource, per-request) from a feature flag
+  (global, cached, rarely-changing) since both look like a boolean the
+  client branches on; and a closing trade-off section naming honestly why
+  most real APIs (including every one built in this course) skip it —
+  internal single-frontend APIs can just redeploy both sides together more
+  cheaply than most clients can benefit from runtime link discovery. A
+  "Scope line" section excludes HAL/JSON:API/Siren's specific media-type
+  shapes and GraphQL's different answer to the same question, as
+  implementation choices on top of the mental model rather than needed to
+  reason about whether to use it. This also directly answers the other half
+  of RESOURCES.md's named API-design gap that Lesson 96 answered one half
+  of (discoverability vs. the error-contract angle), tying off a gap that's
+  been open since early in the course. Checked the glossary first for the
+  two new terms — `HATEOAS` and `link relation / rel` — zero collisions via
+  case-insensitive grep, added as two new rows after Lesson 96's
+  `rate-limit response headers` row, same Term/Tiếng Việt/In software column
+  order confirmed by direct inspection of the file's actual header row
+  before writing. No Go snippet this round (the worked example is plain
+  JSON, since the lesson is about response shape, not an algorithm), so no
+  scratch-module compile check was needed or performed. Verification
+  performed mechanically: (1) a Node quiz-word-count script matching each
+  `<div class="q" data-why="...">` block and splitting every option both via
+  `.split(/\s+/)` and `.split(" ")` — first draft landed uneven on three of
+  four questions (spreads of 1-2 words), fixed through several
+  rewrite-and-recount cycles per option, including one case where swapping
+  a hyphenated compound (`next-cursor`) changed the word count unexpectedly
+  and needed a second pass — converged to exactly 8/8/8/8 on Q1, 7/7/7/7 on
+  Q2, 6/6/6/6 on Q3, and 8/8/8/8 on Q4, both counting methods agreeing
+  exactly, and exactly one `data-ok` and four options per question confirmed
+  the same way; (2) a Node occurrence-count HTML tag-balance check across 20
+  tag types on the lesson — clean on the first pass; and a separate
+  table/tr/th/td/p/div/html/head/body/title/script balance check on
+  `glossary.html` after its two-row addition, also balanced; (3) a
+  raw-unescaped-`&` regex scan across both files — zero hits; (4) the
+  lesson's `<dfn` tags grepped and confirmed to carry both `data-en=` and
+  `data-vn=` — exactly 2 `dfn` tags, matching the 2 new terms, no orphaned
+  attribute; (5) `node --check` against `assets/nav.js`, `assets/gloss.js`,
+  and `assets/quiz.js` — all clean, no output, both before and after the
+  `nav.js` edit (the JS files themselves were not otherwise modified); (6) a
+  basic HTML well-formedness check (exactly one `<!DOCTYPE html>`, one
+  `<html>`/`</html>`, three script tags present with `nav.js` last) — clean.
+  Registered Lesson 97 in `nav.js` (date 2026-10-11, today's actual
+  generation date), re-confirmed exactly one matching `n: 97` entry and
+  exactly one matching `0097-*` lesson file afterward. No new
+  `learning-records/` file was added this round — routine topical entry
+  like Lessons 3-96, not a new baseline finding. This session's sandbox
+  network-permission gate was closed again this round (a `WebFetch` request
+  against Wikipedia's HATEOAS page, to sanity-check the definition and get
+  a cleaner primary-source link than Fielding's dissertation chapter
+  directly, was not granted) — same closed state as the 2026-10-10 round,
+  open state as 2026-10-08/09 — so the "Go deeper" section names Fielding's
+  dissertation chapter 5 as the actual primary source by description
+  (RESOURCES.md's standing MDN citation doesn't cover this topic) rather
+  than linking a freshly-fetched confirmation, and flags a live-fetch
+  confirmation against Fielding's text or a concrete HAL/JSON:API spec as
+  worth doing in a future round when the gate is open. Progress was NOT
+  recorded to the Neon DB this round — per the orchestrator's explicit
+  instruction for this run, the orchestrator records `lesson_generated`
+  centrally after collecting results from all three courses, rather than
+  this session calling `bin/record-progress` directly as prior rounds did;
+  do so centrally once this round's result is collected. No confirmed
+  next-lesson gap is named with certainty for the round after this one —
+  same standing note as every prior round; a completion/quiz-outcome signal
+  or a user-named track should take priority over guessing blind again.
 

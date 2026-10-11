@@ -198,6 +198,8 @@
       file: "lessons/0095-skip-locked-job-claiming.html" },
     { n: 96, date: "2026-10-10", title: "Rate-limit headers: telling a client its quota before it gets rejected",
       file: "lessons/0096-rate-limit-response-headers.html" },
+    { n: 97, date: "2026-10-11", title: "HATEOAS: letting the response say what to do next",
+      file: "lessons/0097-hateoas-hypermedia-controls.html" },
   ];
 
   const REFS = [

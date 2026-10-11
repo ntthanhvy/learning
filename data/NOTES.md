@@ -8320,3 +8320,113 @@
   0093-np-argmax-argmin.html --detail '{"by":"headless"}'` was run from the
   repo root; it recorded successfully (`recorded: data/lesson_generated
   day=93 lesson=0093-np-argmax-argmin.html`).
+- 2026-10-11 generation (Lesson 94): headless run, zero prior context.
+  Confirmed via the orchestrator-supplied date (Sun Oct 11 2026), then read
+  MISSION.md in full (not modified), the full RESOURCES.md, the tail of
+  NOTES.md (this log, Lessons 90-93's entries), the one `learning-records/`
+  baseline file (0001, unchanged since mid-July — no new durable finding to
+  fold in), and `assets/nav.js` in full for the registration format and a
+  title-level skim of all 93 prior lessons' pandas/NumPy surface area.
+  Idempotency was pre-confirmed by the orchestrator framing (lesson 93 was
+  the latest as of 2026-10-10) and independently re-checked: no `0094-*`
+  file existed in `data/lessons/` and no `n: 94` entry existed in `nav.js`
+  before this round started. Lesson 93's own teaser named no standing
+  candidate ("no single standing candidate carries forward from today,
+  since the fresh scan run this round found every other checked gap
+  already covered"), so this round ran its own fresh gap scan per that
+  explicit instruction. Grepped roughly 35 candidate pandas/NumPy terms
+  case-insensitively across every lesson body (`duplicated`, `nlargest`,
+  `Categorical`, `mode()`, `MultiIndex.from_product`, `str.cat`, `str.pad`,
+  `str.zfill`, `np.vectorize`, `.insert(`, `.pop(`, `merge_ordered`,
+  `nunique(axis`, `IntervalIndex`, `get_loc`, `to_numpy`, `pipe(`,
+  `rename_axis`, `swaplevel`, `np.digitize`, `pd.array`, `.filter(`,
+  `lookup`, `str.get(`, `str.findall`, `str.len(`, `str.strip`, `str.title`,
+  `str.join`, `first_valid_index`, `last_valid_index`, `np.tile`,
+  `np.repeat`, `np.broadcast_to`, `ignore_index`) — most were already
+  covered (confirmed via title-level nav.js skim plus targeted greps), but
+  `first_valid_index`/`last_valid_index`, `np.repeat`/`np.tile`/
+  `np.broadcast_to`, and `.insert(`/`.pop(` all came back as genuine
+  zero-hit gaps, confirmed with a second, narrower grep pass on each before
+  picking one; also grepped the glossary for the same terms, zero hits on
+  all of them. Picked `first_valid_index()`/`last_valid_index()` over the
+  NumPy-repeat and DataFrame.insert/.pop runner-ups: it's a real, common
+  ETL cleaning pattern (trimming leading/trailing NaN padding off a time
+  series without deleting a real gap in the middle, which `dropna()` alone
+  can't do) that fits directly into this course's existing NaN-handling
+  thread (Lessons 3, 45, 60, 65, and especially 20/91/93's `idxmax()`/
+  `np.argmax()` all-NaN `ValueError` behavior), and — confirmed by direct
+  probing before committing — it closes that thread with a genuinely new,
+  teachable contrast: these two methods return `None` quietly on all-NaN/
+  empty input instead of raising, the opposite of every all-NaN behavior
+  this course has taught so far. Every behavioral claim was probed directly
+  first in `data/.scratch-0094/` (deleted after), on the actually-installed
+  pandas 3.0.6 (confirmed via `uv run --with pandas python3 -c "import
+  pandas as pd; print(pd.__version__)"` inside the probe script): confirmed
+  `first_valid_index()`/`last_valid_index()` return the real index label
+  (not a position), exactly equivalent to `s.dropna().index[0]`/`[-1]`;
+  confirmed slicing `s.loc[s.first_valid_index():s.last_valid_index()]`
+  trims leading/trailing NaN while leaving a real gap in the middle of the
+  series untouched, unlike `dropna()`, which would delete that middle gap's
+  row too; confirmed via `inspect.signature()` that both methods take no
+  parameters besides `self` — no `skipna=`, no `axis=`; confirmed on a
+  DataFrame there is no per-column form at all — it returns one label for
+  the first/last row where *any* column has a real value, a different
+  shape of answer from Lesson 91's `idxmax(axis=1)` (which always returns
+  one label per row); confirmed an all-NaN Series, and a genuinely empty
+  Series, both return `None` quietly with no exception, in direct contrast
+  to `idxmax()` on the same all-NaN input, which raises `ValueError:
+  Encountered all NA values` (Lessons 20/91/93); confirmed the method is
+  row-position-aware, not sorted-index-label-aware (an out-of-order index
+  `[30, 10, 20]` with the real value at label `10` still returns `10`, the
+  first row by position, not by sorted label value). Cross-checked the
+  official pandas docs via `WebFetch`: fetched the `Series.first_valid_
+  index()` API reference page, which confirmed the exact docstring
+  ("Return index for first non-missing value or None, if no value is
+  found") and both the empty-Series and all-missing `None` behaviors
+  verbatim, matching the direct probing exactly — cited as a freshly-
+  verified primary source. The shipped (unsolved) `practice/94_first_last_
+  valid_index.py` was executed directly from its real `practice/` location
+  and printed exactly 3 ✗ with no raw traceback. Built a solved copy in
+  `.scratch-0094/`, filling in all six blanks correctly (all checks used
+  `bool(...)`-wrapped comparisons or direct `is None`/`is True` against
+  already-Python-native values at the point of assignment, continuing
+  Lessons 90-93's now-standing practice of avoiding the `numpy.bool_`/
+  `is True` identity-check trap preemptively); it printed all 3 ✓ and "All
+  green" on the first run. The shipped file was re-run once more directly
+  from `practice/` after building the solved copy and reproduced the
+  identical all-✗ result, confirming the solved copy's edits never leaked
+  back into the shipped baseline. Quiz options were drafted, then
+  mechanically word-counted with a scratch Python script (`uv run
+  python3`, deleted after) isolating each `<div class="q">` block by regex
+  span and splitting on whitespace — the first draft came out 8/8/8, 10/7/7,
+  8/8/11; several rounds of small rephrasing on Q2 and Q3 (trimming/padding
+  individual options by a word or a comma) until all three questions landed
+  exactly level (8/8/8, 8/8/8, 8/8/8 option words), one `data-ok` per
+  question throughout. A separate mechanical tag-balance script confirmed
+  all tags balanced (a 2/2, body 1/1, button 9/9, code 36/36, dfn 2/2,
+  div 5/5, em 6/6, h1 1/1, h2 5/5, head 1/1, html 1/1, p 16/16, pre 5/5,
+  script 3/3, span 23/23, strong 5/5, title 1/1) and found exactly two raw
+  `&` characters, both inside the one established `cd ~/learning/data &&
+  uv run ...` shell command, matching every prior lesson's pattern, zero
+  raw `&` in prose; also confirmed both new `<dfn>` tags carry both
+  `data-en` and `data-vn`. Checked the glossary for a collision before
+  adding anything — grepped `valid_index` case-insensitively across the
+  full glossary, found zero existing rows — added exactly one new row,
+  "first_valid_index() / last_valid_index()", directly after Lesson 93's
+  "np.argmax() / np.argmin()" entry. Registered Lesson 94 in `nav.js` with
+  today's date (2026-10-11); `node --check` confirmed it still parses as
+  valid JavaScript after the edit, and exactly one `n: 94` entry plus one
+  `0094-first-valid-index-and-last-valid-index` file reference were
+  confirmed to exist. This round closed a fresh gap with no standing
+  lineage to a prior lesson's explicit promise — the two runner-up
+  candidates not used today (`np.repeat()`/`np.tile()`/`np.broadcast_to()`
+  as a NumPy-array-construction trio, and `DataFrame.insert()`/`.pop()` as
+  a column-management pair) carry forward as open options but neither is
+  named as THE next pick; tomorrow should still run its own fresh
+  curriculum/glossary scan rather than assume either remains the best
+  available gap by then. No new `data/learning-records/` entry was added
+  this round — routine lesson, no new baseline finding to justify one. The
+  `.scratch-0094/` directory was deleted after verification, per this
+  course's standing practice of not leaving scratch artifacts committed.
+  Per this course's standing instruction, `bin/record-progress` was NOT run
+  by this agent — the orchestrator records `lesson_generated` centrally.

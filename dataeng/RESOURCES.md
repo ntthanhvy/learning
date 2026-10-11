@@ -90,6 +90,11 @@ before Phase 2.
 - [Docs: Astronomer Cosmos](https://astronomer.github.io/astronomer-cosmos/) · [Astronomer: Orchestrate dbt Core with Airflow and Cosmos](https://www.astronomer.io/docs/learn/airflow-dbt)
   Running each dbt model as an Airflow task. Use for: Phase 2c. Some Astronomer pages still show Airflow 2 code, so check imports against the Airflow 3 docs.
 
+## Knowledge — Portfolio & interview (Phase 2d)
+
+- [GNU Make Manual](https://www.gnu.org/software/make/manual/make.html)
+  Phony targets, prerequisite ordering, and the real-tabs-not-spaces recipe-indentation rule. Use for: Day 26's `Makefile`, if a target ever fails with `missing separator`. Not fetched live this round (this sandbox's network access was unavailable) — confirm syntax details against the live page before quoting them in an interview.
+
 ## Knowledge — a reference build to compare against
 
 - [Course: DataTalksClub Data Engineering Zoomcamp](https://github.com/DataTalksClub/data-engineering-zoomcamp)

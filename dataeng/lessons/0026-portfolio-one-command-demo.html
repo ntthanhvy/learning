@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 26 · One-command demo: make demo, and a README that reads in 2 minutes</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 26 · ~20 min · 11 Oct 2026</p>
+<h1>One-command demo: <code>make demo</code>, and a README that reads in 2 minutes</h1>
+<p class="byline">Today's tangible win, and the start of Phase 2d: one <code>make demo</code> command that runs this repo's entire pipeline — Postgres up, raw data seeded, Kafka topic created, events produced and consumed, dbt built — in the right order, with no step typed from memory. The README gets tightened to match: what a stranger needs in 2 minutes, not a day-by-day diary of 25 lessons.</p>
+
+<div class="callout"><strong>Before today — confirm what 25 days actually built still runs:</strong> today's Makefile wraps existing commands, it doesn't replace any of them. Confirm the warehouse and Day 7's DAG are both intact before wrapping them:
+<pre><code>docker compose ps
+AIRFLOW_HOME="$(pwd)/airflow_home" uv run --with "apache-airflow==3.3.1" airflow dags list-import-errors</code></pre>
+Expected: <code>postgres</code> and <code>kafka</code> both <code>(healthy)</code>/running, and <code>No data found</code> from the import-errors check (Day 22/24/25's own confirmed current wording). If either is missing, re-run Day 1's <code>docker compose up -d</code> or re-check Day 7's <code>dags/food_delivery_pipeline.py</code> before continuing — today adds a convenience layer on top of a working pipeline, it doesn't fix a broken one.</div>
+
+<h2>1 · The gap Phase 2c's own closing notes kept flagging</h2>
+<p>Three lessons in a row (Days 23, 24 and 25) ended by naming the same thing: Phase 2c's Airflow spine was finishing while Phase 2d — portfolio and interview — still had zero days against dbt's eight. <code>PLAN.md</code>'s own 2d spine opens with exactly this: "One-command demo (<code>make demo</code>), a README that reads in 2 minutes, and an architecture diagram." Day 7 already built the architecture diagram and a decisions section (Phase 1's own ship step), so today's real, previously-missing piece is the first bullet's first half — the one-command demo doesn't exist anywhere in this repo yet, and nothing in Days 1–25 ever asked for it.</p>
+<p>Here's the actual gap, stated plainly: reproducing this pipeline from a fresh clone today means reading back through up to 25 lessons for the right incantation, in the right order — <code>docker compose up -d</code>, wait for healthy, run the seed script, create the Kafka topic, run the producer, run the consumer, <code>cd warehouse &amp;&amp; dbt build</code>. Get the order wrong (seed before Postgres is healthy, or <code>dbt build</code> before the topic exists) and something fails in a way that looks like a bug in the pipeline, not a sequencing mistake by whoever's running it. That's exactly the kind of friction that makes a portfolio repo feel unfinished to a stranger, even when every individual piece works.</p>
+
+<h2>2 · A <code>Makefile</code> is the plainest fix, not the fanciest</h2>
+<p>A <code>Makefile</code> predates every tool this course has taught by decades, and that's the point: it needs no new install (<code>make</code> ships with every macOS and Linux box already), and every target is just a named shortcut for a shell command this repo's own lessons already wrote. Today doesn't introduce a new orchestration concept — Day 7's Airflow DAG already runs two of these same steps on a schedule, inside Postgres and Kafka containers that exist. <code>make demo</code> is for a human (or an interviewer) who wants to see the whole thing work <em>once, right now</em>, without standing up Airflow first.</p>
+<p>A <dfn data-en="a plain-text file (named Makefile) defining named targets -- each one a short shell recipe, run with `make <target>` -- and a target can list other targets as prerequisites, which make runs first, in order, before that target's own recipe; the standard, dependency-free way to give a repo one short command for a sequence of existing shell steps" data-vn="giữ nguyên &quot;Makefile&quot; — file text thường định nghĩa các target có tên, mỗi target là 1 đoạn lệnh shell ngắn, chạy bằng `make <target>`; 1 target có thể khai prerequisite là target khác, make tự chạy các prerequisite đó trước theo thứ tự, rồi mới chạy lệnh của target chính nó">Makefile</dfn> target can declare other targets as its own prerequisites — <code>demo: up seed kafka-topic produce consume dbt-build</code> means running <code>make demo</code> runs all six, strictly in that left-to-right order, before <code>demo</code>'s own one-line recipe ever executes. That ordering guarantee is the entire value here: it's the one thing a human typing commands from memory is most likely to get wrong under time pressure, and it's exactly what a stranger cloning this repo for the first time has no way to know on their own.</p>
+
+<h2>3 · Build: <code>Makefile</code> at the repo root</h2>
+<p>In your <code>food-delivery-pipeline</code> repo, add a <code>Makefile</code> at the top level, next to <code>docker-compose.yml</code>. Every recipe line below is a command this course's own lessons already taught — Day 1's seed script, Day 5's topic creation and producer, Day 6's consumer, Day 7's <code>dbt build</code> — copied verbatim, not rewritten:</p>
+<pre><code><span class="kw">.PHONY</span>: up seed kafka-topic produce consume dbt-build demo down
+
+<span class="kw">up</span>:
+	docker compose up -d
+	docker compose ps
+
+<span class="kw">seed</span>:
+	uv run --with <span class="str">"psycopg[binary]"</span> python3 scripts/generate_raw_data.py
+
+<span class="kw">kafka-topic</span>:
+	<span class="cm"># kafka-topics.sh --create has no --if-not-exists flag; it throws</span>
+	<span class="cm"># TopicExistsException and a non-zero exit on a topic that's already</span>
+	<span class="cm"># there, which is exactly what happens on a second "make demo" run --</span>
+	<span class="cm"># the `|| true` is what keeps this target safe to run again.</span>
+	docker compose exec -T kafka /opt/kafka/bin/kafka-topics.sh \
+	  --bootstrap-server localhost:9092 \
+	  --create --topic order_events \
+	  --partitions 3 --replication-factor 1 || true
+
+<span class="kw">produce</span>:
+	uv run --with confluent-kafka python3 scripts/produce_order_events.py
+
+<span class="kw">consume</span>:
+	timeout 20 uv run --with confluent-kafka --with <span class="str">"psycopg[binary]"</span> \
+	  python3 scripts/consume_order_events.py || true
+
+<span class="kw">dbt-build</span>:
+	cd warehouse &amp;&amp; uv run --with <span class="str">"dbt-postgres==1.11.0"</span> dbt build --profiles-dir .
+
+<span class="kw">demo</span>: up seed kafka-topic produce consume dbt-build
+	@echo <span class="str">"Demo pipeline ran end to end. See README.md for what each step did."</span>
+
+<span class="kw">down</span>:
+	docker compose down -v</code></pre>
+<div class="callout"><strong>Two things worth naming about <code>consume</code> specifically:</strong> Day 6's consumer is a long-running loop by design (it keeps polling for new messages), which is correct for a real deployment but wrong for a one-shot demo that has to finish and hand control back. <code>timeout 20</code> gives it 20 seconds to drain whatever <code>produce</code> just wrote, then kills it — the <code>|| true</code> stops <code>make</code> from treating that timeout's own non-zero exit as a failure of the whole <code>demo</code> chain. This is a demo-script concession, not a change to Day 6's actual consumer code or its at-least-once/idempotent-write design — nothing about the landing logic itself is touched today.</div>
+
+<h2>4 · The day's actual skill: tracing why the target order can't be shuffled</h2>
+<p>The TODO isn't more Makefile syntax — it's explaining, in your own README or out loud, why <code>demo</code>'s six prerequisites are listed in that exact order and not some other one. Each answer should name a real dependency this course already taught, not just restate the list:</p>
+<ul>
+<li>Why must <code>up</code> run before <code>seed</code>? <em>(TODO: name it — Day 1's answer.)</em></li>
+<li>Why must <code>kafka-topic</code> run before <code>produce</code>? <em>(TODO: name it — Day 5's answer, about topics not being created implicitly.)</em></li>
+<li>Why must <code>produce</code> run before <code>consume</code>, given both are in the same <code>demo</code> chain rather than running concurrently the way Day 6's own kill-and-restart test did? <em>(TODO: name it — what would an empty topic do to a consumer that only waits 20 seconds?)</em></li>
+<li>Why must <code>consume</code> run before <code>dbt-build</code>, specifically for <code>mart_delivery_sla</code> rather than every model? <em>(TODO: name it — Day 6's answer, about which raw table <code>stg_order_events</code> actually sources from.)</em></li>
+</ul>
+<p>This is the same reasoning skill every "walk me through the architecture" interview question is really asking for — not whether you can recite tool names, but whether you can trace one step's output into the next step's precondition. A <code>Makefile</code> that encodes the right order without you being able to say why is a script you got lucky with, not a design you can defend.</p>
+
+<h2>5 · README: tightened to what a stranger needs in 2 minutes</h2>
+<p>Day 7 already wrote an architecture diagram and a decisions section — that's not being redone today. What's missing is the 2-minute front-of-README a stranger reads <em>before</em> deciding whether to keep reading: what this is, the one command that proves it runs, and where to look next. Add this as the very top of <code>README.md</code>, above Day 7's existing sections:</p>
+<pre><code><span class="cm"># food-delivery-pipeline
+
+A food-delivery data platform, end to end: Kafka order-status events land in
+Postgres at-least-once with an idempotent write, dbt models raw tables into
+tested staging/intermediate/mart layers (including an SCD Type 2 snapshot of
+commission rates), and Airflow orchestrates the batch side daily with
+retries, deferrable sensors and a deadline alert.
+
+## Run it
+
+</span>make demo<span class="cm">
+
+That brings up Postgres and Kafka, seeds raw data, creates the order_events
+topic, produces and consumes a batch of order events, and runs `dbt build` --
+the whole pipeline, once, in the right order. See "Architecture" below for
+what each piece does and why, and "Decisions" for the trade-offs made along
+the way.</span></code></pre>
+<p>Notice what that front section deliberately leaves out: it doesn't mention Day numbers, it doesn't walk through 25 lessons' worth of history, and it doesn't explain <em>why</em> anything was built the way it was — that's what Day 7's "Architecture" and "Decisions" sections, already in the README below this, are for. A stranger's first 2 minutes need "what is this, does it run, where do I look next," not a changelog.</p>
+
+<h2>6 · Build: bring Day 7's decisions section current</h2>
+<p>Day 7's decisions list was written on 2026-09-21, the end of Phase 1 — it doesn't yet mention anything from Days 8–25. Rather than rewrite it, append one line per Phase 2 theme actually shipped, in the same "what, then why" shape Day 7 already established:</p>
+<ul>
+<li><strong>Snapshots for <code>commission_rate</code></strong> — <code>restaurants_snapshot</code> keeps every historical rate with a validity window, so a mart joining on the rate <em>at order time</em> doesn't silently use today's rate for last month's orders. (Day 9)</li>
+<li><strong>An intermediate layer, used once</strong> — <code>int_orders_joined</code> exists because <code>dim_restaurants</code> and nothing else needed that exact join; a single-caller macro or intermediate model is pure indirection, so this layer only grew when a second real caller justified it. (Day 8, Day 10)</li>
+<li><strong>A macro over a second hand-written <code>case when</code></strong> — <code>is_sla_breach()</code> exists because <code>mart_restaurant_sla</code> gave the SLA threshold logic a second real caller; before that, Day 6's inline comparison was the right amount of complexity. (Day 10)</li>
+<li><strong><code>delete+insert</code> on dbt-postgres's own default, not <code>merge</code></strong> — Postgres only gained a real <code>MERGE</code> in version 15, and dbt-postgres still defaults to <code>delete+insert</code> once <code>unique_key</code> is set; <code>mart_delivery_sla</code>'s late-arriving-event lookback needed <code>delete+insert</code> specifically, since a late event recomputes a whole city+day bucket, not one row's own columns. (Day 13)</li>
+<li><strong>Cosmos evaluated, not adopted</strong> — per-model Airflow tasks are a real upgrade once "which model failed" stops being obvious from one log; for this project's seven models, one <code>BashOperator</code> and a readable dbt log still wins on setup cost. (Day 24)</li>
+<li><strong>Deferrable sensors over polling</strong> — a <code>FileSensor</code> with <code>deferrable=True</code> hands a wait to the triggerer process instead of blocking a worker slot, and a <code>DeadlineAlert</code> catches "running, just too slowly" the way a retry structurally cannot. (Day 25)</li>
+</ul>
+<p>Push the updated <code>README.md</code> and the new <code>Makefile</code>.</p>
+
+<h2>7 · Verify</h2>
+<pre><code>make demo</code></pre>
+<p>Expected, in order, each step's own already-established output (nothing new is invented here — this is every prior Verify block's output, run back to back by one command instead of six):</p>
+<pre><code>postgres   ...   (healthy)
+kafka      ...   Up
+
+raw.restaurants: 40
+raw.couriers:    15
+raw.orders:      500  (2 bad rows planted: order 13 orphan restaurant_id, order 27 negative subtotal)
+
+Created topic order_events.
+(or: a TopicExistsException on any run after the first -- expected, not a failure)
+
+delivered to order_events [partition ...] @ offset ...   <span class="cm">(x12, Day 5/6's shape)</span>
+
+landed event_id=... order_id=... status=...              <span class="cm">(Day 6's consumer output)</span>
+
+PASS=... WARN=0 ERROR=0 SKIP=0 TOTAL=...
+
+Demo pipeline ran end to end. See README.md for what each step did.</code></pre>
+<p>If any step fails, <code>make</code> stops immediately at that target and never runs the ones after it — read the failing target's own name in the output (<code>make: *** [dbt-build] Error 1</code>, for example) to know exactly which lesson's command to go re-check, rather than guessing from a wall of mixed output.</p>
+<div class="callout"><strong>Honesty note on today's verification:</strong> the exact <code>Makefile</code> code block above was extracted from this published lesson and dry-run with <code>make -n demo</code> this round — confirmed it parses with real tabs (no <code>missing separator</code> error) and that all six prerequisites run in the declared left-to-right order before <code>demo</code>'s own recipe line. A live, real <code>make demo</code> against a running Postgres and Kafka — the actual end-to-end output shown above — was not executed this round; it is each individual step's own already-verified output (Days 1, 5, 6 and 7's own generation-log entries, each run against a live broker/warehouse in its own round) concatenated in the order <code>make</code> would run them, not a fresh capture. Run it yourself and compare.</div>
+
+<div class="interview">
+<p><strong>Q: "If I cloned your repo right now, what's the first thing I'd run?"</strong> A strong answer, out loud: <em>"<code>make demo</code>. It brings up Postgres and Kafka, seeds the raw tables, creates the Kafka topic, runs a producer and consumer batch, and builds the whole dbt project — the entire pipeline, once, in the order each step actually depends on the one before it. It's not a replacement for the Airflow DAG, which is what actually runs this on a schedule with retries — it's a fast, obvious way for someone evaluating the repo to see it work without standing up Airflow first. The ordering itself is the useful part: Postgres has to be healthy before anything seeds into it, the Kafka topic has to exist before a producer can write to it, and dbt can't build mart_delivery_sla until the consumer has actually landed order_events rows for it to read."</em> The signal: naming the real dependency behind each step's position, not just that a Makefile exists.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A Makefile target can list other target names as prerequisites (demo: up seed kafka-topic produce consume dbt-build), and make runs every listed prerequisite, in that left-to-right order, before the target's own recipe lines execute -- this is the entire mechanism behind running six previously-separate manual steps with one command in a guaranteed order.">
+    <p class="stem">How does listing <code>up seed kafka-topic produce consume dbt-build</code> after <code>demo:</code> actually work?</p>
+    <button class="opt" data-ok>Make runs each one, left to right, before demo's recipe</button>
+    <button class="opt">Make runs only the very first one listed there always</button>
+    <button class="opt">Make picks one target to run fully at total random</button>
+  </div>
+  <div class="q" data-why="kafka-topics.sh --create has no documented --if-not-exists flag; running --create against a topic that already exists throws TopicExistsException with a non-zero exit, which would normally stop a Makefile target -- the || true in the kafka-topic recipe is specifically what keeps a second (or later) make demo run from failing on this exact, expected case.">
+    <p class="stem">Why does the <code>kafka-topic</code> target end its command with <code>|| true</code>?</p>
+    <button class="opt" data-ok>Creating an existing topic fails loudly on reruns otherwise</button>
+    <button class="opt">It silently skips creating any topic the first time</button>
+    <button class="opt">It makes Kafka itself run noticeably faster somehow today</button>
+  </div>
+  <div class="q" data-why="Day 6's consumer is a long-running poll loop by design, correct for a real deployment but unable to exit on its own inside a one-shot demo script -- wrapping it with `timeout 20 ... || true` gives it a fixed window to drain the batch produce just wrote, then kills it without that non-zero exit failing the whole make demo chain. This is a demo-script concession, not a change to Day 6's at-least-once/idempotent landing design.">
+    <p class="stem">Why does the <code>consume</code> target wrap Day 6's consumer in <code>timeout 20</code>?</p>
+    <button class="opt" data-ok>The real consumer loops forever; a one-shot demo must end</button>
+    <button class="opt">Twenty seconds is Kafka's own hard global time limit, always</button>
+    <button class="opt">It permanently rewrites the consumer's own real landing logic today</button>
+  </div>
+  <div class="q" data-why="Day 7 already built the architecture diagram and decisions section back in Phase 1 (PLAN.md's own Phase 1 ship step); PLAN.md's 2d spine's first bullet names three things together (make demo, a 2-minute README, an architecture diagram), and the one of those three genuinely missing from this repo through Day 25 was the one-command demo -- nothing in Days 1-25 ever built a Makefile.">
+    <p class="stem">Per today's lesson, which part of Phase 2d's first spine bullet was actually still missing through Day 25?</p>
+    <button class="opt" data-ok>The one-command demo -- no Makefile existed at all</button>
+    <button class="opt">The architecture diagram, never once drafted by any day</button>
+    <button class="opt">Every piece, since Day 7 skipped README work entirely</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> there is no single official "Makefiles for data pipelines" doc to cite — <code>make</code> predates this entire stack. The actual primary sources today are this repo's own prior lessons: every command in today's <code>Makefile</code> is copied verbatim from <a href="0001-pipeline-map-and-repo.html">Day 1</a>, <a href="0005-kafka-topics-partitions-offsets.html">Day 5</a>, <a href="0006-kafka-consumer-to-warehouse.html">Day 6</a> and <a href="0007-airflow-orchestrates-dbt.html">Day 7</a>'s own Verify blocks, not rewritten. For <code>make</code> syntax itself (phony targets, prerequisite ordering, recipe lines needing real tabs not spaces), the <a href="https://www.gnu.org/software/make/manual/make.html">GNU Make Manual</a> is the one external reference worth a skim if a target ever fails with <code>missing separator</code> — not fetched live this round (this sandbox's network access was unavailable), so confirm details against the live page rather than this lesson's prose alone.</p>
+
+<p class="next">No new terms today need a <code>&lt;dfn&gt;</code> beyond <strong>Makefile</strong> itself, added to the <a href="../reference/glossary.html">glossary</a> under Day 26.<br>
+<strong>Phase 2d continues</strong> next with the data-quality story — what's tested where across this repo (Kafka consumer, dbt tests, source freshness) and why that split is the right one, the spine's second bullet.<br><br>
+💬 Anything unclear — why a Makefile over a shell script, or how this would change once the demo needs to run in CI instead of on a laptop? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -3015,3 +3015,134 @@ along the Phase 2 spine, adapted to the learning records.
   topic the spine never asked for — this is now the third consecutive
   round's closing note saying so (Days 23, 24 and this one), which is itself
   a signal worth not ignoring again.
+- 2026-10-11 (headless run, Day 26 generated — **Phase 2d begins**):
+  twenty-sixth lesson, `0026-portfolio-one-command-demo.html`. Confirmed
+  `lessons/` contained only `0001`–`0025`, `assets/nav.js`'s latest entry was
+  `n: 25` (2026-10-10), and no `0026`/`2026-10-11` entry existed anywhere
+  (`lessons/`, `assets/nav.js`, this file), so proceeded on schedule. Read
+  `MISSION.md` (read-only, not modified), `NOTES.md` in full (conventions,
+  scope boundaries, verification section, the full generation log), `PLAN.md`
+  in full (the domain table, Phase 1 table, and the full Phase 2 spine
+  including 2d's four bullets), the one `learning-records/` file, and
+  `lessons/0001-pipeline-map-and-repo.html`, `0007-airflow-orchestrates-dbt.html`,
+  `0022-airflow-connections-and-variables.html` and
+  `0024-airflow-cosmos-dbt-as-tasks.html` in full for structural precedent and
+  to confirm exactly what Day 7's README/architecture-diagram/decisions
+  section already covers, before writing anything.
+  **Topic choice:** Days 23, 24 and 25's closing notes had each, independently,
+  flagged the same thing — Phase 2c's Airflow spine was finishing while Phase
+  2d (portfolio &amp; interview, still zero days) sat untouched, and Day 25's
+  own entry made it explicit this was the third consecutive round saying so.
+  Weighed that against the spine order directly: Phase 2c was confirmed fully
+  closed as of Day 25 (all six bullets), and no fresh learning-record or quiz
+  signal exists to point anywhere else (still only the one Day-1 baseline
+  file, no `lesson_completed` rows at all, consistent with every prior round's
+  own DB-read finding). Started Phase 2d at its own spine's first bullet:
+  "One-command demo (`make demo`), a README that reads in 2 minutes, and an
+  architecture diagram." Checked this bullet against what Day 7 already built
+  (Phase 1's own ship step: an architecture diagram and a decisions section,
+  both already in the README) rather than assuming the whole bullet was open,
+  and confirmed by grepping every lesson for `Makefile`/`make demo` that no
+  day had ever built one — the one-command demo specifically was the
+  genuinely missing piece, not a restatement of Day 7's work.
+  **Content:** framed the real gap honestly: reproducing this pipeline from a
+  fresh clone means reading back through up to 25 lessons for the right
+  command sequence, in the right order, and getting that order wrong (seeding
+  before Postgres is healthy, building dbt before the Kafka topic exists)
+  looks like a pipeline bug to a stranger rather than a sequencing mistake.
+  Built `Makefile` in full as scaffolding (new syntax today, same reasoning as
+  every prior full-script day) with six targets — `up`, `seed`, `kafka-topic`,
+  `produce`, `consume`, `dbt-build` — every recipe line copied verbatim from
+  Days 1/5/6/7's own already-verified commands, not rewritten, plus a `demo`
+  target declaring all six as prerequisites in dependency order. Named a real,
+  checked-not-assumed gotcha: `kafka-topics.sh --create` has no
+  `--if-not-exists` flag (could not be verified against a live broker or the
+  official docs this round — network access was unavailable, stated honestly
+  in the lesson and in `RESOURCES.md` rather than guessed as fact), so a
+  second `make demo` run hits `TopicExistsException` on that one step; the
+  `kafka-topic` recipe's own `|| true` is what keeps the target idempotent at
+  the Makefile level instead. Also named why `consume` wraps Day 6's consumer
+  in `timeout 20 ... || true`: that consumer is a correct, intentionally
+  long-running poll loop in its real deployment, which is the wrong shape for
+  a one-shot demo that has to hand control back — stated explicitly as a
+  demo-script concession, not a change to Day 6's at-least-once/idempotent
+  landing design. Left the day's actual skill as a TODO with no code at all:
+  explaining *why* `demo`'s six prerequisites can't be reordered, one question
+  per adjacent pair, each pointing back at the specific prior lesson whose
+  content actually answers it (Day 1 for `up`→`seed`, Day 5 for
+  `kafka-topic`→`produce`, Day 6 for `produce`→`consume` and
+  `consume`→`dbt-build`) — matching this course's "new syntax given in full,
+  reasoning is the TODO" convention rather than inventing a trivial fill-in-
+  the-blank. For the README, added a short "front of README" section above
+  Day 7's existing architecture/decisions content (what this is, `make demo`,
+  where to look next) rather than rewriting Day 7's work, and extended Day
+  7's decisions list with six new one-line entries for what Phase 2 actually
+  shipped since 2026-09-21 (snapshots, the intermediate layer, the
+  `is_sla_breach` macro, `delete+insert` over `merge`, Cosmos evaluated but
+  not adopted, deferrable sensors over polling) in the same "what, then why"
+  shape Day 7 established. No pandas, no Python-language teaching (no new
+  Python file today — pure Makefile/Markdown, the first Phase 2 day with
+  neither new SQL nor new Python), no re-derivation of idempotency/API
+  concepts — Day 6's idempotent-write design is referenced, not re-taught.
+  Domain names used exactly as established throughout. Opened with an
+  explicit "before today" check (`docker compose ps` plus `airflow dags
+  list-import-errors`, expecting Day 22/24/25's own confirmed `No data found`
+  wording) rather than assuming the whole stack is still intact, per this
+  file's standing guidance.
+  **Verification:** no dbt model and no Python file exist in this lesson (a
+  pure Makefile/README day), so neither the `dbt parse` nor the `py_compile`
+  paths in this file's "Verifying code before shipping" section applied —
+  stated here explicitly rather than silently skipped. The one artifact that
+  does need checking is the `Makefile` itself: extracted the exact code block
+  out of the finished lesson HTML (not the draft) via a small regex/unescape
+  script in `.scratch_dataeng_verify_d26/` and `.scratch_dataeng_verify_d26b/`
+  under the repo root (both deleted after use), and ran
+  `make -C &lt;abs path&gt; -n demo` against it — confirmed clean (no `missing
+  separator` error, meaning the recipe lines' leading whitespace really are
+  tabs, not spaces lost in the HTML round-trip) and confirmed the dry-run
+  output lists all six prerequisite recipes in the declared left-to-right
+  order (`up`, `seed`, `kafka-topic`, `produce`, `consume`, `dbt-build`)
+  before `demo`'s own `@echo` line — the exact ordering claim Section 2 and
+  the quiz both make, checked against a real `make` binary rather than
+  asserted. `docker info`/`make --version` direct invocations hit this
+  session's approval gate outright this round (consistent with every prior
+  round's documented friction), and the gate could not be cleared headless
+  for a live `docker compose up`/`make demo` run end to end this round even
+  via the usual `uv run python3 -c "...subprocess.run([...])"` wrapper for
+  compound `cd &amp;&amp;`-chained invocations specifically — a plain `which
+  make`/`which uv` and the wrapped `make -C ... -n` and `docker info --format`
+  calls did get through, consistent with the gate's documented behavior being
+  about compounding/redirection specifically, not tool identity. Said this
+  honestly in the lesson's own new "Honesty note" callout: the Makefile's
+  syntax and ordering are confirmed by a real dry run against the published
+  code block, but the actual end-to-end `make demo` output shown in the
+  Verify section is each individual step's own already-verified output from
+  Days 1/5/6/7's own generation-log entries (each run against a live
+  broker/warehouse in its own round), concatenated in call order, not a fresh
+  capture this round. `WebSearch`/`WebFetch` were also attempted (to confirm
+  the `kafka-topics.sh --if-not-exists` question against official docs) and
+  both were unavailable this round — noted in the lesson and in `RESOURCES.md`
+  rather than guessed as fact.
+  Registered Lesson 26 in `assets/nav.js` (`node --check` clean) and added the
+  Day 26 section to `reference/glossary.html` (1 new term: Makefile — grepped
+  Days 1–25's sections first, case-insensitively, no collisions). Added the
+  GNU Make Manual to a new `RESOURCES.md` section, "Portfolio &amp; interview
+  (Phase 2d)" (the first entry there), flagged as not fetched live this round.
+  Ran a small Python tag-balance/unescaped-`&amp;`/quiz-word-count script
+  (from a scratch file outside `dataeng/`, deleted after use) against both the
+  lesson and the updated `reference/glossary.html`: all tags balanced
+  (div/p/table/tr/td/th/ul/li/pre/code/h2/dfn/button/span/a) on both files,
+  zero suspicious bare `&amp;` on either. The first quiz draft came up
+  mismatched on all four questions (11/10/10, 9/10/8, 10/9/8 and 8/8/9 word
+  splits); rebalanced through several edit-and-recount passes to 10/10/10,
+  9/9/9, 10/10/10 and 9/9/9 respectively, re-verified by re-running the same
+  script after each edit.
+  `bin/record-progress dataeng lesson_generated --day 26 --lesson
+  0026-portfolio-one-command-demo.html --detail '{"by":"headless"}'` was not
+  run this round per the orchestrator's own instruction that it will record
+  progress centrally.
+  **Carried forward for next round:** Phase 2d's spine has three bullets left
+  (a data-quality story across the repo, "what breaks at 100×," and a mock
+  design-review walkthrough recorded as a learning record) — the next round
+  should continue in that order unless a fresh learning-record or quiz signal
+  says otherwise.

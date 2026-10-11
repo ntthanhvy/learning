@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 94 · first_valid_index() / last_valid_index(): trimming the NaN padding off a time series</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 94 · ~20 min · 11 Oct 2026</p>
+<h1>first_valid_index() / last_valid_index(): trimming the NaN padding off a time series</h1>
+<p class="byline">A fresh scan today found a genuine zero-coverage gap: every lesson on missing data so far (Lessons 3, 45, 60, 65, 91, 93) has been about values missing <em>inside</em> a column. None of them answer a different, very common cleaning question: a sensor/report feed often starts recording late or stops early, leaving real NaN padding at the very start and end of a time series. <code>dropna()</code> would also delete real gaps in the middle — too blunt. Today's two methods find exactly where the real data begins and ends, so you can trim the edges and leave the middle alone.</p>
+
+<h2>1 · first_valid_index() / last_valid_index(): the label of the first and last non-NaN row</h2>
+<p><dfn data-en="a Series/DataFrame method taking no arguments that returns the INDEX LABEL of the first row containing at least one non-missing value, or None if every row is missing/the Series is empty — not a position, not the value itself, the row's label" data-vn="giữ nguyên 'first_valid_index()' — không nhận tham số nào, trả về NHÃN (label) của hàng ĐẦU TIÊN có ít nhất 1 giá trị không thiếu, hoặc None nếu toàn bộ đều thiếu/Series rỗng; không phải vị trí, không phải giá trị, là cái NHÃN HÀNG">first_valid_index()</dfn> and its mirror <dfn data-en="the row-order counterpart of first_valid_index() — returns the index label of the LAST row containing at least one non-missing value, or None under the same empty/all-missing conditions" data-vn="giữ nguyên 'last_valid_index()' — giống first_valid_index() nhưng tìm hàng CUỐI CÙNG có giá trị không thiếu, cũng trả về None nếu không có hàng nào hợp lệ">last_valid_index()</dfn> scan a Series/DataFrame in its current row order and hand back the real label — confirmed directly (pandas 3.0.6), this is exactly equivalent to <code>s.dropna().index[0]</code> / <code>[-1]</code>, just without building the intermediate dropped copy:</p>
+<pre><code>temp = pd.Series(
+    [np.nan, np.nan, <span class="kw">20.1</span>, <span class="kw">21.4</span>, <span class="kw">19.8</span>, np.nan, np.nan],
+    index=pd.date_range(<span class="str">"2026-01-01"</span>, periods=<span class="kw">7</span>, freq=<span class="str">"D"</span>),
+)
+<span class="cm">-- 2026-01-01   NaN
+-- 2026-01-02   NaN
+-- 2026-01-03  20.1
+-- 2026-01-04  21.4
+-- 2026-01-05  19.8
+-- 2026-01-06   NaN
+-- 2026-01-07   NaN</span>
+
+temp.first_valid_index()
+<span class="cm">-- Timestamp('2026-01-03')   -- the real label, not position 2</span>
+temp.last_valid_index()
+<span class="cm">-- Timestamp('2026-01-05')</span></code></pre>
+<p>The actual win: slicing between the two trims the leading/trailing NaN padding while leaving any real gap in the <em>middle</em> of the series completely alone — something <code>dropna()</code> can't do without deleting that middle gap's row too:</p>
+<pre><code>trimmed = temp.loc[temp.first_valid_index():temp.last_valid_index()]
+<span class="cm">-- 2026-01-03  20.1
+-- 2026-01-04  21.4
+-- 2026-01-05  19.8   -- exactly the real 3 rows, nothing more</span></code></pre>
+
+<h2>2 · No skipna, no axis, no arguments at all — and None instead of raising</h2>
+<p>Confirmed directly via <code>inspect.signature()</code>: both methods take <strong>no parameters besides <code>self</code></strong> — no <code>skipna=</code> to turn off (there's nothing to turn off; skipping missing values <em>is</em> the whole point), no <code>axis=</code> either. On a DataFrame, confirmed directly, there's no per-column version at all: it looks across the <strong>entire row</strong> and returns one label for the first/last row where <em>any</em> column has a real value — a different shape of answer from Lesson 91's <code>idxmax(axis=1)</code>, which always returns one label per row, not one label for the whole frame.</p>
+<pre><code>df = pd.DataFrame({
+    <span class="str">"a"</span>: [np.nan, np.nan, <span class="kw">1</span>, <span class="kw">2</span>],
+    <span class="str">"b"</span>: [np.nan, <span class="kw">3</span>, np.nan, np.nan],
+}, index=[<span class="str">"w"</span>, <span class="str">"x"</span>, <span class="str">"y"</span>, <span class="str">"z"</span>])
+
+df.first_valid_index()
+<span class="cm">-- 'x'   -- row "w" is all-NaN; row "x" has b=3, so IT wins, even though a is still NaN there</span></code></pre>
+<p>And the sharpest contrast with this course's whole recent NaN-position thread (Lessons 20, 91, 93: <code>idxmax()</code> raises <code>ValueError: Encountered all NA values</code> on an all-NaN row/Series, and plain <code>np.argmax()</code> silently returns the NaN's own position): these two methods do neither. Confirmed directly — an all-NaN Series, and a genuinely empty one, both just return <code>None</code>, quietly, no exception at all:</p>
+<pre><code>pd.Series([np.nan, np.nan]).first_valid_index()
+<span class="cm">-- None   -- no ValueError, unlike idxmax() on the same data</span>
+pd.Series([], dtype=<span class="kw">float</span>).first_valid_index()
+<span class="cm">-- None</span></code></pre>
+<p>That's the trap worth naming out loud: code written assuming "it raises if nothing's there, like idxmax() does" will instead silently carry a <code>None</code> forward — and <code>series.loc[None:last]</code> doesn't raise either, it just does something other than what was intended. Always worth an explicit <code>is None</code> check before slicing with the result on data that might be entirely missing.</p>
+
+<div class="interview">
+<p><strong>Q: "You're given a sensor feed that starts a day late and drops out early. How do you trim just the padding, keeping any real gap in the middle?"</strong> A strong answer, out loud: <em>"dropna() is too blunt here — it would delete any real missing reading in the middle of the series too, not just the leading/trailing padding. Instead I'd use first_valid_index() and last_valid_index(): they scan in row order and return the actual index label of the first and last row with a real value, then I slice between them with .loc[first:last]. That keeps the middle exactly as-is and only trims the edges. One thing I'd check first: if the whole series could plausibly be empty or all-missing, both methods quietly return None instead of raising — unlike idxmax(), which raises ValueError on an all-NaN input — so I'd guard for None before slicing with it, not assume an exception would catch that case for me."</em> The signal: naming dropna() as the wrong tool first (and why), knowing the None-not-raise behavior as a real trap, and contrasting it correctly against idxmax()'s raising behavior from memory.</p>
+</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/94_first_last_valid_index.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/94_first_last_valid_index.py</code></pre>
+<p>Exercise 1 confirms <code>first_valid_index()</code>/<code>last_valid_index()</code> return the real row label (not a position), and that slicing between them trims leading/trailing NaN while leaving a real middle gap untouched (Section 1). Exercise 2 confirms the whole-row DataFrame behavior — one label for the first row where <em>any</em> column has a value, not one label per column (Section 2). Exercise 3 confirms both an all-NaN Series and an empty Series return <code>None</code> rather than raising, unlike <code>idxmax()</code> on the same all-NaN input (Section 2).</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: first_valid_index()/last_valid_index() return the actual index LABEL of the first/last row containing a non-missing value, equivalent to s.dropna().index[0]/[-1] -- not a raw integer position like np.argmax() returns, and not the value itself.">
+    <p class="stem">What does <code>first_valid_index()</code> actually return?</p>
+    <button class="opt" data-ok>the row's real index label, same as dropna().index[0]</button>
+    <button class="opt">the raw integer position, same as np.argmax() returns</button>
+    <button class="opt">the first non-missing value found in the Series</button>
+  </div>
+  <div class="q" data-why="Confirmed directly via inspect.signature(): both methods take no parameters besides self -- there is no skipna= to toggle, since skipping missing values is the entire point of the method, and no axis= either.">
+    <p class="stem">Which keyword argument does <code>first_valid_index()</code> accept?</p>
+    <button class="opt" data-ok>none at all -- it takes zero arguments</button>
+    <button class="opt">skipna=, defaulting to True, same as idxmax() has</button>
+    <button class="opt">axis=, the one idxmax(axis=1) uses, from Lesson 91</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: pd.Series([nan, nan]).first_valid_index() returns None quietly, with no exception at all -- unlike idxmax() on an all-NaN input, which raises ValueError: Encountered all NA values (Lessons 20/91/93). An empty Series also returns None, not an error.">
+    <p class="stem">Called on a Series that's entirely NaN, <code>first_valid_index()</code> does what?</p>
+    <button class="opt" data-ok>returns None quietly -- no exception, unlike idxmax()</button>
+    <button class="opt">raises the same ValueError idxmax() raises on all-NaN</button>
+    <button class="opt">returns NaN itself, treated as a found value</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official <a href="https://pandas.pydata.org/docs/reference/api/pandas.Series.first_valid_index.html">pandas API reference for <code>Series.first_valid_index()</code></a> (per <code>RESOURCES.md</code>'s "Docs: pandas User Guide" entry, ~3 min) — confirms the exact docstring ("Return index for first non-missing value or None, if no value is found") and both the empty-Series and all-missing <code>None</code> behaviors verbatim, matching the direct probing above exactly.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>first_valid_index()</code> / <code>last_valid_index()</code> are new today, added right after Lesson 93's <code>np.argmax() / np.argmin()</code> entry.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-94 comes back reported as shakiest, otherwise another fresh curriculum/glossary scan for the next genuinely-uncovered pattern — no single standing candidate carries forward from today.<br><br>
+💬 Anything unclear — the whole-row DataFrame behavior, the None-vs-raise trap, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

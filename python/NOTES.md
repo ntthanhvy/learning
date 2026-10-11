@@ -9393,3 +9393,141 @@ fail *gracefully* so the learner sees which task failed.
   more fresh lesson (one of `configparser`/`uuid`) and make Days 72-74 a
   three-lesson review on Day 75 instead — either satisfies the pattern;
   prefer whichever the Day 74 generator's own fresh-gap scan suggests.
+- 2026-10-11 — **Day 74 generated: `uuid` & `configparser`** (headless
+  run). Read `MISSION.md` (untouched, read-only), `NOTES.md` in full (in
+  chunks, since the whole file exceeds this run's single-read size cap),
+  and `PLAN.md` in full to reconfirm the Phase-2 spine and the
+  no-pandas/no-NumPy scope rule. `learning-records/` still holds only the
+  Day 1 baseline — nothing new to adapt to. Idempotency: listed
+  `lessons/` (highest existing file `0073-concurrent-futures-...html`)
+  and read `assets/nav.js`'s `LESSONS` array directly, confirming no
+  `n: 74` or `2026-10-11` entry existed before writing anything.
+  Decision process — fresh topic vs. review day: Day 73's own next-day
+  note left both options open and explicitly deferred to "whichever the
+  Day 74 generator's own fresh-gap scan suggests." Re-confirmed the
+  cadence evidence directly from `nav.js` titles rather than trusting the
+  note's summary at face value: Day 67 reviewed Days 64-66 (three fresh
+  lessons), Day 71 reviewed Days 68-70 (three fresh lessons) — the
+  settled cadence is a review every three fresh lessons. Since Day 71's
+  review, only Days 72 (`pickle`) and 73 (`concurrent.futures`) have been
+  fresh — two lessons, one short of three — so today took the note's
+  second option: one more fresh lesson now, making Days 72-74 the
+  three-lesson span a review can cover on Day 75, rather than reviewing
+  an under-sized two-lesson span early.
+  Re-ran the fresh-gap check for the two standing candidates — grepped
+  `configparser` and `uuid` (case-insensitive) across every file in
+  `lessons/`, `practice/`, and `reference/glossary.html` — rather than
+  trusting the carry-forward list at face value, per Day 72's own
+  caution about carried-forward candidates going stale unverified. Both
+  terms appeared only inside the "standing fresh-gap candidates" sentence
+  of Days 72's and 73's own closing footers — i.e. named as future
+  candidates, never actually taught — so both confirmed still genuinely
+  open. Chose to teach both together in one lesson, following Day 53's
+  precedent (`collections.deque` & `namedtuple`) of pairing two
+  small, unrelated stdlib modules that are each individually too thin
+  for a full ~20 min lesson on their own: Day 70's note had already
+  called `uuid` "too thin alone for a full lesson," and `configparser`
+  had been passed over every round since Day 58 for being narrow (one
+  config format `pathlib`/plain `dict`s mostly already cover). Pairing
+  them closes both standing gaps in a single lesson instead of stretching
+  either alone or leaving one to linger further.
+  Read Day 53's full lesson and practice file as the direct structural
+  template for a two-module lesson (two numbered sections per module,
+  one shared "Where pandas goes from here" callout at the end, one quiz
+  question per module plus a shared one). Also read Day 73's lesson for
+  the current byline/"Why today"/callout conventions. Grepped
+  `reference/glossary.html` case-insensitively for `uuid` and
+  `configparser` before writing any new `<dfn>` — no prior hits —
+  confirming no collision with today's two new terms.
+  Lesson covers, in order: `uuid.uuid4()` as a coordination-free unique
+  identifier (128-bit random, no central counter needed, contrasted with
+  an auto-increment integer primary key), when to reach for a UUID versus
+  a short/sortable/human-typeable ID and why `uuid4()` is preferred over
+  `uuid1()` (which leaks MAC address and timestamp), then `configparser`
+  reading an INI-style file into a dict-of-dicts-like structure with
+  string-only raw values and the typed `getint()`/`getboolean()` readers,
+  and writing one back out via `config.write(f)`. A callout contrasts
+  `configparser`/INI against Day 10's `pyproject.toml`/TOML rather than
+  re-teaching either. Bridged from SQL: a UUID primary key column versus
+  an auto-increment integer column, framed as the same schema-design
+  tradeoff — app-generated-before-insert vs. database-assigned-after.
+  No-pandas rule: grepped case-insensitively for `pandas`/`numpy`/`pd\.`/
+  `np\.` in both the lesson and practice file — exactly one hit in the
+  lesson (the single "Where pandas goes from here" boundary callout,
+  stating neither module is pandas-specific, no pandas code shown) and
+  zero hits in the practice file — compliant with the
+  one-contrast-sentence allowance.
+  **New jargon: 2 terms** (`uuid`, `configparser`), each with a
+  `<dfn data-en`/`data-vn>` tag, confirmed via a throwaway Node.js
+  regex-based checker (written to a scratch `.scratch-0074check/`
+  directory under the repo root, deleted after use): 2 `<dfn` tags, 2
+  `data-en=` attributes, 2 `data-vn=` attributes, tag stack balanced, and
+  zero unescaped `&` outside the allowed entities. The same checker
+  caught one real bug before it shipped: an early draft's SQL-bridge
+  callout opened with `<div class="callout">` but was mis-closed
+  with `</p></div>` (a stray `</p>` with no matching
+  open tag) — fixed by removing the stray `</p>`, then
+  re-confirmed balanced. Appended a new `id="day74"` glossary section
+  directly before the closing `<p class="next">` footer, matching
+  the last several days' convention.
+  Practice file `practice/74_uuid_and_configparser.py` (4 checks,
+  stdlib-only, no `--with` flag, function-stub-with-TODO-comment style
+  matching Days 68-73's): two independent `uuid.uuid4()` calls confirmed
+  never equal (Ex 1), a UUID round-tripped through `str()` and
+  `uuid.UUID(...)` confirmed equal to the original (Ex 2), a
+  `ConfigParser` section written to a temp file via `config.write(f)`
+  then read back with a fresh `ConfigParser` and `getint()` returning the
+  value as a real `int` (Ex 3), and the same read/write round trip with
+  `getboolean()` reading a deliberately non-`"True"` spelling (`"yes"`)
+  back as the bool `True` (Ex 4) — chosen specifically to exercise
+  `getboolean()`'s accepted-spellings behavior, not just the trivial
+  `"True"`/`"False"` case.
+  Verified in a scratch `.scratch-0074/` directory created directly under
+  the repo root (copied from the shipped file, not edited in place): the
+  shipped (unsolved) copy printed four clean ✗ lines with no traceback,
+  both from the scratch copy and again run directly from its real
+  `python/practice/` path as a final check. A separately solved copy
+  (TODOs filled in on the scratch copy) printed all four ✓ and the "All
+  green" tally, run twice consecutively with identical results both
+  times. Scratch directory deleted before finishing.
+  Quiz: 3 questions, one per module plus one on `configparser`'s typed
+  readers specifically (why no collision is possible, what type a raw
+  `config[...][...]` read returns, what spellings `getboolean()` accepts
+  beyond `true`/`false`). Word counts were checked with a Node.js
+  regex-based script matching this course's established practice; first
+  draft mismatched on all three questions (Q1 10/9/8, Q2 7/7/8, Q3
+  7/10/7) — iterated option-by-option, recounting after every edit per
+  this file's own "recount after edits" rule, until all three landed on
+  equal counts: 9/9/9, 8/8/8, 9/9/9.
+  `RESOURCES.md`: added a new `uuid`/`configparser` docs line, placed
+  directly after the Day 73 `concurrent.futures` line per the file's
+  day-ordered citation convention.
+  Registered in `assets/nav.js` with `date: "2026-10-11"` right after the
+  `n: 73` entry; confirmed `node --check assets/nav.js` reports no syntax
+  errors after the edit.
+  **DB access:** per this run's instructions, progress recording is the
+  orchestrator's job, not this run's — no `record-progress` call was
+  attempted this round, unlike several earlier entries in this log that
+  did attempt one directly.
+  `python/learning-records/` still holds only the Day 1 baseline —
+  choosing between two already-known, already-weighed candidates and
+  pairing them per an existing precedent (Day 53) is generation-process
+  bookkeeping, not a new, durable fact about the learner distinct from
+  what Day 1's record already says.
+  Final `git status --short -- python/` is expected to show exactly six
+  paths changed (`assets/nav.js`, `RESOURCES.md`, `reference/glossary.html`,
+  `NOTES.md`, plus the new lesson and practice file) — no other course's
+  files touched, and no leftover scratch files or directories under the
+  repo.
+  **Next-day note:** both standing fresh-gap candidates (`configparser`,
+  `uuid`) are closed as of today — a fresh grep found no other
+  untaught-but-named candidate anywhere in the log. Days 72-74
+  (`pickle`, `concurrent.futures`, `uuid`/`configparser`) are now a
+  three-lesson fresh span since Day 71's review, matching this course's
+  settled three-fresh-lesson cadence (Day 67 reviewed 64-66, Day 71
+  reviewed 68-70) — Day 75 should default to a review of Days 72-74
+  unless a new urgent gap turns up first. With both carried-forward
+  candidates now taught, Day 75's generator will need a fresh fresh-gap
+  scan from scratch rather than a carry-forward list — nothing is
+  pre-queued this time.
+

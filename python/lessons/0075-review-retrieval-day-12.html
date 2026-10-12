@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 75 · Review day 12: retrieval across Days 72-74</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 75 · ~20 min · 12 Oct 2026</p>
+<h1>Review day 12: retrieval across Days 72-74</h1>
+<p class="byline">Day 71 (review day 11) covered Days 68, 69, and 70. Since then, three fresh days ran in a row — Day 72 (<code>pickle</code>), Day 73 (<code>concurrent.futures</code>), Day 74 (<code>uuid</code> &amp; <code>configparser</code>) — and Day 74's own next-day note flagged this span as exactly matching the course's settled three-fresh-lesson review trigger (Day 67 reviewed Days 64-66, Day 71 reviewed Days 68-70). This is that review — a twelfth retrieval day, covering exactly Days 72, 73, and 74.</p>
+
+<div class="callout"><strong>Why today, specifically, and why not a fourth fresh day:</strong> a fresh-gap grep ran first anyway, matching every prior review day's own discipline — it searched all 74 lessons, every practice file, and <code>reference/glossary.html</code> case-insensitively for every stdlib module named but not yet taught across the whole log. Nothing turned up: Day 74's note explicitly closed out the last two standing candidates (<code>configparser</code>, <code>uuid</code>), and no new candidate has been named anywhere since. With no fresh gap on the table and the cadence math landing exactly on three fresh lessons since Day 71, today pays down retrieval on Days 72-74 instead of stretching to a fourth fresh topic nothing currently calls for.</div>
+
+<h2>1 · Three questions, in the original teaching order</h2>
+<p>Answer each out loud or on paper <em>before</em> reading the fold-out answer. If one is shaky, note it and go fix it in the practice file below rather than only rereading the old lesson.</p>
+
+<p><strong>Day 72 — <code>pickle</code>.</strong> Why can <code>pickle</code> serialize a <code>dataclass</code> instance that makes <code>json.dumps()</code> raise <code>TypeError</code>, and what is the one rule about calling <code>pickle.load()</code> that has nothing to do with syntax at all?</p>
+<div class="callout">Fold-out answer: <code>json</code> only knows how to write the fixed set of types its text format defines — strings, numbers, booleans, <code>None</code>, lists, and dicts of those — so a custom type like a <code>dataclass</code> instance is invisible to it. <code>pickle</code> writes Python's own internal binary representation of an object instead of a fixed text grammar, so it can round-trip almost any Python object with no hand-conversion step. The non-syntax rule: never call <code>pickle.load()</code>/<code>loads()</code> on data from an untrusted or unauthenticated source — reconstructing an object during unpickling can invoke that object's own code, so a maliciously crafted pickle byte string can run arbitrary code the instant it's loaded, a risk <code>json</code> parsing simply has no path to.</div>
+
+<p><strong>Day 73 — <code>concurrent.futures</code>.</strong> Why does <code>ThreadPoolExecutor.map()</code> finish five one-second simulated calls in about one second instead of five, and why does that same trick do nothing for a pure CPU-bound computation?</p>
+<div class="callout">Fold-out answer: each simulated call is I/O-bound — nearly all of its time is spent waiting, not computing — so running the five waits concurrently overlaps the idle time instead of stacking it, and total time tracks the slowest single call rather than the sum of all five. CPython's GIL only releases automatically during a blocking I/O wait; a thread doing pure arithmetic never blocks on I/O, so it never releases the GIL, and running the same computation across several threads provides no speedup (<code>ProcessPoolExecutor</code>, using separate processes instead of threads, is the tool for that case instead).</div>
+
+<p><strong>Day 74 — <code>uuid</code> &amp; <code>configparser</code>.</strong> Why can two independent processes both call <code>uuid.uuid4()</code> with zero risk of colliding, and why does plain <code>config["database"]["port"]</code> hand back the string <code>"5432"</code> rather than the integer <code>5432</code> even though the file reads <code>port = 5432</code>?</p>
+<div class="callout">Fold-out answer: <code>uuid4()</code> generates a 128-bit random value, not a number handed out by any central counter — the randomness is large enough that two independent calls colliding is not a practical concern, which is exactly why no coordination between callers is ever needed (unlike an auto-increment integer primary key, which needs the database itself to hand out the next number). <code>configparser</code> reads every raw value out of an INI file as a plain string, with no concept of int or bool built in anywhere — <code>getint()</code>, <code>getfloat()</code>, and <code>getboolean()</code> are the separate typed readers that convert that string on the way out, not on the way in.</div>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> nothing pandas-specific today — this review only revisits Days 72, 73, and 74's plain-Python serialization, concurrency, and config/identifier material, none of which needs a <code>DataFrame</code> to demonstrate.</div>
+
+<h2>2 · Why these three, and why no new terms today</h2>
+<p>Same interleaving logic as every prior review day: a serialization-format tradeoff, then a concurrency model, then two small but genuinely different "know it exists, reach for it correctly" tools — four different mental models pulled from three lessons, not one idea restated four ways. They also share a quieter throughline worth naming: all three are about a tool drawing a hard line around what it will and won't do automatically — <code>pickle</code> will serialize almost anything but trusts the caller completely on safety, <code>ThreadPoolExecutor</code> will overlap waits but can't speed up computation the GIL still serializes, and <code>configparser</code> will move values between a file and a dict but never silently guesses their type. Recognizing which guarantees a tool is actually making, versus which it explicitly leaves to the caller, is the retrieval goal today more than recalling exact method names alone.</p>
+<p>No new jargon is introduced today on purpose — every term revisited already has a glossary entry under its original day. With today's three done, no standing fresh-gap candidate is currently on record anywhere in the log; Day 76's generator will need a fresh fresh-gap scan from scratch rather than a carry-forward list.</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/75_review_retrieval_day_12.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/75_review_retrieval_day_12.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. No new syntax: every mechanism below was taught in Days 72, 73, and 74. Exercises: round-tripping a <code>dataclass</code> instance through <code>pickle.dumps()</code>/<code>loads()</code> and confirming the restored object is equal but not the same object as the original, timing a plain loop of simulated slow calls against the same calls run through <code>ThreadPoolExecutor.map()</code> and confirming the concurrent version is meaningfully faster, and writing a <code>ConfigParser</code> section out to a temp file then reading an int back with <code>getint()</code> and a non-<code>"True"</code> boolean spelling back with <code>getboolean()</code>.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="json only writes the fixed set of types its text format defines -- strings, numbers, booleans, None, lists, and dicts of those. pickle instead writes Python's own binary object representation, which is not limited to that fixed set, so a dataclass instance (and almost any other Python object) round-trips with no hand-conversion step.">
+    <p class="stem">Why can <code>pickle</code> serialize a <code>dataclass</code> instance that <code>json.dumps()</code> cannot?</p>
+    <button class="opt" data-ok>it writes Python's own binary object representation, not text</button>
+    <button class="opt">pickle quietly converts every dataclass into plain text first</button>
+    <button class="opt">dataclasses are simply forbidden from ever loading as JSON</button>
+  </div>
+  <div class="q" data-why="Each simulated call is I/O-bound, so nearly all its time is spent waiting rather than computing. Running the five waits concurrently overlaps that idle time instead of stacking it one after another, so total time tracks the slowest single call rather than the sum of all five.">
+    <p class="stem">Why does <code>ThreadPoolExecutor.map()</code> finish five one-second calls in about one second?</p>
+    <button class="opt" data-ok>the five I/O waits overlap concurrently instead of stacking</button>
+    <button class="opt">time.sleep() always runs much faster inside a background thread</button>
+    <button class="opt">ThreadPoolExecutor silently skips every call after the first one</button>
+  </div>
+  <div class="q" data-why="CPython's GIL only releases automatically while a thread is blocked on I/O (network, disk, time.sleep). A thread doing pure arithmetic never blocks on I/O, so it never releases the GIL, and running that computation across several threads provides no real speedup -- ProcessPoolExecutor, using separate processes, is the tool for that case instead.">
+    <p class="stem">Why does threading speed up I/O-bound waiting but not CPU-bound computation?</p>
+    <button class="opt" data-ok>the GIL stays held through computation but releases during I/O waits</button>
+    <button class="opt">CPU-bound code is simply always already fast enough on its own</button>
+    <button class="opt">threading flatly refuses to ever run a function that does math</button>
+  </div>
+  <div class="q" data-why="uuid.uuid4() generates a 128-bit random value, not a number from any shared counter -- the randomness is large enough that two independent calls colliding is not a practical concern. That is exactly why no coordination between callers is ever needed, unlike an auto-increment integer primary key, which needs the database to hand out the next number.">
+    <p class="stem">Why can two independent processes both call <code>uuid.uuid4()</code> with no risk of colliding?</p>
+    <button class="opt" data-ok>it generates a large random value, needing no shared counter</button>
+    <button class="opt">python silently registers every call with one central server first</button>
+    <button class="opt">uuid4 always embeds the exact calling machine's own hostname too</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> no single new source today — revisit each lesson's own citation (<a href="https://docs.python.org/3/library/pickle.html"><code>pickle</code></a> for Day 72, <a href="https://docs.python.org/3/library/concurrent.futures.html"><code>concurrent.futures</code></a> for Day 73, and <a href="https://docs.python.org/3/library/uuid.html"><code>uuid</code></a>/<a href="https://docs.python.org/3/library/configparser.html"><code>configparser</code></a> for Day 74), all already listed in <code>RESOURCES.md</code>.</p>
+
+<p class="next">No new terms today — this is a review day, and every term revisited already has a glossary entry under its original day (<a href="../reference/glossary.html#day72">72</a>, <a href="../reference/glossary.html#day73">73</a>, <a href="../reference/glossary.html#day74">74</a>).<br>
+💬 Anything unclear across any of today's three? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

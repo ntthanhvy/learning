@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 98 · Autovacuum and bloat: the cleanup Lesson 39 said was out of scope</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 98 · ~20 min</p>
+<h1>Autovacuum and bloat: the cleanup Lesson 39 said was out of scope</h1>
+<p class="byline">Lesson 39 named VACUUM, explained why it exists, and then drew a line: "tuning autovacuum itself is operations work beyond this lesson's scope." Today crosses that line — what autovacuum actually is, why a table can bloat even though autovacuum is running, and the one failure mode that turns this from a disk-space nuisance into a production outage.</p>
+
+<h2>1 · VACUUM is a program; autovacuum is the scheduler that runs it</h2>
+<p>Lesson 39 was precise about <em>why</em> dead row versions need reclaiming — an old version stays on disk until no active snapshot could possibly still need it. It was looser about who actually does that reclaiming. <code>VACUUM</code> is a command you could, in principle, type yourself. <dfn data-en="Postgres's built-in background daemon that decides, on its own, when a table has accumulated enough dead row versions to be worth vacuuming, and runs VACUUM against it automatically -- without a human or a cron job ever issuing the command" data-vn="autovacuum (giữ nguyên) — daemon nền có sẵn trong Postgres, tự quyết định khi nào 1 bảng đủ nhiều dòng chết để đáng chạy VACUUM, rồi tự chạy luôn, không cần người hay cron job gọi lệnh">autovacuum</dfn> is the daemon that decides <em>when</em>: it watches every table's count of dead tuples against a threshold and launches a vacuum worker on its own, with no human or cron job involved. On any normal Postgres install it's on by default — the reason Lesson 39 could say "usually autovacuum, running on its own" without anyone having configured a thing.</p>
+<p>That threshold is the whole story of why a table can still bloat with autovacuum fully enabled. By default autovacuum fires once dead rows cross roughly 20% of a table's live row count (<code>autovacuum_vacuum_scale_factor</code>, plus a small flat offset). That default was picked for an average table, not yours. A table that gets thousands of <code>UPDATE</code>s per minute can accumulate a 20%-sized pile of dead versions — and keep doing it faster than one autovacuum worker can clean a pile that size — long before the next run even finishes.</p>
+
+<h2>2 · Bloat is the pile outrunning the broom</h2>
+<p><dfn data-en="a table or index occupying more disk space than its live row count would require, because dead row versions have accumulated faster than autovacuum has reclaimed them -- the space isn't lost or corrupted, it's just unreclaimed and sitting between live rows" data-vn="bloat (giữ nguyên) — bảng/index chiếm nhiều đĩa hơn mức dữ liệu sống thực cần, vì dòng chết dồn lại nhanh hơn autovacuum dọn kịp -- không mất dữ liệu, chỉ là chỗ trống nằm xen giữa các dòng sống chưa được tái dùng">Bloat</dfn> is what Lesson 39 called "visibly bloat in size," named properly: dead row versions sitting between live ones faster than autovacuum reclaims them. Three things make a table a bloat risk specifically, not just an active one:</p>
+<ul>
+<li><strong>Heavy UPDATE/DELETE traffic</strong> — every one leaves a dead version behind (Lesson 39, Section 4); a table that's mostly <code>INSERT</code>-only barely bloats at all, since there's little to leave dead.</li>
+<li><strong>Long-running transactions elsewhere</strong> — a single open transaction, even one touching a completely different table, pins its own snapshot in place, and autovacuum can't reclaim any version that transaction's snapshot might still need, anywhere in the database, until it finally commits or rolls back.</li>
+<li><strong>Autovacuum falling behind</strong> — too few workers, a scale factor too loose for this table's write rate, or a vacuum run that keeps getting interrupted before it finishes a large table.</li>
+</ul>
+<p>The fix for an already-bloated table (<code>VACUUM FULL</code>, which rewrites the whole table compactly) takes an exclusive lock for its entire duration — a cure that can cost more downtime than the disease. The cheaper fix is almost always further upstream: find the long-running transaction holding the old snapshot open, or tighten that one table's <code>autovacuum_vacuum_scale_factor</code> so it fires sooner, before the pile gets that large.</p>
+<div class="callout"><strong>Frontend-habit trap:</strong> "the table is using more disk than I expect" reads like a memory leak — something to patch in application code. It isn't one. No bytes are unaccounted for and nothing is corrupted; every byte is either a live row or a dead version autovacuum hasn't reclaimed yet. The fix lives in Postgres configuration and transaction hygiene, not in the Go handler that issued the <code>UPDATE</code>.</div>
+
+<h2>3 · The failure mode that makes this urgent: wraparound</h2>
+<p>Disk space creeping up is an inconvenience. There's a second, sharper reason autovacuum tuning is a real operational concern and not just tidiness. Every transaction's id (Lesson 39's <code>xmin</code>/<code>xmax</code>) is a finite 32-bit number. Postgres reuses them in a circle, and a background vacuum pass is also what "freezes" old row versions so Postgres can tell a genuinely old <code>xmin</code> apart from a reused one that merely looks old after the counter wrapped. If autovacuum falls far enough behind — usually because of exactly the long-running-transaction or misconfigured-threshold causes above, left unaddressed for a long time — Postgres gets close enough to running out of fresh transaction ids that it protects itself the only way it safely can: it stops accepting new write transactions database-wide, in every table, until an emergency vacuum catches up. Reads still work. Every <code>INSERT</code>/<code>UPDATE</code>/<code>DELETE</code> anywhere in the database does not, until the cleanup finishes.</p>
+<p>That's the actual stakes behind Lesson 39's one-line scope cut: autovacuum isn't only reclaiming disk space, it's the same mechanism standing between the database and a self-inflicted, database-wide write outage. Postgres ships monitoring views specifically so this never arrives as a surprise — <code>age(datfrozenxid)</code> in <code>pg_database</code> reports how close a database is to that wraparound limit, long before it becomes urgent.</p>
+
+<h2>4 · Seeing it from Go</h2>
+<p>Nothing about autovacuum is configured from application code — it's a server-side setting, not a <code>pgx</code> call. What application code <em>does</em> control is the one risk factor in Section 2 that a handler can actually create: a transaction opened and then left running far longer than its own work requires, because of a slow downstream call or a missing timeout.</p>
+<pre><code><span class="cm">// riskyTransfer holds a transaction open across a slow external call --
+// every second this is open, autovacuum anywhere in the database cannot
+// reclaim any row version that might still be visible to this snapshot.</span>
+<span class="kw">func</span> riskyTransfer(ctx context.Context, pool *pgxpool.Pool, from, to <span class="kw">int</span>, amount <span class="kw">int</span>) error {
+    tx, err := pool.Begin(ctx)
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        <span class="kw">return</span> err
+    }
+    <span class="kw">defer</span> tx.Rollback(ctx)
+
+    _, err = tx.Exec(ctx, <span class="st">"UPDATE accounts SET balance = balance - $1 WHERE id = $2"</span>, amount, from)
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        <span class="kw">return</span> err
+    }
+
+    <span class="cm">// a slow fraud-check API call, still inside the open transaction --
+    // this is the risk: the transaction's snapshot stays pinned for however
+    // long this call takes, with no timeout bounding it</span>
+    <span class="kw">if</span> err := callFraudCheckAPI(ctx, from, to, amount); err != <span class="kw">nil</span> {
+        <span class="kw">return</span> err
+    }
+
+    _, err = tx.Exec(ctx, <span class="st">"UPDATE accounts SET balance = balance + $1 WHERE id = $2"</span>, amount, to)
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        <span class="kw">return</span> err
+    }
+    <span class="kw">return</span> tx.Commit(ctx)
+}</code></pre>
+<p>The fix isn't a different vacuum setting — it's moving the slow call outside the transaction boundary (do the fraud check first, open the transaction only around the two fast <code>UPDATE</code>s), the same "keep transactions short" instinct Lesson 6 already taught for lock contention, now shown to matter for vacuum too. Lesson 41's <code>context.Context</code> deadline bounds the worst case, but doesn't replace actually shrinking what's inside the transaction.</p>
+
+<div class="interview">
+<p><strong>Q: "One of our tables keeps growing in disk size even though row counts are flat. What's going on, and what would you check?"</strong> A strong answer, out loud: <em>"That's almost always bloat, not a leak — Postgres never overwrites a row in place, UPDATE and DELETE leave dead versions behind, and autovacuum is supposed to reclaim that space in the background. If it's not keeping up, I'd check two things: is there a long-running transaction somewhere pinning an old snapshot and blocking reclamation, and is this specific table's autovacuum threshold too loose for how often it's written to. I'd also check pg_database's age(datfrozenxid) — if autovacuum has been falling behind long enough, the real risk isn't disk space, it's transaction id wraparound, which stops all writes database-wide until an emergency vacuum catches up."</em> The signal: naming bloat as dead-version backlog rather than a leak, and knowing wraparound is the sharper failure mode behind it, not just disk pressure.</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers only the operational layer Lesson 39 explicitly deferred: what autovacuum is, why a table bloats despite it running, and wraparound as the reason this matters beyond disk space. It doesn't cover tuning the full set of autovacuum parameters (cost delay, worker count, per-table overrides) or <code>VACUUM FULL</code>'s mechanics in depth — both real operations topics, but a level past what a backend engineer needs to recognize the symptom and know what to check.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Autovacuum is the background daemon that decides on its own when a table has enough dead row versions to be worth cleaning, and launches VACUUM against it automatically -- VACUUM itself is the cleanup operation Lesson 39 already named; autovacuum is what decides when to run it, with no human or cron job involved.">
+    <p class="stem">What is autovacuum, as distinct from VACUUM itself?</p>
+    <button class="opt" data-ok>the background daemon deciding when to run VACUUM automatically</button>
+    <button class="opt">a faster disk format that stores rows more compactly</button>
+    <button class="opt">a setting that disables MVCC row versioning by default</button>
+    <button class="opt">a manual command that only a human can issue</button>
+  </div>
+  <div class="q" data-why="A long-running transaction elsewhere pins its own snapshot in place, and autovacuum cannot reclaim any row version that transaction's snapshot might still need -- anywhere in the database -- until it finally commits or rolls back, even if that transaction never touches the bloating table directly.">
+    <p class="stem">Why can a long-running transaction on one table cause bloat on a completely different table?</p>
+    <button class="opt" data-ok>its open snapshot blocks reclaiming versions it still needs</button>
+    <button class="opt">Postgres locks every other table whenever one transaction opens</button>
+    <button class="opt">autovacuum runs against only a single table at once</button>
+    <button class="opt">long transactions always trigger a full table-wide rewrite immediately</button>
+  </div>
+  <div class="q" data-why="If autovacuum falls far enough behind for long enough, Postgres approaches running out of fresh 32-bit transaction ids and protects itself by stopping all new write transactions database-wide until an emergency vacuum catches up -- reads keep working, but no INSERT/UPDATE/DELETE succeeds anywhere until cleanup finishes.">
+    <p class="stem">What is transaction ID wraparound protection, when it actually triggers?</p>
+    <button class="opt" data-ok>Postgres halts all writes database-wide until vacuum catches up</button>
+    <button class="opt">Postgres silently deletes the oldest rows in every table</button>
+    <button class="opt">Postgres automatically restarts the whole server process right now</button>
+    <button class="opt">Postgres permanently disables autovacuum on that one table alone</button>
+  </div>
+  <div class="q" data-why="Moving the slow external call outside the transaction boundary -- doing it before opening the transaction, so the transaction only spans the two fast UPDATEs -- shrinks how long the transaction's snapshot stays open, the same short-transaction instinct Lesson 6 already taught for lock contention, now shown to matter for vacuum reclamation too.">
+    <p class="stem">In the Go example, what actually fixes the bloat risk from the slow fraud-check call?</p>
+    <button class="opt" data-ok>moving the slow fraud-check call outside the transaction boundary</button>
+    <button class="opt">adding a second database connection pool just for it</button>
+    <button class="opt">calling VACUUM FULL manually right after each transfer runs</button>
+    <button class="opt">switching that one transaction to SERIALIZABLE isolation instead now</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://www.postgresql.org/docs/current/routine-vacuuming.html">PostgreSQL Manual — Routine Database Maintenance Tasks, "Routine Vacuuming"</a> — RESOURCES.md's standing PostgreSQL Manual citation, extended here past Lesson 39's Concurrency Control chapter into the Maintenance chapter sitting right next to it; its "Autovacuum" and "Preventing Transaction ID Wraparound Failures" subsections are the direct source for Sections 1 and 3 above. This session's sandbox network-permission gate was closed again this round (no live fetch performed) — the scale-factor default, the wraparound mechanism, and <code>age(datfrozenxid)</code> are standard, stable, widely-documented Postgres behavior rather than a fresh citation; worth a live-fetch confirmation against the current manual page in a future round when the gate is open.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially. Nếu chỗ nào chưa rõ, cứ hỏi lại bằng tiếng Việt cũng được.<br><br>
+<em>Next lesson:</em> open. Still no <code>lesson_completed</code>/quiz-outcome record exists for any lesson after 97 rounds — the honest next step remains a completion signal or a user-named track.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

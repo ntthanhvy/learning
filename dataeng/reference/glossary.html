@@ -249,6 +249,12 @@
   <tr><td>Makefile</td><td>giữ nguyên "Makefile" — file text thường định nghĩa các target có tên, mỗi target là 1 đoạn lệnh shell ngắn, chạy bằng `make &lt;target&gt;`; 1 target có thể khai prerequisite là target khác, make tự chạy các prerequisite đó trước theo thứ tự, rồi mới chạy lệnh của target chính nó</td><td>A plain-text file (named <code>Makefile</code>) defining named targets — each one a short shell recipe, run with <code>make &lt;target&gt;</code> — where a target can list other targets as prerequisites, which <code>make</code> runs first, in order, before that target's own recipe. The standard, dependency-free way to give a repo one short command (<code>make demo</code>) for a sequence of existing shell steps, confirmed this round via a real <code>make -n</code> dry run against the exact code block published in this lesson.</td></tr>
 </table>
 
+<h2 id="day27">Day 27 — The data-quality story: what is tested where, and why</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>data-quality layer</td><td>giữ nguyên "data-quality layer" — 1 trong nhiều điểm riêng biệt trong pipeline bắt được 1 loại lỗi/hành vi sai cụ thể, gọi tên theo loại lỗi nó bắt được (hoặc không bắt được) về mặt cấu trúc, không phải theo công cụ nào chạy nó — nên 2 check sống trong cùng 1 công cụ (như data test và freshness của dbt) vẫn tính là 2 layer khác nhau nếu chúng bắt 2 loại lỗi khác nhau</td><td>One of several distinct points in a pipeline where a specific kind of bad data or bad behavior gets caught — named by what failure mode it structurally can and can't detect, not by which tool happens to implement it, so two checks living in the same tool (like dbt's data tests and source freshness) can still count as two different layers if they catch different things. This course's three: the Kafka consumer (no silent loss/duplication), dbt's data tests and source freshness (content correctness, loader liveness), and hand-written singular tests for rules no generic test shape can express (e.g. a point-in-time join's non-overlapping windows).</td></tr>
+</table>
+
 <script src="../assets/nav.js"></script>
 </body>
 </html>

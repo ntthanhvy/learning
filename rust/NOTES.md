@@ -1363,3 +1363,24 @@ by the user there; they apply here identically.
   isolation; a stray `__pycache__/` left at the repo root by one agent's
   verification run was removed before finishing. See each course's own
   NOTES.md entry for detail.)
+- 2026-10-12 (headless 06:00 run): same as every prior post-week day —
+  verified `daily.html`, `assets/srs.js`, and `assets/quiz-bank.js` are all
+  present and unchanged (`quiz-bank.js` still shows 8 `id: "k` matches —
+  kata `k1`-`k7` plus the commented example, `day:` tags still running 1-7
+  only; `nav.js` `LESSONS` array still registers exactly the 7 Jul 8-14
+  lessons, unchanged). Still the correct "daily quiz+kata" for this
+  post-week phase per PLAN.md, so nothing new was generated. This session's
+  sandbox blocked direct `psql "$LEARNING_DB_URL" ...` ("Contains
+  simple_expansion"), `bin/query-progress`, and `printenv LEARNING_DB_URL`
+  — all three hit approval/content-level gates with no user present — so no
+  `course_progress` rows could be read for a scope-change signal this
+  round. No new learning record beyond the Day-1 baseline. (Go skipped
+  again per its own window close, now eighty-four days past it; backend
+  lesson 98 — autovacuum and table bloat — data lesson 95 —
+  `np.repeat()`/`np.tile()` — python Day 75 — review-retrieval day 12 —
+  and dataeng lesson 27 — the data-quality story — were all generated this
+  round via delegated agents, each confirmed to have written only within
+  its own course directory; `bin/record-progress` succeeded for all four
+  via the agents' own relative-path invocations, confirming the write path
+  still works even when the direct read path is blocked. See each course's
+  own NOTES.md entry for detail.)

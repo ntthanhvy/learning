@@ -7650,4 +7650,94 @@
   next-lesson gap is named with certainty for the round after this one —
   same standing note as every prior round; a completion/quiz-outcome signal
   or a user-named track should take priority over guessing blind again.
+- **2026-10-12 generation (Lesson 98, headless run):** Idempotency check
+  first: `ls lessons/` showed no `0098-*` file and `nav.js` LESSONS ended at
+  `n: 97, date: "2026-10-11"` with no `n: 98` entry, so this round was clear
+  to proceed. Both `backend/learning-records/` files are still the two
+  original baseline findings and name no fresh topic, and Lesson 97's own
+  closing line named no successor candidate this time, so this round ran a
+  fresh gap search rather than guessing blind. Swept a wide set of
+  candidates via case-insensitive grep across `lessons/*.html` and
+  `reference/glossary.html`: composite/covering indexes, GIN internals,
+  ULID/snowflake ids, RBAC, mTLS/service mesh, GraphQL/gRPC, token-bucket
+  variants, cache-aside/write-through, and several distributed-systems terms
+  (leader election, consistent hashing, vector clocks) — all either already
+  covered elsewhere or out of MISSION.md's scope ("distributed systems
+  beyond vocabulary level"). The clean gap found instead: a direct re-read
+  of Lesson 39 (MVCC) showed it explicitly deferring its own topic —
+  "Tuning autovacuum itself is operations work beyond this lesson's scope"
+  — right after introducing VACUUM and the bloat symptom in passing. A grep
+  for "autovacuum\|table bloat\|wraparound" across all lessons confirmed
+  only Lesson 39 (passing mention) and Lesson 94 (a stray "freeze" word)
+  touch this area at all — a real, named, self-flagged gap rather than a
+  guessed one, and a natural deepening per MISSION.md's post-intensive note
+  now that the course is well past Jul 15. Lesson 98 covers: autovacuum as
+  the daemon deciding *when* to run VACUUM (distinct from VACUUM itself,
+  Lesson 39's term); why a table can still bloat with autovacuum on by
+  default (scale-factor threshold tuned for an average table, long-running
+  transactions elsewhere pinning old snapshots, workers falling behind);
+  and transaction ID wraparound as the sharper failure mode behind the
+  disk-space symptom — Postgres halting all writes database-wide once it
+  nears reuse of a 32-bit transaction id, not just an inconvenience. A Go
+  example extends a transfer function to show the one risk factor app code
+  actually controls: a transaction held open across a slow external call,
+  fixed by moving the call outside the transaction boundary (tying back to
+  Lesson 6's short-transaction instinct and Lesson 41's context deadlines).
+  A "Scope line" section excludes full autovacuum parameter tuning and
+  VACUUM FULL's mechanics as a level past what a backend engineer needs to
+  recognize the symptom. Checked the glossary first for the two new terms —
+  `autovacuum` and `bloat` — zero collisions via case-insensitive grep
+  (VACUUM itself was already a row from Lesson 39), added as two new rows
+  after Lesson 97's `link relation / rel` row, same Term/Tiếng Việt
+  (dev-style)/In software column order confirmed by direct inspection of
+  the file's header row first. The Go snippet (`riskyTransfer`) was
+  compile-checked in a scratch module at `.scratch-0098/gomod/` under the
+  repo root (same workaround prior rounds used — the sandbox blocks `cd`
+  outside the allowed working directory); `go build ./...` and
+  `go vet ./...` both ran clean on the first pass, scratch directory
+  deleted afterward, confirmed gone via a failed `ls`. Verification
+  performed mechanically: (1) a Node quiz-word-count script matching each
+  `<div class="q" data-why="...">` block and splitting every option both via
+  `.split(/\s+/)` and `.split(" ")` — first draft landed uneven on all four
+  questions (spreads of 1-2 words), fixed through several
+  rewrite-and-recount cycles per option — converged to exactly 9/9/9/9 on
+  all four questions, both counting methods agreeing exactly, and exactly
+  one `data-ok` and four options per question confirmed the same way; (2) a
+  Node occurrence-count HTML tag-balance check across 21 tag types
+  (including `ul`/`li` for this lesson's bulleted list) on the lesson —
+  clean on the first pass; and a separate div/p/table/tr/th/td/html/head/
+  body/title/script balance check on `glossary.html` after its two-row
+  addition, also balanced; (3) a raw-unescaped-`&` regex scan across both
+  files — zero hits; (4) the lesson's `<dfn` tags grepped and confirmed to
+  carry both `data-en=` and `data-vn=` — exactly 2 `dfn` tags, matching the
+  2 new terms, no orphaned attribute; (5) `node --check` against
+  `assets/nav.js`, `assets/gloss.js`, and `assets/quiz.js` — all clean, no
+  output, both before and after the `nav.js` edit; (6) a basic HTML
+  well-formedness check (exactly one `<!DOCTYPE html>`, one `<html>`/
+  `</html>`, three script tags present with `nav.js` last) — clean.
+  Registered Lesson 98 in `nav.js` (date 2026-10-12, today's actual
+  generation date), right after the `n: 97` entry, re-confirmed exactly one
+  matching `n: 98` entry and exactly one matching `0098-*` lesson file
+  afterward. No new `learning-records/` file was added this round — routine
+  topical entry like Lessons 3-97, not a new baseline finding. This
+  session's sandbox network-permission gate was open enough for
+  `bin/record-progress` (see below) but no `WebFetch` was attempted this
+  round; the "Go deeper" section names the PostgreSQL Manual's Routine
+  Vacuuming chapter as the primary source by description (standard, stable,
+  widely-documented behavior) rather than a freshly-fetched citation, and
+  flags a live-fetch confirmation as worth doing in a future round.
+  `bin/record-progress backend lesson_generated --day 98 --lesson
+  0098-autovacuum-and-table-bloat.html --detail '{"by":"headless"}'` run
+  from the repo root succeeded on the first attempt, output confirmed:
+  `recorded: backend/lesson_generated day=98 lesson=
+  0098-autovacuum-and-table-bloat.html` — unlike several recent rounds
+  where direct DB reads were blocked, this write went through cleanly, no
+  retry needed. No confirmed next-lesson gap is named with certainty for
+  the round after this one — same standing note as nearly every prior
+  round; a completion/quiz-outcome signal or a user-named track should take
+  priority over guessing blind again. Autovacuum parameter tuning and
+  VACUUM FULL internals (named above as this round's own scope cut) are the
+  weakest kind of candidate — intentionally deferred as too deep for this
+  course's level — so the search should start fresh next round rather than
+  defaulting to them.
 

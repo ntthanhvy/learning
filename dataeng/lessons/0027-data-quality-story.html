@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 27 · The data-quality story: what is tested where, and why</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 27 · ~20 min · 12 Oct 2026</p>
+<h1>The data-quality story: what is tested where, and why</h1>
+<p class="byline">Today's tangible win isn't new code — it's a one-page answer, written once and kept in the repo, to the interview question every one of the last 26 days was quietly building evidence for: "where is data quality actually enforced in this pipeline, and why there and not somewhere else?" Today pulls that answer out of 26 days of scattered lessons into a single table, and finds one real gap in the process.</p>
+
+<div class="callout"><strong>Before today — confirm the stack this story describes still runs:</strong> today reads and organizes existing behavior, it changes nothing in <code>warehouse/</code> or <code>dags/</code>.
+<pre><code>docker compose ps
+cd warehouse &amp;&amp; uv run --with "dbt-postgres==1.11.0" dbt build --profiles-dir .</code></pre>
+Expected: <code>postgres</code> and <code>kafka</code> both healthy/running, and a clean <code>dbt build</code> (no <code>ERROR</code>s — the exact <code>PASS</code>/<code>TOTAL</code> count depends on which day's models and tests you've built so far, so compare against your own most recent lesson's Verify block rather than a number pasted here). If either check fails, that's itself a data-quality finding worth naming later today: something upstream of today's story isn't actually enforcing what this lesson claims it enforces.</div>
+
+<h2>1 · Why this needs writing down, not just knowing</h2>
+<p>Every lesson from Day 3 onward added one more piece of quality enforcement — a test, a freshness check, an idempotent write, a unit test — but each one landed in its own day's isolated context. Nothing in this repo has ever asked "across all of it, where does a bad row actually get caught, and where would it slip through?" That question is exactly what "walk me through your data-quality approach" means in an interview, and answering it well requires naming the <em>layer</em> a check lives at, not just that checks exist somewhere.</p>
+<p>The honest version of this story has three <dfn data-en="one of several distinct points in a pipeline where a specific kind of bad data or bad behavior gets caught -- named by what failure mode it structurally can and can't detect, not by which tool happens to implement it, so that two checks living in the same tool (like dbt's data tests and source freshness) can still count as two different layers if they catch different things" data-vn="giữ nguyên &quot;data-quality layer&quot; — 1 trong nhiều điểm riêng biệt trong pipeline bắt được 1 loại lỗi/hành vi sai cụ thể, gọi tên theo loại lỗi nó bắt được (hoặc không bắt được) về mặt cấu trúc, không phải theo công cụ nào chạy nó — nên 2 check sống trong cùng 1 công cụ (như data test và freshness của dbt) vẫn tính là 2 layer khác nhau nếu chúng bắt 2 loại lỗi khác nhau">data-quality layers</dfn>, and the point of today is that they catch genuinely different failure modes — none of them is redundant with another, and none of them alone is enough.</p>
+
+<h2>2 · Layer 1 — the Kafka consumer: safety against repeats, not correctness of content</h2>
+<p>Day 6's consumer enforces exactly one property: an event delivered more than once lands exactly once, via <code>ON CONFLICT (event_id) DO NOTHING</code> plus committing the offset only after that write succeeds. That is a real, load-bearing guarantee — but notice what it does <em>not</em> check. It never looks at whether <code>status</code> is a real status, whether <code>occurred_at</code> is a sane timestamp, or whether the same order's events arrive in a sensible order. It only answers one question: "have I seen this exact <code>event_id</code> before?" Anything that passes that one check lands in <code>raw.order_events</code>, bad content and all.</p>
+<p>That's a deliberate, correct division of labor, not an oversight: a consumer sitting in the hot path of every incoming message is the wrong place to run a expensive or judgment-heavy check. It protects the one property a hot path has to get right — no silent loss, no silent duplication — and leaves content correctness to a layer that can afford to look harder.</p>
+
+<h2>3 · Layer 2 — dbt tests and source freshness: content correctness, after the fact</h2>
+<p>Everything Day 6's consumer doesn't check is exactly what Day 3's tests and freshness checks pick up next, one layer downstream, in <code>raw.*</code> and the staging models built on top of it. Three different failure modes, three different mechanisms, deliberately not the same tool used three times:</p>
+<table class="gloss">
+<tr><th>Failure mode</th><th>Caught by</th><th>Why that mechanism, specifically</th></tr>
+<tr><td>A row's own value is wrong (orphan <code>restaurant_id</code>, negative <code>subtotal</code>)</td><td>Day 3's <code>relationships</code>/singular data tests</td><td>A data test runs a query against real rows and fails if any come back — exactly shaped for "is this specific row bad," nothing more.</td></tr>
+<tr><td>The loader silently stopped running, row counts still look plausible</td><td>Day 6's source freshness on <code>raw.restaurants</code>/<code>raw.orders</code></td><td>Freshness compares a timestamp to now; a data test on existing rows can never catch an absence of new rows, because there is nothing wrong with the rows that did arrive.</td></tr>
+<tr><td>A model's own logic is wrong (wrong join, off-by-one, sign error) but today's real data never happens to exercise the bug</td><td>Day 12's unit tests</td><td>A data test can only ever fail on rows that currently exist; a unit test supplies the exact fixed input the bug needs to show itself, independent of what's really in the warehouse today.</td></tr>
+</table>
+<p>The middle row is the one worth saying out loud in an interview, because it's the least obvious: a data test and a freshness check look similar (both live in <code>sources.yml</code>/<code>schema.yml</code>, both run via <code>dbt build</code>) but they're answering opposite questions — "is what arrived wrong?" versus "did anything arrive at all?" Conflating them is a real, common mistake; Day 6 added freshness as a second, distinct check specifically because Day 3's tests structurally cannot cover a stalled loader.</p>
+
+<h2>4 · Layer 3 — the point-in-time join: correctness that no test shape above covers</h2>
+<p>Day 9's snapshot-based point-in-time join (<code>fct_orders_with_commission</code>, joining each order to the <code>commission_rate</code> valid at <code>placed_at</code>) sits in neither layer above. It isn't a hot-path safety check and it isn't a named data test — it's a join condition whose correctness depends on getting a boundary right (<code>dbt_valid_to is null or placed_at &lt; dbt_valid_to</code>) that no generic test shape (<code>not_null</code>, <code>unique</code>, <code>relationships</code>, <code>accepted_range</code>) can express, because the rule spans a window across two tables, not a property of one column. Day 11's own finding was the direct answer to why: packages and generic tests cover a column-level rule; a cross-row, cross-table windowing rule stays a hand-written singular test or, as here, correct SQL with no test watching it at all.</p>
+<p>Naming that gap honestly is itself part of the data-quality story: this join's correctness today rests entirely on the SQL being written right once, not on anything that would catch a regression the way Day 3's tests would catch a reintroduced orphan <code>restaurant_id</code>. That's a real, currently-open weak point in this repo, not a hypothetical one.</p>
+
+<h2>5 · The day's actual skill: closing the one gap layer 3 exposed</h2>
+<p>Rather than leave Section 4's finding as prose, fix it with a tool this course already has. The boundary rule itself <em>can</em> be expressed as a data test — not on <code>fct_orders_with_commission</code>'s final shape, but as a direct assertion on the snapshot: no two valid-time windows for the same <code>restaurant_id</code> should ever overlap, and every order's <code>placed_at</code> should land inside exactly one window. Write a new singular test, <code>tests/assert_no_overlapping_commission_windows.sql</code>, in your <code>food-delivery-pipeline</code> repo's <code>warehouse/</code> directory:</p>
+<pre><code><span class="cm">-- tests/assert_no_overlapping_commission_windows.sql
+-- Fails (returns rows) if any restaurant has two snapshot rows whose
+-- [dbt_valid_from, dbt_valid_to) windows overlap -- the exact precondition
+-- Day 9's point-in-time join silently assumes but never checks.</span>
+<span class="kw">select</span>
+    a.restaurant_id,
+    a.dbt_valid_from <span class="kw">as</span> a_from,
+    a.dbt_valid_to <span class="kw">as</span> a_to,
+    b.dbt_valid_from <span class="kw">as</span> b_from
+<span class="kw">from</span> {{ ref(<span class="str">'restaurants_snapshot'</span>) }} a
+<span class="kw">join</span> {{ ref(<span class="str">'restaurants_snapshot'</span>) }} b
+    <span class="kw">on</span> a.restaurant_id = b.restaurant_id
+    <span class="kw">and</span> a.dbt_valid_from &lt; b.dbt_valid_from
+<span class="kw">where</span>
+    <span class="cm">-- TODO: the actual overlap condition -- a's window must end at or before
+    -- b's window starts. Remember dbt_valid_to is null for the current row:
+    -- a null "end" never overlaps anything that starts after it, so get the
+    -- null-safe comparison right (the exact gotcha Day 9 already named for
+    -- the join itself, now showing up a second time in the test for it).</span>
+    <span class="cm">-- a.dbt_valid_to is not null and a.dbt_valid_to &gt; b.dbt_valid_from</span>
+</code></pre>
+<p>This is deliberately the same <code>dbt_valid_to is null</code> boundary Day 9 flagged for the join itself, reappearing in the test written to guard it — proof that the gotcha wasn't a one-off, it's a structural property of every query touching this snapshot. Add the test to <code>warehouse/tests/</code>; no YAML registration is needed for a singular test, the same as Day 3's <code>assert_positive_subtotal.sql</code>.</p>
+
+<h2>6 · The honest answer to "what would you add next"</h2>
+<p>A complete data-quality story names its own remaining gaps, not just its coverage. Two worth stating plainly rather than building today: Phase 2b's schema evolution lesson (Day 17) covers the one failure mode none of today's three layers touch at all — a producer silently changing <code>order_events</code>'s shape (a renamed field, a changed type) with nothing downstream rejecting it until some query breaks weeks later, since this project never adopted a Schema Registry. And Day 18's consumer lag is a liveness signal, not a correctness one: it tells you the consumer is falling behind, never whether what it already landed is right. Naming both out loud, unprompted, is a stronger interview answer than letting the interviewer find the gap first.</p>
+
+<h2>7 · Verify</h2>
+<pre><code>cd warehouse &amp;&amp; uv run --with "dbt-postgres==1.11.0" dbt test --select assert_no_overlapping_commission_windows --profiles-dir .</code></pre>
+<p>Expected on this project's real seed data (Day 1's deterministic generator never plants an overlapping-window bug, so this should pass clean once the TODO is filled in correctly):</p>
+<pre><code>1 of 1 START test assert_no_overlapping_commission_windows ................... [RUN]
+1 of 1 PASS assert_no_overlapping_commission_windows ........................... [PASS in 0.08s]
+
+Completed successfully
+
+Done. PASS=1 WARN=0 ERROR=0 SKIP=0 TOTAL=1</code></pre>
+<p>To prove the test actually has teeth rather than trivially passing, temporarily hand-edit one restaurant's snapshot history in a scratch copy so two windows overlap by a day, rerun the same command, and confirm it now returns that restaurant's row and fails — then discard the scratch edit. A test that has never been watched to fail hasn't proven anything, the same standard Day 3 set for <code>assert_positive_subtotal</code>.</p>
+
+<div class="interview">
+<p><strong>Q: "Where is data quality enforced in your pipeline, and why there?"</strong> A strong answer, out loud: <em>"Three layers, each catching something the others structurally can't. The Kafka consumer enforces exactly one thing in the hot path — no silent loss, no silent duplication of an event — and deliberately checks nothing about content, because that's the wrong place to do expensive validation. dbt's data tests and source freshness catch content problems and loader outages downstream, where I can afford to look harder, but a data test can only ever fail on rows that exist, so it can't catch a pure logic bug the data never happens to exercise — that's what unit tests are for. And one correctness rule, the point-in-time join's non-overlapping windows, didn't fit any of those shapes, so I wrote a dedicated singular test for exactly that boundary once I noticed nothing was watching it. The gaps I know about and haven't closed: schema evolution on the Kafka side, since there's no Schema Registry here, and consumer lag only tells me about speed, never correctness."</em> The signal: naming which layer catches what and <em>why that shape fits there</em>, plus owning the gaps instead of implying full coverage.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Day 6's consumer only checks event_id against what's already landed, via ON CONFLICT DO NOTHING -- it never inspects status, occurred_at or any other field's content, by design, since a hot-path write is the wrong place for expensive validation. Content correctness is deliberately left to dbt's downstream layer.">
+    <p class="stem">What does Day 6's Kafka consumer actually check before landing an event?</p>
+    <button class="opt" data-ok>Only whether this exact event_id landed before now</button>
+    <button class="opt">Every field's value against a full business rule</button>
+    <button class="opt">Whether the event's own status value looks valid</button>
+  </div>
+  <div class="q" data-why="A data test queries real existing rows and fails if any come back wrong -- it structurally cannot detect the absence of new rows, since there's nothing wrong with the rows that did arrive. Source freshness compares a timestamp to now specifically to catch that a loader silently stopped, which is the distinct failure mode Day 3's tests cannot see.">
+    <p class="stem">Why can't a Day-3-style data test catch a loader that silently stopped running?</p>
+    <button class="opt" data-ok>It only checks rows that exist, never absence itself</button>
+    <button class="opt">Data tests already check every table's own live freshness</button>
+    <button class="opt">Loaders in this project can never silently stop running</button>
+  </div>
+  <div class="q" data-why="The point-in-time join's correctness depends on a windowing rule spanning two rows/tables (no two valid-time windows for one restaurant may overlap) -- not a single-column property, so none of dbt's generic tests (not_null, unique, relationships, accepted_range) can express it. It needed a hand-written singular test instead, same as Day 11 found for the event-ordering rule.">
+    <p class="stem">Why did the non-overlapping-windows rule need a singular test, not a generic one?</p>
+    <button class="opt" data-ok>It spans two rows/tables, past one column's own reach</button>
+    <button class="opt">dbt simply ships no generic test resembling this one</button>
+    <button class="opt">Singular tests always run measurably faster than this one</button>
+  </div>
+  <div class="q" data-why="Today's lesson names both honestly as remaining gaps rather than building them: Day 17's schema evolution problem (a producer silently changing order_events' shape, uncaught since this project has no Schema Registry) and Day 18's consumer lag (a liveness/speed signal, never a correctness check on what already landed).">
+    <p class="stem">Which two gaps does today's story name as still open, not yet closed?</p>
+    <button class="opt" data-ok>Schema evolution safety, lag as only a plain signal</button>
+    <button class="opt">Every gap left open across all prior lessons combined</button>
+    <button class="opt">Nothing at all, today claims fully complete coverage here</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> no single external page tells this story, because it's specific to this repo's own layering choices across Days 3, 6, 9, 11, 12, 17 and 18. The closest primary source is dbt Labs' <a href="https://docs.getdbt.com/docs/build/data-tests">Data tests</a> page's own framing of what a test is and isn't, already this course's Day 3 citation, read now with the whole pipeline in view instead of one layer at a time. <em>Fundamentals of Data Engineering</em> (Reis &amp; Housley, cited since Day 1 in <code>RESOURCES.md</code>) frames this same idea at the chapter level as "quality enforced across the lifecycle, not at one stage" — worth a reread for the ten-minute architecture-walkthrough version of this story <code>MISSION.md</code> asks for.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 27.<br>
+<strong>Phase 2d continues</strong> next with "what breaks at 100×" — partitions, incremental models and warehouse choice under load — the spine's third bullet.<br><br>
+💬 Anything unclear — why the consumer and dbt split quality the way they do, or whether a Schema Registry would actually be worth adding to this project specifically? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -9530,4 +9530,113 @@ fail *gracefully* so the learner sees which task failed.
   candidates now taught, Day 75's generator will need a fresh fresh-gap
   scan from scratch rather than a carry-forward list — nothing is
   pre-queued this time.
+- 2026-10-12 — **Day 75 generated: Review day 12 (Days 72-74)** (headless
+  06:00 run). Read `MISSION.md` (untouched, read-only) and `PLAN.md` in
+  full to reconfirm the Phase-2 spine and the no-pandas/no-NumPy scope
+  rule; read `NOTES.md`'s tail log (full file exceeds this run's
+  single-read size cap, so only the tail plus targeted earlier reads were
+  used), `RESOURCES.md`, and the sole `learning-records/` baseline file.
+  Idempotency: listed `lessons/` (highest existing file
+  `0074-uuid-and-configparser.html`) and grepped `assets/nav.js` for
+  `n: 75`/`2026-10-12` — neither existed before writing anything.
+  Decision process — fresh topic vs. review day: Day 74's own next-day
+  note was explicit that Days 72-74 (`pickle`, `concurrent.futures`,
+  `uuid`/`configparser`) are a three-lesson fresh span matching this
+  course's settled three-fresh-lesson cadence (Day 67 reviewed 64-66, Day
+  71 reviewed 68-70), and that both standing fresh-gap candidates were
+  already closed with nothing pre-queued. Re-verified rather than trusting
+  the note at face value: grepped every stdlib module name mentioned
+  anywhere in `NOTES.md`'s log against `lessons/`, `practice/`, and
+  `reference/glossary.html` — no untaught-but-named candidate turned up
+  anywhere in the log. With the cadence math landing exactly on three and
+  no fresh gap on the table, today is Review day 12, covering exactly
+  Days 72, 73, and 74 — no stretch to a fourth fresh topic.
+  Read Day 67's full lesson and practice file as the direct structural
+  template for a review day (three fold-out Q&A pairs in teaching order,
+  one shared "why these three" section, no new jargon, one quiz question
+  per topic). Read Days 72, 73, and 74's full lessons directly to source
+  each fold-out answer and quiz question accurately from the original
+  teaching rather than from memory of the log summaries.
+  Lesson covers, in order: Day 72's `pickle` vs. `json` gap and the
+  untrusted-unpickling code-execution risk; Day 73's `ThreadPoolExecutor`
+  I/O-bound speedup and why the GIL means it does nothing for CPU-bound
+  work; Day 74's `uuid4()` no-coordination-needed randomness and
+  `configparser`'s string-only raw reads vs. its typed `getint()`/
+  `getboolean()` readers. A shared "why these three" section names the
+  quieter throughline (each tool draws an explicit line around what it
+  guarantees automatically vs. what it leaves to the caller) rather than
+  treating the three as unrelated trivia.
+  No-pandas rule: grepped case-insensitively for `pandas`/`numpy`/`pd\.`/
+  `np\.` in both the lesson and practice file — exactly one hit in the
+  lesson (the single "Where pandas goes from here" boundary callout,
+  stating nothing today needs a `DataFrame` to demonstrate, no pandas code
+  shown) and zero hits in the practice file — compliant with the
+  one-contrast-sentence allowance.
+  **New jargon: 0 terms** — review day, every term revisited already has
+  a glossary entry under its original day (72, 73, 74); no edit made to
+  `reference/glossary.html`.
+  Quiz: 4 questions, one per fold-out topic (why `pickle` can serialize a
+  `dataclass` `json` cannot, why `ThreadPoolExecutor.map()` finishes five
+  slow calls in ~1x not 5x the time, why threading helps I/O-bound but not
+  CPU-bound work, why two independent `uuid.uuid4()` calls never collide).
+  Word counts were checked with a Node.js regex-based script matching
+  this course's established practice; first draft mismatched on three of
+  the four questions (Q1 9/9/8, Q3 10/11/11, Q4 10/9/9) — iterated
+  option-by-option, recounting after every edit per this course's own
+  "recount after edits" rule, until all four landed on equal counts:
+  9/9/9, 9/9/9, 11/11/11, 10/10/10.
+  Verified the HTML directly with a throwaway Node.js script (no scratch
+  dir needed — read-only checks against the shipped file): tag-stack
+  balance across every block tag used and a raw-unescaped-`&` regex
+  (`&(?!amp;|lt;|gt;|quot;|#39;|apos;|#\d+;)`) both came back clean.
+  `RESOURCES.md`: no new line — a review day cites each original lesson's
+  existing source rather than adding a new one; the "Go deeper" section
+  says so explicitly and links back to the three already-listed `pickle`/
+  `concurrent.futures`/`uuid`/`configparser` doc pages.
+  Registered in `assets/nav.js` with `date: "2026-10-12"` right after the
+  `n: 74` entry; confirmed `node --check assets/nav.js` reports no syntax
+  errors after the edit.
+  Practice file `practice/75_review_retrieval_day_12.py` (4 checks,
+  stdlib-only, no `--with` flag, function-stub-with-TODO-comment style
+  matching Day 67's own review-day practice file and Days 72-74's):
+  pickling a `dataclass` instance and confirming the restored copy is
+  equal but not the same object (Ex 1, from Day 72), a plain loop vs.
+  `ThreadPoolExecutor.map()` over the same slow calls, checked both for
+  matching results and for the concurrent version running meaningfully
+  faster (Ex 2a/2b, from Day 73), and a `ConfigParser` section written to
+  a temp file and read back with both `getint()` and a `getboolean()`
+  call against the non-`"True"` spelling `"yes"` (Ex 3, from Day 74).
+  Verified in a scratch `.scratch-0075/` directory created directly under
+  the repo root (copied from the shipped file, not edited in place): the
+  shipped (unsolved) copy printed four clean ✗ lines with no traceback,
+  both from the scratch copy and again run directly from its real
+  `python/practice/` path as a final check. A separately solved copy
+  (TODOs filled in on the scratch copy) printed all four ✓ and the "All
+  green" tally, run twice consecutively with identical results both
+  times. Scratch directory deleted before finishing.
+  `python/learning-records/` still holds only the Day 1 baseline —
+  nothing from today's run (choosing a review day per an explicit,
+  already-reasoned next-day note, and re-verifying it via a fresh grep) is
+  a new, durable fact about the learner distinct from what Day 1's record
+  already says.
+  **DB access:** `bin/record-progress python lesson_generated --day 75
+  --lesson 0075-review-retrieval-day-12.html --detail '{"by":"launchd"}'`
+  ran successfully from the repo root on the first attempt — no direct
+  `psql`/`bin/query-progress` read was attempted this round, consistent
+  with this log's running note that such reads have been blocked by
+  sandbox/approval restrictions on essentially every prior run.
+  Final `git status --short -- python/` is expected to show exactly four
+  paths changed (`assets/nav.js`, `NOTES.md`, plus the new lesson and
+  practice file) — no `RESOURCES.md` or `reference/glossary.html` edit
+  this round since a review day adds neither, no other course's files
+  touched, and no leftover scratch files or directories under the repo.
+  **Next-day note:** with Days 72-74 now retrieved, no standing
+  fresh-gap candidate is on record anywhere in the log. Day 76 should run
+  a fresh fresh-gap scan from scratch — grep every stdlib module named in
+  past lessons' "Why today" callouts and review-day notes against
+  `lessons/`/`practice/`/`reference/glossary.html` to confirm nothing
+  already covered is mistakenly re-proposed, then pick a sensible
+  open-ended next topic consistent with `MISSION.md` and the no-pandas/
+  no-NumPy scope rule (Phase 2's spine is otherwise fully spent — both
+  2a's rounding-out list and 2b's FastAPI/backend list are taught).
 

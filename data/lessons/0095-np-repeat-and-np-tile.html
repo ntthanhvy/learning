@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 95 · np.repeat() and np.tile(): two different ways to multiply an array, and why broadcasting usually beats both</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 95 · ~20 min · 12 Oct 2026</p>
+<h1>np.repeat() and np.tile(): two different ways to multiply an array, and why broadcasting usually beats both</h1>
+<p class="byline">Lesson 94's teaser named two open runner-ups and picked neither as THE next pick, so today ran a fresh gap scan: <code>np.repeat()</code>/<code>np.tile()</code>/<code>np.broadcast_to()</code> and <code>DataFrame.insert()</code>/<code>.pop()</code> both came back as genuine zero-coverage gaps again. This lesson takes the NumPy pair — it closes a real loose end from Lesson 30's broadcasting lesson (that lesson explained the implicit, no-copy "stretching" NumPy does automatically; today covers the two functions you reach for when you need an actual materialized repeated array instead, e.g. building a cartesian test grid or fixture data).</p>
+
+<h2>1 · repeat(): each element repeated in place</h2>
+<p><dfn data-en="a NumPy function taking an array and a repeat count (an int, or an array of per-element ints), returning a NEW flat or axis-aligned array where EACH ELEMENT is repeated that many times immediately after itself — not the whole array repeated as a block" data-vn="giữ nguyên 'np.repeat()' — nhận 1 mảng và số lần lặp (1 số nguyên, hoặc 1 mảng số nguyên theo từng phần tử), trả về mảng MỚI trong đó MỖI PHẦN TỬ được lặp lại ngay sau chính nó bấy nhiêu lần — không phải lặp lại CẢ mảng như 1 khối">np.repeat()</dfn> repeats each element of the input in place, right where it sits. Confirmed directly (numpy 2.5.4): with no <code>axis=</code>, it flattens first (same flatten-then-index idea as Lesson 93's <code>np.argmax()</code>), then repeats each flattened scalar:</p>
+<pre><code><span class="kw">import</span> numpy <span class="kw">as</span> np
+arr = np.array([<span class="kw">10</span>, <span class="kw">20</span>, <span class="kw">30</span>])
+np.repeat(arr, <span class="kw">3</span>)
+<span class="cm"># [10 10 10 20 20 20 30 30 30]   -- each value repeated 3x in place</span></code></pre>
+<p><code>repeats</code> can also be an array, one count per element, confirmed directly to raise <code>ValueError</code> if its length doesn't match the axis being repeated along:</p>
+<pre><code>np.repeat(arr, [<span class="kw">1</span>, <span class="kw">2</span>, <span class="kw">3</span>])
+<span class="cm"># [10 20 20 30 30 30]   -- 10 once, 20 twice, 30 three times</span>
+np.repeat(arr, [<span class="kw">1</span>, <span class="kw">2</span>])
+<span class="cm"># ValueError: operands could not be broadcast together with shape (3,) (2,)</span></code></pre>
+<p>On a 2D array, <code>axis=0</code> repeats whole <strong>rows</strong>; <code>axis=1</code> repeats whole <strong>columns</strong> — confirmed directly, each row/column stays intact, unlike the no-<code>axis</code> default, which flattens everything first:</p>
+<pre><code>grid = np.array([[<span class="kw">1</span>, <span class="kw">2</span>], [<span class="kw">3</span>, <span class="kw">4</span>]])
+np.repeat(grid, <span class="kw">2</span>, axis=<span class="kw">0</span>)
+<span class="cm"># [[1 2]
+#  [1 2]
+#  [3 4]
+#  [3 4]]        -- each ROW doubled</span></code></pre>
+
+<h2>2 · tile(): the whole array repeated as a block</h2>
+<p><dfn data-en="a NumPy function taking an array and a repetition count (an int, or a tuple — one count per axis), returning a NEW array built by repeating the ENTIRE input array as one block in a tiling pattern — the opposite granularity from repeat(), which repeats individual elements" data-vn="giữ nguyên 'np.tile()' — nhận 1 mảng và số lần lặp (1 số nguyên, hoặc 1 tuple — mỗi chiều 1 số), trả về mảng MỚI bằng cách lặp lại CẢ mảng gốc như 1 khối theo kiểu lát gạch (tiling) — ngược hạt với repeat(), vốn lặp từng phần tử riêng">np.tile()</dfn> repeats the entire array as one repeating block, confirmed directly to produce a visibly different result from <code>repeat()</code> on the exact same input:</p>
+<pre><code>np.repeat(arr, <span class="kw">3</span>)
+<span class="cm"># [10 10 10 20 20 20 30 30 30]   -- repeat: each element's own 3 copies, grouped</span>
+np.tile(arr, <span class="kw">3</span>)
+<span class="cm"># [10 20 30 10 20 30 10 20 30]   -- tile: the whole [10 20 30] block, 3 times</span></code></pre>
+<p>On a 2D array, <code>reps</code> is a tuple — one repetition count per axis — confirmed directly, <code>(2, 1)</code> stacks two full copies vertically, <code>(1, 2)</code> lays two full copies side by side:</p>
+<pre><code>np.tile(grid, (<span class="kw">2</span>, <span class="kw">1</span>))
+<span class="cm"># [[1 2]
+#  [3 4]
+#  [1 2]           -- the WHOLE 2x2 block, repeated twice downward
+#  [3 4]]</span></code></pre>
+<p>Confirmed directly (via the official NumPy docs, fetched this round): both functions always return a brand-new array — mutating the result never touches the original input, unlike a view.</p>
+
+<h2>3 · The real use: building a test grid, and why broadcasting usually wins instead</h2>
+<p>Pairing the two builds a cartesian grid without <code>pd.merge(how="cross")</code> (Lesson 92) — useful for constructing fixture/test data directly, e.g. every customer against every date:</p>
+<pre><code><span class="kw">import</span> pandas <span class="kw">as</span> pd
+customers = np.array([<span class="str">"An"</span>, <span class="str">"Binh"</span>])
+dates = pd.date_range(<span class="str">"2026-01-01"</span>, periods=<span class="kw">3</span>, freq=<span class="str">"D"</span>)
+grid = pd.DataFrame({
+    <span class="str">"customer"</span>: np.repeat(customers, len(dates)),  <span class="cm"># each name, 3x in a row</span>
+    <span class="str">"date"</span>:     np.tile(dates, len(customers)),     <span class="cm"># the whole 3-date block, 2x</span>
+})
+<span class="cm">#   customer       date
+#0        An 2026-01-01
+#1        An 2026-01-02
+#2        An 2026-01-03
+#3      Binh 2026-01-01
+#4      Binh 2026-01-02
+#5      Binh 2026-01-03</span></code></pre>
+<p>But for Lesson 30's actual day-to-day case — applying one smaller array across a bigger one in <strong>arithmetic</strong> — materializing a repeated copy with <code>tile()</code> is the wrong tool: broadcasting already does the same job without allocating the extra memory. The NumPy docs themselves say this outright (fetched this round, quoted verbatim): <em>"it is strongly recommended to use NumPy's broadcasting operations and functions"</em> instead of <code>tile()</code> for that case. Confirmed directly — the two approaches give the identical number, but <code>tile()</code> actually builds the repeated array in memory first:</p>
+<pre><code><span class="cm"># materialized (wasteful for plain arithmetic):</span>
+scale = np.tile([<span class="kw">1.1</span>], len(arr))
+arr * scale
+<span class="cm"># [11. 22. 33.]</span>
+
+<span class="cm"># broadcast (Lesson 30's mechanism -- no extra array ever built):</span>
+arr * <span class="kw">1.1</span>
+<span class="cm"># [11. 22. 33.]   -- same numbers, no materialized copy</span></code></pre>
+<p>The takeaway to say out loud: reach for <code>repeat()</code>/<code>tile()</code> when you need an actual <em>longer array to exist</em> (building test fixtures, a cartesian grid, a lookup column) — reach for broadcasting when you're just doing arithmetic between mismatched shapes, which is almost always the pandas case.</p>
+
+<div class="interview">
+<p><strong>Q: "What's the difference between np.repeat() and np.tile(), and when would you actually reach for either over plain broadcasting?"</strong> A strong answer, out loud: <em>"repeat() repeats each element in place — [10, 20] with repeat 2 becomes [10, 10, 20, 20]. tile() repeats the whole array as one block — the same input becomes [10, 20, 10, 20]. I'd reach for either when I need a real, materialized longer array to exist — building a cartesian test grid, like every customer paired with every date, using repeat() on one side and tile() on the other. But for ordinary arithmetic between a smaller and a larger shape, I wouldn't use either — that's exactly what broadcasting already does for free, without allocating the extra copy, and the NumPy docs themselves say to prefer broadcasting over tile() for that case."</em> The signal: naming the granularity difference correctly from memory, plus knowing broadcasting is usually the better tool for the arithmetic case specifically.</p>
+</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/95_np_repeat_and_tile.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/95_np_repeat_and_tile.py</code></pre>
+<p>Exercise 1 confirms <code>np.repeat()</code>'s per-element behavior, both with a scalar count and a per-element counts array (Section 1). Exercise 2 confirms <code>np.tile()</code>'s whole-block behavior on the identical input, producing a visibly different order from Exercise 1 (Section 2). Exercise 3 builds the customer × date cartesian grid by pairing <code>np.repeat()</code> with <code>np.tile()</code>, then confirms a plain broadcast multiplication reaches the same numeric result as a <code>tile()</code>-materialized version without it (Section 3).</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: np.repeat([10,20,30], 3) groups each element's own copies together -- [10,10,10,20,20,20,30,30,30] -- repeating each element in place, not the whole array as a block.">
+    <p class="stem">What does <code>np.repeat([10, 20, 30], 3)</code> actually return?</p>
+    <button class="opt" data-ok>each repeated element grouped together, right in place</button>
+    <button class="opt">the whole three-item array repeated three times total</button>
+    <button class="opt">a brand new 2D array with repeated rows</button>
+  </div>
+  <div class="q" data-why="Confirmed directly against the same [10,20,30] input: np.tile() repeats the ENTIRE array as a block -- [10,20,30,10,20,30,10,20,30] -- the opposite granularity from np.repeat(), which repeats each element individually in place.">
+    <p class="stem">What does <code>np.tile([10, 20, 30], 3)</code> return, on that same input?</p>
+    <button class="opt" data-ok>the whole array repeated as one block, three times</button>
+    <button class="opt">each element repeated three times, same as repeat() does</button>
+    <button class="opt">a ValueError, since tile() always needs a reps tuple</button>
+  </div>
+  <div class="q" data-why="Confirmed directly via the official NumPy docs (fetched this round), which state outright that broadcasting is the recommended tool over tile() for ordinary arithmetic between mismatched shapes -- tile() actually allocates the repeated array in memory first, while broadcasting (Lesson 30) never materializes the extra copy at all.">
+    <p class="stem">For plain arithmetic like <code>arr * 1.1</code> across every element, which approach does the NumPy docs recommend?</p>
+    <button class="opt" data-ok>plain broadcasting, over materializing a tiled copy</button>
+    <button class="opt">np.tile() first, then multiply element by element</button>
+    <button class="opt">np.repeat() first, since it never allocates memory</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official <a href="https://numpy.org/doc/stable/reference/generated/numpy.tile.html">NumPy API reference for <code>numpy.tile()</code></a> (per <code>RESOURCES.md</code>'s "Docs: NumPy fundamentals" entry, ~3 min) — confirms the exact "repeats the whole array as a block" behavior, the per-axis tuple semantics, and states outright that broadcasting is the recommended alternative for ordinary arithmetic, matching the direct probing above exactly.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>np.repeat()</code> and <code>np.tile()</code> are new today, added right after Lesson 94's <code>first_valid_index() / last_valid_index()</code> entry.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-95 comes back reported as shakiest, otherwise <code>DataFrame.insert()</code>/<code>.pop()</code> (today's other confirmed zero-coverage gap, a column-management pair) or a fresh curriculum/glossary scan — no single standing candidate is named as THE next pick.<br><br>
+💬 Anything unclear — the repeat-vs-tile granularity difference, the broadcasting-vs-tile trade-off, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

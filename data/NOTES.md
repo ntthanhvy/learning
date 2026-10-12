@@ -8430,3 +8430,99 @@
   course's standing practice of not leaving scratch artifacts committed.
   Per this course's standing instruction, `bin/record-progress` was NOT run
   by this agent — the orchestrator records `lesson_generated` centrally.
+- 2026-10-12 generation (Lesson 95): headless 06:00 run, zero prior context.
+  Read MISSION.md in full (not modified), RESOURCES.md in full, the tail of
+  this log (Lessons 90-94's entries), the one `learning-records/` baseline
+  file (0001, still unchanged since mid-July — no new durable finding to
+  fold in), and `assets/nav.js` in full for the registration format and a
+  title-level skim of all 94 prior lessons' pandas/NumPy surface area.
+  Idempotency was confirmed before starting: no `0095-*` file existed in
+  `data/lessons/` and no `n: 95` entry existed in `nav.js`. Lesson 94's own
+  teaser named two open runner-ups without picking either as THE next pick
+  ("`np.repeat()`/`np.tile()`/`np.broadcast_to()`... and `DataFrame.insert()`/
+  `.pop()`... carry forward as open options"), so this round grepped both
+  case-insensitively across every lesson body and the glossary to re-confirm
+  they were still genuine zero-hit gaps before picking — both came back with
+  zero hits. Picked the NumPy-repeat trio over `insert()`/`.pop()`: it closes
+  a real loose end from Lesson 30's broadcasting lesson (which only taught
+  the implicit, no-copy "stretching" NumPy does automatically, never the two
+  functions you reach for when you need an actual materialized repeated
+  array — a cartesian test grid, fixture data) and is a common interview-ish
+  NumPy-fluency check per MISSION.md's "read NumPy-flavored code... predict
+  its output." Narrowed to `np.repeat()`/`np.tile()` only (dropping
+  `np.broadcast_to()` from today's lesson, confirmed still a zero-hit gap on
+  its own and left as an explicit open candidate for later) to keep the
+  ~20 min scope tight and the two still contrast cleanly against each other.
+  Every behavioral claim was probed directly first in `data/.scratch-0095/`
+  (deleted after), on the actually-installed numpy 2.5.4 / pandas 3.0.6
+  (confirmed via `uv run --with pandas python3 -c "import numpy as np, pandas
+  as pd; print(np.__version__, pd.__version__)"` inside the probe script):
+  confirmed `np.repeat(arr, 3)` groups each element's own copies together,
+  while `np.tile(arr, 3)` repeats the whole array as one block, a visibly
+  different order on the identical input; confirmed `repeats` can be a
+  per-element counts array, raising `ValueError` if its length doesn't match
+  the axis being repeated along; confirmed `axis=None` (the default) flattens
+  a multi-dimensional array first, same flatten-first default as Lesson 93's
+  `np.argmax()`, while `axis=0`/`axis=1` on a 2D array repeats whole rows/
+  columns intact instead; confirmed `tile()`'s `reps` is a per-axis tuple on
+  multi-dimensional input; confirmed both functions always return a brand-new
+  array, never a view (mutating the result left the original untouched);
+  built the customer x date cartesian grid pairing `np.repeat()` with
+  `np.tile()` and confirmed its row count and ordering; confirmed a plain
+  broadcast multiplication (`arr * 1.1`) reaches the identical numeric result
+  as a `tile()`-materialized scale-up, the basis for today's "prefer
+  broadcasting over tile() for ordinary arithmetic" framing. Cross-checked the
+  official NumPy docs via `WebFetch` (available this round): fetched both the
+  `numpy.repeat()` and `numpy.tile()` API reference pages, which confirmed the
+  flatten-on-no-axis behavior, the per-axis tuple semantics, and — quoted
+  verbatim in the lesson — the docs' own recommendation to prefer broadcasting
+  over `tile()` for ordinary arithmetic; cited as freshly-verified primary
+  sources, matching the direct probing exactly. The shipped (unsolved)
+  `practice/95_np_repeat_and_tile.py` was executed directly from its real
+  `practice/` location and printed exactly 3 ✗ with no raw traceback. Built a
+  solved copy in `.scratch-0095/`, filling in all six blanks correctly; it
+  printed all 3 ✓ and "All green" on the first run. The shipped file was
+  re-run once more directly from `practice/` after building the solved copy
+  and reproduced the identical all-✗ result, confirming the solved copy's
+  edits never leaked back into the shipped baseline. Quiz options were
+  drafted, then mechanically word-counted with a scratch Python script (`uv
+  run python3`, deleted after) isolating each `<div class="q">` block by
+  regex span and splitting on whitespace — the first draft came out 7/10/9,
+  9/9/10, 7/7/7; Q1 and Q2's options were rephrased across a few iterations
+  (trimming/padding words like "total", "right in place", "always") until all
+  three questions landed exactly level (8/8/8, 9/9/9, 7/7/7 option words), one
+  `data-ok` per question throughout. A separate mechanical tag-balance script
+  confirmed all tags balanced (a 2/2, body 1/1, button 9/9, code 47/47, dfn
+  2/2, div 5/5, em 3/3, h1 1/1, h2 6/6, head 1/1, html 1/1, p 20/20, pre 8/8,
+  script 3/3, span 46/46, strong 6/6, title 1/1) and found exactly two raw `&`
+  characters, both inside the one established `cd ~/learning/data && uv run
+  ...` shell command, matching every prior lesson's pattern, zero raw `&` in
+  prose; also confirmed both new `<dfn>` tags carry both `data-en` and
+  `data-vn`. Checked the glossary for a collision before adding anything —
+  grepped `repeat|tile` case-insensitively across the full glossary, found no
+  standalone row (only unrelated prose hits) — added exactly one new row,
+  "np.repeat() / np.tile()", directly after Lesson 94's "first_valid_index()
+  / last_valid_index()" entry; re-ran the tag-balance script against the
+  glossary file afterward, confirmed it stayed balanced (a 1/1, body 1/1, code
+  1104/1104, em 10/10, h1 1/1, head 1/1, html 1/1, p 3/3, script 1/1, table
+  1/1, td 495/495, th 3/3, title 1/1, tr 166/166) with zero raw `&`
+  introduced. Registered Lesson 95 in `nav.js` with today's date
+  (2026-10-12); `node --check` confirmed it still parses as valid JavaScript
+  after the edit, and exactly one `n: 95` entry plus one
+  `0095-np-repeat-and-np-tile` file reference were confirmed to exist. This
+  round closed one of the two runner-ups carried forward from Lesson 94 —
+  the standing open candidates for tomorrow are now `np.broadcast_to()`
+  (deliberately deferred today to keep scope tight, confirmed still a
+  zero-hit gap) and `DataFrame.insert()`/`.pop()` (Lesson 94's other
+  runner-up, still untouched); tomorrow should still run its own fresh
+  curriculum/glossary scan rather than assume either is automatically the
+  best available gap by then. No new `data/learning-records/` entry was
+  added this round — routine lesson, no new baseline finding to justify one
+  (the Neon `course_progress` completion-gap signal remains stale past
+  mid-July, unchanged from this round's starting context). The
+  `.scratch-0095/` directory was deleted after verification, per this
+  course's standing practice of not leaving scratch artifacts committed.
+  Unlike Lesson 94's round, `bin/record-progress data lesson_generated --day
+  95 --lesson 0095-np-repeat-and-np-tile.html --detail '{"by":"launchd"}'` was
+  run directly from the repo root this round and it succeeded: `recorded:
+  data/lesson_generated day=95 lesson=0095-np-repeat-and-np-tile.html`.

@@ -200,6 +200,8 @@
       file: "lessons/0096-rate-limit-response-headers.html" },
     { n: 97, date: "2026-10-11", title: "HATEOAS: letting the response say what to do next",
       file: "lessons/0097-hateoas-hypermedia-controls.html" },
+    { n: 98, date: "2026-10-12", title: "Autovacuum and bloat: the cleanup Lesson 39 said was out of scope",
+      file: "lessons/0098-autovacuum-and-table-bloat.html" },
   ];
 
   const REFS = [

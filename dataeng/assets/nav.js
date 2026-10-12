@@ -37,6 +37,7 @@
     { n: 24, date: "2026-10-09", title: "Cosmos: dbt models as individual Airflow tasks", file: "lessons/0024-airflow-cosmos-dbt-as-tasks.html" },
     { n: 25, date: "2026-10-10", title: "Airflow sensors, deferrable operators & deadline alerts", file: "lessons/0025-airflow-sensors-deferrable-sla.html" },
     { n: 26, date: "2026-10-11", title: "One-command demo: make demo, and a README that reads in 2 minutes", file: "lessons/0026-portfolio-one-command-demo.html" },
+    { n: 27, date: "2026-10-12", title: "The data-quality story: what is tested where, and why", file: "lessons/0027-data-quality-story.html" },
   ];
 
   const REFS = [

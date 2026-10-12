@@ -154,6 +154,8 @@
       file: "lessons/0073-concurrent-futures-threadpoolexecutor.html" },
     { n: 74, date: "2026-10-11", title: "uuid & configparser",
       file: "lessons/0074-uuid-and-configparser.html" },
+    { n: 75, date: "2026-10-12", title: "Review day 12: retrieval across Days 72-74",
+      file: "lessons/0075-review-retrieval-day-12.html" },
   ];
 
   const REFS = [

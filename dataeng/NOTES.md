@@ -3146,3 +3146,121 @@ along the Phase 2 spine, adapted to the learning records.
   design-review walkthrough recorded as a learning record) — the next round
   should continue in that order unless a fresh learning-record or quiz signal
   says otherwise.
+- 2026-10-12 (headless 06:00 run, Day 27 generated): twenty-seventh lesson,
+  `0027-data-quality-story.html`. Confirmed `lessons/` contained only
+  `0001`–`0026`, `assets/nav.js`'s latest entry was `n: 26` (2026-10-11), and no
+  `0027`/`2026-10-12` entry existed anywhere (`lessons/`, `assets/nav.js`, this
+  file), so proceeded on schedule. Direct DB reads (`psql "$LEARNING_DB_URL"
+  ...`, `bin/query-progress`) were not attempted this round, consistent with
+  this file's own standing note that the read path has been blocked on
+  essentially every prior round and isn't worth retrying; the file-based
+  idempotency check above stood in for it, per this file's own documented
+  fallback. Read `MISSION.md` (read-only, not modified), `PLAN.md` in full (the
+  domain table and the full Phase 2 spine, including 2d's four bullets),
+  `NOTES.md` in full (conventions, scope boundaries, verification section, and
+  the full generation log, especially Day 26's own entry), `RESOURCES.md`, the
+  one `learning-records/` file, `reference/glossary.html`, and
+  `lessons/0026-portfolio-one-command-demo.html` plus
+  `lessons/0025-airflow-sensors-deferrable-sla.html` in full for structural and
+  voice precedent before writing anything.
+  **Topic choice:** confirmed first, directly against `PLAN.md`'s own 2d
+  spine text, that the spine is not exhausted at Day 26 despite
+  `0026-portfolio-one-command-demo.html`'s capstone-sounding title — 2d has
+  four bullets (one-command demo; a data-quality story; "what breaks at
+  100×"; a mock design-review walkthrough) and Day 26 only closed the first.
+  Day 26's own "Carried forward for next round" note named the data-quality
+  story as the explicit next item, giving a second independent confirmation
+  beyond the spine order itself. No learning-record or quiz signal exists to
+  suggest deviating (still just the one Day-1 baseline file).
+  **Content:** rather than introduce new mechanics, synthesized what 26 days
+  already built into three named data-quality layers, each catching a
+  different failure mode — the Kafka consumer (Day 6, hot-path
+  no-loss/no-duplication only, deliberately blind to content), dbt's data
+  tests and source freshness (Day 3/6, content correctness and loader
+  liveness, two different questions despite living in the same tool), and
+  hand-written singular tests for rules no generic test shape covers (Day 11's
+  own finding, applied to a genuinely open gap: Day 9's point-in-time join has
+  never had anything testing its own non-overlapping-windows precondition).
+  The day's actual skill is closing that real gap: a new singular test,
+  `tests/assert_no_overlapping_commission_windows.sql`, with the join
+  predicate itself left as a TODO (full new-syntax scaffolding around it,
+  reasoning as the fill-in, this course's standing convention) — deliberately
+  reusing Day 9's own `dbt_valid_to is null` boundary gotcha a second time, to
+  show it's structural to the snapshot, not a one-off. Closed by naming two
+  honest, still-open gaps rather than implying full coverage: Day 17's schema
+  evolution risk (no Schema Registry in this project) and Day 18's consumer
+  lag (a liveness signal, never a correctness one). No pandas, no
+  Python-language teaching, no new re-derivation of idempotency/API concepts —
+  Day 6's idempotent-write design is referenced by name, not re-taught. Domain
+  names used exactly as established throughout (`raw.order_events`,
+  `restaurants_snapshot`, `fct_orders_with_commission`, `mart_delivery_sla`).
+  Opened with an explicit "before today" check (`docker compose ps` plus a
+  live `dbt build`, comparing against the learner's own most recent Verify
+  block rather than a pasted number, since this lesson's own running test
+  count depends on which prior days' models the learner has actually built)
+  rather than assuming the whole stack is current.
+  **Verification:** laid out a minimal scratch project
+  (`dbt_project.yml`, `profiles.yml` pointing at `10.255.255.1` — unreachable,
+  `models/staging/sources.yml`, Day 9's `snapshots/restaurants_snapshot.sql`
+  reconstructed from its own literal lesson snippet, and today's new
+  `tests/assert_no_overlapping_commission_windows.sql`) in
+  `.scratch_dataeng_verify_d27/` under the repo root, deleted after. Ran
+  `uv run --with "dbt-postgres==1.11.0" dbt parse --project-dir <abs>
+  --profiles-dir <abs> --no-partial-parse` (absolute-path flags, single
+  non-compound command, no `cd`/redirection — the same workaround every prior
+  round has needed for this sandbox's approval gate): clean on the finished
+  test SQL, grepped for `Error`, found none (only the expected
+  unused-configuration-path warnings from this scratch project's trimmed
+  `dbt_project.yml`, unrelated to today's content). `dbt list --resource-type
+  test` and `--resource-type snapshot` both resolved real dbt-generated names
+  (`food_delivery_pipeline.assert_no_overlapping_commission_windows`,
+  `food_delivery_pipeline.restaurants_snapshot.restaurants_snapshot`), used
+  verbatim. **A genuinely new finding this round:** swapped in a deliberately
+  broken `ref()` inside the singular test (pointing at a nonexistent
+  snapshot) to confirm `dbt parse` still catches errors the way it does for
+  models — it did not behave the same way. Unlike a broken `ref()` inside a
+  *model*, which every prior round's own log confirms comes back as a fatal
+  `Compilation Error`, a broken `ref()` inside a *singular test* came back as
+  only a `WARNING` ("depends on a node named ... which was not found"), with
+  `dbt parse` otherwise completing cleanly — a real, checked-not-assumed
+  asymmetry between how strictly dbt validates model dependencies versus
+  singular-test dependencies at parse time, not previously documented in this
+  file across 26 prior dbt-verification rounds. Restored the correct `ref()`
+  and reconfirmed a clean parse with no `Error` and no `WARNING` afterward.
+  Stated honestly in this log rather than silently noted only here: this
+  means a typo'd `ref()` inside a singular test is a softer failure mode than
+  the same typo inside a model, worth knowing before trusting `dbt parse`
+  alone to catch every broken reference in a project with hand-written tests.
+  Docker was not brought up this round (no live Postgres needed for
+  parse-level verification; today's one new artifact is a single singular
+  test, not a model or a live-data behavior claim). No Python file exists in
+  this lesson, so `py_compile` was not applicable — noted here rather than
+  silently skipped. Deleted the whole scratch directory afterward.
+  Registered Lesson 27 in `assets/nav.js` (`node --check` clean) and added the
+  Day 27 section to `reference/glossary.html` (1 new term: data-quality layer
+  — grepped Days 1–26's sections first, case-insensitively, no collisions).
+  Ran a small Python tag-balance/unescaped-`&`/quiz-word-count script (from a
+  scratch file outside `dataeng/`, outside the repo entirely, not removable by
+  this session's own file-removal allowlist but carrying no repo-cleanliness
+  risk, consistent with Day 12's same finding) against the lesson and the
+  updated `reference/glossary.html`. Both came back with every checked tag
+  balanced (div/p/table/tr/td/th/ul/li/pre/code/h2/dfn/button/span/a) and zero
+  bare `&`. The first quiz draft had no `<dfn>` at all (an oversight, since
+  this lesson synthesizes existing terms more than it introduces new ones) and
+  came up mismatched on all four questions (8/9/9, 11/9/9, 10/10/9 and 9/8/9
+  word splits); added the one new term as a `<dfn>` (data-quality layer) and
+  rebalanced all four questions to 8/8/8, 9/9/9, 9/9/9 and 9/9/9 across
+  several edit-and-recount passes, re-verified by re-running the same script
+  after each edit, and checked by eye afterward that no option trails off
+  mid-sentence from the rebalancing (two early drafts of Q2/Q3 did, both
+  rewritten to read as complete sentences at the same word count before
+  shipping).
+  `bin/record-progress dataeng lesson_generated --day 27 --lesson
+  0027-data-quality-story.html --detail '{"by":"headless"}'` succeeded on the
+  first attempt, run directly from the repo root:
+  `recorded: dataeng/lesson_generated day=27 lesson=0027-data-quality-story.html`.
+  **Carried forward for next round:** Phase 2d's spine now has two bullets
+  left — "what breaks at 100×" (partitions, incremental models, warehouse
+  choice) and a mock design-review walkthrough recorded as a learning record
+  — the next round should continue in that order unless a fresh
+  learning-record or quiz signal says otherwise.

@@ -194,6 +194,8 @@
       file: "lessons/0093-np-argmax-argmin.html" },
     { n: 94, date: "2026-10-11", title: "first_valid_index() / last_valid_index(): trimming the NaN padding off a time series",
       file: "lessons/0094-first-valid-index-and-last-valid-index.html" },
+    { n: 95, date: "2026-10-12", title: "np.repeat() and np.tile(): two different ways to multiply an array, and why broadcasting usually beats both",
+      file: "lessons/0095-np-repeat-and-np-tile.html" },
   ];
 
   const REFS = [

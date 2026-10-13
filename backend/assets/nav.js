@@ -202,6 +202,8 @@
       file: "lessons/0097-hateoas-hypermedia-controls.html" },
     { n: 98, date: "2026-10-12", title: "Autovacuum and bloat: the cleanup Lesson 39 said was out of scope",
       file: "lessons/0098-autovacuum-and-table-bloat.html" },
+    { n: 99, date: "2026-10-13", title: "Clickjacking: the attack that never touches your API",
+      file: "lessons/0099-clickjacking-and-security-headers.html" },
   ];
 
   const REFS = [

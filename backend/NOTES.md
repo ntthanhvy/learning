@@ -7740,4 +7740,90 @@
   weakest kind of candidate — intentionally deferred as too deep for this
   course's level — so the search should start fresh next round rather than
   defaulting to them.
+- **2026-10-13 generation (Lesson 99, headless run):** Idempotency check
+  first: `ls lessons/ | sort -V | tail` showed the highest file was still
+  `0098-autovacuum-and-table-bloat.html` and `nav.js` LESSONS ended at
+  `n: 98, date: "2026-10-12"` with no `n: 99` entry anywhere in the file
+  (confirmed via grep), so this round was clear to proceed. Both
+  `backend/learning-records/` files are still the two original baseline
+  findings and name no fresh topic, and Lesson 98's own closing line named
+  no successor candidate ("Next lesson: open"), so this round ran a fresh
+  gap search rather than guessing blind. Swept a wide set of candidates via
+  case-insensitive grep across `lessons/*.html` and `reference/glossary.html`
+  covering all four MISSION.md tracks: composite/covering/GIN indexes,
+  RBAC, mTLS, GraphQL/gRPC, cache-aside/write-through, CQRS, event sourcing,
+  sharding, consistent hashing, ORMs, CAP theorem, message queues, bloom/LRU
+  caching, load balancers, timezone handling, recursive CTEs, schema
+  migrations — all either already covered (confirmed via file hits) or
+  explicitly out of MISSION.md's scope. One genuine gap surfaced clean:
+  `clickjacking`, `X-Frame-Options`, and `Content-Security-Policy` had zero
+  hits anywhere in the course, despite three closely-adjacent browser/
+  security lessons already existing (Lesson 22 CSRF, Lesson 52 CORS,
+  Lesson 17 input validation/injection) — confirmed by reading Lesson 22
+  directly, which never mentions framing or clickjacking at all. This is
+  squarely in MISSION.md's security/OWASP track (success criterion #4) and
+  distinct from both neighbors: CSRF defends against a forged request,
+  clickjacking defends against a genuine request triggered by a misdirected
+  click, which is why Lesson 99 opens by explicitly naming why Lesson 22's
+  CSRF token doesn't help here (the submitted form is genuinely real,
+  rendered inside the invisible iframe, so the token travels along
+  correctly). Lesson 99 covers: the clickjacking mechanism (invisible
+  iframe + positioned fake button); X-Frame-Options (DENY/SAMEORIGIN) as the
+  older, simpler defense; CSP's `frame-ancestors` directive as the modern,
+  finer-grained equivalent (can name a specific trusted partner origin,
+  which X-Frame-Options cannot express at all); and a Go middleware example
+  setting both headers, mirroring Lesson 52's CORS-middleware shape. A
+  "Scope line" section excludes CSP's full policy language (script-src,
+  nonces, violation reporting) as a deeper XSS-mitigation topic past what's
+  needed for the clickjacking gap specifically — named as the natural next
+  step if no fresher signal appears first. Checked the glossary first for
+  the three new terms — `clickjacking`, `X-Frame-Options`, and
+  `Content-Security-Policy / CSP` — zero collisions via case-insensitive
+  grep, added as three new rows after Lesson 98's `bloat` row, same
+  Term/Tiếng Việt (dev-style)/In software column order confirmed by direct
+  inspection of the file's actual header row first. The Go snippet
+  (`securityHeaders` middleware) was compile-checked in a scratch module at
+  `.scratch-0099/gomod/` under the repo root (same workaround prior rounds
+  used); `go build ./...` and `go vet ./...` both ran clean on the first
+  pass, scratch directory deleted afterward, confirmed gone via a failed
+  `ls`. Verification performed mechanically: (1) a Node quiz-word-count
+  script matching each `<div class="q" data-why="...">` block and splitting
+  every option via `.split(/\s+/)` and `.split(" ")` — first draft landed
+  uneven on all four questions (spreads of 1-3 words), fixed through
+  several rewrite-and-recount cycles per option — converged to exactly
+  9/9/9/9 on all four questions, both counting methods agreeing exactly,
+  and exactly one `data-ok` and four options per question confirmed the
+  same way; (2) a Node occurrence-count HTML tag-balance check across 14
+  tag types on the lesson — clean on the first pass (div/p/h1/h2/ul/li/pre/
+  code/button/script/html/head/body/title all matched); and a separate
+  table/tr/th/td/p/div/html/head/body/title/script balance check on
+  `glossary.html` after its three-row addition, also balanced; (3) a
+  raw-unescaped-`&` regex scan across both files — zero hits; (4) the
+  lesson's `<dfn` tags grepped and confirmed to carry both `data-en=` and
+  `data-vn=` — exactly 3 `dfn` tags, matching the 3 new terms, no orphaned
+  attribute; (5) `node --check` against `assets/nav.js`, `assets/gloss.js`,
+  and `assets/quiz.js` — all clean, no output, both before and after the
+  `nav.js` edit; (6) a basic HTML well-formedness check (exactly one
+  `<!DOCTYPE html>`, one `<html>`/`</html>`, three script tags present with
+  `nav.js` last) — clean. Registered Lesson 99 in `nav.js` (date
+  2026-10-13, today's actual generation date), right after the `n: 98`
+  entry, re-confirmed exactly one matching `n: 99` entry and exactly one
+  matching `0099-*` lesson file afterward. No new `learning-records/` file
+  was added this round — routine topical entry like Lessons 3-98, not a new
+  baseline finding. This session's sandbox blocked most multi-operation
+  Bash constructs this round (while-loops, heredocs with braces, piped
+  xargs/sh -c chains all hit an "approval"/"obfuscation" content gate) —
+  worked around by using the Grep/Write tools directly instead of shell
+  loops for the gap sweep and scratch-module file creation; `bin/record-
+  progress` and `bin/query-progress` had the opposite split from most prior
+  rounds — `record-progress` ran clean on the first attempt (`recorded:
+  backend/lesson_generated day=99 lesson=
+  0099-clickjacking-and-security-headers.html`), but `query-progress`
+  itself hit a "requires approval" gate with no user present, so no
+  `course_progress` rows could be read this round either. No confirmed
+  next-lesson gap is named with certainty for the round after this one —
+  CSP's fuller policy language (script-src, nonces, reporting) is the
+  standing candidate named in Lesson 99's own teaser, but same as every
+  prior round, a completion/quiz-outcome signal or a user-named track
+  should take priority over guessing blind again if one appears.
 

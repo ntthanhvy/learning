@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 99 · Clickjacking: the attack that never touches your API</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 99 · ~20 min</p>
+<h1>Clickjacking: the attack that never touches your API</h1>
+<p class="byline">Lesson 22 covered CSRF (a forged request) and Lesson 52 covered CORS (who can read a response). Both assume the attacker's page talks to your server directly. Clickjacking doesn't send your server anything unusual at all — it tricks a real, logged-in user into clicking your own legitimate page without realizing it. Today: the attack, and the one response header that kills it.</p>
+
+<h2>1 · The trick: your page is real, the click isn't what the user thinks it is</h2>
+<p>An attacker builds an ordinary-looking page — a "You won a prize, click to claim" button — and loads your actual site inside an invisible <code>&lt;iframe&gt;</code>, positioned exactly under that button and made transparent with CSS. The user sees the attacker's button. What their click actually lands on is your real page's real "Delete my account" or "Transfer funds" button, sitting invisibly on top. This is <dfn data-en="an attack where a malicious page loads a victim site inside an invisible or disguised iframe, positioning a real button from the victim site under a fake one on the attacker's page, so the user's genuine click actually lands on the hidden real button" data-vn="clickjacking (giữ nguyên) — attacker nhúng trang thật của mình vào iframe vô hình, đặt đúng chỗ nút giả bên ngoài, nạn nhân click vào nút giả thì thật ra là click trúng nút thật ẩn bên dưới">clickjacking</dfn> (also called UI redress attack): the request that fires is completely genuine — same cookies, same origin, same session as if the user clicked it directly on your actual site — because it <em>is</em> the user, clicking your actual page. Nothing about the request itself looks forged.</p>
+<div class="callout"><strong>Why CSRF defenses (Lesson 22) don't help here:</strong> a CSRF token still gets submitted correctly, because the form being submitted is your own real form, rendered by your own real page, inside that invisible frame — the token travels along with it exactly as designed. CSRF defends against a forged request from a different page; clickjacking doesn't forge anything, it just tricks the human into triggering a real one.</div>
+
+<h2>2 · The defense is refusing to be framed at all</h2>
+<p>Since the entire attack depends on your page loading inside someone else's <code>&lt;iframe&gt;</code>, the fix is a response header telling browsers to refuse that outright. <dfn data-en="an HTTP response header telling the browser whether this page is allowed to be rendered inside a frame/iframe on another page -- DENY blocks all framing, SAMEORIGIN allows framing only by pages on the same origin" data-vn="X-Frame-Options (giữ nguyên) — header báo browser trang này có được nhúng trong iframe của trang khác không -- DENY = cấm hẳn, SAMEORIGIN = chỉ cho cùng origin nhúng">X-Frame-Options</dfn> is the older, simpler of the two headers that do this:</p>
+<pre><code>HTTP/1.1 200 OK
+X-Frame-Options: DENY
+Content-Type: text/html</code></pre>
+<p><code>DENY</code> means no page, anywhere, including your own other pages, may load this response in a frame. <code>SAMEORIGIN</code> is the usual real-world choice — it still blocks every other origin, but allows your own site to frame its own pages (a settings page inside a dashboard's preview pane, for instance). Either value makes the invisible-iframe trick in Section 1 simply fail: the browser never renders your page inside the attacker's frame at all, so there's nothing for the fake button to sit on top of.</p>
+
+<h2>3 · The modern, more flexible version: CSP's frame-ancestors</h2>
+<p><dfn data-en="an HTTP response header that lets a server declare, in detail, which sources of scripts/styles/frames/etc. a page is allowed to load -- its frame-ancestors directive specifically controls who may frame this page, superseding X-Frame-Options with finer-grained rules" data-vn="Content-Security-Policy / CSP (giữ nguyên) — header khai báo chi tiết nguồn nào (script/style/frame...) được phép load trên trang này -- directive frame-ancestors kiểm soát ai được nhúng trang này, thay cho X-Frame-Options với luật chi tiết hơn">Content-Security-Policy</dfn> (CSP) is a broader header covering far more than framing — which origins scripts, styles, and images are allowed to load from at all, a defense mostly aimed at limiting what an injected script (Lesson 17's XSS-adjacent risk) can do even if one slips through. Its <code>frame-ancestors</code> directive does exactly what <code>X-Frame-Options</code> does, but can name multiple specific allowed origins instead of only all-or-same-origin:</p>
+<pre><code>Content-Security-Policy: frame-ancestors 'self' https://partner-dashboard.example.com</code></pre>
+<p>Where a real product needs to let one specific trusted partner embed a widget while blocking everyone else, <code>X-Frame-Options</code> genuinely cannot express that (it's binary: nobody, or only same-origin); <code>frame-ancestors</code> can. Shipping both together is standard practice today — <code>frame-ancestors</code> for browsers that respect CSP, <code>X-Frame-Options</code> as the fallback for the few that don't.</p>
+<div class="callout"><strong>Frontend-habit trap:</strong> this looks like a client-side concern — "add a header in the frontend build config" — because the symptom (a page refusing to render in an iframe) shows up in the browser. It isn't a frontend fix. The header is set by the server on every response, the same place status codes and <code>Content-Type</code> come from; there's no client-side equivalent that protects anything, since the attacker's page is the one doing the framing, not yours.</div>
+
+<h2>4 · Setting it from Go</h2>
+<p>Like CORS (Lesson 52), this is pure response-header middleware — no state, no database, applied once to every response:</p>
+<pre><code><span class="cm">// securityHeaders sets response headers that are safe defaults for nearly
+// every page this API serves -- X-Frame-Options blocks the classic
+// clickjacking iframe trick, and the CSP frame-ancestors directive is the
+// modern equivalent with finer-grained control over exactly who may embed.</span>
+<span class="kw">func</span> securityHeaders(next http.Handler) http.Handler {
+    <span class="kw">return</span> http.HandlerFunc(<span class="kw">func</span>(w http.ResponseWriter, r *http.Request) {
+        w.Header().Set(<span class="str">"X-Frame-Options"</span>, <span class="str">"DENY"</span>)
+        w.Header().Set(<span class="str">"Content-Security-Policy"</span>, <span class="str">"frame-ancestors 'none'"</span>)
+        next.ServeHTTP(w, r)
+    })
+}</code></pre>
+<p><code>'none'</code> in <code>frame-ancestors</code> is CSP's equivalent of <code>DENY</code> — no origin at all, including your own, may frame this response. Swap either value to allow same-origin or a named partner origin exactly as Sections 2–3 described, the same per-endpoint judgment call CORS required: most API JSON endpoints don't need this header at all (nothing meaningful renders from a bare JSON response in a frame), but any endpoint that returns an actual HTML page a logged-in user interacts with — a dashboard, a settings form, an account-deletion confirmation — is the exact shape of page this defends.</p>
+
+<div class="interview">
+<p><strong>Q: "What's clickjacking, and why doesn't a CSRF token stop it?"</strong> A strong answer, out loud: <em>"It's loading a real, legitimate page inside an invisible iframe, lining up a real button under a fake one on an attacker's page, so the user's genuine click triggers a genuine action on the real site without realizing it. A CSRF token doesn't help because nothing is forged — the form that submits is the real form from the real page, rendered normally inside that invisible frame, so the token goes along for the ride correctly. The actual defense is refusing to be framed at all: X-Frame-Options or CSP's frame-ancestors, set on the server's response, telling the browser this page can't be loaded in someone else's iframe in the first place."</em> The signal: clearly separating "the request is forged" (CSRF) from "the click is misdirected" (clickjacking) — same-looking symptom, completely different mechanism and fix.</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers the one CSP directive relevant to clickjacking (<code>frame-ancestors</code>) and <code>X-Frame-Options</code>. It doesn't cover CSP's full policy language (script-src, nonce/hash-based script allowlisting, report-uri violation reporting) — that's a deeper XSS-mitigation topic in its own right, one level past what's needed to recognize and close the clickjacking gap specifically.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Clickjacking loads the real victim page inside an invisible iframe and positions a real button exactly under a fake one on the attacker's page, so the user's genuine click lands on the hidden real button instead of the fake one they see.">
+    <p class="stem">What is clickjacking, mechanically?</p>
+    <button class="opt" data-ok>a real button hidden under a fake one, invisibly</button>
+    <button class="opt">a forged request sent with no cookies attached, ever</button>
+    <button class="opt">a stolen session token replayed from an earlier request</button>
+    <button class="opt">a cross-origin fetch call blocked by same-origin policy, always</button>
+  </div>
+  <div class="q" data-why="A CSRF token still submits correctly because the form being submitted is the victim's own real form, rendered normally by the real page sitting inside the invisible iframe -- nothing about the request is forged, so the token travels along with it exactly as designed.">
+    <p class="stem">Why doesn't a CSRF token stop clickjacking?</p>
+    <button class="opt" data-ok>the submitted form is genuinely real, token included too</button>
+    <button class="opt">clickjacking attacks never actually involve any HTML form, ever</button>
+    <button class="opt">CSRF tokens are checked only on GET requests, somehow</button>
+    <button class="opt">browsers automatically strip CSRF tokens inside any iframe, always</button>
+  </div>
+  <div class="q" data-why="X-Frame-Options and CSP's frame-ancestors are both response headers the server sends on every response -- the browser then refuses to render that page inside a frame from a disallowed origin, which is what actually defeats the invisible-iframe trick. There is no client-side/frontend equivalent, since the attacker's page is the one doing the framing.">
+    <p class="stem">Where does the actual defense against clickjacking get set?</p>
+    <button class="opt" data-ok>a response header the server sends on every page</button>
+    <button class="opt">a frontend flag set once at the build step</button>
+    <button class="opt">a browser extension the end user must install first</button>
+    <button class="opt">a cookie attribute that only gets set at login</button>
+  </div>
+  <div class="q" data-why="X-Frame-Options can only express nobody (DENY) or only the same origin (SAMEORIGIN) -- it has no way to name one specific other trusted origin. CSP's frame-ancestors directive can list specific allowed origins by name, which is the exact case X-Frame-Options cannot express at all.">
+    <p class="stem">What can CSP's frame-ancestors express that X-Frame-Options cannot?</p>
+    <button class="opt" data-ok>allowing one specific named partner origin to frame it</button>
+    <button class="opt">blocking every single origin, including the page's own one</button>
+    <button class="opt">allowing only the page's own origin to frame it</button>
+    <button class="opt">setting the header on a JSON response, never HTML</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://cheatsheetseries.owasp.org/cheatsheets/Clickjacking_Defense_Cheat_Sheet.html">OWASP Clickjacking Defense Cheat Sheet</a> — RESOURCES.md already names the OWASP Cheat Sheet Series as the standing high-trust source for this security track; this is its dedicated page, covering both headers here plus JavaScript-based frame-busting as a legacy fallback this lesson didn't cover. For the CSP header's full syntax beyond frame-ancestors, <a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Security-Policy">MDN's Content-Security-Policy reference</a> (RESOURCES.md's standing HTTP arbiter) is the complete spec.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially. Nếu chỗ nào chưa rõ, cứ hỏi lại bằng tiếng Việt cũng được.<br><br>
+<em>Next lesson:</em> open — CSP's fuller policy language (script-src, nonces, violation reporting) is the natural next step from today's single directive if no fresher signal appears first.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

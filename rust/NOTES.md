@@ -1384,3 +1384,20 @@ by the user there; they apply here identically.
   via the agents' own relative-path invocations, confirming the write path
   still works even when the direct read path is blocked. See each course's
   own NOTES.md entry for detail.)
+- 2026-10-13 (headless 06:00 run): same as every prior post-week day —
+  verified `daily.html`, `assets/srs.js`, and `assets/quiz-bank.js` are all
+  present and unchanged (`quiz-bank.js` still shows 8 `id: "k` matches —
+  kata `k1`-`k7` plus the commented example, `day:` tags still running 1-7
+  only; `nav.js` `LESSONS` array still registers exactly 7 `file: "lessons`
+  entries, the 7 Jul 8-14 lessons only). Still the correct "daily
+  quiz+kata" for this post-week phase per PLAN.md, so nothing new was
+  generated, nav.js was untouched, and no bank content was added. A
+  repo-wide grep for "2026-10-13" under `rust/` found no existing artifact
+  for today before this check. `bin/query-progress rust 20` hit the usual
+  generic "requires approval" gate with no user present this round (not
+  retried, per the established finding reproduced daily since 2026-07-16),
+  so no `course_progress` rows could be read for a scope-change signal
+  (e.g. a request to keep growing the bank past Day 7). `bin/record-progress
+  rust note --detail '{"by":"headless","day":"post-week-2026-10-13",
+  "action":"verified-unchanged"}'` succeeded on the first attempt using the
+  relative-path form. No new learning record beyond the Day-1 baseline.

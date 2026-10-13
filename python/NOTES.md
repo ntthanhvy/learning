@@ -9639,4 +9639,109 @@ fail *gracefully* so the learner sees which task failed.
   open-ended next topic consistent with `MISSION.md` and the no-pandas/
   no-NumPy scope rule (Phase 2's spine is otherwise fully spent — both
   2a's rounding-out list and 2b's FastAPI/backend list are taught).
+- 2026-10-13 — **Day 76 generated: `json.dumps`/`loads`, `indent=`, and
+  `default=`** (headless run). Read `MISSION.md` (untouched, read-only),
+  `PLAN.md` in full, `RESOURCES.md`, and the sole `learning-records/`
+  baseline file; `NOTES.md` exceeds this run's single-read size cap, so
+  only the tail log was read directly, confirmed sufficient since the
+  tail already carried Day 75's full next-day note. Idempotency: listed
+  `lessons/` (highest existing file `0075-review-retrieval-day-12.html`,
+  dated 2026-10-12 — nothing dated today existed yet) before writing
+  anything.
+  Decision process — fresh gap scan from scratch, per Day 75's explicit
+  next-day note that no candidate was pre-queued: grepped every
+  backtick-quoted stdlib-module-shaped token in `NOTES.md`'s full log
+  against `lessons/`, `practice/`, and `reference/glossary.html`, then
+  separately grepped each lesson file for `json\.` to check what the
+  module's own Day 6 treatment actually covered. Found a real, scoped
+  gap: Day 6 taught only `json.load`/`json.dump` (file-based) with a
+  bare example — `dumps()`/`loads()` (string-based), `indent=`/
+  `sort_keys=` (pretty-printing), and `default=` (the custom-type escape
+  hatch) were never shown anywhere. This doubles as a natural callback to
+  Day 72's `pickle` lesson, which named "`json` can't hold a `dataclass`"
+  as `pickle`'s whole reason for existing — today shows the one
+  escape hatch `json` itself offers for that same gap, then explicitly
+  contrasts when `default=` is enough versus when `pickle` is still the
+  better tool (object identity vs. a lossless text/number stand-in).
+  Read Day 6's and Day 72's full lessons directly before writing, to
+  cite accurately rather than from memory of the log summary.
+  No-pandas rule: grepped case-insensitively for `pandas`/`numpy`/`pd\.`/
+  `np\.` in both the lesson and practice file — exactly one hit in the
+  lesson (the single "Where pandas goes from here" callout, noting
+  `dumps`/`loads` operate on the same dict/list shapes a `DataFrame`'s
+  `.to_dict()` would produce, no `DataFrame` code shown) and zero hits in
+  the practice file — compliant with the one-contrast-sentence allowance.
+  **New jargon: 3 terms** (`json.dumps`/`json.loads`, `indent=`,
+  `default=`) — each wrapped in a `<dfn data-en="…" data-vn="…">` on
+  first mention in the byline per this course's shared rule, and added
+  to `reference/glossary.html` under a new `Day 76` section (appended
+  after Day 74's; Day 75 added none, being a review day).
+  Quiz: 3 questions (one per new term: `dumps` vs `dump`, what `indent=`
+  changes, when `default=` gets called). Word counts were checked with a
+  throwaway Node.js regex-based script matching this course's established
+  practice; first draft mismatched on all three questions (9/9/10,
+  9/10/11, 11/10/13) — iterated option-by-option, recounting after every
+  edit per this course's own "recount after edits" rule, until all three
+  landed on equal counts: 9/9/9, 10/10/10, 10/10/10.
+  Verified the HTML with a throwaway Node.js tag-stack-balance script —
+  first pass caught a genuine authoring bug, not a false positive: a
+  `<span class="cm">` comment span on a code-sample line (`print(text) #
+  '{"city": ...}'`) was missing its closing `</span>`, which the script
+  correctly flagged by tag mismatch. Fixed and reran; both tag-balance
+  and the raw-unescaped-`&` regex came back clean on the second pass.
+  Also fixed a snippet-correctness gap caught on self-review before
+  shipping: the `default=` code sample called `is_dataclass`/`asdict`
+  without importing either — added both to the `from dataclasses import`
+  line.
+  `RESOURCES.md`: added a new `json` line (previously `json` had no
+  dedicated RESOURCES.md entry of its own, only an inline citation inside
+  Day 6's own lesson body) covering both Day 6's file-based basics and
+  today's `dumps`/`loads`/`indent`/`default` additions, following the
+  same two-day-citation shape already used for the `csv` line (Day 6 +
+  Day 66).
+  Registered in `assets/nav.js` with `date: "2026-10-13"` right after the
+  `n: 75` entry; confirmed `node --check assets/nav.js` reports no syntax
+  errors after the edit.
+  Practice file `practice/76_json_dumps_loads_and_default.py` (4 checks,
+  stdlib-only, no `--with` flag, function-stub-with-TODO-comment style
+  matching recent fresh-lesson practice files): a dict round-tripped
+  through `dumps()`/`loads()` as a string (Ex 1), `indent=2` output
+  checked for real embedded newlines (Ex 2), a `json_default()` helper
+  checked against a `datetime`, a `dataclass` instance, and a plain
+  `object()` that must raise `TypeError` (Ex 3), and that same helper
+  used via `default=` to serialize a dataclass holding a datetime field,
+  with the result read back through `json.loads()` (Ex 4).
+  Verified in a scratch `.scratch-0076/` directory created directly under
+  the repo root (copied from the shipped file, not edited in place): the
+  shipped (unsolved) copy printed four clean ✗ lines with no traceback,
+  both from the scratch copy and again run directly from its real
+  `python/practice/` path as a final check. A separately solved copy
+  (TODOs filled in on the scratch copy) printed all four ✓ and the "All
+  green" tally, run twice consecutively with identical results both
+  times. Scratch directory deleted before finishing.
+  **DB access:** `bin/record-progress python lesson_generated --day 76
+  --lesson 0076-json-dumps-loads-and-default.html --detail
+  '{"by":"launchd"}'` ran successfully from the repo root on the first
+  attempt — no direct `psql`/`bin/query-progress` read was attempted this
+  round, per this sandbox's documented restriction on raw `psql` and the
+  running note that such reads have been blocked on essentially every
+  prior run.
+  `python/learning-records/` still holds only the Day 1 baseline —
+  nothing from today's run (a fresh-gap scan landing on `json`'s
+  untaught string/pretty-print/`default=` corner) is a new, durable fact
+  about the learner distinct from what Day 1's record already says.
+  Final `git status --short -- python/` is expected to show exactly five
+  paths changed (`assets/nav.js`, `NOTES.md`, `RESOURCES.md`,
+  `reference/glossary.html`, plus the new lesson and practice file —
+  six total including this file) — no other course's files touched, and
+  no leftover scratch files or directories under the repo.
+  **Next-day note:** with today's `json` gap closed, no standing
+  fresh-gap candidate is on record anywhere in the log. Day 77 should run
+  its own fresh fresh-gap scan from scratch — grep every stdlib module
+  named in past lessons' "Why today" callouts and review-day notes
+  against `lessons/`/`practice/`/`reference/glossary.html` to confirm
+  nothing already covered is mistakenly re-proposed — or, if cadence math
+  favors it (three fresh lessons since Day 75's review would land on Day
+  78), default to a review day covering Days 76-77-78 instead once a
+  second and third fresh topic are chosen.
 

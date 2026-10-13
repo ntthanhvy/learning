@@ -38,6 +38,7 @@
     { n: 25, date: "2026-10-10", title: "Airflow sensors, deferrable operators & deadline alerts", file: "lessons/0025-airflow-sensors-deferrable-sla.html" },
     { n: 26, date: "2026-10-11", title: "One-command demo: make demo, and a README that reads in 2 minutes", file: "lessons/0026-portfolio-one-command-demo.html" },
     { n: 27, date: "2026-10-12", title: "The data-quality story: what is tested where, and why", file: "lessons/0027-data-quality-story.html" },
+    { n: 28, date: "2026-10-13", title: "What breaks at 100×: partitions, incremental models & warehouse choice", file: "lessons/0028-what-breaks-at-100x.html" },
   ];
 
   const REFS = [

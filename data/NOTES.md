@@ -8526,3 +8526,90 @@
   95 --lesson 0095-np-repeat-and-np-tile.html --detail '{"by":"launchd"}'` was
   run directly from the repo root this round and it succeeded: `recorded:
   data/lesson_generated day=95 lesson=0095-np-repeat-and-np-tile.html`.
+- 2026-10-13 generation (Lesson 96): headless run, zero prior context. Read
+  MISSION.md in full (not modified), RESOURCES.md in full, the tail of this
+  log (Lessons 90-95's entries), the one `learning-records/` baseline file
+  (0001, still unchanged since mid-July — stale, no new durable finding to
+  fold in), and `assets/nav.js` in full for the registration format.
+  Idempotency was confirmed before starting: `ls -la --time-style=full-iso`
+  on `data/lessons/` showed the two most-recently-modified files were 0062
+  and 0086 (both pre-existing, untouched today) with no file dated
+  2026-10-13, and no `n: 96` entry existed in `nav.js`. `bin/query-progress`
+  required interactive approval this round and was NOT retried per this
+  course's headless-run constraint — the DB completion signal stayed
+  unavailable, falling back to the file-system records only. Lesson 95's
+  own teaser named two open runner-ups without picking either as THE next
+  pick (`np.broadcast_to()`, and `DataFrame.insert()`/`.pop()`), so this
+  round re-grepped both case-insensitively across every lesson body and the
+  glossary to re-confirm they were still genuine zero-hit gaps before
+  picking — both came back with zero hits. Picked `insert()`/`.pop()` over
+  `np.broadcast_to()`: it closes the column-management picture left open
+  since Lesson 78's `.assign()` (always non-mutating) and Lesson 57's
+  row-multiplication-safety family — these two are the only common column
+  tools that mutate the DataFrame directly, a real interview trap if
+  assumed to behave like everything else, and it's a tighter ~20-min scope
+  than adding a third NumPy-construction function to the already-covered
+  repeat/tile pair. `np.broadcast_to()` remains an explicit open candidate,
+  deliberately deferred again. Every behavioral claim was probed directly
+  first in `data/.scratch-0096/` (deleted after), on the actually-installed
+  numpy 2.5.4 / pandas 3.0.6 (confirmed via the same version-print one-liner
+  prior rounds used): confirmed `df.insert(loc, column, value)` mutates the
+  frame in place and returns `None`; confirmed it raises `ValueError` on a
+  duplicate column name unless `allow_duplicates=True`; confirmed it raises
+  `IndexError` on an out-of-range `loc`; confirmed passing a `Series` as
+  `value` aligns by index label, not row position, producing `NaN` on a
+  mismatched label (cross-checked against the official pandas docs via
+  `WebFetch`, which state this outright with an identical example);
+  confirmed `df.pop(column)` mutates the frame by removing the column AND
+  returns it as a `Series` in the same call; confirmed it raises `KeyError`
+  on a missing column name; confirmed `drop(columns=)` by contrast always
+  returns a new frame and never touches the original, the direct contrast
+  point used in the lesson. Cross-checked both methods' official pandas docs
+  pages via `WebFetch` (available this round) — both confirmed the in-place/
+  `None`-return behavior and the alignment/guard details exactly matching
+  the direct probing, cited as the freshly-verified primary source. The
+  shipped (unsolved) `practice/96_insert_and_pop.py` was executed directly
+  from its real `practice/` location and printed exactly 3 ✗ with no raw
+  traceback. Built a solved copy in `.scratch-0096/`, filling in all five
+  blanks correctly; it printed all 3 ✓ and "All green" on the first run.
+  The shipped file was re-run once more directly from `practice/` after
+  building the solved copy and reproduced the identical all-✗ result,
+  confirming the solved copy's edits never leaked back into the shipped
+  baseline. Quiz options were drafted, then mechanically word-counted with
+  a scratch Python script (`uv run python3`, deleted after) isolating each
+  `<div class="q">` block by regex span and splitting on whitespace — the
+  first draft came out 9/8/8, 10/12/9, 6/8/9; several rounds of small
+  rephrasing (adding/trimming words like "always", "plain", "also", "just")
+  until all three questions landed exactly level (9/9/9, 10/10/10, 9/9/9
+  option words), one `data-ok` per question throughout. A separate
+  mechanical tag-balance script confirmed all tags balanced (a 2/2, body
+  1/1, button 9/9, code 61/61, dfn 2/2, div 5/5, em 3/3, h1 1/1, h2 6/6,
+  head 1/1, html 1/1, p 17/17, pre 7/7, script 3/3, span 67/67, strong 6/6,
+  title 1/1) and found exactly two raw `&` characters, both inside the one
+  established `cd ~/learning/data && uv run ...` shell command, matching
+  every prior lesson's pattern, zero raw `&` in prose; also confirmed both
+  `<dfn>` tags carry both `data-en` and `data-vn`. Checked the glossary for
+  a collision before adding anything — grepped `insert\(\)|\.pop\(\)`
+  case-insensitively across the full glossary, found zero existing rows —
+  added exactly one new row, "insert() / pop()", directly after Lesson 95's
+  "np.repeat() / np.tile()" entry; re-ran the tag-balance and raw-`&`
+  scripts against the glossary file afterward, confirmed it stayed balanced
+  with zero raw `&` introduced. Registered Lesson 96 in `nav.js` with
+  today's date (2026-10-13); `node --check` confirmed it still parses as
+  valid JavaScript after the edit, and exactly one `n: 96` entry plus one
+  `0096-insert-and-pop` file reference were confirmed to exist. This round
+  closed one of the two runner-ups carried forward from Lesson 95 — the one
+  standing open candidate for tomorrow is `np.broadcast_to()` (deferred
+  twice now, confirmed still a zero-hit gap both times); tomorrow should
+  still run its own fresh curriculum/glossary scan rather than assume it's
+  automatically the best available gap by then. No new
+  `data/learning-records/` entry was added this round — routine lesson, no
+  new baseline finding to justify one (the Neon `course_progress`
+  completion-gap signal remains unavailable this round, both from
+  staleness past mid-July and from `bin/query-progress` requiring approval
+  this headless run). The `.scratch-0096/` directory was deleted after
+  verification, per this course's standing practice of not leaving scratch
+  artifacts committed. `bin/record-progress data lesson_generated --day 96
+  --lesson 0096-insert-and-pop.html --detail` (JSON detail payload) was run
+  directly from the repo root this round and it succeeded: `recorded:
+  data/lesson_generated day=96 lesson=0096-insert-and-pop.html`.

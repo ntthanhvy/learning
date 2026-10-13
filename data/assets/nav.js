@@ -196,6 +196,8 @@
       file: "lessons/0094-first-valid-index-and-last-valid-index.html" },
     { n: 95, date: "2026-10-12", title: "np.repeat() and np.tile(): two different ways to multiply an array, and why broadcasting usually beats both",
       file: "lessons/0095-np-repeat-and-np-tile.html" },
+    { n: 96, date: "2026-10-13", title: "DataFrame.insert() and .pop(): the two column-management methods that mutate in place",
+      file: "lessons/0096-insert-and-pop.html" },
   ];
 
   const REFS = [

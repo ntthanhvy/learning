@@ -39,6 +39,8 @@ authors for *why*. Cite inline; each lesson recommends exactly one primary sourc
   Use for: Day 65 — `TemporaryDirectory()` and `NamedTemporaryFile()` as self-cleaning scratch space for pipeline staging, collision-proof unique naming, and the `delete=False` escape hatch for code that needs to reopen a temp file by path.
 - [Docs: `csv`](https://docs.python.org/3/library/csv.html)
   Use for: Day 6 — `csv.reader`/`csv.DictReader` for the read side; Day 66 — `csv.writer`/`csv.DictWriter`, `fieldnames=`, the `newline=""` rule for avoiding doubled line endings, and `extrasaction=`/`restval=` for mismatched dict keys.
+- [Docs: `json`](https://docs.python.org/3/library/json.html)
+  Use for: Day 6 — `json.load`/`json.dump` for the file-based round trip; Day 76 — `dumps()`/`loads()` for working with JSON as an in-memory string, `indent=`/`sort_keys=` for human-readable output, and `default=` for serializing a type (`dataclass`, `datetime`) `json` doesn't know natively, the `cls=` full-encoder option being the natural next step beyond it.
 - [Docs: `subprocess`](https://docs.python.org/3/library/subprocess.html)
   Use for: Day 68 — `subprocess.run()`, the list-of-arguments form vs. the injection risk of `shell=True`, `returncode`/`check=True`, and separating captured `stdout` from `stderr`.
 - [Docs: `statistics`](https://docs.python.org/3/library/statistics.html)

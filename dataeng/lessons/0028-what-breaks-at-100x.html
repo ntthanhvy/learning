@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 28 · What breaks at 100×: partitions, incremental models &amp; warehouse choice</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 28 · ~20 min · 13 Oct 2026</p>
+<h1>What breaks at 100×: partitions, incremental models &amp; warehouse choice</h1>
+<p class="byline">Today's tangible win: a new <code>SCALING.md</code> in your repo naming the three real places this exact pipeline — as built, with this project's own numbers — hits a wall at 100× today's volume, with the actual number each wall sits at and the smallest concrete fix for each, not a vague "add more servers." No new container, no new install: this is a capacity-planning pass over code you've already written and verified live across 27 days.</p>
+
+<div class="callout"><strong>Before today — you need Day 5's real partition count and Day 13's real strategy choice, not guesses:</strong> this lesson's math depends on exact facts this project already established, so confirm them rather than assuming:
+<pre><code>docker compose exec -T kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --describe --topic order_events
+cd warehouse &amp;&amp; grep -A2 "unique_key" models/marts/fct_orders.sql models/marts/mart_delivery_sla.sql</code></pre>
+Expected: the first command's output includes <code>PartitionCount: 3</code> (Day 5's choice); the second shows <code>fct_orders</code> set to <code>incremental_strategy='merge'</code> and <code>mart_delivery_sla</code> set to <code>incremental_strategy='delete+insert'</code> with <code>unique_key='sla_key'</code> (both from Day 13). If either doesn't match, re-read Day 5 or Day 13 before continuing — today's numbers are built on these, not restated from scratch.</div>
+
+<h2>1 · Why this question, and why now</h2>
+<p>MISSION.md asks for a 10-minute walkthrough that includes "what would change at 100× volume" — a question every one of this repo's 27 prior lessons has been quietly setting up evidence for, without ever naming the number explicitly. "It would need more servers" is not an answer an interviewer accepts; naming <em>which specific thing</em> stops working first, at roughly what volume, and what the smallest real fix is, is. Today picks three concrete bottlenecks this pipeline actually has — not generic distributed-systems trivia — and does the arithmetic once, in writing, so it's ready before anyone asks.</p>
+<p>"100×" here means roughly 50,000 orders/day instead of today's 500-order one-off seed (Day 1), and a proportional jump in <code>order_events</code> (12 events landed per Day 6's own test batch, so roughly 1.2M events/day at the same ratio) — round numbers for orientation, not a forecast to defend to the decimal place.</p>
+
+<h2>2 · Bottleneck 1 — Kafka: <dfn data-en="in Kafka, the maximum number of consumers that can be actively processing messages from one topic's partitions at the same time, within a single consumer group -- exactly one consumer per partition may hold it at once, so a topic's partition count is a hard ceiling on parallel consumption for that group, regardless of how many consumer processes are started" data-vn="giữ nguyên &quot;parallelism ceiling&quot; — trong Kafka, số consumer tối đa có thể cùng xử lý song song message từ các partition của 1 topic, trong 1 consumer group: đúng 1 consumer giữ 1 partition tại 1 thời điểm, nên số partition của topic là giới hạn cứng cho song song hoá, bất kể start thêm bao nhiêu consumer process">partition count as a parallelism ceiling</dfn></h2>
+<p>Day 5 fixed <code>order_events</code> at 3 partitions, keyed by <code>order_id</code> so one order's own status events stay in order. That key choice still holds at 100× — ordering per order never needed to change — but the partition <em>count</em> is the part that stops scaling: Kafka guarantees at most one consumer, per consumer group, can read a given partition at a time. Three partitions means at most three consumer processes in <code>inspect-group</code> (or any single group) can ever work in parallel, no matter how many you start — a fourth sits idle, assigned nothing, confirmed behavior straight from Day 5's own partition-assignment claim.</p>
+<p>At 500 orders/day with ~12 events each, Day 6's single consumer drained a batch with room to spare. At 1.2M events/day, three partitions cap this topic's own total consumer throughput at whatever three single-threaded consumers can do — and the fix is not "add a fourth consumer," it's <code>kafka-topics.sh --alter --partitions N</code> to raise the ceiling itself, done <em>before</em> the volume arrives, because partition count can only go up, never down, on a live topic, and existing keys don't automatically remap to new partitions, only new messages do.</p>
+
+<h2>3 · Bottleneck 2 — dbt: an incremental filter that still re-scans everything</h2>
+<p>Day 13 gave <code>fct_orders</code> a real <code>is_incremental()</code> filter on <code>placed_at</code>, and that's the part of "incremental" that actually saves work: each run only reads rows newer than what's already landed, not all 500 (or 50,000,000) historical orders. The part that does <em>not</em> scale automatically is <code>mart_delivery_sla</code>'s <code>delete+insert</code> lookback from the same lesson — its <code>HAVING</code> filter recomputes "the last couple of days' buckets" on every single run, which is a fixed, small cost at 500 orders/day and stays a fixed, small cost at 50,000 orders/day too, <em>as long as the lookback window itself doesn't have to widen</em>. The real 100× risk here isn't the row count, it's whether whatever is producing <code>delivered</code> events starts arriving later under load — a lookback sized for "usually within a day" silently stops being enough if load pushes typical delivery-event lag past it, and the fix is the same diagnostic Day 13 already taught (widen the filter, or <code>--full-refresh</code> once to catch up), not a different incremental strategy.</p>
+<p>The other real 100× question for dbt specifically is materialization choice, not incremental logic: <code>dim_restaurants</code> (Day 4) is a full <code>table</code> rebuild every run, fine at 40 restaurants, still fine at 4,000 — restaurant counts don't scale with order volume the way orders do, so this one deliberately stays a plain <code>table</code> rather than being converted to incremental for no reason, a direct answer to Day 10's own "does this earn its complexity" bar applied to materialization instead of macros.</p>
+
+<h2>4 · Bottleneck 3 — the warehouse: one Postgres node, not a cluster</h2>
+<p>Every dbt model and every landed event in this project writes to one <code>postgres:17</code> container (Day 1), with no read replica and no partitioning on any table. At 500 orders/day this is irrelevant; at 50,000 orders/day, <code>raw.order_events</code> alone is roughly 600,000 new rows/day, and the two places that feel it first are concrete, not abstract: Day 6's consumer does one <code>INSERT ... ON CONFLICT</code> per event, so insert throughput on that one table becomes the hot path's own ceiling long before query performance does; and <code>mart_delivery_sla</code>'s <code>delete+insert</code> rewrites whole day-buckets on every run, which is cheap against a day's worth of orders today and still cheap against a day's worth of orders at 100×, since the lookback window's row count doesn't grow with total history — the actual warehouse risk at scale is unindexed growth on <code>raw.order_events</code> itself making every downstream staging/mart <code>select</code> slower over time, not any one run's incremental cost. The single-node answer this course's own constraints (MISSION.md: Postgres only, no cloud account) actually supports first is table partitioning <code>raw.order_events</code> by date and adding the index Day 1 never needed at 500 rows — before reaching for a managed warehouse at all, since <code>MISSION.md</code> rules those out by name and the real first bottleneck is indexing, not engine choice.</p>
+
+<h2>5 · The day's actual skill: write the math for one bottleneck yourself</h2>
+<p>The three sections above name <em>what</em> breaks and <em>why</em>. Today's build step is writing the <em>numbers</em> down for your own repo, not copying these paragraphs. In your <code>food-delivery-pipeline</code> repo, create <code>SCALING.md</code> at the top level, next to <code>README.md</code>:</p>
+<pre><code><span class="cm"># Scaling notes: what breaks at 100x
+
+Today's volume (this repo's seed): 500 orders/day, ~12 order_events/day per
+order (~6,000 events/day total). 100x: ~50,000 orders/day, ~600,000 events/day.
+
+## 1. Kafka: partition count caps consumer parallelism</span>
+order_events has <span class="cm"><!-- TODO: your real --describe PartitionCount --></span> partitions.
+At most that many consumers in one group can ever run in parallel, regardless
+of how many processes you start. At 100x volume the fix is
+`kafka-topics.sh --alter --partitions N` run ahead of the volume arriving,
+because partition count only ever goes up on a live topic, and only new
+messages land on new partitions -- existing keys don't remap.
+
+## 2. dbt: mart_delivery_sla's lookback window, not row count
+<span class="cm"><!-- TODO: state your own lookback window in days (Day 13's HAVING filter), and
+     what volume/lateness would make that window too short -- in your own
+     words, not copied from the lesson. --></span>
+
+## 3. Warehouse: raw.order_events growth, not any one incremental run
+At 100x, raw.order_events grows by roughly <span class="cm"><!-- TODO: your own 100x daily-row-count
+estimate --></span> rows/day. The first real fix given this course's Postgres-only
+constraint (MISSION.md) is table partitioning by date plus an index -- not a
+managed warehouse, which is explicitly out of scope here.</code></pre>
+<p>The three TODOs are the day's actual skill: Section 1's number comes straight from the "before today" check above; Section 2 and Section 3 need you to reason from this project's own numbers the way Sections 3–4 above did, not repeat their prose verbatim. A number you can defend out loud beats a paragraph you can only recite.</p>
+
+<h2>6 · What's deliberately not here</h2>
+<p>Three real scaling levers are named and set aside on purpose, not forgotten: Kafka Streams/Flink-style stream processing (MISSION.md's own out-of-scope list — "land it and let dbt do it" stays the right call at this project's scale), a managed cloud warehouse (also explicitly out of scope — Postgres is the warehouse here by design), and multi-broker Kafka tuning (out of scope per MISSION.md's constraints list). Naming a lever and correctly setting it aside is itself part of a strong "what breaks at 100×" answer — an interviewer is listening for judgment about what's actually needed at <em>this</em> scale, not a list of every tool that exists.</p>
+
+<h2>7 · Verify</h2>
+<pre><code>test -f SCALING.md &amp;&amp; grep -c "TODO" SCALING.md</code></pre>
+<p>Expected: <code>SCALING.md</code> exists, and the <code>grep -c</code> count drops from <code>3</code> (the template above, unfilled) to <code>0</code> once all three TODOs are replaced with your own real numbers and reasoning. A <code>0</code> with placeholder text literally copied from this lesson doesn't count — the check is mechanical, the content isn't; re-read Section 5 before considering it done.</p>
+<div class="callout"><strong>Honesty note on today's verification:</strong> the partition-parallelism claim (Section 2), the <code>delete+insert</code>-vs-row-count distinction (Section 3) and the single-node insert-throughput framing (Section 4) are reasoned from this project's own already-verified facts — Day 5's live 3-partition broker output, Day 13's live <code>delete+insert</code> build, and Day 1/6's live Postgres inserts, each confirmed against a running stack in its own day's generation log — not re-run live against a 100×-scale broker or warehouse this round, since standing up that scale locally is outside this course's 16 GB/laptop constraint (MISSION.md) and not the day's point. The <code>kafka-topics.sh --alter --partitions</code> flag name was checked against this course's own Day 5/18 CLI usage pattern (<code>--bootstrap-server</code>, no ZooKeeper), not fetched fresh from Kafka's docs this round — confirm the exact flag against the <a href="https://kafka.apache.org/documentation/">Kafka documentation</a> before relying on it against a real cluster.</div>
+
+<div class="interview">
+<p><strong>Q: "What would break first if this pipeline ran at 100× its current volume?"</strong> A strong answer, out loud: <em>"Three things, in the order I'd expect to hit them. First, Kafka's partition count — order_events has 3 partitions today, which caps how many consumers in one group can ever run in parallel at exactly 3, no matter how many I start; the fix is raising the partition count ahead of the volume, not adding more consumer processes past that ceiling. Second, dbt's incremental models themselves mostly scale fine — fct_orders only reads new rows, and mart_delivery_sla's delete+insert lookback stays a small, fixed-size rewrite regardless of total history — but the lookback window's size assumption could break if delivery events start arriving later under load than my current window accounts for. Third, the warehouse: one Postgres node with no partitioning on raw.order_events means insert throughput on that one table becomes the real hot-path ceiling, and the first fix is table partitioning by date plus proper indexing, not switching engines — this project is intentionally Postgres-only. What I'd explicitly not reach for yet: Kafka Streams, a managed warehouse, or multi-broker tuning — none of those are needed at this scale, and reaching for them early is its own kind of mistake."</em> The signal: naming which bottleneck hits first, the actual mechanism (not just "it would be slow"), and which heavier tools are deliberately not needed yet.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Kafka guarantees exactly one consumer per consumer group can read a given partition at a time. With 3 partitions on order_events, at most 3 consumers in one group can ever process messages in parallel -- a 4th consumer process joining the same group gets assigned nothing, no matter how much volume arrives.">
+    <p class="stem">With 3 partitions on <code>order_events</code>, what caps one consumer group's parallelism?</p>
+    <button class="opt" data-ok>At most 3 consumers could ever process in parallel</button>
+    <button class="opt">Exactly 1 single consumer may ever truly connect here</button>
+    <button class="opt">Kafka itself always auto-splits every single incoming message, always</button>
+  </div>
+  <div class="q" data-why="Partition count can be raised on a live Kafka topic via kafka-topics.sh --alter, but it can never be lowered, and existing message keys don't remap to new partitions -- only new messages produced after the change land on the new partitions. This is why the fix needs to happen ahead of the volume arriving, not reactively.">
+    <p class="stem">Why should a partition-count increase happen before 100× volume arrives, not after?</p>
+    <button class="opt" data-ok>Count only rises; old keys never remap anywhere new</button>
+    <button class="opt">Kafka brokers reject any topic alteration while running, ever</button>
+    <button class="opt">Partition count always resets nightly to its own default</button>
+  </div>
+  <div class="q" data-why="mart_delivery_sla's delete+insert lookback recomputes only the last couple of days' buckets every run, a cost that stays small and fixed regardless of total order volume. The real 100x risk is the lookback window's size assumption: if delivered events start arriving later than the window covers under higher load, the window itself becomes too short, which is a different failure from row-count growth.">
+    <p class="stem">What's the real 100× risk in <code>mart_delivery_sla</code>'s <code>delete+insert</code> lookback?</p>
+    <button class="opt" data-ok>The lookback window itself could end up too short</button>
+    <button class="opt">Delete+insert cost rises directly with the total order history</button>
+    <button class="opt">Dbt silently swaps this one strategy to merge instead</button>
+  </div>
+  <div class="q" data-why="MISSION.md explicitly rules out Kafka Streams/Flink-style stream processing ('land it and let dbt do it' at this scale) and managed cloud warehouses (Postgres is the warehouse here by design) as out of scope for this project. Naming a heavier tool and correctly explaining why it isn't needed yet is itself a sign of judgment, not a gap in the answer.">
+    <p class="stem">Per today's lesson, which two heavier tools are named but deliberately set aside?</p>
+    <button class="opt" data-ok>Stream processing engines, plus a real managed cloud warehouse too</button>
+    <button class="opt">Dbt itself, along with every data test it currently runs</button>
+    <button class="opt">The whole Kafka broker, swapped today for a queue service</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> Kleppmann's <em>Designing Data-Intensive Applications</em> (cited in <code>RESOURCES.md</code> since Day 1) — ch. 6 (partitioning) and ch. 11 (stream processing) are the authoritative treatment of why partition count is a hard parallelism ceiling and how a system's bottleneck shifts under load, the exact reasoning this lesson applied to this project's own three numbers rather than a generic one. <a href="https://kafka.apache.org/documentation/">Apache Kafka Documentation</a> (this course's standing Day 5/18 primary source) covers <code>--alter --partitions</code> directly, worth confirming before relying on the exact flag against a real cluster.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 28.<br>
+<strong>Phase 2d continues</strong> next with a mock design-review walkthrough of the repo, recorded as a learning record — the spine's fourth and final bullet.<br><br>
+💬 Anything unclear — why partition count can't shrink, or whether a 100× pipeline would actually need Kafka Streams after all? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

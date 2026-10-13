@@ -3264,3 +3264,123 @@ along the Phase 2 spine, adapted to the learning records.
   choice) and a mock design-review walkthrough recorded as a learning record
   — the next round should continue in that order unless a fresh
   learning-record or quiz signal says otherwise.
+- 2026-10-13 (headless run, Day 28 generated): twenty-eighth lesson,
+  `0028-what-breaks-at-100x.html`. Confirmed `lessons/` contained only
+  `0001`–`0027`, `assets/nav.js`'s latest entry was `n: 27` (2026-10-12), and
+  no `0028`/`2026-10-13` entry existed anywhere (`lessons/`, `assets/nav.js`,
+  this file), so proceeded on schedule. Direct DB reads
+  (`psql "$LEARNING_DB_URL" ...`) were not attempted per this file's own
+  standing note that the raw-psql path is disallowed in this sandbox (literal
+  `$VAR` expansion blocked); `bin/query-progress`/`bin/record-progress` were
+  the permitted fallback per this round's own instructions. Read `MISSION.md`
+  (read-only, not modified), `PLAN.md` in full (the domain table and the full
+  Phase 2 spine, including 2d's four bullets), `NOTES.md` in full
+  (conventions, scope boundaries, verification section, and the full
+  generation log, especially Day 26's and Day 27's own entries),
+  `RESOURCES.md`, the one `learning-records/` file, `reference/glossary.html`,
+  and `lessons/0027-data-quality-story.html` plus
+  `lessons/0026-portfolio-one-command-demo.html` and
+  `lessons/0013-dbt-incremental-strategies.html` in full for structural/voice
+  precedent and for this project's own real partition-count and
+  incremental-strategy facts before writing anything.
+  **Topic choice:** Day 27's own "Carried forward for next round" note named
+  "what breaks at 100×" (partitions, incremental models, warehouse choice) as
+  the explicit next item on Phase 2d's spine, and the spine's own bullet order
+  gives a second independent confirmation. No learning-record or quiz signal
+  exists to suggest deviating (still just the one Day-1 baseline file; no
+  `lesson_completed` rows were found for any recent day).
+  **Content:** rather than teach generic distributed-systems capacity
+  planning, picked three bottlenecks this exact project already has real
+  numbers for. (1) Kafka: Day 5's `order_events` topic has exactly 3
+  partitions, which caps one consumer group's parallelism at 3 regardless of
+  how many consumer processes are started — the fix (`kafka-topics.sh --alter
+  --partitions N`) has to happen ahead of the volume, since partition count
+  only rises and existing keys never remap to new partitions. (2) dbt: Day
+  13's `fct_orders` incremental filter scales fine (it only re-reads new
+  rows), but `mart_delivery_sla`'s `delete+insert` lookback window has a
+  latent risk that isn't row-count growth — the window's fixed day-count
+  assumption could become too short if delivered events start arriving later
+  under load, a distinct failure mode from "more rows costs more," named
+  explicitly to avoid the common wrong instinct that incremental models
+  automatically scale by row count alone. (3) Warehouse: one `postgres:17`
+  node (Day 1) with no partitioning on `raw.order_events` — framed the real
+  100× risk as unindexed growth slowing every downstream `select` over time,
+  not any single incremental run's own cost, and named table partitioning by
+  date plus an index as the first fix, explicitly before a managed warehouse,
+  since `MISSION.md` rules a managed warehouse out by name. Closed by naming
+  three heavier tools considered and deliberately set aside (Kafka
+  Streams/Flink, a managed cloud warehouse, multi-broker tuning), all already
+  out of scope per `MISSION.md`, framed as a sign of judgment rather than a
+  gap. The day's actual skill (Section 5) is a new `SCALING.md` with three
+  TODOs: one mechanical (today's real `--describe` partition count, from the
+  "before today" check), two requiring the learner's own reasoning in their
+  own words rather than copying this lesson's prose. No pandas, no
+  Python-language teaching, no new re-derivation of idempotency/API concepts
+  — none applicable to a pure capacity-planning day. Domain names used
+  exactly as established (`order_events`, `fct_orders`, `mart_delivery_sla`,
+  `raw.order_events`, `sla_key`). Opened with an explicit "before today" check
+  (a live `kafka-topics.sh --describe` plus a `grep` on both models' real
+  `config()` blocks) confirming Day 5's `PartitionCount: 3` and Day 13's
+  `merge`/`delete+insert` choices are still true, rather than restating them
+  from memory.
+  **Verification:** this lesson has no dbt model and no Python file (a pure
+  Markdown/analysis day, closest in shape to Day 26's Makefile day), so
+  neither the `dbt parse` nor the `py_compile` paths in this file's
+  "Verifying code before shipping" section applied — stated here rather than
+  silently skipped. The two artifacts that do need checking: the "before
+  today" `grep -A2 "unique_key"` check, and the Section 7 `test -f
+  SCALING.md && grep -c "TODO" SCALING.md` Verify block. Built representative
+  `fct_orders.sql`/`mart_delivery_sla.sql` `config()` blocks (matching Day
+  4/13's real `unique_key`/`incremental_strategy` values exactly) and a
+  representative unfilled `SCALING.md` template (the exact block shown in
+  Section 5) in `.scratch_dataeng_verify_d28/` under the repo root, deleted
+  after. Ran the exact `grep -A2 "unique_key" ...` command against the
+  representative models: output correctly showed
+  `incremental_strategy='merge'` under `fct_orders`'s `unique_key='order_id'`
+  and `incremental_strategy='delete+insert'` under `mart_delivery_sla`'s
+  `unique_key='sla_key'`, matching the lesson's own "before today" Expected
+  line exactly. Ran `test -f SCALING.md && grep -c "TODO" SCALING.md` against
+  the unfilled template: returned `3`, matching the Verify block's own stated
+  starting count exactly, confirming the mechanical check's arithmetic is
+  real rather than asserted. Did not fabricate a live 100×-scale Kafka
+  broker/Postgres instance to test the partition-ceiling or insert-throughput
+  claims empirically — stated explicitly in the lesson's own "Honesty note"
+  callout that these are reasoned from this project's own already-verified
+  facts (Day 5/13/1/6's own prior live-verified generation-log entries), not
+  re-run live this round, since doing so would exceed this course's own
+  16 GB/laptop constraint (`MISSION.md`) and isn't the day's point. The
+  `kafka-topics.sh --alter --partitions` flag name was checked against this
+  course's own established CLI usage pattern (Days 5/18's
+  `--bootstrap-server`, no ZooKeeper), not fetched fresh against Kafka's own
+  docs this round — flagged honestly in the lesson rather than presented as
+  freshly confirmed. Deleted the whole scratch directory afterward.
+  Registered Lesson 28 in `assets/nav.js` (`node --check` clean) and added the
+  Day 28 section to `reference/glossary.html` (1 new term: partition count as
+  a parallelism ceiling — grepped Days 1–27's sections first, case-
+  insensitively, no collisions). Ran a small Python tag-balance/unescaped-`&`/
+  quiz-word-count script (from a scratch file outside `dataeng/`, outside the
+  repo entirely, consistent with Days 12/27's same finding that it isn't
+  removable by this session's own file-removal allowlist but carries no
+  repo-cleanliness risk) against the lesson and the updated
+  `reference/glossary.html`. Both came back with every checked tag balanced
+  (div/p/table/tr/td/th/ul/li/pre/code/h2/dfn/button/span/a) and zero bare
+  `&`. The first quiz draft came up mismatched on all four questions (8/9/6,
+  10/8/9, 8/8/10, 8/10/9 word splits); rebalanced through several
+  edit-and-recount passes — one early pass genuinely overshot due to hand-
+  miscounting rather than trusting the script output, a mistake caught and
+  corrected by re-running the script after every single edit instead of
+  eyeballing — to a final 9/9/9, 9/9/9, 9/9/9 and 10/10/10, re-verified by
+  re-running the same script after the final edit. Checked by eye afterward
+  that no rebalanced option reads as a sentence fragment; all four hold up as
+  complete, parallel-structured sentences at their shared word count.
+  `bin/record-progress dataeng lesson_generated --day 28 --lesson
+  0028-what-breaks-at-100x.html --detail '{"by":"headless"}'` succeeded on
+  the first attempt, run directly from the repo root:
+  `recorded: dataeng/lesson_generated day=28 lesson=0028-what-breaks-at-100x.html`.
+  **Carried forward for next round:** Phase 2d's spine now has exactly one
+  bullet left — a mock design-review walkthrough of the repo, recorded as a
+  learning record — which would also close Phase 2d entirely and leave
+  `PLAN.md`'s own instruction to "revisit this plan at the end of 2a" (already
+  passed) as the next natural checkpoint to reconsider the dbt/Kafka/Airflow
+  depth split against what the learner actually wants to show, per `PLAN.md`'s
+  own closing line.

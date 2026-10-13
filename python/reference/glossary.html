@@ -559,6 +559,14 @@
   <tr><td>configparser</td><td>giữ nguyên "configparser" — module đọc/ghi file config dạng INI: text thường, chia theo từng [section], bên dưới là các dòng key = value, định dạng kinh điển cho file settings con người tự sửa tay được</td><td>The standard-library module for reading and writing INI-style config files — plain text, organized into <code>[section]</code> headers with <code>key = value</code> lines underneath. Every raw value it reads is a string; <code>getint()</code>/<code>getfloat()</code>/<code>getboolean()</code> are the typed readers that convert on the way out.</td></tr>
 </table>
 
+<h2 id="day76">Day 76 — json.dumps/loads, indent, and default=</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>json.dumps / json.loads</td><td>giữ nguyên "dumps"/"loads" — dumps() chuyển object Python thành chuỗi JSON (str) trong memory, loads() chuyển chuỗi đó ngược lại; khác với dump()/load() của Day 6 là làm việc với file đã mở, không phải string</td><td>The string-based twins of Day 6's <code>json.dump()</code>/<code>json.load()</code>. <code>json.dumps(obj)</code> converts a Python object into a JSON <code>str</code> held in memory; <code>json.loads(text)</code> converts that string back. <code>dump</code>/<code>load</code> always take an already-open file object instead.</td></tr>
+  <tr><td>indent= (json.dumps)</td><td>giữ nguyên "indent" — keyword cho dumps()/dump(), chỉ định số space thụt đầu dòng mỗi cấp lồng nhau, biến output 1 dòng gọn thành nhiều dòng dễ đọc cho người; không đổi dữ liệu, chỉ đổi cách hiển thị</td><td>A keyword argument to <code>json.dumps()</code>/<code>json.dump()</code> that reformats the normally compact, single-line output into readable multi-line text, with that many spaces of indentation per nesting level. Purely a formatting choice — the underlying data is unchanged.</td></tr>
+  <tr><td>default= (json.dumps)</td><td>giữ nguyên "default" — keyword cho dumps(), là 1 hàm được gọi đúng lúc dumps() gặp 1 value không thuộc các kiểu JSON có sẵn (str/int/float/bool/None/list/dict); hàm đó phải trả về 1 giá trị thuộc kiểu JSON biết, ví dụ dataclass trả về dict qua asdict()</td><td>A keyword argument to <code>json.dumps()</code> supplying a function called only on a value that is none of JSON's built-in types. The function must return something JSON already knows how to serialize — e.g. a <code>datetime</code> converted to its <code>.isoformat()</code> string, or a <code>dataclass</code> instance converted to a plain dict via <code>dataclasses.asdict()</code>.</td></tr>
+</table>
+
 <p class="next">💬 A term here still unclear? Ask your teacher — hỏi bằng tiếng Việt cũng được.</p>
 
 <script src="../assets/nav.js"></script>

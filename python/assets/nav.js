@@ -156,6 +156,8 @@
       file: "lessons/0074-uuid-and-configparser.html" },
     { n: 75, date: "2026-10-12", title: "Review day 12: retrieval across Days 72-74",
       file: "lessons/0075-review-retrieval-day-12.html" },
+    { n: 76, date: "2026-10-13", title: "json.dumps/loads, indent, and default=",
+      file: "lessons/0076-json-dumps-loads-and-default.html" },
   ];
 
   const REFS = [

@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 76 · json.dumps/loads, indent, and default=</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 76 · ~20 min · 13 Oct 2026</p>
+<h1><code>json</code> beyond <code>load</code>/<code>dump</code>: strings, pretty-printing, and <code>default=</code></h1>
+<p class="byline">Day 6 taught <code>json.load</code>/<code>json.dump</code> for reading and writing a file. A fresh-gap grep across all 75 lessons and practice files today found the rest of the module untaught: <dfn data-en="json.dumps(obj) converts a Python object into a JSON string held in memory; json.loads(text) converts that string back -- the string-based twins of dump()/load(), which always take an already-open file object instead" data-vn="giữ nguyên &quot;dumps&quot;/&quot;loads&quot; — dumps() chuyển object Python thành chuỗi JSON (str) trong memory, loads() chuyển ngược lại; khác với dump()/load() là làm việc với file đã mở, không phải string"><code>dumps()</code>/<code>loads()</code></dfn> for working with JSON as an in-memory string rather than a file, <dfn data-en="a keyword argument to json.dumps()/json.dump() that reformats the normally compact output into readable multi-line text, with that many spaces of indentation per nesting level -- purely a formatting choice, the data itself is unchanged" data-vn="giữ nguyên &quot;indent&quot; — keyword cho dumps()/dump(), chỉ định số space thụt đầu dòng mỗi cấp lồng nhau, biến output gọn thành nhiều dòng dễ đọc; không đổi dữ liệu, chỉ đổi cách hiển thị"><code>indent=</code></dfn> for human-readable output, and <dfn data-en="a keyword argument to json.dumps() supplying a function called only on a value that is none of JSON's built-in types; the function must return something JSON already knows how to serialize, such as a datetime turned into its isoformat() string or a dataclass turned into a dict via asdict()" data-vn="giữ nguyên &quot;default&quot; — keyword cho dumps(), là 1 hàm được gọi khi dumps() gặp value không thuộc kiểu JSON có sẵn; hàm đó phải trả về giá trị thuộc kiểu JSON biết, ví dụ datetime thành chuỗi isoformat() hoặc dataclass thành dict qua asdict()"><code>default=</code></dfn> for the exact gap Day 72's <code>pickle</code> lesson named — serializing a <code>dataclass</code> or <code>datetime</code> that plain <code>json.dumps()</code> rejects.</p>
+
+<div class="callout"><strong>Why today, specifically:</strong> with Days 72-74 reviewed on Day 75 and no new fresh-gap candidate pre-queued, today's generator ran a fresh scan from scratch per Day 75's own next-day note — grepping every stdlib module named anywhere in the log against <code>lessons/</code>, <code>practice/</code>, and <code>reference/glossary.html</code>. <code>json</code> itself already has a glossary entry and a basic <code>load</code>/<code>dump</code> example from Day 6, but <code>dumps</code>/<code>loads</code>, <code>indent=</code>, <code>sort_keys=</code>, and <code>default=</code> were never shown — a real, scoped gap, and a natural follow-up to Day 72's <code>pickle</code> lesson, which named "<code>json</code> can't hold a <code>dataclass</code>" as the reason <code>pickle</code> exists at all. Today shows the one escape hatch <code>json</code> itself offers for that exact case before reaching for <code>pickle</code>.</div>
+
+<h2>1 · <code>dumps</code>/<code>loads</code>: JSON as a string, not a file</h2>
+<p>Day 6's <code>json.load(f)</code>/<code>json.dump(obj, f)</code> always take an already-open file object. Often the JSON text itself is what's needed — to send over a network, to store in one column of a database row, to print for debugging — with no file involved at all. <code>dumps()</code> ("dump string") and <code>loads()</code> ("load string") are the string-based twins of the exact same conversion:</p>
+<pre><code><span class="kw">import</span> json
+
+record = {<span class="str">"city"</span>: <span class="str">"Hanoi"</span>, <span class="str">"amount"</span>: 120, <span class="str">"tags"</span>: [<span class="str">"retail"</span>, <span class="str">"q3"</span>]}
+
+text = json.dumps(record)
+<span class="kw">print</span>(text)        <span class="cm"># '{"city": "Hanoi", "amount": 120, "tags": ["retail", "q3"]}'</span>
+<span class="kw">print</span>(<span class="kw">type</span>(text))  <span class="cm"># &lt;class 'str'&gt;</span>
+
+back = json.loads(text)
+<span class="kw">print</span>(back == record)  <span class="cm"># True -- round-trips to an equal dict</span></code></pre>
+<p>The naming pattern holds across the whole module: <code>dump</code>/<code>load</code> work with an open file, <code>dumps</code>/<code>loads</code> work with a plain <code>str</code> already in memory. Reach for <code>dumps</code>/<code>loads</code> whenever the JSON text itself is the thing being passed around — an HTTP request body, a log line, a single text column — and <code>dump</code>/<code>load</code> only when writing straight to or reading straight from a file on disk.</p>
+
+<h2>2 · <code>indent=</code> and <code>sort_keys=</code>: JSON for a human to read</h2>
+<p><code>json.dumps()</code>'s default output above is compact — correct, but hard to scan by eye. <code>indent=</code> reformats it as readable, multi-line text:</p>
+<pre><code><span class="kw">import</span> json
+
+record = {<span class="str">"city"</span>: <span class="str">"Hanoi"</span>, <span class="str">"amount"</span>: 120, <span class="str">"tags"</span>: [<span class="str">"retail"</span>, <span class="str">"q3"</span>]}
+
+<span class="kw">print</span>(json.dumps(record, indent=2))
+<span class="cm"># {
+#   "city": "Hanoi",
+#   "amount": 120,
+#   "tags": [
+#     "retail",
+#     "q3"
+#   ]
+# }</span></code></pre>
+<p><code>indent=2</code> tells <code>dumps()</code> to insert that many spaces per nesting level and a newline after every item — the same shape a formatted config file or a pretty-printed API response uses. <code>sort_keys=<span class="kw">True</span></code> additionally sorts every dict's keys alphabetically before writing, which makes two JSON dumps of the same data byte-for-byte comparable regardless of the order the dict happened to build its keys in — useful for diffing a saved snapshot against a freshly generated one. Both keywords work identically on <code>json.dump()</code> when writing to a file.</p>
+
+<h2>3 · <code>default=</code>: the one escape hatch for types <code>json</code> doesn't know</h2>
+<p>Day 72 named the core limit: <code>json</code> only knows the fixed set of types its text format defines — strings, numbers, booleans, <code>None</code>, lists, and dicts of those. A <code>dataclass</code> instance, a <code>datetime</code>, or any other custom object raises <code>TypeError</code> the moment <code>dumps()</code> reaches it:</p>
+<pre><code><span class="kw">from</span> dataclasses <span class="kw">import</span> asdict, dataclass, is_dataclass
+<span class="kw">import</span> datetime
+<span class="kw">import</span> json
+
+<span class="kw">@dataclass</span>
+<span class="kw">class</span> Order:
+    city: str
+    placed_at: datetime.datetime
+
+o = Order(<span class="str">"Hanoi"</span>, datetime.datetime(2026, 10, 13, 9, 0))
+json.dumps(o)   <span class="cm"># raises TypeError: Object of type Order is not JSON serializable</span></code></pre>
+<p><code>default=</code> is the hook <code>json.dumps()</code> calls on exactly the values it doesn't already know how to handle, letting the caller supply a conversion instead of giving up:</p>
+<pre><code><span class="kw">def</span> fallback(value):
+    <span class="kw">if</span> <span class="kw">isinstance</span>(value, datetime.datetime):
+        <span class="kw">return</span> value.isoformat()
+    <span class="kw">if</span> is_dataclass(value):
+        <span class="kw">return</span> asdict(value)
+    <span class="kw">raise</span> TypeError(<span class="kw">f</span><span class="str">"not JSON serializable: {type(value)}"</span>)
+
+json.dumps(o, default=fallback)
+<span class="cm"># '{"city": "Hanoi", "placed_at": "2026-10-13T09:00:00"}'</span></code></pre>
+<p><code>dumps()</code> tries its built-in types first; only when a value is none of those does it call <code>default(value)</code> and use whatever that function returns in its place — which itself must be one of <code>json</code>'s native types, or <code>default</code> runs again on that return value. <code>fallback</code> above handles both cases Day 72 called out by name: <code>datetime</code> turned into its standard string form with <code>.isoformat()</code>, and a dataclass turned into a plain dict with <code>dataclasses.asdict()</code> — both now just strings, numbers, and dicts that <code>json</code> already knows.</p>
+
+<div class="callout"><strong>So when does <code>default=</code> lose to <code>pickle</code>?</strong> <code>default=</code> only helps when every custom type in the data has an obvious, lossless text-or-number stand-in — a <code>datetime</code> as an ISO string, a dataclass as a dict of its own JSON-safe fields. The moment an object's exact Python identity matters — it needs to come back as <em>that class</em>, with methods, not just a dict shaped like it — <code>default=</code> can convert it to JSON but nothing converts it back automatically; <code>pickle</code> round-trips the real object with no hand-written conversion function on either side, at the cost of Day 72's untrusted-source risk. Prefer <code>default=</code> for data crossing a network or a database column; reach for <code>pickle</code> only for same-process, trusted scratch storage of a real Python object.</div>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> nothing pandas-specific today — <code>json.dumps</code>/<code>loads</code> operate on plain dicts and lists, the same shapes a <code>DataFrame</code>'s <code>.to_dict()</code> would produce, but no <code>DataFrame</code> is shown here. Not covered further, per <code>MISSION.md</code>.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/76_json_dumps_loads_and_default.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/76_json_dumps_loads_and_default.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: round-tripping a dict through <code>json.dumps()</code>/<code>loads()</code> as a string with no file involved, formatting output with <code>indent=2</code> and confirming it contains real newlines, and writing a <code>default=</code> function that lets <code>json.dumps()</code> serialize a <code>dataclass</code> instance holding a <code>datetime</code> field.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="dump/load always take an already-open file object and read or write it directly. dumps/loads work with a plain str already in memory, with no file involved at all -- the s stands for string, the exact same conversion either way.">
+    <p class="stem">What is the difference between <code>json.dump()</code> and <code>json.dumps()</code>?</p>
+    <button class="opt" data-ok>dump writes to a file; dumps returns a string</button>
+    <button class="opt">dump is new; dumps is an old deprecated name</button>
+    <button class="opt">dumps works on lists only; dump works on dicts</button>
+  </div>
+  <div class="q" data-why="indent=2 tells dumps()/dump() to insert that many spaces per nesting level plus a newline after every item, turning the normally compact one-line output into readable, multi-line text -- purely a formatting choice, not a change in the data itself.">
+    <p class="stem">What does passing <code>indent=2</code> to <code>json.dumps()</code> change?</p>
+    <button class="opt" data-ok>it reformats that same data as easy to read text</button>
+    <button class="opt">it limits the whole output to two levels of nesting</button>
+    <button class="opt">it rounds every number found in the data to decimals</button>
+  </div>
+  <div class="q" data-why="json.dumps() tries its built-in types first (str, int, float, bool, None, list, dict) and only calls default(value) on a value that is none of those, using whatever JSON-safe value that function returns in its place -- a dataclass turned into a dict via asdict(), for instance.">
+    <p class="stem">When does <code>json.dumps()</code> call the function passed as <code>default=</code>?</p>
+    <button class="opt" data-ok>only on a value its built-in types cannot already handle</button>
+    <button class="opt">on every single value, before any built-in type gets checked</button>
+    <button class="opt">only once, on the outermost dict, never any nested value</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the standard library's <a href="https://docs.python.org/3/library/json.html"><code>json</code></a> docs — the <code>dumps()</code> signature section documents every keyword shown today (<code>indent</code>, <code>sort_keys</code>, <code>default</code>) plus <code>cls=</code> for a full custom encoder class, the natural next step beyond a single <code>default=</code> function.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day76">glossary</a> under Day 76.<br>
+With today's gap closed, no standing fresh-gap candidate is currently on record anywhere in the log; the next lesson's generator should run its own fresh-gap scan from scratch rather than carry one forward.<br><br>
+💬 Anything unclear — when <code>default=</code> is enough versus when <code>pickle</code> is the better fit? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

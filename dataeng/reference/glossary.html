@@ -255,6 +255,12 @@
   <tr><td>data-quality layer</td><td>giữ nguyên "data-quality layer" — 1 trong nhiều điểm riêng biệt trong pipeline bắt được 1 loại lỗi/hành vi sai cụ thể, gọi tên theo loại lỗi nó bắt được (hoặc không bắt được) về mặt cấu trúc, không phải theo công cụ nào chạy nó — nên 2 check sống trong cùng 1 công cụ (như data test và freshness của dbt) vẫn tính là 2 layer khác nhau nếu chúng bắt 2 loại lỗi khác nhau</td><td>One of several distinct points in a pipeline where a specific kind of bad data or bad behavior gets caught — named by what failure mode it structurally can and can't detect, not by which tool happens to implement it, so two checks living in the same tool (like dbt's data tests and source freshness) can still count as two different layers if they catch different things. This course's three: the Kafka consumer (no silent loss/duplication), dbt's data tests and source freshness (content correctness, loader liveness), and hand-written singular tests for rules no generic test shape can express (e.g. a point-in-time join's non-overlapping windows).</td></tr>
 </table>
 
+<h2 id="day28">Day 28 — What breaks at 100×: partitions, incremental models &amp; warehouse choice</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>partition count as a parallelism ceiling</td><td>giữ nguyên "parallelism ceiling" — trong Kafka, số consumer tối đa có thể cùng xử lý song song message từ các partition của 1 topic, trong 1 consumer group: đúng 1 consumer giữ 1 partition tại 1 thời điểm, nên số partition của topic là giới hạn cứng cho song song hoá, bất kể start thêm bao nhiêu consumer process</td><td>In Kafka, the maximum number of consumers that can be actively processing messages from one topic's partitions at the same time, within a single consumer group — exactly one consumer per partition may hold it at once, so a topic's partition count is a hard ceiling on parallel consumption for that group, regardless of how many consumer processes are started. Raising it (<code>kafka-topics.sh --alter --partitions N</code>) only ever goes up on a live topic, and only new messages land on the new partitions — existing keys don't remap.</td></tr>
+</table>
+
 <script src="../assets/nav.js"></script>
 </body>
 </html>

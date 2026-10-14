@@ -3384,3 +3384,143 @@ along the Phase 2 spine, adapted to the learning records.
   passed) as the next natural checkpoint to reconsider the dbt/Kafka/Airflow
   depth split against what the learner actually wants to show, per `PLAN.md`'s
   own closing line.
+- 2026-10-14 (headless run, Day 29 generated — **Phase 2d complete**):
+  twenty-ninth lesson, `0029-design-review-walkthrough.html`. Confirmed
+  `lessons/` contained only `0001`–`0028`, `assets/nav.js`'s latest entry was
+  `n: 28` (2026-10-13), and no `0029`/`2026-10-14` entry existed anywhere
+  (`lessons/`, `assets/nav.js`, this file), so proceeded on schedule. No
+  `lesson_completed`/quiz/kata signal exists for this course more recently
+  than mid-July per the standing finding every round since Day 9 has
+  reconfirmed, and `learning-records/` still holds only the one Day-1
+  baseline file, so there was no fresh completion/quiz signal to adapt
+  today's content to; pace came from Day 28's own carried-forward note plus
+  `PLAN.md`'s spine, consistent with every Phase 2 round so far. Read
+  `MISSION.md`, `PLAN.md` in full (Phase 2d's four bullets and the closing
+  "revisit this plan at the end of 2a" line), `NOTES.md` in full
+  (conventions, scope boundaries, verification section, and the tail of the
+  generation log, especially Day 27's and Day 28's own entries and carried-
+  forward notes), `RESOURCES.md`, the one `learning-records/` file,
+  `reference/glossary.html`, `assets/nav.js`, and `lessons/0028-what-breaks-
+  at-100x.html` plus `lessons/0027-data-quality-story.html` and
+  `lessons/0026-portfolio-one-command-demo.html` in full for structural/voice
+  precedent on a non-dbt, non-Python "reflection" day before writing anything.
+  **Topic choice:** Day 28's own "Carried forward for next round" note named
+  the mock design-review walkthrough as the one remaining Phase 2d bullet,
+  and `PLAN.md`'s own spine gives a second independent confirmation (it is
+  2d's fourth and final listed item). Re-checked `PLAN.md`'s closing line
+  before finalizing: "Revisit this plan at the end of 2a... " is the only
+  standing instruction that could have superseded this choice, and it points
+  *forward*, to a future checkpoint once 2d is done, not to a different topic
+  for today — so it does not override today's choice, it is what today's
+  choice unlocks. No learning-record or quiz signal exists to suggest
+  deviating, same finding as every prior Phase 2 round.
+  **Content:** built a six-question rubric from this project's own real
+  decisions (ELT vs. ETL, why Kafka lands into the warehouse instead of a
+  mart directly, the three data-quality layers from Day 27, materialization
+  choices vs. their Day 4/13 stated reasons, the Day 28 bottleneck/`SCALING.md`
+  state, and an explicit "name a genuine weak spot" question) rather than
+  generic design-review trivia, each one naming the exact file or command to
+  check the answer against so "I think so" is never sufficient on its own.
+  Framed the exercise as playing both roles — presenter and skeptical
+  reviewer — against the same repo, since no second person is available.
+  The day's actual skill (Section 4) is writing the review up as a new
+  `docs/design-review-<date>.md` file in the learner's own repo, with two
+  TODOs: Section 4 (does the real `grep` output on `config()` blocks match
+  what was expected from memory) and Section 6 (an honest, specific weak
+  spot — deliberately not letting "everything's fine" count as a finding,
+  mirroring Day 27's own closing habit of naming real unclosed gaps instead
+  of claiming full coverage). Section 5 scoped what a design review
+  deliberately is *not* (not a security review — no auth/secrets surface
+  exists in this local-only project per `MISSION.md`'s own constraints; not
+  a performance benchmark — Day 28 already did that arithmetic; not a second
+  code-review pass — `dbt build`/`py_compile` already cover that), so the
+  exercise doesn't sprawl into re-doing three prior lessons' jobs. No pandas,
+  no Python-language teaching, no new re-derivation of idempotency/API
+  concepts — none applicable to a pure reflection/process day. Domain names
+  used exactly as established (`raw.*`, `order_events`, `fct_orders`,
+  `dim_restaurants`, `mart_delivery_sla`, `SCALING.md`). Opened with an
+  explicit "before today" check (`README.md`/`SCALING.md` both exist, plus a
+  clean `dbt build`) rather than assuming Days 7's and 28's own build steps
+  landed, per this file's standing guidance, and named that a missing file
+  is itself a review finding worth keeping rather than silently patching
+  first.
+  **Verification:** this lesson introduces no new dbt model, snapshot,
+  macro, DAG or Python file — it is a pure reflection/markdown day, closest
+  in shape to Day 26's Makefile day and Day 28's `SCALING.md` day — so
+  neither the `dbt parse` nor the `py_compile` paths in this file's
+  "Verifying code before shipping" section applied, stated here rather than
+  silently skipped. The two mechanical artifacts that do need checking: the
+  rubric's own "check against" commands (Section 2's table, reusing Days
+  4/13/27/28's own already-literal `grep`/`ls` invocations verbatim rather
+  than inventing new ones) and the Section 6 Verify block
+  (`test -f docs/design-review-*.md && grep -c "TODO" ...`). Built a
+  representative, byte-identical copy of the lesson's own markdown template
+  (the exact block shown in Section 4) in
+  `.scratch_dataeng_verify_d29/docs/design-review-template.md` under the repo
+  root, deleted after, and ran the real `grep -c "TODO"` command against it:
+  returned `2`, matching the Verify block's own stated starting count
+  exactly — confirmed by direct count rather than assumed, since a first,
+  hastier `grep -c "TODO"` run directly against the *lesson's own HTML*
+  (not the reconstructed template file) returned `3`, because the phrase
+  "the two TODOs" appears once in Section 4's own prose outside the `<pre>`
+  block; re-ran against the correctly-reconstructed standalone template file
+  instead and got the real `2`, so the lesson's stated Verify count is
+  confirmed correct and the discrepancy was a verification-script mistake,
+  not a lesson bug. Also re-ran Day 4/13's own `grep -A1 "materialized"`
+  pattern (the exact command named in Section 2's rubric table and Section 3)
+  against representative scratch copies of `fct_orders.sql`/
+  `dim_restaurants.sql`/`mart_delivery_sla.sql` `config()` blocks, confirming
+  the command text itself still produces the expected output shape. Deleted
+  the whole scratch directory afterward.
+  Registered Lesson 29 in `assets/nav.js` (`node --check` clean) and added
+  the Day 29 section to `reference/glossary.html` (1 new term: design review
+  — grepped Days 1–28's sections first, case-insensitively, no collisions).
+  Ran a small Python tag-balance/unescaped-`&`/quiz-word-count script (from a
+  scratch file inside `.scratch_dataeng_verify_d29/`, deleted with the rest of
+  the scratch directory afterward, unlike several recent rounds that had to
+  leave such a script outside the repo entirely — this round's sandbox
+  allowed writing and then removing a file under the repo root directly)
+  against the lesson and the updated `reference/glossary.html`. Both came
+  back with every checked tag balanced
+  (div/p/table/tr/td/th/ul/li/pre/code/h2/dfn/button/span/a) and zero bare
+  `&`. The first quiz draft came up mismatched on three of the four questions
+  (8/9/8, 6/8/10 and 8/11/8 word splits); rebalanced through several
+  edit-and-recount passes to a final 7/7/7, 8/8/8, 8/8/8 and 9/9/9,
+  re-verified by re-running the same script after each edit.
+  **Learning record: none added this round.** Per this file's own standing
+  rule (a learning record documents something genuinely new and durable
+  about the learner or the repo's actual state, not "the learner did a
+  review"), today's lesson *builds the exercise* a design review walkthrough
+  needs — the six-question rubric and the `docs/design-review-<date>.md`
+  template — but no human has actually walked through it yet in this headless
+  generation round. Writing a learning record now would mean fabricating
+  findings (what Section 6's weak spot is, whether Section 4's materialization
+  grep matched expectations) that only exist once the learner actually runs
+  the review against their own repo and fills in both TODOs. The next round
+  should check whether `docs/design-review-*.md` exists in the learner's repo
+  with both TODOs filled (not directly visible to this workspace, so this
+  would need to come from the learner's own follow-up message or a future
+  session) before writing the learning record this lesson's own build step is
+  meant to produce — at that point, *that* file's actual Section 4/6 content
+  is the real, durable finding worth recording, not a restatement of today's
+  template.
+  `bin/record-progress dataeng lesson_generated --day 29 --lesson
+  0029-design-review-walkthrough.html --detail '{"by":"headless"}'` — see
+  this entry's tail for the result.
+  **Phase 2d is now closed.** All four of its spine bullets are done (Day 26:
+  one-command demo; Day 27: data-quality story; Day 28: what breaks at 100×;
+  Day 29: design-review walkthrough). Per `PLAN.md`'s own closing line
+  ("Revisit this plan at the end of 2a, when the dbt depth versus
+  Kafka/Airflow split should be re-checked against what the learner actually
+  wants to show"), the next natural checkpoint — now that 2d, not just 2a, is
+  also behind — is exactly that: re-reading `PLAN.md`'s full spine (2a's
+  remaining depth vs. how much of 2b/2c is still unbuilt) against the
+  learner's own stated goals and any fresh learning-record/quiz signal,
+  before defaulting to continuing straight down 2b/2c's remaining bullets in
+  listed order the way every Phase 2 round so far has defaulted for its own
+  next topic. **Carried forward for next round:** open by re-checking for any
+  new learning-record/quiz/completion signal first (none has appeared since
+  Day 1 across 28 straight rounds, but this is the first round where checking
+  is explicitly, not just procedurally, called for), then make that
+  depth-split call explicitly in the next generation log entry rather than
+  silently defaulting to 2b's first bullet.

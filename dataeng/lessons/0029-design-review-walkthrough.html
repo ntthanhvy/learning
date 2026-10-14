@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 29 · A mock design-review walkthrough of the repo</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 29 · ~20 min · 14 Oct 2026</p>
+<h1>A mock design-review walkthrough of the repo</h1>
+<p class="byline">Today's tangible win isn't new code in <code>warehouse/</code> or <code>dags/</code> — it's running a structured <dfn data-en="a deliberate, structured examination of a system's design by someone playing a skeptical reviewer -- not a bug hunt in the code, but a check of whether the stated design choices actually hold up against their own stated reasons, out loud, against a real system rather than in the abstract" data-vn="giữ nguyên &quot;design review&quot; — buổi xem xét có cấu trúc, có chủ đích về thiết kế hệ thống, do người đóng vai reviewer hay hỏi ngược thực hiện — không phải soi lỗi code, mà kiểm tra các lựa chọn thiết kế đã nêu có thực sự đứng vững trước lý do chính nó đưa ra hay không, nói ra miệng, trên hệ thống thật">design review</dfn> walkthrough of your own <code>food-delivery-pipeline</code> repo against a six-question rubric, then writing down what it actually found as a new <code>learning-records/</code>-style note in your own repo — the first artifact in this course that is a record of a review, not a build step. Completing this closes Phase 2d entirely: every bullet on <code>PLAN.md</code>'s portfolio-and-interview spine will be done.</p>
+
+<div class="callout"><strong>Before today — confirm the artifacts this review actually walks through exist:</strong> today reviews, it doesn't build.
+<pre><code>ls README.md SCALING.md
+cd warehouse &amp;&amp; uv run --with "dbt-postgres==1.11.0" dbt build --profiles-dir .</code></pre>
+Expected: both files exist (<code>README.md</code> since Day 7, <code>SCALING.md</code> since Day 28), and a clean <code>dbt build</code> with no <code>ERROR</code>s (exact <code>PASS</code>/<code>TOTAL</code> depends on which days' models you've built — compare against your own latest lesson's Verify block rather than a number pasted here). If either is missing, that's itself worth noting in today's review rather than silently patched first — a design review runs against what actually exists, not what should exist.</div>
+
+<h2>1 · Why a design review, and why now</h2>
+<p><code>MISSION.md</code> names the finish line for this whole course as a 10-minute interview-style walkthrough: why ELT, why this split between stream and batch, where data quality is enforced, and what would change at 100× volume. Days 26–28 each answered one slice of that out loud (a one-command demo, a data-quality story, a scaling story). Today is different in kind, not degree: instead of writing one more answer, you run the <em>process</em> a real engineering org uses to pressure-test a design before — or after — it ships, pointed at your own finished repo, and you play both roles, builder and reviewer, honestly.</p>
+<p>This matters because a design review catches a different class of problem than a test or a quiz does. <code>dbt build</code> tells you the SQL is correct. A design review asks whether the <em>decisions</em> behind the SQL still make sense together, whether a decision from Day 4 quietly conflicts with one from Day 13, and whether you can defend each one to a skeptical listener without checking the code first. That is exactly the skill an interview's system-design round is testing.</p>
+
+<h2>2 · The rubric: six questions, each pointed at a real file</h2>
+<p>A real design review has a shape: someone walks the system, a reviewer asks "why," and every answer either holds up or becomes a follow-up item. The six questions below are built from this project's own decisions — not generic distributed-systems trivia — and each one names the exact file or lesson to check against, so "I think so" is never good enough; the repo has to confirm it.</p>
+<table class="gloss">
+<tr><th>#</th><th>Question to answer out loud</th><th>Check against</th></tr>
+<tr><td>1</td><td>Why ELT and not ETL for this pipeline specifically?</td><td>Day 1's pipeline map; does <code>raw.*</code> actually hold untransformed data, or did a loader quietly clean something first?</td></tr>
+<tr><td>2</td><td>Why does Kafka feed the warehouse instead of writing straight to a mart?</td><td>Day 6's consumer landing <code>raw.order_events</code>, not a mart, before dbt ever runs on it.</td></tr>
+<tr><td>3</td><td>Where does each of this project's three data-quality layers actually live, and why there?</td><td>Day 27's table — re-derive it from the real files, don't just recite Day 27's prose.</td></tr>
+<tr><td>4</td><td>Which materialization did each mart get, and does today's real <code>config()</code> block still match the reason given for it?</td><td><code>grep -A1 "materialized" warehouse/models/marts/*.sql</code> against Day 4/13's stated reasons.</td></tr>
+<tr><td>5</td><td>What's the single biggest bottleneck at 100×, and is the fix already written down anywhere real?</td><td>Day 28's <code>SCALING.md</code> — are its three TODOs actually filled with your own numbers, or still template text?</td></tr>
+<tr><td>6</td><td>What's the single weakest, least-tested part of this design, named honestly?</td><td>Day 27 Section 4's point-in-time join gap, or a new one you find today — a review that finds nothing wrong is a review that didn't look hard enough.</td></tr>
+</table>
+<p>Notice the shape: questions 1–4 ask you to defend a decision against its own stated reason, using a real command against a real file. Questions 5–6 ask what's still open. A design review that only produces "everything's fine" answers hasn't actually functioned as a review — Day 27's own closing section already modeled this by naming two unclosed gaps instead of claiming full coverage, and today extends that habit to the whole repo rather than one lesson's slice of it.</p>
+
+<h2>3 · Running the review: play both roles honestly</h2>
+<p>A design review needs a skeptical voice asking "why," not just a presenter reciting decisions. Since there's no second person available, play the reviewer against your own repo deliberately: for each of the six questions above, first answer it out loud (or in writing) the way you would in an interview, <em>then</em> run the matching "check against" command and see whether the real repo actually backs up what you just said. The gap between what you said from memory and what the command shows is the real finding — not a formality, the actual point of today.</p>
+<p>Concretely, for question 4 above:</p>
+<pre><code>cd warehouse &amp;&amp; grep -A1 "materialized" models/marts/*.sql</code></pre>
+<p>Before running it, write down from memory what you expect each mart's materialization to be and why (<code>dim_restaurants</code>: a plain <code>table</code>, since restaurant counts don't scale with order volume — Day 28's own point; <code>fct_orders</code>: <code>incremental</code> with <code>unique_key='order_id'</code>, no explicit strategy, which Day 13 found actually means dbt-postgres's own default, <code>delete+insert</code> — not <code>merge</code>; <code>mart_delivery_sla</code>: <code>incremental</code> with <code>incremental_strategy='delete+insert'</code> and a lookback window, from Day 13's second half). Then run the command and compare. If your own project's file matches, that's a decision you can genuinely defend, not just recite. If it doesn't match — a mart you changed since, or a detail you misremembered — that mismatch is today's first real review finding, and it goes in the write-up in Section 4, not quietly fixed and forgotten.</p>
+
+<h2>4 · The day's actual skill: write it up as a learning record, in your own repo</h2>
+<p>Running the review in your head or out loud isn't the deliverable — a design review that produces no written record might as well not have happened, the same reason this course's own <code>learning-records/</code> directory exists. In your <code>food-delivery-pipeline</code> repo, create <code>docs/design-review-2026-10-14.md</code> (or today's real date) with this shape:</p>
+<pre><code><span class="cm"># Design review — food-delivery-pipeline
+
+Date: &lt;today's real date&gt;
+Reviewer: self, mock interview-style walkthrough (Data Pipelines course, Day 29)
+
+## 1. ELT vs ETL
+&lt;your answer to rubric Q1, confirmed against raw.* — 2-3 sentences&gt;
+
+## 2. Why Kafka feeds the warehouse, not a mart directly
+&lt;your answer to rubric Q2 — 2-3 sentences&gt;
+
+## 3. Data-quality layers, re-derived from the real files
+&lt;your answer to rubric Q3 — does it match Day 27's table, or did something
+drift since? Say which.&gt;
+
+## 4. Materialization choices vs. their stated reasons</span>
+&lt;TODO -- the output of today's grep command, plus whether it matched what
+you expected from memory before running it. If it didn't match, say so here,
+not just in your head.&gt;
+<span class="cm">
+## 5. Biggest bottleneck at 100x
+&lt;your answer to rubric Q5, confirmed against SCALING.md&gt;
+
+## 6. Weakest / least-tested part of this design
+&lt;TODO -- your own honest answer. Day 27 named the point-in-time join's
+missing regression coverage as one candidate; name that one, or a different
+one you found today while running this review, but don't leave this section
+empty or vague -- a review that finds nothing is a review that didn't look.&gt;</span>
+</code></pre>
+<p>The two TODOs are today's actual skill: Section 4 needs a real command run against your real repo, and Section 6 needs an honest, specific weak spot — not "everything looks good," which is not a finding a real design review would accept from either a presenter or a reviewer.</p>
+
+<h2>5 · What a design review is not</h2>
+<p>Three things today's walkthrough deliberately isn't, so the scope stays honest: it is not a security review (no secrets/auth surface exists in this local-only project to review — <code>MISSION.md</code>'s own "no cloud account, no paid services" constraint rules that out); it is not a performance benchmark (Day 28 already did the back-of-envelope capacity math — today re-derives the <em>decisions</em>, not the arithmetic); and it is not a second code-review pass hunting for bugs in SQL or Python syntax (that's what <code>dbt build</code> and <code>py_compile</code> already do on every prior day). A design review asks only "do the stated decisions, taken together, still make sense," which is a narrower and different question than any of those three.</p>
+
+<h2>6 · Verify</h2>
+<pre><code>test -f docs/design-review-*.md &amp;&amp; grep -c "TODO" docs/design-review-*.md</code></pre>
+<p>Expected: the file exists, and the <code>grep -c</code> count drops from <code>2</code> (the template above, unfilled) to <code>0</code> once Section 4's real <code>grep</code> output and Section 6's honest weak-spot answer are both written in. As with Day 28's <code>SCALING.md</code> check, a <code>0</code> with placeholder text copied from this lesson doesn't count — the check is mechanical, the content isn't.</p>
+<div class="callout"><strong>Honesty note on today's verification:</strong> this lesson has no new dbt model, snapshot, macro or Python file — the rubric's own "check against" commands (Sections 2–3) are the exact <code>grep</code>/<code>ls</code> invocations already shown verbatim in Days 4/13/27/28's own generation history, re-run this round against representative scratch copies of those same models' <code>config()</code> blocks to confirm the commands themselves still produce the expected text (they did: the Day-4/13 materialization table in Section 3 and the two-TODO count in Section 6 were both confirmed against scratch files, deleted after). Neither <code>dbt parse</code> nor <code>py_compile</code> applies today, since nothing new was written in either language — stated here rather than silently skipped, matching Day 26's and Day 28's own precedent for a non-code lesson.</div>
+
+<div class="interview">
+<p><strong>Q: "Walk me through a design review you'd run on your own project before calling it done."</strong> A strong answer, out loud: <em>"I'd run six questions against the real repo, not from memory alone: why ELT over ETL, why Kafka lands into the warehouse rather than writing a mart directly, where each of my three data-quality layers actually lives and why there, whether my materialization choices still match the reasons I gave for them when I check the real config blocks, what the single biggest bottleneck is at 100x and whether the fix is actually written down, and — the one people skip — what's the weakest, least-tested part of this design. For me that's the point-in-time commission join: its correctness depends on a windowing boundary that no generic test shape covers, and until I wrote a dedicated test for it, nothing would have caught a regression there. A review that only finds things that are fine isn't a real review."</em> The signal: naming a real, specific weak point instead of claiming full coverage, and backing every claim with a command against the actual repo rather than reciting from memory.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A design review checks whether the system's stated design decisions still hold together and still match their own stated reasons, run against the real repo -- not a syntax/bug hunt (that's dbt build / py_compile's job) and not a performance benchmark (that was Day 28's own capacity math). The six-question rubric exists specifically to re-derive decisions from real files, not recite them from memory.">
+    <p class="stem">What does today's design review actually check, that a passing <code>dbt build</code> does not?</p>
+    <button class="opt" data-ok>Whether stated design decisions still hold together</button>
+    <button class="opt">Whether every SQL statement compiles correctly today</button>
+    <button class="opt">Whether Python files import without any errors</button>
+  </div>
+  <div class="q" data-why="Section 3 explicitly frames a review that only produces 'everything's fine' answers as having failed to function as a review -- Day 27's own closing section modeled naming real, unclosed gaps (schema evolution, consumer lag) instead of claiming full coverage, and today's rubric's sixth question exists specifically to force an honest weak-spot answer.">
+    <p class="stem">Why does today's rubric require naming a genuine weak spot, not just strengths?</p>
+    <button class="opt" data-ok>Finding nothing wrong means the review missed it</button>
+    <button class="opt">Weak spots are mandatory content in every quiz</button>
+    <button class="opt">Strengths alone never fit inside one markdown page</button>
+  </div>
+  <div class="q" data-why="Day 13 found that dbt-postgres's own default incremental strategy, once unique_key is set with no explicit incremental_strategy, is delete+insert, not merge -- Postgres only gained a native MERGE in version 15, and dbt-postgres only dispatches to a real merge when a model asks for it explicitly. fct_orders relies on that default rather than stating merge explicitly.">
+    <p class="stem">Per Day 13's own finding, what does <code>fct_orders</code>'s bare <code>unique_key</code> (no explicit strategy) actually resolve to?</p>
+    <button class="opt" data-ok>dbt-postgres's own quiet default, which is just delete+insert</button>
+    <button class="opt">A real native Postgres MERGE, run every time</button>
+    <button class="opt">Whichever strategy the very first dbt run picked</button>
+  </div>
+  <div class="q" data-why="Completing today's mock design-review walkthrough, recorded as a learning record, is explicitly the fourth and final bullet on PLAN.md's Phase 2d spine. PLAN.md's own closing line says to revisit the dbt/Kafka/Airflow depth split at the end of 2a (already passed) against what the learner actually wants to show -- the next natural checkpoint once 2d itself is done.">
+    <p class="stem">What does finishing today's lesson complete, per <code>PLAN.md</code>'s own spine?</p>
+    <button class="opt" data-ok>All of Phase 2d, closing the whole portfolio spine</button>
+    <button class="opt">The entire course, including Phase 2b and 2c too</button>
+    <button class="opt">Nothing structural at all, one more standalone extra day</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <em>Fundamentals of Data Engineering</em> (Reis &amp; Housley, cited in <code>RESOURCES.md</code> since Day 1) — its lifecycle framing (generation → ingestion → storage → transformation → serving) is exactly the structure a real design review walks a pipeline against, one stage at a time, and is the most direct match in this course's own cited sources for "how to evaluate a data platform's design," as opposed to any single tool's own docs. The <a href="https://www.reddit.com/r/dataengineering/">r/dataengineering</a> and <a href="https://datatalks.club/slack.html">DataTalksClub Slack</a> communities (both already in <code>RESOURCES.md</code>'s Wisdom section) are the natural next step after today — post the repo and this review's own honest weak-spot finding and see whether an outside reviewer finds something the mock review didn't.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 29.<br>
+<strong>Phase 2d is now closed.</strong> Per <code>PLAN.md</code>'s own closing line, the next natural checkpoint is revisiting the dbt/Kafka/Airflow depth split against what you actually want this repo to show.<br><br>
+💬 Anything unclear — how to run this review on your own repo, or what your own Section 6 weak-spot answer should be? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

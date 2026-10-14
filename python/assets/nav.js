@@ -158,6 +158,8 @@
       file: "lessons/0075-review-retrieval-day-12.html" },
     { n: 76, date: "2026-10-13", title: "json.dumps/loads, indent, and default=",
       file: "lessons/0076-json-dumps-loads-and-default.html" },
+    { n: 77, date: "2026-10-14", title: "secrets: tokens and timing-safe compare",
+      file: "lessons/0077-secrets-tokens-and-timing-safe-compare.html" },
   ];
 
   const REFS = [

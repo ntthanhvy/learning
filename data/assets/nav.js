@@ -198,6 +198,8 @@
       file: "lessons/0095-np-repeat-and-np-tile.html" },
     { n: 96, date: "2026-10-13", title: "DataFrame.insert() and .pop(): the two column-management methods that mutate in place",
       file: "lessons/0096-insert-and-pop.html" },
+    { n: 97, date: "2026-10-14", title: "np.broadcast_to(): making the implicit \"stretch\" an explicit, inspectable array",
+      file: "lessons/0097-np-broadcast-to.html" },
   ];
 
   const REFS = [

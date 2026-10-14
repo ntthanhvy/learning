@@ -204,6 +204,8 @@
       file: "lessons/0098-autovacuum-and-table-bloat.html" },
     { n: 99, date: "2026-10-13", title: "Clickjacking: the attack that never touches your API",
       file: "lessons/0099-clickjacking-and-security-headers.html" },
+    { n: 100, date: "2026-10-14", title: "CSP's real job: locking down scripts, not just frames",
+      file: "lessons/0100-content-security-policy-script-src.html" },
   ];
 
   const REFS = [

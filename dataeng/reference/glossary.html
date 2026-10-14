@@ -261,6 +261,12 @@
   <tr><td>partition count as a parallelism ceiling</td><td>giữ nguyên "parallelism ceiling" — trong Kafka, số consumer tối đa có thể cùng xử lý song song message từ các partition của 1 topic, trong 1 consumer group: đúng 1 consumer giữ 1 partition tại 1 thời điểm, nên số partition của topic là giới hạn cứng cho song song hoá, bất kể start thêm bao nhiêu consumer process</td><td>In Kafka, the maximum number of consumers that can be actively processing messages from one topic's partitions at the same time, within a single consumer group — exactly one consumer per partition may hold it at once, so a topic's partition count is a hard ceiling on parallel consumption for that group, regardless of how many consumer processes are started. Raising it (<code>kafka-topics.sh --alter --partitions N</code>) only ever goes up on a live topic, and only new messages land on the new partitions — existing keys don't remap.</td></tr>
 </table>
 
+<h2 id="day29">Day 29 — A mock design-review walkthrough of the repo</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>design review</td><td>giữ nguyên "design review" — buổi xem xét có cấu trúc, có chủ đích về thiết kế hệ thống, do người đóng vai reviewer hay hỏi ngược thực hiện — không phải soi lỗi code, mà kiểm tra các lựa chọn thiết kế đã nêu có thực sự đứng vững trước lý do chính nó đưa ra hay không, nói ra miệng, trên hệ thống thật</td><td>A deliberate, structured examination of a system's design by someone playing a skeptical reviewer — not a bug hunt in the code (that's what tests and <code>py_compile</code>/<code>dbt build</code> already do), but a check of whether the stated design decisions actually hold up against their own stated reasons, defended out loud against the real repo rather than recited from memory.</td></tr>
+</table>
+
 <script src="../assets/nav.js"></script>
 </body>
 </html>

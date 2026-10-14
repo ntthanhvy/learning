@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 97 · np.broadcast_to(): making the implicit "stretch" an explicit, inspectable array</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 97 · ~20 min · 14 Oct 2026</p>
+<h1>np.broadcast_to(): making the implicit "stretch" an explicit, inspectable array</h1>
+<p class="byline">Lesson 96's teaser named exactly one standing candidate: <code>np.broadcast_to()</code>, deferred once at Lesson 94 (in favor of <code>np.repeat()</code>/<code>np.tile()</code>) and again at Lesson 95 (in favor of <code>DataFrame.insert()</code>/<code>.pop()</code>). A fresh grep across every lesson body and the glossary confirmed it's still a genuine zero-coverage gap — real hits only inside those two lessons' own teaser prose, never as a taught topic or a glossary row. Picking it today: it directly closes the loop Lesson 30 opened (broadcasting as an automatic, implicit rule) and Lesson 95 sharpened (<code>tile()</code> as the function that materializes a real copy) — <code>broadcast_to()</code> is the missing middle: the function that makes broadcasting's "stretching" an actual array you can look at, without ever paying for a copy.</p>
+
+<h2>1 · What broadcasting was doing invisibly all along</h2>
+<p>Lesson 30 named <code>broadcasting</code> as the rule that lets <code>clean["amount"] * 1.1</code> apply one scalar to every row with no loop. That stretching is normally invisible — NumPy does it internally during the arithmetic and never hands you the stretched version as its own object. <dfn data-en="a NumPy function taking an array and a target shape, that returns a READ-ONLY VIEW of the original array stretched to that shape using the same broadcasting rule arithmetic uses internally, with no data copied -- raises ValueError if the target shape is not broadcast-compatible with the input's own shape" data-vn="giữ nguyên 'np.broadcast_to()' — nhận 1 mảng và 1 shape đích, trả về VIEW CHỈ ĐỌC (read-only) của mảng gốc đã 'kéo giãn' theo đúng quy tắc broadcasting mà các phép tính số học dùng ngầm, KHÔNG copy dữ liệu -- báo lỗi ValueError nếu shape đích không tương thích broadcasting với shape của mảng gốc">np.broadcast_to()</dfn> makes that stretch explicit — it runs the exact same rule, but hands back the stretched array itself. Confirmed directly (numpy 2.5.4):</p>
+<pre><code><span class="kw">import</span> numpy <span class="kw">as</span> np
+arr = np.array([<span class="kw">1</span>, <span class="kw">2</span>, <span class="kw">3</span>])
+b = np.broadcast_to(arr, (<span class="kw">4</span>, <span class="kw">3</span>))
+b
+<span class="cm"># [[1 2 3]
+#  [1 2 3]
+#  [1 2 3]
+#  [1 2 3]]</span>
+
+<span class="cm"># same numeric result as the implicit version from Lesson 30:</span>
+col = np.array([[<span class="kw">1</span>], [<span class="kw">2</span>], [<span class="kw">3</span>], [<span class="kw">4</span>]])
+col + arr
+<span class="cm"># [[2 3 4]
+#  [3 4 5]
+#  [4 5 6]
+#  [5 6 7]]   -- arr was stretched to (4,3) internally, same shape as b</span></code></pre>
+<p>The trap: an incompatible target shape raises <code>ValueError</code>, naming the exact mismatch — confirmed directly:</p>
+<pre><code>np.broadcast_to(arr, (<span class="kw">4</span>, <span class="kw">4</span>))
+<span class="cm"># ValueError: operands could not be broadcast together with
+# remapped shapes [original-&gt;remapped]: (3,) and requested shape (4,4)</span></code></pre>
+
+<h2>2 · Read-only on purpose, and why</h2>
+<p>Confirmed directly against the official NumPy docs (which state this outright): the array <code>broadcast_to()</code> returns is a <strong>view</strong>, not a copy — <code>np.shares_memory(b, arr)</code> is <code>True</code> — and it is <strong>read-only</strong>. Writing to it raises immediately:</p>
+<pre><code>b[<span class="kw">0</span>, <span class="kw">0</span>] = <span class="kw">99</span>
+<span class="cm"># ValueError: assignment destination is read-only</span></code></pre>
+<p>That restriction isn't arbitrary — it protects you from a bug the array's own shape would otherwise hide. Confirmed directly: <code>b.strides</code> is <code>(0, 8)</code> — stride <code>0</code> on the first axis means all four "rows" are literally the <em>same 24 bytes</em> read four times, not four separate rows. Writing through <code>b[0, 0]</code> would silently corrupt every row at once, since there is only one row in memory. This is exactly how Lesson 95's <code>np.tile()</code> differs: <code>tile()</code> always allocates a real, independent, writeable copy (confirmed directly: <code>np.shares_memory(np.tile(arr, (4, 1)), arr)</code> is <code>False</code>) — strictly more memory, but safe to mutate. Needing to write into the result is the signal to reach for <code>.copy()</code> (or <code>tile()</code> directly) instead of <code>broadcast_to()</code>:</p>
+<pre><code>writeable = np.broadcast_to(arr, (<span class="kw">4</span>, <span class="kw">3</span>)).copy()
+writeable[<span class="kw">0</span>, <span class="kw">0</span>] = <span class="kw">99</span>
+<span class="cm"># works fine now -- copy() made it a real, independent array
+# arr itself is still untouched: [1 2 3]</span></code></pre>
+
+<h2>3 · When to reach for it over plain arithmetic</h2>
+<p>For ordinary arithmetic (<code>col + arr</code> above), you never call <code>broadcast_to()</code> yourself — NumPy already does the equivalent stretch internally, for free, exactly as Lesson 30 taught. <code>broadcast_to()</code> earns its place when you need the <em>stretched shape itself</em> as a real object to pass elsewhere — feeding a fixed-shape function, building a cartesian-style mask, or just inspecting what a broadcast will actually produce before trusting it in a pipeline. A companion function, confirmed directly, computes the resulting shape with no array at all, useful for that same sanity check:</p>
+<pre><code>np.broadcast_shapes((<span class="kw">4</span>, <span class="kw">3</span>), (<span class="kw">3</span>,))
+<span class="cm"># (4, 3)   -- answers "what shape would this broadcast to?" with zero data involved</span></code></pre>
+
+<div class="interview">
+<p><strong>Q: "What does np.broadcast_to() actually return, and why is it read-only?"</strong> A strong answer, out loud: <em>"It returns a view, not a copy — same data, reshaped by the exact rule plain broadcasting arithmetic already uses internally, so no memory is duplicated. It's read-only because the view fakes extra rows or columns with stride tricks — stride 0 on the repeated axis — so every 'repeated' row is really the same bytes. Writing through one index would silently corrupt every other repeated row at once, so NumPy raises instead of allowing that. If I actually need to mutate the result, I call .copy() first, or reach for tile() instead, which always makes a real independent copy up front."</em> The signal: naming view-not-copy, read-only, and the actual reason (shared memory via stride 0), not just "because NumPy says so."</p>
+</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/97_np_broadcast_to.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/97_np_broadcast_to.py</code></pre>
+<p>Exercise 1 confirms <code>broadcast_to()</code> stretches an array to a target shape and that the result is a read-only view sharing memory with the original, not a copy (Section 1/2). Exercise 2 confirms the <code>ValueError</code> on an incompatible target shape (Section 1). Exercise 3 confirms the read-only write raises, and that <code>.copy()</code> produces an independent, writeable array while leaving the original untouched (Section 2).</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly and via the official NumPy docs: np.broadcast_to() always returns a read-only view sharing memory with the input, never a copy -- that is the whole point, it is the same stretch plain arithmetic already does internally, just handed back as an object.">
+    <p class="stem">What kind of object does <code>np.broadcast_to(arr, (4, 3))</code> actually return?</p>
+    <button class="opt" data-ok>a read-only view sharing the same memory as arr, never a copy</button>
+    <button class="opt">a brand new writeable array holding four fully copied rows in total</button>
+    <button class="opt">the same exact arr object, totally unchanged in its own original shape</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: the view's repeated axis has stride 0, meaning every repeated row is literally the same bytes read again -- writing through one index would corrupt every row sharing that memory, so NumPy raises ValueError instead of allowing it.">
+    <p class="stem">Why does writing to a <code>broadcast_to()</code> result raise <code>ValueError</code>?</p>
+    <button class="opt" data-ok>the repeated axis has stride 0, one write would corrupt every row</button>
+    <button class="opt">NumPy simply disallows writes to any array built from any function call</button>
+    <button class="opt">the dtype a broadcast result gets is always a fixed read-only dtype</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: an incompatible target shape raises ValueError naming the exact shape mismatch, the same broadcasting-rule failure plain arithmetic would also raise on mismatched shapes -- broadcast_to() just runs that check explicitly, up front.">
+    <p class="stem">What happens when the target shape passed to <code>broadcast_to()</code> is not broadcast-compatible?</p>
+    <button class="opt" data-ok>a plain ValueError, naming the exact specific shape mismatch it hit</button>
+    <button class="opt">the array gets silently truncated to whatever shape does fit it</button>
+    <button class="opt">missing positions would simply fill with NaN, keeping the requested shape</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official <a href="https://numpy.org/doc/stable/reference/generated/numpy.broadcast_to.html">NumPy API reference for <code>broadcast_to()</code></a> (per <code>RESOURCES.md</code>'s "Docs: NumPy fundamentals — broadcasting" entry, ~2 min) — confirms the read-only view, no-copy, and <code>ValueError</code>-on-incompatible-shape behavior exactly as demonstrated above.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>np.broadcast_to()</code> is new today, added right after Lesson 96's <code>insert() / pop()</code> entry.<br>
+<strong>Next lesson:</strong> a focused review round if a drill from Lessons 9-97 comes back reported as shakiest, otherwise a fresh curriculum/glossary scan — no standing candidate is carried forward this time; all three of this course's recently-named open gaps have now been closed (Lessons 95, 96, 97).<br><br>
+💬 Anything unclear — the read-only/view behavior, the stride-0 trick, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

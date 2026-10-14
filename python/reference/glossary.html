@@ -567,6 +567,13 @@
   <tr><td>default= (json.dumps)</td><td>giữ nguyên "default" — keyword cho dumps(), là 1 hàm được gọi đúng lúc dumps() gặp 1 value không thuộc các kiểu JSON có sẵn (str/int/float/bool/None/list/dict); hàm đó phải trả về 1 giá trị thuộc kiểu JSON biết, ví dụ dataclass trả về dict qua asdict()</td><td>A keyword argument to <code>json.dumps()</code> supplying a function called only on a value that is none of JSON's built-in types. The function must return something JSON already knows how to serialize — e.g. a <code>datetime</code> converted to its <code>.isoformat()</code> string, or a <code>dataclass</code> instance converted to a plain dict via <code>dataclasses.asdict()</code>.</td></tr>
 </table>
 
+<h2 id="day77">Day 77 — secrets: tokens and timing-safe compare</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>secrets</td><td>giữ nguyên "secrets" — module chuẩn tạo giá trị ngẫu nhiên an toàn về mật mã học (cryptographically secure) — token, API key, session ID; khác với random vốn nhanh nhưng có thể đoán được, không bao giờ dùng cho việc liên quan bảo mật</td><td>The standard-library module for generating cryptographically secure random values — tokens, API keys, session IDs. Draws from the operating system's own secure randomness source; has no <code>seed()</code>, unlike Day 54's <code>random</code>, since reproducibility is exactly the property a secret must never have.</td></tr>
+  <tr><td>timing attack</td><td>giữ nguyên "timing attack" — kiểu tấn công dò ra giá trị bí mật từng ký tự bằng cách đo thời gian so sánh; hàm so sánh dừng ngay khi gặp ký tự sai đầu tiên, nên guess đúng tiền tố dài hơn sẽ mất thời gian lâu hơn 1 chút, đo nhiều lần là dò ra được</td><td>An attack that recovers a secret value one character at a time by measuring how long a comparison takes to reject each guess. A comparison that exits early on the first mismatched character takes measurably longer for a guess that shares more of the secret's correct prefix — <code>secrets.compare_digest()</code> is the stdlib's constant-time defense against it.</td></tr>
+</table>
+
 <p class="next">💬 A term here still unclear? Ask your teacher — hỏi bằng tiếng Việt cũng được.</p>
 
 <script src="../assets/nav.js"></script>

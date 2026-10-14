@@ -7826,4 +7826,105 @@
   standing candidate named in Lesson 99's own teaser, but same as every
   prior round, a completion/quiz-outcome signal or a user-named track
   should take priority over guessing blind again if one appears.
+- **2026-10-14 generation (Lesson 100, headless run):** Idempotency check
+  first: `ls lessons/` showed the highest file was still
+  `0099-clickjacking-and-security-headers.html` and a grep of `nav.js` for
+  `n: 100` returned no match, with `LESSONS` ending at `n: 99, date:
+  "2026-10-13"` — so this round was clear to proceed. Checked the DB signal
+  first per the orchestrator's brief: no `lesson_completed`/quiz/outcome row
+  newer than mid-July exists, so there was no fresh completion signal to
+  shape today's lesson — same standing situation as the last several
+  rounds. Both `backend/learning-records/` files are still the two original
+  baseline findings and name no fresh topic. Ran a fresh gap scan anyway,
+  as instructed, rather than taking Lesson 99's teaser on faith: grepped
+  `lessons/*.html` and `reference/glossary.html` case-insensitively for a
+  wide set of candidates across all four MISSION.md tracks — mTLS, RBAC,
+  GraphQL/gRPC, cache-aside, consistent hashing, ULID/snowflake ids,
+  composite/covering indexes — all already covered (confirmed via real
+  hits, several from Lesson 99's own round). Specifically checked
+  `script-src`, `nonce`, `report-uri`, and `report-to` across both lessons
+  and the glossary: zero hits anywhere except Lesson 99's own single
+  `frame-ancestors` CSP directive — confirming the gap named in Lesson 99's
+  teaser is real and still open, and that it remains the best
+  zone-of-proximal-development step (CSP as a header was just introduced;
+  script-src is the directive CSP was actually built for first, and the
+  natural next layer once frame-ancestors is known). Decision: kept Lesson
+  99's named candidate rather than switching, since the scan surfaced
+  nothing fresher or more pressing. Lesson 100 covers: XSS as the threat
+  script-src defends against (tying back to Lesson 17's SQL-injection
+  framing — untrusted input becoming code instead of data, the browser's
+  version of the same mistake); script-src itself and why a bare `'self'`
+  policy breaks a site's own legitimate inline scripts too; nonces as the
+  fix that lets the server mark its own inline scripts as trusted per
+  response without reopening the hole via `'unsafe-inline'`; and
+  Content-Security-Policy-Report-Only plus the violation-report mechanism
+  as the safe rollout path (discover breakage before enforcing). A "Scope
+  line" section excludes CSP's other directives (style-src, img-src,
+  connect-src), hash-based allowlisting as a nonce alternative, and
+  service-worker interaction, as same-shape extensions rather than new
+  concepts. Checked the glossary first for all four terms touched this
+  round: `script-src`, `nonce`, and `CSP violation report` had zero
+  collisions via case-insensitive grep and were added as three new rows
+  after Lesson 99's `Content-Security-Policy / CSP` row; `XSS` was found
+  already present (row from Lesson 4, `who-are-you.html`) with its own
+  `<dfn>` there, so no fourth row was added for it — confirmed via grep
+  that re-wrapping an already-glossaried term in a later lesson's own
+  `<dfn>` is existing, accepted practice in this course (XSS, TTL, and
+  several other terms already carry 2-3 separate `<dfn>` occurrences across
+  different lessons; `gloss.js` attaches the popup per-occurrence
+  independently, and the glossary table itself only ever needs one
+  canonical row per term). Same Term/Tiếng Việt (dev-style)/In software
+  column order confirmed by direct inspection of the file's actual header
+  row before writing. The Go snippet (`cspWithNonce` middleware) was
+  compile-checked in a scratch module at `.scratch-0100/gomod/` under the
+  repo root (same workaround prior rounds used for the sandbox's `cd`
+  restriction — used the Write tool directly for the scratch file since a
+  heredoc with braces hit an "expansion obfuscation" content gate this
+  round, same shape of gate prior rounds hit on different constructs); `go
+  build ./...` and `go vet ./...` both ran clean on the first pass, scratch
+  directory deleted afterward, confirmed gone via a failed `ls`.
+  Verification performed mechanically: (1) a Node quiz-word-count script
+  matching each `<div class="q" data-why="...">` block and splitting every
+  option both via `.split(/\s+/)` and `.split(" ")` — first draft landed
+  uneven on all four questions (spreads of 1-3 words), fixed through five
+  rewrite-and-recount cycles total across the four questions (several
+  single-word swaps changed counts unexpectedly, same trap noted in
+  Lesson 97's entry) — converged to exactly 9/9/9/9 on Q1, 10/10/10/10 on
+  Q2, 10/10/10/10 on Q3, and 8/8/8/8 on Q4, both counting methods agreeing
+  exactly, and exactly one `data-ok` and four options per question
+  confirmed the same way; (2) a Node occurrence-count HTML tag-balance
+  check across 14 tag types on the lesson (div/p/h1/h2/ul/li/pre/code/
+  button/script/html/head/body/title) — clean on the first pass (div 7/7,
+  p 19/19, code 29/29, button 16/16, script 3/3, etc.); and a separate
+  table/tr/th/td/p/div/html/head/body/title/script balance check on
+  `glossary.html` after its three-row addition — also balanced (tr
+  329/329, td 984/984); (3) a raw-unescaped-`&` regex scan across both
+  files — zero hits; (4) the lesson's `<dfn` tags grepped and confirmed to
+  carry both `data-en=` and `data-vn=` — exactly 4 `dfn` tags (3 new terms
+  plus the XSS reuse), matching 4/4/4 for `<dfn`/`data-en=`/`data-vn=`
+  counts, no orphaned attribute; (5) `node --check` against `assets/nav.js`,
+  `assets/gloss.js`, and `assets/quiz.js` — all clean, no output, both
+  before and after the `nav.js` edit (the JS files themselves were not
+  otherwise modified); (6) a basic HTML well-formedness check (exactly one
+  `<!DOCTYPE html>`, one `<html>`/`</html>`, three script tags present with
+  `nav.js` last, `gloss.js`/`quiz.js` before it) — clean. Registered
+  Lesson 100 in `nav.js` (date 2026-10-14, today's actual generation date),
+  right after the `n: 99` entry, re-confirmed exactly one matching `n: 100`
+  entry, exactly one matching lesson-file string, and exactly one
+  `0100-*.html` file on disk afterward. No new `learning-records/` file was
+  added this round — routine topical entry like Lessons 3-99, not a new
+  baseline finding; this round's gap-scan outcome (confirming rather than
+  discovering a gap) and the glossary-reuse precedent are durable enough to
+  be worth knowing but don't rise to a new baseline about the learner
+  specifically. This session's sandbox blocked heredoc-with-braces
+  constructs again this round (same "expansion obfuscation" content gate
+  shape as Lesson 99's round, different specific trigger) — worked around
+  by using the Write tool directly for the scratch Go file instead of a
+  bash heredoc; `bin/record-progress` has not yet been run this round (next
+  step, per the orchestrator's brief for this run, immediately following
+  this note). No confirmed next-lesson gap is named with certainty for the
+  round after this one — same standing note as nearly every prior round; a
+  fresh gap scan should run again next round rather than assuming a
+  successor, since this round's own scan found nothing else as clean as
+  the CSP teaser was.
 

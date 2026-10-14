@@ -9744,4 +9744,134 @@ fail *gracefully* so the learner sees which task failed.
   favors it (three fresh lessons since Day 75's review would land on Day
   78), default to a review day covering Days 76-77-78 instead once a
   second and third fresh topic are chosen.
+- 2026-10-14 — **Day 77 generated: `secrets` — tokens and timing-safe
+  compare** (headless run, zero prior context per the orchestrator's
+  brief). Read `MISSION.md` (untouched, read-only) and `PLAN.md` in full
+  to reconfirm the no-pandas/no-NumPy scope rule and that Phase 2's spine
+  is fully spent; `RESOURCES.md` in full; the sole `learning-records/`
+  baseline file; `NOTES.md`'s tail (lines ~9550-9747, covering Days 75-76
+  in full) since the file exceeds this run's single-read size cap (664 KB
+  against a 256 KB ceiling) — confirmed sufficient since the tail already
+  carried Day 76's complete next-day note. Also read `assets/nav.js`'s
+  tail and `reference/glossary.html`'s tail directly rather than trusting
+  the log summary. Idempotency: listed `lessons/` (highest existing
+  `0076-json-dumps-loads-and-default.html`) and grepped `assets/nav.js`
+  for `n: 77`/`0077` (no hit) before writing anything — nothing for today
+  existed yet.
+  Decision process — fresh-gap scan from scratch, per Day 76's explicit
+  next-day note that no candidate was pre-queued and that Day 77 should
+  still be a fresh lesson (cadence math: Day 78 would be the third fresh
+  lesson since Day 75's review, not Day 77). Grepped a wide set of
+  plausible stdlib corners against `lessons/`/`practice/`/
+  `reference/glossary.html`/`RESOURCES.md`: `re` (taught, Day 38),
+  `pathlib`/`logging`/`argparse`/`functools`/`enum`/`contextlib`/
+  `datetime`/`zoneinfo` (all taught), `copy.deepcopy`/`copy.copy` (already
+  covered inside Day 1's object-model lesson, confirmed by reading that
+  section directly), `sqlite3`/`tomllib` (confirmed previously struck from
+  the candidate list for good per Days 72's and a prior round's direct
+  correction — `sqlite3` via Day 21's injection-contrast example,
+  `tomllib` via Day 10's `pyproject.toml` lesson), `textwrap`/
+  `string.Template` (closed per Day 56-57's dedicated treatment).
+  `pprint` and `difflib` turned up as repeatedly-named-but-never-taught
+  candidates across several old scans (Days 70-71's notes) and remain
+  open for a future round, but a stronger, more pointed candidate won
+  this round: `secrets`. Day 54's own `random`-module lesson named
+  `secrets` by name as the correct tool for anything security-sensitive
+  and explicitly called it "out of scope today... not a second module to
+  learn" — grepped case-insensitively for `secrets` across every lesson,
+  every practice file, `reference/glossary.html`, and `RESOURCES.md`:
+  exactly that one Day 54 mention, zero glossary entry, zero
+  `RESOURCES.md` line. A genuine, cleanly-scoped gap with a built-in
+  callback. Read Day 54's full lesson and Day 59's (`hashlib`) full
+  lesson directly before writing, to confirm no overlap: Day 59 covers
+  content hashing and explicitly deferred password-storage hashing
+  (`pbkdf2_hmac()`) as a separate future topic; today's `secrets` is about
+  generating a secure token and comparing it safely, never about hashing
+  — distinct jobs, no duplicate ground covered. Also read Day 74's `uuid`
+  lesson to write an accurate uuid-vs-secrets contrast (uniqueness vs.
+  unpredictability) rather than from memory of the log summary.
+  No-pandas rule: grepped case-insensitively for `pandas`/`numpy`/`pd\.`/
+  `np\.` in both the lesson and practice file — exactly one hit in the
+  lesson (the single "Where pandas goes from here" boundary callout,
+  naming no DataFrame equivalent exists and showing no DataFrame code)
+  and zero hits in the practice file — compliant with the
+  one-contrast-sentence allowance.
+  **New jargon: 2 terms** (`secrets` module, `timing attack`), each with a
+  `<dfn data-en`/`data-vn` tag on first mention, checked case-insensitively
+  against the full glossary first (zero collisions with any Day 1-76
+  entry) before appending a new `id="day77"` section directly before the
+  closing `<p class="next">` footer, matching Day 76's own placement.
+  Quiz: 3 questions (why `random` is wrong for a reset token, what the
+  `token_hex(16)` argument actually controls, why `compare_digest()` beats
+  plain `==`). Word counts were checked with a throwaway stdlib
+  `html.parser.HTMLParser`-based Python script (written via `Write`,
+  deleted after use) that strips tags from each `<button class="opt">`
+  and splits on whitespace. First draft mismatched on all three questions
+  (9/8/9, 10/9/8, 9/9/11) — the same script also caught a real authoring
+  bug independent of word counts: a stray `</p>` left inside the Day-74
+  `uuid` bridge `<div class="callout">`, which never opened a `<p>` in the
+  first place, breaking the tag stack. Fixed the stray tag, then iterated
+  option wording (adding "ever"/"back", trimming "no real behavior
+  change" to "no change", lengthening "the hex string returned" to "the
+  returned hex string value") until all three questions landed on equal
+  counts: 9/9/9, 10/10/10, 9/9/9 — reran the same script to confirm, plus
+  a separate `grep -c data-ok`/`grep -c 'class="q"'` confirming exactly 3
+  of each, matching the three-question count. The same script's raw
+  tag-balance and unescaped-`&` checks came back clean on the final pass
+  for both the lesson file and the full (now-modified)
+  `reference/glossary.html`.
+  `RESOURCES.md`: added a new `secrets` docs line (previously none),
+  placed directly after the Day 74 `uuid`/`configparser` line per the
+  file's day-ordered citation convention.
+  Registered in `assets/nav.js` with `date: "2026-10-14"` right after the
+  `n: 76` entry; confirmed `node --check assets/nav.js` reports no syntax
+  errors after the edit.
+  Practice file `practice/77_secrets_tokens_and_compare.py` (4 checks,
+  stdlib-only, no `--with` flag, function-stub-with-TODO-comment style
+  matching Day 76's own): `token_hex(16)` returning 32 hex characters with
+  no collision across two calls (Ex 1), `token_urlsafe(16)` containing
+  only URL-safe characters (Ex 2), a `secrets.choice()`-built fixed-length
+  digit PIN (Ex 3), and `compare_digest()` agreeing with plain `==` on
+  both a match and a deliberately wrong-length-matched mismatch (Ex 4).
+  Verified in a scratch `.scratch-0077/` directory created directly under
+  the repo root (copied from the shipped file, not edited in place): the
+  shipped (unsolved) copy printed four clean ✗ lines with no traceback.
+  A separately written, fully solved copy (via `Write`, not by editing
+  the shipped file) printed all four ✓ and the "All green" tally, run
+  twice consecutively with identical results both times. Also ran the
+  shipped file directly from its real `python/practice/` path as a final
+  check, confirming the same four clean ✗ lines outside the scratch copy
+  too. Scratch directory deleted before finishing — confirmed by a
+  listing showing no `.scratch-0077` remaining (a separate, unrelated
+  `.scratch_dataeng_verify_d29/` directory from a concurrent parallel
+  session was left untouched, correctly out of this course's scope).
+  `python/learning-records/` still holds only the Day 1 baseline —
+  nothing from today's run (a fresh-gap scan landing on `secrets`, a
+  module named once before as a boundary marker and never taught) rises
+  to a durable, new learner-profile fact distinct from what Day 1's
+  record already says.
+  **DB access:** per the orchestrator's brief, the DB had already been
+  confirmed before this run started — no `lesson_completed`/quiz/outcome
+  row more recent than mid-July, nothing for Day 77 yet — so this round
+  deferred to that pre-run confirmation plus its own on-disk idempotency
+  check rather than attempting a direct `psql`/`bin/query-progress` read,
+  consistent with this log's running note that such reads have been
+  blocked by sandbox/approval restrictions on essentially every prior
+  run.
+  Final `git status --short -- python/` showed exactly five paths changed
+  before this `NOTES.md` edit (`assets/nav.js`, `RESOURCES.md`,
+  `reference/glossary.html`, plus the new lesson and practice file) — six
+  total including this file — no other course's files touched, and no
+  leftover scratch files or directories under the repo.
+  **Next-day note:** the one standing fresh-gap mention (`secrets`, named
+  once by Day 54) is now closed. `pprint` and `difflib` remain open,
+  repeatedly-named-but-never-taught candidates from Days 70-71's scans,
+  worth checking first before a brand-new scan. Cadence: Days 76-77 are
+  now two fresh lessons since Day 75's review (Days 72-74) — Day 78
+  should still run as a fresh topic lesson (its own from-scratch gap
+  scan, `pprint`/`difflib` included), making it the third fresh lesson in
+  this cycle. **Day 79 should then default to a review day** covering
+  Days 76-77-78, per this course's settled three-fresh-lesson cadence
+  (Days 64-66 → review 67, Days 68-70 → review 71, Days 72-74 → review
+  75) — unless Day 78's own generator finds a strong reason to deviate.
 

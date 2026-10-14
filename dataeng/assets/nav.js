@@ -39,6 +39,7 @@
     { n: 26, date: "2026-10-11", title: "One-command demo: make demo, and a README that reads in 2 minutes", file: "lessons/0026-portfolio-one-command-demo.html" },
     { n: 27, date: "2026-10-12", title: "The data-quality story: what is tested where, and why", file: "lessons/0027-data-quality-story.html" },
     { n: 28, date: "2026-10-13", title: "What breaks at 100×: partitions, incremental models & warehouse choice", file: "lessons/0028-what-breaks-at-100x.html" },
+    { n: 29, date: "2026-10-14", title: "A mock design-review walkthrough of the repo", file: "lessons/0029-design-review-walkthrough.html" },
   ];
 
   const REFS = [

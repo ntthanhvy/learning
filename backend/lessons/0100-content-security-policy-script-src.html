@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 100 · CSP's real job: locking down scripts, not just frames</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 100 · ~20 min</p>
+<h1>CSP's real job: locking down scripts, not just frames</h1>
+<p class="byline">Lesson 99 used exactly one Content-Security-Policy directive — <code>frame-ancestors</code> — to close the clickjacking gap, and explicitly scoped out the rest of CSP as "a deeper XSS-mitigation topic in its own right." That's today: the directive CSP was actually built for first, <code>script-src</code>, plus the two mechanisms that make it usable on a real site without breaking everything — nonces and violation reporting.</p>
+
+<h2>1 · The threat CSP's script-src actually targets</h2>
+<p>Lesson 17 covered SQL injection: untrusted input reaching a query as code instead of data. The browser has its own version of that same mistake. If a handler ever writes user-supplied text into an HTML page without escaping it — a comment, a display name, a search query echoed back — and that text contains <code>&lt;script&gt;...&lt;/script&gt;</code>, the browser just runs it, with the full privileges of your page: it can read cookies, submit forms as the logged-in user, call your API with their session. This is <dfn data-en="cross-site scripting: a vulnerability where untrusted input ends up rendered as live HTML/JavaScript in a page instead of as inert text, letting an attacker's script run with that page's full privileges -- read its cookies, act as its logged-in user" data-vn="XSS / cross-site scripting (giữ nguyên) — input không đáng tin bị render thành HTML/JavaScript sống trên trang, thay vì chỉ là text trơn -- script của attacker chạy với full quyền của trang đó, đọc được cookie, hành động như user đang đăng nhập">XSS</dfn> (cross-site scripting), and escaping output correctly is the primary defense — but escaping is a discipline every template call site has to get right, every time, forever. CSP's <dfn data-en="a CSP directive naming which sources a page is allowed to load and execute JavaScript from -- a script tag from any other source, or an inline script with no matching nonce/hash, is simply not executed by the browser at all, even if it got injected into the page" data-vn="script-src (giữ nguyên) — directive CSP khai báo nguồn nào được phép load/chạy JavaScript trên trang -- script từ nguồn khác, hoặc inline script không có nonce/hash khớp, bị browser chặn không chạy, kể cả khi đã lọt được vào trang">script-src</dfn> is the backstop for when that discipline slips once: it tells the browser which sources are allowed to supply JavaScript at all, so even a successfully injected <code>&lt;script&gt;</code> tag simply never executes.</p>
+<pre><code>Content-Security-Policy: script-src 'self' https://cdn.example.com</code></pre>
+<p>This line says: only run JavaScript that comes from this page's own origin, or from <code>cdn.example.com</code>. An attacker's injected <code>&lt;script&gt;alert(document.cookie)&lt;/script&gt;</code> is inline — it isn't loaded from either allowed source — so the browser refuses to execute it and logs a console error instead. The injection still happened; it just can't do anything.</p>
+
+<h2>2 · The problem: your own inline scripts just broke too</h2>
+<p>A bare <code>script-src 'self'</code> blocks <em>every</em> inline <code>&lt;script&gt;</code> tag and every inline <code>onclick="..."</code> handler — including the legitimate ones your own templates render, like a small analytics snippet or a per-page config object. Allowing all inline scripts back with <code>'unsafe-inline'</code> defeats the entire point: that reopens the door to the exact injected-script case Section 1 just closed, since an attacker's inline script would be "allowed" too. The fix is letting the server mark its <em>own</em> inline scripts as trusted without trusting inline scripts in general. A <dfn data-en="a random, single-use token the server generates fresh for each response and both inserts into the CSP header and attaches to each trusted inline script tag -- the browser only executes an inline script whose nonce attribute matches the one named in that response's CSP header, so an attacker who can inject HTML still can't guess the next response's nonce in advance" data-vn="nonce (giữ nguyên) — token random, dùng 1 lần, server tạo mới cho mỗi response, vừa gắn vào CSP header vừa gắn vào thẻ script muốn tin -- browser chỉ chạy inline script có nonce khớp với header của đúng response đó, nên attacker chèn được HTML cũng không đoán trước được nonce của response kế tiếp">nonce</dfn> does exactly that:</p>
+<pre><code>Content-Security-Policy: script-src 'self' 'nonce-r4nd0mBase64'
+...
+&lt;script nonce="r4nd0mBase64"&gt;
+  window.APP_CONFIG = { userId: 42 };
+&lt;/script&gt;</code></pre>
+<p>The server generates a fresh random value on every single response, puts it in the header, and stamps the same value onto the one inline <code>&lt;script&gt;</code> tag it actually wrote. The browser executes that tag because its <code>nonce</code> attribute matches the header. An attacker's injected script has no way to know that value in advance — it's regenerated per response — so it still gets blocked exactly as before. The nonce must never be reused across responses; a nonce that's predictable or repeated defeats the whole mechanism, same as a session ID that never rotates.</p>
+<div class="callout"><strong>Frontend-habit trap:</strong> a nonce looks like a client-side concern because it shows up as an HTML attribute in the rendered page. It isn't generated or chosen client-side at all — the server picks a fresh random value per request and has to inject it in exactly two places in the same response: the <code>Content-Security-Policy</code> header, and every inline script tag it renders. A frontend build step has no way to participate, since it doesn't run per-request.</div>
+
+<h2>3 · Finding out when the policy blocks something — without breaking production first</h2>
+<p>Shipping a strict <code>script-src</code> cold, on a real site, risks silently breaking some legitimate script you forgot about — a third-party widget, an old inline handler nobody remembers writing. CSP has a built-in way to find out before that happens: a report-only mode that logs violations without blocking anything yet.</p>
+<pre><code>Content-Security-Policy-Report-Only: script-src 'self'; report-to csp-endpoint
+Reporting-Endpoints: csp-endpoint="https://example.com/csp-reports"</code></pre>
+<p>With the <code>-Report-Only</code> header instead of the enforcing one, nothing gets blocked — every script still runs — but the browser POSTs a <dfn data-en="a JSON report the browser automatically sends to a server-named endpoint whenever a page's Content-Security-Policy would have blocked something -- used in report-only mode to discover every script a strict policy would break before actually enforcing it, and in enforcing mode as an early-warning signal for active injection attempts" data-vn="CSP violation report (giữ nguyên) — báo cáo JSON browser tự gửi tới endpoint server khai báo, mỗi lần Content-Security-Policy lẽ ra đã chặn gì đó -- dùng ở report-only mode để biết trước script nào sẽ bị policy chặn trước khi enforce thật, và ở enforcing mode như tín hiệu cảnh báo sớm có injection attempt">CSP violation report</dfn> to the named endpoint for every script that would have been blocked. The rollout path this enables: deploy report-only first, watch the reports for a few days, fix or allowlist every legitimate source the reports surface, then switch to the enforcing <code>Content-Security-Policy</code> header once the report volume is quiet. In enforcing mode, the same reporting mechanism keeps working — now as an early-warning signal that an actual injection attempt is being blocked in production, worth alerting on the same way Lesson 13 treats any other anomaly in logs.</p>
+
+<h2>4 · Setting it from Go</h2>
+<p>A nonce has to be fresh per request, which Lesson 99's static header value didn't need — the middleware now has to generate one and make it available to the template that renders the inline script:</p>
+<pre><code><span class="cm">// cspWithNonce generates a fresh per-request nonce, sets it in the CSP
+// header, and stores it on the request context so the handler/template
+// rendering the one trusted inline script can stamp the same value onto it.</span>
+<span class="kw">func</span> cspWithNonce(next http.Handler) http.Handler {
+    <span class="kw">return</span> http.HandlerFunc(<span class="kw">func</span>(w http.ResponseWriter, r *http.Request) {
+        buf := make([]byte, 16)
+        <span class="kw">if</span> _, err := rand.Read(buf); err != nil {
+            http.Error(w, <span class="str">"internal error"</span>, http.StatusInternalServerError)
+            <span class="kw">return</span>
+        }
+        nonce := base64.StdEncoding.EncodeToString(buf)
+
+        policy := <span class="str">"script-src 'self' 'nonce-"</span> + nonce + <span class="str">"'"</span>
+        w.Header().Set(<span class="str">"Content-Security-Policy"</span>, policy)
+
+        ctx := context.WithValue(r.Context(), nonceCtxKey, nonce)
+        next.ServeHTTP(w, r.WithContext(ctx))
+    })
+}</code></pre>
+<p>Using <code>crypto/rand</code> (not <code>math/rand</code>) matters here the same way it matters for Lesson 48's password hashing and Lesson 30's webhook secrets: a nonce an attacker could predict from a weak generator is no defense at all. The handler then reads <code>nonce</code> back off the context to stamp it onto the one inline <code>&lt;script&gt;</code> tag the template actually renders — the same value, generated once, used in exactly the two places Section 2 named.</p>
+
+<div class="interview">
+<p><strong>Q: "Your team wants to tighten CSP's script-src. What's the rollout, and why not just ship it enforcing on day one?"</strong> A strong answer, out loud: <em>"Ship it first as Content-Security-Policy-Report-Only with a reporting endpoint — nothing gets blocked yet, but the browser tells us about every script that would have been. We watch those reports for however long it takes to see the volume settle, fix or explicitly allowlist every legitimate source that shows up — third-party widgets, old inline handlers — and only then switch to the enforcing header. Shipping it enforcing cold risks silently breaking something in production the first time a real user hits the blocked code path, with no warning beforehand."</em> The signal: treating report-only as a required rollout step, not an optional nicety — the same instinct as a canary release (Lesson 89) for a change that can break things in ways tests won't catch.</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>script-src</code>, nonces, and violation reporting — the three pieces needed to actually ship a script-blocking CSP safely. It doesn't cover CSP's other directives (<code>style-src</code>, <code>img-src</code>, <code>connect-src</code>, and a dozen more follow the same shape once <code>script-src</code> makes sense), hash-based allowlisting as a nonce alternative for static assets, or CSP's interaction with service workers — all extensions of today's same mental model rather than new concepts.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="script-src names which sources a page is allowed to load and execute JavaScript from. An injected inline script, or a script tag pointing at a source not in that list, is simply not executed by the browser at all -- the injection succeeds but does nothing, which is exactly the backstop this directive provides underneath output escaping.">
+    <p class="stem">What does CSP's script-src directive actually block?</p>
+    <button class="opt" data-ok>JavaScript loaded from any source outside its own list</button>
+    <button class="opt">any SQL query built from some unescaped request input</button>
+    <button class="opt">every single cookie a response ever tries to set</button>
+    <button class="opt">any request sent to a different origin than this</button>
+  </div>
+  <div class="q" data-why="unsafe-inline allows every inline script to run, including an attacker's injected one -- it reopens exactly the hole script-src exists to close. A nonce instead lets the server mark its own specific inline script as trusted per response, without trusting inline scripts in general.">
+    <p class="stem">Why is 'unsafe-inline' the wrong fix for a legitimate inline script getting blocked?</p>
+    <button class="opt" data-ok>it allows every inline script, attacker's one included, to run</button>
+    <button class="opt">it only works for scripts loaded from a remote host</button>
+    <button class="opt">it silently disables cookies for the rest of the response</button>
+    <button class="opt">it requires a database migration before it can take effect</button>
+  </div>
+  <div class="q" data-why="The server generates a fresh random nonce per response and must place it in exactly two spots in that same response: the Content-Security-Policy header's script-src value, and the nonce attribute of the one inline script tag it rendered. There's no client-side/build-step equivalent, since the value has to be freshly random on every single request.">
+    <p class="stem">Where does a CSP nonce actually get generated and placed?</p>
+    <button class="opt" data-ok>server-side per request, in the header and the script tag</button>
+    <button class="opt">once at build time, then reused for every future response</button>
+    <button class="opt">by the browser itself, before the page's HTML even arrives</button>
+    <button class="opt">inside a cookie the client sends back on its visit</button>
+  </div>
+  <div class="q" data-why="Content-Security-Policy-Report-Only sends violation reports to a named endpoint without blocking anything, letting a team see every script a strict policy would break before switching to the enforcing header -- the safe rollout path for a change that can otherwise silently break production on day one.">
+    <p class="stem">What does deploying a policy as Content-Security-Policy-Report-Only first achieve?</p>
+    <button class="opt" data-ok>seeing every violation that would occur, nothing blocked</button>
+    <button class="opt">blocking every single script right away, reports later</button>
+    <button class="opt">disabling every CSP check until some human review</button>
+    <button class="opt">rotating the page's nonce automatically each single hour</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Security-Policy">MDN's Content-Security-Policy reference</a> — RESOURCES.md's standing arbiter for HTTP semantics, and the same source Lesson 99 named for CSP's full syntax; its <a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Security-Policy/script-src">script-src</a> and <a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Reporting-Endpoints">Reporting-Endpoints</a> pages cover today's three mechanisms in full, including the hash-based nonce alternative and the other directives this lesson's Scope line named as out of today's cut. For the attack side, OWASP's <a href="https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html">XSS Prevention Cheat Sheet</a> (RESOURCES.md's standing security source) covers output-escaping, CSP's role as the backstop beneath it, and the specific contexts (HTML body, attribute, URL, JS) where escaping rules differ.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially. Nếu chỗ nào chưa rõ, cứ hỏi lại bằng tiếng Việt cũng được.<br><br>
+<em>Next lesson:</em> open — no fresher completion/quiz signal has appeared since Lesson 99's round; a fresh gap scan found no other standing teaser as clean as this one was, so the round after this should scan fresh again rather than assume a successor.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

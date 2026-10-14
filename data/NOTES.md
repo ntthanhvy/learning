@@ -8613,3 +8613,114 @@
   --lesson 0096-insert-and-pop.html --detail` (JSON detail payload) was run
   directly from the repo root this round and it succeeded: `recorded:
   data/lesson_generated day=96 lesson=0096-insert-and-pop.html`.
+- 2026-10-14 generation (Lesson 97): headless 06:00 run, zero prior context.
+  Read MISSION.md in full (not modified), RESOURCES.md in full, the tail of
+  this log (Lessons 90-96's entries), the one `learning-records/` baseline
+  file (0001, still unchanged since course creation in mid-July — stale, no
+  new durable finding to fold in), `assets/nav.js` in full for the
+  registration format, `reference/glossary.html`, and the `lessons/` +
+  `practice/` directory listings (96 lessons, 96 practice files, both
+  sequential with no gaps). The orchestrator's framing confirmed no fresh
+  `course_progress` completion signal exists past mid-July either, so this
+  round paced conservatively from file state alone, same as prior rounds.
+  Idempotency was confirmed before starting: no `0097-*` file existed in
+  `data/lessons/`, no `97_*` file existed in `data/practice/`, and no
+  `n: 97` entry existed in `nav.js`. Lesson 96's own teaser named exactly
+  one standing candidate — `np.broadcast_to()`, already deferred twice
+  (Lesson 94 in favor of `np.repeat()`/`np.tile()`, Lesson 95 in favor of
+  `DataFrame.insert()`/`.pop()`) — with no other open runner-up left. This
+  round still ran its own fresh gap scan per instructions rather than
+  assume it remained the best option: grepped `broadcast_to` case-
+  insensitively across every lesson body and the glossary, found real hits
+  only inside Lessons 95 and 96's own teaser prose (naming it as a deferred
+  candidate), never as a taught topic or a glossary row — confirmed a
+  genuine zero-coverage gap a third time. No alternative candidate in the
+  scan surfaced as a clearly better next step than closing this
+  twice-deferred gap, so `np.broadcast_to()` was used as named. It directly
+  closes the loop Lesson 30 opened (broadcasting taught only as an
+  automatic, implicit rule, never materialized as its own object) and
+  sharpens the contrast Lesson 95 drew with `np.tile()` (which always
+  allocates a real, writeable copy) — `broadcast_to()` is the missing
+  middle: the function that makes the Lesson 30 "stretch" an actual,
+  inspectable array without ever paying for a copy. Every behavioral claim
+  was probed directly first in `data/.scratch-0097/` (deleted after), on
+  the actually-installed numpy 2.5.4 (confirmed via the same version-print
+  one-liner prior rounds used): confirmed `np.broadcast_to(arr, shape)`
+  returns a read-only view sharing memory with the input
+  (`np.shares_memory()` is `True`); confirmed `.flags.writeable` is `False`
+  and writing through an index raises `ValueError: assignment destination
+  is read-only`; confirmed the result's stride on every stretched axis is
+  `0` (e.g. `(0, 8)` for a `(3,)` array broadcast to `(4, 3)`), meaning
+  every "repeated" row is the identical bytes read again, the mechanical
+  reason the write-guard exists; confirmed an incompatible target shape
+  (`(3,)` into `(4, 4)`) raises `ValueError` naming the exact mismatch;
+  confirmed `.copy()` on the result produces an independent, writeable
+  array, leaving the original input untouched after a write; confirmed
+  `np.tile()` (Lesson 95), by contrast, always returns a real copy that
+  does not share memory with the input and is writeable immediately, no
+  `.copy()` needed; confirmed the companion function `np.broadcast_shapes()`
+  computes the resulting shape from a pair of shape tuples with no array
+  data involved, returning `(4, 3)` for `((4, 3), (3,))`; confirmed a
+  scalar broadcasts to any shape via the same function. Cross-checked the
+  official NumPy API reference for `broadcast_to()` via `WebFetch`
+  (available this round): it confirmed the signature
+  (`numpy.broadcast_to(array, shape, subok=False)`), the read-only-view/
+  no-copy return value, and the `ValueError`-on-incompatible-shape
+  behavior in wording matching the direct probing exactly — cited as the
+  freshly-verified primary source. The shipped (unsolved)
+  `practice/97_np_broadcast_to.py` was executed directly from its real
+  `practice/` location and printed exactly 3 ✗ with no raw traceback; the
+  first draft of Exercises 2 and 3 had a latent bug caught during this
+  verification step — both exercises' `...` blanks fed into variables that
+  were immediately overwritten by a following `try`/`except` regardless of
+  what the learner typed, so the unsolved file passed those two checks by
+  accident. Restructured both so the blank itself is the risky statement
+  executed inside the `try` block (the `np.broadcast_to(arr, (4, 4))` call
+  for Exercise 2, the `ex1_stretched[0, 0] = 99` write for Exercise 3) —
+  re-ran and confirmed all 3 ✗ with no crash after the fix. Built a solved
+  copy in `.scratch-0097/`, filling in all four blanks correctly; it
+  printed all 3 ✓ and "All green" on the first run. The shipped file was
+  re-run once more directly from `practice/` after building the solved
+  copy and reproduced the identical all-✗ result, confirming the solved
+  copy's edits never leaked back into the shipped baseline. Quiz options
+  were drafted, then mechanically word-counted with a scratch Python
+  script (`uv run python3`, deleted after) isolating each `<div class="q">`
+  block by regex span and splitting on whitespace — the first draft came
+  out 10/9/9, 12/11/11, 7/10/9; several rounds of small rephrasing (adding
+  words like "plain", "simply", "exact", "total", "own") until all three
+  questions landed exactly level (12/12/12, 12/12/12, 11/11/11 option
+  words), one `data-ok` per question throughout. A separate mechanical
+  tag-balance script confirmed all tags balanced (a 2/2, body 1/1, button
+  9/9, code 47/47, dfn 1/1, div 5/5, em 3/3, h1 1/1, h2 6/6, head 1/1, html
+  1/1, p 16/16, pre 6/6, script 3/3, span 31/31, strong 5/5, title 1/1) and
+  found exactly two raw `&` characters, both inside the one established
+  `cd ~/learning/data && uv run ...` shell command, matching every prior
+  lesson's pattern, zero raw `&` in prose; also confirmed the one new
+  `<dfn>` tag carries both `data-en` and `data-vn`. Checked the glossary
+  for a collision before adding anything — grepped `broadcast_to` case-
+  insensitively across the full glossary, found zero existing rows (prior
+  hits were lesson-body prose only, not glossary content) — added exactly
+  one new row, "np.broadcast_to()", directly after Lesson 96's "insert() /
+  pop()" entry; re-ran the tag-balance and raw-`&` scripts against the
+  glossary file afterward, confirmed it stayed balanced (a 1/1, body 1/1,
+  code 1135/1135, em 11/11, h1 1/1, head 1/1, html 1/1, p 3/3, script 1/1,
+  strong 1/1, table 1/1, td 501/501, th 3/3, title 1/1, tr 168/168) with
+  zero raw `&` introduced, and the `<tr>` count went from 167 to 168 as
+  expected. Registered Lesson 97 in `nav.js` with today's date
+  (2026-10-14); `node --check` confirmed it still parses as valid
+  JavaScript after the edit, and exactly one `n: 97` entry plus one
+  `0097-np-broadcast-to` file reference were confirmed to exist. This round
+  closed the last standing carried-forward candidate — no single candidate
+  is named as THE next pick for tomorrow; Lessons 95, 96, and 97 have now
+  closed all three recently-named open gaps (`np.repeat()`/`np.tile()`,
+  `insert()`/`.pop()`, `np.broadcast_to()`), so tomorrow should run a full
+  fresh curriculum/glossary scan with no lineage shortcut available. No new
+  `data/learning-records/` entry was added this round — routine lesson, no
+  new baseline finding to justify one (the Neon `course_progress`
+  completion-gap signal remains stale past mid-July, unchanged from this
+  round's starting context, and confirmed by the orchestrator at the start
+  of this round too). The `.scratch-0097/` directory was deleted after
+  verification, per this course's standing practice of not leaving scratch
+  artifacts committed. `bin/record-progress data lesson_generated --day 97
+  --lesson 0097-np-broadcast-to.html --detail '{"by":"launchd"}'` was run
+  directly from the repo root this round, matching Lesson 95/96's pattern.

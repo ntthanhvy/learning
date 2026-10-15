@@ -1,7 +1,7 @@
 # Mission: Backend Foundations for a Frontend-Heavy Fullstack Dev
 
 ## Why
-Titled fullstack, but day-to-day work is frontend-heavy, so the backend mindset never formed: given a feature, I can build the UI but can't confidently design the schema, the API, or the service behind it. This course builds that mindset — the terminology, concepts, and design instincts — so I can own backend work at my job end-to-end, grounded in the stack I actually touch: Go + PostgreSQL.
+Titled fullstack, but day-to-day work is frontend-heavy, so the backend mindset never formed: given a feature, I can build the UI but can't confidently design the schema, the API, or the service behind it. This course builds that mindset — the terminology, concepts, and design instincts — so I can own backend work at my job end-to-end, grounded in the stacks I actually touch: Go + PostgreSQL, and .NET (C# / ASP.NET Core) at work.
 
 ## Success looks like
 - Take a feature request and design the data model for it: entities, relationships, constraints, and a migration plan — and explain the trade-offs.
@@ -13,9 +13,9 @@ Titled fullstack, but day-to-day work is frontend-heavy, so the backend mindset 
 ## Constraints
 - Runs **in parallel** with the Go week (Jul 7–13) and Rust week (Jul 8–14) intensives: light touch, ~20 min/day — one short concept lesson, terminology and mental models over heavy practice.
 - After the intensives end (~Jul 15), the pace can deepen; revisit this mission then.
-- Ground examples in Go + PostgreSQL; don't duplicate the Go week's Days 5–6 data track (constraints, indexes, EXPLAIN, transactions in depth) — this course provides the conceptual frame around it.
+- Ground examples in Go + PostgreSQL **or .NET (C# / ASP.NET Core)**: pick whichever makes the concept clearest. When a concept looks different in the two ecosystems (e.g. real-time: SignalR in .NET vs hand-rolled WebSocket in Go), show both side by side. Don't duplicate the Go week's Days 5–6 data track (constraints, indexes, EXPLAIN, transactions in depth) — this course provides the conceptual frame around it.
 
 ## Out of scope
 - NoSQL, sharding, replication, distributed systems beyond vocabulary level.
 - Kubernetes/infra tooling; cloud-provider specifics.
-- Frameworks and ORMs — concepts first; the Go week already covers stdlib + pgx practice.
+- Frameworks and ORMs as deep tutorials — concepts first; the Go week already covers stdlib + pgx practice. Exception (2026-10-15): ASP.NET Core building blocks (e.g. SignalR, middleware, EF Core) may be named and shown when they are how the concept is actually done in .NET. Teach the concept, then show the framework's take on it, with no API-reference deep dives.

@@ -55,6 +55,8 @@ authors for *why*. Cite inline; each lesson recommends exactly one primary sourc
   Use for: Day 74 — `uuid.uuid4()` for coordination-free unique identifiers and why it's preferred over `uuid1()`; `configparser.ConfigParser` for reading/writing INI-style config files, its string-only raw values, and the typed `getint()`/`getfloat()`/`getboolean()` readers.
 - [Docs: `secrets`](https://docs.python.org/3/library/secrets.html)
   Use for: Day 77 — `token_hex()`/`token_urlsafe()` for cryptographically secure tokens (vs. Day 54's `random`, never safe for this), `secrets.choice()` for picking from a fixed alphabet securely, and `compare_digest()` for timing-safe comparison of a secret against untrusted input; the "Recipes and best practices" section is the primary source for the timing-attack claim.
+- [Docs: `pprint`](https://docs.python.org/3/library/pprint.html)
+  Use for: Day 78 — `pprint()`/`pformat()` for readable multi-line output on any nested Python object (not only JSON-shaped data, unlike Day 76's `json.dumps(indent=)`), `sort_dicts=` for alphabetical vs. insertion key order, and `width=`/`depth=` for layout control.
 - [PEP 8 — Style Guide for Python Code](https://peps.python.org/pep-0008/)
   Use for: naming and layout conventions, so written code looks like the ecosystem's.
 

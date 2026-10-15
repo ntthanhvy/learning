@@ -206,6 +206,8 @@
       file: "lessons/0099-clickjacking-and-security-headers.html" },
     { n: 100, date: "2026-10-14", title: "CSP's real job: locking down scripts, not just frames",
       file: "lessons/0100-content-security-policy-script-src.html" },
+    { n: 101, date: "2026-10-15", title: "gRPC: the other API shape",
+      file: "lessons/0101-grpc-the-other-api-shape.html" },
   ];
 
   const REFS = [

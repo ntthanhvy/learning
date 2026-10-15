@@ -160,6 +160,8 @@
       file: "lessons/0076-json-dumps-loads-and-default.html" },
     { n: 77, date: "2026-10-14", title: "secrets: tokens and timing-safe compare",
       file: "lessons/0077-secrets-tokens-and-timing-safe-compare.html" },
+    { n: 78, date: "2026-10-15", title: "pprint: readable nested data at a glance",
+      file: "lessons/0078-pprint.html" },
   ];
 
   const REFS = [

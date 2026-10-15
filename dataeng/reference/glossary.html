@@ -267,6 +267,14 @@
   <tr><td>design review</td><td>giữ nguyên "design review" — buổi xem xét có cấu trúc, có chủ đích về thiết kế hệ thống, do người đóng vai reviewer hay hỏi ngược thực hiện — không phải soi lỗi code, mà kiểm tra các lựa chọn thiết kế đã nêu có thực sự đứng vững trước lý do chính nó đưa ra hay không, nói ra miệng, trên hệ thống thật</td><td>A deliberate, structured examination of a system's design by someone playing a skeptical reviewer — not a bug hunt in the code (that's what tests and <code>py_compile</code>/<code>dbt build</code> already do), but a check of whether the stated design decisions actually hold up against their own stated reasons, defended out loud against the real repo rather than recited from memory.</td></tr>
 </table>
 
+<h2 id="day30">Day 30 — Stream processing vs. "land it and let dbt do it"</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>Kafka Streams</td><td>giữ nguyên "Kafka Streams" — thư viện stream processing chạy trong 1 process ứng dụng bình thường (không cần cluster riêng), đọc/viết trực tiếp vào topic Kafka, cung cấp các phép toán như stateful aggregation và windowing ngay trên luồng event vô hạn</td><td>A stream-processing library that runs inside an ordinary application process (no separate cluster), reading from and writing to Kafka topics directly, and offering operations like stateful aggregation and windowing directly over an unbounded stream of events.</td></tr>
+  <tr><td>Flink</td><td>giữ nguyên "Flink" — engine xử lý stream/batch phân tán có cluster worker riêng, đọc được từ Kafka (và nhiều nguồn khác), tính toán stateful quy mô lớn — aggregation theo window, join giữa 2 stream — với guarantee exactly-once cho state, độc lập với broker nào cả</td><td>A distributed stream- and batch-processing engine with its own cluster of worker nodes, able to read from Kafka (and many other sources) and perform large-scale stateful computation — windowed aggregations, joins between streams — with exactly-once state guarantees, independent of any one broker.</td></tr>
+  <tr><td>windowing</td><td>giữ nguyên "windowing" — chia 1 stream event vô hạn thành các khoảng thời gian cố định (ví dụ tumbling window 5 phút) để 1 phép tính stateful như running count hay average có ranh giới rõ để đóng lại và trả kết quả, thay vì chạy mãi trên stream luôn phình ra</td><td>Grouping an unbounded event stream into fixed-size time buckets (e.g. a 5-minute tumbling window) so a stateful computation like a running count or average has a well-defined boundary to close and emit a result for, instead of running forever over an ever-growing stream.</td></tr>
+</table>
+
 <script src="../assets/nav.js"></script>
 </body>
 </html>

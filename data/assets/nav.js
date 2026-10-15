@@ -200,6 +200,8 @@
       file: "lessons/0096-insert-and-pop.html" },
     { n: 97, date: "2026-10-14", title: "np.broadcast_to(): making the implicit \"stretch\" an explicit, inspectable array",
       file: "lessons/0097-np-broadcast-to.html" },
+    { n: 98, date: "2026-10-15", title: "pd.date_range(): building the calendar grid, instead of trusting the one you were sent",
+      file: "lessons/0098-date-range.html" },
   ];
 
   const REFS = [

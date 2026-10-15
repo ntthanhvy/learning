@@ -8724,3 +8724,126 @@
   artifacts committed. `bin/record-progress data lesson_generated --day 97
   --lesson 0097-np-broadcast-to.html --detail '{"by":"launchd"}'` was run
   directly from the repo root this round, matching Lesson 95/96's pattern.
+- 2026-10-15 generation (Lesson 98): headless 06:00 run, zero prior context.
+  Read MISSION.md in full (not modified), RESOURCES.md in full, the tail of
+  this log (Lessons 90-97's entries), the one `learning-records/` baseline
+  file (0001, still unchanged since course creation in mid-July — stale, no
+  new durable finding to fold in), `assets/nav.js` in full for the
+  registration format, and `reference/glossary.html`. The orchestrator
+  pre-confirmed no `course_progress` completion signal exists past
+  mid-July for any course, so this round paced conservatively from file
+  state alone, same as every recent round, and skipped re-querying the DB
+  directly per the orchestrator's framing. Idempotency was pre-confirmed
+  by the orchestrator and independently re-checked: no `0098-*` file
+  existed in `data/lessons/`, no `98_*` file existed in `data/practice/`,
+  and no `n: 98` entry existed in `nav.js` before this round started.
+  Lesson 97's own teaser named no standing candidate — all three
+  previously-open gaps (`np.repeat()`/`np.tile()`, `insert()`/`.pop()`,
+  `np.broadcast_to()`) were closed across Lessons 95-97 — so this round ran
+  a full fresh curriculum/glossary scan per that explicit instruction, with
+  no lineage shortcut available. Built a scratch Python scan script (`uv
+  run python3`, deleted after) that counted case-insensitive substring hits
+  for roughly 90 candidate pandas/NumPy terms across every lesson body and
+  the glossary file at once (faster than per-term grep calls this round).
+  Zero-hit candidates included: `pd.date_range()` (used only as incidental
+  test-data setup inside Lessons 94/95, never as its own topic),
+  `MultiIndex.from_product()`, `rename_axis()`, `swaplevel()`, `get_loc()`,
+  `IntervalIndex`, `to_timedelta()`, `DataFrame.update()`,
+  `np.setdiff1d()`/`np.intersect1d()`/`np.union1d()`, `np.clip()`, and the
+  `str.pad()`/`str.zfill()`/`str.strip()`/`str.title()`/`str.join()`
+  family. Picked `pd.date_range()` over the others: datetime itself is
+  already one of this course's best-covered threads (Lesson 32's `.dt`
+  accessor, 38's `resample()`, 58's `merge_asof()`, 59's `to_period()`,
+  71's `Grouper()`, 81's `to_datetime(format=)`, 94's
+  `first_valid_index()`), yet the one function several of those lessons
+  quietly leaned on to build their own example data was never itself the
+  subject of a lesson — a genuine, surprising gap given how central it is,
+  and a real interview-relevant one (the direct pandas equivalent of a SQL
+  `generate_series()` over a date range, a known "find the missing days"
+  interview pattern per MISSION.md's SQL-equivalence framing). The
+  MultiIndex/str-method candidates were judged thinner interview payoff by
+  comparison and left unused, not deferred by name. Every behavioral claim
+  was probed directly first in `data/.scratch-0098/` (deleted after), on
+  the actually-installed pandas 3.0.6 (confirmed via the same
+  version-print one-liner prior rounds used): confirmed `date_range()`
+  needs exactly three of `start`/`end`/`periods`/`freq` specified — one or
+  fewer, or all four together, both raise the identical `ValueError:
+  Of the four parameters: start, end, periods, and freq, exactly three
+  must be specified`; confirmed that when only `start`+`end` (or
+  `start`+`periods`) are given, `freq` quietly defaults to `"D"`, which is
+  why a two-argument call still passes despite the "exactly three"
+  message; confirmed the removed (not merely deprecated) single-letter
+  frequency aliases from older pandas: `freq="M"` raises `ValueError:
+  'M' is no longer supported for offsets. Please use 'ME' instead.`, and
+  `freq="H"` raises `ValueError: Invalid frequency: H ... Did you mean
+  h?` — both hard errors, not warnings, the same removed-not-deprecated
+  pattern as Lesson 45's `fillna(method=)`; confirmed `freq="B"` (business
+  day) is unchanged and still valid; confirmed the practical ETL pattern
+  of building a full calendar grid via `date_range(sparse.index.min(),
+  sparse.index.max(), freq="D")` and `reindex()`-ing (Lesson 47) a sparse
+  time series onto it, turning invisible missing days into visible `NaN`
+  rows the original sparse table never signals on its own. Cross-checked
+  the official pandas docs via `WebFetch` (available this round): fetched
+  the `pandas.date_range()` API reference page, which phrases the
+  parameter rule more loosely ("a maximum of three can be specified at
+  once" plus a separate "at least two of start, end, periods" clause) —
+  confirmed this is the looser restatement of the same exact-three/
+  freq-defaults-to-D behavior demonstrated by direct probing, not a
+  contradiction, and both are named in the lesson's "Go deeper" section so
+  neither phrasing is presented as the only correct one; also confirmed
+  the docs' `inclusive=` parameter and its four options (`both`, `left`,
+  `right`, `neither`) via direct probing, though `inclusive=` itself was
+  left out of the lesson body to keep the ~20 min scope on the two
+  sharpest points (the three-of-four rule and the removed freq aliases).
+  The shipped (unsolved) `practice/98_date_range.py` was executed directly
+  from its real `practice/` location and printed exactly 3 ✗ with no raw
+  traceback. Built a solved copy in `.scratch-0098/`, filling in all five
+  blanks correctly; it printed all 3 ✓ and "All green" on the first run.
+  The shipped file was re-run once more directly from `practice/` after
+  building the solved copy and reproduced the identical all-✗ result,
+  confirming the solved copy's edits never leaked back into the shipped
+  baseline. Quiz options were drafted, then mechanically word-counted with
+  a scratch Python script (`uv run python3`, deleted after) isolating each
+  `<div class="q">` block by regex span and splitting on whitespace — the
+  first draft came out 10/11/11, 12/11/11, 13/11/10; several rounds of
+  small rephrasing (adding/trimming words like "total", "just", "simply",
+  "single", "merely") across all three questions until every one landed
+  exactly level (12/12/12, 12/12/12, 12/12/12 option words), one
+  `data-ok` per question throughout. A separate mechanical tag-balance
+  script confirmed all tags balanced (a 2/2, body 1/1, button 9/9, code
+  60/60, dfn 1/1, div 5/5, em 3/3, h1 1/1, h2 6/6, head 1/1, html 1/1, p
+  18/18, pre 6/6, script 3/3, span 51/51, strong 4/4, title 1/1) and found
+  exactly two raw `&` characters, both inside the one established `cd
+  ~/learning/data && uv run ...` shell command, matching every prior
+  lesson's pattern, zero raw `&` in prose; also confirmed the one new
+  `<dfn>` tag carries both `data-en` and `data-vn`. Checked the glossary
+  for a collision before adding anything — grepped `date_range` and
+  `date range` case-insensitively across the full glossary, found zero
+  existing rows — added exactly one new row, "pd.date_range()", directly
+  after Lesson 97's "np.broadcast_to()" entry; re-ran the tag-balance and
+  raw-`&` scripts against the glossary file afterward, confirmed it stayed
+  balanced (a 1/1, body 1/1, code 1154/1154, em 11/11, h1 1/1, head 1/1,
+  html 1/1, p 3/3, script 1/1, strong 1/1, table 1/1, td 504/504, th 3/3,
+  title 1/1, tr 169/169) with zero raw `&` introduced, and the `<tr>` count
+  went from 168 to 169 as expected. Registered Lesson 98 in `nav.js` with
+  today's date (2026-10-15); `node --check` confirmed it still parses as
+  valid JavaScript after the edit, and exactly one `n: 98` entry plus one
+  `0098-date-range` file reference were confirmed to exist; `node --check`
+  was also run against the untouched `gloss.js`/`quiz.js` as a quick sanity
+  pass, both still parse fine. This round closed a fresh gap found with no
+  lineage shortcut available, confirming the fresh-scan approach still
+  surfaces real, high-value gaps even after three consecutive
+  lineage-driven rounds — no single candidate is named as THE next pick
+  for tomorrow; the MultiIndex/`rename_axis()`/`swaplevel()` family and the
+  `str.pad()`/`str.strip()`/`str.title()`/`str.join()` family both remain
+  confirmed zero-hit options from today's scan but neither is promoted
+  ahead of running tomorrow's own fresh scan. No new
+  `data/learning-records/` entry was added this round — routine lesson, no
+  new baseline finding to justify one (the Neon `course_progress`
+  completion-gap signal remains stale past mid-July, unchanged from this
+  round's starting context). The `.scratch-0098/` directory was deleted
+  after verification, per this course's standing practice of not leaving
+  scratch artifacts committed. `bin/record-progress data lesson_generated
+  --day 98 --lesson 0098-date-range.html --detail '{"by":"headless"}'` was
+  run directly from the repo root this round, matching the pattern used by
+  Lessons 95-97.

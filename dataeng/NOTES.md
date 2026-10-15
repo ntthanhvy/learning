@@ -3524,3 +3524,144 @@ along the Phase 2 spine, adapted to the learning records.
   is explicitly, not just procedurally, called for), then make that
   depth-split call explicitly in the next generation log entry rather than
   silently defaulting to 2b's first bullet.
+- 2026-10-15 (headless 06:00 run, Day 30 generated): thirtieth lesson,
+  `0030-stream-processing-vs-land-and-let-dbt.html`. Confirmed before writing
+  that no lesson dated 2026-10-15 exists in `assets/nav.js` and no
+  `0030-*.html` file exists in `lessons/` (Lesson 29 was generated
+  2026-10-14, yesterday, so today is next); the DB's `course_progress` table
+  was already confirmed by the orchestrator to have no
+  `lesson_completed`/quiz/outcome row more recent than mid-July 2026 for any
+  course, specifically including nothing confirming the learner ran Day 29's
+  design-review exercise against their own repo, so that check was not
+  re-attempted here. Read `MISSION.md` (read-only), `PLAN.md` in full (every
+  bullet of the Phase 2a/2b/2c/2d spine, cross-checked against what each one's
+  lesson actually covers), `NOTES.md` in full including Day 29's closing note,
+  `RESOURCES.md`, and `assets/nav.js`'s full `LESSONS` array (all 29 titles)
+  before writing anything.
+  **The explicit next-topic call, per Day 29's own flagged decision point:**
+  Day 29's closing note named the real checkpoint — Phase 2d had just closed
+  (all four bullets: one-command demo, data-quality story, what-breaks-at-
+  100x, design-review walkthrough), and per `PLAN.md`'s own line ("revisit
+  this plan at the end of 2a... re-checked against what the learner actually
+  wants to show"), today's round was explicitly supposed to re-read the whole
+  remaining spine and make a reasoned call, not silently take 2b's next
+  listed bullet the way every prior Phase 2 round defaulted for its own
+  immediate next topic. Did exactly that: built a bullet-by-bullet map of
+  `PLAN.md`'s 2a/2b/2c against `assets/nav.js`'s 29 registered titles.
+  **2a (dbt in depth), 8 bullets:** layering (Day 8), snapshots/SCD2 (Day 9),
+  Jinja/macros (Day 10), packages (Day 11), unit tests (Day 12), incremental
+  strategies (Day 13), docs/exposures/contracts (Day 14), dbt in CI (Day 15)
+  — **all 8 done**, closed at Day 15 (confirmed via Day 15's own title in
+  nav.js; not re-read in full this round since Day 23's and Day 28's own
+  closing notes already treat 2a as closed and no contradicting signal
+  exists). **2c (Airflow working depth), 6 bullets:** logical date/backfills
+  (Day 19), TaskFlow/XCom (Day 20), Assets (Day 21), connections/variables
+  (Day 22), Cosmos (Day 24), sensors/deferrable/SLAs (Day 25) — **all 6
+  done**, closed at Day 25 (Day 25's own generation-log entry is titled
+  "Phase 2c spine complete", confirmed by grep). **2b (Kafka concept-first),
+  5 bullets:** delivery semantics (Day 16), schema evolution (Day 17),
+  retention/compaction/consumer lag (Day 18), Kafka Connect and CDC with
+  Debezium (Day 23) — four done — and the fifth, "when stream processing
+  (Kafka Streams, Flink) is warranted vs. 'land it and let dbt do it':
+  vocabulary only," confirmed via `grep -i` across every lesson file that it
+  is **not** yet covered: Days 16/23/28 only name Kafka Streams/Flink in
+  passing "out of scope per MISSION.md" callouts, never as the dedicated
+  vocabulary-level lesson this bullet calls for. This is independently
+  corroborated by Day 23's own closing note, read again this round, which
+  says verbatim: "Phase 2b is now fully covered... except 'when stream
+  processing is warranted vs. land-it-and-let-dbt-do-it,' vocabulary-only and
+  small enough to pair with another topic later." **The call:** this is the
+  single remaining unbuilt bullet across the entire 2a/2b/2c/2d spine. Built
+  today's lesson on it rather than opening a new, undefined "Phase 3" or
+  re-litigating the dbt/Kafka/Airflow split in the abstract, for three
+  explicit reasons, stated here rather than assumed: (1) it is small and
+  already scoped by `PLAN.md` itself as "vocabulary only," fitting this
+  phase's ~20-minute pacing without inventing new scope; (2) completing it
+  closes every single bullet across 2a, 2b and 2c (not just 2a, which is all
+  the plan's own text explicitly asked to revisit) and leaves 2d already
+  closed alongside it — a genuine, nameable milestone (the whole original
+  Phase 2 spine, done) rather than an arbitrary pick; (3) there is still no
+  new learning-record or quiz/completion signal of any kind beyond the one
+  Day-1 baseline file (confirmed via the orchestrator's pre-check, not
+  re-queried here), so there is no learner-stated preference to weigh against
+  the spine's own structure, and closing the one remaining gap is the most
+  defensible move available without inventing a preference that hasn't been
+  expressed. Explicitly deferred to the *next* round: now that every spine
+  bullet is complete, that round should open by checking for any new
+  learning-record/quiz signal first, and if still none exists, make its own
+  reasoned call on what a "Phase 3" (if any) looks like — a dbt-depth
+  refresher against what's actually been built, a return to Kafka/Airflow at
+  more hands-on depth, or declaring the portfolio essentially feature-complete
+  and shifting to maintenance/interview-polish mode — rather than this round
+  inventing that answer without a concrete trigger for it.
+  **Content:** framed the question as one this repo has been quietly
+  deciding by default since Day 6 — `mart_delivery_sla` computes "minutes to
+  deliver" and "share over 45 min" only when Day 7's scheduled `dbt build`
+  runs, not continuously as `order_events` land — then introduced Kafka
+  Streams (a library, no separate cluster, links into an existing JVM
+  process) and Flink (its own distributed cluster, broader source support,
+  exactly-once state guarantees across worker failures) side by side, plus
+  windowing as the primitive a stream needs that a landed table gets for
+  free (a well-defined moment to close and emit an aggregate). Built a
+  before/after ASCII diagram contrasting today's actual batch path against
+  the hypothetical stream path, then a trade-off table (freshness,
+  infrastructure cost, tooling, right-fit-here) scoped to this project's own
+  mart rather than generic streaming-vs-batch trivia. The day's actual skill
+  (Section 5) is writing a new `README.md` `Decisions` bullet arguing
+  land-then-batch over Kafka Streams/Flink for this specific mart, with a
+  named, concrete threshold to revisit it ("notify ops within 30 seconds of
+  an SLA-breach share crossing a threshold"), placed next to Day 7's
+  `BashOperator`-over-Cosmos and Day 23's hand-written-consumer-over-Debezium
+  bullets — explicitly the same shape of decision ("a heavier tool exists,
+  named, correctly not reached for yet"). No pandas, no Python-language
+  teaching, no re-derivation of idempotency/API concepts — none applicable to
+  a pure vocabulary-and-diagram day. Domain names (`mart_delivery_sla`,
+  `order_events`, `placed`/`delivered`) used exactly as established; no
+  renaming. No "before today" build-state check beyond confirming Day 23's
+  README section exists, since today edits that same file rather than
+  depending on any dbt/Kafka/Airflow state.
+  **Verification:** no new dbt model, snapshot, macro, DAG or Python file
+  exists in this lesson (a pure vocabulary/diagram day per `PLAN.md`'s own
+  "vocabulary only" framing for this bullet, the same shape as Day 17's
+  Schema Registry day and Day 23's Kafka Connect/CDC day), so neither
+  `uv run --with "dbt-postgres==1.11.0" dbt parse --profiles-dir .` nor
+  `uv run python3 -m py_compile` was applicable — confirmed by grepping the
+  lesson's own `<pre><code>` blocks (4 total: the two ASCII diagrams, the
+  README markdown snippet, and the one-line `grep` Verify command), none of
+  which contain real SQL or Python to check. Stated honestly in the lesson's
+  own "Honesty note" callout rather than silently skipped, matching Day 23's,
+  Day 26's and Day 29's precedent for non-code lessons. Attempted a
+  `WebFetch` against the Kafka Streams documentation page this round to
+  freshen the primary-source citation beyond memory; the fetch tool required
+  a permission grant that was not available headless this round, so the
+  lesson's own citation is reasoned from this course's established
+  understanding of both projects' documented architecture, not a fresh pull
+  — said so explicitly in the lesson rather than presenting it as freshly
+  verified, consistent with Day 23's own gap in the same situation.
+  Registered Lesson 30 in `assets/nav.js` (`node --check` clean) and added
+  the Day 30 section to `reference/glossary.html` (3 new terms: Kafka
+  Streams, Flink, windowing — grepped Days 1–29's sections first for
+  "stream processing"/"Kafka Streams"/"Flink"/"windowing"/"micro-batch", no
+  collisions; the existing "exactly-once" glossary row from Day 16/17 was
+  left untouched and not duplicated, since today's content only references
+  it in passing rather than redefining it). Ran a small Python script
+  (regex-extracting each `<button class="opt">`, splitting on whitespace,
+  treating hyphenated/dotted identifiers like `exactly-once`/`mart_delivery_sla`
+  as single tokens, consistent with every prior day's counting convention)
+  against the saved HTML from a scratch file at the repo root
+  (`.scratch_dataeng_verify_d30_check.py`, deleted after use) — also checked
+  tag balance (div/p/table/tr/td/th/ul/li/pre/code/h2/dfn/button/span/a) and
+  scanned for unescaped bare `&`. The first quiz draft came up mismatched on
+  all four questions (9/8/7, 11/9/9, 10/11/10, 10/9/9 word splits); rebalanced
+  across several edit-and-recount passes to 8/8/8, 9/9/9, 10/10/10 and 9/9/9
+  respectively, re-verified by re-running the same script after each edit.
+  Ran the identical tag-balance/bare-`&` check against the updated
+  `reference/glossary.html` separately (clean, all tags balanced, zero bare
+  `&`). Confirmed all 3 `<dfn>` terms in the lesson (Kafka Streams, Flink,
+  windowing) match the 3 glossary rows added, by direct extraction and
+  comparison rather than by eye.
+  `bin/record-progress dataeng lesson_generated --day 30 --lesson
+  0030-stream-processing-vs-land-and-let-dbt.html --detail
+  '{"by":"headless"}'` succeeded on the first attempt, run from the repo
+  root: `recorded: dataeng/lesson_generated day=30
+  lesson=0030-stream-processing-vs-land-and-let-dbt.html`.

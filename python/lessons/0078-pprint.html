@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 78 · pprint: readable nested data at a glance</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 78 · ~20 min · 15 Oct 2026</p>
+<h1><code>pprint</code>: making nested data readable without reaching for <code>json</code></h1>
+<p class="byline">A plain <code>print()</code> on a dict of lists of dicts comes out as one long, hard-to-scan line. Day 76 showed one fix — <code>json.dumps(obj, indent=2)</code> — but that only works on JSON-shaped data (no sets, no custom objects, no tuples as dict keys) and always produces a string you then have to print yourself. <dfn data-en="pprint (pretty-print) is the standard-library module for printing nested Python data structures -- dicts, lists, tuples, sets -- in a readable, indented, multi-line layout, working directly on any Python object rather than only JSON-shaped data" data-vn="giữ nguyên &quot;pprint&quot; (pretty-print) — module chuẩn in cấu trúc dữ liệu lồng nhau (dict, list, tuple, set) ra dạng nhiều dòng, có thụt đầu dòng, dễ đọc; hoạt động trực tiếp trên object Python bất kỳ, không chỉ dữ liệu dạng JSON">The <code>pprint</code> module</dfn> is the simpler, more general tool for exactly this job: readable nested data, printed directly, for a human looking at a terminal — not for serialization at all.</p>
+
+<div class="callout"><strong>Why today, specifically:</strong> a fresh-gap scan started by re-checking two repeatedly-named-but-never-taught candidates flagged in Days 70-71's notes: <code>pprint</code> and <code>difflib</code>. Grepped case-insensitively for both across every lesson, every practice file, <code>reference/glossary.html</code>, and <code>RESOURCES.md</code> — both still had zero teaching, matching the carried-forward note exactly. <code>pprint</code> won this round over <code>difflib</code>: it is the more commonly reached-for debugging tool (printing a messy API response or a parsed record while developing), it pairs directly with Day 76's <code>json.dumps(indent=)</code> as a contrast worth drawing explicitly, and it has no import-time cost or edge cases sharp enough to need a whole lesson of its own the way a text-diffing algorithm would. <code>difflib</code> remains open for a future round. This is also Day 78, the third fresh lesson since Day 75's review (Days 76-77-78) — Day 79 should default to reviewing this exact trio next, per the course's settled three-fresh-lesson cadence.</div>
+
+<h2>1 · The problem: nested data on one unreadable line</h2>
+<p>A plain <code>print()</code> call uses each object's default <code>repr()</code>, laid out however it fits — for a short flat list that's fine, but a dict of lists of dicts becomes one dense, bracket-heavy line with no indentation to show where one record ends and the next begins:</p>
+<pre><code>record = {
+    <span class="str">"user"</span>: {<span class="str">"id"</span>: <span class="num">42</span>, <span class="str">"name"</span>: <span class="str">"An"</span>, <span class="str">"roles"</span>: [<span class="str">"admin"</span>, <span class="str">"billing"</span>]},
+    <span class="str">"orders"</span>: [{<span class="str">"sku"</span>: <span class="str">"A1"</span>, <span class="str">"qty"</span>: <span class="num">3</span>}, {<span class="str">"sku"</span>: <span class="str">"B2"</span>, <span class="str">"qty"</span>: <span class="num">1</span>}],
+}
+<span class="kw">print</span>(record)
+<span class="cm"># {'user': {'id': 42, 'name': 'An', 'roles': ['admin', 'billing']}, 'orders': [{'sku': 'A1', 'qty': 3}, {'sku': 'B2', 'qty': 1}]}</span></code></pre>
+<p>That single line is correct but slow to scan — finding where <code>"orders"</code> starts means counting brackets by eye. This is exactly the shape of problem <code>pprint</code> exists to solve.</p>
+
+<h2>2 · <code>pprint()</code>: the direct replacement for <code>print()</code></h2>
+<p><code>pprint.pprint()</code> takes the same single object <code>print()</code> would take, and lays it out across multiple lines with indentation showing the nesting:</p>
+<pre><code><span class="kw">from</span> pprint <span class="kw">import</span> pprint
+
+pprint(record)
+<span class="cm"># {'orders': [{'qty': 3, 'sku': 'A1'}, {'qty': 1, 'sku': 'B2'}],
+<span class="cm">#  'user': {'id': 42, 'name': 'An', 'roles': ['admin', 'billing']}}</span></span></code></pre>
+<p>Two things change from plain <code>print()</code>: the multi-line indentation, and — by default — dict keys are sorted alphabetically before printing (<code>"orders"</code> now comes before <code>"user"</code>, reversed from insertion order), specifically so the same data always prints the same way regardless of what order its keys happened to be built in. Passing <code>sort_dicts=False</code> turns that off and preserves insertion order instead, when the original order is the point.</p>
+
+<h2>3 · <code>width=</code> and <code>pformat()</code>: controlling layout, and getting a string back</h2>
+<p><code>pprint()</code> only breaks a line once it would exceed a target width — 80 characters by default — so short structures still print on one line, same as plain <code>print()</code> would. <code>width=</code> changes that threshold directly:</p>
+<pre><code><span class="kw">from</span> pprint <span class="kw">import</span> pprint
+
+short = {<span class="str">"id"</span>: <span class="num">1</span>, <span class="str">"name"</span>: <span class="str">"An"</span>}
+pprint(short)                 <span class="cm"># {'id': 1, 'name': 'An'} -- fits on one line, stays on one line</span>
+pprint(record, width=<span class="num">40</span>)    <span class="cm"># forces more, narrower lines than the default-width call above</span></code></pre>
+<p>Sometimes the readable text is needed as a string — to write into a log line, or embed in an error message — rather than printed immediately. <code>pprint.pformat()</code> ("pretty-format") does the identical layout work and returns the result as a <code>str</code> instead of printing it, the same split <code>json.dumps()</code>/<code>print(json.dumps(...))</code> has:</p>
+<pre><code><span class="kw">from</span> pprint <span class="kw">import</span> pformat
+<span class="kw">import</span> logging
+
+logging.warning(<span class="str">"bad record: %s"</span>, pformat(record))   <span class="cm"># the formatted text becomes part of a log message, not stdout</span></code></pre>
+
+<div class="callout"><strong>Bridge from Day 76's <code>json.dumps(indent=)</code>:</strong> both produce readable, multi-line nested output, but for different inputs and different purposes. <code>json.dumps(obj, indent=2)</code> only accepts JSON-shaped data (<code>dict</code>/<code>list</code>/<code>str</code>/<code>int</code>/<code>float</code>/<code>bool</code>/<code>None</code>) and produces valid JSON text meant to be sent, stored, or parsed back by something else. <code>pprint()</code> accepts <em>any</em> Python object — including <code>set</code>, <code>tuple</code>, and a dict with a tuple as a key, none of which <code>json.dumps()</code> can serialize at all — and its output is for a human to read right now, never meant to be parsed back. Reach for <code>json.dumps(indent=)</code> when the readable text might also need to travel somewhere as data; reach for <code>pprint()</code> when it's purely a debugging or logging aid.</div>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> nothing pandas-specific today — <code>pprint</code> formats plain Python dicts/lists/sets for terminal reading; a <code>DataFrame</code> already has its own readable <code>__repr__</code> for the same job on tabular data, no <code>DataFrame</code> code shown here, per <code>MISSION.md</code>.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/78_pprint.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/78_pprint.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: using <code>pformat()</code> to confirm a nested dict/list structure prints across more than one line, confirming <code>sort_dicts=True</code> (the default) orders top-level keys alphabetically regardless of insertion order, confirming <code>sort_dicts=False</code> preserves the original insertion order instead, and confirming a narrower <code>width=</code> produces strictly more lines than the default width on the same data.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="pprint() lays nested data out across multiple indented lines so the structure is visible at a glance, and by default sorts dict keys alphabetically so the same data always prints the same way regardless of insertion order -- plain print() uses each object's default repr with no such layout or ordering guarantee.">
+    <p class="stem">What does <code>pprint.pprint()</code> change compared to plain <code>print()</code> on the same nested dict?</p>
+    <button class="opt" data-ok>it adds readable multi-line indentation and sorts keys by default</button>
+    <button class="opt">it converts the dict into valid parseable JSON text output</button>
+    <button class="opt">nothing at all — the two produce identical output always</button>
+  </div>
+  <div class="q" data-why="json.dumps() only accepts JSON's built-in types (dict, list, str, int, float, bool, None) and its output is meant to be sent, stored, or parsed back as data. pprint() accepts any Python object, including a set or a tuple used as a dict key, and its output is for a human reading a terminal or log right now, never meant to be parsed back.">
+    <p class="stem">Why might <code>pprint()</code> succeed on a dict that <code>json.dumps()</code> rejects outright?</p>
+    <button class="opt" data-ok>pprint accepts any object at all, not only JSON's types</button>
+    <button class="opt">pprint always converts every value given to a plain string</button>
+    <button class="opt">json.dumps only fails on dicts that pprint also will reject</button>
+  </div>
+  <div class="q" data-why="pformat() runs the identical layout logic pprint() uses but returns the result as a str instead of printing it immediately -- the same split json.dumps()/print(json.dumps(...)) already has, useful when the readable text needs to go into a log message or an error string rather than straight to stdout.">
+    <p class="stem">When should <code>pprint.pformat()</code> be used instead of <code>pprint.pprint()</code>?</p>
+    <button class="opt" data-ok>when the formatted text is needed back as a plain string value</button>
+    <button class="opt">never — pformat and pprint always do the exact same thing anyway</button>
+    <button class="opt">only when formatting a plain set instead of a dict of values</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the standard library's <a href="https://docs.python.org/3/library/pprint.html"><code>pprint</code></a> docs — the module overview covers <code>pprint()</code>/<code>pformat()</code> side by side with <code>width=</code>, <code>sort_dicts=</code>, and <code>depth=</code> (truncating very deep nesting, not shown above).</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day78">glossary</a> under Day 78.<br>
+That closes one of the two standing fresh-gap mentions carried forward from Days 70-71 (<code>difflib</code> remains open). Days 76-77-78 are now three fresh lessons since Day 75's review — <strong>Day 79 should default to a review day</strong> covering this trio (<code>json</code>, <code>secrets</code>, <code>pprint</code>), per this course's settled three-fresh-lesson cadence, unless Day 79's own generator finds a strong reason to deviate.<br><br>
+💬 Anything unclear — <code>pprint()</code> vs. <code>json.dumps(indent=)</code>, or when <code>sort_dicts=False</code> matters? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

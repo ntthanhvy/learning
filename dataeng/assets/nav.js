@@ -40,6 +40,7 @@
     { n: 27, date: "2026-10-12", title: "The data-quality story: what is tested where, and why", file: "lessons/0027-data-quality-story.html" },
     { n: 28, date: "2026-10-13", title: "What breaks at 100×: partitions, incremental models & warehouse choice", file: "lessons/0028-what-breaks-at-100x.html" },
     { n: 29, date: "2026-10-14", title: "A mock design-review walkthrough of the repo", file: "lessons/0029-design-review-walkthrough.html" },
+    { n: 30, date: "2026-10-15", title: "Stream processing vs. \"land it and let dbt do it\"", file: "lessons/0030-stream-processing-vs-land-and-let-dbt.html" },
   ];
 
   const REFS = [

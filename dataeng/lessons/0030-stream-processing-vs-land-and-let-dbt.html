@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 30 · Stream processing vs. "land it and let dbt do it"</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 30 · ~20 min · 15 Oct 2026</p>
+<h1>Stream processing vs. "land it and let dbt do it"</h1>
+<p class="byline">Today's tangible win: the vocabulary and a diagram for a tool class this repo has never needed — Kafka Streams and Flink — and a reasoned line in your <code>README.md</code>'s <code>Decisions</code> section arguing why this pipeline computes <code>mart_delivery_sla</code> in dbt on a schedule instead of in a stream processor as events arrive. This closes the last open bullet of <code>PLAN.md</code>'s Phase 2b spine, and with it, every bullet across Phase 2a, 2b and 2c.</p>
+
+<div class="callout"><strong>Before today — confirm Day 23's README edit is still there:</strong> today adds one more bullet next to it, so check the section exists before appending to it.
+<pre><code>grep -c "^- \*\*" README.md</code></pre>
+Expected: at least 2 (Day 7's orchestration bullet, Day 23's CDC bullet). If the file or section is missing, add today's bullet as the start of a new <code>Decisions</code> list instead — note that in your own repo rather than guessing it already exists.</div>
+
+<h2>1 · The question this repo has been quietly dodging since Day 6</h2>
+<p><code>mart_delivery_sla</code> has had the same shape since Day 6: a Kafka consumer lands <code>order_events</code> into Postgres, and dbt computes "minutes from placed to delivered" and "share of orders over 45 min" later, on whatever schedule Day 7's DAG runs on. An order that goes <code>placed → accepted → picked_up → delivered</code> in three minutes and one that takes three hours are treated identically by this pipeline until the next scheduled <code>dbt build</code> runs. That gap — events arrive continuously, the answer updates in batches — is exactly the boundary this lesson names. The alternative is computing that same answer continuously, as each event lands, inside the stream itself. This course has never built that alternative, and today is about knowing precisely what it would buy and precisely what it would cost, not building it.</p>
+
+<h2>2 · Stream processing: compute on the stream itself, not after it lands</h2>
+<p><dfn data-en="a stream-processing library that runs inside an ordinary application process (no separate cluster), reading from and writing to Kafka topics, and offering operations like stateful aggregation and windowing directly over an unbounded stream of events" data-vn="giữ nguyên &quot;Kafka Streams&quot; — thư viện stream processing chạy trong 1 process ứng dụng bình thường (không cần cluster riêng), đọc/viết trực tiếp vào topic Kafka, cung cấp các phép toán như stateful aggregation và windowing ngay trên luồng event vô hạn">Kafka Streams</dfn> and <dfn data-en="a distributed stream- and batch-processing engine with its own cluster of worker nodes, able to read from Kafka (and many other sources) and perform large-scale stateful computation -- windowed aggregations, joins between streams -- with exactly-once state guarantees, independent of any one broker" data-vn="giữ nguyên &quot;Flink&quot; — engine xử lý stream/batch phân tán có cluster worker riêng, đọc được từ Kafka (và nhiều nguồn khác), tính toán stateful quy mô lớn — aggregation theo window, join giữa 2 stream — với guarantee exactly-once cho state, độc lập với broker nào cả">Flink</dfn> are the two best-known answers to "I want to compute something continuously, as events arrive, not after they land somewhere." Both let a program hold running state — "this city's running count of orders over 45 minutes so far today" — and update that state one event at a time, instead of re-deriving it from scratch over a table. The core primitive both offer that a landed-then-queried table does not is <dfn data-en="grouping an unbounded event stream into fixed-size time buckets (e.g. a 5-minute tumbling window) so a stateful computation like a running count or average has a well-defined boundary to close and emit a result for, instead of running forever over an ever-growing stream" data-vn="giữ nguyên &quot;windowing&quot; — chia 1 stream event vô hạn thành các khoảng thời gian cố định (ví dụ tumbling window 5 phút) để 1 phép tính stateful như running count hay average có ranh giới rõ để đóng lại và trả kết quả, thay vì chạy mãi trên stream luôn phình ra">windowing</dfn>: grouping an endless stream into fixed time buckets so an aggregate has a well-defined moment to close and emit, something a batch query over a table does implicitly every time it runs, but a stream has to be told explicitly.</p>
+<p>Kafka Streams is a library, not infrastructure: it links into an ordinary JVM application process and talks to the Kafka brokers this course already runs, no separate cluster. Flink is the heavier option — its own cluster of worker nodes, its own scheduler, and the ability to read from many sources beyond Kafka, with exactly-once state guarantees that survive a worker crashing mid-computation. Both exist specifically for problems where "wait for dbt's next scheduled run" is the wrong answer because the latency of waiting is itself the business problem — fraud detection that has to fire within seconds, not minutes; a live dashboard a dispatcher is staring at right now.</p>
+
+<h2>3 · What would actually change here, concretely, if this pipeline used one</h2>
+<pre><code>Today's path (batch, what this repo actually runs):
+
+  Kafka consumer ──▶ raw.order_events (Postgres) ──▶ Airflow-scheduled dbt build ──▶ mart_delivery_sla
+  (Day 6, lands every       (sits here until the           (Day 7's DAG, runs on          (one fresh table/
+   event as it arrives)      next scheduled build)          a clock, not per-event)         incremental rebuild)
+
+
+Kafka Streams / Flink path (stream, not used in this repo, shown for contrast):
+
+  topic:order_events ──▶ a stateful windowed job ──▶ topic:delivery_sla_live  (or a live sink)
+  (same events, read       (keeps a running per-city,        (an always-current result,
+   directly, no landing     per-window aggregate in            updated per event, no
+   step first)              memory/state store, updates        separate "build" step
+                             it on every new event)             ever runs)</code></pre>
+<p>The structural difference: today's path has a visible seam — a table that holds a stale answer between builds — and the stream path has none, because the aggregate itself <em>is</em> the running state, continuously current. That seam is not a bug in this pipeline; it is the whole trade this lesson is about naming honestly.</p>
+
+<h2>4 · The trade-off, named for this project specifically, not in the abstract</h2>
+<table class="gloss">
+  <tr><th></th><th>Land it, let dbt do it (this repo)</th><th>Kafka Streams / Flink</th></tr>
+  <tr><td>Freshness of <code>mart_delivery_sla</code></td><td>As stale as the gap between scheduled <code>dbt build</code> runs (minutes to hours, Day 7's DAG cadence)</td><td>Continuously current, updated per event as it lands</td></tr>
+  <tr><td>New infrastructure needed</td><td>None beyond Postgres and the Kafka broker this course already runs</td><td>A Streams application process, or a whole separate Flink cluster with its own worker nodes and state store</td></tr>
+  <tr><td>Tooling for the actual computation</td><td>SQL, dbt's own tests, Day 9's snapshots, Day 11's packages — everything this course already spent 2a teaching</td><td>A different language/API entirely (Java/Scala for Flink, a Java/Kotlin DSL for Kafka Streams) with its own testing story</td></tr>
+  <tr><td>Right fit here</td><td>Yes — nobody is paged the moment one city's SLA breach share ticks up; a dashboard refreshed hourly already serves the real decision this mart supports</td><td>Would be the right call if a dispatcher needed to see SLA breaches within seconds to act on them in real time, or if the aggregate itself needed to drive an automated action per event</td></tr>
+</table>
+<p>The honest framing is not "streaming is advanced, batch is basic." It is that continuous computation earns its real cost — a new runtime, a new language, a new state store to operate — only when the latency of waiting for the next scheduled build is itself unacceptable to the business. <code>mart_delivery_sla</code> feeds a report a human reads periodically, not an automated action that needs to fire within the same second an event lands, so Day 6–7's land-then-batch path stays the right call, the same kind of named, revisitable decision as Day 23's "hand-written consumer over Debezium" and Day 7's "<code>BashOperator</code> over Cosmos."</p>
+
+<h2>5 · Build: write the decision into the README, not a new runtime</h2>
+<p>Per this course's own scope (<code>MISSION.md</code> lists Kafka Streams and Flink as vocabulary only, and <code>PLAN.md</code>'s Phase 2b spine calls this bullet "vocabulary only" explicitly), today adds no container and no new dependency. The build step is reasoning through the decision this repo already made by default since Day 6, and writing it down where Day 7 and Day 23's decisions already live:</p>
+<pre><code>- **Land-then-batch over Kafka Streams/Flink for `mart_delivery_sla`** — the
+  mart feeds a periodic SLA report a human reads, not an automated action
+  that needs to fire within seconds of an event landing, so the latency of
+  waiting for Airflow's next scheduled `dbt build` (Day 7) is acceptable.
+  A stream processor would earn its cost (a new runtime, a new language, a
+  state store to operate) if this mart needed to drive a real-time alert or
+  dashboard refreshed on every event instead. Revisit if "notify ops within
+  30 seconds of a city's SLA breach share crossing a threshold" ever becomes
+  a real requirement.</code></pre>
+<p>Add that bullet to <code>README.md</code>'s <code>Decisions</code> list, after Day 23's CDC bullet (both are "a heavier tool exists and was named, then correctly not reached for yet" decisions, so they read naturally together). Commit it.</p>
+
+<h2>6 · What's deliberately not here</h2>
+<p>Today is vocabulary and a diagram, not a build, for a concrete reason: standing up even the lighter of the two options (Kafka Streams) means writing and running a second application alongside the existing producer/consumer pair, in a different language ecosystem than the rest of this project, for a freshness requirement this portfolio's own domain doesn't have. Flink is further out of reach still — <code>MISSION.md</code> rules out a whole new cluster to operate locally, the same reasoning Day 17 applied to Schema Registry and Day 23 applied to Kafka Connect/Debezium: name the tool, know exactly what it buys and costs, and build it only when a real requirement — not a hypothetical one — shows up.</p>
+
+<h2>7 · Verify</h2>
+<pre><code>grep -c "Kafka Streams\|Flink" README.md</code></pre>
+<p>Expected: at least <code>1</code> — today's new bullet names at least one of the two tools by name, with a reason tied to this project's own mart, not a generic "streaming is for later" line. As with Day 23's and Day 28's checks, a match on a copy-pasted sentence with no project-specific reasoning doesn't count — the grep is mechanical, the decision behind it isn't.</p>
+<div class="callout"><strong>Honesty note on today's verification:</strong> no new dbt model, snapshot, macro, DAG or Python file exists in this lesson, so neither <code>dbt parse</code> nor <code>py_compile</code> applies — stated here rather than silently skipped, matching Day 23's, Day 26's and Day 29's own precedent for a non-code lesson. The windowing/state-store vocabulary and the Kafka Streams-vs-Flink library-vs-cluster distinction are reasoned from this course's own established understanding of both projects' documented architecture, not a fresh fetch this round (this sandbox's web-fetch tool returned no result when queried against Kafka Streams' own docs this round) — confirm exact API names (<code>KStream</code>, <code>KTable</code>, tumbling vs. hopping window types) against the live docs before quoting them in an interview.</div>
+
+<div class="interview">
+<p><strong>Q: "Your delivery-SLA mart is computed in dbt on a schedule. Why not compute it in a stream processor instead, since the data is already in Kafka?"</strong> A strong answer, out loud: <em>"Because the real question isn't whether the data's in Kafka already, it's whether anyone needs the answer faster than my next scheduled dbt build gives it to them. mart_delivery_sla feeds a report a human checks periodically — nobody's paged the second one city's SLA-breach share ticks up — so the gap between batch runs is acceptable, and landing events then computing in dbt on a schedule costs me nothing beyond what I already run: Postgres and the Kafka broker. A stream processor like Kafka Streams or Flink would earn its real cost — a new runtime, in Kafka Streams' case a different language ecosystem, and for Flink a whole separate cluster with its own state store to operate — the moment this mart needed to drive something in real time: an alert that has to fire within seconds, or a dashboard that has to update per event instead of per batch. That's not a hypothetical I'm ignoring, it's a named threshold in my README I'd revisit the day it actually shows up."</em> The signal: tying the decision to a specific latency requirement this project's domain does or doesn't have, not treating streaming as universally more advanced.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Kafka Streams is a library that links into an ordinary application process and talks to existing Kafka brokers directly, no separate cluster needed. Flink runs as its own distributed cluster of worker nodes with its own scheduler and state store, able to read from Kafka and many other sources, with exactly-once state guarantees across worker failures.">
+    <p class="stem">What is the core structural difference between Kafka Streams and Flink?</p>
+    <button class="opt" data-ok>Streams is a library; Flink runs a cluster</button>
+    <button class="opt">Streams only reads files; Flink only reads topics</button>
+    <button class="opt">Flink never offers any kind of exactly-once guarantee</button>
+  </div>
+  <div class="q" data-why="Windowing groups an endless event stream into fixed time buckets so a stateful aggregate (a running count, an average) has a well-defined moment to close and emit a result, something a batch SQL query over a landed table gets for free every time it runs, but an unbounded stream has to be told explicitly.">
+    <p class="stem">Why does a stream processor need windowing for an aggregate like a running count?</p>
+    <button class="opt" data-ok>A stream never ends, an aggregate needs a limit</button>
+    <button class="opt">Kafka brokers refuse to store any unwindowed topic events</button>
+    <button class="opt">Windowing only exists to shrink one topic's partition count</button>
+  </div>
+  <div class="q" data-why="mart_delivery_sla feeds a periodic report a human reads, not an automated action needing to fire within seconds of an event landing, so Airflow's scheduled dbt build cadence (Day 7) is an acceptable latency. A stream processor earns its real cost -- a new runtime, a new language ecosystem or cluster, a state store to operate -- only once a genuine real-time requirement like a sub-minute alert actually exists.">
+    <p class="stem">Per today's README decision, why does <code>mart_delivery_sla</code> stay land-then-batch, not streamed?</p>
+    <button class="opt" data-ok>Nothing downstream needs it faster than the next scheduled build</button>
+    <button class="opt">Kafka Streams cannot read from this project's own topic ever</button>
+    <button class="opt">Dbt itself technically cannot run on any kind of schedule</button>
+  </div>
+  <div class="q" data-why="Today's lesson closes PLAN.md's Phase 2b spine's fifth and final bullet (stream processing vocabulary), which was also the last open bullet across all of 2a, 2b and 2c combined -- 2a closed at Day 15, 2c closed at Day 25, and 2b's other four bullets (delivery semantics, schema evolution, retention/lag, Connect/CDC) closed across Days 16-23.">
+    <p class="stem">What does finishing today's lesson complete, across <code>PLAN.md</code>'s whole Phase 2 spine?</p>
+    <button class="opt" data-ok>Every bullet across Phase 2a, 2b, 2c and 2d</button>
+    <button class="opt">Only today's own one Kafka vocabulary bullet, nothing more</button>
+    <button class="opt">Phase 1's original seven-day intensive week, all over again</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> Kleppmann's <em>Designing Data-Intensive Applications</em> (cited in <code>RESOURCES.md</code> since Day 1), ch. 11 — the authoritative treatment of stream processing, windowing and the trade-offs against batch computation this lesson applied to this project's own mart, rather than a generic comparison. <a href="https://kafka.apache.org/documentation/streams/">Kafka Streams documentation</a> is the natural next read if a real sub-second SLA-alert requirement ever shows up for this portfolio.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 30.<br>
+<strong>Every bullet across Phase 2a, 2b and 2c is now done</strong> — only Phase 2d (already closed as of Day 29) remains complete alongside it. Per <code>PLAN.md</code>'s own closing line, the next generation round should make an explicit call on what Phase 3, if any, looks like, rather than defaulting to a bullet list that no longer has an unbuilt entry.<br><br>
+💬 Anything unclear — when a real-time SLA alert would actually justify standing up Kafka Streams, or how the windowing idea maps onto dbt's own incremental lookback from Day 13? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

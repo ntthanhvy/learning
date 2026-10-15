@@ -9874,4 +9874,126 @@ fail *gracefully* so the learner sees which task failed.
   Days 76-77-78, per this course's settled three-fresh-lesson cadence
   (Days 64-66 → review 67, Days 68-70 → review 71, Days 72-74 → review
   75) — unless Day 78's own generator finds a strong reason to deviate.
+- 2026-10-15 — **Day 78 generated: `pprint` — readable nested data at a
+  glance** (headless 06:00 run, zero prior context per the orchestrator's
+  brief). Read `MISSION.md` (untouched, read-only) and `PLAN.md` in full
+  to reconfirm the no-pandas/no-NumPy scope rule and that Phase 2's spine
+  is otherwise fully spent; `RESOURCES.md` in full; `assets/nav.js` in
+  full (registration format + recent entries); the sole
+  `learning-records/` baseline file, confirmed still just the Day 1
+  entry. `NOTES.md` exceeds this run's single-read size cap (9877 lines
+  against a 256 KB ceiling), so only the tail (~400 lines, covering Days
+  75-77 in full) was read directly — confirmed sufficient since the tail
+  already carried Day 77's complete next-day note naming `pprint` and
+  `difflib` as the two standing candidates to check first. Idempotency:
+  listed `lessons/`/`practice/` (highest existing file `0077-secrets-
+  tokens-and-timing-safe-compare.html`, dated 2026-10-14) and grepped
+  `assets/nav.js` for `n: 78`/`2026-10-15` — nothing for today existed
+  yet before writing anything.
+  Decision process — cadence and topic, per the orchestrator's brief and
+  Day 77's own next-day note: Days 76-77 were already two fresh lessons
+  since Day 75's review (Days 72-74), so Day 78 needed to be the third
+  fresh lesson in this cycle, not a review day — Day 79 should default to
+  reviewing Days 76-77-78 instead. Checked the two carried-forward
+  candidates first, per instruction, before considering a fresh scan:
+  grepped case-insensitively for `pprint` and `difflib` across every
+  lesson, every practice file, `reference/glossary.html`, and
+  `RESOURCES.md` — both still had zero hits anywhere, confirming Days
+  70-71's notes were still accurate and no newer lesson had quietly
+  closed either gap in between. Chose `pprint` over `difflib`: it is the
+  more commonly reached-for debugging/logging tool, it lets today draw a
+  precise, useful contrast against Day 76's `json.dumps(obj, indent=2)`
+  (any Python object vs. JSON-shaped data only; human-readable debug
+  output vs. data meant to travel/parse back), and it has no sharp edge
+  cases demanding a dedicated lesson the way a text-diffing algorithm
+  would. `difflib` remains open for a future round. Read Day 76's full
+  lesson directly before writing, to source the `indent=` contrast
+  accurately rather than from memory of the log summary.
+  No-pandas rule: grepped case-insensitively for `pandas`/`numpy`/`pd\.`/
+  `np\.` in both the lesson and practice file — exactly one hit in the
+  lesson (the single "Where pandas goes from here" boundary callout,
+  noting a `DataFrame` already has its own readable `__repr__` for the
+  same job on tabular data, no `DataFrame` code shown) and zero hits in
+  the practice file — compliant with the one-contrast-sentence allowance.
+  **New jargon: 1 term** (`pprint` module) — wrapped in a single
+  `<dfn data-en="…" data-vn="…">` on first mention in the byline, per
+  this course's shared rule. Grepped `reference/glossary.html`
+  case-insensitively for `pprint` first to confirm zero prior entries,
+  then appended a new `id="day78"` section directly after Day 77's,
+  matching the file's running append-only convention.
+  Quiz: 3 questions (what `pprint()` changes vs. plain `print()`, why
+  `pprint()` can succeed on data `json.dumps()` rejects, when `pformat()`
+  should be used instead of `pprint()`). Word counts were checked with a
+  throwaway Node.js regex-based script (written via `Write` to a
+  `.verify78.js` scratch file under the repo root, deleted after use)
+  that strips tags from each `<button class="opt">` and splits on
+  whitespace. First draft mismatched on all three questions (Q1 9/10/10,
+  Q2 9/10/10, Q3 11/11/10) — iterated option-by-option (lengthening
+  "indentation" to "multi-line indentation", "not just" to "accepts any
+  object at all, not only", "a string value" to "a plain string value",
+  "a set" to "a plain set"), recounting after every edit per this
+  course's own "recount after edits" rule, until all three landed on
+  equal counts: 10/10/10, 10/10/10, 12/12/12. The same script's raw
+  tag-balance and unescaped-`&` checks came back clean on the final pass
+  for both the lesson file and the full (now-modified)
+  `reference/glossary.html`; `node --check` confirmed no syntax errors on
+  `assets/nav.js`, `assets/gloss.js`, and `assets/quiz.js` (the latter two
+  unmodified, checked as a sanity baseline).
+  `RESOURCES.md`: added a new `pprint` docs line, placed directly after
+  the Day 77 `secrets` line per the file's day-ordered citation
+  convention, naming the Day 76 `indent=` contrast explicitly.
+  Registered in `assets/nav.js` with `date: "2026-10-15"` right after the
+  `n: 77` entry; confirmed `node --check assets/nav.js` reports no syntax
+  errors after the edit.
+  Practice file `practice/78_pprint.py` (4 checks, stdlib-only, no
+  `--with` flag, function-stub-with-TODO-comment style matching Day 77's
+  own): `pformat()` on a nested dict/list structure confirmed to contain
+  a real newline (Ex 1), `sort_dicts=True` (the default) confirmed to
+  order top-level keys alphabetically regardless of insertion order (Ex
+  2), `sort_dicts=False` confirmed to preserve the original insertion
+  order instead (Ex 3), and a narrower `width=20` confirmed to produce
+  strictly more lines than the default width on the same data (Ex 4).
+  Exact expected outputs for Ex 2-4 were verified against a live
+  `uv run python3 -c "..."` probe before being written into the checks,
+  rather than assumed from memory of `pprint`'s documented behavior.
+  Verified in a scratch `.scratch-0078/` directory created directly under
+  the repo root (copied from the shipped file, not edited in place): the
+  shipped (unsolved) copy printed four clean ✗ lines with no traceback,
+  both from the scratch copy and again run directly from its real
+  `python/practice/` path as a final check. A separately solved copy
+  (TODOs filled in directly on the scratch copy via `Edit`) printed all
+  four ✓ and the "All green" tally, run twice consecutively with
+  identical results both times. Scratch directory deleted before
+  finishing — confirmed by a listing showing no `.scratch-0078`
+  remaining.
+  `python/learning-records/` still holds only the Day 1 baseline —
+  nothing from today's run (choosing `pprint` over the other
+  already-known, already-weighed `difflib` candidate, per an explicit
+  carried-forward note) is a new, durable fact about the learner distinct
+  from what Day 1's record already says.
+  **DB access:** per the orchestrator's brief, the DB had already been
+  confirmed before this run started — no `lesson_completed`/quiz/outcome
+  row more recent than mid-July for any course — so this round deferred
+  to that pre-run confirmation plus its own on-disk idempotency check
+  rather than attempting a direct `psql`/`bin/query-progress` read,
+  consistent with this log's running note that such reads have been
+  blocked by sandbox/approval restrictions on essentially every prior
+  run. `bin/record-progress python lesson_generated --day 78 --lesson
+  0078-pprint.html --detail '{"by":"headless"}'` was run from the repo
+  root at the end of this round.
+  Final `git status --short -- python/` is expected to show exactly five
+  paths changed before this `NOTES.md` edit (`assets/nav.js`,
+  `RESOURCES.md`, `reference/glossary.html`, plus the new lesson and
+  practice file) — six total including this file — no other course's
+  files touched, and no leftover scratch files or directories under the
+  repo.
+  **Next-day note:** with `pprint` now closed, only `difflib` remains as
+  a standing, repeatedly-named-but-never-taught candidate from Days
+  70-71's scans. Days 76-77-78 are now a three-lesson fresh span since
+  Day 75's review (Days 72-74), matching this course's settled
+  three-fresh-lesson cadence (Day 67 reviewed 64-66, Day 71 reviewed
+  68-70, Day 75 reviewed 72-74) — **Day 79 should default to a review day
+  covering Days 76-78** (`json`, `secrets`, `pprint`) unless Day 79's own
+  generator finds a strong reason to deviate. If a fresh topic is somehow
+  chosen instead, `difflib` is the natural first candidate to check.
 

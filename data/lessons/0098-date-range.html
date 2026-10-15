@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 98 · pd.date_range(): building the calendar grid, instead of trusting the one you were sent</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 98 · ~20 min · 15 Oct 2026</p>
+<h1>pd.date_range(): building the calendar grid, instead of trusting the one you were sent</h1>
+<p class="byline">Lesson 97 closed the last of three carried-forward candidates, leaving no standing pick — this round ran its own fresh curriculum/glossary scan from scratch. Datetime itself is well covered (Lessons 32's <code>.dt</code> accessor, 38's <code>resample()</code>, 58's <code>merge_asof()</code>, 59's <code>to_period()</code>, 71's <code>Grouper()</code>, 81's <code>to_datetime(format=)</code>, 94's <code>first_valid_index()</code>), but one function those lessons all quietly leaned on as test-data setup was never itself the subject of a lesson: <code>pd.date_range()</code>. A genuine gap, and a common one — the SQL cousin, <code>generate_series()</code> over a date range, is a frequent interview pattern for "find the missing days."</p>
+
+<h2>1 · Four knobs, exactly three required</h2>
+<p><dfn data-en="a pandas function that builds a DatetimeIndex -- a sequence of evenly-spaced timestamps -- from any THREE of its four main parameters: start, end, periods (how many timestamps), and freq (the spacing); passing all four, or only one or fewer, raises ValueError" data-vn="giữ nguyên 'pd.date_range()' — hàm tạo ra DatetimeIndex (dãy mốc thời gian cách đều nhau) từ ĐÚNG 3 trong 4 tham số chính: start, end, periods (số lượng mốc), freq (khoảng cách); truyền đủ cả 4, hoặc chỉ truyền 1 (hay ít hơn), sẽ báo lỗi ValueError">pd.date_range()</dfn> is pandas' calendar-grid builder — the direct equivalent of writing out a SQL <code>generate_series(start, end, interval)</code> yourself instead of trusting whatever dates happen to already be in a table. Confirmed directly (pandas 3.0.6):</p>
+<pre><code><span class="kw">import</span> pandas <span class="kw">as</span> pd
+pd.date_range(<span class="str">"2026-01-01"</span>, periods=<span class="kw">5</span>, freq=<span class="str">"D"</span>)
+<span class="cm"># DatetimeIndex(['2026-01-01', '2026-01-02', '2026-01-03',
+#                '2026-01-04', '2026-01-05'], dtype='datetime64[ns]', freq='D')</span>
+
+pd.date_range(<span class="str">"2026-01-01"</span>, <span class="str">"2026-01-10"</span>, freq=<span class="str">"3D"</span>)
+<span class="cm"># every 3rd day between the two dates:
+# ['2026-01-01', '2026-01-04', '2026-01-07', '2026-01-10']</span></code></pre>
+<p>Only <code>start</code>/<code>end</code>/<code>periods</code>/<code>freq</code> exist, and the function needs exactly three of them live to pin the grid down — confirmed directly, both too few and too many raise the identical message:</p>
+<pre><code>pd.date_range(<span class="str">"2026-01-01"</span>)  <span class="cm"># only 1 given</span>
+<span class="cm"># ValueError: Of the four parameters: start, end, periods, and
+# freq, exactly three must be specified</span>
+
+pd.date_range(<span class="str">"2026-01-01"</span>, <span class="str">"2026-01-10"</span>, periods=<span class="kw">5</span>, freq=<span class="str">"D"</span>)  <span class="cm"># all 4 given</span>
+<span class="cm"># ValueError: Of the four parameters... exactly three must be specified</span></code></pre>
+<p>The official docs phrase the rule more loosely — "a maximum of three can be specified at once," plus "at least two of start, end, periods" separately. Confirmed directly, the sharper, simpler way to say it in practice: give any <strong>two</strong> of <code>start</code>/<code>end</code>/<code>periods</code>, and leave <code>freq</code> out — it quietly defaults to <code>"D"</code> (daily), which is why that case doesn't look like "three" but passes anyway:</p>
+<pre><code>pd.date_range(<span class="str">"2026-01-01"</span>, <span class="str">"2026-01-05"</span>)  <span class="cm"># no freq/periods -- defaults to daily</span>
+<span class="cm"># ['2026-01-01', '2026-01-02', '2026-01-03', '2026-01-04', '2026-01-05']</span></code></pre>
+
+<h2>2 · freq= strings changed under pandas 3.0 — old aliases now raise</h2>
+<p>Confirmed directly: the single-letter month/hour aliases long used in older pandas code and tutorials are gone as of pandas 3.0, not merely deprecated — they now raise <code>ValueError</code> outright, the same removed-not-deprecated pattern as Lesson 45's <code>fillna(method=)</code>:</p>
+<pre><code>pd.date_range(<span class="str">"2026-01-01"</span>, periods=<span class="kw">3</span>, freq=<span class="str">"M"</span>)
+<span class="cm"># ValueError: 'M' is no longer supported for offsets.
+# Please use 'ME' instead.</span>
+
+pd.date_range(<span class="str">"2026-01-01"</span>, periods=<span class="kw">3</span>, freq=<span class="str">"H"</span>)
+<span class="cm"># ValueError: Invalid frequency: H ... Did you mean h?</span>
+
+pd.date_range(<span class="str">"2026-01-01"</span>, periods=<span class="kw">3</span>, freq=<span class="str">"ME"</span>)  <span class="cm"># month-END, current spelling</span>
+<span class="cm"># ['2026-01-31', '2026-02-28', '2026-03-31']</span>
+
+pd.date_range(<span class="str">"2026-01-01"</span>, periods=<span class="kw">3</span>, freq=<span class="str">"B"</span>)  <span class="cm"># business day -- still valid, unchanged</span>
+<span class="cm"># ['2026-01-01', '2026-01-02', '2026-01-05']  -- Sat/Sun 1/3-1/4 skipped</span></code></pre>
+<p>Code copied from an older tutorial that still says <code>freq="M"</code> or <code>freq="H"</code> will crash on current pandas, not silently misbehave — the interview-safe habit is naming the <em>current</em> alias (<code>"ME"</code>, <code>"h"</code>, <code>"D"</code>, <code>"B"</code>) out loud rather than the one half-remembered from older material.</p>
+
+<h2>3 · The real ETL use: finding the missing days a sparse table hides</h2>
+<p>The practical reason this function earns its own lesson: a feed is rarely sent with every calendar day already present — rows just silently don't exist for the days with no activity. <code>date_range()</code> is how you build the <em>true</em> calendar grid and expose those gaps instead of pretending they don't exist, using Lesson 47's <code>reindex()</code>:</p>
+<pre><code>sparse = pd.Series(
+    [<span class="kw">10</span>, <span class="kw">20</span>, <span class="kw">30</span>],
+    index=pd.to_datetime([<span class="str">"2026-01-01"</span>, <span class="str">"2026-01-03"</span>, <span class="str">"2026-01-05"</span>]),
+)
+full_grid = pd.date_range(sparse.index.<span class="kw">min</span>(), sparse.index.<span class="kw">max</span>(), freq=<span class="str">"D"</span>)
+sparse.reindex(full_grid)
+<span class="cm"># 2026-01-01    10.0
+# 2026-01-02     NaN   -- a real missing day, now visible
+# 2026-01-03    20.0
+# 2026-01-04     NaN   -- another real missing day
+# 2026-01-05    30.0
+# Freq: D, dtype: float64</span></code></pre>
+<p>Without building <code>full_grid</code> first, the sparse Series simply looks complete — three rows, no NaN anywhere, no sign that two days never arrived at all.</p>
+
+<div class="interview">
+<p><strong>Q: "How would you find which days are missing from a sparse time-series table?"</strong> A strong answer, out loud: <em>"Build the real calendar with pd.date_range() from the table's own min and max date, then reindex() the table onto that full range. Any day the original table didn't have becomes NaN after the reindex, so isna() on that result tells me exactly which days are missing — the table on its own never reveals that, since a missing day just isn't a row, there's nothing to flag."</em> The signal: naming date_range() plus reindex() together, not date_range() alone — generating the grid is only half the pattern.</p>
+</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/98_date_range.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/98_date_range.py</code></pre>
+<p>Exercise 1 confirms a basic <code>start</code>+<code>periods</code>+<code>freq="D"</code> range (Section 1). Exercise 2 confirms the exactly-three-of-four <code>ValueError</code> on both an under- and over-specified call (Section 1), and the removed <code>freq="M"</code> alias's <code>ValueError</code> (Section 2). Exercise 3 confirms the sparse-table missing-days pattern: <code>date_range()</code> + <code>reindex()</code> turning invisible gaps into visible <code>NaN</code> (Section 3).</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: pd.date_range() needs exactly three of start/end/periods/freq live to pin the grid down -- one or fewer, or all four together, both raise the identical ValueError message naming all four parameters.">
+    <p class="stem">How many of <code>start</code>/<code>end</code>/<code>periods</code>/<code>freq</code> does <code>pd.date_range()</code> need specified?</p>
+    <button class="opt" data-ok>exactly three total; giving just one or all four both raise ValueError</button>
+    <button class="opt">only start is ever truly required, every single other one stays optional</button>
+    <button class="opt">any single pair always works fine, the other two just stay None</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: pandas 3.0 removed the old single-letter 'M' and 'H' frequency aliases outright, not merely deprecated them -- passing either now raises ValueError naming the current replacement spelling (ME, h), the same removed-not-deprecated pattern as fillna(method=).">
+    <p class="stem">What happens on current pandas if old code passes <code>freq="M"</code> to <code>date_range()</code>?</p>
+    <button class="opt" data-ok>ValueError -- 'M' was fully removed, not merely deprecated with a warning</button>
+    <button class="opt">it quietly still works exactly like every older pandas version always did</button>
+    <button class="opt">a silent FutureWarning simply prints, but the old monthly result still returns</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: a sparse table alone shows no sign any day is missing, since a missing day is just an absent row, not a flagged NaN. Building the true calendar with date_range() and then reindex()-ing onto it is what turns each missing day into a visible NaN worth checking with isna().">
+    <p class="stem">Why build a <code>date_range()</code> grid before checking a sparse table for missing days?</p>
+    <button class="opt" data-ok>a missing day is just an absent row; reindexing reveals that NaN</button>
+    <button class="opt">plain pandas just cannot sort any datetime column without a range object</button>
+    <button class="opt">reindexing a sparse table onto itself always just removes any existing NaN</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official <a href="https://pandas.pydata.org/docs/reference/api/pandas.date_range.html">pandas API reference for <code>date_range()</code></a> (per <code>RESOURCES.md</code>'s "Docs: pandas User Guide" entry, ~3 min) — confirms the parameter rules and the <code>inclusive=</code> option; its "maximum of three, minimum two of start/end/periods" phrasing is the looser version of the sharper "exactly three, freq defaults to D" rule demonstrated above, both match the direct probing exactly.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>pd.date_range()</code> is new today, added right after Lesson 97's <code>np.broadcast_to()</code> entry.<br>
+<strong>Next lesson:</strong> no standing candidate carries forward this time — tomorrow should run its own fresh curriculum/glossary scan, same as today.<br><br>
+💬 Anything unclear — the three-of-four rule, the removed freq aliases, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

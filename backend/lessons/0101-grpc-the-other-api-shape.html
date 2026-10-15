@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 101 · gRPC: the other API shape</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 101 · ~20 min</p>
+<h1>gRPC: the other API shape</h1>
+<p class="byline">Lesson 69 said a load balancer "doesn't know or care whether the payload is HTTP, gRPC, or raw binary." Lesson 71 name-dropped "gRPC's ORCA load reporting" in a code comment. Both times, the word walked past without a definition. Today it gets one: what gRPC actually is, why a service team reaches for it instead of Lesson 3's REST contract, and where it still loses.</p>
+
+<h2>1 · Same job as Lesson 3, different contract</h2>
+<p>Lesson 3 built an API contract out of URLs, HTTP verbs, and hand-written JSON shapes — <code>GET /orders/42</code> returns whatever JSON your handler happens to write, and the client has to already know (from docs, or from reading the code) what fields to expect back. <dfn data-en="a remote procedure call framework from Google: a client calls a method on a service by name, with a strongly-typed request/response message, as if it were a local function call -- the framework handles serialization and the network call underneath" data-vn="gRPC (giữ nguyên) — framework remote procedure call của Google: client gọi 1 method trên service bằng tên, kèm request/response có type rõ ràng, giống như gọi hàm local -- framework tự lo serialize và gọi network bên dưới">gRPC</dfn> starts from a different question: instead of "what resource lives at this URL," it asks "what function am I calling on that other service, with what typed arguments, getting back what typed result." A client doesn't build a URL and parse loose JSON; it calls <code>client.GetOrder(ctx, &amp;OrderRequest{Id: 42})</code> and gets back a <code>*OrderResponse</code> struct — generated code, not hand-parsed JSON, stands between the call site and the network.</p>
+<p>That contract is written down once, in a <dfn data-en="a .proto file: the schema gRPC services and messages are defined in, written once in a small interface-definition language, from which the protoc compiler generates client and server code in every target language -- the single source of truth both sides compile against" data-vn="protobuf schema / .proto file (giữ nguyên) — file định nghĩa service và message cho gRPC, viết 1 lần bằng 1 ngôn ngữ mô tả interface nhỏ, từ đó compiler protoc sinh code client/server cho từng ngôn ngữ -- nguồn sự thật duy nhất cả 2 bên compile theo">.proto file</dfn>:</p>
+<pre><code><span class="cm">// order.proto -- the contract both sides compile against</span>
+<span class="kw">service</span> OrderService {
+  <span class="kw">rpc</span> GetOrder(OrderRequest) <span class="kw">returns</span> (OrderResponse);
+}
+
+<span class="kw">message</span> OrderRequest {
+  <span class="kw">int64</span> id = 1;
+}
+
+<span class="kw">message</span> OrderResponse {
+  <span class="kw">int64</span> id = 1;
+  <span class="kw">string</span> status = 2;
+  <span class="kw">int64</span> total_cents = 3;
+}</code></pre>
+<p>Run that file through gRPC's <code>protoc</code> compiler and both sides get generated Go (or Java, Python, whatever each service happens to be written in) with that exact shape baked in — a field renamed on one side and not the other fails at compile time, not as a silent <code>undefined</code> three services downstream. Lesson 3's JSON error contract solved the same "what shape am I getting back" problem by convention and discipline; gRPC solves it by generating code from a schema that can't drift out of sync without a build failing.</p>
+
+<h2>2 · What's actually different underneath: binary, not text</h2>
+<p>REST's JSON body is human-readable text you can paste into a browser tab or curl and eyeball. gRPC messages are <dfn data-en="protocol buffers: a binary wire format for structured data, paired with the schema that describes it -- smaller and faster to parse than the equivalent JSON, at the cost of not being human-readable off the wire without the schema to decode it" data-vn="protobuf / protocol buffers (giữ nguyên) — format binary cho structured data, đi kèm schema mô tả nó -- nhỏ và parse nhanh hơn JSON tương đương, đổi lại không đọc được trực tiếp trên wire nếu không có schema để decode">protocol buffers</dfn> on the wire: the same <code>OrderResponse</code> serializes to a compact binary blob, not <code>{"id": 42, "status": "shipped", "total_cents": 4999}</code>. Smaller payloads, faster to parse on both ends — real savings at the scale of thousands of internal calls per second between services — but you lose the "just read the response in the network tab" debugging habit Lesson 1 assumed; you need the schema (or a tool that already has it) to make sense of captured traffic.</p>
+<p>gRPC also runs on HTTP/2 specifically, which is what lets one open connection carry many concurrent calls at once without them queuing behind each other — the same multiplexing Lesson 50's bulkhead lesson named in passing as "invisible infrastructure" on the browser side. A plain REST API can run on HTTP/2 too, but gRPC requires it; REST never did.</p>
+
+<h2>3 · Where each one actually wins</h2>
+<table class="cmp">
+<thead><tr><th>Question</th><th>REST + JSON</th><th>gRPC</th></tr></thead>
+<tbody>
+<tr><th>Typical caller</th><td>Browsers, mobile apps, third-party integrators</td><td>Your own services calling each other internally</td></tr>
+<tr><th>Readable off the wire</th><td>Yes — plain text JSON</td><td>No — binary, needs the schema to decode</td></tr>
+<tr><th>Contract enforcement</th><td>Convention + docs + discipline (Lesson 3)</td><td>Compiled from a shared .proto, drift fails at build time</td></tr>
+<tr><th>Browser support</th><td>Native — it's just HTTP + JSON</td><td>Needs a proxy (grpc-web) — browsers can't speak it directly</td></tr>
+<tr><th>Streaming</th><td>Bolted on (SSE, WebSockets — Lesson 63)</td><td>Built into the contract itself, both directions</td></tr>
+</tbody>
+</table>
+<p>The browser row is the one that decides most of it: gRPC's binary framing isn't something browser JavaScript can originate directly, so anything a web frontend calls straight from the browser is REST (or GraphQL) territory almost by default. gRPC shows up overwhelmingly on the service-to-service hop — Lesson 31's "caller isn't a person" case — where both ends are services you control, both get regenerated from the same <code>.proto</code> on every change, and the binary format's speed advantage actually compounds across thousands of internal calls.</p>
+<div class="callout"><strong>Frontend-habit trap:</strong> "my API" at work is almost certainly the REST one a browser or mobile app calls directly. gRPC, if your company uses it at all, usually lives one hop further back — between backend services you never see from the browser's network tab. That's exactly why the word showed up twice in this course already (Lessons 69, 71) purely as "the other thing a load balancer might be routing," never as something a frontend-facing API needed to be.</div>
+
+<h2>4 · A minimal server in Go</h2>
+<p>The generated code does the serialization and routing; your job is the same business logic a REST handler would have, just behind a typed method instead of a parsed URL and body:</p>
+<pre><code><span class="cm">// Generated from order.proto by protoc; this is the part you write --
+// the method body, same shape as any REST handler's core logic.</span>
+<span class="kw">type</span> orderServer <span class="kw">struct</span> {
+    pb.UnimplementedOrderServiceServer
+    db *sql.DB
+}
+
+<span class="kw">func</span> (s *orderServer) GetOrder(ctx context.Context, req *pb.OrderRequest) (*pb.OrderResponse, error) {
+    <span class="kw">var</span> orderStatus <span class="kw">string</span>
+    <span class="kw">var</span> totalCents <span class="kw">int64</span>
+    err := s.db.QueryRowContext(ctx,
+        <span class="st">"SELECT status, total_cents FROM orders WHERE id = $1"</span>, req.Id,
+    ).Scan(&amp;orderStatus, &amp;totalCents)
+    <span class="kw">if</span> err == sql.ErrNoRows {
+        <span class="cm">// gRPC has its own status codes -- NotFound here, not an HTTP 404</span>
+        <span class="kw">return</span> <span class="kw">nil</span>, status.Errorf(codes.NotFound, <span class="st">"order %d not found"</span>, req.Id)
+    }
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        <span class="kw">return</span> <span class="kw">nil</span>, status.Errorf(codes.Internal, <span class="st">"lookup failed"</span>)
+    }
+    <span class="kw">return</span> &amp;pb.OrderResponse{Id: req.Id, Status: orderStatus, TotalCents: totalCents}, <span class="kw">nil</span>
+}</code></pre>
+<p>Notice <code>codes.NotFound</code> and <code>codes.Internal</code> in place of Lesson 3's 404 and 500: gRPC has its own small fixed set of status codes, carried in the RPC response rather than an HTTP status line, but the same 4xx-vs-5xx instinct from Lesson 3 maps straight across — <code>NotFound</code>/<code>InvalidArgument</code> are the caller's problem to fix, <code>Internal</code>/<code>Unavailable</code> are yours.</p>
+
+<div class="interview">
+<p><strong>Q: "When would you reach for gRPC instead of a REST API?"</strong> A strong answer, out loud: <em>"For anything a browser or mobile client calls directly, I'd default to REST — it's human-readable, debuggable with curl, and browsers can't originate gRPC's binary framing without a proxy in front of it anyway. I'd reach for gRPC on the internal service-to-service hop, once I control both ends: the .proto file becomes the one contract both sides compile against, so a field rename that breaks the other service fails at build time instead of shipping a silent bug, and the binary wire format and HTTP/2 multiplexing actually pay off at the call volume internal services see. I wouldn't introduce it just because it's faster in a microbenchmark — the schema-driven contract and the build-time safety are the real reason, speed is a secondary benefit."</em> The signal: picking the tool by who's calling and what breaks on drift, not by raw throughput alone.</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers what gRPC is, its contract-first shape, and the REST-vs-gRPC decision at the level needed to recognize and discuss it in a review or an interview. It doesn't cover streaming RPCs (unary call shown here is one of four gRPC call shapes), protobuf's full type system and versioning rules (field numbers, reserved fields, backward compatibility), load balancing specifics for gRPC (Lesson 69's L4/L7 split applies differently to a protocol that multiplexes many calls over one connection), or GraphQL (Lesson 97's own deferred comparison point) — each is a real extension of today's model, not needed to have the vocabulary straight.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="gRPC's contract is a .proto file compiled into typed client/server code for every language involved -- a field rename that breaks the other side fails at build time, unlike REST's hand-written JSON contract which only breaks at runtime once a mismatched client actually calls it.">
+    <p class="stem">What does gRPC's .proto file give a service pair that REST + hand-written JSON does not?</p>
+    <button class="opt" data-ok>a typed contract that fails at build time on drift</button>
+    <button class="opt">the ability to skip writing any server logic at all</button>
+    <button class="opt">automatic encryption of every single stored database column in use</button>
+    <button class="opt">a guarantee the service itself never needs a fresh restart</button>
+  </div>
+  <div class="q" data-why="Protocol buffers are a binary wire format -- smaller and faster to parse than equivalent JSON, but not readable directly off the wire the way a REST JSON body is; you need the schema or a decoding tool to make sense of captured traffic.">
+    <p class="stem">What's the real trade-off of protobuf's binary format versus REST's JSON body?</p>
+    <button class="opt" data-ok>smaller and faster, but not directly human-readable off the wire</button>
+    <button class="opt">larger payloads that are easier for humans to read directly</button>
+    <button class="opt">it removes the need for any shared schema between sides</button>
+    <button class="opt">it only ever works when the caller is a browser</button>
+  </div>
+  <div class="q" data-why="Browsers cannot originate gRPC's binary HTTP/2 framing directly without a translating proxy in front of it, so anything a browser calls straight from client JavaScript defaults to REST or GraphQL almost by construction -- gRPC shows up overwhelmingly on the internal service-to-service hop instead.">
+    <p class="stem">Why does gRPC rarely sit directly behind a browser's own fetch() call?</p>
+    <button class="opt" data-ok>browsers cannot originate gRPC's own framing without a proxy</button>
+    <button class="opt">gRPC is physically incapable of returning any error code</button>
+    <button class="opt">HTTP/2 itself was fully deprecated by every browser vendor</button>
+    <button class="opt">REST needs a database while gRPC never ever does</button>
+  </div>
+  <div class="q" data-why="gRPC carries its own fixed status codes -- like NotFound and Internal -- in the RPC response itself, rather than reusing an HTTP status line the way REST does, though the same 4xx-vs-5xx caller-fault-vs-server-fault instinct from Lesson 3 maps across directly.">
+    <p class="stem">How does gRPC report something like "that order doesn't exist" to the caller?</p>
+    <button class="opt" data-ok>its own status code such as NotFound, in the response</button>
+    <button class="opt">by closing the TCP connection with no explanation at all</button>
+    <button class="opt">solely through an HTTP 404 status line like REST uses</button>
+    <button class="opt">by writing a message straight into the server's log file</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://grpc.io/docs/what-is-grpc/introduction/">grpc.io's official "Introduction to gRPC"</a> — the canonical primary source for the framework itself, covering the four RPC call shapes (unary, server-streaming, client-streaming, bidirectional) this lesson scoped out. RESOURCES.md names no vetted gRPC-specific source yet (its own Gaps section flags API design beyond REST as unvetted territory) — grpc.io's docs and the companion <a href="https://protobuf.dev/overview/">protobuf.dev overview</a> for the wire format are the right starting points until one gets added there.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a> — click any dotted term for a popup (English first, tiếng Việt second). <strong>Anything unclear? Ask your teacher</strong> — the agent that made this lesson. Ask in Vietnamese anytime; "tại sao" questions especially. Nếu chỗ nào chưa rõ, cứ hỏi lại bằng tiếng Việt cũng được.<br><br>
+<em>Next lesson:</em> open — no fresher completion/quiz signal has appeared since Lesson 100's round; a fresh gap scan found gRPC's two unexplained name-drops as the cleanest candidate this round, with streaming RPCs and protobuf versioning as the natural follow-on if nothing fresher surfaces first.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

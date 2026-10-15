@@ -23,6 +23,9 @@
 - [Docs: Effective Go — Goroutines](https://go.dev/doc/effective_go#goroutines)
   Primary source for what a goroutine is and why Go refused the words "thread" and "coroutine". Use for: the thread vs coroutine mechanism question.
 
+- [Docs: Microsoft Learn — ASP.NET Core SignalR (overview + production hosting and scaling)](https://learn.microsoft.com/en-us/aspnet/core/signalr/introduction)
+  Vendor primary source for SignalR: transports and fallback order, hubs, reconnect, sticky-session requirement, Redis backplane vs Azure SignalR Service ([scale page](https://learn.microsoft.com/en-us/aspnet/core/signalr/scale)). Use for: any real-time/SignalR question (Lesson 102).
+
 ## Wisdom (Communities)
 
 - [Database Administrators Stack Exchange](https://dba.stackexchange.com)

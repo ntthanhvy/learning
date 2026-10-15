@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 102 · WebSocket vs SignalR: a protocol and the library on top of it</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 102 · ~20 min</p>
+<h1>WebSocket vs SignalR: a protocol and the library on top of it</h1>
+<p class="byline">"WebSocket vs SignalR" sounds like a choice between two rival technologies. It isn't: SignalR usually <em>runs on</em> WebSockets. The real question is "raw socket, or a library that handles the boring parts for me?" Once you see that, "why is SignalR used more now?" has a precise answer, and so does "when is it the wrong choice?"</p>
+
+<h2>1 · The frontend analogy you already own</h2>
+<p>Compare <code>XMLHttpRequest</code> with a data-fetching library like React Query. XHR is the browser primitive: it sends bytes and gives you bytes back. React Query is built <em>on top</em> of that primitive and adds retries, caching, loading states and deduplication. Nobody asks "XHR or React Query?" as if only one can exist. You pick the library because you'd otherwise write those features yourself, badly.</p>
+<p>WebSocket vs SignalR is the same relationship, one layer down:</p>
+<table class="cmp">
+<thead><tr><th></th><th>The primitive</th><th>The library on top</th></tr></thead>
+<tbody>
+<tr><th>Fetching</th><td><code>XMLHttpRequest</code> / <code>fetch</code></td><td>React Query, SWR</td></tr>
+<tr><th>Real-time</th><td>WebSocket (a protocol, <a href="https://www.rfc-editor.org/rfc/rfc6455">RFC 6455</a>)</td><td>SignalR (.NET), Socket.IO (Node), Centrifugo (any backend)</td></tr>
+</tbody>
+</table>
+
+<h2>2 · What a raw WebSocket gives you, and what it doesn't</h2>
+<p>Lesson 63 covered the protocol itself: an <a href="https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API">upgrade handshake</a>, then a full-duplex pipe where either side can send a message at any time. That's <em>all</em> the protocol promises. Here is everything a real chat or live-dashboard feature still needs, which the protocol leaves to you:</p>
+<ul>
+<li><strong>Message meaning.</strong> A WebSocket message is just a string or bytes. You invent your own envelope (<code>{"type":"chat","payload":…}</code>) and a <code>switch</code> on <code>type</code> on both sides.</li>
+<li><strong>Reconnect.</strong> When Wi-Fi drops, the socket fires <code>onclose</code> and stays dead. Unlike SSE's <code>EventSource</code>, the browser does <em>not</em> reconnect for you.</li>
+<li><strong>Fallback.</strong> Some corporate proxies break the upgrade. With a raw socket, the feature simply fails there.</li>
+<li><strong>Audiences.</strong> "Send to user 42" or "send to everyone in room <code>order-17</code>" means keeping your own map of connections and cleaning it up on every disconnect.</li>
+<li><strong>Multiple instances.</strong> Lesson 63's trap: a socket is pinned to one instance, so a broadcast needs a cross-instance fan-out (Redis pub/sub or similar) that you build and run.</li>
+</ul>
+
+<h2>3 · What SignalR is: the same pipe, plus those five things</h2>
+<p><dfn data-en="an open-source ASP.NET Core library for real-time web features: it picks a transport (WebSocket preferred), and adds method-style messaging, groups, optional auto-reconnect, and scale-out support on top" data-vn="SignalR (giữ nguyên) — thư viện real-time của ASP.NET Core, chạy trên WebSocket (hoặc fallback), lo sẵn gọi method qua lại, group, reconnect, scale-out">SignalR</dfn> is Microsoft's real-time library for ASP.NET Core (<a href="https://learn.microsoft.com/en-us/aspnet/core/signalr/introduction">docs</a>). Each of the five gaps above maps to one feature:</p>
+<table class="cmp">
+<thead><tr><th>Gap in raw WebSocket</th><th>What SignalR does</th></tr></thead>
+<tbody>
+<tr><th>Message meaning</th><td>A <dfn data-en="SignalR's central abstraction: a server class whose public methods clients can call by name, and through which the server can call named methods on clients, so you exchange method calls instead of raw messages" data-vn="hub (giữ nguyên) — class phía server trong SignalR, client gọi method của nó bằng tên, server cũng gọi ngược method bên client được">hub</dfn>: client and server call each other's <em>methods by name</em>, a form of <a href="https://learn.microsoft.com/en-us/aspnet/core/signalr/hubs">RPC</a>. Payloads are JSON or MessagePack.</td></tr>
+<tr><th>Reconnect</th><td><code>withAutomaticReconnect()</code> retries after 0, 2, 10 and 30 s. It's <a href="https://learn.microsoft.com/en-us/aspnet/core/signalr/javascript-client#reconnect-clients">opt-in, not on by default</a>.</td></tr>
+<tr><th>Fallback</th><td><dfn data-en="when the preferred connection method isn't available, automatically trying the next one down -- for SignalR: WebSockets, then Server-Sent Events, then long polling" data-vn="transport fallback (giữ nguyên) — WebSocket không dùng được thì tự lùi xuống SSE, rồi long polling">Transport fallback</dfn>: WebSockets, then SSE, then long polling, <a href="https://learn.microsoft.com/en-us/aspnet/core/signalr/introduction#transports">chosen automatically</a>. These are the same three techniques from Lesson 63.</td></tr>
+<tr><th>Audiences</th><td><code>Clients.All</code>, <code>Clients.User(id)</code>, <code>Clients.Group("order-17")</code>, with no hand-written connection map.</td></tr>
+<tr><th>Multiple instances</th><td>A <dfn data-en="a shared messaging layer (e.g. Redis pub/sub) that every server instance connects to, so a message sent from one instance reaches clients connected to any other instance" data-vn="backplane (giữ nguyên) — lớp pub/sub dùng chung (vd Redis) để instance A gửi được tới client đang nối vào instance B">backplane</dfn>: plug in Redis, or let Azure SignalR Service hold the connections for you (<a href="https://learn.microsoft.com/en-us/aspnet/core/signalr/scale">scale docs</a>).</td></tr>
+</tbody>
+</table>
+<p>The difference is visible in the code. Here is the same "broadcast a chat message" feature in each, client side:</p>
+<pre><code><span class="cm">// raw WebSocket: you invent the envelope, dispatch, and reconnect</span>
+<span class="kw">const</span> ws = <span class="kw">new</span> WebSocket(<span class="st">"wss://api.example.com/ws"</span>);
+ws.onmessage = (e) =&gt; {
+  <span class="kw">const</span> msg = JSON.parse(e.data);
+  <span class="kw">if</span> (msg.type === <span class="st">"chat"</span>) addMessage(msg.user, msg.text);
+};
+ws.onclose = () =&gt; { <span class="cm">/* your backoff + reconnect logic here */</span> };
+ws.send(JSON.stringify({ type: <span class="st">"chat"</span>, user, text }));
+
+<span class="cm">// SignalR: call methods by name; reconnect is one line</span>
+<span class="kw">const</span> conn = <span class="kw">new</span> signalR.HubConnectionBuilder()
+  .withUrl(<span class="st">"/chathub"</span>).withAutomaticReconnect().build();
+conn.on(<span class="st">"ReceiveMessage"</span>, (user, text) =&gt; addMessage(user, text));
+<span class="kw">await</span> conn.start();
+<span class="kw">await</span> conn.invoke(<span class="st">"SendMessage"</span>, user, text);</code></pre>
+<p>And server side, the whole broadcast is one line in the hub: <code>await Clients.All.SendAsync("ReceiveMessage", user, text);</code></p>
+
+<h2>4 · "Why is SignalR used more now?" The honest answer</h2>
+<p>Be precise here, because the question hides an assumption. SignalR hasn't <em>replaced</em> WebSockets; SignalR traffic usually <em>is</em> WebSocket traffic. What happened is that in the .NET world, the library became the default way to <em>use</em> WebSockets. Microsoft says so directly: <a href="https://learn.microsoft.com/en-us/aspnet/core/fundamentals/websockets#signalr">"For most applications, we recommend SignalR rather than raw WebSockets"</a>, giving three reasons:</p>
+<ol>
+<li>it provides transport fallback where WebSockets aren't available;</li>
+<li>it provides a basic RPC app model (the hub);</li>
+<li>it has "no significant performance disadvantage compared to using raw WebSockets in most scenarios."</li>
+</ol>
+<p>Reason 3 is the key one. If the library costs almost nothing extra and saves you from writing reconnect, dispatch, groups and scale-out, the raw socket only wins in narrow cases. Blazor Server is also built on SignalR, so many .NET teams ship it without ever choosing it.</p>
+<p>Outside .NET, the same pattern shows up under other names: Node teams reach for Socket.IO. In <strong>Go</strong>, your course stack, there's no SignalR-equivalent in the standard library or from the Go team. Teams either use a WebSocket package and build the five pieces themselves, or run a separate real-time server like Centrifugo. So "SignalR is used more" is really a .NET-ecosystem fact, not a universal one.</p>
+
+<div class="callout"><strong>Trap: the tension with Lesson 8.</strong> Lesson 8 called <dfn data-en="a load balancer configuration that routes a given client's requests to the same backend instance every time, instead of distributing freely" data-vn="giữ nguyên 'sticky sessions' / 'session affinity' — LB luôn route 1 client về đúng 1 instance">sticky sessions</dfn> a band-aid to avoid. SignalR <em>requires</em> them on a multi-server farm, <a href="https://learn.microsoft.com/en-us/aspnet/core/signalr/scale#sticky-sessions">even with the Redis backplane</a>. The reason: the negotiate request and the fallback transports are separate HTTP requests that must reach the same process. There are only two exceptions: Azure SignalR Service, or every client forced to WebSockets-only with <code>SkipNegotiation</code>. In a design review, "we'll add SignalR" should immediately raise "and how does our load balancer pin connections?"</div>
+
+<h2>5 · When to pick which</h2>
+<table class="cmp">
+<thead><tr><th>Situation</th><th>Reasonable pick</th></tr></thead>
+<tbody>
+<tr><th>ASP.NET Core backend, browser clients, chat/notifications/dashboards</th><td>SignalR. That's the vendor's own recommendation.</td></tr>
+<tr><th>Go backend</th><td>A WebSocket library and your own envelope + reconnect, or SSE if the data only flows one way (Lesson 63).</td></tr>
+<tr><th>Non-browser or third-party clients that speak "plain WebSocket" (IoT, another company's system)</th><td>Raw WebSocket. A SignalR server expects the SignalR protocol, so a plain client can't just connect.</td></tr>
+<tr><th>Ultra-tight, custom binary protocol (games, trading)</th><td>Raw WebSocket. You want full control of every byte.</td></tr>
+</tbody>
+</table>
+
+<div class="interview">
+<p><strong>Q: "What's the difference between WebSockets and SignalR?"</strong> A strong answer, out loud: <em>"WebSocket is the protocol: a full-duplex connection after an HTTP upgrade, nothing more. SignalR is an ASP.NET Core library that uses WebSockets when it can and falls back to SSE or long polling when it can't. On top of that it adds hubs, so you call methods by name instead of parsing messages yourself. It also gives you groups and per-user sends, optional auto-reconnect, and scale-out through a Redis backplane or Azure SignalR Service. Microsoft recommends it over raw WebSockets for most apps because the overhead is small. The catches: you need sticky sessions on a server farm, and every client has to speak the SignalR protocol."</em> The signal: you call it "library on top of a protocol", not "alternative to", and you know at least one operational cost.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory, with no scrolling up. Retrieval is the point.</p>
+
+<p><strong>Part A: who does the job?</strong> For each responsibility, decide whether the WebSocket protocol itself provides it, or whether it's a layer a library like SignalR adds.</p>
+<div class="quiz">
+  <div class="q" data-why="The upgrade handshake and the full-duplex pipe are the WebSocket protocol itself (RFC 6455). SignalR negotiates first, then uses this same pipe as its preferred transport.">
+    <p class="stem">Switching an HTTP connection into a two-way message pipe</p>
+    <button class="opt" data-ok>the WebSocket protocol itself</button>
+    <button class="opt">a library layer on top</button>
+  </div>
+  <div class="q" data-why="A raw WebSocket fires onclose and stays closed; nothing in the protocol or the browser API retries. SignalR's withAutomaticReconnect() adds this, but only when you opt in.">
+    <p class="stem">Reconnecting automatically after the network drops</p>
+    <button class="opt">the WebSocket protocol itself</button>
+    <button class="opt" data-ok>a library layer on top</button>
+  </div>
+  <div class="q" data-why="Falling back to SSE or long polling means using entirely different techniques. A protocol can't fall back to other protocols; that choice is made by a library like SignalR.">
+    <p class="stem">Falling back to long polling when a proxy blocks upgrades</p>
+    <button class="opt">the WebSocket protocol itself</button>
+    <button class="opt" data-ok>a library layer on top</button>
+  </div>
+  <div class="q" data-why="WebSocket messages are opaque strings or bytes. Mapping a message to a named method (SendMessage, ReceiveMessage) is SignalR's hub protocol layered over the pipe.">
+    <p class="stem">Calling a named method on the other side with arguments</p>
+    <button class="opt">the WebSocket protocol itself</button>
+    <button class="opt" data-ok>a library layer on top</button>
+  </div>
+</div>
+
+<p><strong>Part B: reasoning.</strong></p>
+<div class="quiz">
+  <div class="q" data-why="SignalR usually runs over WebSockets. It became the default in .NET because Microsoft recommends it and its overhead versus raw WebSockets is small in most scenarios, while it removes a lot of hand-written plumbing.">
+    <p class="stem">Why is "SignalR replaced WebSockets" an inaccurate statement?</p>
+    <button class="opt" data-ok>SignalR normally uses WebSockets as its preferred transport</button>
+    <button class="opt">SignalR was released many years before WebSockets were standardized</button>
+    <button class="opt">browsers removed native WebSocket support once SignalR was released</button>
+    <button class="opt">SignalR only ever works over HTTP long polling connections</button>
+  </div>
+  <div class="q" data-why="Negotiation and the fallback transports are separate HTTP requests that must all reach the process holding that connection's state. That's why the docs require sticky sessions even with a Redis backplane, unless you use Azure SignalR Service or WebSockets-only with SkipNegotiation.">
+    <p class="stem">Your team adds SignalR behind three instances with a Redis backplane. What still must be configured?</p>
+    <button class="opt" data-ok>sticky sessions on the load balancer for each connection</button>
+    <button class="opt">a separate Postgres table that stores every chat message</button>
+    <button class="opt">an exposed public port on every single backend instance</button>
+    <button class="opt">turning off WebSockets entirely in favor of polling only</button>
+  </div>
+  <div class="q" data-why="A SignalR server speaks the SignalR protocol (negotiate plus hub messages). A third party's plain WebSocket client doesn't, so for external or non-browser clients that expect plain frames, raw WebSocket is the pragmatic choice.">
+    <p class="stem">A partner's IoT devices only speak plain WebSocket frames. What fits best?</p>
+    <button class="opt" data-ok>a raw WebSocket endpoint they can connect to directly</button>
+    <button class="opt">a SignalR hub, because it accepts any WebSocket client</button>
+    <button class="opt">Server-Sent Events, because devices must send data upward</button>
+    <button class="opt">plain polling every second, because sockets cannot cross networks</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://learn.microsoft.com/en-us/aspnet/core/signalr/introduction">Microsoft Learn: Overview of ASP.NET Core SignalR</a> (5 min). Then read <a href="https://learn.microsoft.com/en-us/aspnet/core/signalr/scale">SignalR production hosting and scaling</a>. It's the most useful page for backend thinking: sticky sessions, connection limits, and Redis backplane vs Azure SignalR Service.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a>. Click any dotted term for a popup (English first, tiếng Việt second). Builds on <a href="0063-polling-sse-websockets.html">Lesson 63</a> (the four real-time techniques) and <a href="0008-two-instances-break-your-server.html">Lesson 8</a> (sticky sessions). <strong>Anything unclear? Ask your teacher</strong>, the agent that made this lesson. Ask in Vietnamese anytime. A good follow-up: "does our work codebase use SignalR, and how is our load balancer configured for it?"</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

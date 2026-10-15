@@ -8056,3 +8056,6 @@
   deferred (not a gap, a decision) and should not be re-surfaced as a
   candidate without a fresh reason beyond "it's also a comparison point."
 
+
+## 2026-10-15 interactive session (Lesson 102)
+- User asked directly: "websocket vs signalR, what is the difference and why signalR is used more now". Lesson 102 corrects the premise: SignalR is a library *on top of* WebSocket (with SSE/long-polling fallback), and it's "used more" mainly within .NET because Microsoft recommends it. The SignalR interest suggests their work stack may include ASP.NET Core alongside or instead of Go. Ask before assuming, and consider updating MISSION.md's stack line if they confirm.

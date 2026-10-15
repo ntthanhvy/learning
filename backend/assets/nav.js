@@ -208,6 +208,8 @@
       file: "lessons/0100-content-security-policy-script-src.html" },
     { n: 101, date: "2026-10-15", title: "gRPC: the other API shape",
       file: "lessons/0101-grpc-the-other-api-shape.html" },
+    { n: 102, date: "2026-10-15", title: "WebSocket vs SignalR: a protocol and the library on top of it",
+      file: "lessons/0102-websocket-vs-signalr.html" },
   ];
 
   const REFS = [

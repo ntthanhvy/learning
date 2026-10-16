@@ -34,6 +34,9 @@ body {
   margin: 0 auto;
   padding: 2.5rem 1.25rem 5rem;
 }
+/* Widen the reading column on large screens; phones/tablets keep the 46rem measure. */
+@media (min-width: 1100px) { body { max-width: 58rem; padding-left: 2rem; padding-right: 2rem; } }
+@media (min-width: 1500px) { :root { font-size: 18px; } body { max-width: 66rem; } }
 h1 { font-size: 1.9rem; line-height: 1.15; margin: 0 0 .25rem; font-weight: 600; }
 h2 { font-size: 1.25rem; margin: 2.2rem 0 .6rem; font-weight: 600; }
 h3 { font-size: 1.02rem; margin: 1.5rem 0 .4rem; font-weight: 700; }
@@ -94,17 +97,69 @@ pre .kw { color: var(--accent); font-weight: 600; }    /* keyword */
   font-weight: 700; font-size: .7rem; letter-spacing: .12em;
   text-transform: uppercase; color: var(--accent) !important;
 }
-.nav-days { display: flex; gap: .3rem; flex-wrap: wrap; }
-.day-chip {
-  display: inline-flex; align-items: center; justify-content: center;
-  min-width: 1.7rem; height: 1.7rem; padding: 0 .35rem;
-  border: 1px solid var(--rule); border-radius: 999px;
+.nav-toggle {
+  display: inline-flex; align-items: center; gap: .4rem;
+  font: inherit; color: var(--ink); background: none; cursor: pointer;
+  border: 1px solid var(--rule); border-radius: 999px; padding: .3rem .8rem;
 }
-a.day-chip:hover { border-color: var(--accent); color: var(--accent); }
-.day-chip.current { background: var(--accent); border-color: var(--accent); color: var(--bg) !important; }
-.day-chip.locked { color: var(--muted); opacity: .5; cursor: not-allowed; }
-.nav-right { margin-left: auto; display: flex; gap: .9rem; }
+.nav-toggle:hover, .nav-toggle[aria-expanded="true"] { border-color: var(--accent); color: var(--accent); }
+.nav-right { margin-left: auto; display: flex; flex-wrap: wrap; gap: .4rem .9rem; }
 .nav-right a.current-ref { color: var(--accent); font-weight: 600; }
+
+/* Lesson drawer (injected by nav.js): off-canvas list of every lesson */
+.lesson-drawer {
+  position: fixed; top: 0; bottom: 0; left: 0; z-index: 100;
+  width: min(23rem, 88vw); display: flex; flex-direction: column;
+  background: var(--bg); border-right: 1px solid var(--rule);
+  box-shadow: 4px 0 24px rgba(0, 0, 0, .18);
+  font-family: -apple-system, "Helvetica Neue", sans-serif; font-size: .85rem;
+  transform: translateX(-100%); visibility: hidden;
+  transition: transform .2s ease, visibility 0s linear .2s;
+}
+.drawer-open .lesson-drawer { transform: none; visibility: visible; transition: transform .2s ease; }
+.drawer-scrim {
+  position: fixed; inset: 0; z-index: 99; background: rgba(0, 0, 0, .35);
+  opacity: 0; pointer-events: none; transition: opacity .2s ease;
+}
+.drawer-open .drawer-scrim { opacity: 1; pointer-events: auto; }
+.drawer-open body { overflow: hidden; }
+.drawer-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: .9rem 1.1rem .5rem;
+}
+.drawer-title {
+  font-weight: 700; font-size: .7rem; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--accent); text-decoration: none;
+}
+.drawer-close {
+  font: inherit; font-size: 1.4rem; line-height: 1; color: var(--muted);
+  background: none; border: none; cursor: pointer; padding: .1rem .3rem;
+}
+.drawer-close:hover { color: var(--accent); }
+.drawer-filter {
+  margin: 0 1.1rem .6rem; padding: .45rem .7rem; font: inherit; color: var(--ink);
+  background: var(--code-bg); border: 1px solid var(--rule); border-radius: 6px;
+}
+.drawer-filter:focus { outline: none; border-color: var(--accent); }
+.drawer-list {
+  list-style: none; margin: 0; padding: 0 0 2rem; overflow-y: auto; flex: 1;
+  border-top: 1px solid var(--rule); overscroll-behavior: contain;
+}
+.drawer-list a, .drawer-list .locked {
+  display: flex; gap: .75rem; align-items: baseline;
+  padding: .45rem 1.1rem; line-height: 1.35; color: var(--ink); text-decoration: none;
+}
+.drawer-list a:hover { background: var(--code-bg); color: var(--accent); }
+.drawer-list a.current { background: var(--callout-bg); color: var(--accent); font-weight: 600; box-shadow: inset 3px 0 var(--accent); }
+.drawer-list .locked { color: var(--muted); opacity: .55; cursor: not-allowed; }
+.dl-num {
+  min-width: 1.9rem; text-align: right; flex-shrink: 0;
+  color: var(--muted); font-variant-numeric: tabular-nums; font-size: .78rem;
+}
+.drawer-list a.current .dl-num { color: var(--accent); }
+@media (prefers-reduced-motion: reduce) {
+  .lesson-drawer, .drawer-open .lesson-drawer, .drawer-scrim { transition: none; }
+}
 
 /* Course home lists (index.html) */
 .idx-day {

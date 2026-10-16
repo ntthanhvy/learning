@@ -54,27 +54,24 @@
   const here = (file) => location.pathname.endsWith("/" + file.split("/").pop());
 
   // ---- top bar, injected on every page ----
+  // Only the course name, a lessons toggle and the reference links. The full
+  // lesson list lives in a slide-out drawer so it never crowds the content.
   const nav = document.createElement("nav");
   nav.className = "course-nav";
+
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "nav-toggle";
+  toggle.setAttribute("aria-controls", "lesson-drawer");
+  toggle.setAttribute("aria-expanded", "false");
+  toggle.innerHTML = '<span aria-hidden="true">☰</span> Lessons';
+  nav.appendChild(toggle);
 
   const home = document.createElement("a");
   home.className = "nav-home";
   home.href = ROOT + "index.html";
   home.textContent = "Data Pipelines";
   nav.appendChild(home);
-
-  const days = document.createElement("span");
-  days.className = "nav-days";
-  LESSONS.forEach((l) => {
-    const chip = document.createElement("a");
-    chip.href = ROOT + l.file;
-    chip.title = "Lesson " + l.n + ": " + l.title;
-    if (here(l.file)) chip.classList.add("current");
-    chip.classList.add("day-chip");
-    chip.textContent = l.n;
-    days.appendChild(chip);
-  });
-  nav.appendChild(days);
 
   const right = document.createElement("span");
   right.className = "nav-right";
@@ -88,6 +85,62 @@
   });
   nav.appendChild(right);
   document.body.prepend(nav);
+
+  // ---- lesson drawer (toggled from the top bar; Esc or backdrop closes) ----
+  const drawer = document.createElement("aside");
+  drawer.id = "lesson-drawer";
+  drawer.className = "lesson-drawer";
+  drawer.setAttribute("aria-label", "Lessons");
+  drawer.innerHTML =
+    `<div class="drawer-head"><a class="drawer-title" href="${ROOT}index.html">Data Pipelines</a>` +
+    `<button type="button" class="drawer-close" aria-label="Close lesson list">×</button></div>` +
+    `<input class="drawer-filter" type="search" placeholder="Filter by number or title…" aria-label="Filter lessons">`;
+  const list = document.createElement("ol");
+  list.className = "drawer-list";
+  LESSONS.forEach((l) => {
+    const item = document.createElement("a");
+    item.href = ROOT + l.file;
+    if (here(l.file)) { item.classList.add("current"); item.setAttribute("aria-current", "page"); }
+    const num = document.createElement("span");
+    num.className = "dl-num";
+    num.textContent = l.n;
+    const title = document.createElement("span");
+    title.className = "dl-title";
+    title.textContent = l.title;
+    item.append(num, title);
+    const li = document.createElement("li");
+    li.dataset.search = (l.n + " " + l.title).toLowerCase();
+    li.appendChild(item);
+    list.appendChild(li);
+  });
+  drawer.appendChild(list);
+  const scrim = document.createElement("div");
+  scrim.className = "drawer-scrim";
+  document.body.append(drawer, scrim);
+
+  const filter = drawer.querySelector(".drawer-filter");
+  filter.addEventListener("input", () => {
+    const q = filter.value.trim().toLowerCase();
+    list.querySelectorAll("li").forEach((li) => { li.hidden = !!q && !li.dataset.search.includes(q); });
+  });
+  const setOpen = (on) => {
+    document.documentElement.classList.toggle("drawer-open", on);
+    toggle.setAttribute("aria-expanded", String(on));
+    if (on) {
+      const cur = list.querySelector(".current");
+      if (cur) cur.scrollIntoView({ block: "center" });
+      // Skip auto-focus on touch screens so the keyboard doesn't pop up.
+      if (matchMedia("(hover: hover)").matches) filter.focus({ preventScroll: true });
+    } else if (drawer.contains(document.activeElement)) {
+      toggle.focus();
+    }
+  };
+  toggle.addEventListener("click", () => setOpen(!document.documentElement.classList.contains("drawer-open")));
+  drawer.querySelector(".drawer-close").addEventListener("click", () => setOpen(false));
+  scrim.addEventListener("click", () => setOpen(false));
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && document.documentElement.classList.contains("drawer-open")) setOpen(false);
+  });
 
   // ---- course home: lesson list ----
   const idx = document.getElementById("course-index");

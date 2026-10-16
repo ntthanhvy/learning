@@ -41,34 +41,24 @@
   window.COURSE = { lessons: LESSONS, today };
 
   // ---- top bar, injected on every page ----
+  // Only the course name, a lessons toggle and the reference links. The full
+  // lesson list lives in a slide-out drawer so it never crowds the content.
   const nav = document.createElement("nav");
   nav.className = "course-nav";
+
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "nav-toggle";
+  toggle.setAttribute("aria-controls", "lesson-drawer");
+  toggle.setAttribute("aria-expanded", "false");
+  toggle.innerHTML = '<span aria-hidden="true">☰</span> Days';
+  nav.appendChild(toggle);
 
   const home = document.createElement("a");
   home.className = "nav-home";
   home.href = ROOT + "index.html";
   home.textContent = "Rust Intensive";
   nav.appendChild(home);
-
-  const days = document.createElement("span");
-  days.className = "nav-days";
-  LESSONS.forEach((l) => {
-    let chip;
-    if (unlocked(l)) {
-      chip = document.createElement("a");
-      chip.href = ROOT + l.file;
-      chip.title = "Day " + l.day + ": " + l.title;
-      if (here(l.file) || (l.extras || []).some((e) => here(e.file))) chip.classList.add("current");
-    } else {
-      chip = document.createElement("span");
-      chip.classList.add("locked");
-      chip.title = "Day " + l.day + ": " + l.title + " — unlocks " + fmt(l.date);
-    }
-    chip.classList.add("day-chip");
-    chip.textContent = l.day;
-    days.appendChild(chip);
-  });
-  nav.appendChild(days);
 
   const right = document.createElement("span");
   right.className = "nav-right";
@@ -82,6 +72,72 @@
   });
   nav.appendChild(right);
   document.body.prepend(nav);
+
+  // ---- lesson drawer (toggled from the top bar; Esc or backdrop closes) ----
+  const drawer = document.createElement("aside");
+  drawer.id = "lesson-drawer";
+  drawer.className = "lesson-drawer";
+  drawer.setAttribute("aria-label", "Days");
+  drawer.innerHTML =
+    `<div class="drawer-head"><a class="drawer-title" href="${ROOT}index.html">Rust Intensive</a>` +
+    `<button type="button" class="drawer-close" aria-label="Close day list">×</button></div>` +
+    `<input class="drawer-filter" type="search" placeholder="Filter by number or title…" aria-label="Filter days">`;
+  const list = document.createElement("ol");
+  list.className = "drawer-list";
+  LESSONS.forEach((l) => {
+    let item;
+    if (unlocked(l)) {
+      item = document.createElement("a");
+      item.href = ROOT + l.file;
+      if (here(l.file) || (l.extras || []).some((e) => here(e.file))) {
+        item.classList.add("current");
+        item.setAttribute("aria-current", "page");
+      }
+    } else {
+      item = document.createElement("span");
+      item.className = "locked";
+      item.title = "Unlocks " + fmt(l.date);
+    }
+    const num = document.createElement("span");
+    num.className = "dl-num";
+    num.textContent = l.day;
+    const title = document.createElement("span");
+    title.className = "dl-title";
+    title.textContent = l.title;
+    item.append(num, title);
+    const li = document.createElement("li");
+    li.dataset.search = (l.day + " " + l.title).toLowerCase();
+    li.appendChild(item);
+    list.appendChild(li);
+  });
+  drawer.appendChild(list);
+  const scrim = document.createElement("div");
+  scrim.className = "drawer-scrim";
+  document.body.append(drawer, scrim);
+
+  const filter = drawer.querySelector(".drawer-filter");
+  filter.addEventListener("input", () => {
+    const q = filter.value.trim().toLowerCase();
+    list.querySelectorAll("li").forEach((li) => { li.hidden = !!q && !li.dataset.search.includes(q); });
+  });
+  const setOpen = (on) => {
+    document.documentElement.classList.toggle("drawer-open", on);
+    toggle.setAttribute("aria-expanded", String(on));
+    if (on) {
+      const cur = list.querySelector(".current");
+      if (cur) cur.scrollIntoView({ block: "center" });
+      // Skip auto-focus on touch screens so the keyboard doesn't pop up.
+      if (matchMedia("(hover: hover)").matches) filter.focus({ preventScroll: true });
+    } else if (drawer.contains(document.activeElement)) {
+      toggle.focus();
+    }
+  };
+  toggle.addEventListener("click", () => setOpen(!document.documentElement.classList.contains("drawer-open")));
+  drawer.querySelector(".drawer-close").addEventListener("click", () => setOpen(false));
+  scrim.addEventListener("click", () => setOpen(false));
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && document.documentElement.classList.contains("drawer-open")) setOpen(false);
+  });
 
   // ---- course home: lesson list with lock states ----
   const idx = document.getElementById("course-index");

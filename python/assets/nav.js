@@ -162,6 +162,8 @@
       file: "lessons/0077-secrets-tokens-and-timing-safe-compare.html" },
     { n: 78, date: "2026-10-15", title: "pprint: readable nested data at a glance",
       file: "lessons/0078-pprint.html" },
+    { n: 79, date: "2026-10-16", title: "Review day 13: retrieval across Days 76-78",
+      file: "lessons/0079-review-retrieval-day-13.html" },
   ];
 
   const REFS = [

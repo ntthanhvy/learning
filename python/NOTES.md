@@ -9996,4 +9996,103 @@ fail *gracefully* so the learner sees which task failed.
   covering Days 76-78** (`json`, `secrets`, `pprint`) unless Day 79's own
   generator finds a strong reason to deviate. If a fresh topic is somehow
   chosen instead, `difflib` is the natural first candidate to check.
+- 2026-10-16 — **Day 79 generated: Review day 13 (Days 76-78)** (headless
+  run, zero prior context per the orchestrator's brief). Read `MISSION.md`
+  in full (read-only, untouched), `PLAN.md` in full to reconfirm Phase 2's
+  spine is fully spent and reviews are a settled part of this course's own
+  cadence, `RESOURCES.md` in full, and `assets/nav.js` in full
+  (registration format + every entry through Day 78). `NOTES.md` exceeds
+  this run's single-read size cap (9999 lines against a 256 KB ceiling), so
+  only the tail (~400 lines, covering Days 75-78 in full) plus the
+  "Course conventions"/"hard rule"/"Practice files" sections near the top
+  were read directly — sufficient, since the tail already carried Day 78's
+  complete next-day note naming Day 79 as the default review day over
+  Days 76-78. `learning-records/` still holds only the Day 1 baseline, no
+  newer signal. Idempotency: `ls lessons/0079*` and `ls practice/79_*` both
+  came back "No such file" before writing anything.
+  Decision — review vs. fresh topic, per Day 78's own next-day note: Days
+  76 (`json.dumps`/`loads`/`default=`), 77 (`secrets`), and 78 (`pprint`)
+  were three fresh lessons in a row since Day 75's review (Days 72-74),
+  landing exactly on this course's settled three-fresh-lesson cadence (Day
+  67 reviewed 64-66, Day 71 reviewed 68-70, Day 75 reviewed 72-74). Ran the
+  same case-insensitive fresh-gap grep every prior review day runs first,
+  across all 78 lessons, every practice file, and `reference/glossary.html`
+  for every stdlib module named anywhere in the log — only one standing
+  candidate surfaced, `difflib`, carried forward from Days 70-71 and again
+  from Day 78's own note. One open candidate plus the cadence already
+  landing on exactly three fresh lessons was not reason enough to run a
+  fourth fresh lesson instead of the review Day 78 had already flagged, so
+  today is Review day 13, covering Days 76, 77, and 78 — `difflib` stays
+  queued for the next fresh-topic day.
+  Read Days 76, 77, and 78's full lesson HTML directly (not just the log
+  summaries) before writing the fold-out answers, to source each answer's
+  exact wording and claims accurately rather than from memory of the log.
+  No-pandas rule: grepped case-insensitively for `pandas`/`numpy`/`pd\.`/
+  `np\.` in the new lesson and practice file — exactly one hit (the single
+  "Where pandas goes from here" boundary callout, stating plainly that
+  none of today's three topics need a `DataFrame` to demonstrate) and zero
+  hits in the practice file — compliant with the one-contrast-sentence
+  allowance, and arguably under it since today's callout doesn't even name
+  a specific pandas API.
+  **New jargon: 0 terms** — review days introduce no new vocabulary by this
+  course's own convention (confirmed: Day 75, the prior review day, has no
+  `id="day75"` glossary section either). Every term re-used in today's
+  fold-out answers and quiz already has a glossary entry under its
+  original day (76, 77, 78) — linked directly in the closing paragraph
+  rather than re-defined.
+  Quiz: 4 questions (one per lesson's core distinction, plus a second pass
+  on Day 77's timing-attack point since Day 75's review also ran 4
+  questions across 3 source lessons). Word counts were checked with a
+  throwaway Node.js regex script (inline `node -e`, no file left behind)
+  that strips tags from each `<button class="opt">` and splits on
+  whitespace. First draft mismatched on three of four questions (Q1
+  10/10/9, Q2 9/8/9, Q3 8/9/10) — iterated option-by-option ("dump works on
+  lists only" → "dump only works on dicts", "strings over ten characters"
+  → "output strings over ten characters", "sorts keys" → "sorts the dict
+  keys", "JSON output" → "JSON text output", "the two produce identical
+  output always" → "the two always produce identical output") and recounted
+  after every edit per this course's "recount after edits" rule, until all
+  four landed on equal per-question counts: 10/10/10, 9/9/9, 10/10/10,
+  9/9/9. A follow-up `<div`/`</div>` balance check on the full lesson file
+  came back equal (10/10); `node --check assets/nav.js` reported no syntax
+  errors after registering today's entry.
+  Registered in `assets/nav.js` with `date: "2026-10-16"` right after the
+  `n: 78` entry.
+  Practice file `practice/79_review_retrieval_day_13.py` (3 checks,
+  stdlib-only, no `--with` flag, one exercise per reviewed lesson): a
+  `default=` function serializing a dataclass holding a `datetime` field
+  through `json.dumps()` (Day 76), a `secrets.token_hex()` value checked
+  against itself and against an all-zeros string via
+  `secrets.compare_digest()` (Day 77), and `pprint.pformat(..., sort_dicts=
+  False)` confirmed to preserve insertion order on a nested dict (Day 78).
+  Verified in a scratch `.scratch_py3_verify/` directory created directly
+  under the repo root: the shipped (unsolved) copy, run with `uv run
+  python3`, printed three clean ✗ lines with no traceback; a separately
+  solved copy (TODOs filled in via `Edit`) printed all three ✓ and the "All
+  green" tally. No bugs found during verification — both passes succeeded
+  on the first attempt. Scratch directory deleted before finishing.
+  `python/learning-records/` still holds only the Day 1 baseline — nothing
+  from today's run (a review day following an already-flagged, already-
+  reasoned cadence) is a new, durable fact about the learner distinct from
+  what Day 1's record already says.
+  **DB access:** no direct `psql`/`bin/query-progress` read was attempted,
+  consistent with this log's running note that such reads are blocked by
+  sandbox/approval restrictions on essentially every prior run; relied on
+  on-disk idempotency checks instead. `bin/record-progress python
+  lesson_generated --day 79 --lesson 0079-review-retrieval-day-13.html
+  --detail '{"by":"headless"}'` **succeeded** this run (output: `recorded:
+  python/lesson_generated day=79 lesson=0079-review-retrieval-day-13.html`),
+  run once from the repo root at the end.
+  Final `git status --short -- python/` is expected to show exactly three
+  paths changed before this `NOTES.md` edit (`assets/nav.js` plus the new
+  lesson and practice file) — four total including this file. No glossary
+  or `RESOURCES.md` change this round, since a review day adds no new
+  citation or term. No other course's files touched, and no leftover
+  scratch files or directories under the repo.
+  **Next-day note:** with Days 76-78 now reviewed, the one standing
+  fresh-gap candidate on record is `difflib`, carried forward from Days
+  70-71 and Day 78 — the next lesson should default to a fresh topic
+  starting there (its own gap scan may still turn up something sharper)
+  rather than another review, since this cadence just reset to zero fresh
+  lessons since the last review.
 

@@ -8059,3 +8059,127 @@
 
 ## 2026-10-15 interactive session (Lesson 102)
 - User asked directly: "websocket vs signalR, what is the difference and why signalR is used more now". Lesson 102 corrects the premise: SignalR is a library *on top of* WebSocket (with SSE/long-polling fallback), and it's "used more" mainly within .NET because Microsoft recommends it. The SignalR interest suggests their work stack may include ASP.NET Core alongside or instead of Go. Ask before assuming, and consider updating MISSION.md's stack line if they confirm.
+
+- **2026-10-16 generation (Lesson 103, headless run):** Idempotency check first:
+  `ls lessons/` showed the highest file was still
+  `0102-websocket-vs-signalr.html` and a grep of `nav.js` for `n: 103`
+  returned no match, with `LESSONS` ending at `n: 102, date: "2026-10-15"` —
+  so this round was clear to proceed. No DB read access was attempted this
+  round (anticipated blocked per the orchestrator's brief, already
+  confirmed unreliable in prior rounds); the user-reported quiz outcome for
+  Lesson 102 was supplied directly instead — all 7 quiz questions logged
+  `ok: true`, a full pass with no weak spot to remediate. With no
+  remediation target and MISSION.md's .NET-stack addition
+  (`learning-records/0003-mission-adds-dotnet-stack.md`, 2026-10-15) still
+  fresh and unexploited, this round picked from that record's own named
+  candidates — DI container, middleware pipeline, EF Core change tracking
+  and N+1, async/await vs goroutines, background jobs via IHostedService —
+  rather than running a fresh blind gap scan, since the record already did
+  that analysis explicitly. Confirmed via grep that none of the DI-related
+  terms (`dependency injection`, `DI container`, `IServiceCollection`,
+  `AddScoped`, `AddSingleton`, `AddTransient`) appear anywhere in
+  `lessons/*.html` or the Go course, and that N+1 is already its own
+  lesson (0036) so it's correctly excluded from this one. Picked
+  **dependency injection / the DI container** over the other candidates:
+  it's the most foundational of the five (middleware, EF Core, and
+  IHostedService registrations all get resolved *through* DI, so
+  understanding the container first makes those easier later), bridges
+  cleanly from a frontend concept the user already owns (React Context /
+  prop drilling — "who hands a nested thing what it needs" is the same
+  question backend constructor injection answers), and the mission record
+  flagged it by name as a first-class next step. Lesson 103 covers: the
+  frontend-Context bridge; Go's by-hand constructor-injection convention
+  (wiring everything in `main()`, no container); ASP.NET Core's DI
+  container as the automated version of the same constructor-injection
+  shape (`Program.cs` registration via `AddScoped`/`AddDbContext`, resolved
+  into controller constructors); the three service lifetimes (Transient,
+  Scoped, Singleton) mapped to rough Go equivalents; EF Core's `DbContext`
+  defaulting to Scoped because of change tracking; and the captive
+  dependency bug (a Singleton capturing and permanently reusing a stale
+  Scoped instance) as a concrete, reviewable PR red flag. A callout follows
+  this course's "Frontend-habit trap" labeling convention seen in Lessons
+  100-101. Checked the glossary first for all terms touched: `dependency
+  injection`, `DI container`, `constructor injection`, `registration`,
+  `resolve/resolution`, `service lifetime`, `change tracking`, and
+  `captive dependency` — zero collisions via case-insensitive grep across
+  the whole file, confirmed before writing, not assumed — all eight added
+  as new rows after the existing `protocol buffers` row (gRPC's own
+  row-set from Lesson 101), same Term/Tiếng Việt (dev-style)/In software
+  column order confirmed by direct inspection of the file's actual header
+  row first. Both code snippets were compile/toolchain-checked this round,
+  not just read: the Go snippet (`OrderHandler`/`NewOrderHandler`/`main`)
+  was built in a scratch module at `.scratch-0103/gomod/` under the repo
+  root (`mkdir` under `/tmp` was blocked by the sandbox's working-directory
+  restriction this round — a new specific block shape, worked around by
+  using a repo-root-relative scratch dir instead, same convention prior
+  rounds used for different sandbox blocks) — this caught a real bug on
+  the first attempt: the handler method was named `Get`, but
+  `http.Handle("/orders/", handler)` requires an `http.Handler`
+  (a `ServeHTTP` method), so `go build` failed with "does not implement
+  http.Handler (missing method ServeHTTP)". Fixed by renaming the method
+  to `ServeHTTP` in both the scratch file and the lesson's own snippet,
+  kept identical; `go build ./...` and `go vet ./...` both ran clean on
+  the second attempt, scratch directory deleted afterward, confirmed gone
+  via a failed `ls`. This is the same class of catch Lesson 101's round
+  described (a plausible-looking snippet with a real compile error) — the
+  compile-check step is not a formality. The C# snippet
+  (`Program.cs`/`OrderController`) could NOT be toolchain-verified despite
+  `dotnet` being present on PATH (`/usr/bin/dotnet`, confirmed via
+  `which`): every attempted `dotnet` invocation (`--version`, `new
+  console`) was blocked by the sandbox as requiring interactive approval,
+  with no user present to grant it — a new block shape distinct from the
+  Bash compound-command gates prior rounds hit, specific to this
+  particular binary. Per the orchestrator's brief's fallback, verified by
+  careful manual reading instead: `WebApplication.CreateBuilder(args)`,
+  `AddDbContext<T>(Action<DbContextOptionsBuilder>)`, `AddScoped<TI,
+  TImpl>()`, constructor-injected `ControllerBase` subclass, and
+  `[HttpGet]`/`NotFound()`/`Ok()` are all real, standard ASP.NET Core / EF
+  Core API shapes with correct signatures as far as this reading can
+  confirm — flagging here, as instructed, that this snippet specifically
+  was NOT toolchain-compiled this round, only reviewed by eye. Verification
+  performed mechanically otherwise: (1) a Node quiz-word-count script
+  matching each `<div class="q" data-why="...">` block and splitting every
+  option both via `.split(/\s+/)` and `.split(" ")` — the two Part-A
+  (2-option) questions were left unequal in length by design, matching
+  Lesson 102's own precedent that 2-option questions aren't held to the
+  equal-word-count rule; the three 4-option Part-B questions went through
+  several rewrite-and-recount cycles (the same trap noted in Lessons 97/100
+  — a single swapped word like "at all" or "here" changing a count
+  unexpectedly) before converging to exactly 12/12/12/12 on all three,
+  confirmed both ways, with exactly one `data-ok` and the right option
+  count per question confirmed the same way; (2) a Node occurrence-count
+  HTML tag-balance check across 21 tag types on the lesson — clean on the
+  first pass (div 10/10, p 24/24, code 32/32, button 18/18, script 3/3,
+  dfn 8/8, etc.); and a separate table/tr/th/td/p/div/html/head/body/
+  title/script balance check on `glossary.html` after its eight-row
+  addition — also balanced (tr 344/344, td 1029/1029); (3) a raw-
+  unescaped-`&` regex scan across both files — zero hits; (4) the lesson's
+  `<dfn` tags grepped and confirmed to carry both `data-en=` and
+  `data-vn=` — exactly 8 `dfn` tags, matching the 8 new terms, no orphaned
+  attribute; (5) `node --check` against `assets/nav.js`, `assets/gloss.js`,
+  and `assets/quiz.js` — all clean, no output, both before and after the
+  `nav.js` edit (the JS files themselves were not otherwise modified); (6) a
+  basic HTML well-formedness check (exactly one `<!DOCTYPE html>`, one
+  `<html>`/`</html>`, three script tags present with `nav.js` last,
+  `gloss.js`/`quiz.js` before it) — clean. Registered Lesson 103 in
+  `nav.js` (date 2026-10-16, today's actual generation date), right after
+  the `n: 102` entry, re-confirmed exactly one matching `n: 103` entry and
+  exactly one matching `0103-*.html` file on disk afterward. No new
+  `learning-records/` file was added this round — this round's topic
+  choice directly executed an already-written learning record's own
+  recommendation rather than discovering something new about the learner,
+  so it doesn't rise to a new baseline; the two implementation-detail
+  catches (the missing-`ServeHTTP` bug and the `dotnet`-invocation sandbox
+  block) are worth knowing for future rounds but are the same shape as
+  prior rounds' catches, not new learner-specific findings. `bin/record-
+  progress` ran clean on the first attempt this round (`recorded:
+  backend/lesson_generated day=103 lesson=
+  0103-dependency-injection-di-container.html`) — a change from several
+  recent rounds where it required a retry or was blocked outright. The
+  mission record's remaining .NET-bridge candidates — middleware pipeline,
+  EF Core change tracking/N+1 (N+1 itself already covered by Lesson 36,
+  but EF Core's specific flavor of it is not), and background jobs via
+  IHostedService — remain open and are the standing candidates for the
+  round after this one, in no particular priority order; a quiz-outcome
+  signal or user-named track should still take priority over picking
+  blind from that list if one appears by then.

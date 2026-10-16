@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 99 · np.intersect1d() / np.union1d() / np.setdiff1d(): SQL's INTERSECT/UNION/EXCEPT, as arrays</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 99 · ~20 min · 16 Oct 2026</p>
+<h1>np.intersect1d() / np.union1d() / np.setdiff1d(): SQL's INTERSECT/UNION/EXCEPT, as arrays</h1>
+<p class="byline">Lesson 98 closed with no standing candidate, so this round ran a fresh curriculum/glossary scan (same approach as Lesson 98's own). Found a genuinely surprising gap: this course has taught <code>pd.merge()</code>'s row-level joins (Lesson 5), the cartesian <code>how="cross"</code> (Lesson 92), and even named <code>iterrows()</code> as an anti-pattern in Lesson 1 — but the three NumPy functions that are the direct array equivalent of SQL's <code>INTERSECT</code>/<code>UNION</code>/<code>EXCEPT</code> set operations were never covered at all, despite being a clean, high-frequency interview pattern under MISSION.md's SQL-equivalence framing.</p>
+
+<h2>1 · Three functions, one shared shape: dedupe, sort, return a plain array</h2>
+<p><dfn data-en="three NumPy functions that treat two 1-D arrays as mathematical sets and return a new, sorted, duplicate-free array: the shared elements (intersect1d), all elements from either (union1d), or elements in the first array but not the second (setdiff1d) -- the array equivalent of SQL's INTERSECT/UNION/EXCEPT" data-vn="giữ nguyên 'np.intersect1d()' — phần tử CHUNG giữa 2 mảng; giữ nguyên 'np.union1d()' — HỢP của 2 mảng (mọi phần tử, không trùng); giữ nguyên 'np.setdiff1d()' — phần tử có ở mảng 1 mà KHÔNG có ở mảng 2; cả 3 đều coi mảng như 1 SET, luôn trả về mảng MỚI đã sắp xếp và loại trùng, tương đương INTERSECT/UNION/EXCEPT trong SQL">np.intersect1d() / np.union1d() / np.setdiff1d()</dfn> are NumPy's set-theory trio. Confirmed directly (numpy 2.5.4), the direct SQL mapping:</p>
+<pre><code><span class="kw">import</span> numpy <span class="kw">as</span> np
+a = np.array([<span class="kw">1</span>, <span class="kw">2</span>, <span class="kw">3</span>, <span class="kw">4</span>, <span class="kw">5</span>])
+b = np.array([<span class="kw">3</span>, <span class="kw">4</span>, <span class="kw">5</span>, <span class="kw">6</span>, <span class="kw">7</span>])
+
+np.intersect1d(a, b)  <span class="cm"># array([3, 4, 5])  -- SQL: a INTERSECT b</span>
+np.union1d(a, b)      <span class="cm"># array([1, 2, 3, 4, 5, 6, 7])  -- SQL: a UNION b</span>
+np.setdiff1d(a, b)    <span class="cm"># array([1, 2])  -- SQL: a EXCEPT b (order matters!)</span>
+np.setdiff1d(b, a)    <span class="cm"># array([6, 7])  -- EXCEPT is NOT symmetric, unlike the other two</span></code></pre>
+<p>Confirmed directly: all three dedupe and sort the result even when an input has repeats or is unsorted (<code>np.intersect1d([1,1,2,2,3], [2,3,3,4])</code> returns <code>array([2, 3])</code>, never <code>[2, 2, 3]</code>); every output is a plain, brand-new <code>ndarray</code>, never a view into either input. <code>intersect1d</code> and <code>union1d</code> are symmetric (order of the two arguments never changes the result) — <code>setdiff1d</code> is the one exception, exactly like SQL's <code>EXCEPT</code>: "<code>a</code> minus <code>b</code>" and "<code>b</code> minus <code>a</code>" are different questions.</p>
+
+<h2>2 · Two silent traps: assume_unique's wrong answer, and NaN never matching itself</h2>
+<p>Confirmed directly: all three accept an optional <code>assume_unique=</code> flag (default <code>False</code>) that skips the internal sort-and-dedupe step for speed — a real win on large, already-deduplicated input (a ~17x speedup confirmed directly on two 2M-element arrays pre-reduced with <code>np.unique()</code>), but it is a trust-me flag, not a check:</p>
+<pre><code>dup = np.array([<span class="kw">1</span>, <span class="kw">1</span>, <span class="kw">2</span>])
+other = np.array([<span class="kw">1</span>, <span class="kw">2</span>])
+np.intersect1d(dup, other)                       <span class="cm"># array([1, 2])  -- correct, default checks</span>
+np.intersect1d(dup, other, assume_unique=<span class="kw">True</span>)   <span class="cm"># array([1, 1, 2])  -- WRONG, no error raised</span></code></pre>
+<p>Passing <code>assume_unique=True</code> on input that is not actually unique returns a silently wrong answer with duplicates still in it — no exception, no warning. It is only safe right after a step that already guarantees uniqueness (<code>np.unique()</code>, a groupby key, a primary key column).</p>
+<p>The second trap, confirmed directly: <code>intersect1d</code> requires NaN to equal itself to count as "shared," and <code>NaN != NaN</code> — so two arrays that each contain a NaN never report it as an intersection, exactly like SQL's <code>NULL</code> never equaling <code>NULL</code> in a join or <code>INTERSECT</code>:</p>
+<pre><code>np.intersect1d([np.nan], [np.nan])   <span class="cm"># array([], dtype=float64)  -- empty! NaN != NaN</span>
+np.union1d([<span class="kw">1.0</span>, np.nan, <span class="kw">3.0</span>], [np.nan, <span class="kw">3.0</span>, <span class="kw">4.0</span>])
+<span class="cm"># array([ 1.,  3.,  4., nan])  -- union/setdiff just collect values, NaN passes through once</span></code></pre>
+<p><code>union1d</code> and <code>setdiff1d</code> don't need an equality match to decide membership the same way, so a NaN that appears in the input simply passes through once — only <code>intersect1d</code>'s "must match to survive" logic silently drops it.</p>
+
+<h2>3 · When to reach for this vs. pd.Index's own set methods</h2>
+<p>Confirmed directly: all three functions happily accept a pandas <code>Series</code> or <code>Index</code> as input (not just a raw array), but they always hand back a plain NumPy <code>ndarray</code> — the pandas type and its index are gone. If staying inside pandas types matters, <code>pd.Index</code> already has its own named methods doing the identical job while preserving dtype and <code>Index</code>-ness:</p>
+<pre><code>idx1 = pd.Index([<span class="kw">1</span>, <span class="kw">2</span>, <span class="kw">3</span>, <span class="kw">4</span>])
+idx2 = pd.Index([<span class="kw">3</span>, <span class="kw">4</span>, <span class="kw">5</span>, <span class="kw">6</span>])
+idx1.intersection(idx2)  <span class="cm"># Index([3, 4], dtype='int64')  -- stays an Index</span>
+idx1.union(idx2)         <span class="cm"># Index([1, 2, 3, 4, 5, 6], dtype='int64')</span>
+idx1.difference(idx2)    <span class="cm"># Index([1, 2], dtype='int64')  -- EXCEPT, same asymmetry as setdiff1d</span></code></pre>
+<p>Same three operations, same asymmetric-difference rule — the choice is really just "do I need a plain array back, or do I need to keep working with pandas labels." A 2-D array handed to any of the <code>np.*1d</code> functions is silently flattened first rather than raising, confirmed directly — a reminder these are genuinely 1-D set tools, not a per-row comparison.</p>
+
+<div class="interview">
+<p><strong>Q: "How would you find customer IDs present in both last month's and this month's active-user list?"</strong> A strong answer, out loud: <em>"That's a set intersection — in SQL it's INTERSECT on the two ID columns. In pandas/NumPy, np.intersect1d(last_month_ids, this_month_ids) does exactly that: dedupes both sides, sorts, and returns the IDs present in both as a plain array. If I need the IDs only in one list — churned customers, say — that's setdiff1d, and I'd be careful about argument order since, like SQL's EXCEPT, a minus b isn't the same as b minus a."</em> The signal: naming the SQL equivalent by name (INTERSECT/UNION/EXCEPT) and flagging setdiff1d's asymmetry unprompted, not just knowing the function exists.</p>
+</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/99_np_set_ops.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/99_np_set_ops.py</code></pre>
+<p>Exercise 1 confirms basic <code>intersect1d</code>/<code>union1d</code>/<code>setdiff1d</code> results, including that <code>setdiff1d(a, b)</code> and <code>setdiff1d(b, a)</code> differ (Section 1). Exercise 2 confirms the <code>assume_unique=True</code> trap: a correct default-mode call vs. a wrong, duplicate-containing result when the flag is passed on non-unique input (Section 2). Exercise 3 confirms the NaN trap: two NaN-containing arrays intersect to empty, while <code>union1d</code> keeps one NaN in its result (Section 2).</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: np.setdiff1d(a, b) and np.setdiff1d(b, a) give different results -- elements in a but not b, versus elements in b but not a -- the identical asymmetry SQL's EXCEPT has. intersect1d and union1d are both symmetric; only setdiff1d (and pd.Index.difference) carry this direction-matters trap.">
+    <p class="stem">Why does argument order matter for <code>np.setdiff1d(a, b)</code> but not for <code>np.intersect1d(a, b)</code>?</p>
+    <button class="opt" data-ok>setdiff1d mirrors SQL's own EXCEPT, which is not symmetric; intersect1d is</button>
+    <button class="opt">actually neither function cares about the argument order at all, ever</button>
+    <button class="opt">setdiff1d quietly sorts its two arguments first, so order never matters</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: assume_unique=True skips the internal sort-and-dedupe step for speed, but it is a trust-me flag with no validation -- passing it on input that still has duplicates returns a silently wrong result with those duplicates still present, no exception or warning raised at all.">
+    <p class="stem">What happens when <code>assume_unique=True</code> is passed but the input array actually still has duplicates?</p>
+    <button class="opt" data-ok>a silently wrong result that still contains the duplicates, no error raised</button>
+    <button class="opt">numpy always raises ValueError the instant any duplicate value is found</button>
+    <button class="opt">numpy just quietly ignores the flag and dedupes the input anyway regardless</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: np.intersect1d([nan], [nan]) returns an empty array, because intersect1d requires NaN to equal itself to count as shared, and NaN never equals NaN -- the identical rule as SQL's NULL never equaling NULL in a join or INTERSECT clause.">
+    <p class="stem">Two arrays each contain one <code>NaN</code> value. What does <code>np.intersect1d()</code> return for that pair?</p>
+    <button class="opt" data-ok>an empty array -- NaN never equals NaN, never counting as shared</button>
+    <button class="opt">an array holding that exact single NaN value, matched there as shared</button>
+    <button class="opt">intersect1d simply just raises a TypeError the moment any NaN is found</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official <a href="https://numpy.org/doc/stable/reference/generated/numpy.intersect1d.html">NumPy API reference for <code>intersect1d()</code></a> (per <code>RESOURCES.md</code>'s NumPy fundamentals entry, ~3 min) — confirms the <code>assume_unique=</code> and <code>return_indices=</code> parameters and the sorted-output guarantee in wording matching the direct probing exactly; the <code>union1d()</code>/<code>setdiff1d()</code> reference pages share the identical shape and are linked from the same page.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>np.intersect1d() / np.union1d() / np.setdiff1d()</code> is new today, added right after Lesson 98's <code>pd.date_range()</code> entry.<br>
+<strong>Next lesson:</strong> no standing candidate carries forward this time — today's fresh scan also turned up <code>itertuples()</code> (the lower-overhead alternative to the <code>iterrows()</code> named as an anti-pattern back in Lesson 1, but never itself covered) and NumPy's stacking family (<code>np.vstack()</code>/<code>np.hstack()</code>/<code>np.stack()</code>) as clean zero-hit candidates, neither promoted ahead of tomorrow's own fresh scan.<br><br>
+💬 Anything unclear — the SQL mapping, the assume_unique trap, the NaN behavior, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

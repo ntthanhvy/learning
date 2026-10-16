@@ -275,6 +275,13 @@
   <tr><td>windowing</td><td>giữ nguyên "windowing" — chia 1 stream event vô hạn thành các khoảng thời gian cố định (ví dụ tumbling window 5 phút) để 1 phép tính stateful như running count hay average có ranh giới rõ để đóng lại và trả kết quả, thay vì chạy mãi trên stream luôn phình ra</td><td>Grouping an unbounded event stream into fixed-size time buckets (e.g. a 5-minute tumbling window) so a stateful computation like a running count or average has a well-defined boundary to close and emit a result for, instead of running forever over an ever-growing stream.</td></tr>
 </table>
 
+<h2 id="day31">Day 31 — dbt environments: dev/CI/prod targets &amp; generate_schema_name</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>target</td><td>giữ nguyên "target" (trong profiles.yml) — 1 cấu hình kết nối có tên (dev, ci, prod...), mỗi target có đầy đủ field riêng (host, schema, threads...), chọn bằng --target hoặc target: mặc định trong profile; nhờ đó cùng 1 project, cùng lệnh, chạy được vào schema (hay cả database) khác nhau tuỳ target nào đang active</td><td>A named connection configuration inside <code>profiles.yml</code> (e.g. <code>dev</code>, <code>ci</code>, <code>prod</code>) — each one a full set of connection fields (host, schema, threads...) selectable with dbt's <code>--target</code> flag or the profile's own default <code>target:</code> line, so the same project and the same commands can run against a different schema (or even a different database) depending on which target is active. Day 10 first introduced the <code>target</code> Jinja object for <code>target.name</code>-gated logic; today is the first time this project actually defines more than one.</td></tr>
+  <tr><td>generate_schema_name</td><td>giữ nguyên "generate_schema_name" — macro Jinja dbt tự gọi cho mỗi model để quyết định schema của model đó, dựa vào custom schema config (nếu có) của model và target đang active; project nào cũng override được implementation mặc định (trong macros/generate_schema_name.sql) để đổi rule cho cả project, không cần config riêng từng model</td><td>A Jinja macro dbt itself calls for every single model to decide what schema that model's table or view lands in, given the model's own optional custom schema config (or none) and the active target. Any project can override the default implementation dbt ships, in <code>macros/generate_schema_name.sql</code>, to change that rule project-wide with no per-model configuration needed — today's version suffixes a custom schema onto the target's own schema for every non-<code>prod</code> target, and honors it as-is on <code>prod</code>.</td></tr>
+</table>
+
 <script src="../assets/nav.js"></script>
 </body>
 </html>

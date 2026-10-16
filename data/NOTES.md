@@ -8847,3 +8847,118 @@
   --day 98 --lesson 0098-date-range.html --detail '{"by":"headless"}'` was
   run directly from the repo root this round, matching the pattern used by
   Lessons 95-97.
+- 2026-10-16 generation (Lesson 99): headless run, zero prior context. Read
+  MISSION.md in full (not modified), the one `learning-records/` baseline
+  file (0001, still unchanged since course creation — stale, no new durable
+  finding to fold in), RESOURCES.md in full, `assets/nav.js` in full for the
+  registration format, and the tail of this log (Lessons 90-98's entries).
+  No DB read access was attempted directly per the orchestrator's pre-
+  gathered context (no `course_progress`/quiz/kata signal exists for this
+  course beyond the Day-1 baseline) — paced conservatively from file state
+  alone, same as every recent round. Idempotency was independently
+  confirmed: no `0099-*` file existed in `data/lessons/` before this round
+  started. Lesson 98's own teaser named no standing candidate (closed its
+  own fresh-scan gap with nothing carried forward), so this round ran
+  another full fresh curriculum/glossary scan per that instruction. Built a
+  scratch Python scan script (`uv run python3`, deleted after) that counted
+  case-insensitive substring hits for ~140 candidate pandas/NumPy terms
+  across every lesson body and the glossary file at once. Zero-hit
+  candidates included the `rename_axis()`/`swaplevel()`/`get_loc()`/
+  `MultiIndex.from_product()` family, `IntervalIndex`, `to_timedelta()`,
+  `DataFrame.update()`, `np.setdiff1d()`/`np.intersect1d()`/`np.union1d()`,
+  `np.clip()`, the `str.pad()`/`str.zfill()`/`str.strip()`/`str.title()`/
+  `str.join()`/`str.cat()`/`str.len()`/`str.slice()` family, `cov()`,
+  `read_json()`, the NumPy stacking family (`np.vstack()`/`np.hstack()`/
+  `np.stack()`/`np.split()`/`np.array_split()`), `np.vectorize()`,
+  `np.meshgrid()`, `np.percentile()`/`np.nanpercentile()`, `aggregate()`,
+  `from_dict()`/`from_records()`, `itertuples()`, `reindex_like()`,
+  `truncate()`, `period_range()`/`timedelta_range()`, and `from_dummies()`.
+  Picked `np.intersect1d()`/`np.union1d()`/`np.setdiff1d()` over the rest:
+  this course has taught `pd.merge()`'s row-level joins (Lesson 5) and the
+  cartesian `how="cross"` (Lesson 92), and even named `iterrows()` as an
+  anti-pattern back in Lesson 1's own teaching example — but the direct
+  NumPy array equivalent of SQL's `INTERSECT`/`UNION`/`EXCEPT` set
+  operations was never itself covered, a clean, genuinely surprising gap
+  and a high-frequency interview pattern under MISSION.md's SQL-equivalence
+  framing (named explicitly in the Mission's "Success looks like" list).
+  `itertuples()` (the lower-overhead alternative to the `iterrows()`
+  already named as an anti-pattern) and the NumPy stacking family were
+  judged thinner or more niche by comparison and left unused, named in
+  today's lesson's own teaser as un-promoted candidates for tomorrow's own
+  fresh scan. Every behavioral claim was probed directly first in
+  `data/.scratch-0099/` (deleted after), on the actually-installed pandas
+  3.0.6 / numpy 2.5.4 (confirmed via a version-print one-liner): confirmed
+  all three functions dedupe and sort their result regardless of input
+  order or repeats, and always return a brand-new plain `ndarray`, never a
+  view; confirmed `intersect1d`/`union1d` are symmetric but `setdiff1d` is
+  not (`setdiff1d(a, b) != setdiff1d(b, a)` on the lesson's own example
+  arrays), the identical asymmetry as SQL's `EXCEPT` and as `pd.Index.
+  difference()` (cross-checked as the pandas-native sibling preserving
+  `Index`-ness, via `idx1.intersection()/.union()/.difference()`);
+  confirmed `assume_unique=True` skips the internal sort/dedupe step for a
+  real ~17x speedup on two pre-deduplicated 2M-element arrays, but silently
+  returns a wrong, still-duplicated result when the input is not actually
+  unique, no exception or warning raised; confirmed the NaN trap —
+  `np.intersect1d([nan], [nan])` returns empty because NaN never equals
+  itself, while `np.union1d()`/`np.setdiff1d()` keep a NaN that appears in
+  their input since they don't require an equality match to decide
+  membership the same way; confirmed a 2-D array is silently flattened
+  first rather than raising. Cross-checked the official NumPy API reference
+  for `intersect1d()` via `WebFetch` (available this round): confirmed the
+  signature (`assume_unique=`, `return_indices=`) and the sorted-output
+  guarantee in wording matching the direct probing exactly, cited as the
+  freshly-verified primary source; the `union1d()`/`setdiff1d()` reference
+  pages share the identical shape and are linked from the same page. The
+  shipped (unsolved) `practice/99_np_set_ops.py` was executed directly from
+  its real `practice/` location and printed exactly 3 ✗ with no raw
+  traceback. Built a solved copy in `.scratch-0099/`, filling in all eight
+  blanks correctly; it printed all 3 ✓ and "All green" on the first run.
+  The shipped file was re-run once more directly from `practice/` after
+  building the solved copy and reproduced the identical all-✗ result,
+  confirming the solved copy's edits never leaked back into the shipped
+  baseline. Quiz options were drafted, then mechanically word-counted with
+  a scratch Python script (`uv run python3`, deleted after) isolating each
+  `<div class="q">` block by regex span and splitting on whitespace — the
+  first draft came out 10/10/11, 12/11/12, 14/11/11; several rounds of
+  small rephrasing (adding/trimming words like "own", "the", "exact",
+  "just", "a", "never") across all three questions until every one landed
+  exactly level (11/11/11, 12/12/12, 12/12/12 option words, counting the
+  standalone "--" token the same way prior rounds' scripts did), one
+  `data-ok` per question throughout. A separate mechanical tag-balance
+  script confirmed all tags balanced (a 2/2, body 1/1, button 9/9, code
+  69/69, dfn 1/1, div 5/5, em 1/1, h1 1/1, h2 6/6, head 1/1, html 1/1, p
+  19/19, pre 5/5, script 3/3, span 41/41, strong 3/3, title 1/1) and found
+  exactly two raw `&` characters, both inside the one established `cd
+  ~/learning/data && uv run ...` shell command, matching every prior
+  lesson's pattern, zero raw `&` in prose; also confirmed the one new
+  `<dfn>` tag carries both `data-en` and `data-vn`. Checked the glossary
+  for a collision before adding anything — grepped `intersect1d`/
+  `union1d`/`setdiff1d` case-insensitively across the full glossary, found
+  zero existing rows — added exactly one new row, "np.intersect1d() /
+  np.union1d() / np.setdiff1d()", directly after Lesson 98's
+  "pd.date_range()" entry; re-ran the tag-balance and raw-`&` scripts
+  against the glossary file afterward, confirmed it stayed balanced (a
+  1/1, body 1/1, code 1172/1172, em 11/11, h1 1/1, head 1/1, html 1/1, p
+  3/3, script 1/1, strong 1/1, table 1/1, td 507/507, th 3/3, title 1/1, tr
+  170/170) with zero raw `&` introduced, and the `<tr>` count went from
+  169 to 170 as expected. Registered Lesson 99 in `nav.js` with today's
+  date (2026-10-16); `node --check` confirmed it still parses as valid
+  JavaScript after the edit, and exactly one `n: 99` entry plus one
+  `0099-np-setdiff1d-intersect1d-union1d` file reference were confirmed to
+  exist; `node --check` was also run against the untouched
+  `gloss.js`/`quiz.js` as a quick sanity pass, both still parse fine. This
+  round closed a fresh gap found with no lineage shortcut available, same
+  pattern as Lesson 98 — no single candidate is named as THE next pick for
+  tomorrow; `itertuples()` and the NumPy stacking family
+  (`np.vstack()`/`np.hstack()`/`np.stack()`) remain confirmed zero-hit
+  options from today's scan but neither is promoted ahead of running
+  tomorrow's own fresh scan. No new `data/learning-records/` entry was
+  added this round — routine lesson, no new baseline finding to justify
+  one (the completion-gap signal remains stale past mid-July, unchanged
+  from this round's starting context). The `.scratch-0099/` directory was
+  deleted after verification, per this course's standing practice of not
+  leaving scratch artifacts committed. `bin/record-progress data
+  lesson_generated --day 99 --lesson
+  0099-np-setdiff1d-intersect1d-union1d.html --detail '{"by":"headless"}'`
+  was run directly from the repo root this round and succeeded, matching
+  the pattern used by Lessons 95-98.

@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 103 · Dependency injection: who hands a handler its database?</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 103 · ~20 min</p>
+<h1>Dependency injection: who hands a handler its database?</h1>
+<p class="byline">Every handler needs things it didn't create itself: a database connection, an HTTP client, a logger. Someone has to hand those over. <dfn data-en="a design pattern where a piece of code receives the objects it depends on from the outside, instead of constructing them itself" data-vn="dependency injection / DI (giữ nguyên) — code nhận sẵn các thứ nó cần từ bên ngoài, không tự tạo ra">Dependency injection</dfn> is just a name for that handover. Go does it by hand, in plain code you can read top to bottom. .NET builds a whole subsystem around it — the <dfn data-en="a built-in ASP.NET Core subsystem that creates and hands out an app's services automatically, based on registrations made at startup, instead of each piece of code constructing its own dependencies" data-vn="DI container (giữ nguyên) — hệ thống có sẵn trong ASP.NET Core, tự tạo và phát service theo đăng ký lúc khởi động">DI container</dfn> — and once you can name what it's doing, ASP.NET Core startup code stops looking like magic.</p>
+
+<h2>1 · The frontend version of this problem</h2>
+<p>You've solved this exact problem before. A deeply nested component needs the current user, or a theme, or an API client. Passing it down as props through five layers that don't use it is <em>prop drilling</em>. React Context exists so a component can declare "I need this" and have it appear, without every layer in between forwarding it manually. The provider at the top decides <em>what</em> gets supplied; the component in the middle just says <em>what it needs</em> and leaves it at that.</p>
+<p>Backend code has the same shape. A handler needs a database connection. Something, somewhere, has to create that connection and get it to the handler. "Who creates it, and how does it arrive?" is the whole question dependency injection answers — Context is one answer for the frontend tree; constructor injection is the backend answer, by hand in Go or via a container in .NET.</p>
+
+<h2>2 · Go's answer: write the wiring yourself</h2>
+<p>Go has no DI container in the standard library, and idiomatic Go rarely reaches for one. The pattern is <dfn data-en="passing an object's dependencies in through its constructor function's parameters, so the object never creates them itself and the caller controls what it gets" data-vn="constructor injection (giữ nguyên) — truyền dependency qua tham số hàm tạo, object không tự tạo ra chúng">constructor injection</dfn>: a struct declares what it needs as fields, a constructor function takes those as parameters, and <code>main()</code> is where everything actually gets built and connected.</p>
+<pre><code><span class="kw">type</span> OrderHandler <span class="kw">struct</span> {
+    db     *sql.DB
+    logger *slog.Logger
+}
+
+<span class="kw">func</span> NewOrderHandler(db *sql.DB, logger *slog.Logger) *OrderHandler {
+    <span class="kw">return</span> &amp;OrderHandler{db: db, logger: logger}
+}
+
+<span class="kw">func</span> (h *OrderHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+    <span class="cm">// h.db and h.logger are already there -- handler never built them itself</span>
+}
+
+<span class="kw">func</span> main() {
+    db := mustOpenDB()
+    logger := slog.Default()
+    handler := NewOrderHandler(db, logger) <span class="cm">// the wiring happens here, once, by hand</span>
+    http.Handle(<span class="st">"/orders/"</span>, handler)
+    http.ListenAndServe(<span class="st">":8080"</span>, <span class="kw">nil</span>)
+}</code></pre>
+<p>Nothing here is hidden. If you want to know where <code>db</code> came from, you read <code>main()</code>. The cost shows up as the app grows: every new handler means another line in <code>main()</code> wiring its dependencies by hand, and if ten handlers all need the same <code>db</code> and <code>logger</code>, you're passing the same two values ten times.</p>
+
+<h2>3 · .NET's answer: register once, let the container resolve</h2>
+<p>ASP.NET Core ships a DI container as a core framework piece, not an add-on. Startup code <dfn data-en="telling the DI container, at startup, which concrete type or instance to supply whenever a given type is requested" data-vn="registration (giữ nguyên) — khai báo với container lúc startup: cần kiểu này thì đưa object nào">registers</dfn> each service once; the container <dfn data-en="the DI container's act of looking up a requested type's registration and constructing (or reusing) an instance to hand back" data-vn="resolve/resolution (giữ nguyên) — container tìm registration khớp rồi tạo (hoặc tái dùng) instance để trả về">resolves</dfn> it automatically wherever it's asked for — usually as a constructor parameter, same shape as the Go example, just filled in by the framework instead of by you.</p>
+<pre><code><span class="cm">// Program.cs -- registration happens once, at startup</span>
+<span class="kw">var</span> builder = WebApplication.CreateBuilder(args);
+builder.Services.AddDbContext&lt;AppDbContext&gt;(opts =&gt;
+    opts.UseNpgsql(connectionString));
+builder.Services.AddScoped&lt;IOrderRepository, OrderRepository&gt;();
+<span class="kw">var</span> app = builder.Build();
+
+<span class="cm">// OrderController.cs -- ASP.NET Core resolves both constructor params for you</span>
+<span class="kw">public</span> <span class="kw">class</span> OrderController : ControllerBase {
+    <span class="kw">private</span> <span class="kw">readonly</span> IOrderRepository _repo;
+    <span class="kw">public</span> OrderController(IOrderRepository repo) { _repo = repo; }
+
+    [HttpGet(<span class="st">"{id}"</span>)]
+    <span class="kw">public</span> IActionResult Get(<span class="kw">int</span> id) {
+        <span class="kw">var</span> order = _repo.Find(id);
+        <span class="kw">return</span> order <span class="kw">is</span> <span class="kw">null</span> ? NotFound() : Ok(order);
+    }
+}</code></pre>
+<p>Nobody calls <code>new OrderController(...)</code> anywhere. The framework sees an incoming request, needs an <code>OrderController</code>, looks at its constructor, sees it needs an <code>IOrderRepository</code>, checks the registration from <code>Program.cs</code>, and builds the chain automatically. This is why ASP.NET Core constructors are full of interface parameters with no visible caller — the container is the invisible caller.</p>
+
+<h2>4 · The part that actually matters: lifetime</h2>
+<p>The registration call name — <code>AddScoped</code>, <code>AddSingleton</code>, <code>AddTransient</code> — isn't decoration. It's a <dfn data-en="how long a DI-registered service instance lives before the container creates a fresh one -- transient (new every request for it), scoped (one shared instance per HTTP request), or singleton (one instance for the whole app's lifetime)" data-vn="service lifetime (giữ nguyên) — transient (tạo mới mỗi lần), scoped (1 instance / request), singleton (1 instance cho cả app)">service lifetime</dfn>, and picking the wrong one is a real, reviewable bug class in .NET PRs.</p>
+<table class="cmp">
+<thead><tr><th>Lifetime</th><th>One instance lives for...</th><th>Go equivalent</th></tr></thead>
+<tbody>
+<tr><th>Transient</th><td>a single resolution — a new one every time it's requested, even twice in the same request</td><td>calling <code>NewThing()</code> fresh, inline, every time</td></tr>
+<tr><th>Scoped</th><td>one HTTP request — shared by everything resolved during that request, then discarded</td><td>a value created once near the top of a handler, passed down to whatever it calls within that same request</td></tr>
+<tr><th>Singleton</th><td>the whole application process — created once, reused forever</td><td>a package-level variable set up once in <code>main()</code>, like the <code>db</code> above</td></tr>
+</tbody>
+</table>
+<p>EF Core's <code>DbContext</code> is registered <code>Scoped</code> by default, and that default is load-bearing: a <code>DbContext</code> tracks the entities it's loaded during one request (<dfn data-en="EF Core's DbContext keeping an internal record of every entity it has loaded or created, so it can detect which fields changed and generate the right UPDATE statements on SaveChanges" data-vn="change tracking (giữ nguyên) — DbContext tự nhớ entity nào đã load, để biết field nào đổi mà sinh UPDATE đúng">change tracking</dfn>), and that record should not leak into the next, unrelated request or get shared across concurrent requests touching the same instance.</p>
+
+<div class="callout"><strong>Trap: the captive dependency.</strong> The container will <em>let</em> you register a <code>Singleton</code> that takes a <code>Scoped</code> service (like <code>DbContext</code>) as a constructor parameter. The first time that singleton is built, it captures whichever request's scoped instance happened to be around — then holds onto it forever, handing that one stale, eventually-disposed <code>DbContext</code> to every future request. This is called a <dfn data-en="a bug where a longer-lived service (e.g. Singleton) holds a reference to a shorter-lived one (e.g. Scoped), so the short-lived instance outlives its intended scope instead of being released and recreated per request" data-vn="captive dependency (giữ nguyên) — service sống lâu giữ tham chiếu tới service đáng lẽ chỉ sống ngắn, nên cái ngắn bị kẹt sống lâu hơn dự tính">captive dependency</dfn>, and it fails in production in a way that's hard to reproduce locally (works fine on the first request, degrades or crashes later). In review: any <code>Singleton</code> constructor taking a <code>Scoped</code> or <code>Transient</code> parameter is worth a second look.</div>
+
+<h2>5 · Why Go skips the container and .NET doesn't</h2>
+<p>This isn't one ecosystem being "better" — it's a trade-off, and both sides know it.</p>
+<ul>
+<li><strong>Go's bet:</strong> explicitness over convenience. A small number of long-lived services (one <code>db</code>, one <code>logger</code>) rarely justifies a container; reading <code>main()</code> should tell you the whole dependency graph.</li>
+<li><strong>.NET's bet:</strong> ASP.NET Core apps tend to have many more moving pieces wired through middleware, filters, and framework internals (auth handlers, EF Core, logging providers, SignalR hubs from Lesson 102) — enough that hand-wiring every constructor call would be its own maintenance burden. The container also lets the framework itself register things you never see, like <code>HttpContext</code> accessors.</li>
+</ul>
+<p>Both ecosystems still do constructor injection — the difference is only <em>who calls the constructor</em>: you, by hand, in Go; the container, automatically, in .NET.</p>
+
+<div class="interview">
+<p><strong>Q: "What's dependency injection, and what do the DI container lifetimes mean?"</strong> A strong answer, out loud: <em>"Dependency injection means a piece of code receives what it needs through its constructor instead of creating it itself — Go does that by hand in main(); ASP.NET Core automates it with a container you register services into once at startup. The lifetime you register a service with controls how long one instance lives: Transient is a new instance every time, Scoped is one per HTTP request — that's EF Core's DbContext default, because of change tracking — and Singleton is one for the app's whole lifetime. The bug to watch for is a captive dependency: a Singleton holding onto a Scoped instance it captured once, serving that same stale instance to every later request."</em> The signal: you can name the three lifetimes without hesitating, and you know a real failure mode, not just the vocabulary.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory, with no scrolling up. Retrieval is the point.</p>
+
+<p><strong>Part A: match the lifetime to the lifespan.</strong></p>
+<div class="quiz">
+  <div class="q" data-why="Transient means a brand new instance is created on every single resolution -- even two requests for it within the same HTTP request each get their own.">
+    <p class="stem">A service registered as Transient, resolved twice in one request</p>
+    <button class="opt" data-ok>two separate instances are created</button>
+    <button class="opt">one instance is shared between both resolutions</button>
+  </div>
+  <div class="q" data-why="Scoped means one shared instance per HTTP request -- this is exactly why EF Core's DbContext defaults to Scoped: every piece of code handling one request should see the same tracked entities.">
+    <p class="stem">EF Core's DbContext, registered Scoped, used by two repositories in the same request</p>
+    <button class="opt" data-ok>both repositories get the same DbContext instance</button>
+    <button class="opt">each repository gets its own fresh DbContext instance</button>
+  </div>
+  <div class="q" data-why="Singleton means exactly one instance for the entire application's lifetime, created the first time it's needed and reused by every request afterward -- the closest Go equivalent is a package-level variable set up once in main().">
+    <p class="stem">A logger registered as Singleton, used across a thousand requests over a day</p>
+    <button class="opt" data-ok>the same single instance serves all thousand requests</button>
+    <button class="opt">a new logger instance is built for each of the thousand requests</button>
+  </div>
+</div>
+
+<p><strong>Part B: reasoning.</strong></p>
+<div class="quiz">
+  <div class="q" data-why="Go has no DI container in its standard library or idiomatic tooling. The dependency-injection pattern itself (constructor injection) still applies -- it's just wired by hand in main(), rather than resolved automatically by a framework subsystem.">
+    <p class="stem">Why doesn't a typical Go service have a "DI container" the way an ASP.NET Core app does?</p>
+    <button class="opt" data-ok>idiomatic Go wires every constructor call by hand, with no DI container</button>
+    <button class="opt">dependency injection as a pattern cannot be expressed in Go at all</button>
+    <button class="opt">Go handlers are forbidden from ever taking any constructor parameters at all</button>
+    <button class="opt">Go programs never actually need a database connection passed to any handler</button>
+  </div>
+  <div class="q" data-why="This is exactly the captive-dependency bug: a Singleton's constructor runs once and captures whatever Scoped DbContext existed at that moment, then holds that same now-stale instance forever instead of getting a fresh one per request.">
+    <p class="stem">A Singleton-registered cache service takes a Scoped DbContext as a constructor parameter. What goes wrong?</p>
+    <button class="opt" data-ok>the singleton captures one request's DbContext and keeps reusing that stale instance</button>
+    <button class="opt">the application simply refuses to start until the DbContext is made Singleton</button>
+    <button class="opt">nothing changes here -- lifetimes only ever affect services registered as Transient</button>
+    <button class="opt">the DbContext instance silently becomes a Transient service from that point on</button>
+  </div>
+  <div class="q" data-why="Scoped is EF Core's documented default specifically because of change tracking: the DbContext records which entities it loaded and what changed, and that bookkeeping is meant to live and die with one request, not leak into the next one or get shared across concurrent requests.">
+    <p class="stem">Why does EF Core register DbContext as Scoped by default, rather than Singleton?</p>
+    <button class="opt" data-ok>its change tracking is meant to track just one request, not more</button>
+    <button class="opt">Postgres connections are physically incapable of ever being reused across any requests</button>
+    <button class="opt">Scoped services are always built much faster than an equivalent Singleton service</button>
+    <button class="opt">ASP.NET Core forbids Singleton registration for any database-related type at all today</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://learn.microsoft.com/en-us/aspnet/core/fundamentals/dependency-injection">Microsoft Learn: Dependency injection in ASP.NET Core</a> (10 min), then <a href="https://learn.microsoft.com/en-us/dotnet/core/extensions/dependency-injection-guidelines#captive-dependency">the captive dependency section of the DI guidelines</a> for the lifetime-mismatch trap above.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a>. Click any dotted term for a popup (English first, tiếng Việt second). Builds on Lesson 102's SignalR hubs (one more thing the container resolves into your constructors) and the middleware/handler vocabulary from Lesson 1. <strong>Anything unclear? Ask your teacher</strong>, the agent that made this lesson. Ask in Vietnamese anytime. A good follow-up: "can you show me where our ASP.NET Core project registers its services, and what lifetime each one uses?"</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

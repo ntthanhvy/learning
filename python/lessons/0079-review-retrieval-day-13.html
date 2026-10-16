@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 79 · Review day 13: retrieval across Days 76-78</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 79 · ~20 min · 16 Oct 2026</p>
+<h1>Review day 13: retrieval across Days 76-78</h1>
+<p class="byline">Day 75 (review day 12) covered Days 72, 73, and 74. Since then, three fresh days ran in a row — Day 76 (<code>json.dumps</code>/<code>loads</code>, <code>indent=</code>, <code>default=</code>), Day 77 (<code>secrets</code>), Day 78 (<code>pprint</code>) — and Day 78's own next-day note flagged this exact span as matching the course's settled three-fresh-lesson review trigger (Day 67 reviewed Days 64-66, Day 71 reviewed Days 68-70, Day 75 reviewed Days 72-74). This is that review — a thirteenth retrieval day, covering exactly Days 76, 77, and 78.</p>
+
+<div class="callout"><strong>Why today, specifically, and why not a fourth fresh day:</strong> a fresh-gap grep ran first anyway, matching every prior review day's own discipline — it searched all 78 lessons, every practice file, and <code>reference/glossary.html</code> case-insensitively for every stdlib module named but not yet taught anywhere across the whole log. Only one candidate turned up: <code>difflib</code>, carried forward explicitly in Day 78's own note as still open. One open candidate is not enough on its own to justify a fourth fresh lesson today when the cadence math already lands exactly on three fresh lessons since Day 75 — so today pays down retrieval on Days 76-78 instead, and <code>difflib</code> stays queued for whichever day next needs a fresh topic.</div>
+
+<h2>1 · Three questions, in the original teaching order</h2>
+<p>Answer each out loud or on paper <em>before</em> reading the fold-out answer. If one is shaky, note it and go fix it in the practice file below rather than only rereading the old lesson.</p>
+
+<p><strong>Day 76 — <code>json.dumps</code>/<code>loads</code>, <code>indent=</code>, <code>default=</code>.</strong> What is the actual difference between <code>json.dump()</code> and <code>json.dumps()</code>, and exactly when does <code>json.dumps()</code> call a function passed as <code>default=</code>?</p>
+<div class="callout">Fold-out answer: <code>dump</code>/<code>load</code> always take an already-open file object and read or write it directly; <code>dumps</code>/<code>loads</code> work with a plain <code>str</code> already in memory, with no file involved at all — the trailing "s" means string, same conversion either way. <code>dumps()</code> tries its own built-in types first (<code>str</code>, <code>int</code>, <code>float</code>, <code>bool</code>, <code>None</code>, <code>list</code>, <code>dict</code>) and only calls <code>default(value)</code> on a value that is none of those, using whatever JSON-safe value that function returns in its place — a <code>datetime</code> turned into its <code>.isoformat()</code> string, or a dataclass turned into a dict via <code>dataclasses.asdict()</code>.</div>
+
+<p><strong>Day 77 — <code>secrets</code>.</strong> Why is <code>random</code> the wrong module for generating a password-reset token, and why should a secret value be compared with <code>secrets.compare_digest()</code> instead of plain <code>==</code>?</p>
+<div class="callout">Fold-out answer: <code>random</code> builds its whole sequence from a seed using a deterministic formula — reproducible on purpose, which is exactly what Day 54 relied on for repeatable tests, and exactly why it's unsafe here: anyone who can guess or observe the seed can sometimes predict the rest of the sequence. <code>secrets</code> draws from the operating system's own cryptographically secure source instead, with no <code>seed()</code> at all. Plain <code>==</code> on strings typically stops comparing at the first mismatched character, so a wrong guess sharing more of the correct prefix takes measurably longer to reject than one that differs immediately — a timing attack can exploit that difference, measured over many attempts, to recover a secret character by character. <code>compare_digest()</code> always takes the same amount of time regardless of how much of the prefix matches, so the comparison itself leaks nothing.</div>
+
+<p><strong>Day 78 — <code>pprint</code>.</strong> What does <code>pprint.pprint()</code> actually change compared to plain <code>print()</code> on the same nested dict, and why might <code>pprint()</code> succeed on a value that <code>json.dumps()</code> rejects outright?</p>
+<div class="callout">Fold-out answer: <code>pprint()</code> lays nested data out across multiple indented lines so the structure is visible at a glance, and — by default — sorts dict keys alphabetically so the same data always prints the same way regardless of insertion order; plain <code>print()</code> uses each object's default <code>repr()</code> with no such layout or ordering guarantee. <code>json.dumps()</code> only accepts JSON's own built-in types (<code>dict</code>/<code>list</code>/<code>str</code>/<code>int</code>/<code>float</code>/<code>bool</code>/<code>None</code>); <code>pprint()</code> accepts any Python object at all, including a <code>set</code> or a <code>tuple</code> used as a dict key, neither of which <code>json.dumps()</code> can serialize — because <code>pprint()</code>'s output is only for a human reading a terminal right now, never meant to be parsed back as data.</div>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> nothing pandas-specific today — this review only revisits Days 76, 77, and 78's plain-Python serialization, token-generation, and pretty-printing material, none of which needs a <code>DataFrame</code> to demonstrate.</div>
+
+<h2>2 · Why these three, and why no new terms today</h2>
+<p>Same interleaving logic as every prior review day: a data-interchange format's one escape hatch, then a security-sensitive module most code never needs until it suddenly does, then a debugging tool that looks like a one-line swap for <code>print()</code> but earns its own lesson on the details — three different mental models pulled from three lessons, not one idea restated three ways. They also share a quieter throughline worth naming: all three are about a tool drawing an explicit line between "what the easy, everyday choice does" and "what the deliberate, slightly-less-convenient choice buys instead" — <code>json.dumps()</code> versus <code>default=</code> for a type it doesn't know, <code>random</code> versus <code>secrets</code> for anything an attacker must not predict, and <code>print()</code> versus <code>pprint()</code> for data a human actually has to read. Recognizing which situation calls for the deliberate choice — not just recalling the function names — is the retrieval goal today.</p>
+<p>No new jargon is introduced today on purpose — every term revisited already has a glossary entry under its original day. With today's three done, exactly one standing fresh-gap candidate remains on record: <code>difflib</code>, carried forward from Days 70-71 and again from Day 78 — the next fresh lesson should pick it up unless its own gap scan finds a stronger reason to deviate.</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/79_review_retrieval_day_13.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/79_review_retrieval_day_13.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. No new syntax: every mechanism below was taught in Days 76, 77, and 78. Exercises: writing a <code>default=</code> function that lets <code>json.dumps()</code> serialize a dataclass holding a <code>datetime</code> field, generating a <code>secrets.token_hex()</code> value and confirming <code>secrets.compare_digest()</code> agrees with <code>==</code> on both a match and a mismatch, and using <code>pprint.pformat()</code> with <code>sort_dicts=False</code> to confirm insertion order is preserved instead of alphabetical order.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="dump/load always take an already-open file object and read or write it directly. dumps/loads work with a plain str already in memory, with no file involved at all -- the s stands for string, the exact same conversion either way.">
+    <p class="stem">What is the difference between <code>json.dump()</code> and <code>json.dumps()</code>?</p>
+    <button class="opt" data-ok>dump writes to a file; dumps returns a string value</button>
+    <button class="opt">dump is new; dumps is an old deprecated name now</button>
+    <button class="opt">dumps works on lists only; dump only works on dicts</button>
+  </div>
+  <div class="q" data-why="random builds its entire sequence from a seed using a deterministic formula -- reproducible on purpose, which is exactly why Day 54 relied on it for repeatable tests. secrets draws from the operating system's own cryptographically secure source and offers no seed() at all, since a secret token must never be reproducible by anyone who can guess the seed.">
+    <p class="stem">Why is <code>random</code> the wrong module for generating a password-reset token?</p>
+    <button class="opt" data-ok>its output is seedable and can sometimes be predicted</button>
+    <button class="opt">random cannot ever generate output strings over ten characters</button>
+    <button class="opt">random always produces the exact same token every run</button>
+  </div>
+  <div class="q" data-why="pprint() lays nested data out across multiple indented lines so the structure is visible at a glance, and by default sorts dict keys alphabetically so the same data always prints the same way regardless of insertion order -- plain print() uses each object's default repr with no such layout or ordering guarantee.">
+    <p class="stem">What does <code>pprint.pprint()</code> change compared to plain <code>print()</code> on a nested dict?</p>
+    <button class="opt" data-ok>it adds readable multi-line indentation and sorts the dict keys</button>
+    <button class="opt">it converts the dict into valid parseable JSON text output</button>
+    <button class="opt">nothing at all — the two always produce identical output</button>
+  </div>
+  <div class="q" data-why="Plain == typically stops comparing at the first mismatched character, so a wrong guess sharing more of the correct prefix takes measurably longer to reject than one that differs immediately -- a timing attack can exploit that over many repeated attempts to recover a secret character by character. compare_digest() always takes the same time regardless of how much of the prefix matches.">
+    <p class="stem">Why should a secret token be checked with <code>secrets.compare_digest()</code> instead of plain <code>==</code>?</p>
+    <button class="opt" data-ok>== can leak the secret slowly through comparison timing</button>
+    <button class="opt">plain == cannot ever compare two separate string objects</button>
+    <button class="opt">compare_digest is simply a newer alias with no change</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> no single new source today — revisit each lesson's own citation (<a href="https://docs.python.org/3/library/json.html"><code>json</code></a> for Day 76, <a href="https://docs.python.org/3/library/secrets.html"><code>secrets</code></a> for Day 77, and <a href="https://docs.python.org/3/library/pprint.html"><code>pprint</code></a> for Day 78), all already listed in <code>RESOURCES.md</code>.</p>
+
+<p class="next">No new terms today — this is a review day, and every term revisited already has a glossary entry under its original day (<a href="../reference/glossary.html#day76">76</a>, <a href="../reference/glossary.html#day77">77</a>, <a href="../reference/glossary.html#day78">78</a>).<br>
+One standing fresh-gap candidate remains on record: <code>difflib</code>, carried forward from Days 70-71 and Day 78 — the next fresh lesson should default to it unless its own gap scan finds a stronger reason to deviate.<br><br>
+💬 Anything unclear across any of today's three? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

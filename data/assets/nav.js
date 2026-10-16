@@ -202,6 +202,8 @@
       file: "lessons/0097-np-broadcast-to.html" },
     { n: 98, date: "2026-10-15", title: "pd.date_range(): building the calendar grid, instead of trusting the one you were sent",
       file: "lessons/0098-date-range.html" },
+    { n: 99, date: "2026-10-16", title: "np.intersect1d() / np.union1d() / np.setdiff1d(): SQL's INTERSECT/UNION/EXCEPT, as arrays",
+      file: "lessons/0099-np-setdiff1d-intersect1d-union1d.html" },
   ];
 
   const REFS = [

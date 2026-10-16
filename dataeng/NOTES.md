@@ -3665,3 +3665,96 @@ along the Phase 2 spine, adapted to the learning records.
   '{"by":"headless"}'` succeeded on the first attempt, run from the repo
   root: `recorded: dataeng/lesson_generated day=30
   lesson=0030-stream-processing-vs-land-and-let-dbt.html`.
+- 2026-10-16 (headless 06:00 run, Day 31 generated): thirty-first lesson,
+  `0031-dbt-environments-and-schema-naming.html`. Confirmed before writing
+  that no `0031-*.html` file existed in `lessons/` and no `2026-10-16` entry
+  existed in `assets/nav.js` (last entry was Day 30, dated 2026-10-15). No DB
+  read access was attempted this round (this sandbox's `psql`/DB-read path
+  has been unreliable or blocked every round since Day 1; the orchestrator's
+  own context for this run stated no `lesson_completed`/quiz/outcome row
+  exists beyond the Day-1 baseline, so that check was not re-attempted here
+  either). Read `MISSION.md`, `PLAN.md` in full, this file in full (including
+  Day 30's closing note), `RESOURCES.md`, and `assets/nav.js`'s full
+  `LESSONS` array (all 30 titles) before writing anything.
+  **The Phase 3 call:** Day 30's own closing note explicitly named this as
+  the real checkpoint — every bullet across `PLAN.md`'s Phase 2a/2b/2c/2d
+  spine closed at Day 30, and the next round (today) was supposed to make a
+  reasoned call on what comes after, rather than inventing scope with no
+  trigger. Delegated a focused sub-task to map which real-world dbt topics
+  (dbt being the course's deepest-intended tool, per `MISSION.md`) remain
+  genuinely untouched across Days 1-30, confirming first that MISSION.md's
+  two explicit dbt goals ("choose view/table/incremental and defend it",
+  "write generic, singular and unit tests") are each already fully covered
+  (Day 4, and Days 3+12, respectively) so today doesn't repeat either. Three
+  real, never-taught gaps came back: (1) dev/prod/CI target separation and
+  custom schema naming via `generate_schema_name`, (2) test severity
+  (`warn`/`error`) and `store_failures`, (3) dbt seeds (CSV reference data)
+  vs. sources. Picked (1) for today: it directly closes a real, load-bearing
+  gap Day 15's own CI workflow left open (CI and a local `dbt build` both
+  silently wrote to the identical `dbt_dev` schema, with nothing but luck
+  preventing a collision), it's the highest interview-relevance of the
+  three (every production dbt project answers "where does CI write, and how
+  do dev/CI/prod avoid colliding" and this one previously couldn't), and it
+  needs no new infrastructure. Explicitly deferred to future rounds: test
+  severity/`store_failures` and seeds-vs-sources remain open, smaller,
+  equally viable next picks — named here so the next round doesn't have to
+  re-derive the same map from scratch.
+  **Content:** three named `profiles.yml` targets (`dev`, `ci`, `prod`), all
+  pointing at the same single `postgres:17` instance this course has always
+  run (named explicitly as a scoped simplification of a real company's
+  genuinely separate dev/CI/prod databases, the same honesty pattern as Day
+  7's `BashOperator`-over-Cosmos and Day 30's land-then-batch framing), plus
+  a `macros/generate_schema_name.sql` override close to dbt's own documented
+  default behavior: `prod` honors a model's custom schema config as-is,
+  `dev`/`ci` suffix it onto the target's own schema so two environments (or
+  two developers) never collide even if a future model does add a custom
+  schema. The build step updates Day 15's CI workflow to pass `--target ci`
+  explicitly instead of silently reusing `dev`. Named directly, rather than
+  built: a true per-developer schema convention for a hypothetical second
+  contributor, since this course has exactly one learner and one laptop
+  (same deferred-tool pattern as Day 17's Schema Registry and Day 30's Kafka
+  Streams/Flink). No pandas, no Python-language teaching, no
+  re-derivation of idempotency/API concepts — none applicable to a pure
+  dbt-config day. Domain names and file paths (`food_delivery_pipeline`,
+  `stg_restaurants`, Day 15's `profiles.yml`/`dbt_ci.yml`) used exactly as
+  established; no renaming.
+  **Verification:** laid out a minimal scratch dbt project
+  (`dbt_project.yml`, the three-target `profiles.yml` from Section 2, the
+  `generate_schema_name.sql` macro from Section 3, `sources.yml`, and two
+  models, `stg_orders`/`fct_orders`) under a throwaway directory at the repo
+  root, then ran `uv run --with "dbt-postgres==1.11.0" dbt parse
+  --profiles-dir .` against both the default (`dev`) and `--target prod`
+  — both completed cleanly with no `Error` string in the output (grepped,
+  not relying on exit code, per this file's own standing caution that dbt
+  exits 0 through a pipe). Also ran `dbt compile` once to confirm the only
+  failure surfaced was an expected `Connection refused` (no live Postgres in
+  this sandbox), not any Jinja/config error — confirming the macro's
+  branching logic and the three-target profile are both syntactically sound
+  independent of a real database. No standalone Python file exists in this
+  lesson, so `py_compile` was not applicable. Deleted the scratch directory
+  afterward. Caught and fixed one real markup bug before shipping: a
+  mismatched `<em>...</code>` tag pair in Section 1's first draft, found by
+  a tag-balance script (same approach as Day 30's), not by eye.
+  Registered Lesson 31 in `assets/nav.js` (`node --check` clean) and added
+  the Day 31 section to `reference/glossary.html` (2 new terms: `target` and
+  `generate_schema_name` — grepped the existing glossary first and confirmed
+  `target` had never been given its own row despite Day 10 using the
+  `target` Jinja object in prose, so added it now rather than skipping it as
+  already covered). Ran the same tag-balance/bare-`&` check against the
+  updated glossary separately (clean). Confirmed the lesson's 2 `<dfn>` tags
+  (`target`, `generate_schema_name`) match the 2 glossary rows added, by
+  direct extraction and comparison rather than by eye. The first quiz draft
+  came up mismatched on all four questions (11/10/11, 7/10/11, 10/12/10,
+  11/8/9 word splits); rebalanced across several edit-and-recount passes to
+  11/11/11, 10/10/10, 11/11/11 and 9/9/9 respectively, re-verified by
+  re-running the same script after each edit. Flagged honestly in the
+  lesson's own "Go deeper" section that dbt's `custom-schemas` and
+  `generate-schema-name` docs were not fetched live this round (no working
+  web-fetch tool available), the same gap Days 23 and 30 hit — today's
+  macro is reasoned from established understanding of dbt's documented
+  default, not a fresh pull.
+  `bin/record-progress dataeng lesson_generated --day 31 --lesson
+  0031-dbt-environments-and-schema-naming.html --detail
+  '{"by":"headless"}'` succeeded on the first attempt, run from the repo
+  root: `recorded: dataeng/lesson_generated day=31
+  lesson=0031-dbt-environments-and-schema-naming.html`.

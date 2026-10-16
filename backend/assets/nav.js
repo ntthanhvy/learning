@@ -210,6 +210,8 @@
       file: "lessons/0101-grpc-the-other-api-shape.html" },
     { n: 102, date: "2026-10-15", title: "WebSocket vs SignalR: a protocol and the library on top of it",
       file: "lessons/0102-websocket-vs-signalr.html" },
+    { n: 103, date: "2026-10-16", title: "Dependency injection: who hands a handler its database?",
+      file: "lessons/0103-dependency-injection-di-container.html" },
   ];
 
   const REFS = [

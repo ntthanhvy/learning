@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 31 · dbt environments: dev/CI/prod targets &amp; generate_schema_name</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 31 · ~20 min · 16 Oct 2026</p>
+<h1>dbt environments: dev/CI/prod targets &amp; <code>generate_schema_name</code></h1>
+<p class="byline">Today's tangible win: a <code>profiles.yml</code> with three named targets — <code>dev</code>, <code>ci</code>, <code>prod</code> — plus a <code>macros/generate_schema_name.sql</code> override that gives every target its own schema automatically, so your own local <code>dbt build</code>, Day 15's CI workflow, and a hypothetical "real" production run can never collide in the same database, even though all three happen to point at the same Postgres instance in this portfolio.</p>
+
+<div class="callout"><strong>Where this picks up:</strong> every lesson from Day 2 onward has quietly used one target, <code>dev</code>, writing to one schema, <code>dbt_dev</code>, with Day 15's CI workflow writing to that exact same schema name too. That was never actually safe — it only ever worked because CI and local runs never happened at the same moment. Today names that gap and closes it, rather than continuing to rely on luck.
+<pre><code>cd food_delivery_pipeline
+grep schema profiles.yml</code></pre>
+Expected: one line, <code>schema: dbt_dev</code> — confirming there is currently exactly one schema for every environment this project has ever built against. If your <code>profiles.yml</code> instead lives in <code>~/.dbt/</code> (Day 2's original local setup, before Day 15 added a committed one for CI), today edits the committed one and the local one should match it.</div>
+
+<h2>1 · The question this repo has never had to answer, until now</h2>
+<p>So far, "where does <code>dbt build</code> write to" has had one answer everywhere: whatever <code>profiles.yml</code>'s single <code>dev</code> target says, which is <code>dbt_dev</code>. Day 15's CI workflow reused that same target and that same schema, which was fine as a first pass but is a real landmine: nothing stops a local <code>dbt build</code> running at the same moment as a CI job from the same PR, both writing to <code>dbt_dev</code>, one truncating or rebuilding a table the other is mid-query against. In a real job this gets worse — a genuine production schedule (Day 7's Airflow DAG, if it ran against a real warehouse) would be writing to that identical schema too, meaning a developer's typo in a local experiment could, in principle, land in the same tables a dashboard reads from.</p>
+<p>The fix dbt ships for exactly this is <a href="https://docs.getdbt.com/docs/core/connect-data-platform/connection-profiles"><dfn data-en="a named connection configuration inside profiles.yml (e.g. dev, ci, prod) -- each one a full set of connection fields (host, schema, threads...) selectable with dbt's --target flag or the profile's own default target: line, so the same project and the same commands can run against a different schema (or even a different database) depending on which target is active" data-vn="giữ nguyên &quot;target&quot; (trong profiles.yml) — 1 cấu hình kết nối có tên (dev, ci, prod...), mỗi target có đầy đủ field riêng (host, schema, threads...), chọn bằng --target hoặc target: mặc định trong profile; nhờ đó cùng 1 project, cùng lệnh, chạy được vào schema (hay cả database) khác nhau tuỳ target nào đang active">targets</dfn></a>: separate, named connection configs inside one <code>profiles.yml</code>, switched with <code>--target</code>. This project has had the <em>shape</em> of targets since Day 2 (one target, <code>dev</code>) without ever needing a second one. Today adds two more and, more importantly, makes the schema each one writes to <em>derive</em> from the target automatically, instead of being a literal string someone has to remember to change.</p>
+
+<h2>2 · Three named targets, one Postgres instance</h2>
+<p>A real company runs dev, CI and prod as genuinely separate databases, often separate clusters entirely. This portfolio runs one <code>postgres:17</code> container (Day 1), so today's three targets point at the <em>same</em> host and port — the realistic separation here is the schema, not the server. That's a deliberate, named simplification, not a hidden shortcut: say so if asked in an interview, the same way Day 7 named <code>BashOperator</code>-over-Cosmos as a scoped choice rather than hiding it.</p>
+<pre><code><span class="cm">-- food_delivery_pipeline/profiles.yml -- committed; no real secret lives in this file</span>
+food_delivery_pipeline:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: <span class="str">"{{ env_var('DBT_HOST', 'localhost') }}"</span>
+      port: 5432
+      user: <span class="str">"{{ env_var('DBT_USER', 'fdp') }}"</span>
+      password: <span class="str">"{{ env_var('DBT_PASSWORD', 'fdp_dev_password') }}"</span>
+      dbname: <span class="str">"{{ env_var('DBT_DBNAME', 'fdp') }}"</span>
+      schema: dbt_dev
+      threads: 4
+    ci:
+      type: postgres
+      host: <span class="str">"{{ env_var('DBT_HOST', 'localhost') }}"</span>
+      port: 5432
+      user: <span class="str">"{{ env_var('DBT_USER', 'fdp') }}"</span>
+      password: <span class="str">"{{ env_var('DBT_PASSWORD', 'fdp_dev_password') }}"</span>
+      dbname: <span class="str">"{{ env_var('DBT_DBNAME', 'fdp') }}"</span>
+      schema: dbt_ci
+      threads: 4
+    prod:
+      type: postgres
+      host: <span class="str">"{{ env_var('DBT_HOST', 'localhost') }}"</span>
+      port: 5432
+      user: <span class="str">"{{ env_var('DBT_USER', 'fdp') }}"</span>
+      password: <span class="str">"{{ env_var('DBT_PASSWORD', 'fdp_dev_password') }}"</span>
+      dbname: <span class="str">"{{ env_var('DBT_DBNAME', 'fdp') }}"</span>
+      schema: dbt_prod
+      threads: 4</code></pre>
+<p>TODO — edit your own <code>food_delivery_pipeline/profiles.yml</code> to this shape, keeping your real <code>DBT_HOST</code>/<code>DBT_USER</code>/<code>DBT_PASSWORD</code>/<code>DBT_DBNAME</code> defaults exactly as Day 15 left them. <code>target: dev</code> at the top is the <em>default</em> target — anyone running a bare <code>dbt build</code> with no flag still gets <code>dev</code>, so nobody's muscle-memory command suddenly writes somewhere new.</p>
+<pre><code>uv run --project ../dbt_env dbt debug --target prod</code></pre>
+<p>Expected: <code>All checks passed!</code>, same as Day 2's original <code>dbt debug</code> — <code>--target</code> only changes which output block is used, not whether the connection itself is reachable.</p>
+
+<h2>3 · <code>generate_schema_name</code>: let the target decide the schema, not a hardcoded string</h2>
+<p>Three targets with three different <code>schema:</code> values already stops the dev/CI collision from Section 1 — but it's fragile the way any hand-maintained parallel list is: add a fourth target, or a second developer who clones the repo and picks a different schema name by habit, and nothing enforces consistency. dbt's real answer is a macro every project can override, <a href="https://docs.getdbt.com/reference/dbt-jinja-functions/generate-schema-name"><dfn data-en="a Jinja macro dbt itself calls for every single model to decide what schema that model's table or view lands in, given the model's own optional custom schema config (or none) and the active target -- any project can override the default implementation dbt ships, in macros/generate_schema_name.sql, to change that rule project-wide with no per-model configuration needed" data-vn="giữ nguyên &quot;generate_schema_name&quot; — macro Jinja dbt tự gọi cho mỗi model để quyết định schema của model đó, dựa vào custom schema config (nếu có) của model và target đang active; project nào cũng override được implementation mặc định (trong macros/generate_schema_name.sql) để đổi rule cho cả project, không cần config riêng từng model">generate_schema_name</dfn></a> — the Jinja function dbt itself calls, for every single model, to decide what schema that model's table or view actually lands in. Override it once, and the rule applies project-wide with no per-model configuration at all.</p>
+<pre><code><span class="cm">-- macros/generate_schema_name.sql</span>
+{% macro generate_schema_name(custom_schema_name, node) -%}
+
+    {%- set default_schema = target.schema -%}
+    {%- if target.name == 'prod' -%}
+
+        {#-- prod: a custom schema config (if any) is honored as-is #}
+        {%- if custom_schema_name is none -%}
+            {{ default_schema }}
+        {%- else -%}
+            {{ custom_schema_name | trim }}
+        {%- endif -%}
+
+    {%- else -%}
+
+        {#-- dev/ci: every schema is suffixed onto the target's own schema,
+             so two developers, or a dev run and a CI run, never collide #}
+        {%- if custom_schema_name is none -%}
+            {{ default_schema }}
+        {%- else -%}
+            {{ default_schema }}_{{ custom_schema_name | trim }}
+        {%- endif -%}
+
+    {%- endif -%}
+
+{%- endmacro %}</code></pre>
+<p><code><a href="https://docs.getdbt.com/reference/dbt-jinja-functions/target">target</a></code> is the same Jinja object Day 10 introduced for <code>target.name</code>-gated logic — here it's what tells the macro which of the three outputs is currently active, without any model needing to know or care. <code>custom_schema_name</code> is whatever a model's own <code>schema:</code> config says (most of this project's models set none, so it's <code>none</code> for all of them today); <code>node</code> is the model being built, unused in this version but part of the macro's required signature regardless.</p>
+<p>The behavior this buys: on <code>prod</code>, every model lands exactly where its target's <code>schema:</code> says (<code>dbt_prod</code>, unless a model explicitly overrides it — honored as a deliberate choice, not suffixed away). On <code>dev</code> or <code>ci</code>, dbt still resolves to <code>dbt_dev</code>/<code>dbt_ci</code> today because no model sets a custom schema — but the moment any model <em>does</em> (say, a future <code>marts</code> folder config setting <code>schema: marts</code>), dev and CI get <code>dbt_dev_marts</code>/<code>dbt_ci_marts</code> automatically, never colliding with whatever prod's own <code>dbt_prod_marts</code> or unsuffixed <code>dbt_prod</code> resolves to. This is <a href="https://docs.getdbt.com/docs/build/custom-schemas">dbt Labs's own documented default behavior pattern</a> for exactly this dev-vs-prod problem — today's macro is close to what dbt ships out of the box, written out explicitly so the branching is visible rather than assumed.</p>
+
+<h2>4 · Confirm it, then wire <code>ci</code> into Day 15's workflow</h2>
+<pre><code>uv run --project ../dbt_env dbt run --target prod --select stg_restaurants
+uv run --project ../dbt_env dbt run --target dev --select stg_restaurants</code></pre>
+<p>Expected: the <code>prod</code> run logs <code>dbt_prod.stg_restaurants</code>; the <code>dev</code> run logs <code>dbt_dev.stg_restaurants</code> — same model, same SQL, two different schemas, decided entirely by <code>--target</code>, with zero change to any model file. That's the actual payoff: the separation lives in one macro and one profile, not scattered across every model's config.</p>
+<p>TODO — update <code>.github/workflows/dbt_ci.yml</code> (Day 15) so its <code>dbt build</code> step passes <code>--target ci</code> explicitly, and update that step's <code>profiles.yml</code> env values to match the <code>ci</code> output block added in Section 2. Today's macro means CI was already one bad coincidence away from colliding with a local run writing to <code>dbt_dev</code> at the same moment — this is the fix, not a cosmetic rename.</p>
+<pre><code><span class="cm">-- .github/workflows/dbt_ci.yml -- the "dbt build" step, edited</span>
+      - name: dbt build (CI)
+        working-directory: food_delivery_pipeline
+        run: uv run --with <span class="str">"dbt-postgres==1.11.0"</span> dbt build --target ci --profiles-dir .</code></pre>
+<div class="callout"><strong>This is still a scoped simplification, named honestly.</strong> A fourth teammate's own local run would also need its own target (or dbt's built-in per-user default-schema convention, where <code>schema:</code> can be left to resolve from the active database user rather than a fixed string) to avoid colliding with <em>your</em> <code>dev</code> schema specifically. This course has exactly one learner and one laptop, so that case is named here rather than built — the same shape of deferred decision as Day 17's Schema Registry and Day 30's Kafka Streams, a real tool exists for a real need this portfolio doesn't have yet.</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Before today, the dev target and Day 15's CI workflow both wrote to the exact same schema, dbt_dev -- nothing in the project enforced any separation, it only worked because a local run and a CI run never happened to build at literally the same moment. A real collision (one truncating or rebuilding a table the other was mid-query against) was always possible, just never triggered yet.">
+    <p class="stem">What was the real risk in this project before today's targets existed?</p>
+    <button class="opt" data-ok>Local runs and Day 15's CI both wrote to one schema</button>
+    <button class="opt">Dbt itself physically cannot connect to Postgres twice at once, ever</button>
+    <button class="opt">Day 15's own workflow never actually ran dbt build at all</button>
+  </div>
+  <div class="q" data-why="target is the Jinja object exposing whichever output block --target selected (or the profile's own default target: line if no flag is passed) -- target.name is the string 'dev'/'ci'/'prod', and target.schema is that output's own configured schema. generate_schema_name reads target.name to decide whether to honor a custom schema as-is (prod) or suffix it onto the target's own schema (dev/ci), with zero per-model configuration needed.">
+    <p class="stem">What does the <code>generate_schema_name</code> macro read to decide which branch to take?</p>
+    <button class="opt" data-ok><code>target.name</code> -- which of <code>dev</code>, <code>ci</code>, <code>prod</code> is active now</button>
+    <button class="opt">A hardcoded schema string pasted into every single model file</button>
+    <button class="opt">The literal git branch name of whatever PR triggered it</button>
+  </div>
+  <div class="q" data-why="Overriding generate_schema_name means dbt calls this one macro for every model project-wide to decide its schema -- change the rule once, in one file, and it applies everywhere with no per-model config. The alternative, setting a schema: config by hand on every single model (or relying on everyone remembering to pass the right profiles.yml schema string), doesn't scale and has no single enforcement point.">
+    <p class="stem">Why override <code>generate_schema_name</code> instead of setting <code>schema:</code> by hand on every model?</p>
+    <button class="opt" data-ok>One macro enforces the rule everywhere, no per-model config at all</button>
+    <button class="opt">dbt otherwise refuses to build any model lacking a schema config</button>
+    <button class="opt"><code>schema:</code> configs are a feature only <code>dbt-postgres</code> itself supports at all</button>
+  </div>
+  <div class="q" data-why="On the prod target, generate_schema_name's prod branch honors a model's custom_schema_name exactly as given (or falls back to target.schema if none is set) -- it does not suffix anything. The suffixing behavior (default_schema + '_' + custom_schema_name) only happens in the else branch, for every non-prod target such as dev or ci, which is exactly why a future custom schema config can't collide between dev/ci and prod.">
+    <p class="stem">On the <code>prod</code> target specifically, what does today's macro do with a model's custom schema config?</p>
+    <button class="opt" data-ok>Honors it exactly as given, with no suffix added</button>
+    <button class="opt">Always suffixes it onto <code>dbt_prod</code> too, same as <code>dev</code>/<code>ci</code></button>
+    <button class="opt">Silently ignores it, just falls back to <code>dbt_prod</code> always</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> dbt's own <a href="https://docs.getdbt.com/docs/build/custom-schemas">custom schemas</a> and <a href="https://docs.getdbt.com/reference/dbt-jinja-functions/generate-schema-name">generate_schema_name</a> docs spell out the exact default macro dbt ships before any project override, and the full signature dbt calls for every model — worth rereading before changing the branch logic, since getting the <code>custom_schema_name is none</code> check wrong is the most common way teams accidentally collapse every model into one schema regardless of target. Not fetched live this round (this sandbox had no working web-fetch tool this round, the same gap Days 23 and 30 hit) — today's macro and its default-vs-override behavior are reasoned from this course's established understanding of dbt's documented default, not a fresh pull; confirm the exact default macro body against the live docs before quoting it in an interview.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 31.<br>
+Every bullet of <code>PLAN.md</code>'s original Phase 2a/2b/2c/2d spine closed at Day 30. Today opened an explicit "Phase 3": real dbt-production concerns the spine's own bullets never named directly (environment separation was the clearest, highest-interview-value gap). Next up, by the same reasoning: dbt seeds (CSV reference data) vs. sources, and test severity (<code>warn</code> vs. <code>error</code>) with <code>store_failures</code> — both real gaps, both small, both no new infrastructure.<br><br>
+💬 Anything unclear — why <code>prod</code>'s branch doesn't suffix a custom schema the way <code>dev</code>/<code>ci</code> does, or how a per-developer default schema would work if a second person cloned this repo? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -10095,4 +10095,122 @@ fail *gracefully* so the learner sees which task failed.
   starting there (its own gap scan may still turn up something sharper)
   rather than another review, since this cadence just reset to zero fresh
   lessons since the last review.
+- 2026-10-17 — **Day 80 generated: `difflib` — comparing sequences of
+  text** (headless run, zero prior context per the orchestrator's brief).
+  Read `MISSION.md` in full (read-only, untouched), `PLAN.md` in full to
+  reconfirm Phase 2's spine is fully spent and the no-pandas rule,
+  `RESOURCES.md` in full, and `assets/nav.js` in full (registration format
+  + every entry through Day 79). `NOTES.md` exceeds this run's single-read
+  size cap, so only the tail (~400 lines, covering Days 78-79 in full) plus
+  the "Course conventions"/"hard rule"/"Practice files" sections near the
+  top were read directly — sufficient, since the tail already carried Day
+  79's next-day note naming `difflib` as the sole standing fresh-gap
+  candidate. `learning-records/` still holds only the Day 1 baseline, no
+  newer signal. Idempotency: highest existing lesson was
+  `0079-review-retrieval-day-13.html` (2026-10-16); `assets/nav.js` had no
+  `n: 80`/`2026-10-17` entry before writing anything.
+  **DB check:** queried `course_progress` via the `node`+`spawnSync`
+  workaround (direct shell expansion of `$LEARNING_DB_URL` is blocked by a
+  sandbox gate) — the 15 most recent `python` rows are all
+  `kind=lesson_generated` through Day 79, nothing dated 2026-10-17 yet (so
+  not already generated today), and a separate query for any non-
+  `lesson_generated` kind (`lesson_completed`, quiz, etc.) returned zero
+  rows for this course — no weak-spot or completion signal available,
+  consistent with this log's running note that such rows essentially never
+  appear for `python`. Proceeded on on-disk idempotency plus this empty DB
+  read.
+  Decision — review vs. fresh topic: Day 79 was already a review (Days
+  76-78), resetting the fresh-lesson count to zero, so Day 80 defaults to a
+  fresh topic per the settled three-fresh-then-review cadence. Re-grepped
+  case-insensitively for `difflib` across every lesson, every practice
+  file, `reference/glossary.html`, and `RESOURCES.md` — zero hits
+  anywhere, confirming it is still the one standing candidate carried
+  forward from Days 70-71 and Day 78's next-day note. No stronger
+  candidate surfaced, so `difflib` was chosen: `unified_diff()` for a
+  `git diff`-shaped comparison, `SequenceMatcher.ratio()` for a similarity
+  score, and `get_close_matches()` for "did you mean…?" suggestions.
+  No-pandas rule: grepped case-insensitively for `pandas`/`numpy`/`pd\.`/
+  `np\.` in the new lesson and practice file — exactly one hit (the single
+  "Where pandas goes from here" boundary callout, noting a `DataFrame`-vs-
+  `DataFrame` diff is a different, library-specific question this course
+  doesn't teach) and zero hits in the practice file.
+  **New jargon: 4 terms** (`difflib`, `unified_diff()`, `SequenceMatcher`,
+  `get_close_matches()`) — the module name wrapped in a single
+  `<dfn data-en="…" data-vn="…">` on first mention in the byline, per this
+  course's shared rule; the other three are named and explained in prose
+  without a repeated `<dfn>` (matching how e.g. Day 78 handled `pformat()`
+  alongside its own `<dfn>`'d module name). Grepped
+  `reference/glossary.html` case-insensitively for `difflib` first to
+  confirm zero prior entries, then appended a new `id="day80"` section
+  directly after Day 78's (Day 79 was a review day with no glossary
+  section of its own), matching the file's append-only convention.
+  Caught and fixed one real bug while drafting: the first code sample's
+  `unified_diff()` output, shown with input lines ending in `\n`, actually
+  prints extra blank lines once `print()` adds its own trailing newline on
+  top — verified live with `uv run python3 -c "..."` before writing the
+  sample, then switched both the lesson's sample lines and the practice
+  file's `OLD_LINES`/`NEW_LINES` to plain newline-free strings (the
+  `lineterm=""` explanation was corrected to match: it suppresses the
+  newline `unified_diff()` adds to its own header/hunk lines, not a second
+  newline on top of an already-`\n`-terminated input line).
+  Quiz: 3 questions (what `unified_diff()` reveals that `==` can't,
+  what `SequenceMatcher.ratio()` returns, why `get_close_matches()` suits
+  "did you mean…?" better than `unified_diff()`). Word counts were checked
+  with a throwaway Node.js script (`.verify80.js`, written via `Write`
+  under the repo root, deleted after use) that strips tags from each
+  `<button class="opt">` and splits on whitespace, plus a stack-based
+  tag-balance check and a bare-`&` check. First draft mismatched on two of
+  three questions (Q1 10/11/11, Q3 10/9/7) — iterated option-by-option
+  (lengthening "the two" to "the two lists", rewriting the Q3 distractors
+  entirely around "sequences already paired line by line" and "a full
+  diff formatted the git diff way") and recounted after every edit, until
+  all three landed on equal per-question counts: 11/11/11, 9/9/9, 11/11/11.
+  A second throwaway script (`.verify80b.js`) confirmed `<div>`/`<p>` tag
+  balance and no bare `&` on both the lesson file and the full (now-
+  modified) `reference/glossary.html`; `node --check` confirmed no syntax
+  errors on `assets/nav.js`, `assets/gloss.js`, and `assets/quiz.js` (the
+  latter two unmodified, checked as a sanity baseline). Both scratch
+  scripts deleted before finishing.
+  `RESOURCES.md`: added a new `difflib` docs line, placed directly after
+  the Day 78 `pprint` line per the file's day-ordered citation convention.
+  Registered in `assets/nav.js` with `date: "2026-10-17"` right after the
+  `n: 79` entry; confirmed `node --check assets/nav.js` reports no syntax
+  errors after the edit.
+  Practice file `practice/80_difflib_comparing_sequences.py` (5 checks,
+  stdlib-only, no `--with` flag, function-stub-with-TODO-comment style
+  matching Day 78's own): `unified_diff()`'s removed-line marker (Ex 1),
+  its added-line marker (Ex 2), its unchanged-context-line marker (Ex 3),
+  a `SequenceMatcher` ratio of exactly `1.0` on two identical strings (Ex
+  4), and `get_close_matches()` finding the right field name for a
+  misspelled input (Ex 5). All expected values verified against a live
+  `uv run python3 -c "..."` probe before being written into the checks.
+  Verified in a scratch `.scratch-0080/` directory created directly under
+  the repo root: the shipped (unsolved) copy printed five clean ✗ lines
+  with no traceback. A separately solved copy (TODOs filled in via `Edit`)
+  printed all five ✓ and the "All green" tally, run twice consecutively
+  with identical results both times. Also ran the shipped file directly
+  from its real `python/practice/` path as a final check, confirming the
+  same five clean ✗ lines outside the scratch copy too. Scratch directory
+  deleted before finishing — confirmed by a listing showing no
+  `.scratch-0080` remaining.
+  `python/learning-records/` still holds only the Day 1 baseline —
+  nothing from today's run (choosing the single already-known,
+  already-weighed `difflib` candidate per an explicit carried-forward
+  note) is a new, durable fact about the learner distinct from what Day
+  1's record already says.
+  `bin/record-progress python lesson_generated --day 80 --lesson
+  0080-difflib-comparing-sequences.html --detail '{"by":"headless"}'` was
+  run from the repo root at the end of this round.
+  Final `git status --short -- python/` is expected to show exactly five
+  paths changed before this `NOTES.md` edit (`assets/nav.js`,
+  `RESOURCES.md`, `reference/glossary.html`, plus the new lesson and
+  practice file) — six total including this file — no other course's
+  files touched, and no leftover scratch files or directories under the
+  repo.
+  **Next-day note:** with `difflib` now closed, no standing fresh-gap
+  candidate remains on record — the next fresh-topic day needs its own
+  gap scan from scratch. Day 80 is the first fresh lesson since Day 79's
+  review (Days 76-78); two more fresh lessons should follow before
+  the next review is due by this course's settled three-fresh-then-review
+  cadence, unless a strong reason to deviate turns up then.
 

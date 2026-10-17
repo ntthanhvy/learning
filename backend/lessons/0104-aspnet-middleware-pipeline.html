@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 104 · The middleware pipeline: order is the feature</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 104 · ~20 min</p>
+<h1>The middleware pipeline: order is the feature</h1>
+<p class="byline">Lesson 1 named middleware as "code wrapped around handlers for cross-cutting work." That was true but vague about one thing that turns out to matter a lot: middleware runs in a specific, visible <em>order</em>, and that order is not a style choice — it decides whether auth actually protects anything. Go makes you write the chain by hand, one wrap at a time. ASP.NET Core writes it as a literal, ordered list in <code>Program.cs</code>, and reading that list correctly is a real skill for reviewing .NET PRs.</p>
+
+<h2>1 · A pipeline, not a pile</h2>
+<p>Lesson 1 said middleware wraps a handler. The more precise picture: a request enters at the top of an ordered chain and passes through each piece in turn, in the order it was added, before ever reaching the route handler — then the response travels back out through the same chain, in reverse. Each piece gets to look at the request, do something, and decide whether to call the <em>next</em> piece or stop right there and answer immediately. That decision point is the whole mechanism; everything else is detail.</p>
+<p>Go has no framework-owned pipeline, but idiomatic code builds the identical shape by hand, by wrapping one <code>http.Handler</code> in another:</p>
+<pre><code><span class="kw">func</span> withLogging(next http.Handler) http.Handler {
+    <span class="kw">return</span> http.HandlerFunc(<span class="kw">func</span>(w http.ResponseWriter, r *http.Request) {
+        start := time.Now()
+        next.ServeHTTP(w, r) <span class="cm">// call the next link in the chain</span>
+        log.Printf(<span class="st">"%s %s %v"</span>, r.Method, r.URL.Path, time.Since(start))
+    })
+}
+
+<span class="kw">func</span> withAuth(next http.Handler) http.Handler {
+    <span class="kw">return</span> http.HandlerFunc(<span class="kw">func</span>(w http.ResponseWriter, r *http.Request) {
+        <span class="kw">if</span> !isAuthenticated(r) {
+            w.WriteHeader(http.StatusUnauthorized)
+            <span class="kw">return</span> <span class="cm">// stop here -- next.ServeHTTP is never called</span>
+        }
+        next.ServeHTTP(w, r)
+    })
+}
+
+<span class="kw">func</span> main() {
+    handler := withLogging(withAuth(orderHandler)) <span class="cm">// the ORDER is written right here, by hand</span>
+    http.ListenAndServe(<span class="st">":8080"</span>, handler)
+}</code></pre>
+<p>Read <code>withLogging(withAuth(orderHandler))</code> from the outside in: logging wraps auth, auth wraps the real handler. A request hits logging first, then auth, then the handler — and the auth middleware's early <code>return</code> is the "stop right there" move: skip calling <code>next.ServeHTTP</code>, and nothing further in the chain, including the real handler, ever runs.</p>
+
+<h2>2 · ASP.NET Core's answer: the same chain, written as a list</h2>
+<p>ASP.NET Core takes the exact same wrap-and-call-next shape and gives it a dedicated, visible place: a sequence of <code>app.Use...</code> calls in <code>Program.cs</code>, each one a <dfn data-en="an ordered sequence of middleware components an ASP.NET Core app is built from, registered in Program.cs with app.Use... calls -- each request flows through every component in registration order on the way in, then back out in reverse, and each component decides whether to call the next one or short-circuit the response itself" data-vn="middleware pipeline (giữ nguyên) — chuỗi middleware có thứ tự trong ASP.NET Core, đăng ký bằng app.Use... trong Program.cs -- request đi qua từng middleware theo đúng thứ tự đăng ký, mỗi middleware tự quyết định gọi tiếp hay dừng response luôn">middleware pipeline</dfn> link, in exactly the order they appear in the file:</p>
+<pre><code><span class="cm">// Program.cs -- this order is the entire pipeline, top to bottom</span>
+<span class="kw">var</span> app = builder.Build();
+
+app.UseExceptionHandler(<span class="st">"/error"</span>);  <span class="cm">// 1: catch unhandled exceptions from everything below</span>
+app.UseHttpsRedirection();           <span class="cm">// 2: redirect http:// to https://</span>
+app.UseAuthentication();             <span class="cm">// 3: who is this request from?</span>
+app.UseAuthorization();              <span class="cm">// 4: are they allowed to reach this route?</span>
+app.MapControllers();                <span class="cm">// 5: terminal -- this is where a handler finally runs</span>
+
+app.Run();</code></pre>
+<p>Each registered piece receives a <dfn data-en="the delegate (function reference) ASP.NET Core passes to each middleware component representing the rest of the pipeline -- calling it runs every remaining component and, eventually, the matched route handler; not calling it stops the request right there" data-vn="next delegate (giữ nguyên) — hàm ASP.NET Core đưa cho mỗi middleware, đại diện cho phần pipeline còn lại -- gọi nó thì chạy tiếp các middleware sau và handler; không gọi thì dừng request ngay đó">next delegate</dfn> standing in for "everything registered after me," same role as Go's <code>next.ServeHTTP</code> above — the framework builds that chain of delegates automatically from the registration order, instead of you nesting function calls by hand.</p>
+
+<div class="callout"><strong>Why order is the whole lesson, not a detail:</strong> swap lines 3 and 4 above — <code>UseAuthorization()</code> before <code>UseAuthentication()</code> — and authorization now runs against a request that has no identity attached yet, because authentication hasn't run. Every authorization check either silently fails closed (nobody gets in) or, worse, fails open depending on how the check is written. This isn't a hypothetical: it's the single most common ASP.NET Core middleware bug, and it compiles and starts up without any warning either way — nothing catches it except knowing the order matters and reading it.</div>
+
+<h2>3 · Short-circuiting: the deliberate "stop here"</h2>
+<p>A middleware component that never calls its <code>next</code> delegate is <dfn data-en="when a middleware component in the pipeline writes the response itself and deliberately does not call its next delegate, so every later middleware and the route handler never run for that request" data-vn="short-circuit (giữ nguyên) — middleware tự viết response và không gọi next, nên các middleware sau và handler không bao giờ chạy cho request đó">short-circuiting</dfn> the pipeline, same as Go's <code>withAuth</code> returning early above. This is usually deliberate and correct — rejecting an unauthenticated request before it reaches anything that assumes one — but it means a component sitting late in the list silently never runs for requests a much earlier component already answered. Something that must run on <em>every</em> request, including rejected ones (request logging is the classic case) has to be registered <em>before</em> anything that might short-circuit, not after.</p>
+<p>The route handler itself — <code>MapControllers()</code>, or <code>MapGet("/orders", ...)</code> — is <dfn data-en="the middleware (or endpoint) at the end of the pipeline that actually writes a response and does not forward the request any further, as opposed to the middleware before it that each pass control to the next piece" data-vn="terminal middleware (giữ nguyên) — middleware cuối pipeline, tự viết response, không forward tiếp cho cái nào khác">terminal</dfn>: it's where the chain of "pass it on" calls finally ends and a real response gets written, the equivalent of Go's innermost <code>orderHandler</code>.</p>
+
+<h2>4 · Where DI fits: middleware gets built by the same container</h2>
+<p>Lesson 103 covered the DI container resolving constructor parameters for controllers. Middleware is resolved the same way — a class-based middleware component's constructor can request any registered service, and the container supplies it, same <code>AddScoped</code>/<code>AddSingleton</code>/<code>AddTransient</code> rules from Lesson 103 apply:</p>
+<pre><code><span class="kw">public</span> <span class="kw">class</span> RequestLoggingMiddleware {
+    <span class="kw">private</span> <span class="kw">readonly</span> RequestDelegate _next;
+    <span class="kw">private</span> <span class="kw">readonly</span> ILogger&lt;RequestLoggingMiddleware&gt; _logger;
+
+    <span class="kw">public</span> RequestLoggingMiddleware(RequestDelegate next, ILogger&lt;RequestLoggingMiddleware&gt; logger) {
+        _next = next;       <span class="cm">// the framework hands this in -- "the rest of the pipeline"</span>
+        _logger = logger;   <span class="cm">// resolved by the DI container, same as Lesson 103's controllers</span>
+    }
+
+    <span class="kw">public</span> <span class="kw">async</span> Task InvokeAsync(HttpContext context) {
+        <span class="kw">var</span> start = DateTime.UtcNow;
+        <span class="kw">await</span> _next(context);  <span class="cm">// call the next link; awaiting lets it run, then returns here</span>
+        _logger.LogInformation(<span class="st">"{Method} {Path} took {Ms}ms"</span>,
+            context.Request.Method, context.Request.Path, (DateTime.UtcNow - start).TotalMilliseconds);
+    }
+}</code></pre>
+<p>This is the same constructor-injection shape Lesson 103 showed for controllers, just applied to a pipeline component instead of a route handler — one more thing Lesson 103's container resolves, exactly as that lesson's closing line anticipated.</p>
+
+<h2>Scope line</h2>
+<p>This lesson covers ordering, short-circuiting, and the DI connection — the mental model needed to read a <code>Program.cs</code> pipeline correctly in review. It does not cover: writing middleware as inline lambdas via <code>app.Use(async (ctx, next) => ...)</code> versus the class-based convention shown above (both exist; class-based is more common for anything beyond a few lines); endpoint routing's separate matching phase (how <code>MapControllers</code> itself decides which controller action runs, a routing-internals topic, not a pipeline-ordering one); and branching the pipeline per-path with <code>app.MapWhen</code> or <code>UseWhen</code>. These are natural follow-ons, not covered here.</p>
+
+<div class="interview">
+<p><strong>Q: "A PR adds authorization middleware. What do you check first?"</strong> A strong answer, out loud: <em>"Before anything about what the check itself does, I check where it's registered in Program.cs relative to UseAuthentication — authorization has to run after authentication, because it needs an identity already attached to decide anything, and ASP.NET Core won't warn you if you get the order backwards; it just silently authorizes against an empty identity. I'd also check whether anything upstream of it could short-circuit the request before this middleware ever runs, and whether this new middleware itself might unintentionally short-circuit something that was supposed to run after it, like response logging."</em> The signal: naming that pipeline order is a correctness property, not cosmetic, and that the framework gives you zero compile-time protection against getting it wrong.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory, with no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="The pipeline runs in exact registration order. UseAuthorization needs an identity to check permissions against, and that identity is only attached by UseAuthentication running first -- swapping them means authorization runs with no identity present yet.">
+    <p class="stem">In Program.cs, app.UseAuthorization() is registered BEFORE app.UseAuthentication(). What actually happens?</p>
+    <button class="opt" data-ok>authorization runs against a request with no identity attached yet</button>
+    <button class="opt">ASP.NET Core automatically reorders both calls at app startup time</button>
+    <button class="opt">the app refuses to start and throws a configuration exception</button>
+    <button class="opt">authentication still silently runs first regardless of the written order</button>
+  </div>
+  <div class="q" data-why="Short-circuiting means a middleware writes the response itself and does not call its next delegate -- every later middleware and the route handler simply never run for that request, same as Go's withAuth returning early without calling next.ServeHTTP.">
+    <p class="stem">A middleware component returns a 401 response and never calls its next delegate. What happens to the rest of the pipeline?</p>
+    <button class="opt" data-ok>every later middleware, and the route handler, never run at all</button>
+    <button class="opt">every later middleware still runs, just without any request body attached</button>
+    <button class="opt">only the route handler gets skipped; every later middleware still runs</button>
+    <button class="opt">the whole pipeline restarts automatically from the very first middleware again</button>
+  </div>
+  <div class="q" data-why="Request logging needs to observe every request, including ones some other middleware rejects early -- so it has to be registered before anything that might short-circuit. Registered after, it simply never runs for any request that got short-circuited upstream.">
+    <p class="stem">Why must request-logging middleware be registered BEFORE authentication, if it should log rejected requests too?</p>
+    <button class="opt" data-ok>logging placed after a short-circuiting step never runs for rejected requests</button>
+    <button class="opt">ASP.NET Core requires every logging call to sit at the top</button>
+    <button class="opt">authentication middleware is always physically unable to run after logging middleware</button>
+    <button class="opt">logging registered later than that always executes twice for each request</button>
+  </div>
+  <div class="q" data-why="Class-based middleware constructors are resolved by the same DI container Lesson 103 covered for controllers -- RequestDelegate next is handed in by the framework representing the rest of the pipeline, and other constructor parameters like ILogger<T> are resolved from the container's registrations, same AddScoped/AddSingleton/AddTransient rules apply.">
+    <p class="stem">A class-based middleware's constructor takes an ILogger&lt;T&gt; parameter. Where does that instance come from?</p>
+    <button class="opt" data-ok>the same DI container that resolves constructor parameters for all controllers</button>
+    <button class="opt">it must always be passed in manually at app.UseMiddleware registration time</button>
+    <button class="opt">ASP.NET Core middleware is simply forbidden from taking any constructor parameters</button>
+    <button class="opt">it gets created fresh by hand inside InvokeAsync on every request</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://learn.microsoft.com/en-us/aspnet/core/fundamentals/middleware/">Microsoft Learn: ASP.NET Core Middleware</a> (15 min) — covers the order diagram this lesson walked through, the built-in middleware order Microsoft recommends, and the class-based vs. inline-lambda middleware forms this lesson's Scope line deferred.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a>. Click any dotted term for a popup (English first, tiếng Việt second). Builds on Lesson 1's middleware concept and Lesson 103's DI container (middleware constructors are resolved the same way controllers are). <strong>Anything unclear? Ask your teacher</strong>, the agent that made this lesson. Ask in Vietnamese anytime. A good follow-up: "can you show me our actual Program.cs and walk through what order our middleware runs in, and whether anything looks backwards?"</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

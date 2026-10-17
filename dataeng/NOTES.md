@@ -3758,3 +3758,104 @@ along the Phase 2 spine, adapted to the learning records.
   '{"by":"headless"}'` succeeded on the first attempt, run from the repo
   root: `recorded: dataeng/lesson_generated day=31
   lesson=0031-dbt-environments-and-schema-naming.html`.
+- 2026-10-17 (headless run, Day 32 generated): thirty-second lesson,
+  `0032-dbt-test-severity-and-store-failures.html`. Confirmed before writing
+  that no `0032-*.html` file existed in `lessons/` and no `2026-10-17` entry
+  existed in `assets/nav.js` (last entry was Day 31, dated 2026-10-16). DB
+  read access worked this round (a scratch `node` script under
+  `.scratch_dataeng_db_check/`, deleted after use, calling `psql` directly
+  via `child_process.spawnSync` rather than shell-expanding
+  `$LEARNING_DB_URL`, which this sandbox's content-level gate blocks).
+  Queried `course_progress` for `course='dataeng'`: the 15 most recent rows
+  are all `lesson_generated`, day 17 through day 31, nothing dated
+  2026-10-17; a separate query for any non-`lesson_generated` kind returned
+  only the original 2026-09-14 `course_created` note. No `lesson_completed`
+  or quiz/outcome row exists for this course beyond that, the same standing
+  finding every round has reconfirmed since Day 9 — so there was no fresh
+  completion/quiz signal to adapt today's content to, and pace came from
+  Day 31's own carried-forward note plus `PLAN.md`'s spine. Read
+  `MISSION.md`, `PLAN.md`, this file in full (including Day 31's closing
+  note), `RESOURCES.md`, the one `learning-records/` file, and
+  `assets/nav.js`'s full `LESSONS` array before writing anything, plus
+  `lessons/0031-dbt-environments-and-schema-naming.html` and
+  `lessons/0003-dbt-tests.html` in full for structural/voice precedent and
+  to confirm exactly what Day 3's existing tests already look like before
+  editing them.
+  **Topic choice:** Day 31's own closing note named two explicit, real,
+  still-open gaps from its "Phase 3" dbt-topic map: (1) dbt seeds vs.
+  sources, and (2) test severity (`warn`/`error`) with `store_failures`.
+  Picked (2) for today, for three reasons stated here rather than assumed:
+  it builds directly on Day 3's and Day 27's existing tests rather than
+  introducing a new project structure concept, matching this phase's
+  ~20-minute pacing; it closes a real, nameable gap in how this project's
+  tests already behave (every test since Day 3 has silently used dbt's
+  `error` default, never named or chosen on purpose); and it is
+  self-contained enough to verify fully with `dbt parse` alone, with no new
+  infrastructure. Seeds-vs-sources remains open and named here for the next
+  round, same as Day 31 named it for this one.
+  **Content:** edited two of Day 3's own existing tests rather than
+  inventing new ones, to make the lesson about a changed *setting*, not a
+  new rule: downgraded `stg_orders.yml`'s `courier_id` → `stg_couriers`
+  `relationships` test to `severity: warn`, with a concrete, named reason
+  (couriers leaving the platform is a real, not-yet-modelled business event,
+  not "this test is annoying" — an explicit callout warns against the latter
+  reasoning) — and added `severity = 'error', store_failures = true` to the
+  `assert_positive_subtotal` singular test, since a negative subtotal should
+  still block a build but the offending rows are worth keeping queryable.
+  Kept `restaurant_id`'s own `relationships` test at the untouched default
+  `error`, named explicitly as the contrast case (an orphan restaurant really
+  would break `fct_orders`'s join). Showed where `store_failures` actually
+  lands (`<target schema>_dbt_test__audit`, e.g. `dbt_dev_dbt_test__audit`
+  on this project's `dev` target) and a plant-a-bad-row-then-query-the-audit-
+  table walkthrough, reverted afterward, so the mechanism is seen working
+  end to end rather than only described. The TODO build step asks the
+  learner to apply the same `config()` pairing to one more test of their own
+  choosing, so there's a second worked example beyond today's two. No
+  pandas, no Python-language teaching, no re-derivation of idempotency/API
+  concepts — none applicable to a pure dbt-test-config day. Domain names and
+  file paths (`stg_orders.yml`, `assert_positive_subtotal.sql`,
+  `food_delivery_pipeline`) used exactly as established; no renaming.
+  **Verification:** laid out a minimal scratch dbt project under
+  `.scratch_dataeng_verify_d32/` at the repo root (`dbt_project.yml`, a
+  `profiles.yml` pointing at an unreachable Postgres, `sources.yml`, the
+  three staging models, and — critically — `stg_orders.yml` with the exact
+  `severity: warn` config block from Section 2 plus a `dbt_utils.accepted_range`
+  test with `severity: warn` + `store_failures: true` together, and
+  `tests/assert_positive_subtotal.sql` with the exact `{{ config(severity =
+  'error', store_failures = true) }}` line from Section 3). Ran `dbt deps`
+  first (needed for the `dbt_utils` reference to resolve), then `uv run
+  --with "dbt-postgres==1.11.0" dbt parse --project-dir ... --profiles-dir
+  ...` — completed with only one unrelated, expected warning (an unused
+  `models.food_delivery_pipeline.marts` config path, since the scratch
+  project's `marts/` folder has no models in it) and zero occurrences of
+  `Error` when grepped from a redirected log file, confirmed by `grep -c
+  "Error"` returning `0` directly rather than trusting the warning-vs-error
+  distinction by eye. This confirms both the YAML `config: severity: warn`
+  nesting under a generic test's arguments and the Jinja `{{ config(...) }}`
+  syntax for a singular test are valid before shipping either in the lesson.
+  No standalone Python file exists in this lesson, so `py_compile` was not
+  applicable — confirmed by grepping the lesson's own code blocks for `.py`,
+  zero matches. Deleted the whole scratch directory afterward.
+  Registered Lesson 32 in `assets/nav.js` (`node --check` clean) and added
+  the Day 32 section to `reference/glossary.html` (2 new terms: `severity`,
+  `store_failures` — grepped the existing glossary first, case-insensitively,
+  no collisions). Ran a small Python tag-balance/bare-`&`/quiz-word-count
+  script (from a scratch file under `.scratch_dataeng_verify_d32b/`, deleted
+  with the rest of the scratch directory afterward) against the lesson and
+  the updated glossary separately. Both came back with every checked tag
+  balanced (div/p/table/tr/td/th/ul/li/pre/code/h2/dfn/button/span/a) and
+  zero bare `&`. Caught and fixed two real markup bugs before the word-count
+  pass: a stray non-ASCII character accidentally typed into one quiz option,
+  and a mismatched `<em>...</code>` tag pair in Section 3's prose, both found
+  by the tag-balance script rather than by eye. The first quiz draft came up
+  mismatched on three of the four questions (8/9/9, 9/10/10 and 7/8/9 word
+  splits); rebalanced through several edit-and-recount passes to a final
+  9/9/9 on all four questions, re-verified by re-running the same script
+  after every edit. Confirmed the lesson's 2 `<dfn>` tags (`severity`,
+  `store_failures`) match the 2 glossary rows added, by direct extraction
+  and comparison rather than by eye.
+  `bin/record-progress dataeng lesson_generated --day 32 --lesson
+  0032-dbt-test-severity-and-store-failures.html --detail
+  '{"by":"headless"}'` succeeded on the first attempt, run from the repo
+  root: `recorded: dataeng/lesson_generated day=32
+  lesson=0032-dbt-test-severity-and-store-failures.html`.

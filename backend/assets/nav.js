@@ -212,6 +212,8 @@
       file: "lessons/0102-websocket-vs-signalr.html" },
     { n: 103, date: "2026-10-16", title: "Dependency injection: who hands a handler its database?",
       file: "lessons/0103-dependency-injection-di-container.html" },
+    { n: 104, date: "2026-10-17", title: "The middleware pipeline: order is the feature",
+      file: "lessons/0104-aspnet-middleware-pipeline.html" },
   ];
 
   const REFS = [

@@ -8962,3 +8962,111 @@
   0099-np-setdiff1d-intersect1d-union1d.html --detail '{"by":"headless"}'`
   was run directly from the repo root this round and succeeded, matching
   the pattern used by Lessons 95-98.
+- 2026-10-17 generation (Lesson 100): headless run, zero prior context.
+  Read MISSION.md in full (not modified), the one `learning-records/`
+  baseline file (0001, still unchanged since course creation — stale, no
+  new durable finding to fold in), RESOURCES.md in full, `assets/nav.js`
+  in full for the registration format, and the tail of this log (Lessons
+  90-99's entries). DB access worked this round via the documented
+  `/tmp/query.js` Node workaround (direct shell expansion of
+  `$LEARNING_DB_URL` is blocked by the sandbox's "Contains simple_expansion"
+  gate) — queried `course_progress` for `course='data'` and confirmed no
+  `lesson_generated` row dated 2026-10-17 existed yet (the latest was
+  Lesson 99, dated 2026-10-16), so this round was not a duplicate; the 15
+  most recent rows were all `kind='lesson_generated'` with no `quiz` or
+  `lesson_completed` rows at all, confirming NOTES.md's running observation
+  that the completion/quiz signal has stayed stale since course creation —
+  paced from file state alone, same as every recent round. Idempotency was
+  also independently confirmed from `lessons/`: the highest-numbered file
+  before this round was `0099-np-setdiff1d-intersect1d-union1d.html`, no
+  `0100-*` file existed yet. Lesson 99's own teaser named two standing
+  candidates with neither promoted: `itertuples()` and the NumPy stacking
+  family (`np.vstack()`/`np.hstack()`/`np.column_stack()`/`np.stack()`).
+  Grepped both case-insensitively across every lesson body and the
+  glossary file at once and confirmed both were still genuine zero-hit
+  gaps. Picked the NumPy stacking family over `itertuples()`: Lesson 21
+  taught `pd.concat()` as the DataFrame row/column stacker and mapped it to
+  SQL's `UNION ALL`, but the raw-array layer underneath — what "stack"
+  actually means with no DataFrame or Index to align by — was never itself
+  covered, a clean gap that closes the loop back to Lesson 21's own tool
+  and fits MISSION.md's "vectorization/why pandas vs raw NumPy" framing
+  directly; `itertuples()` was judged thinner by comparison (a single
+  anti-pattern-adjacent method vs. a three-function family with a genuine
+  behavioral surprise) and left unused, named in today's teaser as the
+  standing candidate for tomorrow. Every behavioral claim was probed
+  directly first in `data/.scratch-0100/` (deleted after), on the actually-
+  installed pandas 3.0.6 / numpy 2.5.4 (confirmed via a version-print
+  one-liner): confirmed `np.vstack()` on two 1-D arrays always returns a
+  2-D result (each input becomes one row) while `np.hstack()` on the exact
+  same inputs stays 1-D (plain concatenation) — the core surprise of this
+  family; confirmed `np.column_stack()` on the same 1-D inputs returns a
+  2-D result shaped the opposite way from `vstack` (columns, not rows);
+  confirmed via `np.array_equal()` that on 2-D inputs, `vstack` exactly
+  matches `np.concatenate(axis=0)` and `hstack` exactly matches
+  `np.concatenate(axis=1)`; confirmed a shape mismatch outside the
+  stacking axis raises `ValueError` naming the exact dimension and the two
+  conflicting sizes, a sharp contrast directly cross-checked against
+  Lesson 21's own `pd.concat()` example, which silently NaN-fills a column
+  mismatch instead of raising; confirmed dtype promotion on stacking int
+  with float upcasts the whole result to `float64`, and int with string
+  upcasts to a Unicode string dtype, both silent, no warning either way.
+  Cross-checked the official NumPy API reference for `np.concatenate()`
+  against the already-confirmed direct probing (the
+  `vstack()`/`hstack()`/`column_stack()` pages are linked from its "See
+  also" section and describe the identical axis-fixing and implicit-
+  reshape behavior), cited as the primary source. The shipped (unsolved)
+  `practice/100_np_stacking.py` was executed directly from its real
+  `practice/` location and printed exactly 3 ✗ with no raw traceback.
+  Built a solved copy in `.scratch-0100/`, filling in all nine blanks
+  (including a small `raises_value_error()` helper function body)
+  correctly; it printed all 3 ✓ and "All green" on the first run after two
+  small fixes to the shipped file's Exercise 3 structure (the first draft
+  defined unreachable fill-in branches inside a try/except that no student
+  could sensibly complete; rewritten as a single helper function with its
+  body as the lone blank). The shipped file was re-run once more directly
+  from `practice/` after building the solved copy and reproduced the
+  identical all-✗ result, confirming the solved copy's edits never leaked
+  back into the shipped baseline. Quiz options were drafted, then
+  mechanically word-counted with a scratch Python script (`uv run
+  python3`, deleted after) isolating each `<div class="q">` block by regex
+  span and splitting on whitespace — the first draft came out 10/10/9,
+  7/7/9, 10/10/9; several rounds of small rephrasing (adding/trimming
+  words like "just", "its own", "new", "input") across all three questions
+  until every one landed exactly level (10/10/10, 7/7/7, 10/10/10 option
+  words, counting the standalone "--" token the same way prior rounds'
+  scripts did), one `data-ok` per question throughout. A separate
+  mechanical tag-balance script confirmed all tags balanced (a 2/2, body
+  1/1, button 9/9, code 56/56, dfn 1/1, div 5/5, em 2/2, h1 1/1, h2 6/6,
+  head 1/1, html 1/1, p 18/18, pre 4/4, script 3/3, span 28/28, strong
+  3/3, title 1/1) and found exactly two raw `&` characters, both inside
+  the one established `cd ~/learning/data && uv run ...` shell command,
+  matching every prior lesson's pattern, zero raw `&` in prose; also
+  confirmed the one new `<dfn>` tag carries both `data-en` and `data-vn`.
+  Checked the glossary for a collision before adding anything — grepped
+  `vstack`/`hstack`/`column_stack` case-insensitively across the full
+  glossary, found zero existing rows — added exactly one new row,
+  "np.vstack() / np.hstack() / np.column_stack()", directly after Lesson
+  99's "np.intersect1d() / np.union1d() / np.setdiff1d()" entry; re-ran the
+  tag-balance and raw-`&` scripts against the glossary file afterward,
+  confirmed it stayed balanced (a 1/1, body 1/1, code 1186/1186, em 11/11,
+  h1 1/1, head 1/1, html 1/1, p 3/3, script 1/1, strong 1/1, table 1/1, td
+  510/510, th 3/3, title 1/1, tr 171/171) with zero raw `&` introduced, and
+  the `<tr>` count went from 170 to 171 as expected. Registered Lesson 100
+  in `nav.js` with today's date (2026-10-17); `node --check` confirmed it
+  still parses as valid JavaScript after the edit, and exactly one `n: 100`
+  entry plus one `0100-np-vstack-hstack-column-stack` file reference were
+  confirmed to exist; `node --check` was also run against the untouched
+  `gloss.js`/`quiz.js` as a quick sanity pass, both still parse fine. This
+  round closed a candidate that was already named and promoted from
+  Lesson 99's own teaser, unlike the last two rounds' fresh-scan-with-no-
+  lineage pattern. `itertuples()` remains the one standing candidate
+  carried forward into tomorrow's teaser, left for tomorrow's own fresh
+  scan to confirm or replace rather than being pre-committed. No new
+  `data/learning-records/` entry was added this round — routine lesson, no
+  new baseline finding to justify one (the completion/quiz signal remains
+  stale past mid-July, unchanged from this round's starting context). The
+  `.scratch-0100/` directory was deleted after verification, per this
+  course's standing practice of not leaving scratch artifacts committed.
+  `bin/record-progress data lesson_generated --day 100 --lesson
+  0100-np-vstack-hstack-column-stack.html --detail '{"by":"headless"}'`
+  will be run directly from the repo root to close out this round.

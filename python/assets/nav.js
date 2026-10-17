@@ -164,6 +164,8 @@
       file: "lessons/0078-pprint.html" },
     { n: 79, date: "2026-10-16", title: "Review day 13: retrieval across Days 76-78",
       file: "lessons/0079-review-retrieval-day-13.html" },
+    { n: 80, date: "2026-10-17", title: "difflib: comparing sequences of text",
+      file: "lessons/0080-difflib-comparing-sequences.html" },
   ];
 
   const REFS = [

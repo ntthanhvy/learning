@@ -580,6 +580,15 @@
   <tr><td>pprint</td><td>giữ nguyên "pprint" (pretty-print) — module chuẩn in cấu trúc dữ liệu lồng nhau (dict, list, tuple, set) ra dạng nhiều dòng, có thụt đầu dòng, dễ đọc; hoạt động trực tiếp trên object Python bất kỳ, không chỉ dữ liệu dạng JSON</td><td>The standard-library module for printing nested Python data structures — dicts, lists, tuples, sets — in a readable, indented, multi-line layout. <code>pprint()</code> prints directly; <code>pformat()</code> does the identical layout work and returns a <code>str</code> instead. Works on any Python object, not only JSON-shaped data.</td></tr>
 </table>
 
+<h2 id="day80">Day 80 — difflib: comparing sequences of text</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>difflib</td><td>giữ nguyên "difflib" — module chuẩn so sánh 2 sequence (thường là các dòng text) và báo chính xác chỗ khác nhau hoặc mức độ giống nhau, không chỉ trả lời có bằng nhau hay không</td><td>The standard-library module for comparing sequences — most often lines of text — and reporting exactly where they differ or how similar they are, rather than only whether they are equal. <code>unified_diff()</code> renders the difference the <code>git diff</code> way; <code>SequenceMatcher</code> and <code>get_close_matches()</code> instead score similarity.</td></tr>
+  <tr><td>unified_diff()</td><td>giữ nguyên "unified_diff" — hàm trong difflib trả về generator các dòng diff theo format quen thuộc của git diff: dòng bị xóa thêm dấu -, dòng thêm mới thêm dấu +, dòng không đổi giữ nguyên với 1 khoảng trắng đầu dòng</td><td><code>difflib.unified_diff(a, b)</code> returns a generator of lines in the same format <code>git diff</code> and code-review tools use: a removed line prefixed <code>-</code>, an added line prefixed <code>+</code>, and an unchanged context line prefixed with a plain space.</td></tr>
+  <tr><td>SequenceMatcher</td><td>giữ nguyên "SequenceMatcher" — class trong difflib so sánh 2 sequence và trả về 1 con số ratio() từ 0.0 (không giống gì) tới 1.0 (giống hoàn toàn), không tạo ra diff dạng hiển thị</td><td><code>difflib.SequenceMatcher(None, a, b)</code> compares two sequences and its <code>.ratio()</code> method returns a single float from <code>0.0</code> (nothing alike) to <code>1.0</code> (identical) — a similarity score, not a rendered diff.</td></tr>
+  <tr><td>get_close_matches()</td><td>giữ nguyên "get_close_matches" — hàm trong difflib dựa trên SequenceMatcher.ratio() để tìm trong 1 danh sách candidate những giá trị giống nhất với 1 từ cho sẵn, đúng kiểu gợi ý "bạn có ý là...?"</td><td><code>difflib.get_close_matches(word, candidates)</code> uses <code>SequenceMatcher</code>'s ratio under the hood to return the best-matching candidates from a list, the exact shape a "did you mean…?" suggestion needs.</td></tr>
+</table>
+
 <p class="next">💬 A term here still unclear? Ask your teacher — hỏi bằng tiếng Việt cũng được.</p>
 
 <script src="../assets/nav.js"></script>

@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 32 · dbt test severity (warn/error) &amp; store_failures</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 32 · ~20 min · 17 Oct 2026</p>
+<h1>dbt test severity (<code>warn</code>/<code>error</code>) &amp; <code>store_failures</code></h1>
+<p class="byline">Today's tangible win: two of Day 3's existing tests get a <code>config()</code> block that changes what a failure actually does — one downgraded to <code>warn</code> so a known-messy column stops blocking the whole build, and one upgraded with <code>store_failures: true</code> so the exact offending rows land in a queryable table instead of only ever appearing once in a scrollback log.</p>
+
+<div class="callout"><strong>Before today — confirm Day 3's tests still pass clean:</strong> everything below edits config on top of tests that already exist, so a dirty baseline would make today's new behavior hard to tell apart from an old, unrelated failure.
+<pre><code>cd food_delivery_pipeline
+uv run --project ../dbt_env dbt build</code></pre>
+Expected: <code>Done. PASS=… WARN=0 ERROR=0 SKIP=0 TOTAL=…</code>, with zero in both the <code>WARN</code> and <code>ERROR</code> columns. If either is nonzero, resolve it before continuing — today's own numbers assume a clean build going in.</div>
+
+<h2>1 · Every test so far has had exactly one setting: fail hard, or don't run</h2>
+<p>Since Day 3, every dbt test in this project has behaved the same way: its query runs, and if it returns any rows, <code>dbt build</code> reports <code>ERROR</code> for that test and the whole build's exit code goes non-zero. That is the right default — a <code>relationships</code> test catching an orphan <code>restaurant_id</code> should block a build, because downstream marts would silently carry a broken join. But not every test deserves the same reaction. A courier record with a <code>null</code> <code>vehicle</code> field is worth knowing about; it is not worth failing Day 7's whole nightly <code>dbt build</code> over, the way a CI pipeline failing a deploy over a lint warning instead of a real compile error wastes everyone's attention on the wrong signal. dbt's answer is <dfn data-en="a config on any dbt test (severity: warn or severity: error, default error) controlling what a failing test actually does to the build -- error fails dbt build and returns a non-zero exit code; warn logs the failure, counts it in the WARN column, but lets the build continue and still exit zero" data-vn="giữ nguyên &quot;severity&quot; — config trên test dbt (severity: warn hoặc error, mặc định error) quyết định test fail thì build phản ứng sao: error thì dbt build fail, exit code khác 0; warn thì chỉ log + tính vào cột WARN, build vẫn tiếp tục và exit code vẫn 0">severity</dfn>: a per-test setting, <code>warn</code> or <code>error</code>, defaulting to <code>error</code> for every test written so far without anyone naming it explicitly.</p>
+
+<h2>2 · <code>severity: warn</code> on a test you want visible, not blocking</h2>
+<p>Day 3's <code>stg_orders.yml</code> added a <code>relationships</code> test on <code>courier_id</code>, asserting every order's courier exists in <code>stg_couriers</code>. In the real seed data that's always been true, but couriers who leave the platform are a real, expected business event this project hasn't modelled yet — an order placed while a courier was active, then that courier's row removed later, would orphan the join through no fault of the pipeline. Erroring the whole build over that is the wrong reaction until a courier-deactivation flow actually exists; today it becomes a <code>warn</code>, visible every run without blocking one:</p>
+<pre><code><span class="cm">-- models/staging/stg_orders.yml -- courier_id's relationships test, edited</span>
+      - name: courier_id
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_couriers')
+                field: courier_id
+              config:
+                severity: warn</code></pre>
+<p>The <code>config:</code> key nests under the test itself, same level as <code>arguments:</code> — not a sibling of <code>tests:</code>, and not something that applies to the whole column. <code>restaurant_id</code>'s own <code>relationships</code> test, just above it in the same file, keeps its default <code>error</code> untouched: an orphan restaurant really would break <code>fct_orders</code>' join, so that one should still fail loud. Severity is a per-test decision, made on purpose, not a project-wide dial.</p>
+
+<h2>3 · <code>store_failures</code>: keep the offending rows, not just a count</h2>
+<p>Day 3's singular test, <code>assert_positive_subtotal</code>, selects the exact rows that break the rule — but only Postgres sees them, for the length of one test query, then they're gone. The scrollback log has the rows from whichever run you happened to be watching; a run two days from now with a new bad row shows new output you'd have to go find. <dfn data-en="a dbt test config (store_failures: true) that, on a failing test, writes the exact failing rows into a real table in the warehouse (by default under a dbt-managed audit schema) instead of only ever showing them once in that run's console output -- the table is overwritten on every subsequent run, so it always reflects the current failing rows, not a historical log" data-vn="giữ nguyên &quot;store_failures&quot; — config test dbt (store_failures: true), khi test fail thì ghi đúng các hàng fail vào 1 table thật trong warehouse (mặc định ở schema audit riêng của dbt) thay vì chỉ hiện 1 lần trong console; table này bị ghi đè mỗi lần chạy, nên luôn phản ánh đúng các hàng đang fail hiện tại, không phải log lịch sử">store_failures</dfn> fixes that: dbt writes the failing rows into a real table, rewritten fresh on every run, queryable any time with ordinary SQL instead of grepped out of a log you may not still have.</p>
+<pre><code><span class="cm">-- tests/assert_positive_subtotal.sql -- add a config() block at the top</span>
+{{ config(severity = 'error', store_failures = true) }}
+
+select
+    order_id,
+    subtotal
+from {{ ref('stg_orders') }}
+where subtotal &lt; 0</code></pre>
+<p>A singular test sets config via the <code>{{ config(...) }}</code> Jinja function at the top of its own <code>.sql</code> file, not YAML — there is no column or model to attach a <code>tests:</code> block to, since the whole file <em>is</em> the test. <code>severity</code> stays <code>error</code> here on purpose: a negative subtotal is exactly the kind of row that should still block a build. <code>store_failures</code> is independent of severity — an <code>error</code> test can store its failures just as a <code>warn</code> test can, the two settings answer different questions ("does this block the build" vs. "do I keep a queryable record of what failed").</p>
+<p>TODO — add the same <code>config()</code> pattern to one more test of your own choosing: either <code>delivery_fee</code>'s range check if you built one in Phase 2a, or any generic test where you'd want to query failures later instead of re-running the build to see them again. Set <code>severity: warn</code> and <code>store_failures: true</code> together on that one, so you have one example of each combination (Day 3's <code>subtotal</code> test is <code>error</code> + stored; <code>courier_id</code>'s is <code>warn</code>, not stored) before deciding which shape fits a given rule.</p>
+
+<h2>4 · Where the stored rows actually land</h2>
+<p>By default, dbt creates failure tables in a schema named <code>&lt;target schema&gt;_dbt_test__audit</code> — on this project's <code>dev</code> target, that's <code>dbt_dev_dbt_test__audit</code>, a sibling of <code>dbt_dev</code> itself, not mixed into it. Each stored test gets one table, named after the test (dbt's own generated or custom test name). Query it like any other table:</p>
+<pre><code>uv run --project ../dbt_env dbt build --select assert_positive_subtotal
+docker compose exec -T postgres psql -U fdp -d fdp -c \
+  "select * from dbt_dev_dbt_test__audit.assert_positive_subtotal;"</code></pre>
+<p>Expected, assuming the seed data is already clean from Day 3's fix: <code>0 rows</code> in both the build's own <code>PASS</code> line and this query — the audit table is overwritten empty on a passing run, not left holding a stale failure from before. Plant a bad row on purpose to see it work end to end:</p>
+<pre><code>docker compose exec -T postgres psql -U fdp -d fdp -c \
+  "UPDATE raw.orders SET subtotal = -5.00 WHERE order_id = 1;"
+uv run --project ../dbt_env dbt build --select assert_positive_subtotal</code></pre>
+<p>Expected: <code>ERROR=1</code>, naming <code>assert_positive_subtotal</code> — then re-run the same <code>psql</code> query above and expect exactly <code>1</code> row back: <code>order_id 1</code>, <code>subtotal -5.00</code>. Revert the row afterward (<code>UPDATE raw.orders SET subtotal = &lt;original value&gt; WHERE order_id = 1;</code> — check Day 1's seed script for the original) so the project returns to its known-clean baseline.</p>
+
+<h2>5 · Build: apply both, confirm the right numbers in the right columns</h2>
+<p>Commit the edited <code>models/staging/stg_orders.yml</code> (Section 2) and <code>tests/assert_positive_subtotal.sql</code> (Section 3). Run the full build one more time on clean data:</p>
+<pre><code>uv run --project ../dbt_env dbt build</code></pre>
+<p>Expected: <code>Done. PASS=… WARN=0 ERROR=0 SKIP=0 TOTAL=…</code> — same as before today, because nothing in the seed data actually violates <code>courier_id</code>'s relationship right now. The real change isn't visible in today's numbers; it's in what happens the <em>next</em> time a courier goes missing: <code>WARN=1</code> instead of a failed build, and a build that still completes.</p>
+
+<div class="callout"><strong>This is still a deliberate, narrow choice — named honestly.</strong> Downgrading a test to <code>warn</code> is easy to misuse as a way to silence a real problem instead of fixing it. The only test touched this way today is one backed by a concrete, named reason (couriers leaving the platform is a real, not-yet-modelled event) — not "this test is annoying." A <code>warn</code> with no reason anyone could state out loud is a test slowly being ignored, not a test correctly scoped.</div>
+
+<div class="interview">
+<p><strong>Q: "What's the difference between a test's severity and store_failures?"</strong> A strong answer, out loud: <em>"Severity decides what a failing test does to the build — error fails dbt build with a non-zero exit code, warn logs it and lets the build keep going, still exiting zero. That's useful for a real but non-blocking signal, like a foreign key that can legitimately go stale before a cleanup process catches up. store_failures is a completely separate setting: it writes the exact failing rows into a real table in the warehouse, rewritten fresh every run, so you can query what failed with ordinary SQL instead of re-running the build and reading console output. The two combine independently — I've got one test that's error plus stored, because a negative subtotal should still block a build and I want the exact rows on hand, and one that's warn with no storage, because it's just a heads-up on a known, accepted gap."</em> The signal: naming that the two configs answer different questions, not treating "softer" and "more visible" as the same axis.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="severity defaults to error for every dbt test unless a config block explicitly sets severity: warn. Every test written in this project before today used that default without anyone naming it, which is exactly why a courier relationship test blocking the whole build was the behavior all along, never a deliberate choice until today.">
+    <p class="stem">What is a dbt test's <code>severity</code> before anyone configures it explicitly?</p>
+    <button class="opt" data-ok><code>error</code> -- a failing test fails the whole build</button>
+    <button class="opt"><code>warn</code> -- a failure never fails the whole build</button>
+    <button class="opt">None -- every test requires severity set by hand</button>
+  </div>
+  <div class="q" data-why="severity: warn still logs the failure and counts it in the build's own WARN column, but lets dbt build keep running and still exit zero overall. error is the setting that fails the build with a non-zero exit code; warn is specifically the one that reports without blocking.">
+    <p class="stem">What happens to <code>dbt build</code>'s exit code when a <code>severity: warn</code> test fails?</p>
+    <button class="opt" data-ok>Stays zero -- the build still reports success overall</button>
+    <button class="opt">Goes non-zero -- identical to a severity: error failure</button>
+    <button class="opt">The build stops instantly, mid-run, with no further models</button>
+  </div>
+  <div class="q" data-why="store_failures writes a failing test's exact offending rows into a real warehouse table, rewritten fresh on every run, queryable with ordinary SQL at any later time. Without it, the only place the failing rows ever appeared was that one run's console output -- gone once the terminal scrolls past it.">
+    <p class="stem">What does <code>store_failures: true</code> actually change about a failing test?</p>
+    <button class="opt" data-ok>Writes the exact failing rows into a queryable table</button>
+    <button class="opt">Automatically fixes the failing rows in the source table</button>
+    <button class="opt">Makes every future run of that test skip entirely</button>
+  </div>
+  <div class="q" data-why="severity and store_failures are independent settings answering different questions -- severity controls whether a failure blocks the build at all, store_failures controls whether the exact failing rows get written to a queryable table. Today's lesson deliberately paired error plus stored (the subtotal test) with warn and not stored (the courier relationship test) to show both axes move separately.">
+    <p class="stem">Why can a test be both <code>severity: warn</code> and have <code>store_failures: true</code> at once?</p>
+    <button class="opt" data-ok>They are independent settings, each answering a different question</button>
+    <button class="opt">warn always forces store_failures to silently turn on too</button>
+    <button class="opt">They can't -- dbt rejects that exact combination outright</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> dbt Labs's <a href="https://docs.getdbt.com/docs/build/data-tests">Data tests</a> doc (cited in <code>RESOURCES.md</code> as this course's primary source since Day 3) documents both <code>severity</code> and <code>store_failures</code> directly, including the exact default audit-schema naming convention used in Section 4 above and the <code>warn_if</code>/<code>error_if</code> threshold variant (a count-based middle ground between plain <code>warn</code> and plain <code>error</code>) that today's lesson didn't need but is worth knowing exists. Not fetched live this round (no working web-fetch tool was available this session, the same gap Days 23, 30 and 31 hit) — today's config syntax and default schema-naming behavior were verified instead by actually running <code>dbt parse</code> against a scratch project with both settings configured (see this lesson's own generation log entry), not fetched fresh from the live page; confirm the exact <code>warn_if</code>/<code>error_if</code> syntax against the live docs before using it.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 32.<br>
+<strong>Next up:</strong> dbt seeds (CSV reference data) vs. sources — the other real gap named back on Day 31, still open.<br><br>
+💬 Anything unclear — when a <code>warn</code> is the right call versus quietly ignoring a real problem, or how <code>store_failures</code>' audit schema interacts with Day 31's <code>generate_schema_name</code> override? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

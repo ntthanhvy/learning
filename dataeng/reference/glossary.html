@@ -282,6 +282,13 @@
   <tr><td>generate_schema_name</td><td>giữ nguyên "generate_schema_name" — macro Jinja dbt tự gọi cho mỗi model để quyết định schema của model đó, dựa vào custom schema config (nếu có) của model và target đang active; project nào cũng override được implementation mặc định (trong macros/generate_schema_name.sql) để đổi rule cho cả project, không cần config riêng từng model</td><td>A Jinja macro dbt itself calls for every single model to decide what schema that model's table or view lands in, given the model's own optional custom schema config (or none) and the active target. Any project can override the default implementation dbt ships, in <code>macros/generate_schema_name.sql</code>, to change that rule project-wide with no per-model configuration needed — today's version suffixes a custom schema onto the target's own schema for every non-<code>prod</code> target, and honors it as-is on <code>prod</code>.</td></tr>
 </table>
 
+<h2 id="day32">Day 32 — dbt test severity (warn/error) &amp; store_failures</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>severity</td><td>giữ nguyên "severity" — config trên test dbt (severity: warn hoặc error, mặc định error) quyết định test fail thì build phản ứng sao: error thì dbt build fail, exit code khác 0; warn thì chỉ log + tính vào cột WARN, build vẫn tiếp tục và exit code vẫn 0</td><td>A config on any dbt test (<code>severity: warn</code> or <code>severity: error</code>, default <code>error</code>) controlling what a failing test actually does to the build — <code>error</code> fails <code>dbt build</code> and returns a non-zero exit code; <code>warn</code> logs the failure, counts it in the <code>WARN</code> column, but lets the build continue and still exit zero.</td></tr>
+  <tr><td>store_failures</td><td>giữ nguyên "store_failures" — config test dbt (store_failures: true), khi test fail thì ghi đúng các hàng fail vào 1 table thật trong warehouse (mặc định ở schema audit riêng của dbt) thay vì chỉ hiện 1 lần trong console; table này bị ghi đè mỗi lần chạy, nên luôn phản ánh đúng các hàng đang fail hiện tại, không phải log lịch sử</td><td>A dbt test config (<code>store_failures: true</code>) that, on a failing test, writes the exact failing rows into a real table in the warehouse (by default under a dbt-managed audit schema, e.g. <code>&lt;target schema&gt;_dbt_test__audit</code>) instead of only ever showing them once in that run's console output — the table is overwritten on every subsequent run, so it always reflects the current failing rows, not a historical log.</td></tr>
+</table>
+
 <script src="../assets/nav.js"></script>
 </body>
 </html>

@@ -42,6 +42,7 @@
     { n: 29, date: "2026-10-14", title: "A mock design-review walkthrough of the repo", file: "lessons/0029-design-review-walkthrough.html" },
     { n: 30, date: "2026-10-15", title: "Stream processing vs. \"land it and let dbt do it\"", file: "lessons/0030-stream-processing-vs-land-and-let-dbt.html" },
     { n: 31, date: "2026-10-16", title: "dbt environments: dev/CI/prod targets & generate_schema_name", file: "lessons/0031-dbt-environments-and-schema-naming.html" },
+    { n: 32, date: "2026-10-17", title: "dbt test severity (warn/error) & store_failures", file: "lessons/0032-dbt-test-severity-and-store-failures.html" },
   ];
 
   const REFS = [

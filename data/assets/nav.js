@@ -204,6 +204,8 @@
       file: "lessons/0098-date-range.html" },
     { n: 99, date: "2026-10-16", title: "np.intersect1d() / np.union1d() / np.setdiff1d(): SQL's INTERSECT/UNION/EXCEPT, as arrays",
       file: "lessons/0099-np-setdiff1d-intersect1d-union1d.html" },
+    { n: 100, date: "2026-10-17", title: "np.vstack() / np.hstack() / np.column_stack(): the array layer under pd.concat()",
+      file: "lessons/0100-np-vstack-hstack-column-stack.html" },
   ];
 
   const REFS = [

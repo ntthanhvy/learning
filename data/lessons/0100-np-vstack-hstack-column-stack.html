@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 100 · np.vstack() / np.hstack() / np.column_stack(): the array layer under pd.concat()</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 100 · ~20 min · 17 Oct 2026</p>
+<h1>np.vstack() / np.hstack() / np.column_stack(): the array layer under pd.concat()</h1>
+<p class="byline">Lesson 99 closed with two standing candidates and no promotion: <code>itertuples()</code> and the NumPy stacking family. A fresh scan confirmed both still had zero hits, plus a dozen other zero-hit names already tried in prior rounds. The stacking family won: Lesson 21 taught <code>pd.concat()</code> as the row/column stacker for DataFrames and mapped it to SQL's <code>UNION ALL</code> — but the raw-array layer underneath it, the one that actually decides what "stack" means when there's no DataFrame or Index to align by, was never itself covered. A clean, well-scoped gap, and a good one for round 100: it closes the loop back to Lesson 21's own tool.</p>
+
+<h2>1 · Two functions, two different answers to "stack these 1-D arrays"</h2>
+<p>Confirmed directly (numpy 2.5.4): <dfn data-en="three NumPy functions for combining arrays without any key-based matching -- vstack always treats each input as a row and stacks downward (growing a new axis if needed), hstack concatenates along whichever axis is already the 'long' one, and column_stack turns separate 1-D arrays into side-by-side columns" data-vn="giữ nguyên 'np.vstack()' — xếp các mảng THÀNH HÀNG, chồng xuống dưới (mảng 1-D sẽ biến thành ma trận 2-D, mỗi mảng input là 1 hàng); giữ nguyên 'np.hstack()' — nối các mảng theo chiều 'dài' đã có sẵn (mảng 1-D thì vẫn là 1-D, chỉ nối dài ra, KHÔNG thành ma trận); giữ nguyên 'np.column_stack()' — biến mỗi mảng 1-D thành 1 CỘT rồi xếp cạnh nhau">np.vstack() / np.hstack() / np.column_stack()</dfn> look like a matched trio, but <code>vstack</code> and <code>hstack</code> behave very differently on the exact same 1-D inputs:</p>
+<pre><code><span class="kw">import</span> numpy <span class="kw">as</span> np
+a = np.array([<span class="kw">1</span>, <span class="kw">2</span>, <span class="kw">3</span>])
+b = np.array([<span class="kw">4</span>, <span class="kw">5</span>, <span class="kw">6</span>])
+
+np.vstack([a, b])
+<span class="cm"># array([[1, 2, 3],
+#        [4, 5, 6]])    -- 2-D now! each 1-D array became one ROW</span>
+
+np.hstack([a, b])
+<span class="cm"># array([1, 2, 3, 4, 5, 6])    -- still 1-D! just concatenated end to end</span>
+
+np.column_stack([a, b])
+<span class="cm"># array([[1, 4],
+#        [2, 5],
+#        [3, 6]])    -- 2-D, but each array became a COLUMN, not a row</span></code></pre>
+<p>Confirmed directly: on two plain 1-D arrays, <code>vstack</code> always produces a 2-D result (one row per input), <code>hstack</code> stays 1-D (a longer flat array), and <code>column_stack</code> produces a 2-D result shaped the opposite way from <code>vstack</code> — columns, not rows. This is the single most common mistake with this trio: reaching for <code>hstack</code> expecting a matrix and getting a flat array back instead.</p>
+
+<h2>2 · On 2-D arrays, both reduce to a named axis of concatenate()</h2>
+<p>The confusion mostly disappears once the inputs are already 2-D — confirmed directly, <code>vstack</code> and <code>hstack</code> become exact, literal spellings of <code>np.concatenate()</code> with a fixed axis:</p>
+<pre><code>A = np.array([[<span class="kw">1</span>, <span class="kw">2</span>], [<span class="kw">3</span>, <span class="kw">4</span>]])
+B = np.array([[<span class="kw">5</span>, <span class="kw">6</span>], [<span class="kw">7</span>, <span class="kw">8</span>]])
+
+np.vstack([A, B])                    <span class="cm"># same result as:</span>
+np.concatenate([A, B], axis=<span class="kw">0</span>)   <span class="cm"># -- stack downward, more rows</span>
+
+np.hstack([A, B])                    <span class="cm"># same result as:</span>
+np.concatenate([A, B], axis=<span class="kw">1</span>)   <span class="cm"># -- stack sideways, more columns</span></code></pre>
+<p>Confirmed directly with <code>np.array_equal()</code>: both equivalences hold exactly. <code>vstack</code>/<code>hstack</code> are not separate machinery — they are <code>concatenate()</code> with the axis pre-chosen and, for 1-D inputs only, an implicit reshape to 2-D first (that implicit reshape is exactly why <code>vstack</code> on 1-D arrays surprised Section 1 by returning a matrix). This mirrors Lesson 21's <code>pd.concat(axis=0)</code> vs <code>axis=1</code> almost exactly — same two directions, same idea, one level lower, no Index to align by.</p>
+
+<h2>3 · Where concatenate() actually errors — and where pd.concat() wouldn't</h2>
+<p>Confirmed directly: every function in this family demands matching shape on every axis except the one being stacked along, and raises <code>ValueError</code> naming the exact dimension and the two conflicting sizes — no silent fix-up:</p>
+<pre><code>np.vstack([a, np.array([<span class="kw">1</span>, <span class="kw">2</span>])])
+<span class="cm"># ValueError: all the input array dimensions except for the concatenation
+# axis must match exactly, but along dimension 1, the array at index 0
+# has size 3 and the array at index 1 has size 2</span></code></pre>
+<p>This is the sharpest contrast with Lesson 21's <code>pd.concat()</code>, confirmed directly against that lesson's own example: stacking two DataFrames with mismatched <em>columns</em> silently NaN-fills the gap and returns a result — <code>pd.concat()</code> never raises over a shape mismatch. The raw NumPy layer has no column names to reconcile by, no NaN-filling machinery, and no opinion about what should happen when shapes don't line up — it just refuses. Reach for <code>pd.concat()</code> when inputs might legitimately have different columns; reach for this family only once shapes are already known to agree, typically deep inside a numeric pipeline with no DataFrame in sight.</p>
+<p>One more confirmed trap, silent rather than loud: dtype promotion follows the same rule as any mixed-type array. Stacking an int array with a float array upcasts the whole result to <code>float64</code>; stacking an int array with a string array upcasts everything to a Unicode string dtype (<code>&lt;U21</code>) — numbers included, now unusable for arithmetic without converting back. No warning either way.</p>
+
+<div class="interview">
+<p><strong>Q: "You have a list of several same-length 1-D NumPy arrays, one per sensor reading, and need them as rows of one matrix for a model. What's the risk of just reaching for hstack?"</strong> A strong answer, out loud: <em>"hstack on 1-D arrays concatenates them into one long flat array, not a matrix — it stays 1-D. vstack is the one that treats each array as a row and actually produces the 2-D shape I want, one row per sensor. If I'd wanted them as columns instead, that's column_stack, not hstack. I'd also check all the arrays are the same length first, since any mismatch raises ValueError immediately rather than silently padding or dropping anything, unlike pd.concat() on DataFrames with different columns."</em> The signal: naming the 1-D surprise unprompted, not just knowing the three function names exist.</p>
+</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/100_np_stacking.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/100_np_stacking.py</code></pre>
+<p>Exercise 1 confirms the 1-D surprise: <code>vstack</code> on two 1-D arrays returns 2-D (one row per array), <code>hstack</code> stays 1-D, <code>column_stack</code> returns the column-shaped 2-D opposite of <code>vstack</code> (Section 1). Exercise 2 confirms the 2-D equivalences: <code>vstack(2-D)</code> matches <code>concatenate(axis=0)</code> and <code>hstack(2-D)</code> matches <code>concatenate(axis=1)</code> exactly (Section 2). Exercise 3 confirms a shape mismatch raises <code>ValueError</code> and that int+float stacking upcasts the result to <code>float64</code> (Section 3).</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: np.vstack() on two 1-D arrays always produces a 2-D result, one row per input array -- while np.hstack() on the same two 1-D arrays just concatenates them end to end and stays 1-D. The shape change is the whole surprise; column_stack produces a third, column-shaped 2-D result, different from both.">
+    <p class="stem">Given two 1-D arrays of the same length, what does <code>np.vstack([a, b])</code> return that <code>np.hstack([a, b])</code> does not?</p>
+    <button class="opt" data-ok>a 2-D result with each original array becoming one row</button>
+    <button class="opt">a 1-D result with every value simply appended in order</button>
+    <button class="opt">nothing -- both always just return the exact identical shape</button>
+  </div>
+  <div class="q" data-why="Confirmed directly with np.array_equal(): on 2-D inputs, np.vstack(A, B) produces the exact same result as np.concatenate([A, B], axis=0), and np.hstack(A, B) matches np.concatenate([A, B], axis=1) exactly. Both are just concatenate() with the axis already chosen.">
+    <p class="stem">For two 2-D arrays, <code>np.vstack([A, B])</code> gives the identical result as which call?</p>
+    <button class="opt" data-ok>np.concatenate([A, B], axis=0), stacking more rows downward</button>
+    <button class="opt">np.concatenate([A, B], axis=1), stacking more columns sideways</button>
+    <button class="opt">neither -- vstack always builds fresh output</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: unlike pd.concat() on DataFrames with mismatched columns (which silently NaN-fills the gap and still returns a result, per Lesson 21), np.vstack()/np.hstack() on arrays whose shapes don't match along every axis except the one being stacked immediately raise ValueError, naming the exact dimension and sizes involved -- no silent fix-up at all.">
+    <p class="stem">Stacking two arrays whose shapes don't match (outside the stacking axis) with <code>np.vstack()</code> does what, unlike <code>pd.concat()</code> on mismatched DataFrame columns?</p>
+    <button class="opt" data-ok>raises ValueError right away instead of silently filling any gap</button>
+    <button class="opt">silently fills the mismatched cells with NaN, same as concat</button>
+    <button class="opt">just quietly drops whichever input array happens to be shorter</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official <a href="https://numpy.org/doc/stable/reference/generated/numpy.concatenate.html">NumPy API reference for <code>np.concatenate()</code></a> (per <code>RESOURCES.md</code>'s NumPy fundamentals entry, ~5 min) — the <code>vstack()</code>/<code>hstack()</code>/<code>column_stack()</code> reference pages are linked from the "See also" section and each confirm, in their own wording, the exact axis each one fixes and the implicit-reshape behavior on 1-D input found by direct probing above.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>np.vstack() / np.hstack() / np.column_stack()</code> is new today, added right after Lesson 99's <code>np.intersect1d() / np.union1d() / np.setdiff1d()</code> entry.<br>
+<strong>Next lesson:</strong> no standing candidate carries forward this time either — <code>itertuples()</code> (the lower-overhead alternative to the <code>iterrows()</code> anti-pattern named back in Lesson 1, still never itself covered) remains a clean zero-hit option, left for tomorrow's own fresh scan to confirm or replace.<br><br>
+💬 Anything unclear — the 1-D vstack/hstack surprise, the concatenate() equivalence, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

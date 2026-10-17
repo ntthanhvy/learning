@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 80 · difflib: comparing sequences of text</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 80 · ~20 min · 17 Oct 2026</p>
+<h1><code>difflib</code>: finding exactly what changed between two texts</h1>
+<p class="byline"><code>==</code> on two strings or two lists only answers yes/no — it says nothing about <em>where</em> they differ, which is what a code reviewer, a log comparer, or a "did the config change?" check actually needs. <dfn data-en="difflib is the standard-library module for comparing sequences (most often lines of text) and reporting exactly where they differ or how similar they are, rather than only whether they are equal" data-vn="giữ nguyên &quot;difflib&quot; — module chuẩn so sánh 2 sequence (thường là các dòng text) và báo chính xác chỗ khác nhau hoặc mức độ giống nhau, không chỉ trả lời có bằng nhau hay không">The <code>difflib</code> module</dfn> is the standard-library tool for exactly that: given two sequences, it finds the added, removed, and shared parts and can render them as a human-readable diff.</p>
+
+<div class="callout"><strong>Why today, specifically:</strong> a fresh-gap scan re-checked the one standing candidate carried forward from Days 70-71's notes and Day 78's own next-day note: <code>difflib</code>, named twice before and never taught. Grepped case-insensitively for <code>difflib</code> across every lesson, every practice file, <code>reference/glossary.html</code>, and <code>RESOURCES.md</code> — zero hits anywhere, confirming the gap is still open. Day 79 was a review day (Days 76-78), so this resets the fresh-lesson count to one — the course's settled cadence (three fresh lessons, then a review) means Day 81 or 82 should again default to review once two more fresh topics land, unless a stronger reason to deviate turns up then.</div>
+
+<h2>1 · The problem: <code>==</code> only says yes or no</h2>
+<p>Comparing two versions of a config file, or two log captures, with plain equality gives no detail to act on:</p>
+<pre><code>old = [<span class="str">"host = localhost"</span>, <span class="str">"port = 8000"</span>, <span class="str">"debug = true"</span>]
+new = [<span class="str">"host = localhost"</span>, <span class="str">"port = 9000"</span>, <span class="str">"debug = true"</span>]
+
+<span class="kw">print</span>(old == new)   <span class="cm"># False -- but which line changed? == can't say.</span></code></pre>
+<p>Finding the actual change by eye works for three lines; it stops working for a 500-line file. This is the gap <code>difflib</code> closes.</p>
+
+<h2>2 · <code>unified_diff()</code>: the familiar <code>git diff</code> shape</h2>
+<p><code>difflib.unified_diff()</code> takes two lists of lines and returns a generator of lines in the same <code>---</code>/<code>+++</code>/<code>@@</code> format <code>git diff</code> and code-review tools already use — each changed line prefixed <code>-</code> (removed) or <code>+</code> (added), unchanged lines shown for context:</p>
+<pre><code><span class="kw">import</span> difflib
+
+diff = difflib.unified_diff(
+    old, new, fromfile=<span class="str">"old.conf"</span>, tofile=<span class="str">"new.conf"</span>, lineterm=<span class="str">""</span>
+)
+<span class="kw">for</span> line <span class="kw">in</span> diff:
+    <span class="kw">print</span>(line)
+<span class="cm"># --- old.conf</span>
+<span class="cm"># +++ new.conf</span>
+<span class="cm"># @@ -1,3 +1,3 @@</span>
+<span class="cm">#  host = localhost</span>
+<span class="cm"># -port = 8000</span>
+<span class="cm"># +port = 9000</span>
+<span class="cm">#  debug = true</span></code></pre>
+<p><code>unified_diff()</code> is a generator — nothing runs until iterated, same as Day 5's generators. The <code>---</code>/<code>+++</code> header lines and the <code>@@</code> hunk marker always get their own newline added by <code>unified_diff()</code> itself; <code>lineterm=""</code> stops that addition, which only matters when the input lines (like <code>old</code>/<code>new</code> above) don't already carry a trailing <code>\n</code> of their own, as real lines read from an open file would.</p>
+
+<h2>3 · <code>SequenceMatcher</code>: a similarity ratio, no diff formatting</h2>
+<p>Sometimes the question isn't "show me the diff" but "how similar are these two strings?" — useful for fuzzy-matching a typo'd input against a list of known values. <code>difflib.SequenceMatcher</code> gives a single number between <code>0.0</code> (nothing alike) and <code>1.0</code> (identical):</p>
+<pre><code><span class="kw">import</span> difflib
+
+matcher = difflib.SequenceMatcher(<span class="kw">None</span>, <span class="str">"color"</span>, <span class="str">"colour"</span>)
+<span class="kw">print</span>(matcher.ratio())   <span class="cm"># 0.909... -- close but not identical</span></code></pre>
+<p>The first argument is reserved for an optional "junk" filter (characters to ignore when comparing, rarely needed) — pass <code>None</code> when there is nothing to ignore. <code>difflib.get_close_matches(word, possibilities)</code> builds directly on the same ratio to return the best-matching candidates from a list, which is the shape a "did you mean…?" suggestion needs:</p>
+<pre><code><span class="kw">import</span> difflib
+
+known_fields = [<span class="str">"username"</span>, <span class="str">"password"</span>, <span class="str">"email"</span>]
+<span class="kw">print</span>(difflib.get_close_matches(<span class="str">"usrname"</span>, known_fields))   <span class="cm"># ['username']</span></code></pre>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> nothing pandas-specific today — <code>difflib</code> compares plain Python sequences (lines of text, or any list of hashable items); a <code>DataFrame</code>-vs-<code>DataFrame</code> diff is a different, library-specific question this course doesn't teach, per <code>MISSION.md</code>.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/80_difflib_comparing_sequences.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/80_difflib_comparing_sequences.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: using <code>unified_diff()</code> to confirm a changed line shows up as one <code>-</code> line and one <code>+</code> line, confirming an unchanged line between two versions appears with no <code>-</code>/<code>+</code> prefix, computing a <code>SequenceMatcher</code> ratio and confirming two identical strings score exactly <code>1.0</code>, and using <code>get_close_matches()</code> to find the single best match for a misspelled word among known candidates.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Plain == only reports whether two sequences are equal or not, with no information about where or how they differ. difflib.unified_diff() reports the actual added and removed lines in the same -/+ format git diff and code-review tools already use, which is what pinpointing a change actually needs.">
+    <p class="stem">What can <code>difflib.unified_diff()</code> tell you that plain <code>==</code> on two line lists cannot?</p>
+    <button class="opt" data-ok>exactly which lines were added or removed between the two lists</button>
+    <button class="opt">whether the two given line lists are equal overall or not</button>
+    <button class="opt">the total count of characters found in both of the lists</button>
+  </div>
+  <div class="q" data-why="SequenceMatcher.ratio() returns a single float between 0.0 and 1.0 measuring how similar two sequences are -- it does not produce any diff-style output of what specifically changed, which is unified_diff()'s separate job.">
+    <p class="stem">What does <code>difflib.SequenceMatcher(None, a, b).ratio()</code> return?</p>
+    <button class="opt" data-ok>a single float from 0.0 to 1.0 measuring similarity</button>
+    <button class="opt">a full line-by-line diff formatted the git diff way</button>
+    <button class="opt">a plain boolean True only when both sequences match</button>
+  </div>
+  <div class="q" data-why="get_close_matches() is built directly on SequenceMatcher's ratio to rank a list of known candidates by similarity to one input word, which is exactly the shape a 'did you mean...?' suggestion needs -- unified_diff() instead compares two already-paired sequences line by line, not one word against many candidates.">
+    <p class="stem">Why does <code>difflib.get_close_matches()</code> fit a "did you mean…?" suggestion better than <code>unified_diff()</code> would?</p>
+    <button class="opt" data-ok>it ranks many known candidate words by similarity to one word</button>
+    <button class="opt">unified_diff only ever compares two sequences already paired line by line</button>
+    <button class="opt">get_close_matches always needs a full diff formatted the git diff way</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the standard library's <a href="https://docs.python.org/3/library/difflib.html"><code>difflib</code></a> docs — the module overview covers <code>unified_diff()</code>/<code>context_diff()</code> side by side, <code>SequenceMatcher</code>'s <code>ratio()</code>/<code>get_matching_blocks()</code>, and <code>get_close_matches()</code>'s <code>n=</code>/<code>cutoff=</code> tuning, not shown above.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day80">glossary</a> under Day 80.<br>
+That closes the one standing fresh-gap mention carried forward from Days 70-71 and Day 78 — no open candidates remain on record; the next fresh topic needs its own gap scan. Day 80 is the first fresh lesson since Day 79's review (Days 76-78) — two more fresh lessons should follow before the next review is due, per this course's settled three-fresh-lesson cadence, unless a stronger reason to deviate turns up then.<br><br>
+💬 Anything unclear — <code>unified_diff()</code>'s <code>@@</code> line markers, or when a similarity ratio beats an exact diff? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

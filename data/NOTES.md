@@ -9070,3 +9070,117 @@
   `bin/record-progress data lesson_generated --day 100 --lesson
   0100-np-vstack-hstack-column-stack.html --detail '{"by":"headless"}'`
   will be run directly from the repo root to close out this round.
+- 2026-10-18 generation (Lesson 101): headless run, zero prior context. Per
+  this round's own explicit instructions, direct `psql "$LEARNING_DB_URL"
+  ...` reads and `bin/query-progress` were both confirmed blocked before
+  any attempt (the former by the sandbox's hard "Contains simple_expansion"
+  content-level gate on that exact variable name, the latter by a generic
+  approval gate with no human present to approve) — not retried, per
+  instruction. No `course_progress` rows could be read this round, same
+  gap as most recent rounds; pacing came from `learning-records/` (still
+  just the Lesson 1 baseline, unchanged) and this file's own tail alone.
+  Idempotency confirmed from file state: `git status` was clean, the last
+  commit was "lessons: 2026-10-17," and the highest-numbered file in
+  `lessons/` was `0100-np-vstack-hstack-column-stack.html` with no
+  `0101-*` file yet — today was not a duplicate. Read MISSION.md in full
+  (not modified), RESOURCES.md in full, `assets/nav.js` in full for the
+  registration format, and Lesson 99/100's own entries in this file's
+  tail. Lesson 100's own teaser named exactly one standing candidate:
+  `itertuples()` — the lower-overhead alternative to the `iterrows()`
+  anti-pattern named back in Lesson 1's own code example
+  (`for _, row in df.iterrows(): ...`), confirmed still a genuine zero-hit
+  gap by grepping `itertuples` case-insensitively across every lesson body
+  and the glossary file (only Lessons 99/100's own teaser text and this
+  file matched, never a lesson body teaching it). Promoted it directly
+  without running a fresh curriculum/glossary scan, since it was already
+  the one option left standing from Lesson 100's own teaser rather than a
+  fresh pick with no lineage. Every behavioral claim was probed directly
+  first in `/tmp/data-verify-0101/` (outside the repo checkout, not
+  committed; deleted after, though `rm` on it was itself blocked by the
+  sandbox's path restriction to the repo checkout — harmless either way
+  since it was never tracked by git), on the actually-installed pandas
+  3.0.6 / numpy 2.5.4 (confirmed via a version-print one-liner): confirmed
+  `itertuples()` yields a `collections.namedtuple` (class `Pandas` by
+  default) with `.Index` plus one field per column, readable by attribute;
+  timed `iterrows()` vs `itertuples()` vs a vectorized column expression
+  over the same 50,000-row column — `itertuples()` measured roughly 35x
+  faster than `iterrows()`, and the vectorized expression measured roughly
+  35x faster again than `itertuples()`, confirming it narrows but never
+  closes the gap to vectorization; confirmed a column name that is not a
+  valid Python identifier (tested `"2024 amount"`) is silently renamed to
+  a positional field (`_2`) instead of raising, cross-checked against the
+  official pandas docs for `itertuples()` (fetched via a sub-agent's
+  WebFetch) which confirm the exact rule in prose ("renamed to positional
+  names if they are invalid Python identifiers, repeated, or start with an
+  underscore") with no numbered-column-count fallback threshold mentioned
+  anywhere on the current page — deliberately did not invent a specific
+  numeric threshold for that in the lesson, since direct probing up to 255
+  real columns still produced a namedtuple in this pandas version and the
+  docs name no number at all; confirmed the yielded namedtuple is
+  immutable, `row.amount = 1` raises `AttributeError: can't set attribute`
+  immediately. Cited the official pandas API reference for
+  `DataFrame.itertuples()` as the primary source, matching the direct
+  probing exactly. The shipped (unsolved) `practice/101_itertuples.py` was
+  executed directly from its real `practice/` location and printed exactly
+  3 ✗ with no raw traceback. Built a solved copy in `.scratch-0101/`
+  (inside the repo, deleted after), filling in all blanks correctly
+  (including a `assigning_raises_attribute_error()` helper function body,
+  same pattern as Lesson 100's `raises_value_error()` helper); it printed
+  all 3 ✓ and "All green" on the first run. The shipped file was re-run
+  directly from `practice/` again afterward and reproduced the identical
+  all-✗ result, confirming the solved copy's edits never leaked back into
+  the shipped baseline; this was repeated a second time after the lesson's
+  own mechanical quiz/tag-balance passes (below) to confirm nothing in
+  that editing pass touched the practice file either. Quiz options were
+  drafted, then mechanically word-counted with a scratch Python script
+  (`uv run python3`, outside the repo checkout like the behavioral-probing
+  script above) isolating each `<div class="q">` block by regex span and
+  splitting on whitespace — the first draft came out 10/11/12, 13/11/11,
+  10/12/12; several rounds of small rephrasing (adding/trimming words like
+  "just", "real", "itself", "at all") across all three questions until
+  every one landed exactly level (10/10/10, 11/11/11, 12/12/12 option
+  words, counting the standalone "--" token the same way prior rounds'
+  scripts did), one `data-ok` per question throughout. The same script
+  also caught a genuine tag-balance bug this round, not just a count
+  mismatch: an unclosed `<span class="cm">` on the Section 2 code block
+  (the comment span opened before `iterrows()`'s three-line comment but
+  was never closed before the next `<span class="kw">` began), found via a
+  line-by-line open/close scan and fixed by closing the span at the end of
+  its own comment instead of leaving it open across the `for` loop line
+  that followed. After the fix, a full mechanical tag-balance pass
+  confirmed all tags balanced (a 2/2, body 1/1, button 9/9, code 52/52,
+  dfn 1/1, div 5/5, em 1/1, h1 1/1, h2 6/6, head 1/1, html 1/1, p 17/17,
+  pre 4/4, script 3/3, span 31/31, strong 3/3, title 1/1) and found exactly
+  two raw `&` characters, both inside the one established `cd
+  ~/learning/data && uv run ...` shell command, matching every prior
+  lesson's pattern, zero raw `&` in prose; also confirmed the one new
+  `<dfn>` tag carries both `data-en` and `data-vn`. Checked the glossary
+  for a collision before adding anything — grepped `itertuples`
+  case-insensitively across the full glossary, found zero existing rows —
+  added exactly one new row, "itertuples()", directly after Lesson 100's
+  "np.vstack() / np.hstack() / np.column_stack()" entry; re-ran the
+  tag-balance and raw-`&` scripts against the glossary file afterward,
+  confirmed it stayed balanced (a 1/1, body 1/1, code 1201/1201, em 11/11,
+  h1 1/1, head 1/1, html 1/1, p 3/3, script 1/1, strong 1/1, table 1/1, td
+  513/513, th 3/3, title 1/1, tr 172/172) with zero raw `&` introduced, and
+  the `<tr>` count went from 171 to 172 as expected. Registered Lesson 101
+  in `nav.js` with today's date (2026-10-18); `node --check` confirmed it
+  still parses as valid JavaScript after the edit, and exactly one
+  `n: 101` entry plus one `0101-itertuples` file reference were confirmed
+  to exist; `node --check` was also run against the untouched
+  `gloss.js`/`quiz.js` as a quick sanity pass, both still parse fine. This
+  round closed the one candidate already named and promoted from Lesson
+  100's own teaser, same lineage-continuation pattern as Lesson 100
+  closing out Lesson 99's teaser. No standing candidate is named for
+  tomorrow this time — today's own pick was the last one left standing, so
+  tomorrow starts with a fresh curriculum/glossary scan, same situation
+  Lessons 98/99 started from. No new `data/learning-records/` entry was
+  added this round — routine lesson, no new baseline finding to justify
+  one (the completion/quiz signal remains stale past mid-July, unchanged
+  from this round's starting context, and per this round's own
+  instructions DB access was not retried to check). The in-repo
+  `.scratch-0101/` directory was deleted after verification, per this
+  course's standing practice of not leaving scratch artifacts committed.
+  `bin/record-progress data lesson_generated --day 101 --lesson
+  0101-itertuples.html --detail '{"by":"headless"}'` will be run directly
+  from the repo root to close out this round.

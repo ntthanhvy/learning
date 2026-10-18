@@ -289,6 +289,12 @@
   <tr><td>store_failures</td><td>giữ nguyên "store_failures" — config test dbt (store_failures: true), khi test fail thì ghi đúng các hàng fail vào 1 table thật trong warehouse (mặc định ở schema audit riêng của dbt) thay vì chỉ hiện 1 lần trong console; table này bị ghi đè mỗi lần chạy, nên luôn phản ánh đúng các hàng đang fail hiện tại, không phải log lịch sử</td><td>A dbt test config (<code>store_failures: true</code>) that, on a failing test, writes the exact failing rows into a real table in the warehouse (by default under a dbt-managed audit schema, e.g. <code>&lt;target schema&gt;_dbt_test__audit</code>) instead of only ever showing them once in that run's console output — the table is overwritten on every subsequent run, so it always reflects the current failing rows, not a historical log.</td></tr>
 </table>
 
+<h2 id="day33">Day 33 — dbt seeds vs. sources</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>seed</td><td>giữ nguyên "seed" — file CSV nằm trong thư mục seeds/ của project dbt, được lệnh dbt seed load thành table thật trong warehouse — khác source, dbt tự lo cả file và cả việc load, nên seed chỉ hợp cho reference data nhỏ, ít đổi, đã được commit vào git, không dùng cho bảng mà 1 process pipeline khác chịu trách nhiệm đổ vào</td><td>A CSV file checked into a dbt project's <code>seeds/</code> directory, loaded into the warehouse by the <code>dbt seed</code> command as a real table. Unlike a source, dbt owns both the file and the load, which is why a seed is only appropriate for small, rarely-changing reference data checked into version control, never for a table an external pipeline process is responsible for landing.</td></tr>
+</table>
+
 <script src="../assets/nav.js"></script>
 </body>
 </html>

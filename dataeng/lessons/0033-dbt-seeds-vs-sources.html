@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 33 · dbt seeds vs. sources</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 33 · ~20 min · 18 Oct 2026</p>
+<h1>dbt seeds vs. sources</h1>
+<p class="byline">Today's tangible win: a small, rarely-changing CSV — a four-row city-to-region lookup — gets checked into the dbt project itself and loaded by <code>dbt seed</code>, then joined into a new <code>stg_restaurants_enriched</code> model with <code>ref()</code>, the exact same function used for every other model dependency so far. The point isn't the join; it's seeing, hands-on, the one real line between data dbt loads itself and data dbt only ever reads.</p>
+
+<div class="callout"><strong>Before today — confirm the baseline is clean:</strong> today adds a new seed and a new model on top of Day 2's existing <code>stg_restaurants</code>, so a dirty build going in would make today's new pieces hard to tell apart from an old failure.
+<pre><code>cd food_delivery_pipeline
+uv run --project ../dbt_env dbt build</code></pre>
+Expected: <code>Done. PASS=… WARN=0 ERROR=0 SKIP=0 TOTAL=…</code>, zero in <code>WARN</code> and <code>ERROR</code>. Resolve any nonzero count before continuing.</div>
+
+<h2>1 · Every raw table so far has arrived the same way — from outside dbt</h2>
+<p><code>raw.restaurants</code>, <code>raw.couriers</code> and <code>raw.orders</code> all share one trait: something outside dbt put them there. Day 1's generator script loaded them with plain <code>psycopg</code>, and Day 6 added <code>raw.order_events</code> the same way, landed by a Kafka consumer. dbt never writes to any of the four — it only ever declares them with <code>source()</code> (Day 2) and reads from them. That split is deliberate, not incidental: a <dfn data-en="a dbt-declared pointer at a table that already exists in the warehouse, loaded by a process outside dbt (a script, a Kafka consumer, a CDC tool) -- dbt only ever reads a source, never writes to it, and source freshness checks attach to this declaration" data-vn="giữ nguyên &quot;source&quot; — khai báo trỏ tới bảng đã có sẵn trong warehouse, do 1 process ngoài dbt load vào (script, Kafka consumer, CDC...) — dbt chỉ đọc source, không bao giờ viết vào; freshness check cũng gắn vào khai báo này">source</dfn> is dbt's declaration that a table is someone else's responsibility to populate.</p>
+<p>But not every small table in a real project arrives that way. A city-to-region mapping, a list of valid order statuses, a currency-conversion table that changes twice a year — reference data nobody wants to stand up a whole batch job for, and that changes rarely enough to live as a plain file. For exactly that case, dbt ships a second kind of raw input, one it <em>does</em> load itself: a <dfn data-en="a CSV file checked into a dbt project's seeds/ directory, loaded into the warehouse by the dbt seed command as a real table -- unlike a source, dbt owns both the file and the load, which is why a seed is only appropriate for small, rarely-changing reference data checked into version control, never for a table an external pipeline process is responsible for landing" data-vn="giữ nguyên &quot;seed&quot; — file CSV nằm trong thư mục seeds/ của project dbt, được lệnh dbt seed load thành table thật trong warehouse — khác source, dbt tự lo cả file và cả việc load, nên seed chỉ hợp cho reference data nhỏ, ít đổi, đã được commit vào git, không dùng cho bảng mà 1 process pipeline khác chịu trách nhiệm đổ vào">seed</dfn>.</p>
+
+<h2>2 · A real seed: city → region, checked in as a CSV</h2>
+<p><code>PLAN.md</code>'s own generator script (Day 1) hardcodes four cities — <code>Hanoi</code>, <code>Ho Chi Minh City</code>, <code>Da Nang</code>, <code>Hue</code> — directly in Python, with no region grouping anywhere. Adding "region" to the raw generator would mean touching Day 1's scaffolding and re-running the whole load for four rows of lookup data that will almost never change. A seed is the right tool precisely because this data: lives nowhere else in the warehouse, changes on a timescale of "maybe once a year," and is small enough to read in one glance in a pull request diff.</p>
+<pre><code><span class="cm">-- food_delivery_pipeline/seeds/seed_cities.csv</span>
+city,region
+Hanoi,North
+Ho Chi Minh City,South
+Da Nang,Central
+Hue,Central</code></pre>
+<p>Load it:</p>
+<pre><code>uv run --project ../dbt_env dbt seed</code></pre>
+<p>Expected: <code>Completed successfully</code>, naming <code>seed_cities</code> — and a real table now exists at <code>dbt_dev.seed_cities</code> (or wherever today's active target's schema points, per Day 31), with exactly 4 rows, no <code>source()</code> declaration anywhere, because dbt itself just built it.</p>
+
+<h2>3 · <code>ref()</code> on a seed looks identical to <code>ref()</code> on a model — on purpose</h2>
+<p>This is the detail worth remembering over any syntax: once loaded, a seed is just another node in the project's DAG, referenced with the exact same <code>ref()</code> used for <code>stg_restaurants</code> or <code>fct_orders</code> since Day 2. There is no separate "seed-reading" function.</p>
+<pre><code><span class="cm">-- models/staging/stg_restaurants_enriched.sql</span>
+select
+    r.restaurant_id,
+    r.name,
+    r.cuisine,
+    r.city,
+    c.region,
+    r.commission_rate
+from {{ ref('stg_restaurants') }} as r
+left join {{ ref('seed_cities') }} as c
+    on r.city = c.city</code></pre>
+<p><code>ref('stg_restaurants')</code> points at a model built from a <code>source()</code>-declared raw table; <code>ref('seed_cities')</code> points at a seed built from a checked-in CSV. dbt's dependency graph treats both the same way — build order, <code>dbt build --select stg_restaurants_enriched+</code>, and the lineage graph all work identically whether the upstream node is a model, a source, or a seed. The only place the distinction actually matters is at the edge: how the data got into the warehouse in the first place, not how anything downstream reads it.</p>
+<p>TODO — build <code>stg_restaurants_enriched</code> and confirm the join actually matched every row:</p>
+<pre><code>uv run --project ../dbt_env dbt build --select seed_cities+
+docker compose exec -T postgres psql -U fdp -d fdp -c \
+  "select count(*) as total, count(region) as matched from dbt_dev.stg_restaurants_enriched;"</code></pre>
+<p>Expected: <code>total=40, matched=40</code> — every one of Day 1's 40 restaurants has a <code>city</code> that exists in <code>seed_cities</code>, so the left join loses no rows. If <code>matched</code> comes back lower than <code>total</code>, a restaurant's <code>city</code> value doesn't match any row in the seed exactly (case or whitespace are the usual culprits) — fix the seed's spelling, not the model.</p>
+
+<h2>4 · The line, stated as a rule you can defend out loud</h2>
+<p>The question "seed or source?" has one real test: <strong>who is responsible for the file getting into the warehouse, and how often does the data change?</strong> <code>raw.orders</code> fails both — a Python script owns the load, and 500 new rows could land tomorrow — so it's a source, always. <code>seed_cities.csv</code> passes both — dbt owns the load via <code>dbt seed</code>, and a new city opening is a deploy, not a daily event. The size test matters too: a seed's whole file lives in git and gets fully reloaded (dropped and recreated) on every <code>dbt seed</code> run, which is fine for four rows and actively wrong for anything resembling production order volume.</p>
+<div class="callout"><strong>The trap: reaching for a seed when the real answer is "write a test instead."</strong> A list of the five valid order statuses (<code>placed, accepted, picked_up, delivered, cancelled</code>) looks like seed material, but it's better enforced as an <code>accepted_values</code> data test on <code>stg_order_events.status</code> (dbt_utils or dbt-core's own generic test) — a rule about what's <em>valid</em>, not a table to join against. Reach for a seed only when the data is genuinely joined into a query's result, like today's region column. If nothing ever selects a column out of it, it's a constraint, not a seed.</div>
+
+<div class="interview">
+<p><strong>Q: "When would you use a dbt seed instead of a source?"</strong> A strong answer, out loud: <em>"A source is for a table something outside dbt is responsible for landing — a script, a Kafka consumer, a CDC tool — and dbt only ever reads it. A seed is for small, rarely-changing reference data I'm willing to check into the dbt project itself as a CSV and let dbt load with dbt seed — a city-to-region mapping is a good example, because it changes maybe once a year and is small enough to review in a pull request diff. Once loaded, both are referenced with ref(), so the DAG and build order don't care which one it is — the distinction is entirely about who owns getting the data in, not how it's read afterward. I'd never use a seed for anything an external pipeline process already lands, and I'd never use it for a fixed list of valid values either — that's a data test, not a table to join."</em> The signal: naming the ownership test directly, and naming the test-instead-of-seed trap without being asked.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A source always points at a table something outside dbt is responsible for loading -- a script, a Kafka consumer, a CDC tool -- and dbt only ever reads it, never writes to it. raw.orders is loaded by Day 1's generator script and can grow by hundreds of rows at any time, which fails both of a seed's real tests: dbt doesn't own the load, and the data isn't small or rarely-changing.">
+    <p class="stem">Why is <code>raw.orders</code> a source and not a seed?</p>
+    <button class="opt" data-ok>An outside script owns the load; row counts grow often</button>
+    <button class="opt">dbt seed cannot physically read a table with 500 rows</button>
+    <button class="opt">Sources are required for any table queried inside a join</button>
+  </div>
+  <div class="q" data-why="Once a seed CSV is loaded by dbt seed, it becomes a real table in the warehouse and is referenced exactly like any model or source-derived model: with ref(). There is no separate seed-reading function -- the DAG, build order and lineage graph all treat a seed node the same way they treat a model node.">
+    <p class="stem">How does a model reference a loaded seed table in its SQL?</p>
+    <button class="opt" data-ok>The same <code>ref()</code> function used for any other model</button>
+    <button class="opt">A special <code>seed()</code> function unique to seed tables only</button>
+    <button class="opt">A raw schema-qualified table name, bypassing dbt entirely here</button>
+  </div>
+  <div class="q" data-why="A seed's whole CSV file lives in git and gets fully dropped and reloaded on every dbt seed run -- fine for four rows of city/region data, actively wrong for anything resembling real order volume, which is exactly why raw.orders stays a source loaded by an external process instead of a checked-in file.">
+    <p class="stem">What happens to a seed's underlying table on every <code>dbt seed</code> run?</p>
+    <button class="opt" data-ok>It is fully dropped and reloaded from the checked-in CSV</button>
+    <button class="opt">Only new rows since the last run get appended in</button>
+    <button class="opt">Nothing -- a seed loads exactly once per project, ever</button>
+  </div>
+  <div class="q" data-why="A fixed list of valid order statuses is a rule about what's valid, not data meant to be joined into a query result -- it belongs in an accepted_values data test on the status column, not a seed table. The actual trap named today is reaching for a seed whenever reference data comes to mind, when the real question is whether anything ever selects a column out of it.">
+    <p class="stem">Why shouldn't the five valid order statuses become a seed table?</p>
+    <button class="opt" data-ok>Nothing selects a column from it; it's just a rule</button>
+    <button class="opt">dbt seed only accepts numeric columns, never any text values</button>
+    <button class="opt">Five rows falls below some fixed minimum seed row count</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> dbt Labs's <a href="https://docs.getdbt.com/docs/build/seeds">Seeds</a> doc (cited in <code>RESOURCES.md</code> alongside Day 2's <a href="https://docs.getdbt.com/docs/build/sources">Sources</a> doc) states the "small, rarely-changing, version-controlled" guidance directly, plus the column-type override config today's scratch verification exercised but the lesson didn't need to show. Not fetched live this round (no working web-fetch tool was available this session, the same gap Days 23, 30, 31 and 32 hit) — today's <code>dbt seed</code> behavior and <code>ref()</code> equivalence were verified instead by actually running <code>dbt parse</code> against a scratch project with a seed and a seed-referencing model (see this lesson's own generation log entry), not fetched fresh from the live page; confirm the exact full-reload-on-every-run behavior against the live docs before stating it as absolute in an interview — some adapters support an <code>--full-refresh</code>-gated incremental seed append, worth checking if asked.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 33.<br>
+<strong>Next up:</strong> Day 31's "Phase 3" dbt-depth map is now fully closed (environments, test severity, seeds vs. sources). The next round should re-check <code>PLAN.md</code> and this file's own tail for any newer learner signal before picking a fresh angle — dbt_utils' <code>generate_series</code>/<code>date_spine</code> macros (named in <code>PLAN.md</code>'s packages bullet but never built hands-on) and a Kafka consumer-lag monitoring walkthrough (Day 18 stayed concept-only) are two real, still-untouched candidates if no fresher signal exists.<br><br>
+💬 Anything unclear — when a small lookup table is worth a seed versus just being a CTE inside the model that needs it, or how a seed's column types get decided if a CSV's values are ambiguous (e.g. a column that looks numeric but should stay text)? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

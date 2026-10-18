@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 81 · io.StringIO &amp; io.BytesIO: file-shaped objects with no file</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 81 · ~20 min · 18 Oct 2026</p>
+<h1><code>io.StringIO</code> &amp; <code>io.BytesIO</code>: a file-shaped object with no file on disk</h1>
+<p class="byline">Day 6's <code>csv.reader(f)</code> and Day 76's <code>json.load(f)</code> both expect <code>f</code> to be <em>something with <code>.read()</code>/<code>.write()</code></em> — not necessarily a real file on disk. Day 15's <code>logging</code> practice already leaned on this once, quietly, to capture log output without touching the filesystem, but never named or taught the tool doing the work. <dfn data-en="io.StringIO and io.BytesIO are in-memory, file-like objects -- they support the same read()/write()/seek() methods a real open() file does, but hold their data as a string or bytes value in memory instead of on disk" data-vn="giữ nguyên &quot;StringIO&quot;/&quot;BytesIO&quot; — object giả làm file, có đủ các hàm read()/write()/seek() như file thật mở bằng open(), nhưng dữ liệu nằm trong memory (dạng string hoặc bytes) chứ không nằm trên đĩa">The <code>io</code> module's <code>StringIO</code> and <code>BytesIO</code></dfn> are that tool: a value that behaves exactly like an open file to any code expecting one, without ever touching disk.</p>
+
+<div class="callout"><strong>Why today, specifically:</strong> a fresh-gap grep across all 80 lessons and every practice file found zero hits for <code>StringIO</code>/<code>BytesIO</code> as a taught topic — the only two prior mentions are Day 15's practice file, which builds a <code>logging.StreamHandler(io.StringIO())</code> purely as an invisible test fixture with no explanation in the lesson text, and the standing "worth a look" note carried across several review-day gap scans (Days 56, 68) that never won out against a stronger competing module. It is a genuine, clean gap, and it is squarely in scope: <code>MISSION.md</code>'s pipeline goal is reading/writing CSV and JSON, and every format-handling lesson so far (Days 6, 66, 76) has assumed the data source is either a real file or an in-memory string/list — <code>StringIO</code>/<code>BytesIO</code> is the missing bridge between those two, letting a function written for files be tested, or reused, without disk I/O at all.</div>
+
+<h2>1 · The problem: a function written for files, tested without one</h2>
+<p>Suppose a function expects an already-open file object — exactly the shape <code>csv.writer()</code> and <code>json.dump()</code> both want:</p>
+<pre><code><span class="kw">import</span> csv
+
+<span class="kw">def</span> write_rows(f, rows):
+    writer = csv.writer(f)
+    <span class="kw">for</span> row <span class="kw">in</span> rows:
+        writer.writerow(row)</code></pre>
+<p>Testing this for real means creating a temp file (Day 65's <code>tempfile</code>), writing to it, closing it, reopening it to read the result back, then deleting it — four extra steps around the one line actually being tested. <code>csv.writer()</code> never asked for a <em>file</em> specifically; it asked for anything with a <code>.write()</code> method that takes a string. <code>io.StringIO</code> is exactly that, held entirely in memory:</p>
+<pre><code><span class="kw">import</span> io, csv
+
+buf = io.StringIO()
+write_rows(buf, [[<span class="str">"name"</span>, <span class="str">"qty"</span>], [<span class="str">"bolt"</span>, <span class="num">10</span>]])
+<span class="kw">print</span>(buf.getvalue())
+<span class="cm"># 'name,qty\r\nbolt,10\r\n' -- the exact text that would have been written to a real file</span></code></pre>
+<p><code>write_rows()</code> itself needed zero changes — it never knew its <code>f</code> wasn't a real file. <code>.getvalue()</code> is <code>StringIO</code>'s own method for reading back everything written so far, as a plain <code>str</code>, with no <code>open()</code>/<code>close()</code>/temp-path bookkeeping anywhere.</p>
+<p>(The <code>\r\n</code> in that output is Day 66's <code>csv</code> dialect doing its normal line-ending job, same as it would write to a real file — <code>StringIO</code> changed nothing about <code>csv</code>'s own behavior, only where the bytes end up.)</p>
+
+<h2>2 · Reading, not just writing: <code>StringIO</code> as an input</h2>
+<p><code>StringIO</code> works the other direction too — construct it <em>with</em> text, and anything that reads from a file reads that text instead:</p>
+<pre><code><span class="kw">import</span> io, csv
+
+text = <span class="str">"name,qty\nbolt,10\nnut,25\n"</span>
+reader = csv.reader(io.StringIO(text))
+<span class="kw">print</span>(<span class="kw">list</span>(reader))
+<span class="cm"># [['name', 'qty'], ['bolt', '10'], ['nut', '25']]</span></code></pre>
+<p>This is the same pattern Day 6's <code>csv.reader(f)</code> used on a real open file — <code>csv.reader()</code> only ever needed something it could iterate line by line, and a <code>StringIO</code> wrapping a string satisfies that exactly like a file does. Useful whenever test data, or data that already arrived as a string (an HTTP response body, a string pulled from a database column), needs to go through file-shaped parsing code unchanged.</p>
+
+<div class="callout"><strong>Bridge from SQL:</strong> this is the same idea as a SQL view over a derived table — the consuming query doesn't know or care that the "table" isn't a real stored one. <code>StringIO</code> is a view over a string that lets file-shaped code run against it as if it were a real file.</div>
+
+<h2>3 · <code>BytesIO</code>: the same idea for bytes, not text</h2>
+<p><code>StringIO</code> holds <code>str</code>; <code>BytesIO</code> holds <code>bytes</code> — needed for binary formats like a zip archive (Day 64), a pickle stream (Day 72), or image data, none of which are valid text:</p>
+<pre><code><span class="kw">import</span> io
+
+buf = io.BytesIO()
+buf.write(<span class="str">b"hello"</span>)
+buf.write(<span class="str">b" world"</span>)
+<span class="kw">print</span>(buf.getvalue())   <span class="cm"># b'hello world'</span>
+
+buf.seek(<span class="num">0</span>)             <span class="cm"># rewind to the start -- same seek() a real binary file supports</span>
+<span class="kw">print</span>(buf.read())      <span class="cm"># b'hello world' -- read from the current position, now position 0</span></code></pre>
+<p><code>.seek(0)</code> is the detail that trips people up on both classes: after writing, the internal position sits at the <em>end</em> of what was written, so an immediate <code>.read()</code> returns nothing — exactly like a real file left open in write mode. Rewinding with <code>.seek(0)</code> first is what makes reading back what was just written actually work, on both <code>StringIO</code> and <code>BytesIO</code>.</p>
+
+<div class="callout"><strong>Where this sits next to Day 65's <code>tempfile</code>:</strong> both exist to avoid naming a real path on disk, but for different reasons. <code>tempfile</code> still creates an actual file or directory — needed when some other program, or a function that insists on a real path string, has to open it too. <code>StringIO</code>/<code>BytesIO</code> create nothing on disk at all — the right choice whenever every reader and writer involved is Python code that only needs the file-like <em>interface</em>, never a path.</div>
+
+<div class="callout"><strong>Where pandas goes from here:</strong> nothing pandas-specific today — <code>pandas.read_csv()</code> happens to also accept a <code>StringIO</code>/<code>BytesIO</code> in place of a path, but that is <code>data/</code>'s API to teach; no <code>DataFrame</code> code shown here, per <code>MISSION.md</code>.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/81_io_stringio_bytesio.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/81_io_stringio_bytesio.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: writing CSV rows into a <code>StringIO</code> and reading the result back with <code>.getvalue()</code>, parsing a <code>StringIO</code>-wrapped CSV string with <code>csv.reader()</code>, round-tripping JSON through a <code>StringIO</code> with <code>json.dump()</code>/<code>json.load()</code>, and writing then rewinding-and-reading a <code>BytesIO</code> to confirm <code>.seek(0)</code> is what makes the read-back work.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="csv.writer()/csv.reader() only need an object with the right read()/write() methods -- they never check whether it's a real file on disk. A StringIO satisfies that interface while holding its data purely in memory, so code written for a real file runs unchanged against it, with no temp file created or cleaned up.">
+    <p class="stem">Why does <code>csv.writer(buf)</code> work when <code>buf</code> is a <code>StringIO</code> instead of a real open file?</p>
+    <button class="opt" data-ok>csv.writer only needs a write() method, not an actual disk file</button>
+    <button class="opt">csv.writer silently converts any StringIO into a real temp file first</button>
+    <button class="opt">StringIO objects are secretly real files stored in a hidden folder</button>
+  </div>
+  <div class="q" data-why="After writing, a StringIO's (or BytesIO's) internal position sits at the end of what was just written, exactly like a real file left open in write mode. An immediate read() from that position returns nothing. seek(0) rewinds the position back to the start, which is what makes reading back the just-written content actually return it.">
+    <p class="stem">Why does reading from a <code>BytesIO</code> return nothing right after writing to it, unless <code>.seek(0)</code> runs first?</p>
+    <button class="opt" data-ok>the write moved the position past it, like a file</button>
+    <button class="opt">BytesIO objects only ever support writes, never reads at all</button>
+    <button class="opt">a write() call always erases every byte written before it</button>
+  </div>
+  <div class="q" data-why="tempfile still creates an actual file or directory on disk, needed when some other program or a function demanding a real path has to open it too. StringIO/BytesIO create nothing on disk at all -- the right choice whenever every reader and writer involved is Python code that only needs the file-like interface, never an actual path.">
+    <p class="stem">When does Day 65's <code>tempfile</code> stay the better choice over <code>StringIO</code>/<code>BytesIO</code>?</p>
+    <button class="opt" data-ok>when some other program needs to open an actual file path</button>
+    <button class="opt">whenever the data being held is text rather than raw bytes</button>
+    <button class="opt">never at all — StringIO and BytesIO always fully replace it</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the standard library's <a href="https://docs.python.org/3/library/io.html"><code>io</code></a> docs — the "Text I/O" and "Binary I/O" sections describe <code>StringIO</code>/<code>BytesIO</code> directly alongside the real-file classes they mimic, including <code>.getvalue()</code> and <code>.seek()</code>.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day81">glossary</a> under Day 81.<br>
+This is the second fresh lesson since Day 79's review (Day 80 was the first) — Day 82 can still take a fresh topic from its own gap scan; if it does, Day 83 becomes the natural review day covering Days 80-82, per this course's settled three-fresh-then-review cadence.<br><br>
+💬 Anything unclear — when to reach for <code>StringIO</code> over a real temp file, or why <code>.seek(0)</code> matters? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

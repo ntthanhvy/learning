@@ -10213,4 +10213,141 @@ fail *gracefully* so the learner sees which task failed.
   review (Days 76-78); two more fresh lessons should follow before
   the next review is due by this course's settled three-fresh-then-review
   cadence, unless a strong reason to deviate turns up then.
+- 2026-10-18 — **Day 81 generated: `io.StringIO` &amp; `io.BytesIO` —
+  file-shaped objects with no file** (headless run, zero prior context per
+  the orchestrator's brief). Read `MISSION.md` in full (read-only,
+  untouched) with particular attention to the no-pandas exclusion, `PLAN.md`
+  in full confirming Phase 2's spine is fully spent so topic choice is
+  gap-driven, `RESOURCES.md` in full, `learning-records/0001-…md` in full
+  (still the only record — no newer signal than Day 1's baseline), and
+  `assets/nav.js` in full (registration format + every entry through Day
+  80). `NOTES.md` exceeds this run's single-read size cap, so only the tail
+  (~180 lines, covering Day 80 in full) plus the "Course conventions"/"hard
+  rule"/"Practice files" sections near the top were read directly —
+  sufficient, since the tail already carried Day 80's next-day note (no
+  standing fresh-gap candidate left, next fresh day needs its own scan).
+  Idempotency: highest existing lesson was
+  `0080-difflib-comparing-sequences.html` (2026-10-17); `assets/nav.js` had
+  no `n: 81`/`2026-10-18` entry, and no `0081-*`/`81_*` files existed in
+  `lessons/`/`practice/` before writing anything.
+  **DB check:** both `psql "$LEARNING_DB_URL" …` and `bin/query-progress`
+  were ruled out before attempting them, per this run's explicit brief —
+  the former is blocked by a hard sandbox content filter on expanding that
+  env var in Bash command text ("Contains simple_expansion"), the latter by
+  a generic approval gate with no human present to approve in this headless
+  session. Did not retry either. Paced entirely from on-disk state
+  (`assets/nav.js`, `NOTES.md` tail, `PLAN.md` spine, `learning-records/`)
+  instead, consistent with this log's running note that DB reads are
+  blocked on essentially every prior run too.
+  Decision — review vs. fresh topic: Day 80 was the first fresh lesson
+  since Day 79's review (Days 76-78), so Day 81 defaults to a second fresh
+  topic per the settled three-fresh-then-review cadence (one more fresh day
+  can follow before a review is due). Ran a from-scratch fresh-gap scan
+  since Day 80 left no standing candidate: grepped all 80 lessons and every
+  practice file case-insensitively for a wide set of plausible untaught
+  stdlib corners — `textwrap`/`string.Template` (already closed via Day
+  55's aside), `glob`/`fnmatch` (already covered by Day 13's `Path.glob()`/
+  `.rglob()`), `base64`, `sqlite3` (already covered incidentally via Day
+  21), `ChainMap`/`OrderedDict`, `warnings`, `traceback.format_exc`,
+  `array.array`, `calendar`, `graphlib` — and `io.StringIO`/`io.BytesIO`.
+  `io.StringIO`/`BytesIO` came back as a genuine, clean gap: its only two
+  prior mentions anywhere are Day 15's practice file, which builds a
+  `logging.StreamHandler(io.StringIO())` purely as an invisible test
+  fixture with zero explanation in the lesson text, and a "worth a look"
+  aside carried across two earlier review-day gap scans (Days 56, 68) that
+  never won out against a stronger competing module at the time. Chose it
+  over `base64` (the other genuinely clean zero-hit candidate): `io`
+  directly completes the file-like-object story Days 6/66/76 already
+  started (csv/json functions expecting "anything with read()/write()"),
+  ties straight into `MISSION.md`'s pipeline/testing goals, and is reused
+  far more often in real code and interviews than `base64`, which is
+  narrower (encoding/decoding only) and was left as the next candidate to
+  consider in a future round.
+  No-pandas rule: grepped case-insensitively for `pandas`/`numpy`/`pd\.`/
+  `np\.` in the new lesson and practice file — exactly one hit (the single
+  "Where pandas goes from here" boundary callout, noting `pandas.read_csv()`
+  also accepts a `StringIO`/`BytesIO` but that this is `data/`'s API to
+  teach, not demonstrated) and zero hits in the practice file.
+  **New jargon: 3 terms** (`io.StringIO`/`io.BytesIO` as one combined term,
+  `.getvalue()`, `.seek(0)`) — the module pair wrapped in a single
+  `<dfn data-en="…" data-vn="…">` on first mention in the byline, per this
+  course's shared rule; `.getvalue()`/`.seek(0)` are named and explained in
+  prose at first use. Grepped `reference/glossary.html` case-insensitively
+  for all three terms first to confirm zero prior entries, then appended a
+  new `id="day81"` section directly after Day 80's, matching the file's
+  append-only convention.
+  Verified every code sample live via `uv run python3` against a scratch
+  script (written with `Write` under `/tmp`, outside this repo's tracked
+  tree) before writing it into the lesson: confirmed `csv.writer()` into a
+  `StringIO` produces `\r\n` line endings (same dialect behavior as a real
+  file, Day 66's gotcha resurfacing), `csv.reader()` parses a
+  `StringIO`-wrapped string directly, a `BytesIO` written-then-read-without-
+  seek returns empty bytes while `.seek(0)` first returns the written
+  content, and a `json.dumps()`/`StringIO` round trip preserves a dict
+  exactly.
+  Quiz: 3 questions (why `csv.writer()` accepts a `StringIO` in place of a
+  real file, why an unseeked read after a write returns nothing on
+  `BytesIO`, when `tempfile` is still the better choice over `StringIO`/
+  `BytesIO`). Word counts were checked with a throwaway Python
+  `html.parser.HTMLParser`-based script (written via `Write` under the repo
+  root as `.verify81_quiz.py`, deleted after use) that strips tags from
+  each `<button class="opt">` and splits on whitespace. First draft
+  mismatched on two of three questions (Q2 13/11/9, Q3 11/11/9) — iterated
+  option-by-option across several rounds (trimming/adding words like "at
+  all"/"like a file"/"entirely"/"period" and recounting after each single-
+  word change, once overshooting a fix and needing a second correction
+  pass) until all three landed on equal per-question counts: 11/11/11,
+  10/10/10, 11/11/11. A companion throwaway script (`.verify81_tags.py`,
+  same write-then-delete pattern) confirmed `<div>`/`<p>`/every other tag's
+  balance and zero bare `&` on both the new lesson file and the full
+  (now-modified) `reference/glossary.html`; `node --check` confirmed no
+  syntax errors on `assets/nav.js` after registering today's entry. Both
+  scratch scripts deleted before finishing.
+  `RESOURCES.md`: added a new `io` docs line, placed directly after the Day
+  80 `difflib` line per the file's day-ordered citation convention.
+  Registered in `assets/nav.js` with `date: "2026-10-18"` right after the
+  `n: 80` entry; confirmed `node --check assets/nav.js` reports no syntax
+  errors after the edit.
+  Practice file `practice/81_io_stringio_bytesio.py` (4 checks,
+  stdlib-only, no `--with` flag, function-stub-with-TODO-comment style
+  matching Day 80's own): writing CSV rows into a `StringIO` and reading
+  back via `.getvalue()` (Ex 1), parsing a `StringIO`-wrapped CSV string
+  with `csv.reader()` (Ex 2), a `json.dump()`/`json.load()` round trip
+  through a `StringIO` (Ex 3), and a `BytesIO` write-then-read pair showing
+  the unseeked read comes back empty while the post-`seek(0)` read returns
+  the written bytes (Ex 4).
+  Verified in a scratch `.scratch-0081/` directory created directly under
+  the repo root: the shipped (unsolved) copy, run with `uv run python3`,
+  printed four clean ✗ lines with no traceback; a separately solved copy
+  (written via `Write`, not by editing the shipped file) printed all four
+  ✓ and the "All green" tally, run twice consecutively with identical
+  results both times. Also ran the shipped file directly from its real
+  `python/practice/` path as a final check (both right after first writing
+  it, and again after the quiz-wording edits above), confirming the same
+  four clean ✗ lines outside the scratch copy each time. The scratch
+  directory was deleted before finishing; a companion scratch file created
+  under `/tmp` for live-verifying code samples could not be removed by this
+  session's sandboxed `rm` (blocked: only paths under the repo working
+  directory are allowed) but holds no secrets and is outside the repo's
+  tracked tree, so it carries no cleanup obligation here.
+  `python/learning-records/` still holds only the Day 1 baseline — nothing
+  from today's run (a gap-driven module choice following the same
+  decision process as several prior rounds) is a new, durable fact about
+  the learner distinct from what Day 1's record already says.
+  `bin/record-progress python lesson_generated --day 81 --lesson
+  0081-io-stringio-bytesio.html --detail '{"by":"headless"}'` was run from
+  the repo root at the end of this round.
+  Final `git status --short -- python/` is expected to show exactly five
+  paths changed before this `NOTES.md` edit (`assets/nav.js`,
+  `RESOURCES.md`, `reference/glossary.html`, plus the new lesson and
+  practice file) — six total including this file — no other course's
+  files touched, and no leftover scratch files or directories under the
+  repo (aside from the noted, harmless `/tmp` file outside the tracked
+  tree).
+  **Next-day note:** Day 81 is the second fresh lesson since Day 79's
+  review (Day 80, 81); one more fresh lesson can follow before the next
+  review is due by this course's settled three-fresh-then-review cadence,
+  though `base64` is now the standing fresh-gap candidate to consider first
+  if Day 82 goes fresh again — it was the runner-up this round, ruled out
+  only on relative priority, not because it is already taught.
 

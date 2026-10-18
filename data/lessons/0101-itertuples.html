@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 101 · itertuples(): the better row-loop, for the rare case a loop is unavoidable</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 101 · ~20 min · 18 Oct 2026</p>
+<h1>itertuples(): the better row-loop, for the rare case a loop is unavoidable</h1>
+<p class="byline">Lesson 100 closed with one standing candidate, carried forward from Lesson 99's own fresh scan: <code>itertuples()</code>, the lower-overhead alternative to <code>iterrows()</code> — named back in Lesson 1 as the row-loop anti-pattern (<code>for _, row in df.iterrows(): ...</code>) but never itself covered. This round promoted it directly rather than running another fresh scan, since Lesson 100's own teaser already named it as the one option left standing after the rest of today's candidates closed out.</p>
+
+<h2>1 · Same job as iterrows(), a different row shape</h2>
+<p><dfn data-en="a DataFrame method that loops over rows like iterrows(), but hands back each row as an immutable namedtuple instead of a (label, Series) pair -- no per-row Series construction, so it keeps the interpreter-loop overhead Lesson 1 warned about but removes the single biggest cost of iterrows() along the way" data-vn="giữ nguyên 'itertuples()' — cũng là loop qua từng hàng như iterrows(), nhưng trả về mỗi hàng dưới dạng namedtuple KHÔNG đổi được (immutable), không phải cặp (label, Series); không phải tạo 1 Series riêng cho mỗi hàng nên nhanh hơn iterrows() nhiều, nhưng vẫn là loop Python — chậm hơn cách vectorized rất nhiều">itertuples()</dfn> loops over the exact same rows <code>iterrows()</code> does — the difference is what each iteration hands back:</p>
+<pre><code><span class="kw">import</span> pandas <span class="kw">as</span> pd
+df = pd.DataFrame({<span class="st">"customer"</span>: [<span class="st">"An"</span>, <span class="st">"Binh"</span>, <span class="st">"Chi"</span>], <span class="st">"amount"</span>: [<span class="kw">120.0</span>, <span class="kw">35.5</span>, <span class="kw">99.9</span>]})
+
+<span class="kw">for</span> row <span class="kw">in</span> df.itertuples():
+    <span class="kw">print</span>(row)
+<span class="cm"># Pandas(Index=0, customer='An', amount=120.0)
+# Pandas(Index=1, customer='Binh', amount=35.5)
+# Pandas(Index=2, customer='Chi', amount=99.9)</span></code></pre>
+<p>Confirmed directly (pandas 3.0.6): each row is a <code>collections.namedtuple</code> (class name <code>Pandas</code> by default, set via <code>name=</code>), not the <code>(index_label, Series)</code> pair <code>iterrows()</code> yields. Field access reads naturally, <code>row.customer</code> / <code>row.amount</code> / <code>row.Index</code> — the row index label rides along as the first field, named <code>Index</code> exactly like that, capitalized to avoid colliding with a real column also called <code>index</code>.</p>
+
+<h2>2 · Why it's faster: no per-row Series ever gets built</h2>
+<p>Confirmed directly, timing both loops over the same 50,000-row column summed with a Python <code>for</code>: <code>iterrows()</code> took ~0.36s, <code>itertuples()</code> took ~0.01s on the identical data — roughly 35x faster in this run. The reason traces straight back to what each one constructs per row:</p>
+<pre><code><span class="cm"># iterrows(): builds a brand-new Series for EVERY row -- new Index,
+# new dtype inference (often upcasting the whole row to object if the
+# columns mix types), real per-row allocation cost.</span>
+<span class="kw">for</span> _, row <span class="kw">in</span> df.iterrows():
+    total += row[<span class="st">"amount"</span>] * <span class="kw">2</span>
+
+<span class="cm"># itertuples(): just a lightweight namedtuple, no Series, no dtype
+# inference, no Index object built per row.</span>
+<span class="kw">for</span> row <span class="kw">in</span> df.itertuples():
+    total += row.amount * <span class="kw">2</span></code></pre>
+<p>Confirmed directly: a vectorized <code>(df["amount"] * 2).sum()</code> on the same data ran in ~0.0003s — roughly 35x faster again than <code>itertuples()</code>, and over 1000x faster than <code>iterrows()</code>. <code>itertuples()</code> narrows the gap to vectorization; it never closes it. Lesson 1's rule still stands exactly as written: reach for a column expression, a mask, or a <code>groupby</code> first. <code>itertuples()</code> is only the answer once a real per-row loop is unavoidable — typically calling an external, row-at-a-time API or writing out a file format with no vectorized writer.</p>
+
+<h2>3 · Two traps unique to the namedtuple shape</h2>
+<p>Confirmed directly: a column name that is not a valid Python identifier, is repeated, or starts with an underscore gets silently renamed to a positional field instead — <code>_1</code>, <code>_2</code>, and so on by position (official pandas docs, identical wording) — so attribute access on that one field quietly breaks while every other field still works fine:</p>
+<pre><code>df2 = df.rename(columns={<span class="st">"amount"</span>: <span class="st">"2024 amount"</span>})
+<span class="kw">for</span> row <span class="kw">in</span> df2.itertuples():
+    <span class="kw">print</span>(row)
+<span class="cm"># Pandas(Index=0, customer='An', _2=120.0)  -- "2024 amount" became _2</span>
+row.customer   <span class="cm"># 'An' -- still works, valid identifier</span>
+row._2         <span class="cm"># 120.0 -- the renamed field, NOT row.amount (AttributeError)</span></code></pre>
+<p>The second trap, confirmed directly: the namedtuple is immutable. Assigning <code>row.amount = 1</code> inside the loop raises <code>AttributeError: can't set attribute</code> immediately, rather than silently doing nothing — a real, if noisy, safety net against the exact mutation-inside-a-loop mistake that makes row loops risky in the first place. <code>iterrows()</code>'s Series looks writable but a write to it never reaches the original DataFrame either (Lesson 26's <code>SettingWithCopy</code> territory) — <code>itertuples()</code> just fails loudly up front instead of silently doing nothing.</p>
+
+<div class="interview">
+<p><strong>Q: "iterrows() is slow — does itertuples() fix that?"</strong> A strong answer, out loud: <em>"It helps a lot, since it skips building a brand-new Series per row — in a quick test I ran it was over 30x faster than iterrows() on the same data. But it's still a Python-level loop with per-row interpreter overhead, and vectorization beat itertuples() by another 30x on the identical column. So itertuples() is my answer when I'm stuck calling something row-at-a-time, like an external API — not a general substitute for thinking in columns first."</em> The signal: citing itertuples() as the better loop, not the right tool — vectorization is still the right tool.</p>
+</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/101_itertuples.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/101_itertuples.py</code></pre>
+<p>Exercise 1 confirms the basic shape: each row from <code>itertuples()</code> is a namedtuple with <code>.Index</code> plus one field per column, readable by attribute (Section 1). Exercise 2 confirms the invalid-identifier fallback: a column name that isn't a valid Python identifier becomes a positional field like <code>_2</code> instead (Section 3). Exercise 3 confirms immutability: assigning to a field of a yielded row raises <code>AttributeError</code> (Section 3).</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: iterrows() builds a brand-new Series (with its own Index and dtype inference) for every single row, which is real per-row allocation cost. itertuples() skips that entirely and just yields a lightweight namedtuple, which is why it measured roughly 35x faster on identical data in this lesson's own timing.">
+    <p class="stem">What makes <code>itertuples()</code> measurably faster than <code>iterrows()</code> over the same rows?</p>
+    <button class="opt" data-ok>iterrows() builds a brand-new Series each row; itertuples() never does</button>
+    <button class="opt">itertuples() secretly just skips over half of the actual rows</button>
+    <button class="opt">iterrows() always reads every single column twice per row, somehow</button>
+  </div>
+  <div class="q" data-why="Confirmed directly against the official pandas docs: a column name that is not a valid Python identifier, is repeated, or starts with an underscore gets silently renamed to a positional field like _1, _2, and so on -- so df.rename(columns={'amount': '2024 amount'}) makes that field show up as row._2, not row.amount, with no warning.">
+    <p class="stem">A column is named <code>"2024 amount"</code>, not a valid Python identifier. What does <code>itertuples()</code> do with that field?</p>
+    <button class="opt" data-ok>silently renames it to a positional field like _2, no warning</button>
+    <button class="opt">raises a clear ValueError right away, naming that bad column itself</button>
+    <button class="opt">just drops that single column entirely from every row it yields</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: the namedtuple itertuples() yields is immutable, so row.amount = 1 inside the loop raises AttributeError: can't set attribute right away. This is actually a safety net -- iterrows()'s Series looks writable but a write to it typically never reaches the original DataFrame either, just silently instead of loudly.">
+    <p class="stem">Inside an <code>itertuples()</code> loop, what happens when code tries <code>row.amount = 1</code>?</p>
+    <button class="opt" data-ok>it raises AttributeError right away, since that namedtuple can never be changed</button>
+    <button class="opt">it quietly updates that exact row back in the original source DataFrame</button>
+    <button class="opt">nothing happens at all -- the assignment just silently does nothing real</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official <a href="https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.itertuples.html">pandas API reference for <code>DataFrame.itertuples()</code></a> (per <code>RESOURCES.md</code>'s pandas User Guide entry, ~3 min) — confirms the positional-rename rule for invalid/repeated/underscore-prefixed column names in wording matching the direct probing exactly, and documents the <code>name=</code> parameter (set to <code>None</code> for plain tuples instead of namedtuples) this lesson didn't otherwise need.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>itertuples()</code> is new today, added right after Lesson 100's <code>np.vstack() / np.hstack() / np.column_stack()</code> entry.<br>
+<strong>Next lesson:</strong> no standing candidate named this round — today closed the one option Lesson 100 carried forward rather than opening a new one, so tomorrow starts with a fresh curriculum/glossary scan.<br><br>
+💬 Anything unclear — the Series-vs-namedtuple cost difference, the invalid-identifier rename, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

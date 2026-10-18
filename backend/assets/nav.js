@@ -214,6 +214,8 @@
       file: "lessons/0103-dependency-injection-di-container.html" },
     { n: 104, date: "2026-10-17", title: "The middleware pipeline: order is the feature",
       file: "lessons/0104-aspnet-middleware-pipeline.html" },
+    { n: 105, date: "2026-10-18", title: "IHostedService: a worker living inside your app process",
+      file: "lessons/0105-ihostedservice-background-services.html" },
   ];
 
   const REFS = [

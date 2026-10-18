@@ -206,6 +206,8 @@
       file: "lessons/0099-np-setdiff1d-intersect1d-union1d.html" },
     { n: 100, date: "2026-10-17", title: "np.vstack() / np.hstack() / np.column_stack(): the array layer under pd.concat()",
       file: "lessons/0100-np-vstack-hstack-column-stack.html" },
+    { n: 101, date: "2026-10-18", title: "itertuples(): the better row-loop, for the rare case a loop is unavoidable",
+      file: "lessons/0101-itertuples.html" },
   ];
 
   const REFS = [

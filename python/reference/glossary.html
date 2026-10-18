@@ -589,6 +589,14 @@
   <tr><td>get_close_matches()</td><td>giữ nguyên "get_close_matches" — hàm trong difflib dựa trên SequenceMatcher.ratio() để tìm trong 1 danh sách candidate những giá trị giống nhất với 1 từ cho sẵn, đúng kiểu gợi ý "bạn có ý là...?"</td><td><code>difflib.get_close_matches(word, candidates)</code> uses <code>SequenceMatcher</code>'s ratio under the hood to return the best-matching candidates from a list, the exact shape a "did you mean…?" suggestion needs.</td></tr>
 </table>
 
+<h2 id="day81">Day 81 — io.StringIO &amp; io.BytesIO: file-shaped objects with no file</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>io.StringIO / io.BytesIO</td><td>giữ nguyên "StringIO"/"BytesIO" — object giả làm file, có đủ các hàm read()/write()/seek() như file thật mở bằng open(), nhưng dữ liệu nằm trong memory (dạng string hoặc bytes) chứ không nằm trên đĩa</td><td>In-memory, file-like objects from the standard library's <code>io</code> module. <code>StringIO</code> holds text (<code>str</code>); <code>BytesIO</code> holds raw bytes. Both support the same <code>.read()</code>/<code>.write()</code>/<code>.seek()</code> interface a real <code>open()</code> file does, so code written for a file runs unchanged against either, with no disk I/O at all.</td></tr>
+  <tr><td>.getvalue()</td><td>giữ nguyên ".getvalue()" — hàm của StringIO/BytesIO trả về toàn bộ nội dung đã ghi tính đến thời điểm gọi, dưới dạng str hoặc bytes, không cần seek() hay đóng file trước</td><td>A method unique to <code>StringIO</code>/<code>BytesIO</code> (a real file has no equivalent) that returns everything written so far as a plain <code>str</code> or <code>bytes</code> value, with no need to seek or close first.</td></tr>
+  <tr><td>.seek(0)</td><td>giữ nguyên ".seek(0)" — đưa vị trí đọc/ghi hiện tại về đầu; sau khi write() thì vị trí đang ở cuối, nên phải seek(0) trước thì read() mới đọc lại được đúng những gì vừa ghi</td><td>Rewinds the current read/write position back to the start. After writing, the position sits at the end of what was just written — exactly like a real file left open in write mode — so an immediate <code>.read()</code> returns nothing until <code>.seek(0)</code> runs first.</td></tr>
+</table>
+
 <p class="next">💬 A term here still unclear? Ask your teacher — hỏi bằng tiếng Việt cũng được.</p>
 
 <script src="../assets/nav.js"></script>

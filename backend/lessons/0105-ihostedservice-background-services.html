@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 105 · IHostedService: a worker living inside your app process</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 105 · ~20 min</p>
+<h1>IHostedService: a worker living inside your app process</h1>
+<p class="byline">Lesson 10 drew a hard line: a handler enqueues work, a separate, independent process dequeues and runs it. That's still the right model for real job queues. But ASP.NET Core has a lighter-weight shape for recurring or long-running work that doesn't need its own process — a background task registered to start and stop alongside the web app itself. Today: what that shape is, when it's the right call, and where it stops being enough.</p>
+
+<h2>1 · Not every background task needs Lesson 10's whole machine</h2>
+<p>Lesson 10's queue-and-worker pattern earns its complexity when jobs must survive a crash, retry safely, and scale independently of the web tier. But plenty of recurring backend work is smaller than that: expire stale sessions every hour, flush an in-memory metrics buffer every 30 seconds, warm a cache on startup. None of that needs a durable queue or a second deployable — it just needs <em>some</em> code running continuously, started once, stopped cleanly when the app shuts down.</p>
+<p>ASP.NET Core's answer is an <dfn data-en="the ASP.NET Core interface (StartAsync/StopAsync) that lets a class run as a long-lived background task inside the same process as the web app, started when the host starts and stopped when it shuts down -- registered with AddHostedService, not created per-request like a controller" data-vn="IHostedService (giữ nguyên) — interface cho 1 task chạy nền ngay trong cùng process với web app, start/stop cùng lúc với app, khai báo qua AddHostedService, không tạo mới theo từng request như controller">IHostedService</dfn>: a class the DI container starts once, when the app starts, and stops once, when the app shuts down — living for the whole process lifetime, same lifetime shape as Lesson 103's Singleton, but with actual code to run instead of just state to hold.</p>
+
+<h2>2 · The shape: BackgroundService and a loop</h2>
+<p>Nobody implements <code>IHostedService</code> directly in practice — the framework ships <dfn data-en="an abstract base class ASP.NET Core provides that implements IHostedService's start/stop plumbing for you, leaving only one method, ExecuteAsync, for you to override with the actual recurring work and its loop" data-vn="BackgroundService (giữ nguyên) — base class có sẵn, tự lo phần start/stop của IHostedService, mình chỉ cần override ExecuteAsync để viết logic chạy nền">BackgroundService</dfn>, an abstract base class that does the start/stop plumbing and leaves one method to fill in:</p>
+<pre><code><span class="kw">public</span> <span class="kw">class</span> ExpiredSessionCleanupService : BackgroundService {
+    <span class="kw">private</span> <span class="kw">readonly</span> IServiceScopeFactory _scopeFactory;
+    <span class="kw">private</span> <span class="kw">readonly</span> ILogger&lt;ExpiredSessionCleanupService&gt; _logger;
+
+    <span class="kw">public</span> ExpiredSessionCleanupService(IServiceScopeFactory scopeFactory,
+                                       ILogger&lt;ExpiredSessionCleanupService&gt; logger) {
+        _scopeFactory = scopeFactory; <span class="cm">// see section 4 -- NOT a scoped DbContext injected directly</span>
+        _logger = logger;
+    }
+
+    <span class="kw">protected</span> <span class="kw">override</span> <span class="kw">async</span> Task ExecuteAsync(CancellationToken stoppingToken) {
+        <span class="kw">while</span> (!stoppingToken.IsCancellationRequested) {
+            <span class="kw">using</span> (<span class="kw">var</span> scope = _scopeFactory.CreateScope()) {
+                <span class="kw">var</span> db = scope.ServiceProvider.GetRequiredService&lt;AppDbContext&gt;();
+                <span class="kw">await</span> db.Sessions.Where(s => s.ExpiresAt &lt; DateTime.UtcNow)
+                               .ExecuteDeleteAsync(stoppingToken);
+            }
+            _logger.LogInformation(<span class="st">"expired sessions cleaned"</span>);
+            <span class="kw">await</span> Task.Delay(TimeSpan.FromHours(1), stoppingToken); <span class="cm">// wait, respecting shutdown</span>
+        }
+    }
+}
+
+<span class="cm">// Program.cs</span>
+builder.Services.AddHostedService&lt;ExpiredSessionCleanupService&gt;(); <span class="cm">// registered once, not per-request</span>
+</code></pre>
+<p><code>ExecuteAsync</code> runs for the life of the app: the <code>while</code> loop is the entire job, not one iteration of it. <code>stoppingToken</code> is how the host says "shut down now" — <code>Task.Delay</code> and the loop condition both honor it, so the app can stop within roughly one tick instead of being killed mid-work.</p>
+
+<h2>3 · Go has no registered-service concept — the shape is the same goroutine Lesson 10 already used</h2>
+<p>Go never needed a dedicated interface for this because starting a long-lived goroutine alongside the server already <em>is</em> the pattern — no framework registration step exists to compare against:</p>
+<pre><code><span class="cm">// worker: a goroutine started once at process startup, running for the process's entire life</span>
+<span class="kw">func</span> runCleanupWorker(ctx context.Context) {
+    ticker := time.NewTicker(time.Hour)
+    <span class="kw">defer</span> ticker.Stop()
+    <span class="kw">for</span> {
+        <span class="kw">select</span> {
+        <span class="kw">case</span> &lt;-ctx.Done(): <span class="cm">// process is shutting down -- stop cleanly</span>
+            log.Println(<span class="st">"cleanup worker: shutting down"</span>)
+            <span class="kw">return</span>
+        <span class="kw">case</span> &lt;-ticker.C:
+            deleteExpiredSessions(ctx) <span class="cm">// the actual recurring work</span>
+        }
+    }
+}
+
+<span class="kw">func</span> main() {
+    ctx, cancel := context.WithCancel(context.Background())
+    <span class="kw">defer</span> cancel()
+    <span class="kw">go</span> runCleanupWorker(ctx) <span class="cm">// started once, alongside the HTTP server, not per-request</span>
+    <span class="cm">// ... start http.ListenAndServe, etc.</span>
+}</code></pre>
+<p>Line up the two: <code>ExecuteAsync</code>'s <code>while (!stoppingToken.IsCancellationRequested)</code> is <code>runCleanupWorker</code>'s <code>select</code> loop; <code>stoppingToken</code> is <code>ctx.Done()</code>; <code>AddHostedService</code> is just <code>go runCleanupWorker(ctx)</code> made into a declared, container-managed registration instead of a line written by hand in <code>main</code>. ASP.NET Core didn't invent a new capability here — it gave Go's already-familiar shape a name, a base class, and a place in <code>Program.cs</code> where every other registered background task is visible in one list.</p>
+
+<div class="callout"><p><strong>Where this stops being enough:</strong> an <code>IHostedService</code> dies with its process. Restart the app, redeploy, scale to three instances — and either the task vanishes until the app comes back, or it runs three times at once with no coordination between instances (nothing stops all three from firing the same cleanup query simultaneously). Lesson 10's queue-and-worker pattern exists specifically for work that must survive exactly that: a durable queue outlives any one process, and <a href="0095-skip-locked-job-claiming.html">Lesson 95's <code>SKIP LOCKED</code></a> is exactly the mechanism that lets several worker instances claim jobs without claiming the same one twice. An <code>IHostedService</code> for the session-cleanup example above is fine precisely because running it zero or three times in a given hour costs nothing worse than a slightly stale row.</p></div>
+
+<h2>4 · Why a scope, not a straight constructor injection</h2>
+<p>Notice the cleanup service's constructor takes <code>IServiceScopeFactory</code>, not <code>AppDbContext</code> directly. <code>AddHostedService</code> registers the service itself as a Singleton — it's built once and lives for the app's whole lifetime, same as Lesson 103 covered — but <code>AppDbContext</code> is normally registered Scoped, meant to live for one HTTP request. Injecting a Scoped service straight into a Singleton's constructor is exactly Lesson 104's glossary term <a href="../reference/glossary.html"><code>captive dependency</code></a> waiting to happen: the one instance created at startup would be held for the service's entire lifetime, never refreshed, likely holding a stale or disposed database connection by the second loop iteration. Calling <code>_scopeFactory.CreateScope()</code> inside the loop creates a fresh scope — and a fresh <code>AppDbContext</code> — every iteration, then disposes it at the end of the <code>using</code> block, which is the correct way for a Singleton to borrow something Scoped for a moment without trapping it.</p>
+
+<div class="interview">
+<p><strong>Q: "Why does this ExecuteAsync create a scope instead of just injecting AppDbContext into the constructor?"</strong> A strong answer, out loud: <em>"AddHostedService registers the service as a Singleton, built once for the app's whole life, but AppDbContext is Scoped, meant to live one request at a time. Injecting it straight into the constructor would be a captive dependency — one DbContext instance held for the entire app lifetime instead of a fresh one per unit of work. Creating a scope inside the loop and resolving AppDbContext from that scope gives each iteration its own instance, disposed right after, which is the supported way for a Singleton to use something Scoped."</em> The signal: connecting a specific registration mismatch to the concrete bug it causes, not just naming "captive dependency" as a term.</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers what <code>IHostedService</code>/<code>BackgroundService</code> is, when it's the right-sized tool versus Lesson 10's queue pattern, and the scope-factory detail that keeps it from becoming a captive-dependency bug. It does not cover: <code>IHostedLifecycleService</code>'s extra startup/shutdown hook ordering; <code>Quartz.NET</code> or Hangfire as dedicated scheduling libraries people reach for once cron-like scheduling needs grow past a simple <code>Task.Delay</code> loop; or Go's own ecosystem equivalents for cron-style scheduling (e.g. <code>robfig/cron</code>). Natural follow-ons, not covered here.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory, with no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="IHostedService/BackgroundService is started once when the app starts and stopped once when it shuts down, living for the app's whole process lifetime -- it has nothing to do with per-request lifetime at all.">
+    <p class="stem">When does an ASP.NET Core BackgroundService's ExecuteAsync method run?</p>
+    <button class="opt" data-ok>once, for the app's entire process lifetime</button>
+    <button class="opt">once, for each incoming HTTP request route</button>
+    <button class="opt">once, for every database query it runs</button>
+    <button class="opt">only when a client calls one endpoint</button>
+  </div>
+  <div class="q" data-why="An IHostedService lives and dies with its one process -- it does not survive a restart or redeploy, and running several instances means several copies racing with no built-in coordination between them, unlike a durable queue a separate worker reads from.">
+    <p class="stem">What breaks if an app using IHostedService for a cleanup task scales to three instances?</p>
+    <button class="opt" data-ok>all three instances run the task with no coordination at all</button>
+    <button class="opt">ASP.NET Core automatically elects exactly one of them to run it</button>
+    <button class="opt">the task silently and permanently stops running on every single instance</button>
+    <button class="opt">the three instances automatically and evenly split the task into thirds</button>
+  </div>
+  <div class="q" data-why="AddHostedService registers the service as a Singleton, built once for the whole app lifetime. Injecting a Scoped service like AppDbContext straight into its constructor traps one instance for that entire lifetime instead of a fresh one per unit of work -- exactly the captive-dependency bug.">
+    <p class="stem">Why would injecting AppDbContext directly into a BackgroundService's constructor be risky?</p>
+    <button class="opt" data-ok>the Scoped DbContext would get trapped by the Singleton service</button>
+    <button class="opt">BackgroundService classes cannot legally declare any constructor at all, ever</button>
+    <button class="opt">AppDbContext can only ever be injected into controller classes too</button>
+    <button class="opt">the DI container blocks that specific pairing at compile time</button>
+  </div>
+  <div class="q" data-why="Creating a scope inside the loop (via IServiceScopeFactory.CreateScope) gives each iteration its own fresh Scoped instance, disposed at the end of that scope -- the supported way for a long-lived Singleton to borrow something Scoped without holding one instance forever.">
+    <p class="stem">What does calling _scopeFactory.CreateScope() inside the loop actually fix?</p>
+    <button class="opt" data-ok>it gives each loop pass its own fresh, properly disposed instance</button>
+    <button class="opt">it makes the background service run noticeably faster than before overall</button>
+    <button class="opt">it permanently converts AppDbContext into a brand new Singleton service forever</button>
+    <button class="opt">it lets the loop skip calling await on any asynchronous work</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://learn.microsoft.com/en-us/aspnet/core/fundamentals/host/hosted-services">Microsoft Learn: Background tasks with hosted services in ASP.NET Core</a> (~15 min) — covers <code>IHostedService</code>, <code>BackgroundService</code>, timed vs. queued background tasks, and the scoped-service-inside-a-singleton pattern this lesson's section 4 walked through.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a>. Click any dotted term for a popup (English first, tiếng Việt second). Builds on Lesson 10's background-job model, Lesson 95's SKIP LOCKED, Lesson 103's service lifetimes, and Lesson 104's captive-dependency term. <strong>Anything unclear? Ask your teacher</strong>, the agent that made this lesson. Ask in Vietnamese anytime. A good follow-up: "does our .NET service have any IHostedService classes, and if we scale it to multiple instances, would any of them race or run the same work twice?"</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

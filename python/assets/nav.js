@@ -166,6 +166,8 @@
       file: "lessons/0079-review-retrieval-day-13.html" },
     { n: 80, date: "2026-10-17", title: "difflib: comparing sequences of text",
       file: "lessons/0080-difflib-comparing-sequences.html" },
+    { n: 81, date: "2026-10-18", title: "io.StringIO & io.BytesIO: file-shaped objects with no file",
+      file: "lessons/0081-io-stringio-bytesio.html" },
   ];
 
   const REFS = [

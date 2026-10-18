@@ -8320,3 +8320,109 @@
   after this one; a quiz-outcome or completion signal for Lessons 103 or
   104, or a user-named track, should still take priority over picking
   blind from that list if one appears by then.
+- **2026-10-18 generation (Lesson 105, headless run):** Idempotency check
+  first: `ls lessons/ | sort -V | tail` showed the highest file was still
+  `0104-aspnet-middleware-pipeline.html` and `nav.js` LESSONS ended at
+  `n: 104, date: "2026-10-17"` — no `n: 105` entry and no 2026-10-18 lesson
+  existed yet, so this round was clear to proceed. DB access was blocked
+  again this round, same shape as most prior rounds: direct
+  `psql "$LEARNING_DB_URL" ..."` hit a hard content-level sandbox filter on
+  expanding that exact variable name in any Bash command text, and
+  `bin/query-progress` hit a generic "requires approval" gate with no user
+  present to approve. No `course_progress` rows could be read either way,
+  so pacing came entirely from `learning-records/` (all three files) plus
+  this file's own tail — no fresh DB-sourced signal this round. The one
+  remaining open candidate named by both the 2026-10-16 and 2026-10-17
+  entries and by `learning-records/0003-mission-adds-dotnet-stack.md` —
+  background jobs via `IHostedService` (the EF Core N+1-flavor candidate
+  from the same list was the other; picked against it) — was chosen for
+  Lesson 105 for the same reason Lesson 104 picked middleware over its
+  alternatives: it's a direct bridge from an already-taught Go-only
+  concept (Lesson 10's background-job model) into its .NET shape, rather
+  than a freestanding new topic. Confirmed via grep that "IHostedService"
+  and "BackgroundService" appear nowhere yet in any lesson or in
+  `reference/glossary.html`, and that "background job" (Lesson 10's term)
+  already exists in the glossary with no collision risk for the two new
+  terms. Lesson 105 covers: `IHostedService`/`BackgroundService` as a
+  Singleton-lifetime task started/stopped with the app process (tied back
+  to Lesson 103's Singleton lifetime); a side-by-side showing
+  `ExecuteAsync`'s `while (!stoppingToken.IsCancellationRequested)` loop is
+  the same shape as a Go goroutine's `select { case <-ctx.Done(): ... }`
+  loop started with `go` in `main()`, with `AddHostedService` being that
+  same goroutine launch made into a declared container registration; a
+  callout on where this pattern stops being enough — it dies with its
+  process and gives multiple scaled instances no coordination, which is
+  exactly why Lesson 10's queue-and-worker pattern (and Lesson 95's `SKIP
+  LOCKED`) exists for anything that can't tolerate running zero or N times;
+  and why the example constructor takes `IServiceScopeFactory` instead of
+  `AppDbContext` directly — injecting a Scoped service into this
+  Singleton-lifetime class would be Lesson 104's own `captive dependency`
+  glossary term, so each loop iteration opens and disposes its own scope
+  instead. A Scope line excludes `IHostedLifecycleService`'s extra
+  start/stop hook ordering, dedicated scheduling libraries (Quartz.NET,
+  Hangfire) for cron-like needs beyond a plain `Task.Delay` loop, and Go's
+  own cron-style scheduling libraries, as natural follow-ons. Added two new
+  glossary rows (`IHostedService`, `BackgroundService`) immediately after
+  Lesson 104's four-row block, same Term / Tiếng Việt (dev-style) / In
+  software column order confirmed by reading the file's actual header row
+  first, not assumed. The Go snippet (`runCleanupWorker`/`main`) was
+  compile-checked in a scratch module at `.scratch-0105/gomod/` directly
+  under the repo root (same repo-root-relative workaround prior rounds
+  used after `/tmp` operations were blocked) — `go build ./...` and `go
+  vet ./...` both ran clean on the first pass, scratch directory deleted
+  afterward and confirmed gone via a failed `ls`. The C# snippet
+  (`ExpiredSessionCleanupService`) again could NOT be toolchain-verified:
+  `which dotnet` succeeded (`/usr/bin/dotnet`) but `dotnet --version` was
+  blocked as requiring interactive approval with no user present — same
+  specific block prior rounds hit, confirmed still standing. Verified by
+  careful manual reading instead: `BackgroundService`'s `ExecuteAsync`
+  override signature, `IServiceScopeFactory.CreateScope()`, `using` with a
+  created scope, `scope.ServiceProvider.GetRequiredService<T>()`,
+  `ExecuteDeleteAsync(CancellationToken)`, `Task.Delay(TimeSpan,
+  CancellationToken)`, and `builder.Services.AddHostedService<T>()` are
+  all real, standard ASP.NET Core / EF Core API shapes with correct
+  signatures as far as this reading can confirm — flagging here, as
+  instructed, that the C# snippet was reviewed by eye only, not compiled.
+  Verification performed mechanically otherwise, written to a scratch
+  Node script under `lessons/` and deleted after each use (confirmed
+  gone): (1) an HTML tag-balance check across div/p/code/button/script/
+  dfn/pre/h2/h1/em/strong/a — first pass caught a real bug, a `<div
+  class="callout">` opened with no inner `<p>` but closed with `</p>
+  </div>`, fixed by adding the missing opening `<p>`; a second bug, an
+  inline `*some*` markdown-style emphasis left over from drafting instead
+  of `<em>some</em>`, caught on a later full re-read, not by the tag
+  balancer (word count differs, not tag count, so it slipped through
+  that specific check) — both fixed, re-verified balanced after each fix,
+  final state clean on div 7/7, p 19/19, code 36/36, button 16/16, script
+  3/3, dfn 2/2, pre 2/2, h2 7/7, h1 1/1, em 3/3, strong 4/4, a 4/4; (2) a
+  quiz-word-count script counting each option both via `.split(/\s+/)`
+  and `.split(" ")` — first draft landed uneven across all four questions
+  (spreads of up to 4 words), fixed through several rewrite-and-recount
+  cycles per option, converged to exactly 7/7/7/7 on Q1, 11/11/11/11 on
+  Q2 and Q4, and 10/10/10/10 on Q3, both counting methods agreeing exactly,
+  exactly one `data-ok` and four options per question confirmed the same
+  way; (3) a raw-unescaped-`&` regex scan — zero hits; (4) the lesson's
+  `<dfn` tags grepped and confirmed to carry both `data-en=` and
+  `data-vn=` — exactly 2 `dfn` tags, matching the 2 new terms; (5) `node
+  --check` against `assets/nav.js`, `assets/gloss.js`, and `assets/
+  quiz.js` — all clean; (6) a basic HTML well-formedness check (exactly
+  one `<!DOCTYPE html>`, one `<html>`/`</html>`, three script tags with
+  `nav.js` last) — clean. Registered Lesson 105 in `nav.js` (date
+  2026-10-18, today's actual generation date) right after `n: 104`,
+  confirmed exactly one matching `n: 105` entry, exactly one matching
+  `0105-ihostedservice-background-services.html` string, and exactly one
+  `0105-*.html` file on disk afterward. No new `learning-records/` file
+  was added this round — same as Lessons 103 and 104's rounds, this
+  round's topic directly executed an already-written learning record's
+  own recommendation rather than discovering something new about the
+  learner. `bin/record-progress` has not yet been run this round (next
+  step, immediately following this note). With this round, both
+  `learning-records/0003`-named .NET-bridge candidates (middleware
+  pipeline, done Lesson 104; EF Core N+1 flavor and `IHostedService`, the
+  latter done this round) are now down to exactly one standing item: EF
+  Core change tracking's specific N+1 flavor (N+1 itself already covered
+  generically by Lesson 36). That is the sole remaining named candidate
+  for the round after this one, unless a quiz-outcome or completion
+  signal for Lessons 103–105, or a user-named track, takes priority by
+  then — DB access should be retried each round regardless of this
+  streak of blocks, since any round could be the one it's back.

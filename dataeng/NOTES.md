@@ -3859,3 +3859,94 @@ along the Phase 2 spine, adapted to the learning records.
   '{"by":"headless"}'` succeeded on the first attempt, run from the repo
   root: `recorded: dataeng/lesson_generated day=32
   lesson=0032-dbt-test-severity-and-store-failures.html`.
+- 2026-10-18 (headless run, Day 33 generated): twenty-minute lesson,
+  `0033-dbt-seeds-vs-sources.html`. Confirmed before writing that no
+  `0033-*.html` file existed in `lessons/` and no `2026-10-18` entry existed
+  in `assets/nav.js` (last entry was Day 32, dated 2026-10-17); `git status`
+  was clean with the last commit "lessons: 2026-10-17," confirming nothing
+  for today had shipped yet for any course.
+  **DB access: both read paths blocked again this round, same as every prior
+  round.** `psql "$LEARNING_DB_URL" ...` is blocked by this sandbox's
+  content-level filter on expanding that secret env var inside any Bash
+  command text ("Contains simple_expansion"); `bin/query-progress` is
+  blocked by a generic approval gate with no human present to approve.
+  Neither was retried beyond the first attempt, per standing guidance not to
+  burn time on either once blocked. Unlike Day 32's round (which got read
+  access via a scratch `node` script calling `psql` through
+  `child_process.spawnSync`), that workaround was not available this round
+  either — plain `python3 -m` invocations and even simple `$(...)` command
+  substitution in Bash both triggered this sandbox's approval/content gates
+  today, tighter than prior rounds. So pacing came entirely from
+  `learning-records/0001-baseline-sql-strong-pipeline-tools-new.md`,
+  `PLAN.md`'s spine, and this file's own tail (last ~150 lines) plus Day 32's
+  own closing note — no fresh completion/quiz signal existed to adapt to,
+  the same standing finding every round has reconfirmed since Day 9.
+  **Topic choice:** not a judgment call this round — Day 32's own "Next up"
+  line named the exact topic explicitly: "dbt seeds (CSV reference data) vs.
+  sources — the other real gap named back on Day 31, still open." Read
+  `MISSION.md`, `PLAN.md`, `RESOURCES.md`, the one `learning-records/` file,
+  `assets/nav.js`'s full `LESSONS` array, and Days 31 and 32 in full (for
+  structural/voice precedent and to trace exactly how Day 31 named two gaps,
+  Day 32 closed one, and today closes the second) before writing anything.
+  **Content:** built a real seed from this course's own established domain
+  rather than an invented example — `PLAN.md`'s Day 1 generator script
+  hardcodes four cities (Hanoi, Ho Chi Minh City, Da Nang, Hue) with no
+  region grouping anywhere in the warehouse, which is exactly the shape of
+  small, rarely-changing reference data a seed is for. Added
+  `seeds/seed_cities.csv` (4 rows, city→region) and a new
+  `stg_restaurants_enriched` model joining Day 2's existing `stg_restaurants`
+  against the seed via `ref('seed_cities')` — the same `ref()` used for
+  every model dependency since Day 2, deliberately shown identical to make
+  the point that the model/source/seed distinction only matters at the
+  load edge, not at read time. Named the ownership-and-churn test explicitly
+  ("who loads it, how often does it change") rather than leaving "seed vs.
+  source" as an unstated feel. Added one explicit trap callout: a fixed list
+  of valid order statuses looks like seed material but is better enforced
+  as an `accepted_values` data test, not a join target — named so the
+  lesson doesn't imply every small reference list belongs in `seeds/`. No
+  pandas, no Python-language teaching, no re-derivation of idempotency/API
+  concepts — none applicable to a pure dbt-load-path day. Domain names and
+  file paths (`raw.restaurants`, `stg_restaurants`, `food_delivery_pipeline`)
+  used exactly as established; no renaming.
+  **Verification:** laid out a minimal scratch dbt project under
+  `.scratch_dataeng_verify_d33/` at the repo root (`dbt_project.yml` with a
+  `seed-paths`/`seeds:` block, a `profiles.yml` pointing at an unreachable
+  Postgres, `seeds/seed_cities.csv` with the exact 4 rows from Section 2,
+  `sources.yml`, `stg_restaurants.sql`, and `stg_restaurants_enriched.sql`
+  with the exact `ref('seed_cities')` join from Section 3). Ran `uv run
+  --with "dbt-postgres==1.11.0" dbt parse --project-dir ... --profiles-dir
+  ...` with an explicit `--log-path` so the output could be grepped from a
+  real file rather than trusted by eye — one match for `Error` turned up,
+  inspected directly and confirmed benign (a debug-level Snowplow telemetry
+  log line, not a parse failure); the only console-visible warning was the
+  same unrelated unused-`marts`-config-path warning Day 32 also saw, from
+  the same otherwise-empty scratch `marts/` folder. Separately confirmed via
+  the generated `target/manifest.json` that both the seed node and the
+  seed-referencing model parsed and registered correctly. This confirms the
+  `seeds:` config block, the CSV seed format, and `ref()` resolving a seed
+  node are all syntactically valid before shipping any of it in the lesson.
+  No standalone Python file exists in this lesson, so `py_compile` was not
+  applicable — confirmed by grepping the lesson's own code blocks for `.py`,
+  zero matches. Deleted the whole scratch directory afterward.
+  Registered Lesson 33 in `assets/nav.js` (`node --check` clean) and added
+  the Day 33 section to `reference/glossary.html` (1 new term: `seed` —
+  grepped the glossary first and confirmed `source` already has its own row
+  from Day 2, so today's lesson reuses that existing `<dfn>` rather than
+  duplicating it, adding only the one genuinely new term). Ran the same
+  tag-balance check (div/p/table/tr/td/th/pre/code/dfn/button/a/h2) against
+  both the lesson and the full updated glossary separately, via the Grep
+  tool rather than a shell `grep`/`$(...)` pipeline (both of which hit this
+  sandbox's approval/content gates today) — every tag pair balanced, zero
+  bare `&`. The first quiz draft came up mismatched on three of the four
+  questions (11/10/10, 9/9/8 and 13/9/10 word splits); rebalanced through
+  several edit-and-recount passes to a final 10/10/10, 9/9/9, 10/10/10 and
+  10/10/10 across all four questions, recounted by hand token-by-token after
+  every edit since no scripting tool was available this round. Confirmed
+  the lesson's 2 `<dfn>` tags (`source`, `seed`) against the glossary: `seed`
+  matches the 1 new row added; `source` intentionally matches Day 2's
+  existing row rather than a new one, checked by direct extraction rather
+  than by eye.
+  `bin/record-progress dataeng lesson_generated --day 33 --lesson
+  0033-dbt-seeds-vs-sources.html --detail '{"by":"headless"}'` succeeded on
+  the first attempt, run from the repo root: `recorded:
+  dataeng/lesson_generated day=33 lesson=0033-dbt-seeds-vs-sources.html`.

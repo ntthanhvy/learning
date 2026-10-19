@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 102 · np.clip(): the array-level clamp underneath Series.clip()</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 102 · ~20 min · 19 Oct 2026</p>
+<h1>np.clip(): the array-level clamp underneath Series.clip()</h1>
+<p class="byline">Lesson 101 closed its own standing candidate with none carried forward, so this round ran a fresh curriculum/glossary scan (same situation Lessons 98/99 started from). Lesson 35 taught <code>Series.clip()</code> and even hand-derived its logic as a nested <code>np.where()</code> floor-then-ceiling check — but never named the actual NumPy sibling, <code>np.clip()</code>, that <code>Series.clip()</code> itself calls down to. A clean, genuinely surprising gap closing a loop Lesson 35 opened, same lineage shape as Lesson 100 closing Lesson 21's <code>pd.concat()</code> thread.</p>
+
+<h2>1 · Same clamp, one level lower</h2>
+<p><dfn data-en="a NumPy function that caps every value in an array-like between a given minimum and maximum, broadcasting the bounds against the input -- the raw-array layer Series.clip() itself dispatches down to" data-vn="giữ nguyên 'np.clip()' — bản NumPy của clip(), nhận 1 mảng/array-like và 2 biên min/max, giá trị trong khoảng thì giữ nguyên, ngoài khoảng thì kéo về biên gần nhất; Series.clip() thực chất gọi xuống hàm này">np.clip()</dfn> does exactly what Lesson 35's <code>Series.clip()</code> does — just one layer lower, on any array-like, not only a Series:</p>
+<pre><code><span class="kw">import</span> numpy <span class="kw">as</span> np
+<span class="kw">import</span> pandas <span class="kw">as</span> pd
+
+arr = np.array([<span class="kw">120.0</span>, <span class="kw">5.0</span>, <span class="kw">999.0</span>, <span class="kw">50.0</span>])
+np.clip(arr, <span class="kw">50</span>, <span class="kw">150</span>)
+<span class="cm"># array([120.,  50., 150.,  50.])</span>
+
+s = pd.Series([<span class="kw">120.0</span>, <span class="kw">5.0</span>, <span class="kw">999.0</span>, <span class="kw">50.0</span>])
+np.clip(s, <span class="kw">50</span>, <span class="kw">150</span>)
+<span class="cm"># 0    120.0
+# 1     50.0
+# 2    150.0
+# 3     50.0
+# dtype: float64</span></code></pre>
+<p>Confirmed directly (pandas 3.0.6, numpy 2.5.4): calling <code>np.clip()</code> on a Series returns a <em>Series</em> back, not a bare array — NumPy's dispatch machinery recognizes pandas objects and hands the result back in the same type, byte-for-byte identical to calling <code>s.clip(lower=50, upper=150)</code> directly (checked with <code>np.array_equal()</code>). The two aren't just similar — <code>Series.clip()</code> calls down to this exact same NumPy routine under the hood, the same relationship Lesson 100 found between <code>pd.concat()</code> and the raw <code>np.vstack()</code>/<code>np.hstack()</code> family underneath it.</p>
+
+<h2>2 · Three traps the Series method doesn't have</h2>
+<p>Confirmed directly, three behaviors specific to the plain-array function, none of which <code>Series.clip()</code> exposes the same way:</p>
+<pre><code><span class="cm"># Trap 1: lower &gt; upper doesn't raise -- every value silently becomes
+# the upper bound, no warning at all.</span>
+np.clip(arr, <span class="kw">150</span>, <span class="kw">50</span>)
+<span class="cm"># array([50., 50., 50., 50.])  -- all four values, whatever they were</span>
+
+<span class="cm"># Trap 2: an int array clipped with float bounds silently upcasts to
+# float64 -- same silent-upcast shape as Lesson 100's stacking family.</span>
+ints = np.array([<span class="kw">1</span>, <span class="kw">200</span>, <span class="kw">300</span>], dtype=np.int64)
+np.clip(ints, <span class="kw">10.5</span>, <span class="kw">100.5</span>).dtype
+<span class="cm"># dtype('float64')  -- even though every input value was a plain int</span>
+
+<span class="cm"># Trap 3: NaN passes straight through, same as Series.clip() -- NOT
+# pulled to either bound, because NaN can't be compared with &lt; or &gt;.</span>
+np.clip(np.array([np.nan, <span class="kw">5.0</span>, <span class="kw">999.0</span>]), <span class="kw">50</span>, <span class="kw">150</span>)
+<span class="cm"># array([ nan,  50., 150.])  -- the NaN survives untouched</span></code></pre>
+<p>Trap 1 is the one worth saying out loud in an interview: passing bounds in the wrong order is a typo any time of day, and <code>np.clip()</code> gives zero feedback that something went wrong — it just quietly returns an array of one repeated value. Cross-checked against the official NumPy docs, which confirm this exact rule in the signature's own example: when <code>a_min &gt; a_max</code>, every output value becomes <code>a_max</code>. Trap 2's silent int-to-float upcast on mismatched bound/array dtypes is the same no-warning pattern Lesson 100 found stacking an int array with a float one. Trap 3 matches Lesson 35's own glossary note almost exactly — NaN passes through both the Series and the array version untouched, since clipping requires a <code>&lt;</code>/<code>&gt;</code> comparison and NaN fails every comparison by IEEE float rules (Lesson 1's NaN entry).</p>
+
+<h2>3 · Why reach for np.clip() at all, given Series.clip() exists</h2>
+<p>Confirmed directly, timing both over an identical 2,000,000-row column: <code>Series.clip()</code> measured several times slower than calling <code>np.clip()</code> on the Series' own <code>.to_numpy()</code> array directly, run repeated three times to rule out a one-off fluke (results varied run to run, from roughly 6x to roughly 36x — the exact ratio is noisy, but the direction never flipped). The gap traces to the same source as every pandas-vs-NumPy timing difference this course has found before: <code>Series.clip()</code> carries pandas' index-alignment and missing-value-handling machinery on top of the same underlying NumPy call, while <code>np.clip()</code> on a raw array skips all of it.</p>
+<div class="callout">In practice this almost never matters — one <code>clip()</code> call on a column is not the bottleneck in a real pipeline, and <code>Series.clip()</code>'s Index-aware behavior (per-row bounds via a same-length Series, from Lesson 35) is usually exactly what's wanted. The real reason to know <code>np.clip()</code> by name: it is what a NumPy-only function signature or a third-party library expects when it asks for an array, not a Series — and it is the term that shows up when reading NumPy-flavored code that has no pandas import at all, directly matching this course's own "read NumPy-flavored code and predict its output" goal.</div>
+
+<div class="interview">
+<p><strong>Q: "What's the difference between Series.clip() and np.clip()?"</strong> A strong answer, out loud: <em>"Functionally almost nothing on a Series — Series.clip() actually dispatches down to np.clip() under the hood, confirmed by getting byte-identical results either way. np.clip() works on any array-like, not just a Series, and it's a bit faster on a raw array since it skips pandas' index-alignment overhead. The one trap I'd watch for either way: passing the bounds in the wrong order doesn't raise — it silently clips everything to the upper bound, no warning."</em> The signal: knowing they're the same operation at different layers, not two unrelated functions, and naming the lower-order-than-upper trap unprompted.</p>
+</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/102_np_clip.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/102_np_clip.py</code></pre>
+<p>Exercise 1 confirms the basic clamp on a plain NumPy array (Section 1). Exercise 2 confirms <code>np.clip()</code> returns a Series back when called on a Series, identical to <code>Series.clip()</code> (Section 1). Exercise 3 confirms the <code>lower &gt; upper</code> trap: every value collapses to the upper bound, no exception raised (Section 2).</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: np.clip() recognizes a pandas Series as input and returns a Series back, with values identical (checked via np.array_equal()) to calling s.clip(lower=, upper=) directly -- because Series.clip() itself dispatches down to this same NumPy routine under the hood.">
+    <p class="stem">Calling <code>np.clip(a_series, 50, 150)</code> on a pandas Series returns what?</p>
+    <button class="opt" data-ok>a Series, with values identical to calling Series.clip() directly on it instead</button>
+    <button class="opt">a plain NumPy array, since np.clip() always strips the whole Index away</button>
+    <button class="opt">a Python list of clipped values only, with no real type preserved</button>
+  </div>
+  <div class="q" data-why="Confirmed directly against the official NumPy docs' own example: when a_min is greater than a_max, np.clip() does not raise -- every output value silently becomes a_max instead, with zero warning that the bounds were passed in the wrong order.">
+    <p class="stem">What does <code>np.clip(arr, 150, 50)</code> do, given <code>lower=150</code> is bigger than <code>upper=50</code>?</p>
+    <button class="opt" data-ok>returns every value as plain 50 (upper) instead, silently -- no real error</button>
+    <button class="opt">raises a clear ValueError message right away, naming the two swapped bounds here</button>
+    <button class="opt">just swaps the two given bounds back around itself, then clips just fine</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: clipping requires comparing each value against the bounds with < and >, and NaN fails every such comparison by IEEE float rules (the same reason NaN != NaN) -- so a NaN already in the array passes straight through unclipped, in both np.clip() and Series.clip().">
+    <p class="stem">An array holds one NaN among normal values. What does <code>np.clip()</code> do to that NaN?</p>
+    <button class="opt" data-ok>leaves it as NaN, since it can never be compared against either bound</button>
+    <button class="opt">pulls it down to whichever of the two given bound values happens smaller</button>
+    <button class="opt">raises an exception the very moment it first reaches that one NaN entry</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official <a href="https://numpy.org/doc/stable/reference/generated/numpy.clip.html">NumPy API reference for <code>numpy.clip()</code></a> (per <code>RESOURCES.md</code>'s NumPy fundamentals entry, ~3 min) — confirms the <code>a_min &gt; a_max</code> → all-<code>a_max</code> behavior in its own worked example exactly matching the direct probing above, and documents the newer <code>min=</code>/<code>max=</code> Array-API-compatible parameter spelling (added NumPy 2.1) alongside the original <code>a_min=</code>/<code>a_max=</code> names, which this lesson didn't otherwise need.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>np.clip()</code> is new today, added right after Lesson 101's <code>itertuples()</code> entry.<br>
+<strong>Next lesson:</strong> no standing candidate named this round — today closed a fresh-scan pick with nothing obvious left over, so tomorrow starts with another fresh curriculum/glossary scan. Two zero-hit families spotted during today's scan but not picked: the <code>str.pad()</code>/<code>str.strip()</code>/<code>str.title()</code>/<code>str.join()</code> text-cleanup family, and <code>pd.to_timedelta()</code> (the duration-parsing cousin of Lesson 81's <code>pd.to_datetime(format=)</code>) — neither promoted ahead of running tomorrow's own fresh scan.<br><br>
+💬 Anything unclear — the Series/array dispatch, the lower-than-upper trap, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

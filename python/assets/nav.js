@@ -168,6 +168,8 @@
       file: "lessons/0080-difflib-comparing-sequences.html" },
     { n: 81, date: "2026-10-18", title: "io.StringIO & io.BytesIO: file-shaped objects with no file",
       file: "lessons/0081-io-stringio-bytesio.html" },
+    { n: 82, date: "2026-10-19", title: "base64: binary data as plain text",
+      file: "lessons/0082-base64-encoding.html" },
   ];
 
   const REFS = [

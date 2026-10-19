@@ -597,6 +597,15 @@
   <tr><td>.seek(0)</td><td>giữ nguyên ".seek(0)" — đưa vị trí đọc/ghi hiện tại về đầu; sau khi write() thì vị trí đang ở cuối, nên phải seek(0) trước thì read() mới đọc lại được đúng những gì vừa ghi</td><td>Rewinds the current read/write position back to the start. After writing, the position sits at the end of what was just written — exactly like a real file left open in write mode — so an immediate <code>.read()</code> returns nothing until <code>.seek(0)</code> runs first.</td></tr>
 </table>
 
+<h2 id="day82">Day 82 — base64: binary data as plain text</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>base64</td><td>giữ nguyên "base64" — module chuẩn encode bytes bất kỳ thành text chỉ gồm 64 ký tự an toàn (A-Z, a-z, 0-9, +, / — hoặc -, _ ở bản url-safe), để nhúng được vào chỗ chỉ nhận text thuần như JSON/URL/header, đổi lại size tăng khoảng 1/3</td><td>The standard-library module that re-encodes any <code>bytes</code> value as text built only from a safe 64-character alphabet, so arbitrary binary data can travel through a format that only accepts plain text (JSON, a URL, a text-based log) — at the cost of roughly one third more size.</td></tr>
+  <tr><td>b64encode() / b64decode()</td><td>giữ nguyên "b64encode"/"b64decode" — hàm trong base64, b64encode() nhận bytes trả về bytes đã encode (chỉ gồm 64 ký tự an toàn), b64decode() làm ngược lại, trả đúng y nguyên bytes gốc, không mất dữ liệu</td><td><code>base64.b64encode(data)</code> takes <code>bytes</code> and returns <code>bytes</code> built only from the safe 64-character alphabet; <code>base64.b64decode()</code> reverses it, returning the exact original bytes with no data lost.</td></tr>
+  <tr><td>urlsafe_b64encode()</td><td>giữ nguyên "urlsafe_b64encode" — hàm trong base64 encode giống b64encode() nhưng đổi 2 ký tự + và / (có nghĩa riêng trong URL) thành - và _, an toàn để nhúng trực tiếp vào URL hoặc query string</td><td><code>base64.urlsafe_b64encode()</code> does the same packing as <code>b64encode()</code>, but swaps the <code>+</code>/<code>/</code> characters (which have special meaning inside a URL) for <code>-</code>/<code>_</code>, safe to drop directly into a URL path or query string.</td></tr>
+  <tr><td>encoding (vs. encryption)</td><td>giữ nguyên "encoding" — quy tắc biến đổi dữ liệu sang dạng khác, công khai, ai cũng đảo ngược được, không cần key bí mật; khác hẳn encryption (mã hoá) vốn cần key bí mật mới đảo ngược được</td><td>A reversible, publicly-known rule for representing data in a different shape — anyone who knows the rule, like <code>base64</code>'s, can decode it with no secret key involved. Encryption requires a secret key to reverse; base64 hides nothing from anyone who looks.</td></tr>
+</table>
+
 <p class="next">💬 A term here still unclear? Ask your teacher — hỏi bằng tiếng Việt cũng được.</p>
 
 <script src="../assets/nav.js"></script>

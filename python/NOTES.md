@@ -10350,4 +10350,129 @@ fail *gracefully* so the learner sees which task failed.
   though `base64` is now the standing fresh-gap candidate to consider first
   if Day 82 goes fresh again — it was the runner-up this round, ruled out
   only on relative priority, not because it is already taught.
+- 2026-10-19 — **Day 82 generated: `base64` — binary data as plain text**
+  (headless 06:00 run, zero prior context per the orchestrator's brief).
+  Idempotency: confirmed no `date: "2026-10-19"` entry in `assets/nav.js`
+  and no `0082-*`/`82_*` files in `lessons/`/`practice/` before writing
+  anything. Read `MISSION.md` in full (no-pandas exclusion in particular),
+  `PLAN.md` in full, `RESOURCES.md` in full, `learning-records/0001-…md`
+  in full (still the only record, no newer signal), and `assets/nav.js` in
+  full for the registration format and every prior entry. `NOTES.md`
+  exceeds this run's single-read cap, so only its tail (~220 lines,
+  covering Days 80-81 in full) was read directly — sufficient, since Day
+  81's own next-day note already named `base64` as the standing fresh-gap
+  candidate with its reasoning.
+  Decision — review vs. fresh topic, and topic choice: Day 81's next-day
+  note stated Day 80 and 81 were the first two fresh lessons since Day 79's
+  review, with one more fresh day allowed before the next review is due
+  under this course's settled three-fresh-then-review cadence, and named
+  `base64` as the standing candidate (runner-up in Day 81's own gap scan,
+  ruled out there only on relative priority against `io`, not because it
+  was already taught). Independently re-verified before trusting it:
+  grepped all 81 lessons, every practice file, `reference/glossary.html`,
+  and `RESOURCES.md` case-insensitively for `base64` — zero hits anywhere,
+  confirming the gap is still genuinely open. Took `base64` as today's
+  topic on that basis — this is the third fresh lesson since Day 79's
+  review (Days 80, 81, 82), so per the cadence Day 83 should be a review
+  day (see next-day note below).
+  No DB query attempted directly in this run (per the orchestrator's brief,
+  which had already confirmed via its own query that no `python` row exists
+  for 2026-10-19 and no newer quiz/completion signal exists since mid-July);
+  paced entirely from on-disk state as in recent prior rounds.
+  No-pandas rule: grepped case-insensitively for `pandas`/`numpy`/`pd\.`/
+  `np\.`/`dataframe` in the new lesson and practice file — exactly one hit
+  (the single required "Where pandas/NumPy go from here" boundary callout,
+  stating base64 encoding has no connection to a `DataFrame` or array and
+  stays entirely in stdlib territory) and zero hits in the practice file.
+  Content: motivated via Day 81's `BytesIO`/Day 76's `json.dumps()` —
+  raw bytes can't go into JSON (`TypeError`), base64 re-encodes them into a
+  safe 64-character text alphabet first. Covered `b64encode()`/`b64decode()`
+  as the core round trip, `.decode("ascii")` to get a plain `str` for
+  embedding (safe specifically because base64's output alphabet is pure
+  ASCII), the `=` padding's actual meaning (packs 3 bytes into 4 chars,
+  pads when input isn't a multiple of 3), `urlsafe_b64encode()`/
+  `urlsafe_b64decode()` swapping `+`/`/` for `-`/`_` for URL embedding, and
+  an explicit "not encryption" callout (encoding is public/reversible with
+  no key; Day 77's `secrets` is the right tool if actual secrecy is the
+  goal). Every code sample verified live via `uv run python3` against a
+  scratch script before writing it into the lesson — including finding a
+  concrete byte sequence (`bytes([251, 255, 191])`) whose standard
+  `b64encode()` output actually contains `+`/`/` (an arbitrary first guess
+  did not), so the urlsafe-vs-standard contrast in section 3 is a real,
+  checked difference rather than a coincidentally-identical pair.
+  **New jargon: 4 terms** (`base64` the module, `b64encode()`/`b64decode()`
+  combined as one term, `urlsafe_b64encode()`, and `encoding` as a concept
+  contrasted with encryption) — `base64` wrapped in a single `<dfn
+  data-en="…" data-vn="…">` on first mention in the byline and `encoding`
+  wrapped in its own `<dfn>` at the "not encryption" callout, per this
+  course's shared rule; the other two are named and explained in prose at
+  first use. Grepped `reference/glossary.html` case-insensitively for all
+  four terms first to confirm zero prior entries, then appended a new
+  `id="day82"` section directly after Day 81's, matching the file's
+  append-only convention.
+  Quiz: 3 questions (why `json.dumps()` rejects `bytes` and why `base64`
+  fixes that, what the trailing `=` padding actually means, why calling
+  `b64encode()` "hiding" data is a mistake). Word counts were checked with
+  a throwaway Python regex-based script (written via `Write` under the
+  repo root's course-scoped scratch dir, deleted after use) that strips
+  tags from each `<button class="opt">` and splits on whitespace. First
+  draft mismatched on all three questions (Q1 11/9/8, Q2 9/9/9 already
+  equal, Q3 9/10/9) — iterated option-by-option (lengthening/shortening
+  phrases like "re-encodes it as text" vs. "re-encodes to text", "shrinks
+  the bytes down until" vs. "shrinks the bytes until", dropping "that" from
+  one Q3 distractor) and recounted after every edit, until all three
+  landed on equal per-question counts: 9/9/9, 9/9/9, 9/9/9. A companion
+  scratch script confirmed `<div>`/`<p>`/`<code>`/every other relevant
+  tag's balance and zero bare `&` on both the new lesson file and the full
+  (now-modified) `reference/glossary.html` — this caught one real bug: an
+  early draft of the "not encryption" callout had a stray `</p>` with no
+  matching opening `<p>`, fixed by removing it. `node --check` confirmed no
+  syntax errors on `assets/nav.js` after registering today's entry. All
+  scratch scripts deleted before finishing.
+  `RESOURCES.md`: added a new `base64` docs line, placed directly after
+  the Day 81 `io` line per the file's day-ordered citation convention.
+  Registered in `assets/nav.js` with `date: "2026-10-19"` right after the
+  `n: 81` entry; confirmed `node --check assets/nav.js` reports no syntax
+  errors after the edit.
+  Practice file `practice/82_base64_encoding.py` (4 checks, stdlib-only,
+  no `--with` flag, function-stub-with-TODO-comment style matching Day
+  81's own): a plain `b64encode()`/`b64decode()` round trip (Ex 1),
+  decoding the encoded bytes to a `str` for embedding (Ex 2), confirming
+  `urlsafe_b64encode()` differs from `b64encode()` on bytes whose standard
+  encoding contains `+`/`/` (Ex 3), and embedding a base64 token inside a
+  `json.dumps()`/`json.loads()` round trip (Ex 4).
+  Verified in a scratch `.scratch-python-1019/` directory created directly
+  under the repo root (named to avoid colliding with sibling courses'
+  concurrent scratch dirs this round): the shipped (unsolved) copy, run
+  with `uv run python3` from its real `python/practice/` path, printed
+  four clean ✗ lines with no traceback. A separately solved copy (written
+  fresh into the scratch dir, not by editing the shipped file) printed all
+  four ✓ and the "All green" tally, run twice consecutively with identical
+  results both times. Re-ran the shipped file from its real path
+  afterward, confirming it still printed the same four clean ✗ lines. The
+  scratch directory was deleted before finishing — confirmed by a listing
+  showing no `.scratch-python-1019` remaining (two sibling courses' own
+  scratch dirs were visible and left untouched, as they belong to other
+  concurrent runs).
+  `python/learning-records/` still holds only the Day 1 baseline —
+  nothing from today's run (taking the already-known, already-weighed
+  `base64` candidate per an explicit carried-forward note, independently
+  re-verified) is a new, durable fact about the learner distinct from what
+  Day 1's record already says.
+  `bin/record-progress python lesson_generated --day 82 --lesson
+  0082-base64-encoding.html --detail '{"by":"headless"}'` was run from the
+  repo root at the end of this round.
+  Final `git status --short -- python/` is expected to show exactly five
+  paths changed before this `NOTES.md` edit (`assets/nav.js`,
+  `RESOURCES.md`, `reference/glossary.html`, plus the new lesson and
+  practice file) — six total including this file — no other course's
+  files touched, and no leftover scratch files or directories under the
+  repo.
+  **Next-day note:** Day 82 is the third fresh lesson since Day 79's
+  review (Days 80, 81, 82) — per this course's settled three-fresh-then-
+  review cadence, **Day 83 should be a review day** covering Days 80-82,
+  not another fresh topic. The next round should pick review content/format
+  consistent with however Day 79's review was structured (not reread in
+  full this round — only its outcome was referenced via the Day 81 entry's
+  framing) before defaulting to a fresh-topic gap scan.
 

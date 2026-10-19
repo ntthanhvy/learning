@@ -295,6 +295,13 @@
   <tr><td>seed</td><td>giữ nguyên "seed" — file CSV nằm trong thư mục seeds/ của project dbt, được lệnh dbt seed load thành table thật trong warehouse — khác source, dbt tự lo cả file và cả việc load, nên seed chỉ hợp cho reference data nhỏ, ít đổi, đã được commit vào git, không dùng cho bảng mà 1 process pipeline khác chịu trách nhiệm đổ vào</td><td>A CSV file checked into a dbt project's <code>seeds/</code> directory, loaded into the warehouse by the <code>dbt seed</code> command as a real table. Unlike a source, dbt owns both the file and the load, which is why a seed is only appropriate for small, rarely-changing reference data checked into version control, never for a table an external pipeline process is responsible for landing.</td></tr>
 </table>
 
+<h2 id="day34">Day 34 — Kafka consumer group rebalancing</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>group coordinator</td><td>giữ nguyên "group coordinator" — 1 broker được chọn làm đầu mối cho 1 consumer group cụ thể: theo dõi consumer nào đang là member, phát hiện member rời đi (tắt graceful hoặc mất heartbeat quá session.timeout.ms), và chạy protocol rebalance để chia lại partition cho các member còn lại</td><td>The Kafka broker process responsible for one consumer group: tracks which consumers are currently members, detects a member leaving (graceful shutdown or a missed heartbeat past <code>session.timeout.ms</code>), and runs the group's rebalance protocol to reassign partitions among the remaining members.</td></tr>
+  <tr><td>rebalance</td><td>giữ nguyên "rebalance" — quá trình Kafka chia lại partition cho các consumer trong group, xảy ra bất cứ khi nào có consumer join, leave, hoặc bị coi là chết do mất heartbeat quá hạn; trong lúc rebalance, các consumer liên quan tạm dừng đọc cho tới khi việc chia partition mới được chốt, rồi mỗi consumer chỉ đọc đúng partition được giao</td><td>The process by which a Kafka consumer group's partitions get reassigned among its current members, triggered whenever a consumer joins, leaves, or is judged dead by a missed heartbeat. Every affected consumer briefly pauses consumption while new partition ownership is agreed, then resumes reading only the partition(s) it was assigned — confirmed this round by running two instances of Day 6's own consumer under one <code>group.id</code>, watching <code>kafka-consumer-groups.sh --describe</code> show the 3-partition split, then killing one and watching the survivor get handed the orphaned partition live.</td></tr>
+</table>
+
 <script src="../assets/nav.js"></script>
 </body>
 </html>

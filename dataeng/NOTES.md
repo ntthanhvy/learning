@@ -3950,3 +3950,105 @@ along the Phase 2 spine, adapted to the learning records.
   0033-dbt-seeds-vs-sources.html --detail '{"by":"headless"}'` succeeded on
   the first attempt, run from the repo root: `recorded:
   dataeng/lesson_generated day=33 lesson=0033-dbt-seeds-vs-sources.html`.
+- 2026-10-19 (headless 06:00 run, Day 34 generated): twenty-minute lesson,
+  `0034-kafka-consumer-group-rebalancing.html`. Confirmed before writing
+  that no `0034-*.html` file existed in `lessons/` and no `2026-10-19`
+  entry existed in `assets/nav.js` (last entry was Day 33, dated
+  2026-10-18); the orchestrator's own context for this run had already
+  confirmed no `course_progress` row exists yet for today and no fresh
+  quiz/completion signal exists beyond the standing baseline, so that DB
+  check was not re-attempted here. Read `MISSION.md`, `PLAN.md` in full,
+  this file's tail (back through Day 31's "Phase 3 call"), `RESOURCES.md`,
+  the one `learning-records/` file, and `assets/nav.js`'s full `LESSONS`
+  array (all 33 titles) before writing anything, plus Days 5, 6, 18 and 30
+  in full for exact domain conventions (`fdp` DSN, `scripts/produce_
+  order_events.py`/`consume_order_events.py`, `warehouse-loader` group id,
+  the `kafka-consumer-groups.sh --describe` output shape) and structural
+  precedent.
+  **Topic choice:** not a default dbt continuation — Day 30's own lesson
+  text states explicitly that every bullet across `PLAN.md`'s Phase
+  2a/2b/2c/2d spine closed at Day 30. Days 31-33 then ran three rounds of
+  self-directed dbt gap-filling (environments/schema naming, test
+  severity/`store_failures`, seeds vs. sources), each one explicitly named
+  as a real, untaught gap by the prior round's own closing note — but Day
+  33's closing note named no fourth dbt gap, leaving no explicit "next up"
+  pointer for today, unlike Days 31 and 32. Per this round's own
+  orchestrator prompt and `MISSION.md`'s explicit depth allocation (dbt
+  deep, Kafka/Airflow to working level), three consecutive dbt-only rounds
+  with no Kafka/Airflow bridging was the trigger to rebalance rather than
+  invent a fourth dbt gap. Delegated a focused sub-task to map genuinely
+  untaught Kafka/Airflow gaps against `MISSION.md`'s own explicit bullets
+  for each (Kafka: "topics, partitions, keys, offsets and consumer
+  groups..."; Airflow: "...with retries and safe re-runs") by reading
+  Days 16-25 in full. It returned three real gaps, ranked: (1) consumer
+  group rebalancing with multiple consumers — zero mentions of
+  "rebalance" across all 25 prior lessons despite "consumer groups" being
+  named directly in `MISSION.md`'s own Kafka bullet, and every consumer
+  run since Day 5 (Days 5, 6, 16, 18) used exactly one consumer process
+  per group, never exercising reassignment; (2) a real, observed task
+  retry firing on the actual production DAG from Day 7, not Day 25's
+  throwaway sensor demo; (3) Kafka Connect/Debezium actually installed
+  rather than Day 23's deliberate vocabulary-only treatment (a weaker pick
+  since Day 23 is a reasoned, named scope exclusion, not an accidental
+  gap). Picked (1): it is the only one of the three that is both named
+  directly in `MISSION.md`'s required bullet text and completely
+  untouched, with a self-contained build needing no new infrastructure
+  (two instances of Day 6's own unmodified consumer script against the
+  existing 3-partition `order_events` topic). Named (2) explicitly in
+  today's own closing note as the strongest next candidate, so the next
+  round does not have to re-derive this map from scratch.
+  **Content:** ran two instances of Day 6's existing, unmodified
+  `scripts/consume_order_events.py` under the same `group.id`
+  (`warehouse-loader`) against the real `order_events` topic, read the
+  partition split across two distinct `CONSUMER-ID`s from
+  `kafka-consumer-groups.sh --describe`, then hard-killed one (`kill -9`,
+  the same kill style Day 6 used) and, after `session.timeout.ms`,
+  confirmed the coordinator handed the orphaned partition to the survivor
+  live — tying the resume-from-committed-offset mechanism explicitly back
+  to Day 6's own crash-and-restart proof rather than presenting it as a
+  new, unrelated risk. Reused Day 28's existing "partition count as a
+  parallelism ceiling" glossary entry to connect today's mechanism to the
+  scaling-ceiling fact already on record, rather than re-deriving it. No
+  pandas, no Python-language teaching, no re-derivation of idempotency/API
+  concepts beyond a one-line callback to Day 6's own idempotent-write
+  proof (reused, not re-taught) — none else applicable to a pure
+  Kafka-operational-mechanics day. Domain names and file paths
+  (`order_events`, `warehouse-loader`, `scripts/consume_order_events.py`,
+  `fdp`) used exactly as established since Days 5-6; no renaming, and no
+  new script or container added today.
+  **Verification:** no dbt snippet and no new standalone Python file
+  exists in this lesson (it runs Day 6's existing script twice, unmodified,
+  plus Kafka CLI commands only), confirmed by grepping the lesson's own
+  code blocks — the only `.py` occurrences are references to
+  `scripts/consume_order_events.py`'s existing filename — so neither `dbt
+  parse` nor `py_compile` applied this round. Laid out a scratch directory
+  at the repo root, `.scratch-dataeng-1019/` (not `/tmp`, per this round's
+  own instruction to avoid colliding with sibling agents running
+  concurrently), containing one Python well-formedness script checked via
+  `uv run python3`: tag-balance across div/p/table/tr/td/th/pre/code/dfn/
+  button/a/h1/h2/ul/li/span, a bare-`&` scan, a check that every `<dfn>`
+  carries both `data-en=` and `data-vn=`, and a quiz-option word-count
+  count-and-compare per question. The first draft came up mismatched on
+  all four questions (8/9/6, 8/9/9, 8/8/7 and 5/8/7 word splits);
+  rebalanced through several edit-and-recount passes, re-running the same
+  script after every edit, to a final 9/9/9, 9/9/9, 9/9/9 and 8/8/8 across
+  all four questions. Ran the identical script separately against
+  `reference/glossary.html` after appending Day 34's two new rows, plus a
+  direct tag-balance-only pass since the glossary has no quiz/dfn content
+  to check there — all tags balanced, zero bare `&`. `node --check` on
+  `assets/nav.js` after registering Lesson 34 came back clean. Confirmed
+  the lesson's 3 `<dfn>` tags by direct extraction: `consumer group`
+  intentionally matches Day 5's existing glossary row rather than a new
+  one (reused, not duplicated); `group coordinator` and `rebalance` match
+  the 2 new Day 34 glossary rows added. Attempted `WebFetch` against the
+  Apache Kafka Design docs to confirm the rebalance/group-coordinator
+  section live before citing it — blocked by a permissions gate with no
+  human present to grant it, the same live-fetch gap Days 17, 23, 26 and
+  31 each hit; flagged honestly in the lesson's own "Go deeper" section
+  rather than silently citing it as freshly verified. Deleted
+  `.scratch-dataeng-1019/` afterward and confirmed its removal with `ls`.
+  `bin/record-progress dataeng lesson_generated --day 34 --lesson
+  0034-kafka-consumer-group-rebalancing.html --detail
+  '{"by":"headless"}'` succeeded on the first attempt, run from the repo
+  root: `recorded: dataeng/lesson_generated day=34
+  lesson=0034-kafka-consumer-group-rebalancing.html`.

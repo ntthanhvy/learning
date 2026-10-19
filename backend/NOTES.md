@@ -8426,3 +8426,106 @@
   signal for Lessons 103–105, or a user-named track, takes priority by
   then — DB access should be retried each round regardless of this
   streak of blocks, since any round could be the one it's back.
+- **2026-10-19 generation (Lesson 106, headless run):** Idempotency check
+  first: grepped `nav.js` for `date: "2026-10-19"` (no match) and listed
+  `lessons/` for a `0106-*.html` file (none present) — this round was
+  clear to proceed. Per the orchestrator's brief this round, the DB had
+  already been queried by the orchestrator before handoff (confirmed: no
+  `course_progress` row for backend dated 2026-10-19 yet, and no new
+  quiz/lesson_completed signal since the 2026-10-15 full-pass on Lesson
+  102), so no redundant DB read was attempted this round — relied on that
+  pre-confirmed result plus this file's own tail and all three
+  `learning-records/` files, read in full, same as the DB-blocked rounds'
+  methodology. With no fresh remediation signal, picked the sole standing
+  candidate named by the 2026-10-18 entry and by
+  `learning-records/0003-mission-adds-dotnet-stack.md`: EF Core change
+  tracking's specific N+1 flavor (generic N+1 already Lesson 36; the
+  other four named .NET-bridge candidates — DI container, middleware
+  pipeline, IHostedService — are now all done, Lessons 103–105).
+  Confirmed via grep that `AsNoTracking`, `Include(`, and `navigation
+  property` appear nowhere yet in any lesson or in `reference/
+  glossary.html`, and that `change tracking` and `lazy-loading` already
+  have glossary rows (added by Lessons 103 and 36 respectively) — so this
+  round's new terms are additive, not a re-teach. Lesson 106 covers: a
+  navigation-property read inside a loop as EF Core's specific disguise
+  for Lesson 36's N+1 shape (an innocent-looking property access secretly
+  firing a query per row); `Include()` as the concrete eager-load fix,
+  tying back to Lesson 36's generic JOIN-or-batch fix and its own
+  `lazy-loading` glossary term; and a second, EF-Core-only cost that
+  `Include()` does NOT fix — every tracked entity gets a change-tracking
+  snapshot allocated whether or not it's ever saved, pure overhead on a
+  read-only endpoint — fixed instead by `AsNoTracking()`. A closing
+  Go-side-by-side callout notes hand-written pgx code never pays either
+  cost (no navigation properties, no change tracker) but also gets no
+  free `UPDATE`-diffing in return, framing it as one trade-off, not two
+  separate avoidable bugs. A Scope line excludes `AsSplitQuery()`,
+  explicit loading via `Entry().Collection().Load()`, and EF Core's query
+  compilation/caching internals as natural follow-ons. Checked the
+  glossary first for all four new terms — `navigation property`,
+  `Include()`, `tracked-entity snapshot`, `AsNoTracking()` — zero
+  collisions via case-insensitive grep across the whole file, confirmed
+  before writing; added as four new rows immediately after Lesson 105's
+  `BackgroundService` row, same Term/Tiếng Việt (dev-style)/In software
+  column order confirmed by direct inspection of the file's actual header
+  row first. No Go code sample this round — all four snippets are C#
+  (EF Core LINQ + one controller action), so no `.scratch-backend-1019/`
+  Go module was needed; the Go comparison lives entirely in the closing
+  callout's prose. The C# snippets could not be toolchain-verified:
+  `which dotnet` succeeded (`/usr/bin/dotnet`) but `dotnet --version` was
+  blocked as requiring interactive approval with no user present — same
+  specific block every prior round since Lesson 103 hit, confirmed still
+  standing. Verified by careful manual reading instead, per the brief's
+  fallback: `IQueryable<T>.Include(Expression<Func<T,TProperty>>)`,
+  `IQueryable<T>.AsNoTracking()`, `DbSet<T>.ToListAsync()`,
+  `[HttpGet("reports/orders")]` plus `Task<IActionResult>` and `Ok(...)`
+  on a controller action, and a LINQ `Select` projection are all real,
+  standard EF Core / ASP.NET Core API shapes with correct signatures as
+  far as this reading can confirm — flagging here, as instructed, that
+  neither snippet was compiled this round. Verification performed
+  mechanically otherwise, via scratch Node scripts under
+  `.scratch-backend-1019/` (repo-root-relative, today's course+date-unique
+  path per the brief's convention) deleted after use, confirmed gone via
+  a failed `ls`: (1) a quiz-word-count script splitting every option via
+  both `.split(/\s+/)` and `.split(" ")` — first draft landed uneven
+  across all four questions (spreads of 1–3 words, the same single-word
+  trap prior rounds hit), fixed through several rewrite-and-recount
+  cycles per option, converged to exactly 9/9/9/9 on Q1–Q3 and 10/10/10/10
+  on Q4, both counting methods agreeing exactly, exactly one `data-ok`
+  and four options per question confirmed the same way; (2) an HTML
+  tag-balance check across div/p/code/button/script/dfn/pre/h2/h1/em/
+  strong/a — clean on the first pass (div 6/6, p 19/19, code 40/40,
+  button 16/16, script 3/3, dfn 4/4, pre 4/4, h2 6/6, h1 1/1, em 2/2,
+  strong 3/3, a 3/3); a separate table/tr/th/td/p/div/html/head/body/
+  title/script balance check on `glossary.html` after its four-row
+  addition — also balanced (tr 354/354, td 1059/1059); (3) a raw-
+  unescaped-`&` regex scan across both files — zero hits; (4) the
+  lesson's `<dfn` tags grepped and confirmed to carry both `data-en=`
+  and `data-vn=` — exactly 4 `dfn` tags, matching the 4 new terms, no
+  orphaned attribute; (5) `node --check` against `assets/nav.js`,
+  `assets/gloss.js`, and `assets/quiz.js` — all clean; (6) a basic HTML
+  well-formedness check (exactly one `<!DOCTYPE html>`, one `<html>`/
+  `</html>`, three script tags with `nav.js` last) — clean; (7) a grep
+  for stray markdown-style `*emphasis*` left over from drafting — none
+  found. Registered Lesson 106 in `nav.js` (date 2026-10-19, today's
+  actual generation date) right after `n: 105`, confirmed exactly one
+  matching `n: 106` entry and exactly one matching `0106-*.html` file on
+  disk afterward. Added one new RESOURCES.md line (two Microsoft Learn
+  EF Core docs pages — eager loading, tracking vs. no-tracking) following
+  the existing per-topic grouping, placed right after Lesson 102's
+  SignalR line in the same Knowledge section. No new `learning-records/`
+  file this round — this round's topic directly executed an
+  already-written learning record's own recommendation (same as Lessons
+  103–105's rounds), so it doesn't rise to a new baseline. `bin/
+  record-progress` ran clean on the first attempt this round (`recorded:
+  backend/lesson_generated day=106 lesson=
+  0106-ef-core-change-tracking-n-plus-one.html`). With this round, all
+  five of `learning-records/0003`'s named .NET-bridge candidates (DI
+  container, middleware pipeline, EF Core change tracking/N+1,
+  `IHostedService`, and now this lesson's N+1 flavor specifically) are
+  done — no standing named candidate remains for the round after this
+  one. A fresh gap scan (or DB-sourced quiz/completion signal, or a
+  user-named track) should drive the next round's topic choice instead
+  of picking blind from an exhausted list; DB access should still be
+  retried each round regardless of the recent streak of blocks on direct
+  reads, since the orchestrator-side query this round worked cleanly and
+  any future round could too.

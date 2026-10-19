@@ -44,6 +44,7 @@
     { n: 31, date: "2026-10-16", title: "dbt environments: dev/CI/prod targets & generate_schema_name", file: "lessons/0031-dbt-environments-and-schema-naming.html" },
     { n: 32, date: "2026-10-17", title: "dbt test severity (warn/error) & store_failures", file: "lessons/0032-dbt-test-severity-and-store-failures.html" },
     { n: 33, date: "2026-10-18", title: "dbt seeds vs. sources", file: "lessons/0033-dbt-seeds-vs-sources.html" },
+    { n: 34, date: "2026-10-19", title: "Kafka consumer group rebalancing", file: "lessons/0034-kafka-consumer-group-rebalancing.html" },
   ];
 
   const REFS = [

@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 106 · EF Core's own flavor of N+1</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 106 · ~20 min</p>
+<h1>EF Core's own flavor of N+1</h1>
+<p class="byline">Lesson 36 taught the N+1 query problem in the abstract: one query for a list, then one more query per row in a loop. It even named <code>lazy-loading</code> as the ORM disguise for that same bug. Today: exactly how EF Core's <code>DbContext</code> — Lesson 103's Scoped service, the one with <code>change tracking</code> — turns that disguise into something that looks like perfectly normal C#, and the two different fixes for the two different ways it happens.</p>
+
+<h2>1 · The loop is still there, it's just hidden behind a property</h2>
+<p>Here's code that looks like it does nothing wrong — no visible loop issuing queries, just reading data off objects already in hand:</p>
+<pre><code><span class="kw">foreach</span> (<span class="kw">var</span> order <span class="kw">in</span> db.Orders.ToList()) {
+    Console.WriteLine($<span class="st">"Order {order.Id}: {order.Items.Count} items"</span>);
+}
+</code></pre>
+<p>If <code>Order.Items</code> is a <dfn data-en="an EF Core entity property that represents a relationship to another entity or collection (e.g. Order.Items), rather than a plain scalar column -- reading it can trigger a fresh query if the related data was not already loaded" data-vn="navigation property (giữ nguyên) — property đại diện cho quan hệ sang entity/bảng khác (VD Order.Items), không phải cột dữ liệu thường -- đọc nó có thể kích query mới nếu chưa load sẵn">navigation property</dfn> and lazy-loading is enabled, that one-line <code>order.Items.Count</code> fires a fresh <code>SELECT</code> the first time it's touched for each <code>order</code> — Lesson 36's 1,001-query shape, except nothing in this code looks like a loop firing queries. It looks like reading a field. That's exactly the disguise Lesson 36's section 6 named, and it's the normal way this bug gets into a C# codebase: nobody wrote a query inside the loop on purpose, the navigation property wrote it for them.</p>
+
+<h2>2 · Fix #1: tell EF Core to fetch the relation up front</h2>
+<p>The fix is the same "eager load" idea Lesson 36 named generically, with a concrete EF Core method: <dfn data-en="an EF Core query method that eagerly loads a related navigation property as part of the original query (via SQL JOIN), instead of issuing a separate query the first time the property is accessed" data-vn="Include() (giữ nguyên) — method của EF Core để load sẵn navigation property ngay trong query gốc (bằng JOIN), thay vì đợi query riêng khi đọc property">Include()</dfn>:</p>
+<pre><code><span class="kw">var</span> orders = <span class="kw">await</span> db.Orders
+    .Include(o => o.Items)   <span class="cm">// fetch Items in the SAME query, via JOIN</span>
+    .ToListAsync();
+
+<span class="kw">foreach</span> (<span class="kw">var</span> order <span class="kw">in</span> orders) {
+    Console.WriteLine($<span class="st">"Order {order.Id}: {order.Items.Count} items"</span>);  <span class="cm">// no extra query now</span>
+}
+</code></pre>
+<p><code>Include(o => o.Items)</code> turns the query into one SQL statement with a <code>JOIN</code>, so every order's items arrive in the same round trip as the orders themselves. By the time the <code>foreach</code> runs, <code>order.Items</code> is already populated — reading it doesn't ask the database anything, because EF Core's <code>change tracking</code> already has it in memory. This is Lesson 36's JOIN-or-batch fix, just spelled as a LINQ method instead of hand-written SQL.</p>
+
+<h2>3 · The second, EF-Core-specific flavor: change tracking itself is the cost</h2>
+<p>Lesson 103 already named it: <code>change tracking</code> is <code>DbContext</code> remembering every entity it has loaded, so <code>SaveChanges()</code> knows which fields changed and can generate the right <code>UPDATE</code>. That bookkeeping isn't free — and it runs whether or not you intend to modify anything:</p>
+<pre><code><span class="cm">// A read-only report endpoint -- nothing here is ever going to be saved</span>
+[HttpGet(<span class="st">"reports/orders"</span>)]
+<span class="kw">public</span> <span class="kw">async</span> Task&lt;IActionResult&gt; GetOrderReport() {
+    <span class="kw">var</span> orders = <span class="kw">await</span> db.Orders.Include(o => o.Items).ToListAsync();
+    <span class="kw">return</span> Ok(orders.Select(o => <span class="kw">new</span> { o.Id, o.Items.Count }));
+}
+</code></pre>
+<p>This isn't Lesson 36's round-trip-count problem — <code>Include</code> already fixed that part, it's one query. The cost here is different: every one of those entities gets a <dfn data-en="an internal snapshot EF Core's change tracker keeps per loaded entity, used to detect which properties changed by diffing against it when SaveChanges runs -- allocated and maintained even if the entity is never going to be modified or saved" data-vn="tracked entity snapshot (giữ nguyên) — bản snapshot nội bộ EF Core giữ cho mỗi entity đã load, dùng để so sánh phát hiện field nào đổi khi SaveChanges chạy -- vẫn tốn dù entity không bao giờ bị sửa hay lưu lại">tracked-entity snapshot</dfn> allocated and kept in the <code>DbContext</code>'s change tracker, purely in case something changes it later — memory and CPU spent on bookkeeping a read-only report endpoint will never use. On a large result set, that overhead is real and avoidable.</p>
+<p>The fix is a different method than <code>Include</code>, because it's a different problem: <dfn data-en="an EF Core query method that returns entities without registering them in the change tracker -- no snapshot is kept, SaveChanges cannot persist edits to them, but reads are cheaper because the bookkeeping is skipped entirely" data-vn="AsNoTracking() (giữ nguyên) — method của EF Core để query mà KHÔNG đăng ký vào change tracker -- không giữ snapshot, không SaveChanges được, nhưng đọc nhẹ hơn vì bỏ qua bookkeeping">AsNoTracking()</dfn>:</p>
+<pre><code><span class="kw">var</span> orders = <span class="kw">await</span> db.Orders
+    .AsNoTracking()           <span class="cm">// skip the change-tracker snapshot entirely</span>
+    .Include(o => o.Items)
+    .ToListAsync();
+</code></pre>
+<p><code>Include</code> and <code>AsNoTracking</code> answer two different questions, and this lesson's whole point is not to confuse them: <code>Include</code> fixes <em>how many queries</em> run (Lesson 36's round-trip problem); <code>AsNoTracking</code> fixes <em>how much bookkeeping</em> each returned row carries (an EF-Core-only cost with no Go/raw-SQL equivalent, because hand-written SQL never tracked anything to begin with). A report endpoint that never calls <code>SaveChanges</code> should almost always use both.</p>
+
+<div class="callout"><p><strong>Go side-by-side:</strong> the Go/pgx code in Lesson 36 never had either problem by construction. A hand-written <code>SELECT ... JOIN ...</code> or batched <code>WHERE id = ANY(...)</code> query is the only round trip there is — there's no navigation property to lazily fire a second query, and there's no change tracker silently snapshotting every scanned row, because <code>pgx.Rows.Scan</code> just copies columns into a struct and stops. The trade-off runs the other way too: that same hand-written code gets no free <code>UPDATE</code>-diffing from a change tracker either — Go/pgx code must build its own <code>UPDATE</code> statement by hand, field by field, every time. EF Core's convenience and its two N+1-adjacent costs are the same trade-off, not two separate things to avoid.</p></div>
+
+<h2>Scope line</h2>
+<p>This lesson covers EF Core's lazy-loading navigation-property flavor of Lesson 36's N+1 problem, the <code>Include()</code> fix for it, and the separate change-tracking overhead <code>AsNoTracking()</code> fixes. It does not cover: split queries (<code>AsSplitQuery()</code>) for when a single big <code>JOIN</code> itself becomes the bottleneck on multiple collection includes; explicit loading (<code>Entry().Collection().Load()</code>) as a third loading strategy; or EF Core's query compilation/caching internals. Natural follow-ons, not covered here.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory, with no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A navigation property like Order.Items reads like a normal field access in the code, but if lazy-loading is enabled and the data was not already fetched, touching it fires a brand new query -- the same N+1 shape as Lesson 36, just hidden behind property syntax instead of a visible loop.">
+    <p class="stem">Why can reading order.Items inside a loop silently cause N+1 queries?</p>
+    <button class="opt" data-ok>a lazy navigation property can quietly fire one query</button>
+    <button class="opt">a C# property getter runs one brand new query</button>
+    <button class="opt">EF Core always forbids reading any properties inside loops</button>
+    <button class="opt">Order.Items is actually stored as raw, unparsed binary text</button>
+  </div>
+  <div class="q" data-why="Include(o => o.Items) tells EF Core to fetch the related Items as part of the original query, via a SQL JOIN, instead of waiting for the property to be touched and firing a separate query then -- the same eager-load fix Lesson 36 named generically.">
+    <p class="stem">What does calling .Include(o =&gt; o.Items) actually change about the query?</p>
+    <button class="opt" data-ok>it fetches Items in the same query, via JOIN</button>
+    <button class="opt">it deletes every single Items row linked to orders</button>
+    <button class="opt">it renames the Items navigation property itself, for good</button>
+    <button class="opt">it disables change tracking, only for that one query</button>
+  </div>
+  <div class="q" data-why="Change tracking keeps a snapshot per loaded entity so SaveChanges can later diff and detect what changed. That bookkeeping costs memory and CPU even when an entity is only being read and will never be saved -- a cost separate from, and not fixed by, Include().">
+    <p class="stem">Why does a read-only report endpoint still pay a change-tracking cost?</p>
+    <button class="opt" data-ok>EF Core snapshots every loaded entity, whether it changes</button>
+    <button class="opt">Include always forces one extra, completely unneeded UPDATE too</button>
+    <button class="opt">read-only endpoints secretly call SaveChanges, once per row too</button>
+    <button class="opt">change tracking applies only to entities missing a key</button>
+  </div>
+  <div class="q" data-why="Include and AsNoTracking fix two different costs: Include reduces the query count (Lesson 36's round-trip problem), while AsNoTracking skips the per-entity change-tracker snapshot (a cost with no equivalent in hand-written Go/pgx SQL, since that code never tracked anything to begin with).">
+    <p class="stem">How do .Include() and .AsNoTracking() differ in what they fix?</p>
+    <button class="opt" data-ok>one cuts the query count, the other skips tracking cost</button>
+    <button class="opt">they are two interchangeable names for one exact method here</button>
+    <button class="opt">both of them only affect how JSON gets serialized later</button>
+    <button class="opt">AsNoTracking simply makes Include itself run a little bit faster</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://learn.microsoft.com/en-us/ef/core/querying/related-data/eager">Microsoft Learn: Loading Related Data — Eager Loading</a> (~10 min) covers <code>Include()</code> and its split-query variant; <a href="https://learn.microsoft.com/en-us/ef/core/querying/tracking">Microsoft Learn: Tracking vs. No-Tracking Queries</a> (~10 min) covers <code>AsNoTracking()</code> and exactly what change tracking costs it skips. Both extend RESOURCES.md's existing Microsoft Learn citation pattern (first used for SignalR, Lesson 102) into EF Core's own docs tree.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a>. Click any dotted term for a popup (English first, tiếng Việt second). Builds on Lesson 36's N+1 problem and lazy-loading term, and Lesson 103's change-tracking and Scoped-lifetime material. <strong>Anything unclear? Ask your teacher</strong>, the agent that made this lesson. Ask in Vietnamese anytime. A good follow-up: "does our .NET codebase have any Include() missing on a hot list endpoint, or any read-only query that should have AsNoTracking() but doesn't?"</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

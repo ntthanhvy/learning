@@ -9184,3 +9184,140 @@
   `bin/record-progress data lesson_generated --day 101 --lesson
   0101-itertuples.html --detail '{"by":"headless"}'` will be run directly
   from the repo root to close out this round.
+- 2026-10-19 generation (Lesson 102): headless run, zero prior context. The
+  orchestrator pre-confirmed no `course_progress` row dated 2026-10-19
+  existed for `data` and no new quiz/lesson_completed/remediation signal
+  had appeared (the completion/quiz signal remains stale since mid-July,
+  unchanged) — DB access was not independently re-attempted this round,
+  per the orchestrator's own instruction. Idempotency independently
+  confirmed from file state too: `grep -n '2026-10-19' data/assets/nav.js`
+  and a glob for `data/lessons/0102-*` both came back empty before this
+  round started. Read MISSION.md in full (not modified), RESOURCES.md in
+  full, `assets/nav.js` in full for the registration format, and this
+  file's own tail (Lessons 98-101's entries) — the `learning-records/`
+  directory holds only the one Day-1 baseline file (0001), still
+  unchanged, no new durable finding to fold in. Lesson 101's own teaser
+  named no standing candidate this time (today's own pick was the last
+  one left standing from the prior lineage), so this round ran a fresh
+  curriculum/glossary scan per that instruction, same situation Lessons
+  98/99 started from. Built a scratch Python scan script (`uv run
+  --with pandas python3`, run from `.scratch-data-1019/` directly under
+  the repo root per this round's own instruction to avoid colliding with
+  concurrently-running sibling agents, deleted after) that counted
+  case-insensitive substring hits for ~160 candidate pandas/NumPy terms
+  across every lesson body and the glossary file at once. 78 zero-hit
+  candidates came back, including the `rename_axis()`/`swaplevel()`/
+  `get_loc()`/`MultiIndex.from_product()` family, the `str.pad()`/
+  `str.strip()`/`str.title()`/`str.join()` text-cleanup family,
+  `pd.to_timedelta()`, `np.clip()`, `np.cumsum()`/`np.cumprod()`/
+  `np.diff()` as raw NumPy functions (distinct from the pandas
+  `Series.cumsum()`/`Series.diff()` already taught in Lessons 7/23),
+  `np.digitize()`, `np.histogram()`, `np.allclose()`/`np.isclose()`,
+  `to_markdown()`/`to_excel()`/`read_excel()`, `IntervalIndex`, and
+  several others. Picked `np.clip()` over the rest: grepped Lesson 35
+  (`clip()`) directly and confirmed it teaches `Series.clip()` thoroughly
+  — including hand-deriving its logic as a nested `np.where()`
+  floor-then-ceiling check — but never once names `np.clip()`, the actual
+  NumPy function `Series.clip()` itself calls down to; a clean,
+  high-confidence "used in passing but never itself taught" gap, the same
+  lineage shape as Lesson 100 closing Lesson 21's `pd.concat()` thread by
+  teaching the raw-array stacking functions underneath it. The
+  `str.pad()`/`str.strip()` family and `np.cumsum()`/`np.diff()` were
+  judged thinner by comparison (a text-cleanup grab-bag vs. a single sharp
+  function; and a pandas-only rerun of material Lessons 7/23 already
+  cover at the Series level, respectively) and left unused; both are named
+  in today's own teaser as un-promoted candidates for tomorrow's fresh
+  scan, alongside `pd.to_timedelta()`. Every behavioral claim was probed
+  directly first in `.scratch-data-1019/` (inside the repo, deleted
+  after), on the actually-installed pandas 3.0.6 / numpy 2.5.4 (confirmed
+  via a version-print one-liner): confirmed `np.clip()` called on a
+  pandas Series returns a Series back (not a bare ndarray), with values
+  byte-identical (via `np.array_equal()`) to calling `s.clip(lower=,
+  upper=)` directly; confirmed `lower > upper` does not raise at all —
+  every output value silently becomes the upper bound instead, no
+  warning; confirmed an int array clipped with float bounds silently
+  upcasts the whole result to `float64`; confirmed a NaN already present
+  in the input passes straight through unclipped in both the ndarray and
+  Series forms, since the clip comparison can never match a NaN by IEEE
+  float rules; confirmed `ndarray.clip()` (the method form) and
+  `np.clip()` (the function form) return identical results, confirmed via
+  `np.array_equal()`. Timed `Series.clip()` against `np.clip()` on the
+  same Series' `.to_numpy()` array over a 2,000,000-row column, repeated
+  three times to rule out a one-off fluke: `np.clip()` on the raw array
+  measured consistently faster than `Series.clip()` on every run, but the
+  exact ratio was noisy across repeats (roughly 6x, 12x, and 36x in three
+  separate runs) — the lesson deliberately reports this as "several times
+  faster, direction never flipped" rather than committing to one precise
+  multiplier, unlike some earlier lessons' single stable timing figures,
+  specifically because this one didn't replicate to a stable number.
+  Cross-checked the official NumPy API reference for `numpy.clip()` via
+  `WebFetch`: confirmed the `lower > upper` → all-`upper` behavior in the
+  docs' own worked example, matching direct probing exactly; the docs page
+  itself is silent on NaN behavior, which the direct probing above
+  confirmed independently, going further than that page states (same
+  pattern as Lesson 93's citation note about `np.argmax()`'s docs being
+  silent on NaN). Cited under the existing `RESOURCES.md` "Docs: NumPy
+  fundamentals — broadcasting" entry rather than adding a new line,
+  matching the established precedent of Lessons 93/95/97/99/100 citing a
+  different `numpy.org/doc/stable/reference/generated/...` page under that
+  same umbrella entry each time without adding a new `RESOURCES.md` row
+  per lesson. The shipped (unsolved) `practice/102_np_clip.py` was
+  executed directly from its real `practice/` location (via `cd data &&
+  uv run --with pandas python3 practice/102_np_clip.py`) and printed
+  exactly 3 ✗ with no raw traceback. Built a solved copy in
+  `.scratch-data-1019/102_np_clip_solved.py`, filling in all five blanks
+  (including a `clip_with_swapped_bounds()` helper function body, same
+  pattern as Lessons 100/101's own helper-function exercises) correctly;
+  it printed all 3 ✓ and "All green" on the first run. The shipped file
+  was re-run once more directly from `practice/` after building the solved
+  copy and reproduced the identical all-✗ result, confirming the solved
+  copy's edits never leaked back into the shipped baseline. Quiz options
+  were drafted, then mechanically word-counted with a scratch Python
+  script (`uv run --with pandas python3`, deleted after) isolating each
+  `<div class="q">` block by regex span and splitting on whitespace — the
+  first draft came out 9/11/11, 12/11/13, 13/11/10; several rounds of
+  small rephrasing (adding/trimming words like "back", "here", "instead",
+  "message", "given", "still") across all three questions until every one
+  landed exactly level (12/12/12, 13/13/13, 13/13/13 option words, counting
+  the standalone "--" token the same way prior rounds' scripts did), one
+  `data-ok` per question throughout, with the `data-why` wording re-checked
+  against the final option text afterward to confirm the rephrasing never
+  drifted the meaning. A separate mechanical tag-balance script confirmed
+  all tags balanced (a 2/2, body 1/1, button 9/9, code 56/56, dfn 1/1, div
+  6/6, em 2/2, h1 1/1, h2 6/6, head 1/1, html 1/1, p 16/16, pre 3/3, script
+  3/3, span 35/35, strong 3/3, title 1/1) and found exactly two raw `&`
+  characters, both inside the one established `cd ~/learning/data && uv
+  run ...` shell command, matching every prior lesson's pattern, zero raw
+  `&` in prose; also confirmed the one new `<dfn>` tag carries both
+  `data-en` and `data-vn`. Checked the glossary for a collision before
+  adding anything — grepped `clip` case-insensitively across the full
+  glossary, found exactly one existing row (Lesson 35's own `clip()` row,
+  the pandas Series/DataFrame method, not the NumPy function) — added
+  exactly one new row, "np.clip()", directly after Lesson 101's
+  "itertuples()" entry; re-ran the tag-balance and raw-`&` scripts against
+  the glossary file afterward, confirmed it stayed balanced (a 1/1, body
+  1/1, code 1215/1215, em 11/11, h1 1/1, head 1/1, html 1/1, p 3/3, script
+  1/1, strong 1/1, table 1/1, td 516/516, th 3/3, title 1/1, tr 173/173)
+  with zero raw `&` introduced, and the `<tr>` count went from 172 to 173
+  as expected. Registered Lesson 102 in `nav.js` with today's date
+  (2026-10-19); `node --check` confirmed it still parses as valid
+  JavaScript after the edit, and exactly one `n: 102` entry plus one
+  `0102-np-clip` file reference were confirmed to exist; `node --check`
+  was also run against the untouched `gloss.js`/`quiz.js` as a quick
+  sanity pass, both still parse fine. This round closed a fresh gap found
+  with no lineage shortcut available, same pattern as Lessons 98/99's own
+  fresh-scan rounds. No single candidate is named as THE next pick for
+  tomorrow; the `str.pad()`/`str.strip()`/`str.title()`/`str.join()`
+  family, `np.cumsum()`/`np.cumprod()`/`np.diff()` as raw NumPy functions,
+  and `pd.to_timedelta()` all remain confirmed zero-hit options from
+  today's scan but none is promoted ahead of running tomorrow's own fresh
+  scan. No new `data/learning-records/` entry was added this round —
+  routine lesson, no new baseline finding to justify one (the
+  completion/quiz signal remains stale past mid-July, unchanged from this
+  round's starting context, consistent with the orchestrator's own
+  pre-gathered DB read this round). The `.scratch-data-1019/` directory
+  was deleted after verification, per this course's standing practice of
+  not leaving scratch artifacts committed. `bin/record-progress data
+  lesson_generated --day 102 --lesson 0102-np-clip.html --detail
+  '{"by":"headless"}'` was run directly from the repo root to close out
+  this round.

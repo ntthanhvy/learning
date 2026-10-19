@@ -216,6 +216,8 @@
       file: "lessons/0104-aspnet-middleware-pipeline.html" },
     { n: 105, date: "2026-10-18", title: "IHostedService: a worker living inside your app process",
       file: "lessons/0105-ihostedservice-background-services.html" },
+    { n: 106, date: "2026-10-19", title: "EF Core's own flavor of N+1",
+      file: "lessons/0106-ef-core-change-tracking-n-plus-one.html" },
   ];
 
   const REFS = [

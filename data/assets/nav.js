@@ -208,6 +208,8 @@
       file: "lessons/0100-np-vstack-hstack-column-stack.html" },
     { n: 101, date: "2026-10-18", title: "itertuples(): the better row-loop, for the rare case a loop is unavoidable",
       file: "lessons/0101-itertuples.html" },
+    { n: 102, date: "2026-10-19", title: "np.clip(): the array-level clamp underneath Series.clip()",
+      file: "lessons/0102-np-clip.html" },
   ];
 
   const REFS = [

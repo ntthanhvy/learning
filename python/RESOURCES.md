@@ -61,6 +61,8 @@ authors for *why*. Cite inline; each lesson recommends exactly one primary sourc
   Use for: Day 80 — `unified_diff()` for a `git diff`-shaped line-by-line comparison, `SequenceMatcher.ratio()` for a 0.0-1.0 similarity score instead of a rendered diff, and `get_close_matches()` for ranking known candidates against one input word (a "did you mean…?" suggestion).
 - [Docs: `io`](https://docs.python.org/3/library/io.html)
   Use for: Day 81 — `StringIO`/`BytesIO` as in-memory, file-like objects for code that expects an open file (`csv`, `json`), `.getvalue()` for reading back everything written, and `.seek(0)` for rewinding before a read.
+- [Docs: `base64`](https://docs.python.org/3/library/base64.html)
+  Use for: Day 82 — `b64encode()`/`b64decode()` for carrying arbitrary bytes through a text-only format (JSON, a log line), `urlsafe_b64encode()`/`urlsafe_b64decode()` for the URL-safe `-`/`_` alphabet variant, and why encoding is not encryption.
 - [PEP 8 — Style Guide for Python Code](https://peps.python.org/pep-0008/)
   Use for: naming and layout conventions, so written code looks like the ecosystem's.
 

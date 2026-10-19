@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 82 · base64: binary data as plain text</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 82 · ~20 min · 19 Oct 2026</p>
+<h1><code>base64</code>: binary data as plain text</h1>
+<p class="byline">Day 81's <code>io.BytesIO</code> held raw <code>bytes</code> in memory instead of on disk — but JSON, a URL, an HTTP header, and plain text all still choke on raw bytes directly, because those formats only know a limited set of printable characters. <dfn data-en="base64 is a standard-library module that re-encodes any bytes value as text built only from the 64 characters A-Z, a-z, 0-9, +, and / (or -, _ in the URL-safe variant) -- so arbitrary binary data can travel through a format that only accepts plain text, at the cost of roughly one third more size" data-vn="giữ nguyên &quot;base64&quot; — module chuẩn encode bytes bất kỳ thành text chỉ gồm 64 ký tự an toàn (A-Z, a-z, 0-9, +, / — hoặc -, _ ở bản url-safe), để nhúng được vào chỗ chỉ nhận text thuần như JSON/URL/header, đổi lại size tăng khoảng 1/3">The <code>base64</code> module</dfn> is the standard answer: encode bytes into that safe alphabet before handing them to a text-only format, and decode them back to the original bytes on the other end.</p>
+
+<div class="callout"><strong>Why today, specifically:</strong> a fresh-gap grep across all 81 lessons and every practice file found zero hits for <code>base64</code> as a taught topic — it surfaced as the runner-up in Day 81's own gap scan (that round picked <code>io.StringIO</code>/<code>BytesIO</code> instead, on relative priority, and explicitly flagged <code>base64</code> as the standing candidate to take next). It is still a clean gap today, and it completes a real story: Day 81 taught holding bytes in memory; today teaches what to do when those bytes need to leave Python's world — into a JSON field, a URL, or a text-based log — without a byte lost or mangled.</div>
+
+<h2>1 · The problem: raw bytes don't survive a text-only format</h2>
+<p>Suppose a small PNG's raw bytes need to travel inside a JSON payload — maybe an API that returns an image thumbnail embedded directly in a response body instead of as a separate file:</p>
+<pre><code><span class="kw">import</span> json
+
+image_bytes = <span class="str">b"\x89PNG\r\n\x1a\n..."</span>  <span class="cm"># arbitrary binary, not text</span>
+<span class="kw">try</span>:
+    json.dumps({<span class="str">"thumbnail"</span>: image_bytes})
+<span class="kw">except</span> TypeError <span class="kw">as</span> e:
+    <span class="kw">print</span>(e)
+<span class="cm"># Object of type bytes is not JSON serializable</span></code></pre>
+<p>Day 76's <code>json.dumps()</code> only knows <code>str</code>, <code>int</code>, <code>float</code>, <code>bool</code>, <code>None</code>, <code>list</code>, and <code>dict</code> — <code>bytes</code> is not on that list, and for good reason: JSON text itself is restricted to characters that can't represent an arbitrary byte like <code>\x1a</code> safely. The fix isn't a <code>default=</code> callback (Day 76) rewriting the bytes into some other shape; it's re-encoding the bytes themselves into text first, so they become a plain <code>str</code> JSON already knows how to hold.</p>
+
+<h2>2 · <code>b64encode()</code> / <code>b64decode()</code>: the core round trip</h2>
+<pre><code><span class="kw">import</span> base64
+
+data = <span class="str">b"hello world"</span>
+encoded = base64.b64encode(data)
+<span class="kw">print</span>(encoded)          <span class="cm"># b'aGVsbG8gd29ybGQ='</span>
+
+decoded = base64.b64decode(encoded)
+<span class="kw">print</span>(decoded)          <span class="cm"># b'hello world'</span>
+<span class="kw">print</span>(decoded == data)  <span class="cm"># True -- the exact original bytes, no loss</span></code></pre>
+<p><code>b64encode()</code> takes <code>bytes</code> and returns <code>bytes</code> — notice the <code>b'...'</code> prefix on the output too. That output happens to contain only the 64 safe characters, so it's always safe to go one step further and turn it into a real <code>str</code> for embedding in JSON or text:</p>
+<pre><code>token = base64.b64encode(data).decode(<span class="str">"ascii"</span>)
+<span class="kw">print</span>(token, <span class="kw">type</span>(token))
+<span class="cm"># aGVsbG8gd29ybGQ= &lt;class 'str'&gt;</span>
+
+json.dumps({<span class="str">"payload"</span>: token})  <span class="cm"># works now -- it's just a plain string</span></code></pre>
+<p><code>.decode("ascii")</code> is safe here specifically because base64's output alphabet is pure ASCII by construction — unlike Day 76's general text-encoding concerns, there's no multi-byte character risk to worry about on this particular conversion.</p>
+<p>The trailing <code>=</code> is padding, not noise: base64 packs every 3 input bytes into 4 output characters, and pads with <code>=</code> when the input isn't a multiple of 3 bytes, so a decoder always knows exactly where the real data ends:</p>
+<pre><code><span class="kw">for</span> n <span class="kw">in</span> (<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>):
+    <span class="kw">print</span>(n, base64.b64encode(<span class="str">b"x"</span> * n))
+<span class="cm"># 1 b'eA=='   -- 1 byte in, padded to 4 chars
+# 2 b'eHg='   -- 2 bytes in, padded to 4 chars
+# 3 b'eHh4'   -- 3 bytes in, no padding needed</span></code></pre>
+
+<h2>3 · <code>urlsafe_b64encode()</code>: when the text destination is a URL</h2>
+<p>Standard base64's 64-character alphabet includes <code>+</code> and <code>/</code> — both characters with their own special meaning inside a URL (space-encoding and path separators). Putting a raw base64 string into a URL query parameter risks it being misread:</p>
+<pre><code>data = <span class="kw">bytes</span>([<span class="num">251</span>, <span class="num">255</span>, <span class="num">191</span>])
+<span class="kw">print</span>(base64.b64encode(data))          <span class="cm"># b'+/+/'</span>
+<span class="kw">print</span>(base64.urlsafe_b64encode(data))  <span class="cm"># b'-_-_'</span></code></pre>
+<p><code>urlsafe_b64encode()</code> does the exact same packing, just swapping <code>+</code> → <code>-</code> and <code>/</code> → <code>_</code> in the output alphabet — safe to drop straight into a URL path segment or query string with no further escaping. <code>urlsafe_b64decode()</code> is its matching reader; mixing a string from one variant into the other's decoder silently produces wrong bytes or an error, so the pick has to match on both ends.</p>
+
+<div class="callout"><strong>Not encryption:</strong> base64 is an <dfn data-en="an encoding is a reversible, publicly-known rule for representing data in a different shape -- anyone who knows the rule can decode it, with no secret key involved -- unlike encryption, which requires a secret key to reverse" data-vn="giữ nguyên &quot;encoding&quot; — quy tắc biến đổi dữ liệu sang dạng khác, công khai, ai cũng đảo ngược được, không cần key bí mật; khác hẳn encryption (mã hoá) vốn cần key bí mật mới đảo ngược được">encoding</dfn>, not encryption. Anyone who sees a base64 string can decode it with zero effort and no secret key — <code>base64.b64decode()</code> is public knowledge, not a cipher. It hides nothing. If the actual goal is "keep this secret," Day 77's <code>secrets</code> module and a real encryption library are the right tools; base64 only solves "make these bytes survive a text-only pipe."</div>
+
+<div class="callout"><strong>Where pandas/NumPy go from here:</strong> nothing library-specific today — base64 encoding is a plain-bytes operation with no connection to a <code>DataFrame</code> or array; this stays entirely in stdlib territory, per <code>MISSION.md</code>.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/82_base64_encoding.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/82_base64_encoding.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: round-tripping bytes through <code>b64encode()</code>/<code>b64decode()</code>, decoding the encoded result to a plain <code>str</code> for embedding elsewhere, confirming <code>urlsafe_b64encode()</code> swaps <code>+</code>/<code>/</code> for <code>-</code>/<code>_</code> on the same input, and embedding an encoded token inside a JSON payload with <code>json.dumps()</code>/<code>json.loads()</code>.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="json.dumps() only knows str, int, float, bool, None, list, and dict -- bytes is not one of those types, and raw binary data can't be represented safely inside JSON's own text syntax. base64.b64encode() re-encodes the bytes into text built from a safe 64-character alphabet, so the result becomes a plain str JSON already knows how to hold.">
+    <p class="stem">Why does <code>json.dumps()</code> reject a <code>bytes</code> value, and why does <code>base64</code> fix that?</p>
+    <button class="opt" data-ok>bytes isn't a JSON type; base64 re-encodes to text</button>
+    <button class="opt">json.dumps always crashes on any value past one word</button>
+    <button class="opt">base64 shrinks the bytes down until json.dumps accepts them</button>
+  </div>
+  <div class="q" data-why="base64 packs every 3 input bytes into 4 output characters. When the input isn't a multiple of 3 bytes, the final group is padded with one or two = characters so a decoder always knows exactly where the real encoded data ends -- it is not an error marker or leftover noise.">
+    <p class="stem">What does the trailing <code>=</code> in a <code>b64encode()</code> result actually mean?</p>
+    <button class="opt" data-ok>padding that marks exactly where the real data ends</button>
+    <button class="opt">a warning that the decode step will silently fail</button>
+    <button class="opt">a random character inserted to pad out the length</button>
+  </div>
+  <div class="q" data-why="Encoding is a reversible, publicly-known rule for reshaping data -- anyone who knows the rule, which for base64 is public and built into every standard library, can decode it with no secret key at all. Encryption requires a secret key to reverse. base64 hides nothing from anyone who looks.">
+    <p class="stem">Why is calling <code>base64.b64encode()</code> "hiding" data a mistake?</p>
+    <button class="opt" data-ok>decoding it back needs no secret key at all</button>
+    <button class="opt">decoding needs a secret key only the sender has</button>
+    <button class="opt">encoded text becomes permanently unreadable to anyone at all</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the standard library's <a href="https://docs.python.org/3/library/base64.html"><code>base64</code></a> docs — the "Encoding and decoding" section covers <code>b64encode()</code>/<code>b64decode()</code> directly, with <code>urlsafe_b64encode()</code>/<code>urlsafe_b64decode()</code> and the RFC-defined alphabet right alongside.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day82">glossary</a> under Day 82.<br>
+This is the third fresh lesson since Day 79's review (Days 80, 81, 82) — per this course's settled three-fresh-then-review cadence, Day 83 is the natural review day covering Days 80-82.<br><br>
+💬 Anything unclear — why base64 isn't encryption, or when URL-safe matters? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

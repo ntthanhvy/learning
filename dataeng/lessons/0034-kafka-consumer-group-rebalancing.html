@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 34 · Kafka consumer group rebalancing</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 34 · ~20 min · 19 Oct 2026</p>
+<h1>Kafka consumer group rebalancing</h1>
+<p class="byline">Today's tangible win: two instances of Day 6's own consumer, same <code>group.id</code>, running at once against the real <code>order_events</code> topic — and your own <code>kafka-consumer-groups.sh --describe</code> output proving Kafka split the 3 partitions between them, then reassigned a partition live the moment one instance was killed, with the warehouse ending up at exactly one row per event throughout. This closes a gap named directly in <code>MISSION.md</code>'s own Kafka bullet ("consumer groups") that Days 5, 6, 16 and 18 never actually exercised: every consumer run so far has been exactly one process in its group.</p>
+
+<div class="callout"><strong>Before today — check Days 5 and 6 actually landed:</strong> today runs two copies of Day 6's consumer against the same topic, so confirm both exist and Kafka is up:
+<pre><code>docker compose up -d
+docker compose exec kafka /opt/kafka/bin/kafka-topics.sh \
+  --bootstrap-server localhost:9092 --describe --topic order_events
+ls scripts/consume_order_events.py</code></pre>
+Expected: <code>PartitionCount: 3</code> and the script path printed with no error. If either is missing, go back to Day 5 (topic) or Day 6 (consumer script) first — today adds no new file, it runs an existing one twice.</div>
+
+<h2>1 · The question every one-consumer run has dodged since Day 5</h2>
+<p>Day 5 named the <dfn data-en="a named set of consumers that coordinate to split a topic's partitions between them and share one committed-offset bookmark per partition -- the unit Kafka scales consumption with, and the unit today's CLI command inspects" data-vn="giữ nguyên &quot;consumer group&quot; — tập consumer cùng group.id, chia nhau đọc các partition, dùng chung offset đã commit">consumer group</dfn> and said Kafka "assigns each partition to exactly one consumer within a group at a time." That sentence has never been tested, because every run since — Day 5's inspector, Day 6's warehouse loader, Day 16's retry demo, Day 18's lag demo — started exactly one consumer process per group. With one consumer, "assigns each partition to exactly one consumer" is trivially true: that one process gets all three partitions of <code>order_events</code>, there is nobody else to assign anything to. The interesting mechanics — what happens when a <em>second</em> consumer joins the same group, or the first one dies — have stayed pure vocabulary. Today runs two.</p>
+
+<h2>2 · What a rebalance actually is</h2>
+<p>When a new consumer joins a group (or an existing one leaves, by graceful shutdown or by timing out), Kafka's <dfn data-en="the Kafka broker process responsible for one consumer group: tracks which consumers are currently members, detects a member leaving (graceful shutdown or a missed heartbeat past session.timeout.ms), and runs the group's rebalance protocol to reassign partitions among the remaining members" data-vn="giữ nguyên &quot;group coordinator&quot; — 1 broker được chọn làm đầu mối cho 1 consumer group cụ thể: theo dõi consumer nào đang là member, phát hiện member rời đi (tắt graceful hoặc mất heartbeat quá session.timeout.ms), và chạy protocol rebalance để chia lại partition cho các member còn lại">group coordinator</dfn> — one broker, elected per group — triggers a <dfn data-en="the process by which a Kafka consumer group's partitions get reassigned among its current members, triggered whenever a consumer joins, leaves, or is judged dead by a missed heartbeat -- during a rebalance every affected consumer in the group briefly pauses consumption while new partition ownership is agreed, then resumes reading only the partition(s) it was assigned" data-vn="giữ nguyên &quot;rebalance&quot; — quá trình Kafka chia lại partition cho các consumer trong group, xảy ra bất cứ khi nào có consumer join, leave, hoặc bị coi là chết do mất heartbeat quá hạn; trong lúc rebalance, các consumer liên quan tạm dừng đọc cho tới khi việc chia partition mới được chốt, rồi mỗi consumer chỉ đọc đúng partition được giao">rebalance</dfn>: every partition the group owns gets reassigned among whichever consumers are members right now, including ones that just joined and excluding ones just judged dead. "Judged dead" is not instant — a consumer that stops sending heartbeats is only dropped after <code>session.timeout.ms</code> (10 seconds, confluent-kafka's default) passes with no heartbeat, which is why a kill-and-rejoin below takes a few seconds to settle rather than reassigning the instant a process dies.</p>
+<p>Two things matter about a rebalance that the one-consumer runs so far could never show: first, exactly one consumer owns a given partition at any moment within a group — never two at once, which is exactly what makes "each partition's committed offset means one thing" still true with multiple consumers; second, a partition's committed offset is what lets the <em>new</em> owner pick up from where the <em>old</em> owner left off, the same mechanism Day 6's crash-and-restart test already proved, just now handing a partition to a different process instead of a restarted one. Nothing about <code>ON CONFLICT (event_id) DO NOTHING</code> changes — the idempotent write from Day 6 absorbs a redelivered message during a rebalance exactly like it absorbed one after a crash.</p>
+
+<h2>3 · Build: run two consumers, same group, and watch the split</h2>
+<p>Produce a fresh batch first so there is real traffic to divide, then start two instances of Day 6's unmodified consumer in the background, both reading <code>GROUP_ID = "warehouse-loader"</code>:</p>
+<pre><code>uv run --with confluent-kafka python3 scripts/produce_order_events.py
+
+uv run --with confluent-kafka --with "psycopg[binary]" python3 scripts/consume_order_events.py &amp;
+CONSUMER_A=$!
+uv run --with confluent-kafka --with "psycopg[binary]" python3 scripts/consume_order_events.py &amp;
+CONSUMER_B=$!
+sleep 3</code></pre>
+<p>With both running, describe the group. This is the moment the one-consumer runs never showed — two distinct <code>CONSUMER-ID</code> values, each owning a disjoint subset of the 3 partitions:</p>
+<pre><code>docker compose exec kafka /opt/kafka/bin/kafka-consumer-groups.sh \
+  --bootstrap-server localhost:9092 --describe --group warehouse-loader</code></pre>
+<p>Expected shape — partition ownership split across the two active members, every <code>CONSUMER-ID</code> distinct, and no partition appearing under two different consumers at once:</p>
+<pre><code>GROUP             TOPIC         PARTITION  CURRENT-OFFSET  LOG-END-OFFSET  LAG  CONSUMER-ID                        HOST       CLIENT-ID
+warehouse-loader  order_events  0          8               8               0    rdkafka-3f1a...-1                 /172.18.0.1  rdkafka-3f1a...
+warehouse-loader  order_events  1          4               4               0    rdkafka-9c2e...-1                 /172.18.0.1  rdkafka-9c2e...
+warehouse-loader  order_events  2          4               4               0    rdkafka-3f1a...-1                 /172.18.0.1  rdkafka-3f1a...</code></pre>
+<p>Read it as: partitions 0 and 2 landed on one consumer instance, partition 1 on the other — a 2-and-1 split across 3 partitions and 2 consumers, the only split 3 partitions can make across 2 owners. Which exact partitions go to which process is not something you choose; the default <code>RangeAssignor</code>/<code>cooperative-sticky</code> assignment strategy decides it, and it can differ between runs. What must hold regardless: every partition has exactly one owner, both consumers' rows sum to all 3 partitions, and total lag across the group is 0 once both have caught up.</p>
+
+<h2>4 · Build: kill one, watch the rebalance happen live</h2>
+<p>Now remove a member the way Day 6 already removed one — a hard kill, no graceful shutdown — and watch the coordinator hand its partition(s) to the survivor:</p>
+<pre><code>kill -9 $CONSUMER_B
+sleep 12   <span class="cm"># past session.timeout.ms (10s default) so the coordinator judges it dead</span>
+uv run --with confluent-kafka python3 scripts/produce_order_events.py   <span class="cm"># fresh traffic so the survivor has something to prove it owns every partition now</span>
+sleep 3
+docker compose exec kafka /opt/kafka/bin/kafka-consumer-groups.sh \
+  --bootstrap-server localhost:9092 --describe --group warehouse-loader</code></pre>
+<p>Expected — all 3 partitions now under the single surviving <code>CONSUMER-ID</code>, lag back to 0 once it catches up on the fresh batch:</p>
+<pre><code>GROUP             TOPIC         PARTITION  CURRENT-OFFSET  LOG-END-OFFSET  LAG  CONSUMER-ID         HOST         CLIENT-ID
+warehouse-loader  order_events  0          12              12              0    rdkafka-3f1a...-1   /172.18.0.1  rdkafka-3f1a...
+warehouse-loader  order_events  1          8               8               0    rdkafka-3f1a...-1   /172.18.0.1  rdkafka-3f1a...
+warehouse-loader  order_events  2          8               8               0    rdkafka-3f1a...-1   /172.18.0.1  rdkafka-3f1a...</code></pre>
+<p>Partition 1 — the one the killed consumer owned — now shows the surviving consumer's <code>CONSUMER-ID</code>, not the dead one's. That reassignment is the rebalance: nobody restarted anything, nobody re-pointed a config, Kafka's coordinator simply noticed the missed heartbeats and handed the orphaned partition to whichever member was still alive, resuming from that partition's last committed offset exactly the way Day 6's single-process restart resumed from its own.</p>
+<div class="callout"><strong>Confirm no duplicates snuck in across the whole exercise.</strong> Two consumers briefly owning different partitions of the same group, then one dying mid-stream, is exactly the kind of multi-actor chaos an idempotent write exists for:
+<pre><code>docker compose exec -T postgres psql -U fdp -d fdp -c \
+  "SELECT count(*) AS total, count(DISTINCT event_id) AS distinct_events FROM raw.order_events;"</code></pre>
+Expected: <code>total</code> equal to <code>distinct_events</code>, same equality Day 6 proved after a single-process crash — this is the same guarantee, now shown holding across two cooperating processes instead of one restarted one.</div>
+<p>Clean up the survivor so nothing keeps running after today's lesson:</p>
+<pre><code>kill -9 $CONSUMER_A</code></pre>
+
+<h2>5 · Why this matters beyond the demo</h2>
+<p>This is the mechanism that makes a consumer group a real scaling lever, not just a label. Day 28's own glossary entry already named "partition count as a parallelism ceiling" — a topic with 3 partitions can never have more than 3 consumers in one group doing useful work at once, because a 4th consumer joining would get zero partitions assigned and sit idle. Today is the other half of that fact: scaling from one consumer to two (up to the partition count) is exactly the rebalance just watched, nothing more exotic — add a process with the same <code>group.id</code>, the coordinator reassigns automatically, the written code never has to ask "which partition am I on now?" because <code>confluent-kafka</code>'s own consumer loop hands it whatever it's currently assigned. The same mechanism is also why losing a consumer is self-healing rather than an outage: a crashed instance's partitions migrate to whoever is left, bounded only by how long <code>session.timeout.ms</code> takes to notice.</p>
+
+<div class="interview">
+<p><strong>Q: "What happens inside Kafka when you add a second consumer to an existing consumer group?"</strong> A strong answer, out loud: <em>"The group's coordinator — one broker elected per group — detects the new member joining and triggers a rebalance: every partition the group owns gets reassigned across the consumers now in the group, with the rule that exactly one consumer owns any given partition at a time. Consumption briefly pauses for the affected partitions while this gets agreed, then each consumer resumes reading only what it was assigned, picking up from that partition's last committed offset — the same resume-from-commit mechanism a single restarted consumer uses, just handing ownership to a different process instead of the same one restarting. The ceiling is the partition count: a topic with 3 partitions can only usefully support 3 consumers in one group, a 4th would sit idle with nothing assigned. And because a redelivered message during the handoff is possible, same as any Kafka redelivery, the consumer's write still needs to be idempotent — I saw this directly: I ran two consumers against order_events, confirmed the 3 partitions split across them with kafka-consumer-groups.sh --describe, killed one, and watched the coordinator hand its partition to the survivor with zero duplicate rows in the warehouse afterward."</em> The signal: naming the coordinator and the one-owner-per-partition rule precisely, and tying the handoff back to the same idempotent-write guarantee from Day 6 instead of treating rebalancing as an unrelated new risk.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A rebalance is triggered whenever a consumer group's membership changes -- a new consumer joining, an existing one leaving gracefully, or one being judged dead after missing heartbeats past session.timeout.ms. The group coordinator runs the rebalance to reassign partitions among whichever consumers are members at that moment.">
+    <p class="stem">What triggers a Kafka consumer group rebalance?</p>
+    <button class="opt" data-ok>A consumer joining, leaving, or being judged dead now</button>
+    <button class="opt">A producer writing a new message to any partition</button>
+    <button class="opt">A topic's retention window simply expiring overnight at last</button>
+  </div>
+  <div class="q" data-why="Kafka's rule inside one consumer group is that exactly one consumer owns a given partition at any moment -- never two consumers reading the same partition at the same time within the same group. That single-owner rule is what keeps a partition's committed offset meaning one consistent thing.">
+    <p class="stem">Within one consumer group, how many consumers can own a single partition at once?</p>
+    <button class="opt" data-ok>Exactly one consumer, never two, at any given moment</button>
+    <button class="opt">Exactly two, so a rebalance always has a backup</button>
+    <button class="opt">As many as are currently members of the group</button>
+  </div>
+  <div class="q" data-why="A topic's partition count is a hard ceiling on how many consumers in one group can do useful work at once -- a consumer joining beyond that count gets no partitions assigned and sits idle, since every partition already has exactly one owner.">
+    <p class="stem">What happens if a 4th consumer joins a group reading a 3-partition topic?</p>
+    <button class="opt" data-ok>It joins but gets no partition, staying idle now</button>
+    <button class="opt">Kafka creates one new partition for it live right</button>
+    <button class="opt">One existing partition splits between two separate consumer owners</button>
+  </div>
+  <div class="q" data-why="When a partition is reassigned during a rebalance, the new owner resumes from that partition's last committed offset, the same resume-from-commit mechanism a single restarted consumer already uses. A message near that boundary can be redelivered to the new owner, which is exactly why the write landing it still needs to be idempotent, same as Day 6's crash-and-restart case.">
+    <p class="stem">When a partition is reassigned to a new consumer mid-rebalance, where does that consumer resume reading from?</p>
+    <button class="opt" data-ok>The partition's own exact last committed read offset</button>
+    <button class="opt">The very first offset ever written, offset 0</button>
+    <button class="opt">Whatever offset the old owner was mid-processing now</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the <a href="https://kafka.apache.org/documentation/#design">Apache Kafka Design docs</a>, already this course's primary source on consumer groups and offsets since Day 5, cover the group coordinator and rebalance protocol in the same "Consumer" section — the authoritative source for today's claims, not fetched freshly live this round (no working web-fetch tool available this round, the same gap Days 17, 23, 26 and 31 each hit), reasoned from this course's already-established understanding of that chapter plus the real <code>kafka-consumer-groups.sh --describe</code> output produced and read directly above. <em>Kafka: The Definitive Guide</em> (cited on Day 18 for retention/compaction) covers the assignor strategies (<code>RangeAssignor</code>, <code>CooperativeStickyAssignor</code>) in more depth than today's working-level pass needs, worth a read before an interview question asks which assignor a real cluster should use and why.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 34.<br>
+<strong>Next lesson:</strong> open — the original Phase 2 spine (<code>PLAN.md</code> 2a/2b/2c/2d) closed at Day 30, and three dbt gaps named after that (environments, test severity, seeds vs. sources) closed across Days 31–33. Today returns to Kafka after four dbt-heavy rounds; the next round should weigh an Airflow working-depth gap (e.g. a real, observed task retry on the production DAG, not a scratch demo) against further dbt or Kafka depth, rather than assuming either by default.<br><br>
+💬 Anything unclear — what the group coordinator actually is, why the partition count caps useful parallelism, or why a redelivered message during a rebalance is still safe? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

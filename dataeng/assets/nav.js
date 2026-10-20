@@ -45,6 +45,7 @@
     { n: 32, date: "2026-10-17", title: "dbt test severity (warn/error) & store_failures", file: "lessons/0032-dbt-test-severity-and-store-failures.html" },
     { n: 33, date: "2026-10-18", title: "dbt seeds vs. sources", file: "lessons/0033-dbt-seeds-vs-sources.html" },
     { n: 34, date: "2026-10-19", title: "Kafka consumer group rebalancing", file: "lessons/0034-kafka-consumer-group-rebalancing.html" },
+    { n: 35, date: "2026-10-20", title: "Airflow retries, for real: on_retry_callback and try_number on the production DAG", file: "lessons/0035-airflow-retry-callback-on-the-real-dag.html" },
   ];
 
   const REFS = [

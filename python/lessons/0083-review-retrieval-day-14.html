@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 83 · Review day 14: retrieval across Days 80-82</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 83 · ~20 min · 20 Oct 2026</p>
+<h1>Review day 14: retrieval across Days 80-82</h1>
+<p class="byline">Day 79 (review day 13) covered Days 76, 77, and 78. Since then, three fresh days ran in a row — Day 80 (<code>difflib</code>), Day 81 (<code>io.StringIO</code>/<code>io.BytesIO</code>), Day 82 (<code>base64</code>) — and Day 82's own next-day note flagged this exact span as matching the course's settled three-fresh-lesson review trigger (Day 67 reviewed Days 64-66, Day 71 reviewed Days 68-70, Day 75 reviewed Days 72-74, Day 79 reviewed Days 76-78). This is that review — a fourteenth retrieval day, covering exactly Days 80, 81, and 82.</p>
+
+<div class="callout"><strong>Why today, specifically, and why not a fourth fresh day:</strong> a fresh-gap grep ran first anyway, matching every prior review day's own discipline — it searched all 82 lessons, every practice file, and <code>reference/glossary.html</code> case-insensitively for stdlib corners named but not yet taught. No single strong standing candidate turned up this time (Day 82's next-day note named none), and the cadence math already lands exactly on three fresh lessons since Day 79 — so today pays down retrieval on Days 80-82 instead, and the next fresh day starts its topic search from scratch.</div>
+
+<h2>1 &middot; Three questions, in the original teaching order</h2>
+<p>Answer each out loud or on paper <em>before</em> reading the fold-out answer. If one is shaky, note it and go fix it in the practice file below rather than only rereading the old lesson.</p>
+
+<p><strong>Day 80 &mdash; <code>difflib</code>.</strong> What can <code>difflib.unified_diff()</code> show you that a plain <code>old == new</code> comparison can't, and why is <code>get_close_matches()</code> a better fit than <code>unified_diff()</code> for a "did you mean&hellip;?" suggestion?</p>
+<div class="callout">Fold-out answer: <code>==</code> only answers "are these the same, yes or no" &mdash; it gives no information about <em>where</em> two sequences differ when they aren't. <code>unified_diff()</code> walks line by line and marks exactly which lines were removed (<code>-</code>), added (<code>+</code>), or unchanged context (plain leading space), the same shape <code>git diff</code> prints. <code>get_close_matches()</code> suits "did you mean&hellip;?" better because it is built for exactly that: given one misspelled or unknown word and a list of known candidates, it ranks the candidates by similarity and returns the closest one(s) &mdash; <code>unified_diff()</code> instead expects two sequences that are already meant to line up position by position, and would just show the whole single word as entirely removed and the candidate as entirely added, with no ranking of "closeness" at all.</div>
+
+<p><strong>Day 81 &mdash; <code>io.StringIO</code> &amp; <code>io.BytesIO</code>.</strong> Why does <code>csv.writer()</code> accept a <code>StringIO</code> in place of a real open file, and why does reading from a <code>BytesIO</code> immediately after writing to it come back empty?</p>
+<div class="callout">Fold-out answer: <code>csv.writer()</code> only needs an object with a <code>.write()</code> method that accepts <code>str</code> &mdash; it never checks whether that object is backed by a real file on disk. <code>io.StringIO</code> implements that same file-like interface entirely in memory, so anything written to it (via <code>csv</code>, <code>json</code>, or plain <code>print(..., file=buf)</code>) is just as acceptable as a real file handle. Reading right after writing comes back empty because a stream tracks a single read/write position: after writing, that position sits at the end of what was just written, so an unseeked <code>.read()</code> starts from there and finds nothing left to read. <code>.seek(0)</code> rewinds the position back to the start before reading, which is why it has to run between the write and the read.</div>
+
+<p><strong>Day 82 &mdash; <code>base64</code>.</strong> Why does <code>json.dumps()</code> reject raw <code>bytes</code> outright, and why is calling <code>base64.b64encode()</code> a way of "hiding" or "securing" data a mistake?</p>
+<div class="callout">Fold-out answer: JSON's own spec only defines a fixed set of value types &mdash; strings, numbers, booleans, <code>null</code>, objects, and arrays &mdash; and raw <code>bytes</code> is not one of them, so <code>json.dumps()</code> raises a <code>TypeError</code> the moment it meets a <code>bytes</code> value with no <code>default=</code> function to fall back on. <code>base64.b64encode()</code> re-encodes those bytes into a safe 64-character text alphabet that JSON's string type <em>can</em> hold, closing that gap. Calling it "hiding" or "securing" data is a mistake because base64 is encoding, not encryption: it uses a fixed, public, documented alphabet and no key at all, so anyone who recognizes base64-looking text (or simply runs <code>base64.b64decode()</code> on it) gets the original bytes back immediately &mdash; it protects nothing from anyone who wants to read it, it only makes binary data transportable through a text-only channel.</div>
+
+<div class="callout"><strong>Where pandas/NumPy go from here:</strong> nothing pandas- or NumPy-specific today &mdash; this review only revisits Days 80, 81, and 82's plain-Python diffing, in-memory file objects, and binary-to-text encoding, none of which needs a <code>DataFrame</code> or array to demonstrate.</div>
+
+<h2>2 &middot; Why these three, and why no new terms today</h2>
+<p>Same interleaving logic as every prior review day: a text-comparison tool, a pair of in-memory stand-ins for a file, and a binary-to-text encoding scheme &mdash; three different mental models pulled from three lessons, not one idea restated three ways. They also share a quieter throughline worth naming: all three are about carrying data across a boundary it wasn't originally shaped for &mdash; two versions of the same text compared line by line instead of byte-for-byte, bytes held in memory instead of on disk, and bytes squeezed into a text-only alphabet instead of a binary channel. Recognizing which boundary a given problem is crossing &mdash; not just recalling the function names &mdash; is the retrieval goal today.</p>
+<p>No new jargon is introduced today on purpose &mdash; every term revisited already has a glossary entry under its original day. No single standing fresh-gap candidate remains on record from Day 82's next-day note &mdash; the next fresh lesson needs its own gap scan from scratch.</p>
+
+<h2>Try it &mdash; self-checking practice (~20 min)</h2>
+<p>Open <code>practice/83_review_retrieval_day_14.py</code>, follow the TODOs, and re-run until every check prints &check;:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/83_review_retrieval_day_14.py</code></pre>
+<p>Standard library only &mdash; no <code>--with</code> flag needed. No new syntax: every mechanism below was taught in Days 80, 81, and 82. Exercises: using <code>difflib.unified_diff()</code> to find exactly which line changed between two small configs, round-tripping CSV rows through an <code>io.StringIO</code> with <code>csv.writer()</code>/<code>csv.reader()</code>, and encoding a <code>BytesIO</code>'s contents with <code>base64.b64encode()</code> so they can travel inside a JSON string.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory &mdash; no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="== only answers whether two sequences are identical, with no detail about where they differ. unified_diff() walks line by line and marks exactly which lines were removed, added, or left as unchanged context -- the same shape git diff prints.">
+    <p class="stem">What can <code>difflib.unified_diff()</code> show that plain <code>==</code> cannot?</p>
+    <button class="opt" data-ok>exactly which lines were removed, added, or unchanged</button>
+    <button class="opt">whether the two input strings are exactly identical</button>
+    <button class="opt">the total count of characters across both inputs</button>
+  </div>
+  <div class="q" data-why="A stream tracks one read/write position. After writing, that position sits at the end of what was just written, so an unseeked read starts there and finds nothing left. seek(0) rewinds the position back to the start before reading.">
+    <p class="stem">Why does reading a <code>BytesIO</code> right after writing to it return nothing?</p>
+    <button class="opt" data-ok>the read/write position sits at the end until seek(0) rewinds it</button>
+    <button class="opt">BytesIO objects silently discard every byte the moment it is written</button>
+    <button class="opt">writing and reading can never both happen in one script run</button>
+  </div>
+  <div class="q" data-why="base64 is encoding, not encryption: it uses a fixed, public, documented alphabet and no key at all, so anyone who runs b64decode() on it gets the original bytes back immediately. It protects nothing from anyone who wants to read it.">
+    <p class="stem">Why is calling <code>base64.b64encode()</code> a way to "hide" data a mistake?</p>
+    <button class="opt" data-ok>it uses a public, documented alphabet that reverses with no key</button>
+    <button class="opt">it only works correctly on very short byte strings in practice</button>
+    <button class="opt">decoding the base64 text back always requires a secret shared password</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> no single new source today &mdash; revisit each lesson's own citation (<a href="https://docs.python.org/3/library/difflib.html"><code>difflib</code></a> for Day 80, <a href="https://docs.python.org/3/library/io.html"><code>io</code></a> for Day 81, and <a href="https://docs.python.org/3/library/base64.html"><code>base64</code></a> for Day 82), all already listed in <code>RESOURCES.md</code>.</p>
+
+<p class="next">No new terms today &mdash; this is a review day, and every term revisited already has a glossary entry under its original day (<a href="../reference/glossary.html#day80">80</a>, <a href="../reference/glossary.html#day81">81</a>, <a href="../reference/glossary.html#day82">82</a>).<br>
+No single standing fresh-gap candidate remains on record &mdash; the next fresh lesson starts its own gap scan from scratch.<br><br>
+&#128172; Anything unclear across any of today's three? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 107 · async/await: C#'s coroutine, named properly this time</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 107 · ~20 min</p>
+<h1>async/await: C#'s coroutine, named properly this time</h1>
+<p class="byline">Lesson 25 named the two questions — concurrent-or-not, thread-or-coroutine — and said Go skipped the <code>async</code>/<code>await</code> ceremony "that Python or Rust require." C# requires that ceremony too, and every C# snippet since Lesson 103 has used <code>async Task&lt;IActionResult&gt;</code> and <code>await</code> without ever stopping to say what they actually do. Today: what <code>await</code> really suspends, what <code>Task&lt;T&gt;</code> actually is, and the one C#-specific way to misuse both that creates a deadlock a Go goroutine cannot produce by the same mistake.</p>
+
+<h2>1 · Task&lt;T&gt; is a coroutine's "not finished yet, but here's where to check"</h2>
+<p>A C# method marked <code>async</code> that returns <code>Task&lt;T&gt;</code> does not return a <code>T</code>. It returns immediately with a <dfn data-en="a .NET object representing a unit of asynchronous work that may not have finished yet -- it is not the result itself, but a handle: something can check whether the work is done, attach a continuation to run once it is, or (via await) suspend until it is, without blocking the thread that's waiting" data-vn="Task&lt;T&gt; (giữ nguyên) — object đại diện cho một việc đang chạy bất đồng bộ, chưa chắc đã xong -- không phải kết quả thật, mà là cái handle để check xong chưa, gắn tiếp việc chạy sau khi xong, hoặc await để chờ mà không chặn thread">Task&lt;T&gt;</dfn> — an object representing "this work is running, and will eventually hold a <code>T</code>, or an exception, once it's done." Calling an <code>async</code> method starts the work and hands back that handle; it does not wait for the work to finish.</p>
+<pre><code><span class="kw">public</span> <span class="kw">async</span> Task&lt;Order&gt; GetOrderAsync(<span class="kw">int</span> id) {
+    <span class="kw">var</span> order = <span class="kw">await</span> db.Orders.FindAsync(id);   <span class="cm">// suspend HERE until the DB answers</span>
+    <span class="kw">return</span> order;
+}
+</code></pre>
+<p>Lesson 25 already named the mechanism this is: a <dfn data-en="C#'s pair of keywords marking a cooperatively-scheduled, runtime-managed function that can suspend at an await point and resume later, without ever blocking the OS thread that was running it -- the exact ceremony Lesson 25 said Go's goroutines skip" data-vn="async/await (giữ nguyên) — cặp từ khóa của C# đánh dấu 1 hàm chạy cooperative, do runtime điều phối, có thể tạm dừng ở điểm await rồi chạy tiếp sau đó mà không chặn OS thread -- đúng là cái ceremony mà Lesson 25 nói goroutine của Go không cần">async</dfn>/<dfn data-en="the keyword that suspends an async method at that exact point, releasing the OS thread back to the thread pool, and schedules the rest of the method to resume once the awaited Task completes -- cooperative scheduling's actual yield point in C#" data-vn="await (giữ nguyên) — từ khóa tạm dừng method async ngay tại đó, trả OS thread lại cho thread pool, và hẹn phần còn lại của method chạy tiếp khi Task đang chờ xong -- chính là điểm nhường quyền của cooperative scheduling trong C#">await</dfn>-marked method is C#'s coroutine — scheduled by the .NET runtime, not the OS kernel, suspending only at an <code>await</code> (a cooperative yield point, same word Lesson 25 used), and resuming later without ever needing its own OS thread while it waits. <code>await db.Orders.FindAsync(id)</code> suspends the method right there, hands the OS thread it was running on back to the thread pool to go serve some other request, and schedules the rest of the method to run once the database actually answers — on whatever thread happens to be free then, not necessarily the one that started it.</p>
+
+<h2>2 · Lining it up with Lesson 25's table: the same row, a different checkbox</h2>
+<p>This is not a new concept — it's a second entry in Lesson 25's "called" row, right next to goroutines, task/future, and Python's <code>async def</code>. The difference that actually matters day to day is one checkbox in that same table:</p>
+<div class="cmp-wrap">
+<table class="cmp">
+<thead><tr><th></th><th>Go goroutine</th><th>C# async/await</th></tr></thead>
+<tbody>
+<tr><th>Scheduled by</th><td>Go runtime, in user space</td><td>.NET runtime, in user space</td></tr>
+<tr><th>Switching</th><td>cooperative, but can suspend almost anywhere — a blocking call, a channel op</td><td>cooperative, only at an explicit <code>await</code> — nowhere else, ever</td></tr>
+<tr><th>Ceremony to write one</th><td><code>go f()</code> — no keyword needed on <code>f</code> itself</td><td><code>async</code> on the method, <code>await</code> at every suspend point</td></tr>
+<tr><th>Calling it blocks the caller?</th><td>no — <code>go f()</code> returns instantly, <code>f</code> runs independently</td><td>no, <em>if</em> the caller also <code>await</code>s — see section 3 if it doesn't</td></tr>
+</tbody>
+</table>
+</div>
+<p>Go gave the compiler almost nothing to check — a goroutine can block inside any function, at any line, and the runtime copes. C# makes every suspend point visible in the method's own text as an <code>await</code> keyword, which is more ceremony to write but means a reviewer can see exactly where a method might hand its thread back, just by reading it top to bottom.</p>
+
+<h2>3 · The C#-specific trap: calling async code without awaiting it</h2>
+<p>Because <code>Task&lt;T&gt;</code> is a handle, not a value, C# lets you reach into it without <code>await</code> at all — and that's where a bug with no real Go equivalent shows up:</p>
+<pre><code><span class="cm">// Inside a synchronous method, calling an async one and blocking for the result:</span>
+<span class="kw">public</span> Order GetOrder(<span class="kw">int</span> id) {
+    <span class="kw">var</span> order = GetOrderAsync(id).Result;  <span class="cm">// BLOCKS this thread until the Task finishes</span>
+    <span class="kw">return</span> order;
+}
+</code></pre>
+<p><code>.Result</code> (and <code>.Wait()</code>) forces the calling thread to sit and block until the <code>Task</code> finishes — this is called <dfn data-en="calling asynchronous, Task-returning code from synchronous code and blocking the calling thread on its result (via .Result or .Wait()) instead of awaiting it -- defeats the entire point of async, and in a context with a captured synchronization context (classic ASP.NET, UI apps) it can deadlock outright" data-vn="sync-over-async (giữ nguyên) — gọi code async (trả về Task) từ code đồng bộ rồi block thread chờ kết quả (.Result hoặc .Wait()) thay vì await -- phá hỏng hết lợi ích của async, và trong context có synchronization context (ASP.NET cũ, app UI) có thể deadlock luôn">sync-over-async</dfn>, and it undoes the entire reason <code>Task&lt;T&gt;</code> exists: the calling thread is now blocked and unusable, exactly the cost goroutines and coroutines both exist to avoid. In modern ASP.NET Core this usually "only" wastes a thread-pool thread. But in a context that captures and resumes on the original context (classic ASP.NET's <code>SynchronizationContext</code>, or a WPF/WinForms UI thread) it can deadlock outright: the blocked thread is the exact same thread the awaited <code>Task</code> is waiting to resume on, so the <code>Task</code> can never finish and <code>.Result</code> never returns. No goroutine deadlocks this particular way, because Go never created a separate "blocking handle" object standing between a call and its result in the first place — calling a function and getting its value back is the only shape Go has.</p>
+<p>The fix is almost always the same one word, propagated all the way up: <code>await</code> instead of <code>.Result</code>/<code>.Wait()</code>, on every method in the call chain, as far up as it needs to go — the rule sometimes called "async all the way." A library author one layer further down can also reduce the deadlock risk for synchronous callers they don't control with <dfn data-en="an await-site option telling the runtime it does not need to resume on the original captured context -- any available thread-pool thread is fine. Does not fix a caller's own sync-over-async mistake, but avoids adding to the specific deadlock risk when writing library code that might get called that way" data-vn="ConfigureAwait(false) (giữ nguyên) — option đặt ở chỗ await, báo runtime không cần resume đúng lại context ban đầu -- thread pool thread nào cũng được. Không fix được lỗi sync-over-async của caller, nhưng viết library thì nên dùng để giảm rủi ro deadlock cho caller lỡ gọi kiểu blocking">ConfigureAwait(false)</dfn>, but that's a mitigation for library code, not a substitute for the real fix in application code the team actually controls.</p>
+
+<div class="callout"><strong>Where this shows up in review:</strong> a controller action or a test harness calling <code>.Result</code> on an async repository method "just to make it compile" is the single most common place this bug enters a C# codebase — it compiles cleanly, runs fine locally under light load, and only deadlocks or starves the thread pool under real concurrent traffic. Spotting a bare <code>.Result</code> or <code>.Wait()</code> anywhere outside test setup code is worth a comment every time.</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers what <code>async</code>/<code>await</code> and <code>Task&lt;T&gt;</code> actually do, how that lines up with Lesson 25's thread-vs-coroutine vocabulary, and the sync-over-async deadlock trap. It does not cover: <code>ValueTask&lt;T&gt;</code> as a lower-allocation alternative to <code>Task&lt;T&gt;</code> for hot paths; <code>Task.WhenAll</code>/<code>Task.WhenAny</code> for running several awaits concurrently instead of one after another; or the compiler-generated state machine class each <code>async</code> method is actually rewritten into. Natural follow-ons, not covered here.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory, with no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Task<T> is a handle representing work that may not be finished yet, not the T value itself -- calling an async method starts the work and returns that handle immediately, without waiting for the work inside it to complete at all.">
+    <p class="stem">What does calling a C# method that returns Task&lt;T&gt; actually hand back right away?</p>
+    <button class="opt" data-ok>a handle to work that might not be done</button>
+    <button class="opt">the one finished T value, already fully computed now</button>
+    <button class="opt">a brand new dedicated OS thread, made for it</button>
+    <button class="opt">a permanent and totally unrecoverable compile time error here</button>
+  </div>
+  <div class="q" data-why="await suspends the async method at that exact point and releases the OS thread back to the thread pool to go do other work, scheduling the rest of the method to resume later once the awaited Task finishes -- it never blocks that thread while waiting.">
+    <p class="stem">What does the await keyword actually do to the thread running that method?</p>
+    <button class="opt" data-ok>it releases the thread back to the pool now</button>
+    <button class="opt">it blocks that one thread until the Task finishes</button>
+    <button class="opt">it permanently destroys that one thread right away too</button>
+    <button class="opt">it pins that thread so nothing else can touch</button>
+  </div>
+  <div class="q" data-why="Go's goroutines can suspend almost anywhere a blocking call happens, with no keyword marking the point, while C#'s async/await can only ever suspend at an explicit await keyword written into the method's own source text -- that's the one checkbox that actually differs day to day.">
+    <p class="stem">What is the real day-to-day difference between a goroutine and C#'s async/await?</p>
+    <button class="opt" data-ok>await only suspends at an explicit keyword in code</button>
+    <button class="opt">only async/await ever runs cooperatively scheduled code at all</button>
+    <button class="opt">goroutines require a separate, dedicated OS process every time</button>
+    <button class="opt">C# async methods always run fully in true parallel</button>
+  </div>
+  <div class="q" data-why="Calling .Result or .Wait() on a Task blocks the calling thread until it finishes, instead of awaiting it -- in a context with a captured synchronization context this can deadlock, because the blocked thread is the very thread the Task needs free again to resume and finish on.">
+    <p class="stem">Why can calling .Result on a Task deadlock in some C# contexts?</p>
+    <button class="opt" data-ok>the blocked thread is the one the Task needs</button>
+    <button class="opt">.Result always permanently cancels that exact Task right there</button>
+    <button class="opt">C# simply forbids calling .Result on any Task object</button>
+    <button class="opt">await keywords stop working anywhere once .Result runs there</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://learn.microsoft.com/en-us/dotnet/csharp/asynchronous-programming/">Microsoft Learn: Asynchronous programming with async and await</a> (~15 min) covers the <code>Task</code>/<code>async</code>/<code>await</code> model directly; <a href="https://devblogs.microsoft.com/dotnet/configureawait-faq/">.NET Blog: ConfigureAwait FAQ</a> (~10 min) is the primary source for exactly when sync-over-async deadlocks and how <code>ConfigureAwait(false)</code> changes the risk.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a>. Click any dotted term for a popup (English first, tiếng Việt second). Builds directly on Lesson 25's thread-vs-coroutine vocabulary and every C# snippet since Lesson 103. <strong>Anything unclear? Ask your teacher</strong>, the agent that made this lesson. Ask in Vietnamese anytime. A good follow-up: "does our .NET codebase have any .Result or .Wait() calls on a Task outside test code, and would any of them be at risk of a sync-over-async deadlock?"</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

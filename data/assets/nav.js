@@ -210,6 +210,8 @@
       file: "lessons/0101-itertuples.html" },
     { n: 102, date: "2026-10-19", title: "np.clip(): the array-level clamp underneath Series.clip()",
       file: "lessons/0102-np-clip.html" },
+    { n: 103, date: "2026-10-20", title: "pd.to_timedelta(): parsing durations, the datetime sibling",
+      file: "lessons/0103-to-timedelta.html" },
   ];
 
   const REFS = [

@@ -302,6 +302,13 @@
   <tr><td>rebalance</td><td>giữ nguyên "rebalance" — quá trình Kafka chia lại partition cho các consumer trong group, xảy ra bất cứ khi nào có consumer join, leave, hoặc bị coi là chết do mất heartbeat quá hạn; trong lúc rebalance, các consumer liên quan tạm dừng đọc cho tới khi việc chia partition mới được chốt, rồi mỗi consumer chỉ đọc đúng partition được giao</td><td>The process by which a Kafka consumer group's partitions get reassigned among its current members, triggered whenever a consumer joins, leaves, or is judged dead by a missed heartbeat. Every affected consumer briefly pauses consumption while new partition ownership is agreed, then resumes reading only the partition(s) it was assigned — confirmed this round by running two instances of Day 6's own consumer under one <code>group.id</code>, watching <code>kafka-consumer-groups.sh --describe</code> show the 3-partition split, then killing one and watching the survivor get handed the orphaned partition live.</td></tr>
 </table>
 
+<h2 id="day35">Day 35 — Airflow retries, for real: on_retry_callback and try_number on the production DAG</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>try_number</td><td>giữ nguyên "try_number" — bộ đếm lần chạy hiện tại của 1 task trong 1 DAG run cụ thể, bắt đầu từ 0 và tăng 1 mỗi lần thử, đọc được trong task qua context["task_instance"].try_number</td><td>An Airflow <code>TaskInstance</code>'s own counter of which attempt is currently running for one task in one DAG run, starting at 0 and incrementing by 1 on each attempt — read inside a task via <code>context["task_instance"].try_number</code>, and the exact number Airflow's own retry-eligibility check (<code>try_number &lt;= max_tries</code>) compares against the task's configured <code>retries</code>. Confirmed this round directly from the installed <code>apache-airflow==3.3.1</code> source.</td></tr>
+  <tr><td>max_tries</td><td>giữ nguyên "max_tries" — thuộc tính bằng đúng số retries đã cấu hình cho task, so sánh trực tiếp với try_number để quyết định còn được thử lại hay không</td><td>An Airflow <code>TaskInstance</code> property equal to the task's own configured <code>retries</code> count — the maximum number of attempts beyond the first that are allowed before a failure is treated as final, compared directly against <code>try_number</code> inside <code>is_eligible_to_retry()</code>. Confirmed this round by reading that method's exact source: <code>bool(self.task.retries and self.try_number &lt;= self.max_tries)</code>.</td></tr>
+</table>
+
 <script src="../assets/nav.js"></script>
 </body>
 </html>

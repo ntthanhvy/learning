@@ -170,6 +170,8 @@
       file: "lessons/0081-io-stringio-bytesio.html" },
     { n: 82, date: "2026-10-19", title: "base64: binary data as plain text",
       file: "lessons/0082-base64-encoding.html" },
+    { n: 83, date: "2026-10-20", title: "Review day 14: retrieval across Days 80-82",
+      file: "lessons/0083-review-retrieval-day-14.html" },
   ];
 
   const REFS = [

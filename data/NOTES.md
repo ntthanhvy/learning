@@ -9321,3 +9321,133 @@
   lesson_generated --day 102 --lesson 0102-np-clip.html --detail
   '{"by":"headless"}'` was run directly from the repo root to close out
   this round.
+- 2026-10-20 generation (Lesson 103): headless run, zero prior context. The
+  orchestrator pre-confirmed no `course_progress` row dated 2026-10-20
+  existed for `data` and no new quiz/lesson_completed/remediation signal
+  had appeared since Lesson 102 — DB access was not independently
+  re-attempted this round, matching the orchestrator's own instruction and
+  the pattern of recent rounds; the completion/quiz signal remains stale
+  since mid-July. Idempotency independently confirmed from file state
+  too: `grep -c '2026-10-20' assets/nav.js` returned 0 and `ls lessons/ |
+  grep 0103` returned nothing before this round started. Read MISSION.md
+  in full (not modified), RESOURCES.md in full, `assets/nav.js` in full
+  for the registration format, and this file's own tail (Lessons 99-102's
+  entries) — the `learning-records/` directory holds only the one Day-1
+  baseline file (0001), still unchanged, no new durable finding to fold
+  in. Lesson 102's own teaser named two standing candidates: the
+  `str.pad()`/`str.strip()`/`str.title()`/`str.join()` text-cleanup
+  family, and `pd.to_timedelta()`. Re-grepped both case-insensitively
+  across every lesson body and the glossary file — both confirmed still
+  genuine zero-hit gaps (the one `to_timedelta` hit found was Lesson 102's
+  own teaser prose, never a taught lesson body). Picked `pd.to_timedelta()`
+  over the string family: it is the direct duration-parsing sibling of
+  Lesson 81's `pd.to_datetime(format=)`, and closes a real hole — every
+  timedelta this course has produced so far (Lesson 23's `shift()`, Lesson
+  32's `.dt` accessor) came from subtracting two already-parsed datetimes,
+  never from parsing a raw duration string or number straight from a
+  source column, which is exactly how real ETL source data often presents
+  durations. The glossary already had a `Timedelta` row (the dtype, from
+  Lesson 23/32's lineage) but no `pd.to_timedelta()` row (the parsing
+  function) — confirmed distinct terms, no collision, the same shape of
+  near-miss Lesson 102 found with `clip()`/`np.clip()`. The text-cleanup
+  family was judged thinner by comparison (a multi-function grab-bag vs.
+  a single sharp function with a direct named lineage to an existing
+  lesson) and left unused, named in today's own teaser as the one
+  un-promoted candidate for tomorrow. Every behavioral claim was probed
+  directly first in `/tmp/data-verify-0103/` (outside the repo checkout,
+  per this round's own read of the environment — `cd` into the repo's own
+  scratch-dir convention was attempted first but the working directory is
+  fixed by the sandbox to the monorepo root this round, so scratch files
+  were written there instead via direct absolute paths and deleted after),
+  on the actually-installed pandas 3.0.6 / numpy 2.5.4 (confirmed via a
+  version-print one-liner): confirmed a single duration string parses to
+  a `pandas.Timedelta` scalar and a Series of duration strings parses to a
+  genuine `timedelta64[us]`-dtype Series, not object/string; confirmed a
+  bare number defaults to nanoseconds when `unit=` is omitted
+  (`pd.to_timedelta(1_000_000_000)` → exactly 1 second); confirmed `unit=`
+  paired with a string input raises `ValueError` ("unit must not be
+  specified if the input is/contains a str") rather than being silently
+  ignored or silently overridden — the same contradiction-refused shape as
+  Lesson 81's `format=`-vs-string rule; confirmed `errors="ignore"` is no
+  longer a valid option on this installed pandas version, itself raising
+  `ValueError` ("errors must be one of 'raise', or 'coerce'") rather than
+  being accepted, a version-specific trap worth naming since older
+  tutorials still show it as valid; confirmed `errors="coerce"` turns an
+  unparseable entry into `NaT` while a parseable sibling entry in the same
+  list passes through untouched, the same pattern as Lesson 2/81's own
+  `errors="coerce"` behavior elsewhere. Cross-checked via `WebFetch`
+  against the official pandas API reference for `pandas.to_timedelta()`:
+  confirmed the signature's default `unit="ns"`, the `unit=`-rejected-with-
+  string rule, and that the docs name only `'raise'`/`'coerce'` as valid
+  `errors=` values (no `'ignore'` listed at all) — matching direct probing
+  exactly. Cited the official pandas API reference page for
+  `pandas.to_timedelta()` under the existing `RESOURCES.md` "Docs: pandas
+  User Guide" entry rather than adding a new line, matching the
+  established precedent of Lessons 93/95/97/99/100/101/102 citing a
+  different `pandas.pydata.org/docs/reference/api/...` or
+  `numpy.org/doc/stable/reference/generated/...` page under an existing
+  umbrella entry each time rather than adding a new `RESOURCES.md` row per
+  lesson. The shipped (unsolved) `practice/103_to_timedelta.py` was
+  executed directly from its real `practice/` location (via `uv run
+  --with pandas python3 /home/runner/work/learning/learning/data/practice/
+  103_to_timedelta.py`, since the sandbox's fixed working directory this
+  round required an absolute path rather than the usual `cd
+  ~/learning/data &&` form) and printed exactly 3 ✗ with no raw traceback.
+  Built a solved copy at `/tmp/data-verify-0103/103_to_timedelta_solved.py`
+  (outside the repo, deleted after), filling in all blanks correctly
+  (including a `unit_with_string_raises()` helper function body, same
+  pattern as Lessons 100/101/102's own helper-function exercises); it
+  printed all 3 ✓ and "All green" on the first run. The shipped file was
+  re-run once more directly from `practice/` after building the solved
+  copy and reproduced the identical all-✗ result, confirming the solved
+  copy's edits never leaked back into the shipped baseline. Quiz options
+  were drafted, then mechanically word-counted with a scratch Python
+  script (outside the repo checkout, deleted after) isolating each
+  `<div class="q">` block by regex span and splitting on whitespace — the
+  first draft came out 12/12/13, 12/12/13, 11/15/13; several rounds of
+  small rephrasing (adding/trimming words like "right", "whole", "one",
+  "given", "at all", "like") across all three questions until every one
+  landed exactly level (13/13/13, 13/13/13, 13/13/13 option words,
+  counting the standalone "--" token the same way prior rounds' scripts
+  did), one `data-ok` per question throughout, with the `data-why` wording
+  re-checked against the final option text afterward to confirm the
+  rephrasing never drifted the meaning. A separate mechanical tag-balance
+  script confirmed all tags balanced (a 2/2, body 1/1, button 9/9, code
+  60/60, dfn 1/1, div 6/6, em 1/1, h1 1/1, h2 6/6, head 1/1, html 1/1, p
+  16/16, pre 4/4, script 3/3, span 28/28, strong 3/3, title 1/1) and found
+  exactly two raw `&` characters, both inside the one established `cd
+  ~/learning/data && uv run ...` shell command, matching every prior
+  lesson's pattern, zero raw `&` in prose; also confirmed the one new
+  `<dfn>` tag carries both `data-en` and `data-vn`. Checked the glossary
+  for a collision before adding anything — grepped `timedelta`
+  case-insensitively across the full glossary, found exactly one existing
+  row (the `Timedelta` dtype entry, distinct from the `pd.to_timedelta()`
+  function) — added exactly one new row, "pd.to_timedelta()", directly
+  after Lesson 102's "np.clip()" entry; re-ran the tag-balance and raw-`&`
+  scripts against the glossary file afterward, confirmed it stayed
+  balanced (a 1/1, body 1/1, code 1233/1233, em 11/11, h1 1/1, head 1/1,
+  html 1/1, p 3/3, script 1/1, strong 1/1, table 1/1, td 519/519, th 3/3,
+  title 1/1, tr 174/174) with zero raw `&` introduced, and the `<tr>`
+  count went from 173 to 174 as expected. Registered Lesson 103 in
+  `nav.js` with today's date (2026-10-20); `node --check` confirmed it
+  still parses as valid JavaScript after the edit, and exactly one
+  `n: 103` entry plus one `0103-to-timedelta` file reference were
+  confirmed to exist; `node --check` was also run against the untouched
+  `gloss.js`/`quiz.js` as a quick sanity pass, both still parse fine. This
+  round closed the one candidate already named and promoted from Lesson
+  102's own teaser, same lineage-continuation pattern as Lesson 101
+  closing Lesson 100's own teaser. The `str.pad()`/`str.strip()`/
+  `str.title()`/`str.join()` text-cleanup family remains the one standing
+  candidate carried forward into tomorrow's teaser, left for tomorrow's
+  own fresh scan to confirm or replace rather than being pre-committed. No
+  new `data/learning-records/` entry was added this round — routine
+  lesson, no new baseline finding to justify one (the completion/quiz
+  signal remains stale past mid-July, unchanged from this round's
+  starting context, consistent with the orchestrator's own pre-gathered
+  DB read this round). The `/tmp/data-verify-0103/` scratch directory was
+  deleted after verification (outside the repo, never tracked by git
+  anyway), per this course's standing practice of not leaving scratch
+  artifacts committed. `bin/record-progress data lesson_generated --day
+  103 --lesson 0103-to-timedelta.html --detail '{"by":"headless"}'` was
+  run directly from the repo root and succeeded, matching the pattern used
+  by Lessons 95-102.

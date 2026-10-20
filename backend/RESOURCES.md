@@ -27,6 +27,8 @@
   Vendor primary source for SignalR: transports and fallback order, hubs, reconnect, sticky-session requirement, Redis backplane vs Azure SignalR Service ([scale page](https://learn.microsoft.com/en-us/aspnet/core/signalr/scale)). Use for: any real-time/SignalR question (Lesson 102).
 - [Docs: Microsoft Learn — EF Core Loading Related Data: Eager Loading](https://learn.microsoft.com/en-us/ef/core/querying/related-data/eager) and [Tracking vs. No-Tracking Queries](https://learn.microsoft.com/en-us/ef/core/querying/tracking)
   Vendor primary source for EF Core's `Include()` eager-loading method and the `AsNoTracking()` change-tracking opt-out. Use for: EF Core's own N+1/lazy-loading flavor and change-tracking overhead questions (Lesson 106).
+- [Docs: Microsoft Learn — Asynchronous programming with async and await](https://learn.microsoft.com/en-us/dotnet/csharp/asynchronous-programming/) and [.NET Blog — ConfigureAwait FAQ](https://devblogs.microsoft.com/dotnet/configureawait-faq/)
+  Vendor primary source for C#'s `Task<T>`/`async`/`await` model and exactly when sync-over-async deadlocks via a captured synchronization context. Use for: C# concurrency-mechanism questions, the `.Result`/`.Wait()` deadlock trap (Lesson 107).
 
 ## Wisdom (Communities)
 

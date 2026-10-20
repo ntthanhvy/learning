@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 103 · pd.to_timedelta(): parsing durations, the datetime sibling</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 103 · ~20 min · 20 Oct 2026</p>
+<h1>pd.to_timedelta(): parsing durations, the datetime sibling</h1>
+<p class="byline">Lesson 102 closed a fresh-scan pick with two zero-hit candidates named but not promoted: the <code>str.pad()</code>/<code>str.strip()</code>/<code>str.title()</code>/<code>str.join()</code> text-cleanup family, and <code>pd.to_timedelta()</code>. Re-grepped both case-insensitively across every lesson body and the glossary file — both still genuine zero-hit gaps. Picked <code>pd.to_timedelta()</code>: it is the direct duration-parsing sibling of Lesson 81's <code>pd.to_datetime(format=)</code>, closes a real hole (every diff/duration this course has produced so far came from subtracting two already-parsed datetimes, never from parsing a raw duration string or number straight from a source column), and fits MISSION.md's ETL "load → clean dtypes" step more squarely than a string-cleanup grab-bag.</p>
+
+<h2>1 · Parsing durations: strings and numbers, not just datetime subtraction</h2>
+<p>Every timedelta this course has produced so far came from subtracting two parsed datetimes (Lesson 23's <code>shift()</code>, Lesson 32's <code>.dt</code> accessor). Real source data often hands over a duration directly instead — a string like <code>"1 day 2 hours"</code>, or a bare number of seconds. <dfn data-en="a pandas function that parses a duration string, a number (interpreted in a given unit=), or a list/Series of either into pandas Timedelta/TimedeltaIndex/timedelta64 values -- the duration-parsing sibling of pd.to_datetime(), for source data that already represents elapsed time rather than a point in time" data-vn="giữ nguyên 'pd.to_timedelta()' — anh em của pd.to_datetime() nhưng cho KHOẢNG THỜI GIAN (duration) thay vì 1 mốc thời gian; nhận string ('1 day 2 hours'), số (kèm unit=), hay cả list/Series, trả về Timedelta/TimedeltaIndex/timedelta64">pd.to_timedelta()</dfn> is that parser:</p>
+<pre><code><span class="kw">import</span> pandas <span class="kw">as</span> pd
+
+pd.to_timedelta(<span class="str">"1 day 2 hours"</span>)
+<span class="cm"># Timedelta('1 days 02:00:00')</span>
+
+pd.to_timedelta(<span class="kw">5</span>, unit=<span class="str">"h"</span>)
+<span class="cm"># Timedelta('0 days 05:00:00')</span>
+
+df = pd.DataFrame({<span class="str">"dur"</span>: [<span class="str">"1 days 00:00:05"</span>, <span class="str">"2 days 00:01:00"</span>]})
+pd.to_timedelta(df[<span class="str">"dur"</span>])
+<span class="cm"># 0   1 days 00:00:05
+# 1   2 days 00:01:00
+# Name: dur, dtype: timedelta64[us]</span></code></pre>
+<p>Confirmed directly (pandas 3.0.6): a single string returns a <code>Timedelta</code> scalar; a Series of duration strings returns a Series with a real <code>timedelta64[us]</code> dtype — not object/string — ready for arithmetic against a datetime column exactly like Lesson 23's own subtraction-derived timedeltas. A bare number needs <code>unit=</code> to say what it counts (seconds, hours, days, ...); with no <code>unit=</code> given on a bare number, it defaults to nanoseconds, confirmed directly (<code>pd.to_timedelta(1_000_000_000)</code> → exactly 1 second).</p>
+
+<h2>2 · Two traps, one shared with to_datetime, one new</h2>
+<p>Confirmed directly, both against the official pandas docs:</p>
+<pre><code><span class="cm"># Trap 1 (shared with pd.to_datetime, Lesson 81): unit= is rejected
+# outright when the input is a string -- not silently ignored.</span>
+pd.to_timedelta(<span class="str">"1 day"</span>, unit=<span class="str">"h"</span>)
+<span class="cm"># ValueError: unit must not be specified if the input is/contains a str</span>
+
+<span class="cm"># Trap 2 (new here): errors="ignore" was removed in this pandas version --
+# only "raise" (the default) and "coerce" remain valid at all.</span>
+pd.to_timedelta([<span class="str">"1 days"</span>, <span class="str">"bad"</span>], errors=<span class="str">"ignore"</span>)
+<span class="cm"># ValueError: errors must be one of 'raise', or 'coerce'.</span>
+
+pd.to_timedelta([<span class="str">"1 days"</span>, <span class="str">"bad"</span>], errors=<span class="str">"coerce"</span>)
+<span class="cm"># TimedeltaIndex(['1 days', NaT], dtype='timedelta64[us]', freq=None)</span></code></pre>
+<p>Trap 1 is Lesson 81's exact <code>format=</code>-vs-string rule, reappearing on the sibling function: a string already states its own units in words ("day", "hours"), so pairing it with a numeric <code>unit=</code> is a contradiction pandas refuses outright rather than silently picking one side. Trap 2 is specific to this pandas version (3.0.6) and worth naming because older code or tutorials may still show <code>errors="ignore"</code> — it now raises <code>ValueError</code> immediately, confirmed directly and cross-checked against the official docs, which document only <code>'raise'</code> and <code>'coerce'</code> as valid values. <code>errors="coerce"</code> behaves exactly like Lesson 2/81's pattern: unparseable entries become <code>NaT</code>, parseable ones pass through untouched.</p>
+
+<h2>3 · Why it matters: enables real duration arithmetic</h2>
+<p>Confirmed directly: a parsed timedelta adds/subtracts against a parsed datetime exactly like any Lesson-23-derived one, since both end up as the same underlying <code>timedelta64</code>/<code>datetime64</code> dtypes regardless of which function produced them:</p>
+<pre><code>order_date = pd.to_datetime(<span class="str">"2026-01-01"</span>)
+sla = pd.to_timedelta(<span class="str">"3 days"</span>)
+order_date + sla
+<span class="cm"># Timestamp('2026-01-04 00:00:00')</span></code></pre>
+<div class="callout">This is the ETL "clean dtypes" step from MISSION.md applied to durations specifically: a source column holding <code>"3 days"</code> or <code>"PT3H"</code>-style text as raw strings/objects can't be added, compared, or resampled against a datetime column until it's parsed into a real <code>timedelta64</code> — exactly the same reason Lesson 81's <code>pd.to_datetime()</code> matters for point-in-time columns. A SQL equivalent: casting a text column to an <code>INTERVAL</code> type before doing date arithmetic against it, rather than leaving it as a string the database can't add to anything.</div>
+
+<div class="interview">
+<p><strong>Q: "You have a CSV column called 'processing_time' with values like '2 days 04:30:00'. How would you work with it?"</strong> A strong answer, out loud: <em>"First parse it with pd.to_timedelta() rather than leaving it as a string or object dtype — that gives a real timedelta64 column I can add or subtract against a datetime64 column, sort, or compare with <, exactly like any duration derived from subtracting two timestamps directly. I'd watch two things: unit= can't be passed alongside a string input, since the string already states its own unit in words; and in recent pandas, errors='ignore' isn't valid anymore — only 'raise' or 'coerce' — so coerce is what I'd reach for if some rows might be malformed, same as to_datetime."</em> The signal: naming it as the duration-parsing counterpart to to_datetime, not a brand-new unrelated function.</p>
+</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/103_to_timedelta.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/103_to_timedelta.py</code></pre>
+<p>Exercise 1 confirms a duration string parses to a real <code>timedelta64</code>-backed result, usable in arithmetic against a parsed datetime (Section 1 &amp; 3). Exercise 2 confirms a bare number needs <code>unit=</code> to be meaningful, and that pairing <code>unit=</code> with a string input raises <code>ValueError</code> instead of silently picking one (Section 1 &amp; 2). Exercise 3 confirms <code>errors="coerce"</code> turns an unparseable entry into <code>NaT</code> while leaving a valid one untouched (Section 2).</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly (pandas 3.0.6): pd.to_timedelta() on a Series of duration strings returns a Series with a real timedelta64 dtype, not object or plain string -- the same shape of fix pd.to_datetime() provides for point-in-time strings, letting the result be added to or subtracted from a parsed datetime column directly.">
+    <p class="stem">Calling <code>pd.to_timedelta()</code> on a Series of strings like <code>"1 days 00:00:05"</code> returns what kind of result?</p>
+    <button class="opt" data-ok>a Series with a real timedelta64 dtype, ready right away for datetime arithmetic</button>
+    <button class="opt">a plain Series of object-dtype strings, totally unchanged from before this one call</button>
+    <button class="opt">a brand new DataFrame holding separate day and time text columns, split apart</button>
+  </div>
+  <div class="q" data-why="Confirmed directly against the official pandas docs: unit= is rejected outright (ValueError) when the input already is or contains a string, since the string already states its own unit in words -- it is never silently ignored or silently overridden by the string's own stated unit.">
+    <p class="stem">Calling <code>pd.to_timedelta("1 day", unit="h")</code> -- a string input together with <code>unit=</code> -- does what?</p>
+    <button class="opt" data-ok>raises ValueError right away, since unit can't pair with a string input here</button>
+    <button class="opt">silently ignores the given unit, parsing the whole string exactly as written instead</button>
+    <button class="opt">overrides the string's own day unit, forcibly treating it as one full hour</button>
+  </div>
+  <div class="q" data-why="Confirmed directly (pandas 3.0.6) and cross-checked against the official docs, which name only 'raise' and 'coerce' as valid errors values: errors='ignore' has been removed and now itself raises ValueError, rather than quietly leaving any bad entries as their original unparsed string values the old way.">
+    <p class="stem">Passing <code>errors="ignore"</code> to <code>pd.to_timedelta()</code> on this installed pandas version does what?</p>
+    <button class="opt" data-ok>raises ValueError itself, since ignore is no longer an accepted option at all</button>
+    <button class="opt">leaves every bad entry as its original raw string value, like older pandas</button>
+    <button class="opt">quietly converts every single entry in the given list straight into NaT instead</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official <a href="https://pandas.pydata.org/docs/reference/api/pandas.to_timedelta.html">pandas API reference for <code>pandas.to_timedelta()</code></a> (per <code>RESOURCES.md</code>'s "Docs: pandas User Guide" entry, ~5 min) — confirms the <code>unit=</code>-with-string restriction and the <code>'raise'</code>/<code>'coerce'</code>-only <code>errors=</code> values exactly matching the direct probing above.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>pd.to_timedelta()</code> is new today, added right after Lesson 102's <code>np.clip()</code> entry.<br>
+<strong>Next lesson:</strong> the <code>str.pad()</code>/<code>str.strip()</code>/<code>str.title()</code>/<code>str.join()</code> text-cleanup family remains a standing named candidate from today's scan, left for tomorrow's own fresh scan to confirm or replace rather than being pre-committed.<br><br>
+💬 Anything unclear — string vs numeric parsing, the unit=/errors= traps, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

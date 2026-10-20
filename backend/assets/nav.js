@@ -218,6 +218,8 @@
       file: "lessons/0105-ihostedservice-background-services.html" },
     { n: 106, date: "2026-10-19", title: "EF Core's own flavor of N+1",
       file: "lessons/0106-ef-core-change-tracking-n-plus-one.html" },
+    { n: 107, date: "2026-10-20", title: "async/await: C#'s coroutine, named properly this time",
+      file: "lessons/0107-async-await-task-sync-over-async.html" },
   ];
 
   const REFS = [

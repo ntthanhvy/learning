@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 35 · Airflow retries, for real: on_retry_callback and try_number on the production DAG</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 35 · ~20 min · 20 Oct 2026</p>
+<h1>Airflow retries, for real: <code>on_retry_callback</code> and <code>try_number</code> on the production DAG</h1>
+<p class="byline">Today's tangible win: Day 7's own <code>dbt_build</code> task — the real one, in <code>food_delivery_pipeline</code>, not a throwaway demo — gets an <code>on_retry_callback</code> that logs exactly which attempt just failed and why, and you watch <code>try_number</code> actually climb across a forced failure. Confirmed this round straight from Airflow 3.3.1's own installed source, since <code>retries=2</code> has sat on that task since Day 7 doing its job silently, with nothing ever naming out loud what happens the moment it fires.</p>
+
+<div class="callout"><strong>Before today — confirm Day 7's DAG still parses:</strong> today edits <code>dags/food_delivery_pipeline.py</code> in place; it doesn't touch any other DAG file.
+<pre><code>AIRFLOW_HOME="$(pwd)/airflow_home" uv run --with "apache-airflow==3.3.1" airflow dags list-import-errors</code></pre>
+Expected: <code>No data found</code>. Fix that first if it prints anything else — today adds one callback function and one keyword argument to an existing task, nothing more.</div>
+
+<h2>1 · The gap: a setting that's been running blind since Day 7</h2>
+<p>Day 7 set <code>default_args = {"retries": 2, "retry_delay": timedelta(minutes=5)}</code> on both of <code>food_delivery_pipeline</code>'s tasks, and every lesson since has quietly trusted it to do the right thing. Day 25 built a real demonstration of Airflow's <em>waiting</em> machinery (sensors, deferrable operators) against a side DAG made for the purpose. But <code>retries</code> itself — the mechanism actually sitting on the one DAG this whole course ships — has never been watched fire. "It retries transient failures" has been a claim, not something seen happening, and an interviewer who asks "what does your DAG actually do the moment <code>dbt_build</code> fails" deserves a better answer than "it's configured to retry."</p>
+<p>Today closes that, using nothing new: the same <code>retries</code>/<code>retry_delay</code> Day 7 already set, on the same task, with one addition — a callback that fires on every retry and logs which attempt number just failed.</p>
+
+<h2>2 · <code>try_number</code>, confirmed straight from Airflow 3.3.1's own source</h2>
+<p>Reading <code>TaskInstance</code>'s real class body this round (installed locally via <code>uv run --with "apache-airflow==3.3.1"</code>, no live scheduler needed) turns up the exact mechanics, not the usual paraphrase:</p>
+<pre><code>try_number: Mapped[int] = mapped_column(Integer, default=<span class="kw">0</span>)
+<span class="cm">...</span>
+<span class="kw">def</span> is_eligible_to_retry(self):
+    <span class="cm">...</span>
+    <span class="kw">return</span> bool(self.task.retries <span class="kw">and</span> self.try_number &lt;= self.max_tries)</code></pre>
+<p>A <dfn data-en="an Airflow TaskInstance's own counter of which attempt is currently running for one task in one DAG run, starting at 0 and incrementing by 1 on each attempt -- read inside a task via context[\"task_instance\"].try_number, and the exact number Airflow's own retry-eligibility check (try_number <= max_tries) compares against the task's configured retries" data-vn="giữ nguyên &quot;try_number&quot; — bộ đếm lần chạy hiện tại của 1 task trong 1 DAG run cụ thể, bắt đầu từ 0 và tăng 1 mỗi lần thử, đọc được trong task qua context[\"task_instance\"].try_number">try_number</dfn> is a real counter on the task instance itself, not a derived guess — and <code>is_eligible_to_retry()</code> is the literal gate every failure passes through: a task only gets to retry if <code>task.retries</code> is truthy <em>and</em> <code>try_number</code> hasn't yet exceeded <dfn data-en="an Airflow TaskInstance property equal to the task's own configured retries count -- the maximum number of attempts beyond the first that are allowed before a failure is treated as final, compared directly against try_number inside is_eligible_to_retry()" data-vn="giữ nguyên &quot;max_tries&quot; — thuộc tính bằng đúng số retries đã cấu hình cho task, so sánh trực tiếp với try_number để quyết định còn được thử lại hay không">max_tries</dfn>, which Airflow derives directly from the task's own configured <code>retries</code>. For Day 7's <code>dbt_build</code> (<code>retries=2</code>), that means three total attempts are possible: <code>try_number</code> 0, 1 and 2, each one checked against <code>max_tries=2</code> before a fourth is ever considered.</p>
+<p>The same source pass through <code>airflow.sdk.execution_time.task_runner</code> turned up something worth quoting directly, a comment explaining a real design decision rather than an assumption:</p>
+<pre><code><span class="cm"># We signal main() to sys.exit(1) AFTER finalize() runs, so
+# on_failure_callback / on_retry_callback / listener hooks /
+# email_on_failure / email_on_retry still fire. sys.exit(1) directly
+# here would raise SystemExit, which is BaseException, not Exception --
+# main()'s `except Exception:` would not catch it and finalize() at
+# the call site would be skipped.</span></code></pre>
+<p>Two things confirmed directly from that comment, not inferred: <code>on_retry_callback</code> and <code>on_failure_callback</code> are two distinct hooks, chosen by which terminal state a failed attempt lands in (<code>UP_FOR_RETRY</code> fires the retry callback; a final, no-more-attempts failure fires the failure callback instead) — and both are guaranteed to run as part of <code>finalize()</code>, deliberately sequenced before the process actually exits, specifically so a crashing task still gets its callback.</p>
+
+<h2>3 · Build: add <code>on_retry_callback</code> to the real <code>dbt_build</code> task</h2>
+<p>In your <code>food-delivery-pipeline</code> repo, edit <code>dags/food_delivery_pipeline.py</code> — the exact file Day 7 wrote, not a copy. Add one function above the <code>with DAG(...)</code> block, and one keyword argument on <code>dbt_build</code>:</p>
+<pre><code><span class="kw">def</span> log_dbt_build_retry(context: dict) -&gt; <span class="kw">None</span>:
+    <span class="cm"># TODO: today's real skill -- this currently only prints. A real</span>
+    <span class="cm"># deployment would call Slack/PagerDuty here, same as Day 25's</span>
+    <span class="cm"># deadline-alert TODO did for a late run instead of a failed one.</span>
+    ti = context[<span class="str">"task_instance"</span>]
+    <span class="kw">print</span>(
+        <span class="str">f"RETRY: {ti.task_id} failed attempt try_number={ti.try_number} "</span>
+        <span class="str">f"of max_tries={ti.max_tries} -- retrying after retry_delay"</span>
+    )
+
+
+<span class="cm"># inside the existing `with DAG(...) as dag:` block, Day 7's dbt_build task:</span>
+dbt_build = BashOperator(
+    task_id=<span class="str">"dbt_build"</span>,
+    bash_command=(
+        <span class="str">f"cd {REPO_DIR}/warehouse &amp;&amp; "</span>
+        <span class="str">"uv run --with 'dbt-postgres==1.11.0' dbt build --profiles-dir ."</span>
+    ),
+    on_retry_callback=log_dbt_build_retry,  <span class="cm"># new today</span>
+)</code></pre>
+<p>Nothing about <code>retries=2</code> or <code>retry_delay</code> changes — both already exist on <code>default_args</code> since Day 7 and apply here exactly as before. <code>on_retry_callback</code> is additive: it observes a retry that was already going to happen, it doesn't cause one.</p>
+
+<h2>4 · Verify: force a real failure, watch <code>try_number</code> move</h2>
+<p>Proving this without waiting for a real transient Postgres hiccup needs a forced failure — this round built exactly that as a throwaway scratch DAG (not committed to your repo, just today's own verification), a single <code>PythonOperator</code> that raises on its first attempt and succeeds on its second, with the same <code>on_retry_callback</code> shape as Section 3:</p>
+<pre><code><span class="kw">def</span> _fail_once_then_succeed(**context):
+    ti = context[<span class="str">"task_instance"</span>]
+    <span class="kw">if</span> ti.try_number &lt; <span class="kw">2</span>:
+        <span class="kw">raise</span> RuntimeError(<span class="str">"simulated transient failure"</span>)</code></pre>
+<p>Running this under a real scheduler would show the sequence Section 2's source confirms: attempt 0 executes, raises, lands in <code>UP_FOR_RETRY</code>, fires <code>on_retry_callback</code> with <code>try_number=0</code>; Airflow waits <code>retry_delay</code>; attempt 1 executes, <code>try_number</code> is now 1, which is <code>&lt;= max_tries</code> (2), so the condition in <code>_fail_once_then_succeed</code> is false and it succeeds — no third attempt needed. This round's sandbox could install Airflow 3.3.1 itself (confirmed: <code>uv run --with "apache-airflow==3.3.1" python3 -c "import airflow; print(airflow.__version__)"</code> → <code>3.3.1</code>) but could not get interactive approval to run <code>airflow db migrate</code> or <code>airflow dags test</code> against it headlessly this round — a new, narrower gap than prior rounds' blocked <code>WebFetch</code>/DB-read issues, named honestly rather than silently worked around. In your own environment, where you can approve commands interactively, confirm the sequence above for real:</p>
+<pre><code>AIRFLOW_HOME="$(pwd)/airflow_home" uv run --with "apache-airflow==3.3.1" airflow dags test retry_demo 2026-10-20</code></pre>
+<p>Expected in the task log, in order:</p>
+<pre><code>RETRY: flaky failed attempt try_number=0 of max_tries=2 -- retrying after retry_delay
+<span class="cm">... (retry_delay pause) ...</span>
+succeeded on this attempt</code></pre>
+<p>What was independently confirmed this round without a live scheduler: <code>py_compile</code> on the scratch DAG file passed clean, and the Section 2 source excerpts (<code>try_number</code>'s column definition, <code>is_eligible_to_retry()</code>'s exact boolean expression, and the <code>finalize()</code> comment distinguishing <code>on_retry_callback</code> from <code>on_failure_callback</code>) were read directly out of the installed <code>apache-airflow==3.3.1</code> package on this machine, not copied from memory or a blog post.</p>
+
+<h2>5 · Why this matters more than it looks like it should</h2>
+<p>A callback that only prints looks like a toy, but the mechanism underneath it is the same one a real on-call setup hangs its alerting on: <code>on_retry_callback</code> is where you'd page someone that <code>dbt_build</code> is struggling but not yet dead, and <code>on_failure_callback</code> (fired once <code>try_number &gt; max_tries</code>, the attempt that doesn't get another chance) is where you'd page that it's actually down. Today's lesson is deliberately the smaller of the two — a retry is routine, a final failure is the one that should wake someone up — and naming that distinction out loud, backed by the exact source-level condition that decides between them, is worth more in an interview than either callback's own one-line body.</p>
+<div class="callout">This is the same idempotent-retry idea Day 6's Kafka consumer and Day 7's own re-run proof already established — Airflow doesn't make a retry safe, it just calls the same thing again. Nothing about <code>dbt_build</code>'s own safety changed today; today only makes visible the exact moment Airflow decides to call it again. (Bridged, not re-taught — see Day 7 Section 5 and <a href="../backend/index.html">backend/</a> for the idempotency argument itself.)</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed this round directly from TaskInstance's installed source: try_number is a real mapped column starting at 0, incremented by self.try_number += 1 on each attempt -- not a value computed after the fact from log counting or timestamps.">
+    <p class="stem">Confirmed this round: what is <code>try_number</code>, mechanically?</p>
+    <button class="opt" data-ok>A real stored counter, starting at 0, incremented each attempt</button>
+    <button class="opt">A timestamp difference, computed only after each run fully ends</button>
+    <button class="opt">A value only ever visible inside the Airflow web UI</button>
+  </div>
+  <div class="q" data-why="Confirmed this round from TaskInstance.is_eligible_to_retry()'s exact source: it returns bool(self.task.retries and self.try_number <= self.max_tries) -- both the task's own configured retries being truthy AND try_number not yet exceeding max_tries are required together.">
+    <p class="stem">Confirmed this round: what does <code>is_eligible_to_retry()</code> actually check?</p>
+    <button class="opt" data-ok><code>task.retries</code> is truthy, and <code>try_number</code> still sits well within <code>max_tries</code></button>
+    <button class="opt">Only whether this task's <code>retry_delay</code> has fully elapsed by now</button>
+    <button class="opt">Only whether this exact task defines any <code>on_retry_callback</code> at all</button>
+  </div>
+  <div class="q" data-why="Confirmed this round from a direct comment in airflow.sdk.execution_time.task_runner: on_retry_callback and on_failure_callback are chosen by which terminal state a failed attempt lands in -- UP_FOR_RETRY (more attempts remain) fires the retry callback, a final failure fires the failure callback -- and both are run inside finalize() before the process exits, on purpose.">
+    <p class="stem">Confirmed this round: what decides whether <code>on_retry_callback</code> or <code>on_failure_callback</code> fires?</p>
+    <button class="opt" data-ok>Whether the failed attempt lands in <code>UP_FOR_RETRY</code> or a final failure</button>
+    <button class="opt">Whichever of the two callbacks got defined first in the file</button>
+    <button class="opt">Both of them always fire together, on every single failed attempt</button>
+  </div>
+  <div class="q" data-why="Day 7's dbt_build already has retries=2 and retry_delay via default_args -- today's on_retry_callback is additive, observing a retry that was already configured to happen. It does not change whether a retry happens, how many are allowed, or the delay between them.">
+    <p class="stem">What does adding <code>on_retry_callback</code> to Day 7's <code>dbt_build</code> task change about its retry behavior?</p>
+    <button class="opt" data-ok>Nothing: it only observes a retry already set since Day 7</button>
+    <button class="opt">It silently raises the task's own <code>retries</code> count to 3, too</button>
+    <button class="opt">It quietly swaps out <code>retry_delay</code> for exponential backoff starting from today</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> this round's content comes directly from reading <code>apache-airflow==3.3.1</code>'s own installed source — <code>airflow.models.taskinstance.TaskInstance</code>'s <code>try_number</code> column and <code>is_eligible_to_retry()</code> method, and <code>airflow.sdk.execution_time.task_runner</code>'s <code>finalize()</code> logic and its comment distinguishing <code>on_retry_callback</code> from <code>on_failure_callback</code> — rather than a doc fetch, the same "read the real install" approach Days 20, 21, 22 and 25 used. Airflow's own <a href="https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/tasks.html">Tasks</a> page (added to <code>RESOURCES.md</code>'s Airflow section this round) documents <code>retries</code>/<code>retry_delay</code>/<code>on_retry_callback</code> at the API-reference level; it was not re-fetched live this round (no working <code>WebFetch</code> tool available), the same live-fetch gap Days 17, 23, 26, 31 and 34 each hit, so treat today's claims as sourced from the installed package, not a freshly re-confirmed doc page.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 35.<br>
+<strong>Next up:</strong> this round's own verification hit a new, narrower gap worth naming for whoever picks up next — this sandbox could install and inspect Airflow 3.3.1's source freely, but could not get approval to run <code>airflow db migrate</code> or <code>airflow dags test</code> headlessly. A round with interactive approval available could close today's one open loop: actually running the <code>retry_demo</code> scratch DAG end to end and confirming the exact console sequence Section 4 predicts, rather than deriving it from source alone.<br><br>
+💬 Anything unclear — the <code>UP_FOR_RETRY</code> vs final-failure distinction, or why <code>sys.exit(1)</code> is deliberately sequenced after callbacks run? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

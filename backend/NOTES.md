@@ -8529,3 +8529,132 @@
   retried each round regardless of the recent streak of blocks on direct
   reads, since the orchestrator-side query this round worked cleanly and
   any future round could too.
+- **2026-10-20 generation (Lesson 107, headless run):** Idempotency check
+  first: grepped `nav.js` for `date: "2026-10-20"` (no match) and globbed
+  `lessons/` for `0107*.html` (no match) — this round was clear to
+  proceed. Per the orchestrator's brief this round, the DB had already
+  been queried moments before handoff (confirmed: no `course_progress`
+  row for backend dated 2026-10-20 yet, and no new quiz/lesson_completed
+  signal since the 2026-10-15 full-pass on Lesson 102), so no redundant
+  DB read was attempted — relied on that pre-confirmed result plus this
+  file's own tail and all three `learning-records/` files, read in full.
+  The 2026-10-19 entry closed out all five of
+  `learning-records/0003-mission-adds-dotnet-stack.md`'s named
+  .NET-bridge candidates as done (DI container, middleware pipeline, EF
+  Core N+1 flavor, `IHostedService`), explicitly leaving no standing
+  named candidate — this round's brief required a fresh gap scan instead
+  of picking blind from that exhausted list. Read `reference/
+  glossary.html` in full (two paginated reads, ~353 terms) cross-
+  referenced against every lesson title in `nav.js` and MISSION.md's
+  "Success looks like" goals. Found a real, specific gap: every C#
+  snippet since Lesson 103 (103, 104, 105, 106) uses `async`, `await`,
+  and `Task<T>`/`Task<IActionResult>` in code without any lesson ever
+  explaining what those keywords/types actually do — Lesson 25 covers
+  Go's goroutine/coroutine vocabulary in depth and even says in passing
+  that Go skips "the `async`/`await` ceremony that Python or Rust
+  require," but never circles back to explain that ceremony itself once
+  .NET entered scope five lessons later. Confirmed via grep that
+  `async`/`await` appear in `reference/glossary.html` only inside other
+  terms' prose (never as their own `<dfn>`/glossary row) and that
+  `sync-over-async`, `ConfigureAwait`, and `Task<T>` as a named concept
+  appear nowhere in any lesson — a genuine, well-motivated gap, not a
+  re-teach. Picked this over any other candidate because it's the same
+  bridge shape that drove Lessons 103–106 (an already-taught Go/vocab
+  concept, Lesson 25's thread-vs-coroutine material, extended into its
+  .NET-specific shape) and because the gap was being silently assumed
+  away in four straight lessons' worth of code samples rather than
+  freestanding. Lesson 107 covers: `Task<T>` as a handle representing
+  unfinished async work, not the value itself; `async`/`await` as C#'s
+  named cooperative-scheduling ceremony, lined up directly against
+  Lesson 25's comparison table (goroutines can suspend almost anywhere;
+  C# can only suspend at an explicit `await` keyword — the one checkbox
+  that actually differs day to day); and `sync-over-async` (calling
+  `.Result`/`.Wait()` on a `Task` instead of awaiting it) as a concrete,
+  reviewable bug with no real Go equivalent, including why it can
+  deadlock outright under a captured synchronization context (classic
+  ASP.NET, UI apps) and `ConfigureAwait(false)` as a library-side
+  mitigation, not an application-side fix. Checked the glossary first
+  for all five new terms — `Task<T>`, `async/await`, `await`, `sync-
+  over-async`, `ConfigureAwait(false)` — zero collisions via case-
+  insensitive grep across the whole file, confirmed before writing (note:
+  this is five new rows, not four — `async/await` and `await` are two
+  separate `<dfn>` tags, matching the two keywords actually used
+  separately in prose, a deliberate choice rather than an oversight);
+  added as five new rows immediately after Lesson 106's `AsNoTracking()`
+  row, same Term/Tiếng Việt (dev-style)/In software column order
+  confirmed by direct inspection of the file's actual header row first,
+  not assumed. No Go code sample this round — the lesson is entirely
+  about C#'s own mechanism, with Go's already-taught vocabulary (Lesson
+  25) used only in prose comparison, not a code snippet — so no scratch
+  Go module was needed. The C# snippets could not be toolchain-verified:
+  `which dotnet` succeeded (`/usr/bin/dotnet`) but `dotnet --version` was
+  blocked as requiring interactive approval with no user present — the
+  same specific block every round since Lesson 103 has hit, confirmed
+  still standing one more round later. Verified by careful manual reading
+  instead, per the brief's fallback: an `async Task<T>` method signature,
+  `await` on a `Task`-returning call (`db.Orders.FindAsync(id)`, a real
+  EF Core method), `.Result`/`.Wait()` as real blocking `Task`/`Task<T>`
+  members, and `ConfigureAwait(false)` as a real `Task` instance method
+  altering continuation-context capture are all real, standard .NET/C#
+  API shapes with correct signatures as far as this reading can confirm
+  — flagging here, as instructed, that none of this round's C# snippets
+  were compiled, only reviewed by eye. Verification performed
+  mechanically otherwise, via a scratch Node script at `/tmp/verify-
+  backend-1020.js` (this round's sandbox allowed writing to `/tmp` but
+  blocked `rm`/`ls` against that exact path afterward as outside the
+  allowed working directory — left in place; it sits outside the repo
+  entirely, under `/tmp`, not under `backend/` or anywhere `git status`
+  for this repo could ever see it, so it was not a cleanup failure
+  worth blocking the round over, just a sandbox-boundary difference from
+  prior rounds' `/tmp` workaround): (1) a quiz-word-count script
+  splitting every option both via `.split(/\s+/)` and `.split(" ")` —
+  first draft landed uneven across all four questions (spreads of 1–3
+  words, the exact single-word trap prior rounds' entries describe —
+  this round it was punctuation-adjacent tokens like "T," "thread," and
+  ".Result" miscounted by eye before the script caught it), fixed
+  through several rewrite-and-recount cycles per option, converged to
+  exactly 9/9/9/9 on all four questions, both counting methods agreeing
+  exactly, exactly one `data-ok` and four options per question confirmed
+  the same way; (2) an HTML tag-balance check across div/p/code/button/
+  script/dfn/pre/h2/h1/em/strong/a/table/tr/th/td — clean on the first
+  pass after the quiz rewrites (div 7/7, p 17/17, code 53/53, button
+  16/16, script 3/3, dfn 5/5, pre 2/2, h2 6/6, h1 1/1, em 1/1, strong
+  3/3, a 3/3); a separate table/tr/th/td/p/div/html/head/body/title/
+  script balance check on `glossary.html` after its five-row addition —
+  also balanced (tr 359/359, td 1074/1074), plus a duplicate-term scan
+  across all 358 first-column entries — zero duplicates; (3) a raw-
+  unescaped-`&` regex scan across both files — zero hits; (4) the
+  lesson's `<dfn` tags grepped and confirmed to carry both `data-en=`
+  and `data-vn=` — exactly 5 `dfn` tags, matching the 5 new terms, no
+  orphaned attribute; (5) `node --check` against `assets/nav.js`,
+  `assets/gloss.js`, and `assets/quiz.js` — all clean, both before and
+  after the `nav.js` edit; (6) a basic HTML well-formedness check
+  (exactly one `<!DOCTYPE html>`, one `<html>`/`</html>`, three script
+  tags with `nav.js` last) — clean; (7) a grep for stray markdown-style
+  `*emphasis*` left over from drafting — none found. Registered Lesson
+  107 in `nav.js` (date 2026-10-20, today's actual generation date)
+  right after `n: 106`, confirmed exactly one matching `n: 107` entry and
+  exactly one matching `0107-*.html` file on disk afterward. Added one
+  new RESOURCES.md line (Microsoft Learn's async/await doc plus the .NET
+  Blog's ConfigureAwait FAQ) following the existing per-topic grouping,
+  placed right after Lesson 106's EF Core docs line. `bin/record-
+  progress` ran clean on the first attempt this round (`recorded:
+  backend/lesson_generated day=107 lesson=
+  0107-async-await-task-sync-over-async.html`). A new `learning-records/`
+  file was considered but not added: this round's finding (C#'s async
+  ceremony being used unexplained across four lessons) is a gap caught
+  during routine glossary/lesson cross-referencing, not a new signal
+  about the learner's baseline or a quiz-outcome surprise — closer in
+  kind to "a topic that should exist didn't yet" than to a new fact about
+  how the learner thinks, so it didn't rise to a new baseline record.
+  With the .NET-bridge list from `0003` now fully exhausted (as of
+  Lesson 106) and this round's gap closed, the round after this one
+  should again start from a fresh gap scan (glossary cross-referenced
+  against lesson titles and MISSION.md's goals) or a DB-sourced quiz/
+  completion signal rather than an assumed list — candidates spotted but
+  not picked this round, worth checking again fresh rather than treating
+  as pre-queued: `ValueTask<T>`, `Task.WhenAll`/`WhenAny`, and the
+  compiler-generated async state machine, all named in this lesson's own
+  Scope line as follow-ons; GraphQL and gRPC streaming were also not
+  found in the glossary cross-reference but weren't chosen this round in
+  favor of the more directly-motivated async/await gap.

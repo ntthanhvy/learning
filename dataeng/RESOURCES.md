@@ -81,6 +81,8 @@ before Phase 2.
   What changed from 2.x. Use for: bridging the learner's earlier Airflow exposure, which may be 2.x-era, so imports and concepts that moved are flagged explicitly.
 - [Docs: Core Concepts](https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/index.html) · [TaskFlow tutorial](https://airflow.apache.org/docs/apache-airflow/stable/tutorial/taskflow.html)
   DAGs, tasks, operators, scheduling, TaskFlow. Use for: Day 7 and Phase 2c.
+- [Docs: Tasks](https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/tasks.html)
+  API reference for `retries`, `retry_delay` and the `on_retry_callback`/`on_failure_callback` pair. Use for: Day 35, the primary source — not re-fetched live that round (no working `WebFetch` tool), so Day 35's claims are sourced from reading the installed `apache-airflow` package's own code directly, not this page; confirm field-level details against the live page before quoting them in an interview.
 - [Docs: Best Practices](https://airflow.apache.org/docs/apache-airflow/stable/best-practices.html)
   Idempotent tasks, top-level code, testing DAGs. Use for: Day 7's "safe re-run" requirement.
 - [Docs: Assets (data-aware scheduling)](https://airflow.apache.org/docs/apache-airflow/stable/authoring-and-scheduling/assets.html)

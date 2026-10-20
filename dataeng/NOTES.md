@@ -4052,3 +4052,115 @@ along the Phase 2 spine, adapted to the learning records.
   '{"by":"headless"}'` succeeded on the first attempt, run from the repo
   root: `recorded: dataeng/lesson_generated day=34
   lesson=0034-kafka-consumer-group-rebalancing.html`.
+- 2026-10-20 (headless 06:00 run, Day 35 generated): twenty-minute lesson,
+  `0035-airflow-retry-callback-on-the-real-dag.html`. Confirmed before
+  writing that no `0035-*.html` file existed in `lessons/` and no
+  `2026-10-20` entry existed in `assets/nav.js` (last entry was Day 34,
+  dated 2026-10-19); the orchestrator's own context for this run had
+  already confirmed no `course_progress` row exists yet for today and no
+  fresh quiz/completion signal exists beyond the standing baseline, so
+  that DB check was not re-attempted here. Read `MISSION.md`, `PLAN.md` in
+  full, this file's tail (back through Day 30's Phase 2→3 close and Day
+  34's own closing note), `RESOURCES.md`, the one `learning-records/`
+  file, and `assets/nav.js`'s full `LESSONS` array (all 34 titles) before
+  writing anything, plus Days 7 and 25 in full for exact domain
+  conventions (`food_delivery_pipeline` DAG id, `REPO_DIR`, Day 7's
+  existing `retries=2`/`retry_delay` `default_args`, the `BashOperator`
+  shape) and structural precedent for an Airflow-mechanics lesson.
+  **Topic choice:** not a fresh gap-map this round — Day 34's own closing
+  note ranked three real Kafka/Airflow gaps and named the strongest
+  explicitly: "a real, observed task retry firing on the actual
+  production DAG from Day 7, not Day 25's throwaway sensor demo." Picked
+  exactly that, for the same reason Day 34 gave it top rank: `retries=2`
+  has sat on Day 7's `dbt_build` task since Phase 1 and has never once
+  been watched actually fire, despite "retries and safe re-runs" being
+  named directly in `MISSION.md`'s own Airflow bullet — a real, nameable
+  gap, not an invented one, and closable with zero new infrastructure
+  (one callback added to one existing task).
+  **Content:** added `on_retry_callback` to Day 7's real `dbt_build` task
+  in `dags/food_delivery_pipeline.py` — the actual file every prior
+  Airflow lesson has built on, not a side demo DAG (Day 24's Cosmos demo
+  and Day 25's sensor demo were both explicitly the "side DAG, not the
+  real one" pattern; today deliberately breaks that pattern since the
+  whole point is observing the real task). `retries=2`/`retry_delay`
+  themselves are untouched. Traced `try_number`/`max_tries` and the
+  `on_retry_callback` vs `on_failure_callback` split directly from
+  Airflow 3.3.1's own installed source rather than from memory or a blog
+  post (Section 2). No pandas, no Python-language teaching, no
+  re-derivation of idempotency/API concepts beyond a one-line callback to
+  Day 7's own re-run-safety proof (reused, not re-taught) — none else
+  applicable to a pure Airflow-retry-mechanics day. Domain names and file
+  paths (`food_delivery_pipeline`, `dbt_build`, `REPO_DIR`) used exactly
+  as established since Day 7; no renaming.
+  **Verification:** this sandbox could install `apache-airflow==3.3.1`
+  itself this round (`uv run --with "apache-airflow==3.3.1" python3 -c
+  "import airflow; print(airflow.__version__)"` → `3.3.1`, confirmed), a
+  capability prior rounds did not establish either way. Used that install
+  to read real source rather than assert from memory: extracted
+  `TaskInstance`'s actual `try_number` column definition and
+  `is_eligible_to_retry()` method body (`bool(self.task.retries and
+  self.try_number <= self.max_tries)`), and
+  `airflow.sdk.execution_time.task_runner`'s `finalize()` logic plus its
+  comment explaining why `on_failure_callback`/`on_retry_callback` are
+  guaranteed to run before `sys.exit(1)`. Also constructed two real DAG
+  objects against that same install — Day 7's edited `dbt_build` task
+  (as a standalone copy, `food_delivery_pipeline_section3.py`) and a
+  throwaway `retry_demo` DAG with a task that fails its first attempt and
+  succeeds its second — and imported both directly (not via `DagBag`,
+  which needs a migrated metadata DB) to confirm `retries`, `retry_delay`
+  and `on_retry_callback` all construct and attach correctly; notably,
+  `task.on_retry_callback` resolves to a *list* containing the given
+  function (`[log_dbt_build_retry]`), not the bare function — a real,
+  worth-knowing shape confirmed directly rather than assumed, though it
+  did not change anything about how the lesson's own code is written
+  since the kwarg usage itself is unaffected. Attempted to go one step
+  further and actually run `airflow db migrate` / `airflow dags test`
+  against the `retry_demo` DAG under a scratch `AIRFLOW_HOME` to observe
+  the real console sequence end to end — blocked by this sandbox's
+  approval gate on that specific command with no human present to approve
+  it headlessly, a new and narrower gap than prior rounds' blocked
+  `WebFetch`/DB-read issues (package installation and source inspection
+  both worked fine; only the actual scheduler/DB-writing commands were
+  gated). Named honestly in the lesson's own build/verify section and in
+  its closing "Next up" note, rather than silently asserting the live run
+  happened. `py_compile` passed clean on both scratch DAG files. No dbt
+  snippet exists in this lesson (the only `dbt` text is the unmodified
+  `dbt build` shell string inside Day 7's own existing `BashOperator`),
+  confirmed by grep, so `dbt parse` did not apply this round.
+  All scratch work happened under `.scratch-dataeng-1020/` at the repo
+  root (not `/tmp`, matching Day 34's own reasoning about avoiding
+  collisions with concurrent sibling agents), deleted afterward and
+  confirmed removed via a directory listing.
+  Ran a small Python tag-balance/bare-`&`/dfn-attribute/quiz-word-count
+  script (written to the same scratch directory, deleted with it) against
+  the lesson and against `reference/glossary.html` separately — both
+  came back with every checked tag balanced
+  (div/p/table/tr/td/th/pre/code/h1/h2/dfn/button/span/a/em/strong) and
+  zero bare `&`. One real markup bug was caught and fixed before the
+  word-count pass: a stray stray apostrophe-and-space typo
+  (<code>&lt;/em '</code>) in Section 1's first draft, found by the
+  tag-balance script rather than by eye. The first quiz draft came up
+  mismatched on all four questions (10/8/12, 7/6/6, 10/9/8 and 11/8/7 word
+  splits); rebalanced through several edit-and-recount passes, re-running
+  the same script after every edit, to a final 10/10/10, 10/10/10,
+  11/11/11 and 11/11/11 across all four questions.
+  Registered Lesson 35 in `assets/nav.js` (`node --check` clean) and added
+  the Day 35 section to `reference/glossary.html` (2 new terms:
+  `try_number`, `max_tries` — grepped the existing glossary first,
+  case-insensitively, no collisions; Day 7's existing `retries` row was
+  reused in prose rather than duplicated). Confirmed the lesson's 2
+  `<dfn>` tags (`try_number`, `max_tries`) match the 2 new glossary rows
+  added, by direct extraction and comparison rather than by eye. Added one
+  new line to `RESOURCES.md`'s Airflow section (the official Tasks docs
+  page, covering `retries`/`retry_delay`/`on_retry_callback` at the
+  API-reference level) since today's primary citation wasn't previously
+  listed; flagged honestly, there and in the lesson's own "Go deeper"
+  section, that it was not fetched live this round (no working `WebFetch`
+  tool available), the same live-fetch gap Days 17, 23, 26, 31 and 34 each
+  hit — today's claims are sourced from reading the installed package's
+  own code, not a fresh doc pull.
+  `bin/record-progress dataeng lesson_generated --day 35 --lesson
+  0035-airflow-retry-callback-on-the-real-dag.html --detail
+  '{"by":"headless"}'` succeeded on the first attempt, run from the repo
+  root: `recorded: dataeng/lesson_generated day=35
+  lesson=0035-airflow-retry-callback-on-the-real-dag.html`.

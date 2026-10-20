@@ -10475,4 +10475,133 @@ fail *gracefully* so the learner sees which task failed.
   consistent with however Day 79's review was structured (not reread in
   full this round — only its outcome was referenced via the Day 81 entry's
   framing) before defaulting to a fresh-topic gap scan.
+- 2026-10-20 — **Day 83 generated: Review day 14, retrieval across Days
+  80-82** (headless 06:00 run, zero prior context per the orchestrator's
+  brief, started from a repo path — `/home/runner/work/learning/learning/python`
+  — different from the `~/learning/python/` shorthand in the brief; resolved
+  by listing the actual working directory tree once at the start). Read
+  `MISSION.md` in full (no-pandas exclusion in particular), `PLAN.md` in
+  full (confirms Phase 2's spine is fully spent), `RESOURCES.md` in full,
+  `learning-records/0001-…md` in full (still the only record, no newer
+  signal), and `assets/nav.js` in full for the registration format and
+  every prior entry through Day 82. `NOTES.md` exceeds this run's
+  single-read cap, so only its tail (~400 lines, covering Days 80-82 in
+  full) was read directly — sufficient, since Day 82's own next-day note
+  already stated the cadence math plainly: Days 80, 81, 82 were three
+  fresh lessons in a row since Day 79's review, so **Day 83 must be a
+  review day**, not another fresh-topic gap scan. Also read Day 79's full
+  HTML and practice file (the most recent review day) to match its exact
+  structure, rather than relying on a secondhand description as the
+  2026-10-18 entry had to.
+  Idempotency: confirmed no `date: "2026-10-20"` entry existed in
+  `assets/nav.js` and no `0083-*`/`83_*` files existed in
+  `lessons/`/`practice/` before writing anything — both clean, consistent
+  with the orchestrator's own DB check reported in this run's brief (no
+  `course_progress` row for python dated 2026-10-20 yet). No direct DB
+  query attempted this round, since the orchestrator's brief had already
+  confirmed via its own query that no python row exists for 2026-10-20 and
+  no newer quiz/completion signal exists beyond routine
+  `lesson_generated` rows — paced entirely from on-disk state as in most
+  recent prior rounds.
+  Decision — review vs. fresh topic: not a judgment call this round —
+  Day 82's next-day note already did the cadence arithmetic (Day 67
+  reviewed 64-66, Day 71 reviewed 68-70, Day 75 reviewed 72-74, Day 79
+  reviewed 76-78, and Days 80/81/82 are the three fresh lessons since Day
+  79), and stated no standing fresh-gap candidate was left to carry
+  forward. Took Day 83 as a review of Days 80 (`difflib`), 81
+  (`io.StringIO`/`io.BytesIO`), 82 (`base64`) on that basis, matching Day
+  79's own template: a "why today" callout explaining the cadence and the
+  (empty) fresh-gap re-scan, three fold-out retrieval questions in
+  teaching order, a "why these three" throughline paragraph, a required
+  pandas/NumPy boundary callout, a practice file with one exercise per
+  reviewed day, a 3-question quiz, and a "no new terms" closing note
+  pointing at each day's existing glossary anchor.
+  No-pandas rule: grepped case-insensitively for
+  `pandas|numpy|dataframe|pd\.|np\.` in the new lesson and practice file —
+  exactly one hit (the single required "Where pandas/NumPy go from here"
+  boundary callout, stating none of today's three reviewed topics needs a
+  `DataFrame` or array) and zero hits in the practice file. Topic is a
+  review of three already-taught stdlib modules (`difflib`, `io`,
+  `base64`) — a language/stdlib review, not a library API, so the
+  hard-scope rule was never in tension here.
+  No new jargon today (review day; every term already has a glossary
+  entry under Day 80/81/82 — confirmed those anchors exist via `grep -n
+  'id="day8' reference/glossary.html` before writing the closing links).
+  `reference/glossary.html` and `RESOURCES.md` both left untouched this
+  round, matching Day 79's own review-day precedent (no new citation or
+  term on a review day).
+  Quiz: 3 questions (what `unified_diff()` shows that `==` can't, why an
+  unseeked `BytesIO` read comes back empty, why `b64encode()` is not a way
+  to hide data). Word counts were checked with a throwaway Python script
+  (written via `Write` under the repo root as `.verify83.py`, deleted
+  after use) using `html.parser.HTMLParser` for a tag-balance check plus a
+  regex-based bare-`&` scan and a per-question word-count tally that
+  strips tags from each `<button class="opt">` and splits on whitespace.
+  First draft mismatched on two of three questions (Q2 11/7/10, Q3
+  11/9/9) — iterated option-by-option (lengthening "BytesIO objects
+  silently discard…" through several word counts, stretching the Q3
+  password distractor) and recounted after every edit, until all three
+  landed on equal per-question counts: 8/8/8, 11/11/11, 11/11/11. The same
+  script's bare-`&` scan initially flagged 2 hits that turned out to be
+  false positives from an incomplete entity allowlist (`&middot;` and
+  `&check;`, both legitimate named entities already used by Day 79's own
+  template) — widened the allowlist and re-ran to confirm zero real bare
+  `&` and clean tag balance. Also caught and fixed one real markup bug
+  while drafting: a stray `</code>` with no matching open tag inside an
+  `<em>where</em>` phrase in the Day 80 fold-out answer, found by the same
+  tag-balance check, fixed by correcting it to a real `<em>...</em>` pair.
+  `node --check` confirmed no syntax errors on `assets/nav.js` after
+  registering today's entry. The scratch script was deleted before
+  finishing.
+  Registered in `assets/nav.js` with `date: "2026-10-20"` right after the
+  `n: 82` entry.
+  Practice file `practice/83_review_retrieval_day_14.py` (3 checks,
+  stdlib-only, no `--with` flag, function-stub-with-TODO-comment style
+  matching Day 79's own review-practice shape): isolating the one changed
+  line between two small configs with `difflib.unified_diff()` (Ex 1,
+  Day 80), round-tripping CSV rows through an `io.StringIO` with
+  `csv.writer()`/`csv.reader()` (Ex 2, Day 81), and encoding a
+  `BytesIO`'s contents with `base64.b64encode()` so they can travel inside
+  a `json.dumps()` string (Ex 3, Day 82). All three expected values were
+  verified against a live `uv run python3 -c "..."` probe before being
+  written into the checks.
+  Verified in a scratch `.scratch-python-1020/` directory created
+  directly under the repo root: the shipped (unsolved) copy, run with
+  `uv run python3` from its real `python/practice/` path, printed three
+  clean ✗ lines with no traceback. A separately solved copy (written
+  fresh into the scratch dir, not by editing the shipped file) printed
+  all three ✓ and the "All green" tally, run twice consecutively with
+  identical results both times. The scratch directory and both scratch
+  verification scripts were deleted before finishing — confirmed by a
+  directory listing showing neither `.scratch-python-1020` nor any
+  `.verify83*` file remaining.
+  `python/learning-records/` still holds only the Day 1 baseline — a
+  routine cadence-driven review day (the choice was arithmetic, not a new
+  finding about the learner) is not a new, durable fact distinct from
+  what Day 1's record already says.
+  `bin/record-progress python lesson_generated --day 83 --lesson
+  0083-review-retrieval-day-14.html --detail '{"by":"headless"}'` was run
+  from the repo root at the end of this round (output: `recorded:
+  python/lesson_generated day=83 lesson=0083-review-retrieval-day-14.html`).
+  A direct shell `cd` into the repo root followed by the command in the
+  same call succeeded; the command failed with "No such file or
+  directory" when run as a bare relative path in a session whose working
+  directory had reset to a sibling course's directory between tool calls,
+  and failed with an approval gate when given an absolute path instead —
+  worth knowing for the next round if the same reset happens again.
+  Final `git status --porcelain` from the repo root showed exactly three
+  paths changed, all under `python/`: `python/assets/nav.js` (modified),
+  `python/lessons/0083-review-retrieval-day-14.html` (new), and
+  `python/practice/83_review_retrieval_day_14.py` (new) — plus this
+  `NOTES.md` edit once it lands. Three other untracked paths appeared in
+  the same status output (`.scratch-dataeng-1020/`,
+  `backend/lessons/0107-….html`, `data/lessons/0103-….html`) — all
+  clearly belonging to other courses' own concurrent headless runs, not
+  touched by this one. No glossary or `RESOURCES.md` change this round,
+  since a review day adds no new citation or term.
+  **Next-day note:** with Days 80-82 now reviewed, no standing fresh-gap
+  candidate remains on record — the next lesson should default to a
+  fresh topic and run its own gap scan from scratch, rather than another
+  review, since this cadence just reset to zero fresh lessons since the
+  last review.
 

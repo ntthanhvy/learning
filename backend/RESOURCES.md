@@ -29,6 +29,10 @@
   Vendor primary source for EF Core's `Include()` eager-loading method and the `AsNoTracking()` change-tracking opt-out. Use for: EF Core's own N+1/lazy-loading flavor and change-tracking overhead questions (Lesson 106).
 - [Docs: Microsoft Learn — Asynchronous programming with async and await](https://learn.microsoft.com/en-us/dotnet/csharp/asynchronous-programming/) and [.NET Blog — ConfigureAwait FAQ](https://devblogs.microsoft.com/dotnet/configureawait-faq/)
   Vendor primary source for C#'s `Task<T>`/`async`/`await` model and exactly when sync-over-async deadlocks via a captured synchronization context. Use for: C# concurrency-mechanism questions, the `.Result`/`.Wait()` deadlock trap (Lesson 107).
+- [Docs: pkg.go.dev — golang.org/x/sync/errgroup](https://pkg.go.dev/golang.org/x/sync/errgroup)
+  Primary source for Go's `errgroup.Group`, `WithContext`, `Go()`, and `Wait()`'s first-error-only return behavior. Use for: fan-out/fan-in concurrency questions, structured concurrency in Go (Lesson 108).
+- [Docs: Microsoft Learn — Task.WhenAll](https://learn.microsoft.com/en-us/dotnet/api/system.threading.tasks.task.whenall) and [Cancellation in Managed Threads](https://learn.microsoft.com/en-us/dotnet/standard/threading/cancellation-in-managed-threads)
+  Vendor primary source for exactly when `Task.WhenAll`'s returned Task completes (only once every supplied task has completed, aggregating all faulted tasks' exceptions) and for `CancellationTokenSource`/`CancellationToken`'s source-vs-token split. Use for: C# structured-concurrency fan-out and the fail-fast-cancellation gap versus Go's errgroup (Lesson 108).
 
 ## Wisdom (Communities)
 

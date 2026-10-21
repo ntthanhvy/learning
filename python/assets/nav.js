@@ -172,6 +172,8 @@
       file: "lessons/0082-base64-encoding.html" },
     { n: 83, date: "2026-10-20", title: "Review day 14: retrieval across Days 80-82",
       file: "lessons/0083-review-retrieval-day-14.html" },
+    { n: 84, date: "2026-10-21", title: "traceback: capturing failure as text",
+      file: "lessons/0084-traceback-module.html" },
   ];
 
   const REFS = [

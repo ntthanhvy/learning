@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 36 · dbt_utils date_spine: making zero-order days visible</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 36 · ~20 min · 21 Oct 2026</p>
+<h1>dbt_utils <code>date_spine</code>: making zero-order days visible</h1>
+<p class="byline">Today's tangible win: <code>mart_delivery_sla</code> gets a real calendar behind it — every <code>(city, order_date)</code> pair in the reporting window, not just the ones that happened to have an order — built from <code>dbt_utils.date_spine</code>, the exact macro Day 11's own closing note named as a real, still-untouched gap and never built.</p>
+
+<div class="callout"><strong>Before today — optional, read-only check:</strong> this course builds in your own <code>food-delivery-pipeline</code> repo, which this sandbox cannot reach, so the checks below are things to confirm yourself before starting, not something run for you. Today is a normal dbt day, not a dependency-heavy one, but it's worth a quick look since several rounds have now passed since Day 7 and Day 35:
+<pre><code>cd food_delivery_pipeline
+uv run --project ../dbt_env dbt build
+AIRFLOW_HOME="$(pwd)/airflow_home" uv run --with "apache-airflow==3.3.1" airflow dags list-import-errors</code></pre>
+Expected: the first prints <code>Done. PASS=... ERROR=0</code>, the second prints <code>No data found</code>. If either doesn't, that's worth fixing first — but it's not a hard gate for today, since today only edits <code>mart_delivery_sla.sql</code>, <code>packages.yml</code> and <code>dbt_project.yml</code>, and doesn't touch the DAG at all.</div>
+
+<h2>1 · The gap Day 11 named and never closed</h2>
+<p><code>mart_delivery_sla</code> has reported "minutes from placed to delivered, and the share of orders over 45 min per city per day" since Day 6, and Day 11 gave it a real surrogate key over its true grain, <code>(city, order_date)</code>. But the mart's own <code>group by city, order_date</code> can only ever produce a row for a combination that had at least one order. A city with zero orders on a given day — a slow Tuesday, a city that just launched and has three days of history — doesn't get a row showing "0 orders, 0 breaches." It gets no row at all, silently. Anyone querying <code>mart_delivery_sla</code> to ask "which cities are breaching SLA most this month" sees only days that had traffic, with no way to tell "0% breach rate" apart from "this city-day never happened" unless they already know the full calendar by heart. Day 11's own closing note named the fix directly — <code>dbt_utils.date_spine</code> — and left it unbuilt. Today closes it.</p>
+
+<h2>2 · <code>date_spine</code>: a calendar table generated from two dates, not a query</h2>
+<p>A <dfn data-en="a dbt_utils macro that generates one row per date (or other datepart interval) between a start and end date expression, with a single date_day column -- used as a base table to left-join real data onto, so every date in a range appears exactly once regardless of whether any real row exists for it" data-vn="giữ nguyên &quot;date_spine&quot; — macro dbt_utils tạo 1 bảng có đúng 1 dòng cho mỗi ngày (hoặc đơn vị thời gian khác) giữa 2 mốc ngày, với 1 cột date_day; dùng làm bảng gốc để left-join dữ liệu thật vào, nhờ đó mọi ngày trong khoảng đều xuất hiện đúng 1 lần, bất kể có dữ liệu thật cho ngày đó hay không">date_spine</dfn> macro takes a date part, a start expression and an end expression, and compiles to a recursive CTE that emits exactly one row per date in that range — nothing queried from any table, purely generated. It's the calendar-table pattern any warehouse eventually needs, written once by dbt Labs instead of by every project that needs one. Call it directly in a new model, <code>models/marts/dim_dates.sql</code>:</p>
+<pre><code><span class="cm">-- models/marts/dim_dates.sql</span>
+{{ dbt_utils.date_spine(
+    datepart=<span class="str">"day"</span>,
+    start_date=<span class="str">"cast('2024-01-01' as date)"</span>,
+    end_date=<span class="str">"cast(current_date as date)"</span>
+) }}</code></pre>
+<p>Build it alone first and read what comes out, before changing anything else:</p>
+<pre><code>uv run --project ../dbt_env dbt build --select dim_dates</code></pre>
+<p>Expected — one view, one column, one row per calendar day in the range, nothing else:</p>
+<pre><code>1 of 1 OK created sql view model dbt_dev.dim_dates ......................... [CREATE VIEW in 0.02s]
+
+Done. PASS=0 WARN=0 ERROR=0 SKIP=0 TOTAL=0</code></pre>
+<pre><code>uv run --project ../dbt_env dbt compile --select dim_dates
+grep -A2 "with rawdata" target/compiled/food_delivery_pipeline/models/marts/dim_dates.sql</code></pre>
+<p>The compiled SQL is a plain recursive CTE walking from <code>start_date</code> to <code>end_date</code> one day at a time, ending in a single <code>date_day</code> column — worth reading once, same as Day 11's reminder that a package macro is still just Jinja producing SQL, no different from hand-written SQL once compiled.</p>
+
+<h2>3 · Build: left join the spine onto every city, so absence becomes a visible zero</h2>
+<p><code>dim_dates</code> alone only has dates — the real gap is <code>(city, order_date)</code> pairs, so today crosses the spine against the distinct cities this project already has in <code>stg_restaurants</code>, then left-joins the real order aggregation onto that full grid. Edit <code>mart_delivery_sla.sql</code>'s structure: keep Day 6's <code>order_durations</code> CTE exactly as it is, and change only the final <code>select</code> to start from the full city/date grid instead of from the aggregated orders directly:</p>
+<pre><code><span class="cm">-- models/marts/mart_delivery_sla.sql -- new CTEs added above the existing final select</span>
+with order_durations as (
+    <span class="cm">-- ...unchanged from Day 6/Day 10: placed/delivered join through stg_order_events</span>
+),
+
+cities as (
+    <span class="kw">select distinct</span> city <span class="kw">from</span> {{ ref(<span class="str">'stg_restaurants'</span>) }}
+),
+
+city_date_grid as (
+    <span class="kw">select</span> cities.city, dim_dates.date_day <span class="kw">as</span> order_date
+    <span class="kw">from</span> cities
+    <span class="kw">cross join</span> {{ ref(<span class="str">'dim_dates'</span>) }} <span class="kw">as</span> dim_dates
+),
+
+daily_city_stats as (
+    <span class="kw">select</span>
+        city,
+        date_trunc(<span class="str">'day'</span>, placed_at)::date <span class="kw">as</span> order_date,
+        count(*) <span class="kw">as</span> order_count,
+        sum(<span class="kw">case when</span> {{ is_sla_breach(<span class="str">'minutes_to_deliver'</span>) }} <span class="kw">then</span> <span class="kw">1</span> <span class="kw">else</span> <span class="kw">0</span> <span class="kw">end</span>)::numeric <span class="kw">as</span> breach_count
+    <span class="kw">from</span> order_durations
+    <span class="kw">group by</span> city, date_trunc(<span class="str">'day'</span>, placed_at)::date
+)
+
+<span class="kw">select</span>
+    {{ dbt_utils.generate_surrogate_key([<span class="str">'city_date_grid.city'</span>, <span class="str">'city_date_grid.order_date'</span>]) }} <span class="kw">as</span> sla_key,
+    city_date_grid.city,
+    city_date_grid.order_date,
+    coalesce(daily_city_stats.order_count, <span class="kw">0</span>) <span class="kw">as</span> order_count,
+    coalesce(daily_city_stats.breach_count, <span class="kw">0</span>) <span class="kw">as</span> breach_count,
+    <span class="kw">case when</span> coalesce(daily_city_stats.order_count, <span class="kw">0</span>) = <span class="kw">0</span>
+        <span class="kw">then</span> <span class="kw">0</span>
+        <span class="kw">else</span> daily_city_stats.breach_count / daily_city_stats.order_count
+    <span class="kw">end</span> <span class="kw">as</span> share_over_sla
+<span class="kw">from</span> city_date_grid
+<span class="kw">left join</span> daily_city_stats
+    <span class="kw">on</span> city_date_grid.city = daily_city_stats.city
+    <span class="kw">and</span> city_date_grid.order_date = daily_city_stats.order_date</code></pre>
+<p>The join direction is the whole fix: starting <code>from city_date_grid</code> and <code>left join</code>-ing the real aggregation onto it means every grid row survives even when <code>daily_city_stats</code> has nothing for it, and the two <code>coalesce()</code> calls turn that missing row into an honest <code>0</code> instead of a <code>null</code> that would silently poison <code>share_over_sla</code>'s division. Day 11's <code>sla_key</code> surrogate key moves with the grain — it's still exactly one column standing in for <code>(city, order_date)</code>, now built from the grid's columns instead of the aggregation's, because the grid is what guarantees the pair exists at all.</p>
+<pre><code>uv run --project ../dbt_env dbt build --select dim_dates mart_delivery_sla</code></pre>
+<p>Expected — the same <code>sla_key</code> tests from Day 11 still pass, now against a row count equal to <code>cities × days in range</code> rather than only the city-days that happened to have traffic:</p>
+<pre><code>1 of 3 OK created sql view model dbt_dev.dim_dates ........................ [CREATE VIEW in 0.02s]
+2 of 3 OK created sql table model dbt_dev.mart_delivery_sla ............... [SELECT 1 in 0.05s]
+3 of 3 PASS unique_mart_delivery_sla_sla_key ................... [PASS in 0.02s]
+
+Done. PASS=3 WARN=0 ERROR=0 SKIP=0 TOTAL=3</code></pre>
+<p>Confirm the fix is real, not just a passing build — query for a city-day that should now exist with zero orders:</p>
+<pre><code>docker compose exec -T postgres psql -U fdp -d fdp -c \
+  "select city, order_date, order_count, share_over_sla from dbt_dev.mart_delivery_sla where order_count = 0 limit 5;"</code></pre>
+<p>Expected: at least a few rows, each with <code>order_count = 0</code> and <code>share_over_sla = 0</code> rather than that city-day being absent from the result set entirely — before today's change this query returned zero rows no matter what, because no row with <code>order_count = 0</code> could ever have existed.</p>
+
+<h2>4 · Why this is a real data-quality gap, not cosmetics</h2>
+<p>A dashboard built on top of yesterday's version of <code>mart_delivery_sla</code> has a silent failure mode: "average share of orders over SLA across all cities this week" computed by averaging <code>share_over_sla</code> across whatever rows exist quietly drops every zero-order city-day from the average instead of counting it as a true zero, which skews the number upward by exactly the amount of missing-data days. That's the same shape of bug as a dbt test that doesn't fire because the bad case never produces a row to test in the first place — Day 3's tests check rows that exist; nothing before today could ever check a <code>(city, order_date)</code> pair that was silently never created. <code>date_spine</code> doesn't add a new rule, it removes a blind spot: once the full grid exists, Day 3's existing <code>not_null</code>/<code>unique</code> tests on <code>sla_key</code> now actually test the grain they were always supposed to test, every city-day, not only the ones that happened to log traffic.</p>
+
+<div class="callout">This generated-calendar idea has one bridge worth naming explicitly, not re-deriving: a Python-side calendar generator (<code>pandas.date_range</code>, say) would produce the identical set of dates. The reason today's fix lives in dbt rather than a Python script is the same reason Day 1 chose ELT over ETL — the grid is consumed by SQL joins immediately after, inside the same warehouse, by the same tool that already owns <code>mart_delivery_sla</code>'s other transformations. (Bridged, not re-taught — pandas itself belongs to <a href="../data/index.html">data/</a>.)</div>
+
+<h2>5 · Verify</h2>
+<pre><code>uv run --project ../dbt_env dbt build --select dim_dates mart_delivery_sla
+docker compose exec -T postgres psql -U fdp -d fdp -c \
+  "select count(*) as zero_order_rows from dbt_dev.mart_delivery_sla where order_count = 0;"</code></pre>
+<p>Expected: the build prints <code>PASS=3 WARN=0 ERROR=0 SKIP=0 TOTAL=3</code> (same as Section 3), and <code>zero_order_rows</code> is greater than <code>0</code> — proof the grid is doing its job, not just compiling cleanly. A build that passes but reports <code>zero_order_rows = 0</code> would mean the left join silently degraded back into an inner join somewhere, same mechanical-check-isn't-enough caution Day 23's and Day 30's own verify sections named.</p>
+<div class="callout"><strong>Honesty note on today's verification:</strong> this round's sandbox has no live Postgres and no live dbt invocation against this project's actual seed data, the same recurring gap named on Days 11 and several since — <code>dbt_utils.date_spine</code>'s macro signature and its recursive-CTE compiled shape are reasoned from the dbt_utils README (cited below) rather than captured from a fresh <code>dbt compile</code> run this round, and the exact <code>PASS=3</code>/row-count output shown above is hand-derived from this project's own established row counts (Day 11) and dbt_utils' documented behavior, not a captured live run. Confirm the exact compiled CTE shape and the <code>PASS=3</code> output for real in your own environment before quoting either in an interview.</div>
+
+<div class="interview">
+<p><strong>Q: "Your delivery-SLA mart is grouped by city and day. How do you make sure a city with zero orders on some day still shows up as zero, instead of just not appearing?"</strong> A strong answer, out loud: <em>"By building the full grid of every city crossed with every date in the reporting window first, as its own small model, using dbt_utils' date_spine macro to generate the date half of that — it's a recursive CTE that emits one row per day in a range, nothing queried from a table. Then I left-join my real orders-per-city-per-day aggregation onto that grid instead of starting from the aggregation itself, and coalesce the order count and breach count to zero wherever the join finds nothing. The join direction is what matters: starting from the grid guarantees every city-day survives even with zero real orders behind it, where starting from the aggregation — what I had before — can only ever produce rows for combinations that already happened to have at least one order. I caught this because an average computed downstream was silently skewed upward: every missing zero-order day was dropped from the average instead of counted as a real zero."</em> The signal: naming the join direction as the actual fix, not just "I added a calendar table," and tying it to a concrete downstream consequence (a skewed average) rather than treating it as a cosmetic nicety.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="date_spine compiles to a recursive CTE that generates one row per date between a start and end expression, with a single date_day column -- it queries no table and reads no real data, it is purely generated from the two date bounds given to it.">
+    <p class="stem">What does <code>dbt_utils.date_spine</code> actually produce?</p>
+    <button class="opt" data-ok>A generated row per date, from two given bounds</button>
+    <button class="opt">A live query over whichever dates already have orders</button>
+    <button class="opt">A single row holding the full min-to-max date span</button>
+  </div>
+  <div class="q" data-why="Before today, mart_delivery_sla's group by city, order_date could only ever emit a row for a (city, order_date) combination that already had at least one real order -- a city-day with zero orders produced no row at all, not a row with order_count=0, because nothing generated that row's existence independently of real data.">
+    <p class="stem">Before today's fix, why did a zero-order city-day never appear in <code>mart_delivery_sla</code> at all?</p>
+    <button class="opt" data-ok>Grouping real orders alone can't invent a missing day</button>
+    <button class="opt">dbt's own <code>group by</code> clause silently drops zero counts</button>
+    <button class="opt">Postgres itself always refuses to store any zero-valued rows</button>
+  </div>
+  <div class="q" data-why="Starting the final select from city_date_grid and left-joining the real daily_city_stats aggregation onto it keeps every grid row even where the aggregation has nothing -- the two coalesce() calls then turn that missing match into an honest 0 instead of a null. Starting from the aggregation instead, even with the same left join, would only ever keep rows the aggregation already produced.">
+    <p class="stem">What specifically makes today's join turn absence into a visible zero, not a missing row?</p>
+    <button class="opt" data-ok>Starting from the full grid, then left-joining real stats onto it</button>
+    <button class="opt">Replacing every <code>left join</code> in the model with an <code>inner join</code></button>
+    <button class="opt">Running <code>dbt build</code> a second extra time right after the first</button>
+  </div>
+  <div class="q" data-why="A downstream average computed over share_over_sla, before today, silently dropped every zero-order city-day from the calculation instead of counting it as a true zero, skewing the average upward by exactly the missing-data days -- the same kind of blind spot as a test that can never fire because the bad case never produces a row to test in the first place.">
+    <p class="stem">Per today's lesson, what real downstream consequence did the missing zero-order rows cause?</p>
+    <button class="opt" data-ok>A skewed average, since missing zero days got dropped out</button>
+    <button class="opt"><code>dbt build</code> itself failing outright on every single run now</button>
+    <button class="opt">Duplicate rows appearing twice for the exact same city day</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the <a href="https://github.com/dbt-labs/dbt-utils?tab=readme-ov-file#date_spine-source"><code>date_spine</code></a> section of the dbt_utils README (dbt Labs' own package, already this course's primary source for packages since Day 11) documents the exact macro signature and the recursive-CTE shape it compiles to. <a href="https://docs.getdbt.com/docs/build/sources">dbt's own Sources</a> doc (Day 2's source) is worth a re-read for how <code>cities</code>'s <code>select distinct</code> over <code>stg_restaurants</code> stays a normal <code>ref()</code>-based model despite today's new calendar-crossing logic sitting next to it.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 36.<br>
+<strong>Next up:</strong> this round closes the last of the three dbt gaps named back on Day 31 and 33 (environments, test severity, seeds vs. sources, and now <code>date_spine</code>) alongside Day 33's own second named candidate, a Kafka consumer-lag monitoring walkthrough (Day 18 stayed concept-only) — that one, plus Day 35's own open loop (actually running <code>airflow dags test</code> end to end under interactive approval), are the two clearest remaining threads for whoever picks up next.<br><br>
+💬 Anything unclear — the join direction, or why <code>coalesce()</code> has to wrap both <code>order_count</code> and <code>breach_count</code> and not just one? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -9451,3 +9451,116 @@
   103 --lesson 0103-to-timedelta.html --detail '{"by":"headless"}'` was
   run directly from the repo root and succeeded, matching the pattern used
   by Lessons 95-102.
+- 2026-10-21 generation (Lesson 104): headless run, zero prior context.
+  Read MISSION.md in full (not modified), this file's own tail (Lessons
+  100-103's entries), both `lessons/0102-np-clip.html` and
+  `lessons/0103-to-timedelta.html` in full for exact HTML structure, both
+  `practice/102_np_clip.py` and `practice/103_to_timedelta.py` in full for
+  the exact self-checking practice pattern, `assets/nav.js`'s tail for the
+  LESSONS registration shape, `reference/glossary.html`'s last rows for
+  the exact `<tr><td>Term</td><td>VN</td><td>EN</td></tr>` column order,
+  and `RESOURCES.md` in full. Lesson 103's own teaser named one standing
+  candidate: the `str.pad()`/`str.strip()`/`str.title()`/`str.join()`
+  text-cleanup family. Re-grepped `strip` case-insensitively across every
+  lesson body and the glossary file before picking — the only hit found
+  was Lesson 55's plain Python `"_".join(...).strip("_")` call on an
+  already-joined column-label string, never the pandas `.str.strip()`
+  accessor itself, so `.str.strip()` is a genuine zero-hit gap. Picked
+  `.str.strip()` over its three siblings (`pad()`/`title()`/`join()`):
+  it is the single most common and most-skipped real-CSV cleanup step,
+  and it explains a class of silent bug (extra groupby groups, missed
+  merge rows) this course hadn't named yet — a sharper pick than the
+  grab-bag as a whole, same reasoning shape Lesson 103 itself used to
+  prefer `pd.to_timedelta()` over this same family. Every behavioral
+  claim was probed directly first in a scratch directory outside
+  `data/` (`.scratch-data-20261021/` at the repo root, deleted after —
+  NOTES.md's own record of a past incident with unscoped `/tmp` paths
+  colliding across concurrent sibling-course runs was read first, and
+  `/tmp` itself turned out to be blocked entirely for directory creation
+  in this sandboxed session regardless, so the scratch dir was placed at
+  the repo root instead, outside `data/` and never tracked by git), on
+  the actually-installed pandas 3.0.6 / numpy 2.5.4 (confirmed via a
+  version-print one-liner, matching Lessons 102/103's own installed
+  versions exactly): confirmed a whitespace-padded key ("Binh" vs
+  "Binh " vs " Binh") silently produces separate `groupby()` groups
+  instead of one, and silently drops rows out of a `merge()`, both with
+  zero error or warning either way, by direct `python3` probing of both
+  scenarios with concrete DataFrames; confirmed `lstrip()`/`rstrip()`
+  each remove only one side's whitespace, leaving the other side intact;
+  confirmed `to_strip=` accepts a custom character string, stripping any
+  combination of the given characters from both ends, not a literal
+  substring match; confirmed NaN passes straight through `.str.strip()`
+  untouched, matching every other `.str` method and `np.clip()`'s own
+  NaN behavior (Lesson 102); confirmed a Series whose dtype holds no
+  strings at all (plain `int64`) raises `AttributeError` on
+  `.str.strip()` immediately, while a *mixed* `object`-dtype Series with
+  a few non-string entries scattered among real strings instead silently
+  turns just those entries into `NaN` rather than raising — this second,
+  more precise distinction was found via `WebFetch` against the official
+  pandas docs page for `Series.str.strip()` (which states "Replaces any
+  non-strings in Series with NaNs" and demonstrates it with a mixed
+  object-dtype example) and then independently reproduced directly
+  side-by-side against the pure-`int64` AttributeError case, confirming
+  the docs' nuance rather than taking it on faith. Also confirmed the
+  installed pandas 3.0.6's default string dtype shows as `str` rather
+  than legacy `object` for a plain list of Python strings, and that
+  `.str.strip()` preserves that `str` dtype on its result — noted as a
+  version-specific observation in the lesson's own code comment but kept
+  brief, not promoted into its own section, to hold to the "one
+  function/concept per lesson" rule. Cited the official pandas API
+  reference page for `Series.str.strip()` under the existing
+  `RESOURCES.md` "Docs: pandas User Guide" entry rather than adding a new
+  line, matching the established precedent of Lessons 93/95/97/99-103
+  citing a different `pandas.pydata.org/docs/reference/api/...` page
+  under an existing umbrella entry each time. The shipped (unsolved)
+  `practice/104_str_strip.py` was executed directly from its real
+  `practice/` location (`cd data && uv run --with pandas python3
+  practice/104_str_strip.py`) and printed exactly 3 ✗ with no raw
+  traceback. Built a solved copy in the same now-deleted scratch
+  directory, filling in all blanks correctly (including a
+  `strip_keep_nan()` helper function body, same pattern as Lessons
+  100-103's own helper-function exercises); it printed all 3 ✓ and "All
+  green" on the first run. The shipped file was re-run once more directly
+  from `practice/` after building the solved copy and reproduced the
+  identical all-✗ result, confirming the solved copy's edits never leaked
+  back into the shipped baseline. Quiz options were drafted, then
+  mechanically word-counted with a scratch Python script (same now-
+  deleted scratch directory) isolating each `<div class="q">` block by
+  regex span and splitting on whitespace — the first draft came out
+  14/13/13, 13/13/12, 14/14/15; several small rephrasing rounds (trimming
+  or adding words like "string", "still", "completely", "here", "lone",
+  "instead") across all three questions until every one landed exactly
+  level (13/13/13, 14/14/14, 14/14/14 option words), one `data-ok` per
+  question throughout, with the `data-why` wording re-checked against the
+  final option text afterward to confirm the rephrasing never drifted the
+  meaning. A separate mechanical tag-balance script confirmed all tags
+  balanced (void elements `br`/`link`/`meta` excluded as expected) and
+  found exactly two raw `&` characters, both inside the one established
+  `cd ~/learning/data && uv run ...` shell command, zero raw `&` in prose;
+  also confirmed all three new `<dfn>` tags carry both `data-en` and
+  `data-vn`. Checked the glossary for a collision before adding anything —
+  grepped `strip` case-insensitively across the full glossary, found zero
+  existing rows — added exactly one new row, "str.strip() / str.lstrip()
+  / str.rstrip()" (grouping the three siblings together, since they share
+  one tight behavioral story), directly after Lesson 103's
+  "pd.to_timedelta()" entry; re-ran the tag-balance script against the
+  glossary file afterward, confirmed it stayed balanced with zero raw `&`
+  introduced, and the `<tr>` count went from 174 to 175 as expected.
+  Registered Lesson 104 in `nav.js` with today's date (2026-10-21);
+  `node --check` confirmed it still parses as valid JavaScript after the
+  edit, and exactly one `n: 104` entry plus one `0104-str-strip` file
+  reference were confirmed to exist. This round closed the one candidate
+  already named and promoted from Lesson 103's own teaser, same
+  lineage-continuation pattern as Lesson 103 itself closing Lesson 102's
+  teaser. `str.pad()`/`str.title()`/`str.join()` remain the standing
+  named candidates carried forward into tomorrow's teaser — none
+  promoted yet, left for tomorrow's own fresh scan to confirm or replace
+  rather than being pre-committed. No new `data/learning-records/` entry
+  was added this round — routine lesson, no new baseline finding to
+  justify one (the completion/quiz signal remains stale past mid-July,
+  unchanged from recent rounds). The scratch directory was deleted after
+  verification (outside `data/`, never tracked by git anyway), per this
+  course's standing practice of not leaving scratch artifacts committed.
+  `bin/record-progress data lesson_generated --day 104 --lesson
+  0104-str-strip.html --detail '{"by":"headless"}'` was run directly from
+  the repo root to close out this round.

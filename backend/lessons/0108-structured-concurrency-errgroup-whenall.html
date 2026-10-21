@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 108 · Fan out to 3 services, get all results or the first error</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 108 · ~20 min</p>
+<h1>Fan out to 3 services, get all results or the first error</h1>
+<p class="byline">Lesson 107 covered one <code>await</code> at a time. Real handlers often need three downstream calls at once — pricing, inventory, shipping — and then one of two outcomes: all three answers, or the first error, with the other two stopped rather than left running pointlessly. Lesson 25 named the vocabulary (goroutine, coroutine, cooperative scheduling); today is the pattern for coordinating several of them together, in Go and in C#, and the one place the two stacks quietly disagree on what "first error" should do to its siblings.</p>
+
+<h2>1 · The shape: fan out, then one of two outcomes</h2>
+<p>Three independent calls, started together, not one after another:</p>
+<pre><code>priceResult, invResult, shipResult := callPricing(), callInventory(), callShipping()
+<span class="cm">// sequential: ~300ms if each call takes ~100ms</span>
+</code></pre>
+<p>Run sequentially, three 100ms calls cost 300ms. Run concurrently, they cost roughly 100ms — the slowest one. That's the whole motivation. But concurrent fan-out raises a question sequential code never had to answer: if the inventory call fails, should the pricing and shipping calls keep running anyway? Usually not — their answers are about to be discarded, so every extra millisecond they run is wasted work and wasted downstream load. The pattern this lesson covers is <dfn data-en="a concurrency discipline where a block of code that spawns several concurrent tasks does not return (or let its caller continue) until all of those tasks have finished, one way or another -- no task can outlive the block that launched it, and a failure in one sibling can be propagated to cancel the rest before they finish" data-vn="structured concurrency (giữ nguyên) — cách tổ chức concurrency sao cho 1 block code sinh ra nhiều task con thì không return/cho caller tiếp tục cho tới khi TẤT CẢ task con đã xong -- không task nào sống lâu hơn block sinh ra nó, và lỗi ở 1 nhánh có thể lan ra hủy các nhánh còn lại trước khi chúng xong">structured concurrency</dfn>: fan out, wait for the whole group to finish, and make sure no sibling call outlives the point where its result stopped mattering.</p>
+
+<h2>2 · Go: errgroup.Group ties "wait for all" to "cancel on first error"</h2>
+<p>Go's standard library gives you <code>sync.WaitGroup</code> for "wait for all goroutines," but it says nothing about errors or cancellation. <a href="https://pkg.go.dev/golang.org/x/sync/errgroup"><code>golang.org/x/sync/errgroup</code></a> is the de facto standard answer, built on exactly the Lesson 41 <code>context.Context</code> you already know:</p>
+<pre><code><span class="kw">g</span>, ctx := errgroup.WithContext(parentCtx)
+
+<span class="kw">var</span> price Price
+<span class="kw">var</span> inv Inventory
+<span class="kw">var</span> ship ShipEstimate
+
+g.Go(<span class="kw">func</span>() <span class="kw">error</span> {
+    <span class="kw">var</span> err <span class="kw">error</span>
+    price, err = callPricing(ctx)   <span class="cm">// ctx -- cancelled if a sibling fails</span>
+    <span class="kw">return</span> err
+})
+g.Go(<span class="kw">func</span>() <span class="kw">error</span> {
+    <span class="kw">var</span> err <span class="kw">error</span>
+    inv, err = callInventory(ctx)
+    <span class="kw">return</span> err
+})
+g.Go(<span class="kw">func</span>() <span class="kw">error</span> {
+    <span class="kw">var</span> err <span class="kw">error</span>
+    ship, err = callShipping(ctx)
+    <span class="kw">return</span> err
+})
+
+<span class="kw">if</span> err := g.Wait(); err != <span class="kw">nil</span> {
+    <span class="kw">return</span> err   <span class="cm">// the FIRST error any goroutine returned</span>
+}
+<span class="cm">// all three succeeded; price, inv, ship are all populated</span>
+</code></pre>
+<p><code>errgroup.WithContext(parentCtx)</code> returns a <dfn data-en="the errgroup.Group returned by errgroup.WithContext, paired with a derived context.Context -- calling g.Go() runs a function in a new goroutine under this group, and the derived ctx is cancelled automatically the moment any one of those goroutines returns a non-nil error" data-vn="errgroup.Group (giữ nguyên) — group trả về từ errgroup.WithContext, đi kèm 1 context.Context dẫn xuất -- gọi g.Go() để chạy 1 hàm trong goroutine mới thuộc group này, và ctx dẫn xuất tự bị hủy ngay khi 1 trong các goroutine đó trả về lỗi khác nil">errgroup.Group</dfn> and a derived <code>ctx</code>. Each <dfn data-en="errgroup.Group's method for launching a function in a new goroutine as part of the group -- the function must return error; the group tracks it and makes it the (possibly first) return value of g.Wait()" data-vn="g.Go() (giữ nguyên) — method của errgroup.Group để chạy 1 hàm trong goroutine mới thuộc group -- hàm phải trả về error; group theo dõi nó, dùng làm giá trị (có thể là lỗi đầu tiên) trả về từ g.Wait()">g.Go()</dfn> call runs one of the three calls in its own goroutine. The moment any one of them returns a non-nil <code>error</code>, the derived <code>ctx</code> is cancelled — the exact same cancellation signal Lesson 41 already taught you to check for. The other two goroutines, mid-flight, see that cancellation inside <code>callInventory(ctx)</code> or wherever they're blocked and can stop early, instead of running to completion for no reason. <code>g.Wait()</code> blocks until every goroutine in the group has returned, then hands back only the <strong>first</strong> non-nil error any of them produced — not a list of all three.</p>
+
+<h2>3 · C#: Task.WhenAll does "wait for all," not "cancel on first error"</h2>
+<p>C#'s equivalent fan-out looks almost identical on the surface, and that similarity is exactly what hides the gotcha:</p>
+<pre><code><span class="kw">var</span> priceTask = CallPricingAsync(ct);
+<span class="kw">var</span> invTask = CallInventoryAsync(ct);
+<span class="kw">var</span> shipTask = CallShippingAsync(ct);
+
+<span class="kw">await</span> Task.WhenAll(priceTask, invTask, shipTask);
+<span class="cm">// all three awaited Tasks are done -- or WhenAll threw</span>
+</code></pre>
+<p><code>Task.WhenAll</code> returns a <code>Task</code> that, per Microsoft's own docs, "will complete when all of the supplied tasks have completed" — every single one, always, whether they succeeded or faulted. If <code>invTask</code> throws almost immediately while <code>priceTask</code> and <code>shipTask</code> are still running, <code>Task.WhenAll</code> does <strong>not</strong> stop them. It just keeps waiting for all three to finish before it lets the <code>await</code> on its own line continue — the opposite of errgroup's behavior, using code that looks like a direct translation of it.</p>
+<div class="callout"><strong>The gotcha, stated plainly:</strong> <code>errgroup</code> cancels siblings automatically, because <code>g.Go()</code>'s functions and <code>g.Wait()</code> are wired to the same derived <code>ctx</code>. <code>Task.WhenAll</code> has no such wiring — passing the same <code>CancellationToken</code> into all three calls does not make one task's failure cancel the token. Nothing cancels the token unless something explicitly calls <code>Cancel()</code> on it.</div>
+<p>Getting errgroup's fail-fast behavior in .NET takes one extra, explicit piece: a <dfn data-en="a disposable .NET object that creates and owns a CancellationToken, and whose Cancel() method is the only way to actually signal that token's cancellation -- the token itself is a read-only value passed to listeners; only the source that created it can trigger the cancellation they're watching for" data-vn="CancellationTokenSource (giữ nguyên) — object của .NET tạo và sở hữu 1 CancellationToken, Cancel() là cách duy nhất để thực sự báo hủy token đó -- token chỉ là giá trị chỉ-đọc đưa cho nơi lắng nghe; chỉ source tạo ra nó mới kích được việc hủy mà nơi đó đang chờ">CancellationTokenSource</dfn> (<code>cts</code>) that every task's call is given the <dfn data-en="a lightweight, read-only .NET value, obtained from a CancellationTokenSource's Token property and passed into cancelable operations, that those operations poll or register a callback against to notice a cancellation request -- it cannot itself trigger cancellation, only observe it" data-vn="CancellationToken (giữ nguyên) — giá trị nhẹ, chỉ-đọc, lấy từ property Token của 1 CancellationTokenSource, đưa vào các operation có thể hủy để chúng poll hoặc đăng ký callback theo dõi yêu cầu hủy -- bản thân nó không kích hủy được, chỉ quan sát">CancellationToken</dfn> (<code>cts.Token</code>) from, with the catch block for each task calling <code>cts.Cancel()</code> the moment that task fails:</p>
+<pre><code><span class="kw">using</span> <span class="kw">var</span> cts = <span class="kw">new</span> CancellationTokenSource();
+
+<span class="kw">async</span> Task&lt;Price&gt; RunPricing() {
+    <span class="kw">try</span> { <span class="kw">return</span> <span class="kw">await</span> CallPricingAsync(cts.Token); }
+    <span class="kw">catch</span> { cts.Cancel(); <span class="kw">throw</span>; }   <span class="cm">// signal siblings, then rethrow</span>
+}
+<span class="cm">// RunInventory() / RunShipping() follow the same try/catch-and-cancel shape</span>
+
+<span class="kw">try</span> {
+    <span class="kw">await</span> Task.WhenAll(RunPricing(), RunInventory(), RunShipping());
+} <span class="kw">catch</span> (Exception) {
+    <span class="cm">// Task.WhenAll's exception only carries ONE rethrown exception from .Result,</span>
+    <span class="cm">// even though ALL faulted exceptions are aggregated inside the Task itself</span>
+    <span class="kw">throw</span>;
+}
+</code></pre>
+<p>Each wrapper method catches its own failure, calls <code>cts.Cancel()</code>, then rethrows. The other two calls, which were given <code>cts.Token</code>, see the cancellation and can stop early inside whatever <code>await</code> they're sitting on — the same early-exit <code>callInventory(ctx)</code> got for free in the Go version, here wired by hand through one shared <code>CancellationTokenSource</code>. The alternative some teams use instead of this try/catch wiring is <code>Task.WhenAny</code> — await just the first task to finish, inspect whether it faulted, and manually cancel the rest if it did — but that needs its own manual loop to collect the remaining results on success, so the try/catch-and-cancel shape above is usually the smaller change from a naive <code>Task.WhenAll</code> call.</p>
+
+<div class="cmp-wrap">
+<table class="cmp">
+<thead><tr><th></th><th>Go: errgroup.Group</th><th>C#: Task.WhenAll</th></tr></thead>
+<tbody>
+<tr><th>Wait for all to finish</th><td><code>g.Wait()</code></td><td><code>await Task.WhenAll(...)</code></td></tr>
+<tr><th>Cancel siblings on first failure</th><td>automatic, via the derived <code>ctx</code></td><td>not automatic — needs an explicit <code>cts.Cancel()</code></td></tr>
+<tr><th>Error(s) returned</th><td>the first non-nil error only</td><td>all faulted tasks' exceptions, aggregated inside the Task</td></tr>
+<tr><th>What ties cancellation to failure</th><td><code>errgroup</code> itself, by construction</td><td>whatever try/catch you write around each task</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers fanning out independent concurrent calls with errgroup and Task.WhenAll, and the fail-fast cancellation gap between them. It does not cover: <code>errgroup.Group.SetLimit</code> for bounding how many goroutines run at once (Lesson 25's worker-pool idea, applied to errgroup specifically); <code>Task.WhenAny</code>'s full manual-cancellation pattern in detail; or retry/backoff on an individual failed call before giving up (Lesson 32's territory, one layer below this one). Natural follow-ons, not covered here.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory, with no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="errgroup.WithContext ties the group's derived ctx to its goroutines: the moment any g.Go() function returns a non-nil error, that ctx is cancelled, so the other running goroutines can notice and stop early instead of finishing pointless work.">
+    <p class="stem">In errgroup, what actually cancels the sibling goroutines when one fails?</p>
+    <button class="opt" data-ok>the group's own derived context, cancelled right away</button>
+    <button class="opt">the Go runtime kills every other goroutine outright</button>
+    <button class="opt">nothing -- siblings always keep running to completion</button>
+    <button class="opt">the failing goroutine sends a channel value manually</button>
+  </div>
+  <div class="q" data-why="Task.WhenAll's own docs say the returned Task completes only once all the supplied tasks have completed, whether they succeeded or faulted -- it does not stop or cancel any sibling task just because one of them threw early.">
+    <p class="stem">What does plain Task.WhenAll do when one of its tasks throws early?</p>
+    <button class="opt" data-ok>it still waits for every other task first</button>
+    <button class="opt">it cancels every other still-running task right away</button>
+    <button class="opt">it instantly rethrows before any task even starts</button>
+    <button class="opt">it silently discards that one faulted task's exception</button>
+  </div>
+  <div class="q" data-why="A CancellationTokenSource is the only thing that can actually trigger cancellation, via its Cancel() method. A CancellationToken (from cts.Token) is a read-only value passed into each task purely so it can observe that cancellation -- it cannot trigger it itself.">
+    <p class="stem">Why pass CancellationToken, not CancellationTokenSource, into each task?</p>
+    <button class="opt" data-ok>only the source can cancel; a token can merely observe it</button>
+    <button class="opt">tasks can only ever accept a token, never any source type</button>
+    <button class="opt">passing a source there always throws a plain type error now</button>
+    <button class="opt">a token runs faster than a source for any given task</button>
+  </div>
+  <div class="q" data-why="Lesson 25 drew the thread-vs-coroutine line on who does the scheduling: an OS kernel for threads, a language runtime for coroutines. Both errgroup's goroutines and C#'s Task-returning async methods are runtime-scheduled coroutines, not OS threads -- the fan-out pattern in this lesson sits entirely on the coroutine side of that line in both stacks.">
+    <p class="stem">Per Lesson 25's vocabulary, are errgroup's goroutines and awaited Tasks threads?</p>
+    <button class="opt" data-ok>no -- both are runtime-scheduled coroutines, never true OS threads</button>
+    <button class="opt">yes -- both get a brand new dedicated OS thread</button>
+    <button class="opt">only the Go goroutines count as true OS kernel threads</button>
+    <button class="opt">only the C# Tasks count as true OS kernel threads</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://pkg.go.dev/golang.org/x/sync/errgroup">pkg.go.dev: golang.org/x/sync/errgroup</a> (~10 min) is the primary source for <code>Group</code>, <code>WithContext</code>, <code>Go()</code>, and <code>Wait()</code>'s first-error-only behavior; <a href="https://learn.microsoft.com/en-us/dotnet/api/system.threading.tasks.task.whenall">Microsoft Learn: Task.WhenAll</a> (~10 min) is the primary source for exactly when the returned Task completes and how it aggregates faulted tasks' exceptions, and <a href="https://learn.microsoft.com/en-us/dotnet/standard/threading/cancellation-in-managed-threads">Microsoft Learn: Cancellation in Managed Threads</a> (~10 min) is the primary source for <code>CancellationTokenSource</code>/<code>CancellationToken</code> and the source-vs-token split this lesson leans on.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a>. Click any dotted term for a popup (English first, tiếng Việt second). Builds on Lesson 41's <code>context.Context</code>, Lesson 25's goroutine/coroutine vocabulary, and Lesson 107's <code>Task</code>/<code>async</code>/<code>await</code> model. <strong>Anything unclear? Ask your teacher</strong>, the agent that made this lesson. Ask in Vietnamese anytime. A good follow-up: "does our .NET codebase have any Task.WhenAll fan-out that should cancel its siblings on first failure but doesn't yet?"</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

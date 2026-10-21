@@ -4164,3 +4164,95 @@ along the Phase 2 spine, adapted to the learning records.
   '{"by":"headless"}'` succeeded on the first attempt, run from the repo
   root: `recorded: dataeng/lesson_generated day=35
   lesson=0035-airflow-retry-callback-on-the-real-dag.html`.
+- 2026-10-21 (headless run, Day 36 generated): thirty-sixth lesson,
+  `0036-dbt-utils-date-spine.html`. Confirmed before writing that no
+  `0036-*.html` file existed in `lessons/` and no `2026-10-21` entry existed
+  in `assets/nav.js` (last entry was Day 35, dated 2026-10-20).
+  **Topic choice — the original assignment was a duplicate, caught before
+  writing:** this round's brief named "Kafka Connect and CDC with Debezium"
+  as today's topic, framed as the last open Phase 2b item. Grepping
+  `lessons/` and `assets/nav.js` before writing anything turned up
+  `0023-kafka-connect-and-cdc-with-debezium.html`, registered as Day 23,
+  2026-10-08 — the exact same topic, already built, with the Debezium
+  Architecture doc already cited in `RESOURCES.md`'s Kafka section since
+  that round. Re-checked `PLAN.md`'s full Phase 2a/2b/2c/2d spine against
+  all 35 existing lesson titles rather than assuming only Kafka Connect was
+  the gap: every bullet across every sub-phase is closed (2b specifically:
+  delivery semantics on Day 16, schema evolution Day 17, retention/
+  compaction/lag Day 18, Connect/CDC Day 23, stream-processing vocabulary
+  Day 30 — confirmed Day 30's own lesson text states this closed "every
+  bullet across Phase 2a, 2b and 2c"). Delegated a research sub-task to map
+  genuinely untaught gaps across all three tools given the self-directed
+  "Phase 3" pattern Days 31-35 already established (each round's own
+  closing note names the next real gap for whoever picks up next). Found
+  the answer already sitting in the course's own continuity thread rather
+  than needing to invent one: Day 33's closing note explicitly named two
+  still-open dbt candidates — `dbt_utils.date_spine`/`generate_series`
+  (flagged as a real gap as far back as Day 11's own closing note, "for the
+  day a calendar table is needed to fill in dates with zero orders") and a
+  Kafka consumer-lag monitoring walkthrough. Picked `date_spine`: it is dbt
+  (correct per the round-robin Day 34 established — dbt had run zero
+  rounds since Day 30's spine close, vs. one each for Kafka Day 34 and
+  Airflow Day 35), it directly closes a real, long-named gap rather than
+  inventing scope, and it needs no new infrastructure — reuses
+  `mart_delivery_sla` and the `dbt_utils` package Day 11 already installed.
+  **Content:** built `models/marts/dim_dates.sql` from
+  `dbt_utils.date_spine`, then rewrote `mart_delivery_sla.sql`'s final
+  `select` to start from a `city_date_grid` (the spine crossed against
+  distinct cities from `stg_restaurants`) and `left join` the real
+  per-city-per-day aggregation onto it, with `coalesce()` turning missing
+  matches into honest zeros — the join-direction fix is the actual lesson,
+  not just "add a calendar table." Reused Day 11's `sla_key` surrogate key
+  and Day 10's `is_sla_breach()` macro and `var('sla_threshold_minutes')`
+  unchanged, only moving which CTE's columns feed the key. Named a concrete
+  downstream consequence (an average silently skewed upward by dropped
+  zero-order days) rather than framing the fix as cosmetic. One explicit
+  one-line pandas bridge (a callout contrasting `pandas.date_range` against
+  building the calendar in dbt, pointing to `data/` rather than teaching
+  it) — no other pandas/Python-language/API-idempotency content applied
+  this round.
+  **Verify step — hands-on dbt, not concept-only, so a real Build/Verify
+  section was needed and included.** Before writing, read Day 30
+  (`0030-stream-processing-vs-land-and-let-dbt.html`), the course's one
+  genuinely concept-only Phase 2b lesson, to check the no-Verify precedent
+  named in this round's own brief — but Day 30 itself still has both a
+  "Build" (writing a README decision bullet) and a "Verify" section (a
+  `grep` check), just no container/code build. Since today's actual topic
+  is a hands-on dbt macro lesson (closer to Day 11's own shape than Day
+  30's), that precedent doesn't apply here anyway — today has a full
+  Build/Verify section with real `dbt build --select` commands and an
+  expected-output block, matching Day 11's pattern.
+  **Honesty on what ran live this round:** no live Postgres or live dbt
+  invocation against this project's real seed data was available in this
+  sandbox, the same recurring gap Day 11 itself named for this exact
+  package. `dbt_utils.date_spine`'s macro signature and compiled
+  recursive-CTE shape are reasoned from the dbt_utils README (already
+  cited in `RESOURCES.md` by name for `date_spine` since Day 11, so no new
+  `RESOURCES.md` line was needed this round) rather than a fresh `dbt
+  compile` run, and the exact `PASS=3`/row-count output shown in the lesson
+  is hand-derived from this project's own established row counts and
+  dbt_utils' documented behavior, not captured from a live run — flagged
+  honestly in the lesson's own verification callout rather than silently
+  asserted. Ran a Python tag-balance/bare-`&`/dfn-attribute/quiz-word-count
+  script (written to `.scratch-dataeng-1021/`, deleted afterward) against
+  the lesson: tags balanced, zero bare `&`, the one `<dfn>` tag
+  (`date_spine`) carries both `data-en=` and `data-vn=`. The first quiz
+  draft came up mismatched on all four questions (10/9/9, 10/9/8, 9/11/11
+  and 9/9/10 word splits); rebalanced through several edit-and-recount
+  passes, re-running the same script after every edit, to a final 9/9/9,
+  9/9/9, 11/11/11 and 10/10/10 across all four questions. No standalone
+  Python file exists in this lesson, confirmed by grep, so `py_compile`
+  did not apply.
+  Registered Lesson 36 in `assets/nav.js` (`node --check` clean) and added
+  the Day 36 section to `reference/glossary.html` (1 new term:
+  `date_spine` — grepped the existing glossary first, no collisions).
+  Confirmed the lesson's 1 `<dfn>` tag matches the 1 new glossary row added,
+  by direct extraction and comparison. No `RESOURCES.md` change this round
+  — `date_spine` was already named by that exact macro name in the
+  dbt_utils package line since Day 11.
+  **Next up, named honestly for whoever picks up next:** two real,
+  still-open threads — Day 33's second named candidate, a Kafka
+  consumer-lag monitoring walkthrough (Day 18 stayed concept-only, never
+  hands-on), and Day 35's own open verification loop (actually running
+  `airflow dags test` end to end under interactive approval, which this
+  sandbox couldn't get approved headlessly that round or this one).

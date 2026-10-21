@@ -10604,4 +10604,146 @@ fail *gracefully* so the learner sees which task failed.
   fresh topic and run its own gap scan from scratch, rather than another
   review, since this cadence just reset to zero fresh lessons since the
   last review.
+- 2026-10-21 — **Day 84 generated: `traceback` — capturing failure as
+  text** (headless run, zero prior context, starting from the repo root
+  at `/home/runner/work/learning/learning/python`). Read `MISSION.md` in
+  full (no-pandas exclusion in particular, re-confirmed before writing a
+  line), `PLAN.md` in full, and `assets/nav.js` in full for the
+  registration format and every prior entry through Day 83. `NOTES.md`
+  exceeds this run's single-read cap, so only its tail (~250 lines,
+  covering Day 83 in full) was read directly — sufficient, since Day
+  83's own next-day note already stated the cadence plainly: the review
+  cycle had just reset to zero fresh lessons since Day 83, so Day 84
+  should run its own fresh-gap scan from scratch rather than defaulting
+  to either another review or an old carried-forward candidate.
+  Fresh-gap scan: the orchestrator's brief suggested `collections.Counter`/
+  `defaultdict` paired in one lesson, with `sqlite3` basics as a named
+  fallback if that turned out to be already taught. Checked both directly
+  against the actual lesson text rather than trusting the brief's own
+  claim that neither existed yet — this caught two real corrections.
+  `collections.Counter`/`defaultdict` are **both already fully taught on
+  Day 3** (`dict & set: grouping without pandas`): `defaultdict` has its
+  own `<dfn>`, a full code example building the same grouping dict three
+  ways (plain `if`-guard, `setdefault`, `defaultdict(list)`), and a quiz
+  question on what the factory argument does; `Counter` is covered in a
+  dedicated callout (`Counter(row["city"] for row in sales)`) and has its
+  own practice exercise. The suggested fallback, `sqlite3`, is **also
+  already taught** — Day 21 uses `sqlite3.connect(":memory:")`,
+  `.cursor()`, parameterized `.execute()`, and `.fetchall()` throughout as
+  its whole DB-API teaching vehicle for the PostgreSQL lesson, and this
+  course's own `NOTES.md` history independently documents `sqlite3` being
+  mis-carried as an open candidate for several rounds before Day 72 struck
+  it from the list for good. Neither the recommended topic nor its named
+  fallback was actually available, so today ran its own independent
+  fresh-gap scan rather than defaulting to either: grepped all 83 lessons,
+  every practice file, `reference/glossary.html`, and `RESOURCES.md`
+  case-insensitively for `hmac`, `inspect`, `traceback`, `ChainMap`/
+  `OrderedDict`, `warnings`, `graphlib`, `weakref`, `calendar`, and
+  `glob`/`fnmatch` (the last already confirmed covered via Day 13's
+  `Path.glob()`/`.rglob()`). Found `hmac` named only inside Day 59/77's
+  `hashlib.pbkdf2_hmac()` mentions (never the standalone `hmac` module),
+  `traceback` used only as the English word for an uncaught exception's
+  printed output (Day 8's own glossed term) or inside Day 15's
+  `exc_info=True` discussion — never the `traceback` module's own
+  `format_exc()`/`print_exc()` API. Took the `traceback` module as
+  today's topic: a genuine zero-hit gap, squarely stdlib/exception-
+  handling material Day 8 and Day 15 already set up but never finished,
+  and directly useful for the course's recurring per-record pipeline
+  exercise (catch one bad row, keep the rest of the batch running).
+  No-pandas rule: grepped case-insensitively for
+  `pandas|numpy|dataframe|pd\.|np\.` in the new lesson and practice file —
+  exactly one hit (the required "Where pandas/NumPy go from here" boundary
+  callout, stating capturing a traceback as text has no connection to a
+  `DataFrame` or array) and zero hits in the practice file.
+  Content: motivated via Day 8's already-glossed "traceback" concept and
+  Day 15's `exc_info=True` (named but never explained). Covered
+  `traceback.format_exc()` returning the exact uncaught-exception report as
+  a plain `str` from inside an active `except` block, a one-line caution
+  that calling it with no exception in flight silently returns
+  `"NoneType: None\n"` instead of raising (confirmed live via
+  `uv run python3` against a scratch probe, not assumed), `print_exc()`
+  writing the same report directly (to `stderr` by default), its `file=`
+  redirect into a Day 81 `io.StringIO` (also confirmed live, including the
+  exact last line of the captured text), and the explicit link back to
+  `logging`'s `exc_info=True` calling this same module internally.
+  **New jargon: 1 term** (the `traceback` module itself, as distinct from
+  Day 8's already-glossed general "traceback" concept) — wrapped in a
+  single `<dfn data-en="…" data-vn="…">` on first mention in the byline.
+  Grepped `reference/glossary.html` for `id="day8"` first to confirm Day
+  8's existing "traceback" entry describes the general concept, not the
+  module, so today's new term needed to be named distinctly enough not to
+  collide with it; appended a new `id="day84"` section directly after Day
+  82's (Day 83 was a review day and added no section of its own).
+  Quiz: 3 questions (what `format_exc()` captures beyond `str(e)`, what
+  happens calling `format_exc()` with no exception active, how `logging`'s
+  `exc_info=True` relates to the module). Word counts were checked with a
+  throwaway Python script (written via `Write` into this round's scratch
+  dir, deleted after use) using `html.parser.HTMLParser` for a tag-balance
+  check plus a regex-based bare-`&` scan and a per-question word-count
+  tally stripping tags from each `<button class="opt">` and splitting on
+  whitespace. First draft mismatched on all three questions (Q1 10/9/8,
+  Q2 8/9/9, Q3 10/11/8) — iterated option-by-option (lengthening/
+  shortening phrases like "file name always removed" vs. "...removed
+  first", "misleading text string" vs. "misleading short text... back")
+  and recounted after every edit, until all three landed on equal
+  per-question counts: 10/10/10, 10/10/10, 10/10/10. The same tag-balance
+  check caught one real markup bug while drafting: a literal `<module>`
+  left unescaped inside a `<span class="cm">` comment in a code sample
+  (copied from a real traceback's `File "pipeline.py", line 5, in
+  <module>` line), which `HTMLParser` correctly flagged as a stray
+  mismatched tag — fixed by escaping it to `&lt;module&gt;`, matching Day
+  8's own already-correct precedent for the identical line. Re-ran the
+  same check against the full (now-modified) `reference/glossary.html`
+  separately — zero tag-balance errors, zero bare `&`. `node --check`
+  confirmed no syntax errors on `assets/nav.js` after registering today's
+  entry. All scratch scripts deleted before finishing.
+  `RESOURCES.md`: added a new `traceback` docs line, placed directly after
+  the Day 82 `base64` line per the file's day-ordered citation convention
+  (Day 83 added none, being a review day).
+  Registered in `assets/nav.js` with `date: "2026-10-21"` right after the
+  `n: 83` entry.
+  Practice file `practice/84_traceback_module.py` (4 checks, stdlib-only,
+  no `--with` flag, function-stub-with-TODO-comment style matching recent
+  practice files): capturing one bad record's full traceback as a `str`
+  via `format_exc()` (Ex 1), confirming the captured text's exact last
+  line (Ex 2), redirecting `print_exc()` into an `io.StringIO` via `file=`
+  (Ex 3), and a small batch where good records parse and bad ones keep
+  their traceback text while the run keeps going (Ex 4). All expected
+  values were verified against a live `uv run python3` probe before being
+  written into the checks.
+  Verified in a course-scoped scratch directory
+  (`.scratch-python-20261021/`, created directly under the repo root,
+  named to avoid colliding with a sibling course's own concurrently
+  visible `.scratch-data-20261021/` scratch dir this round — this
+  session's sandbox blocks `/tmp` entirely, so the scratch dir had to live
+  under the repo root instead, which is why it had to be named carefully
+  and fully cleaned up before finishing): the shipped (unsolved) copy, run
+  with `uv run python3` from its real `python/practice/` path, printed
+  four clean ✗ lines with no traceback. A separately solved copy (written
+  fresh into the scratch dir, not by editing the shipped file) printed all
+  four ✓ and the "All green" tally, run twice consecutively with identical
+  results both times. Re-ran the shipped file from its real path
+  afterward, confirming it still printed the same four clean ✗ lines. The
+  scratch directory was deleted before finishing — confirmed by a listing
+  showing no `.scratch-python-20261021` remaining (the sibling course's
+  own `.scratch-data-20261021/` was visible and left untouched, belonging
+  to another concurrent run).
+  `python/learning-records/` was not touched this round — a routine
+  fresh-topic pick following the course's own settled cadence and a
+  correction to the orchestrator's own suggested topic is not a new,
+  durable fact about the learner distinct from what Day 1's baseline
+  record already says.
+  `bin/record-progress python lesson_generated --day 84 --lesson
+  0084-traceback-module.html --detail '{"by":"headless"}'` was run from
+  the repo root at the end of this round (output: `recorded:
+  python/lesson_generated day=84 lesson=0084-traceback-module.html`).
+  **Next-day note:** Day 84 is the first fresh lesson since Day 83's
+  review (Days 80-82) — per this course's settled three-fresh-then-review
+  cadence, two more fresh topics (Days 85-86) should default next before
+  a review is next due, unless a stronger reason to deviate turns up then.
+  No standing fresh-gap candidate remains on record from today's scan —
+  the next round should start its own gap scan from scratch too, unless
+  this entry is still fresh enough to carry `hmac`/`inspect`/`ChainMap`/
+  `warnings`/`graphlib`/`weakref`/`calendar` forward as genuinely-checked,
+  still-open candidates (all confirmed zero-hit today, just not chosen).
 

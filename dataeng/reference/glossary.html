@@ -309,6 +309,12 @@
   <tr><td>max_tries</td><td>giữ nguyên "max_tries" — thuộc tính bằng đúng số retries đã cấu hình cho task, so sánh trực tiếp với try_number để quyết định còn được thử lại hay không</td><td>An Airflow <code>TaskInstance</code> property equal to the task's own configured <code>retries</code> count — the maximum number of attempts beyond the first that are allowed before a failure is treated as final, compared directly against <code>try_number</code> inside <code>is_eligible_to_retry()</code>. Confirmed this round by reading that method's exact source: <code>bool(self.task.retries and self.try_number &lt;= self.max_tries)</code>.</td></tr>
 </table>
 
+<h2 id="day36">Day 36 — dbt_utils date_spine: making zero-order days visible</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>date_spine</td><td>giữ nguyên "date_spine" — macro dbt_utils tạo 1 bảng có đúng 1 dòng cho mỗi ngày (hoặc đơn vị thời gian khác) giữa 2 mốc ngày, với 1 cột date_day; dùng làm bảng gốc để left-join dữ liệu thật vào, nhờ đó mọi ngày trong khoảng đều xuất hiện đúng 1 lần, bất kể có dữ liệu thật cho ngày đó hay không</td><td>A dbt_utils macro that generates one row per date (or other datepart interval) between a start and end date expression, with a single <code>date_day</code> column — used as a base table to left-join real data onto, so every date in a range appears exactly once regardless of whether any real row exists for it. Compiles to a recursive CTE, no table queried. Confirmed this round against <code>mart_delivery_sla</code>'s real grain: crossing the spine against distinct cities and left-joining the real per-city-per-day aggregation onto it turns a silently missing zero-order city-day into a real row with <code>order_count = 0</code>.</td></tr>
+</table>
+
 <script src="../assets/nav.js"></script>
 </body>
 </html>

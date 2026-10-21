@@ -8658,3 +8658,104 @@
   Scope line as follow-ons; GraphQL and gRPC streaming were also not
   found in the glossary cross-reference but weren't chosen this round in
   favor of the more directly-motivated async/await gap.
+- **2026-10-21 generation (Lesson 108, headless run):** Topic was handed
+  in pre-decided this round (structured concurrency: Go's
+  `errgroup`+`context.Context` vs .NET's `Task.WhenAll`+
+  `CancellationTokenSource`/`CancellationToken`), so no fresh gap scan
+  was needed to pick it — but the idempotency check still ran first:
+  grepped `nav.js` for `date: "2026-10-21"` (no match) and globbed
+  `lessons/` for `0108*.html` (no match), clear to proceed. Read
+  `MISSION.md`, this file's tail, the last two lessons (0106, 0107) for
+  exact HTML structure, `nav.js`'s tail for the LESSONS entry shape, and
+  `glossary.html`'s tail for the row/column order, all before writing
+  anything. The brief named two retrieval-callback candidates explicitly
+  flagged in a prior round as unverified by any quiz/completion signal —
+  Lesson 25's thread-vs-coroutine vocabulary, and Lesson 102's SignalR-
+  vs-WebSocket "library vs protocol" framing — and asked for one quiz
+  question to call back to either. Picked Lesson 25: this lesson's whole
+  spine is already Lesson 25's vocabulary (goroutines/coroutines as
+  runtime-scheduled, not OS threads) extended into a second mechanism
+  (fan-out/cancellation) on top of Lesson 107's Task/async/await and
+  Lesson 41's `context.Context`, so a Lesson 25 callback question is a
+  direct continuation of the lesson's own material rather than a bolted-
+  on aside; Lesson 102's framing didn't fit this lesson's actual content
+  as naturally, so it's still unverified and worth picking up next time
+  a real-time/WebSocket topic comes up instead of forcing it in here. Verified the
+  errgroup API and the Task.WhenAll/CancellationToken behavior directly
+  against primary sources before writing any prose: fetched
+  pkg.go.dev's errgroup page (confirmed `WithContext`, `Go(func() error)`,
+  `Wait() error` returning only the first non-nil error, and that the
+  derived ctx is cancelled the moment any one `Go()` function returns a
+  non-nil error) and Microsoft Learn's `Task.WhenAll` reference page
+  directly (confirmed in its own wording: "a task that will complete
+  when all of the supplied tasks have completed," and that a faulted
+  result aggregates the unwrapped exceptions of every faulted task, not
+  just one) plus its Cancellation in Managed Threads page (confirmed the
+  `CancellationTokenSource`-creates/owns-the-token vs
+  `CancellationToken`-is-the-read-only-listener-side split, and that only
+  `Cancel()` on the source actually signals it). This closes the exact
+  gap the brief named: naive `Task.WhenAll` code looks like a direct
+  translation of `errgroup` but silently drops the fail-fast cancellation
+  behavior, because nothing wires a shared token's cancellation to a
+  sibling task's failure unless a try/catch does it by hand — the
+  lesson's section 3 and comparison table make that gap the explicit
+  point, not a footnote. Five new terms, checked against the glossary
+  first via case-insensitive grep across the whole file — zero
+  collisions confirmed before writing: `structured concurrency`,
+  `errgroup.Group`, `g.Go()`, `CancellationTokenSource`,
+  `CancellationToken`. `context.Context` and `async`/`await`/`Task<T>`
+  are reused from Lessons 41 and 107 respectively, deliberately not
+  redefined — confirmed both already have their own `<dfn>`/glossary rows
+  before relying on that. Added the five new rows immediately after
+  Lesson 107's `ConfigureAwait(false)` row, same Term/Tiếng Việt (dev-
+  style)/In software column order, confirmed by inspecting the file's
+  actual header row and last two existing rows directly rather than
+  assumed. Verification performed mechanically via a Node one-liner
+  (this round's sandbox allowed inline `node -e` scripts without the
+  `/tmp`-script friction prior rounds hit): (1) a quiz-word-count check
+  splitting every option via `.split(/\s+/)`, run against the quiz block
+  only (the broader-document regex first double-counted across question
+  boundaries — caught and fixed by scoping the split to each `<div
+  class="q">` block directly) — first draft landed uneven (spreads of
+  7-11 words across options within the same question), fixed through
+  several rewrite-and-recount cycles per option, converged to exactly
+  8/8/8/8, 8/8/8/8, 11/11/11/11, and 10/10/10/10 across the four
+  questions, with exactly one `data-ok` per question confirmed the same
+  way; (2) an HTML tag-balance check across div/p/code/button/script/
+  dfn/pre/h2/h1/em/strong/a/table/tr/th/td — clean (div 7/7, p 18/18,
+  code 55/55, button 16/16, script 3/3, dfn 5/5, pre 4/4, h2 6/6, h1 1/1,
+  strong 5/5, a 5/5, table 1/1, tr 5/5, th 7/7, td 8/8; em intentionally
+  0/0, no `<em>` used this lesson); a separate table/tr/th/td/p/div/
+  html/head/body/title/script balance check on `glossary.html` after its
+  five-row addition — also balanced (tr 364/364, td 1089/1089), plus a
+  duplicate-term scan across all 363 first-column entries — zero
+  duplicates; (3) a raw-unescaped-`&` regex scan across both files —
+  zero hits; (4) the lesson's `<dfn` tags grepped and confirmed to carry
+  both `data-en=` and `data-vn=` — exactly 5 `dfn` tags, matching the 5
+  new terms, no orphaned attribute; (5) `node --check` against
+  `assets/nav.js`, `assets/gloss.js`, and `assets/quiz.js` — all clean,
+  both before and after the `nav.js` edit; (6) a basic HTML well-
+  formedness check (exactly one `<!DOCTYPE html>`, one `<html>`/
+  `</html>`, three script tags with `nav.js` last) — clean; (7) a grep
+  for stray markdown-style `*emphasis*` left over from drafting — none
+  found. Registered Lesson 108 in `nav.js` (date 2026-10-21, today's
+  actual generation date) right after `n: 107`, confirmed exactly one
+  matching `n: 108` entry and exactly one matching `0108-*.html` file on
+  disk afterward. Added two new RESOURCES.md lines (pkg.go.dev's
+  errgroup page, and Microsoft Learn's Task.WhenAll reference plus its
+  Cancellation in Managed Threads page) following the existing per-topic
+  grouping, placed right after Lesson 107's async/await line. `bin/
+  record-progress` ran clean on the first attempt this round (`recorded:
+  backend/lesson_generated day=108 lesson=
+  0108-structured-concurrency-errgroup-whenall.html`).
+  No new `learning-records/` file this round — the topic was handed in
+  pre-decided by the orchestrator's brief rather than surfaced by this
+  round's own gap scan, so there was no new baseline fact about the
+  learner to record; the retrieval-callback choice (Lesson 25 over
+  Lesson 102) is logged above for the next round to pick up the other
+  one. Candidates spotted but not picked this round, worth checking
+  fresh next time: `errgroup.Group.SetLimit` (bounding fan-out width),
+  `Task.WhenAny`'s full manual-cancellation pattern, and retry/backoff
+  composed with structured concurrency (Lesson 32's territory one layer
+  below this lesson) — all three named in this lesson's own Scope line
+  as follow-ons, not pre-queued.

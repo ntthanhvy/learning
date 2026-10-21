@@ -63,6 +63,8 @@ authors for *why*. Cite inline; each lesson recommends exactly one primary sourc
   Use for: Day 81 — `StringIO`/`BytesIO` as in-memory, file-like objects for code that expects an open file (`csv`, `json`), `.getvalue()` for reading back everything written, and `.seek(0)` for rewinding before a read.
 - [Docs: `base64`](https://docs.python.org/3/library/base64.html)
   Use for: Day 82 — `b64encode()`/`b64decode()` for carrying arbitrary bytes through a text-only format (JSON, a log line), `urlsafe_b64encode()`/`urlsafe_b64decode()` for the URL-safe `-`/`_` alphabet variant, and why encoding is not encryption.
+- [Docs: `traceback`](https://docs.python.org/3/library/traceback.html)
+  Use for: Day 84 — `format_exc()`/`print_exc()` for capturing or writing out the same report an uncaught exception would print, from inside a running `except` block; `print_exc()`'s `file=` redirect; and how Day 15's `logging` `exc_info=True` calls this module internally.
 - [PEP 8 — Style Guide for Python Code](https://peps.python.org/pep-0008/)
   Use for: naming and layout conventions, so written code looks like the ecosystem's.
 

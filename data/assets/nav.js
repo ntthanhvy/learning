@@ -212,6 +212,8 @@
       file: "lessons/0102-np-clip.html" },
     { n: 103, date: "2026-10-20", title: "pd.to_timedelta(): parsing durations, the datetime sibling",
       file: "lessons/0103-to-timedelta.html" },
+    { n: 104, date: "2026-10-21", title: "Series.str.strip(): the whitespace bug hiding in every merge key",
+      file: "lessons/0104-str-strip.html" },
   ];
 
   const REFS = [

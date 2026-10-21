@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 84 · traceback: capturing failure as text</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 84 · ~20 min · 21 Oct 2026</p>
+<h1><code>traceback</code>: capturing failure as text</h1>
+<p class="byline">Day 8 named the <a href="../reference/glossary.html#day8">traceback</a> as the report Python prints when an exception goes uncaught, and Day 15's <code>logging</code> used <code>exc_info=True</code> to attach one to a log record without ever seeing what that call does underneath. <dfn data-en="the traceback module is the standard-library module that builds that same traceback report as a plain string or writes it out directly, instead of only letting Python print it automatically on an uncaught exception" data-vn="giữ nguyên &quot;traceback module&quot; — module chuẩn tự dựng ra đúng báo cáo traceback dưới dạng string, hoặc in thẳng ra, thay vì chỉ để Python tự in khi exception không ai bắt">The <code>traceback</code> module</dfn> is that underneath: it builds the exact same report on demand, inside a running <code>except</code> block, as a <code>str</code> a pipeline can log, save, or inspect — instead of losing it the instant the block moves on.</p>
+
+<div class="callout"><strong>Why today, specifically:</strong> the course's cadence just reset to zero fresh lessons since Day 83's review, so today ran its own fresh-gap scan from scratch rather than carrying forward any old candidate. Grepped all 83 lessons, every practice file, <code>reference/glossary.html</code>, and <code>RESOURCES.md</code> case-insensitively for several named gaps at once. The two strongest-looking candidates both turned out to be already taught on closer reading: <code>collections.Counter</code>/<code>defaultdict</code> both already have full sections, <code>&lt;dfn&gt;</code> terms, quiz questions, and practice exercises in Day 3; <code>sqlite3</code> is the exact module Day 21 uses as its DB-API vehicle (<code>connect()</code>/<code>cursor()</code>/parameterized <code>execute()</code>/<code>fetchall()</code>), confirmed by this course's own notes history, which struck it from the candidate list once already. The <code>traceback</code> <em>module</em> (as opposed to the word "traceback," already glossed on Day 8) came back a genuine zero-hit gap — every one of its grep hits across the course turned out to be the English word describing an uncaught exception's printed output, or <code>logging</code>'s <code>exc_info=True</code>, never the module's own <code>format_exc()</code>/<code>print_exc()</code> API.</div>
+
+<h2>1 · The problem: an <code>except</code> block that only logs a message throws the detail away</h2>
+<p>Day 8 taught catching an exception narrowly. A common next step in a real pipeline is: don't crash the whole batch over one bad record — catch it, note the failure, and keep going. But a plain message loses exactly the detail needed to debug it later:</p>
+<pre><code>records = [<span class="str">"10"</span>, <span class="str">"20"</span>, <span class="str">"oops"</span>, <span class="str">"40"</span>]
+good, bad = [], []
+
+<span class="kw">for</span> r <span class="kw">in</span> records:
+    <span class="kw">try</span>:
+        good.append(<span class="kw">int</span>(r))
+    <span class="kw">except</span> ValueError <span class="kw">as</span> e:
+        bad.append({<span class="str">"record"</span>: r, <span class="str">"error"</span>: <span class="kw">str</span>(e)})
+<span class="cm"># bad[0]["error"] == "invalid literal for int() with base 10: 'oops'"
+# -- true, but it has no idea which function or line raised it</span></code></pre>
+<p><code>str(e)</code> gives the exception's own message — useful, but it says nothing about <em>where</em> in the call chain the failure happened, which matters the moment the real parsing logic is more than one line deep.</p>
+
+<h2>2 · <code>format_exc()</code>: the full traceback, as a <code>str</code></h2>
+<p><code>traceback.format_exc()</code> called inside an active <code>except</code> block returns the exact text Python would have printed had nothing caught the exception — type, message, and the full chain of calls — as one ordinary string:</p>
+<pre><code><span class="kw">import</span> traceback
+
+<span class="kw">for</span> r <span class="kw">in</span> records:
+    <span class="kw">try</span>:
+        good.append(<span class="kw">int</span>(r))
+    <span class="kw">except</span> ValueError:
+        bad.append({<span class="str">"record"</span>: r, <span class="str">"error"</span>: traceback.format_exc()})
+
+<span class="kw">print</span>(bad[<span class="num">0</span>][<span class="str">"error"</span>])
+<span class="cm"># Traceback (most recent call last):
+#   File "pipeline.py", line 5, in &lt;module&gt;
+#     good.append(int(r))
+# ValueError: invalid literal for int() with base 10: 'oops'</span></code></pre>
+<p>That string is just data now — appendable to a list, writable to a file, insertable into a database column — the same shift Day 76's <code>json.dumps()</code> made for Python objects, applied here to a failure report. Because it returns a plain <code>str</code>, nothing stops a pipeline from keeping full failure detail for every bad record in one batch instead of only the last one Python happened to print.</p>
+<div class="callout"><strong>One sharp edge:</strong> <code>format_exc()</code> only has something real to report while an exception is actively being handled. Called with no exception in flight, it returns the harmless-looking string <code>"NoneType: None\n"</code> instead of raising an error to flag the mistake — confirmed live. It belongs inside an <code>except</code> block, never outside one.</div>
+
+<h2>3 · <code>print_exc()</code>: the same report, written out directly</h2>
+<p>When the goal is simply to see the traceback rather than store it, <code>traceback.print_exc()</code> skips the string step and writes the report straight out — to <code>stderr</code> by default, the same stream an uncaught exception's own traceback goes to:</p>
+<pre><code><span class="kw">try</span>:
+    <span class="num">1</span> / <span class="num">0</span>
+<span class="kw">except</span> ZeroDivisionError:
+    traceback.print_exc()   <span class="cm"># prints the full traceback to stderr, keeps running</span>
+<span class="kw">print</span>(<span class="str">"still running"</span>)   <span class="cm"># this line still executes -- the exception was caught</span></code></pre>
+<p>A <code>file=</code> keyword redirects it anywhere else a real file object can go — including Day 81's <code>io.StringIO</code>, which turns <code>print_exc()</code> back into exactly <code>format_exc()</code>'s string, just written instead of returned:</p>
+<pre><code><span class="kw">import</span> io
+
+buf = io.StringIO()
+<span class="kw">try</span>:
+    <span class="num">1</span> / <span class="num">0</span>
+<span class="kw">except</span> ZeroDivisionError:
+    traceback.print_exc(file=buf)
+
+<span class="kw">print</span>(buf.getvalue().splitlines()[-<span class="num">1</span>])   <span class="cm"># ZeroDivisionError: division by zero -- confirmed live</span></code></pre>
+<p>This is the same job Day 15's <code>logger.error(msg, exc_info=True)</code> already does under the hood — <code>logging</code> calls this exact module to render the traceback text it attaches to a log record. Reach for <code>logging</code> directly when a logger is already set up; reach for <code>traceback</code> itself when the text needs to be stored, emailed, or inspected some other way a log record doesn't fit.</p>
+
+<div class="callout"><strong>Where pandas/NumPy go from here:</strong> nothing library-specific today — capturing a traceback as text is a plain-Python exception-handling detail with no connection to a <code>DataFrame</code> or array; this stays entirely in stdlib territory, per <code>MISSION.md</code>.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/84_traceback_module.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/84_traceback_module.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: catching one bad record out of several and capturing its full traceback with <code>format_exc()</code> as a <code>str</code>, confirming the captured text's last line names the right exception type, redirecting <code>print_exc()</code> into an <code>io.StringIO</code> with <code>file=</code>, and processing a small batch of records where good ones collect into one list and bad ones collect their traceback text into another, with no record stopping the whole run.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="str(e) only gives the exception's own message, with no information about which function or line raised it. traceback.format_exc() returns the full report -- type, message, and the entire call chain active when it was raised -- as one ordinary string, the same text Python would print on an uncaught exception.">
+    <p class="stem">What does <code>traceback.format_exc()</code> capture that <code>str(e)</code> alone does not?</p>
+    <button class="opt" data-ok>the full call chain active when the exception was raised</button>
+    <button class="opt">a shorter summary with the file name always removed first</button>
+    <button class="opt">the exact same single message string, printed out twice over</button>
+  </div>
+  <div class="q" data-why="format_exc() only has a real exception to report while one is actively being handled inside an except block. Called with no exception in flight, it does not raise an error to flag the mistake -- it quietly returns the misleading string 'NoneType: None', confirmed live.">
+    <p class="stem">What happens when <code>traceback.format_exc()</code> is called with no exception active?</p>
+    <button class="opt" data-ok>it quietly returns the misleading short text "NoneType: None" back</button>
+    <button class="opt">it raises a clear RuntimeError that names the real mistake</button>
+    <button class="opt">it silently blocks and waits for some exception to occur</button>
+  </div>
+  <div class="q" data-why="logging's exc_info=True calls this same traceback module internally to render the traceback text it attaches to a log record. traceback.print_exc()/format_exc() are the right direct tool when the text needs to be stored, emailed, or inspected some other way a log record doesn't already fit.">
+    <p class="stem">How does <code>logging</code>'s <code>exc_info=True</code> relate to the <code>traceback</code> module?</p>
+    <button class="opt" data-ok>logging calls this same module to render its attached text</button>
+    <button class="opt">the two modules share no code or behavior at all</button>
+    <button class="opt">exc_info=True always disables every traceback module call made right here</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the standard library's <a href="https://docs.python.org/3/library/traceback.html"><code>traceback</code></a> docs — the "Module Interface" section covers <code>format_exc()</code>/<code>print_exc()</code> directly, with <code>format_exception()</code>/<code>extract_tb()</code>'s lower-level, structured alternative right alongside for the next step beyond what today shows.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day84">glossary</a> under Day 84.<br>
+This is the first fresh lesson since Day 83's review (Days 80-82) — two more fresh topics should follow before the next review is due, per this course's settled three-fresh-then-review cadence, unless a stronger reason to deviate turns up then.<br><br>
+💬 Anything unclear — why <code>format_exc()</code> needs an active <code>except</code> block, or <code>print_exc()</code> vs. <code>logging</code>? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

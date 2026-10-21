@@ -220,6 +220,8 @@
       file: "lessons/0106-ef-core-change-tracking-n-plus-one.html" },
     { n: 107, date: "2026-10-20", title: "async/await: C#'s coroutine, named properly this time",
       file: "lessons/0107-async-await-task-sync-over-async.html" },
+    { n: 108, date: "2026-10-21", title: "Fan out to 3 services, get all results or the first error",
+      file: "lessons/0108-structured-concurrency-errgroup-whenall.html" },
   ];
 
   const REFS = [

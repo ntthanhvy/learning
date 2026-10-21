@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 104 · Series.str.strip(): the whitespace bug hiding in every merge key</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 104 · ~20 min · 21 Oct 2026</p>
+<h1>Series.str.strip(): the whitespace bug hiding in every merge key</h1>
+<p class="byline">Lesson 103 closed the standing <code>pd.to_timedelta()</code> pick and carried forward one named candidate: the <code>str.pad()</code>/<code>str.strip()</code>/<code>str.title()</code>/<code>str.join()</code> text-cleanup family. Re-grepped <code>strip</code> case-insensitively across every lesson body and the glossary file before picking — the only hit was Lesson 55's plain Python <code>"_".join(...).strip("_")</code> call on an already-joined label, never the pandas <code>.str.strip()</code> accessor itself, so this is a genuine zero-hit gap. Picked <code>.str.strip()</code> over its three siblings: it is the single most common and most-skipped real-CSV cleanup step, and it directly explains a class of bug (silent extra groupby groups, silent missed merge rows) this course hasn't named yet.</p>
+
+<h2>1 · The bug: whitespace you can't see, breaking a key you trust</h2>
+<p>SQL's <code>TRIM()</code>/<code>LTRIM()</code>/<code>RTRIM()</code> strip leading/trailing whitespace from a text column. Pandas' column-wide equivalent is <dfn data-en="a Series/Index string method, Series.str.strip(to_strip=None), removing leading AND trailing characters from every string in the Series at once, vectorized -- with to_strip=None (the default) it strips whitespace; passing a string of characters strips any combination of those characters instead" data-vn="giữ nguyên 'str.strip()' -- method Series.str.strip(to_strip=None), bản TRIM() của SQL nhưng chạy vectorized trên CẢ CỘT 1 lần; to_strip=None (mặc định) thì cắt khoảng trắng 2 đầu; truyền 1 chuỗi ký tự thì cắt các ký tự đó thay vào">Series.str.strip()</dfn> — same idea, run once over the whole column instead of row by row:</p>
+<pre><code><span class="kw">import</span> pandas <span class="kw">as</span> pd
+
+df = pd.DataFrame({
+    <span class="str">"name"</span>: [<span class="str">"Binh"</span>, <span class="str">"Binh "</span>, <span class="str">" Binh"</span>, <span class="str">"An"</span>],
+    <span class="str">"amount"</span>: [<span class="kw">100</span>, <span class="kw">50</span>, <span class="kw">30</span>, <span class="kw">20</span>],
+})
+df.groupby(<span class="str">"name"</span>)[<span class="str">"amount"</span>].sum()
+<span class="cm"># name
+#  Binh     30
+# An        20
+# Binh     100
+# Binh      50      -- "Binh" split into THREE separate groups!</span>
+
+df[<span class="str">"name"</span>].str.strip().pipe(<span class="kw">lambda</span> s: df.groupby(s)[<span class="str">"amount"</span>].sum())
+<span class="cm"># name
+# An       20
+# Binh    180        -- all three Binh rows now correctly merged</span></code></pre>
+<p>Confirmed directly: <code>"Binh" == "Binh "</code> is <code>False</code> — Python string equality is exact, character for character, and pandas' groupby key matching uses that same exact equality. A trailing or leading space is invisible when a human eyeballs a printed DataFrame, but it is a completely different key to the machine, so <code>groupby()</code> silently produces extra groups instead of raising anything. The identical trap breaks a <code>merge()</code> the same way — rows that should match on a text key silently don't, with no error, no warning, just fewer joined rows than expected:</p>
+<pre><code>left = pd.DataFrame({<span class="str">"key"</span>: [<span class="str">"Binh "</span>, <span class="str">"An"</span>, <span class="str">" Chi"</span>], <span class="str">"val"</span>: [<span class="kw">1</span>, <span class="kw">2</span>, <span class="kw">3</span>]})
+right = pd.DataFrame({<span class="str">"key"</span>: [<span class="str">"Binh"</span>, <span class="str">"An"</span>, <span class="str">"Chi"</span>], <span class="str">"other"</span>: [<span class="kw">10</span>, <span class="kw">20</span>, <span class="kw">30</span>]})
+pd.merge(left, right, on=<span class="str">"key"</span>).shape[<span class="kw">0</span>]
+<span class="cm"># 1   -- only "An" matched; "Binh " and " Chi" silently dropped</span>
+
+pd.merge(left.assign(key=left[<span class="str">"key"</span>].str.strip()), right, on=<span class="str">"key"</span>).shape[<span class="kw">0</span>]
+<span class="cm"># 3   -- all three rows match once the key is stripped first</span></code></pre>
+
+<h2>2 · lstrip() / rstrip(): the one-sided siblings</h2>
+<p>Confirmed directly: <dfn data-en="a Series/Index string method removing ONLY leading (left-side) characters, leaving trailing characters untouched -- the left-only sibling of strip()" data-vn="giữ nguyên 'str.lstrip()' -- chỉ cắt khoảng trắng/ký tự bên TRÁI (đầu chuỗi), bên phải giữ nguyên">str.lstrip()</dfn> removes only leading whitespace and <dfn data-en="a Series/Index string method removing ONLY trailing (right-side) characters, leaving leading characters untouched -- the right-only sibling of strip()" data-vn="giữ nguyên 'str.rstrip()' -- chỉ cắt khoảng trắng/ký tự bên PHẢI (cuối chuỗi), bên trái giữ nguyên">str.rstrip()</dfn> removes only trailing whitespace — exactly SQL's <code>LTRIM()</code>/<code>RTRIM()</code> split:</p>
+<pre><code>s = pd.Series([<span class="str">" Binh "</span>, <span class="str">"  An"</span>, <span class="str">"Chi  "</span>])
+s.str.strip()   <span class="cm"># ['Binh', 'An', 'Chi']        -- both sides</span>
+s.str.lstrip()  <span class="cm"># ['Binh ', 'An', 'Chi  ']     -- left only, trailing spaces survive</span>
+s.str.rstrip()  <span class="cm"># [' Binh', '  An', 'Chi']     -- right only, leading spaces survive</span></code></pre>
+<p>All three also take an optional <code>to_strip=</code> string of characters instead of whitespace — confirmed directly, <code>pd.Series(["--Binh--", "**An**"]).str.strip("-*")</code> returns <code>['Binh', 'An']</code>, stripping any combination of the given characters from both ends, not a literal substring match.</p>
+
+<h2>3 · Two traps worth naming</h2>
+<p>Confirmed directly, pandas 3.0.6:</p>
+<pre><code><span class="cm"># Trap 1: NaN passes straight through untouched, same shape as every
+# other .str method and as np.clip()'s NaN behavior (Lesson 102).</span>
+pd.Series([<span class="str">" Binh "</span>, np.nan, <span class="str">"  An  "</span>]).str.strip()
+<span class="cm"># 0    Binh
+# 1     NaN
+# 2      An
+# dtype: str</span>
+
+<span class="cm"># Trap 2: a Series with NO string values at all raises AttributeError
+# outright -- the .str accessor refuses a non-string dtype up front.</span>
+pd.Series([<span class="kw">1</span>, <span class="kw">2</span>, <span class="kw">3</span>]).str.strip()
+<span class="cm"># AttributeError: Can only use .str accessor with string values, not integer</span></code></pre>
+<p>Trap 1 means <code>.str.strip()</code> is safe to call on a column that already has missing values — no extra <code>.fillna()</code> dance needed first. Trap 2 is a dtype check, not a per-value one: confirmed against the official pandas docs, a <em>mixed</em> <code>object</code>-dtype Series with a few non-string entries mixed among real strings instead turns those specific non-string entries into <code>NaN</code> rather than raising — the hard <code>AttributeError</code> only fires when pandas can tell upfront, from the column's own dtype, that there are no strings in it at all.</p>
+<div class="callout">This is MISSION.md's ETL "clean" step applied to the single most-skipped real-CSV problem: a text column read from a CSV, a copy-pasted spreadsheet, or a user-entered form field almost always has inconsistent leading/trailing whitespace somewhere. It costs nothing to call <code>.str.strip()</code> on every text key column right after load, right alongside the dtype fixes from Lesson 2 — and it costs a confusing, silent, hard-to-notice bug later if skipped: a <code>groupby()</code> with one extra group that looks almost right, or a <code>merge()</code> quietly missing rows, both with zero error message pointing at the real cause.</div>
+
+<div class="interview">
+<p><strong>Q: "Your groupby('customer_name') is producing more groups than there are actual customers. What's your first guess?"</strong> A strong answer, out loud: <em>"Before anything fancier, I'd check for invisible whitespace or casing differences in the key column — 'Binh' and 'Binh ' look identical printed out but are different strings, so groupby silently treats them as two separate groups instead of raising any error. I'd run df['customer_name'].str.strip() (and probably .str.lower() too) across the whole column before grouping, which is vectorized and needs no loop, then re-check the group count. The same invisible-whitespace issue breaks merge() the same way — rows that should join on a text key silently don't, with fewer rows in the result and no warning at all."</em> The signal: naming whitespace/casing as the first suspect for a key that "should" match but doesn't, not jumping straight to something more exotic.</p>
+</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/104_str_strip.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/104_str_strip.py</code></pre>
+<p>Exercise 1 confirms <code>.str.strip()</code> collapses whitespace-padded duplicate keys so a <code>groupby()</code> produces the correct number of groups (Section 1). Exercise 2 confirms <code>lstrip()</code>/<code>rstrip()</code> each remove only one side, leaving the other untouched (Section 2). Exercise 3 confirms NaN passes through <code>.str.strip()</code> untouched while a real string in the same Series gets stripped (Section 3).</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: groupby() keys are matched by exact string equality, and 'Binh' != 'Binh ' character for character, so each distinct whitespace variant becomes its own separate group -- silently, with no error or warning raised anywhere, same as a key mismatch inside merge().">
+    <p class="stem">A <code>name</code> column has values <code>"Binh"</code>, <code>"Binh "</code>, and <code>" Binh"</code>. Grouping by this column directly does what?</p>
+    <button class="opt" data-ok>produces three separate groups silently, since exact equality treats each one as distinct</button>
+    <button class="opt">raises a clear warning naming the extra whitespace found inside that one column</button>
+    <button class="opt">merges all three into a single group automatically, since pandas trims keys itself</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: lstrip() removes only leading (left-side) characters and leaves trailing ones untouched, while rstrip() does the exact opposite -- only trailing characters go, leading ones survive. strip() is the only one of the three that removes both sides at once.">
+    <p class="stem">Given the string <code>"  An  "</code> (two spaces each side), what does <code>.str.lstrip()</code> alone return?</p>
+    <button class="opt" data-ok>"An  " -- only the leading spaces are gone, the trailing two still remain</button>
+    <button class="opt">"  An" -- only the trailing spaces are gone, the leading two still remain</button>
+    <button class="opt">"An" -- both sides are completely gone, identical to calling plain strip() instead here</button>
+  </div>
+  <div class="q" data-why="Confirmed directly (pandas 3.0.6): .str.strip() leaves an existing NaN entry as NaN, the same pass-through-untouched shape as every other .str method and as np.clip() (Lesson 102) -- it never raises on a NaN, and it never turns a NaN into some other stripped value.">
+    <p class="stem">A Series holds <code>" Binh "</code>, <code>NaN</code>, and <code>"  An  "</code>. Calling <code>.str.strip()</code> on the whole Series does what to that one <code>NaN</code> entry?</p>
+    <button class="opt" data-ok>leaves it as NaN untouched, while the two real strings each get properly stripped</button>
+    <button class="opt">raises an exception right away, the moment it first reaches that one lone NaN</button>
+    <button class="opt">turns it into an empty string instead, as if it had been blank space</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official <a href="https://pandas.pydata.org/docs/reference/api/pandas.Series.str.strip.html">pandas API reference for <code>Series.str.strip()</code></a> (per <code>RESOURCES.md</code>'s "Docs: pandas User Guide" entry, ~3 min) — confirms the <code>to_strip=</code> parameter, the <code>lstrip()</code>/<code>rstrip()</code> siblings, and the mixed-object-dtype non-string-becomes-NaN behavior exactly matching the direct probing above.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>str.strip()</code>, <code>str.lstrip()</code>, and <code>str.rstrip()</code> are new today, added right after Lesson 103's <code>pd.to_timedelta()</code> entry.<br>
+<strong>Next lesson:</strong> <code>str.pad()</code>/<code>str.title()</code>/<code>str.join()</code> remain standing named candidates from the same text-cleanup family this round scanned — none promoted yet, left for tomorrow's own fresh scan to confirm or replace rather than being pre-committed.<br><br>
+💬 Anything unclear — the groupby/merge whitespace trap, the lstrip/rstrip split, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

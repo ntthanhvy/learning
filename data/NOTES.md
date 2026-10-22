@@ -9564,3 +9564,126 @@
   `bin/record-progress data lesson_generated --day 104 --lesson
   0104-str-strip.html --detail '{"by":"headless"}'` was run directly from
   the repo root to close out this round.
+- 2026-10-22 generation (Lesson 105): headless run, zero prior context.
+  Read MISSION.md in full (not modified), this file's own tail (Lessons
+  100-104's entries), both `lessons/0103-to-timedelta.html` and
+  `lessons/0104-str-strip.html` in full for exact HTML structure, both
+  `practice/103_to_timedelta.py` and `practice/104_str_strip.py` in full
+  for the exact self-checking practice pattern, `assets/nav.js`'s tail for
+  the LESSONS registration shape, `reference/glossary.html`'s last rows
+  for the exact `<tr><td>Term</td><td>VN</td><td>EN</td></tr>` column
+  order, and `RESOURCES.md` in full. Lesson 104's own teaser named three
+  standing candidates from the same text-cleanup family: `str.pad()`/
+  `str.title()`/`str.join()`. Re-grepped all three case-insensitively
+  across every lesson body and the glossary file before picking — all
+  three are still genuine zero-hit gaps (only ever appearing inside past
+  teaser text itself, never actually taught). Picked `.str.pad()` over its
+  two siblings: it is the direct SQL `LPAD()`/`RPAD()` equivalent (zero-
+  padding IDs, zip codes, invoice numbers to a fixed width is a classic
+  interview ask), and direct probing turned up a sharp, docs-contradicting
+  trap involving its `zfill()` sibling that neither `.str.title()` nor
+  `.str.join()` has an equivalent of — a sharper pick than the other two,
+  same reasoning shape Lesson 104 itself used to prefer `.str.strip()`
+  over its own siblings. Every behavioral claim was probed directly first
+  in a scratch directory outside `data/` (`.scratch-data-20261022/` at the
+  repo root, deleted after), on the actually-installed pandas 3.0.6 /
+  numpy 2.5.4 (confirmed via a version-print one-liner, matching Lessons
+  102-104's own installed versions exactly): confirmed `side="left"` is
+  the default (matching SQL's `LPAD()`), `side="right"` matches `RPAD()`,
+  and `side="both"` centers with the extra padding character landing on
+  the right when the split is odd; confirmed `width=` is a *minimum*, not
+  an exact width — a string already at or past it passes through
+  completely unchanged (`pd.Series(["123"]).str.pad(width=1)` stays
+  `"123"`, no truncation); confirmed `fillchar=` must be exactly one
+  character, a multi-character string like `"00"` raising `TypeError:
+  fillchar must be a character, not str` rather than repeating or
+  truncating it; confirmed an invalid `side=` value raises `ValueError:
+  Invalid side`; confirmed NaN passes straight through `.str.pad()`
+  untouched, the same pass-through shape as `.str.strip()` (Lesson 104)
+  and `np.clip()` (Lesson 102); confirmed a non-string dtype (plain
+  `int64`) raises `AttributeError` outright, same as every other `.str`
+  accessor method probed so far. The sharpest finding: the official
+  pandas docs for `Series.str.pad()` name `Series.str.zfill()` as
+  "equivalent to `Series.str.pad(side='left', fillchar='0')`" — confirmed
+  directly (and cross-checked against both the `str.pad()` and `str.zfill()`
+  official docs pages via `WebFetch`) that this stated equivalence holds
+  for plain positive-looking strings but breaks specifically the moment a
+  string starts with a minus sign: `pd.Series(["-7"]).str.zfill(5)` gives
+  `"-0007"` (sign-aware, the `-` stays in front of the padding), while
+  `pd.Series(["-7"]).str.pad(width=5, side="left", fillchar="0")` gives
+  `"000-7"` (not sign-aware at all, the `-` is just another character
+  pushed rightward) — a genuine docs-vs-direct-testing discrepancy worth
+  naming explicitly, not just a restated API fact. Cited the official
+  pandas API reference page for `Series.str.pad()` under the existing
+  `RESOURCES.md` "Docs: pandas User Guide" entry rather than adding a new
+  line, matching the established precedent of Lessons 93/95/97/99-104
+  citing a different `pandas.pydata.org/docs/reference/api/...` page
+  under an existing umbrella entry each time; the lesson's "Go deeper"
+  section also links the `Series.str.zfill()` docs page inline as the
+  cross-check source for the sign-awareness claim, without adding it as a
+  second `RESOURCES.md` citation. The shipped (unsolved)
+  `practice/105_str_pad.py` was executed directly from its real
+  `practice/` location (`cd data && uv run --with pandas python3
+  practice/105_str_pad.py`) and printed exactly 3 ✗ with no raw traceback
+  — this required one small fix mid-draft: the first draft had `ex2_zfill,
+  ex2_pad = ...` as the unsolved placeholder line for a tuple-returning
+  helper, and Python's own tuple-unpacking raised a raw `TypeError: cannot
+  unpack non-iterable ellipsis object` before the `try/except` could catch
+  it; fixed by assigning the bare `...` to a single `ex2_pair` placeholder
+  first and unpacking it *inside* the `try` block instead, same shape as
+  every other exercise's placeholder-then-try pattern, confirmed this
+  reproduced a clean all-✗ run with no traceback afterward. Built a solved
+  copy in the same now-deleted scratch directory, filling in all blanks
+  correctly (including a `compare_zfill_and_pad()` helper function body
+  returning a tuple, same pattern as Lessons 100-104's own helper-function
+  exercises); it printed all 3 ✓ and "All green" on the first run. The
+  shipped file was re-run once more directly from `practice/` after
+  building the solved copy and reproduced the identical all-✗ result,
+  confirming the solved copy's edits never leaked back into the shipped
+  baseline. Quiz options were drafted, then mechanically word-counted with
+  a scratch Python script (same now-deleted scratch directory) isolating
+  each `<div class="q">` block by regex span and splitting on whitespace —
+  the first draft came out 16/14/11, 17/14/16, 14/14/12; several rounds of
+  small rephrasing (adding words like "original", "whole", "one", "right",
+  "always", "fully", "plain") across all three questions until every one
+  landed exactly level (17/17/17, 17/17/17, 14/14/14 option words,
+  counting the standalone "--" token the same way prior rounds' scripts
+  did), one `data-ok` per question throughout, with the `data-why` wording
+  re-checked against the final option text afterward to confirm the
+  rephrasing never drifted the meaning. A separate mechanical tag-balance
+  script confirmed all tags balanced (a 3/3, body 1/1, button 9/9, code
+  75/75, dfn 2/2, div 6/6, em 2/2, h1 1/1, h2 6/6, head 1/1, html 1/1, p
+  16/16, pre 4/4, script 3/3, span 34/34, strong 3/3, title 1/1) and found
+  exactly two raw `&` characters, both inside the one established `cd
+  ~/learning/data && uv run ...` shell command, zero raw `&` in prose;
+  also confirmed both new `<dfn>` tags carry both `data-en` and `data-vn`.
+  Checked the glossary for a collision before adding anything — grepped
+  `\bpad\b` and `zfill` case-insensitively across the full glossary, found
+  zero existing rows for either — added exactly one new row, "str.pad() /
+  str.zfill()" (grouping the pair together since they share one tight
+  behavioral story, same grouping precedent as Lesson 104's own "str.strip()
+  / str.lstrip() / str.rstrip()" row), directly after Lesson 104's
+  "str.strip() / str.lstrip() / str.rstrip()" entry; re-ran the
+  tag-balance script against the glossary file afterward, confirmed it
+  stayed balanced (a 1/1, body 1/1, code 1272/1272, em 11/11, h1 1/1, head
+  1/1, html 1/1, p 3/3, script 1/1, strong 1/1, table 1/1, td 525/525, th
+  3/3, title 1/1, tr 176/176) with zero raw `&` introduced, and the `<tr>`
+  count went from 175 to 176 as expected. Registered Lesson 105 in
+  `nav.js` with today's date (2026-10-22); `node --check` confirmed it
+  still parses as valid JavaScript after the edit (also spot-checked
+  against untouched `gloss.js`/`quiz.js`, both still parse fine), and
+  exactly one `n: 105` entry plus one `0105-str-pad` file reference were
+  confirmed to exist. This round closed one of the three candidates
+  carried forward from Lesson 104's own teaser. `str.title()`/`str.join()`
+  remain the standing named candidates carried forward into tomorrow's
+  teaser — neither promoted yet, left for tomorrow's own fresh scan to
+  confirm or replace rather than being pre-committed. No new
+  `data/learning-records/` entry was added this round — routine lesson, no
+  new baseline finding to justify one (the completion/quiz signal remains
+  stale past mid-July, unchanged from recent rounds). The scratch
+  directory was deleted after verification (outside `data/`, never
+  tracked by git anyway), per this course's standing practice of not
+  leaving scratch artifacts committed. `bin/record-progress data
+  lesson_generated --day 105 --lesson 0105-str-pad.html --detail
+  '{"by":"headless"}'` was run directly from the repo root and succeeded,
+  matching the pattern used by Lessons 95-104.

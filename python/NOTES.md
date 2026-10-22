@@ -10746,4 +10746,134 @@ fail *gracefully* so the learner sees which task failed.
   this entry is still fresh enough to carry `hmac`/`inspect`/`ChainMap`/
   `warnings`/`graphlib`/`weakref`/`calendar` forward as genuinely-checked,
   still-open candidates (all confirmed zero-hit today, just not chosen).
+- 2026-10-22 — **Day 85 generated: `warnings` — flagging trouble without
+  stopping** (headless run, zero prior context, starting from the repo
+  root at `/home/runner/work/learning/learning/python`). Read `MISSION.md`
+  in full (no-pandas exclusion re-confirmed before writing a line),
+  `PLAN.md` in full, `RESOURCES.md` in full, and the learner's only
+  record (`learning-records/0001-baseline-reads-python-writes-little.md`).
+  `NOTES.md` exceeds this run's single-read cap, so only its tail
+  (~250 lines, covering Day 84 in full) was read directly — sufficient,
+  since Day 84's own next-day note stated the cadence plainly: Day 84 was
+  the first fresh lesson since Day 83's review, so Days 85-86 should
+  default to fresh topics next, per the course's settled three-fresh-
+  then-review cadence, before a review is next due again.
+  Topic selection: Day 84's own notes named seven candidates already
+  confirmed zero-hit that round but not chosen — `hmac`, `inspect`,
+  `ChainMap`, `warnings`, `graphlib`, `weakref`, `calendar`. Re-ran the
+  same case-insensitive grep across every lesson, every practice file,
+  `reference/glossary.html`, and `RESOURCES.md` for all seven before
+  picking, rather than trusting the carried-forward claim — still zero
+  hits for every one of them. Chose `warnings`: it sits in the exact gap
+  Day 8's `raise` and Day 15's `logging` both left open (a function that
+  wants to flag "probably wrong, but still survivable" without stopping,
+  and without just writing a log line nobody can programmatically react
+  to), continuing the exceptions/diagnostics thread Day 84 extended, and
+  is pure stdlib/language-mechanics material with no pandas/NumPy
+  surface at all.
+  Content: motivated via the exact three-way gap (raise stops everything,
+  logging.warning() only writes text, nothing in between lets a caller
+  react). Covered `warnings.warn(message, category)` printing once per
+  call site while execution continues normally afterward (confirmed live
+  via `uv run python3` against a scratch probe — both the warning line
+  and the function's own return value printed), the categories
+  `UserWarning`/`DeprecationWarning`/`RuntimeWarning` named as the three
+  most common, `catch_warnings(record=True)` + `simplefilter("always")`
+  for collecting warnings into a list for a test to assert on (confirmed
+  live: 3 asserts on message/category all passed, nothing printed to
+  stderr), why `simplefilter("always")` specifically is needed (default
+  filter shows each distinct warning only once per call site), and
+  `filterwarnings("error", category=...)` escalating a matching `warn()`
+  call into a real raised exception (confirmed live, caught via
+  `except UserWarning`). An explicit callout contrasts `warnings.warn()`
+  against Day 15's `logging.warning()` by what each lets a caller
+  programmatically do with it afterward, not just where the text ends up.
+  No-pandas rule: grepped case-insensitively for
+  `pandas|numpy|dataframe|pd\.|np\.` in the new lesson and practice file —
+  exactly one hit (the required "Where pandas/NumPy go from here" boundary
+  callout, noting both libraries use this exact module internally for
+  their own deprecation notices, with no worked pandas/NumPy example) and
+  zero hits in the practice file.
+  **New jargon: 4 terms** (`warnings module`, `warnings.warn()`,
+  `catch_warnings(record=True)`, `filterwarnings("error", ...)`) each
+  wrapped in `<dfn data-en="…" data-vn="…">` (only the module itself on
+  first mention in the byline carries the actual `<dfn>` tag, per this
+  course's established pattern of one inline `<dfn>` per lesson plus
+  fuller glossary-page entries for the rest). Grepped
+  `reference/glossary.html` case-insensitively for `warnings` first —
+  zero hits, confirming no collision with any prior day's terms (Day 8's
+  "exception"/"traceback" and Day 15's "logging"/"level" are related but
+  textually distinct). Appended a new `id="day85"` section directly after
+  Day 84's.
+  Quiz: 3 questions (warn() vs. raise's control-flow difference, why
+  warn() over logging.warning() for a deprecated-argument notice, what
+  filterwarnings("error", ...) does to a later warn() call). Word counts
+  were checked with a throwaway Python script (written via `Write` into
+  this round's scratch dir, deleted after use) using
+  `html.parser.HTMLParser` for a tag-balance check plus a regex-based
+  bare-`&` scan, and a separate regex-based per-question option extractor
+  stripping tags and splitting on whitespace. First draft mismatched on
+  all three questions (Q1 11/10/11, Q2 13/10/11 then 13/11/12, Q3 9/8/9) —
+  iterated option-by-option (e.g. "stops the function at that exact line"
+  → "stops the function right at that exact line", "writes to a database
+  table" → "writes straight to a real database table") and recounted
+  after every edit, until all three landed on equal per-question counts:
+  11/11/11, 13/13/13, 9/9/9. The same tag-balance check found zero errors
+  on both the new lesson and the full (now-modified)
+  `reference/glossary.html` on the first pass this round — no markup bugs
+  this time, unlike Day 84's stray `<module>` catch. `node --check`
+  confirmed no syntax errors on `assets/nav.js` after registering today's
+  entry. All scratch scripts deleted before finishing.
+  `RESOURCES.md`: added a new `warnings` docs line, placed directly after
+  the Day 84 `traceback` line per the file's day-ordered citation
+  convention.
+  Registered in `assets/nav.js` with `date: "2026-10-22"` right after the
+  `n: 84` entry.
+  Practice file `practice/85_warnings_module.py` (3 checks, stdlib-only,
+  no `--with` flag, function-stub-with-TODO-comment style matching recent
+  practice files): a `parse_rate()` that warns on a suspicious value but
+  still returns a value either way (Ex 1), catching that warning with
+  `catch_warnings(record=True)`/`simplefilter("always")` and checking its
+  message and category (Ex 2), and escalating a warning category into a
+  real raised exception with `filterwarnings("error", ...)` (Ex 3). One
+  non-obvious check-design detail: Ex 3's own check wraps the call in a
+  fresh `catch_warnings()` + `resetwarnings()` so the global "error" filter
+  the solved `warn_as_error()` installs can't leak into or get masked by
+  filters other exercises/checks might also touch in the same process —
+  verified by running the solved file twice consecutively with identical
+  all-✓ results both times. All expected values were verified against a
+  live `uv run python3` probe before being written into the checks.
+  Verified in a course-scoped scratch directory
+  (`.scratch-python-20261022/`, created directly under the repo root,
+  named to avoid colliding with sibling courses' own concurrently visible
+  `.scratch-data-20261022/` and `.scratch-dataeng-1022/` scratch dirs this
+  round — this session's sandbox blocks `/tmp` entirely, so the scratch
+  dir had to live under the repo root instead): the shipped (unsolved)
+  copy, run with `uv run python3` from its real `python/practice/` path,
+  printed three clean ✗ lines with no traceback. A separately solved copy
+  (written fresh into the scratch dir, not by editing the shipped file)
+  printed all three ✓ and the "All green" tally, run twice consecutively
+  with identical results both times. Re-ran the shipped file from its real
+  path afterward, confirming it still printed the same three clean ✗
+  lines. The scratch directory was deleted before finishing — confirmed
+  by a directory listing showing no `.scratch-python-20261022` remaining
+  (the sibling courses' own scratch dirs were visible and left untouched,
+  belonging to other concurrent runs).
+  `python/learning-records/` was not touched this round — a routine
+  fresh-topic pick following the course's own settled cadence is not a
+  new, durable fact about the learner distinct from what Day 1's baseline
+  record already says.
+  `bin/record-progress python lesson_generated --day 85 --lesson
+  0085-warnings-module.html --detail '{"by":"headless"}'` was run from
+  the repo root at the end of this round (output: `recorded:
+  python/lesson_generated day=85 lesson=0085-warnings-module.html`).
+  **Next-day note:** Day 85 is the second fresh lesson since Day 83's
+  review (Days 80-82) — per this course's settled three-fresh-then-review
+  cadence, one more fresh topic (Day 86) should default next, and then a
+  review covering Days 84-86 is due. No standing fresh-gap candidate
+  remains on record from today's scan — the next round should run its own
+  gap scan from scratch, unless this entry is still fresh enough to carry
+  `hmac`/`inspect`/`ChainMap`/`graphlib`/`weakref`/`calendar` forward as
+  genuinely-checked, still-open candidates (`warnings` now struck off the
+  list, having been chosen and taught today).
 

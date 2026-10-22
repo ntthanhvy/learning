@@ -222,6 +222,8 @@
       file: "lessons/0107-async-await-task-sync-over-async.html" },
     { n: 108, date: "2026-10-21", title: "Fan out to 3 services, get all results or the first error",
       file: "lessons/0108-structured-concurrency-errgroup-whenall.html" },
+    { n: 109, date: "2026-10-22", title: "Fan out to 3 is easy. Fan out to 3,000 needs a limit.",
+      file: "lessons/0109-bounded-fan-out-setlimit-semaphoreslim.html" },
   ];
 
   const REFS = [

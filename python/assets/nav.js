@@ -174,6 +174,8 @@
       file: "lessons/0083-review-retrieval-day-14.html" },
     { n: 84, date: "2026-10-21", title: "traceback: capturing failure as text",
       file: "lessons/0084-traceback-module.html" },
+    { n: 85, date: "2026-10-22", title: "warnings: flagging trouble without stopping",
+      file: "lessons/0085-warnings-module.html" },
   ];
 
   const REFS = [

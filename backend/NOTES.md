@@ -8759,3 +8759,112 @@
   composed with structured concurrency (Lesson 32's territory one layer
   below this lesson) — all three named in this lesson's own Scope line
   as follow-ons, not pre-queued.
+- **2026-10-22 generation (Lesson 109, headless run):** No topic was
+  handed in pre-decided this round, so a fresh gap scan ran first, per
+  Lesson 108's own note that the next round should start there rather
+  than from an assumed list. Read `MISSION.md`, this file's tail,
+  Lesson 108 in full for exact HTML/quiz/callout structure, `nav.js`'s
+  tail for the LESSONS entry shape, `glossary.html`'s tail for the row/
+  column order, all three `learning-records/` files, and `RESOURCES.md`
+  in full, before writing anything. Picked `errgroup.Group.SetLimit`
+  (bounding fan-out width) vs. a hand-wired `SemaphoreSlim` in C#: both
+  were explicitly named in Lesson 108's own Scope line as follow-ons not
+  yet covered, confirmed genuinely absent via a case-insensitive grep of
+  `SetLimit`/`WhenAny`/`SemaphoreSlim`/`semaphore` across every lesson
+  and the glossary (only one passing, non-`<dfn>` prose mention of
+  "semaphore" in Lesson 50's primary-source paragraph, no defined term),
+  and distinct from Lesson 50's bulkhead pattern (which partitions
+  capacity *between* dependencies, not the width of *one* fan-out call
+  site) and from Lessons 28/32's retry/circuit-breaker material (a
+  different failure-handling axis, already covered, so not re-picked
+  despite also being named as a Lesson 108 follow-on). `Task.WhenAny`'s
+  full manual-cancellation pattern, the other Lesson 108 follow-on, was
+  considered and set aside again in favor of the width problem, which is
+  the more immediately practical gap (it is very easy to accidentally
+  write a fan-out loop over a slice/collection, rather than three fixed
+  calls, and get an unbounded burst) — still open for a future round.
+  Verified both APIs directly against primary sources before writing any
+  prose: fetched pkg.go.dev's errgroup page for `SetLimit`'s exact
+  signature and doc text (confirmed: a negative `n` means no limit, zero
+  blocks every subsequent `Go()` forever, any `Go()` call past the cap
+  blocks the calling goroutine until a slot frees, and the limit "must
+  not be modified while any goroutines in the group are active" — a
+  constraint called out explicitly in the lesson's own prose); and
+  Microsoft Learn's `SemaphoreSlim` class page (confirmed the
+  constructor takes initial/max count, `WaitAsync()` asynchronously
+  suspends the caller without blocking a thread when the count is
+  already zero, and `Release()` increments the count back) plus a
+  separate fetch of `Task.WhenAny` to confirm — for the Scope line's own
+  accuracy, in case a future round picks it up — that `Task.WhenAny`'s
+  returned task resolves to the first-completed task regardless of
+  faulted/canceled state and does **not** auto-cancel the remaining
+  tasks ("the other tasks will continue running until completion...
+  If that behavior is undesirable, you can cancel all the remaining
+  tasks once the first task completes" — Microsoft's own tip, confirming
+  this is still a real open gap for next time, not already solved by
+  `WhenAny` itself). Two new terms, checked against the glossary first
+  via case-insensitive grep across the whole file — zero collisions
+  confirmed before writing: `SetLimit()` and `SemaphoreSlim`. Added both
+  as two new rows immediately after Lesson 108's `CancellationToken`
+  row, same Term/Tiếng Việt (dev-style)/In software column order,
+  confirmed by inspecting the file's actual last two existing rows
+  directly rather than assumed. Verification performed mechanically via
+  Node scripts written to a scratch directory at `/tmp/verify-
+  backend-1022/` (outside the repo tree entirely, so `git status` for
+  this repo never saw it — the same sandbox-boundary situation Lesson
+  107's entry already documented: `rm -rf` against that exact `/tmp`
+  path was blocked by this round's sandbox as outside the allowed
+  working directory, so it was left in place rather than treated as a
+  cleanup failure worth blocking the round over): (1) a quiz-word-count
+  script splitting every option both via `.split(/\s+/)` and
+  `.split(" ")`, scoped per `<div class="q">` block directly (Lesson
+  108's entry flagged the earlier mistake of a whole-document regex
+  double-counting across question boundaries, avoided here from the
+  start) — first draft landed uneven across all four questions (spreads
+  of 5–13 words per option, including a surprising case where a bare
+  `--` token and a trailing comma each counted as their own "word" under
+  `.split(/\s+/)`, inflating counts in ways invisible by eye), fixed
+  through several rewrite-and-recount cycles per option, converged to
+  exactly 9/9/9/9, 9/9/9/9, 11/11/11/11, and 11/11/11/11 across the four
+  questions, both counting methods agreeing exactly, exactly one
+  `data-ok` and four options per question confirmed the same way; (2) an
+  HTML tag-balance check across div/p/code/button/script/dfn/pre/h2/h1/
+  em/strong/a/table/tr/th/td — clean on the first pass (div 7/7, p
+  16/16, code 35/35, button 16/16, script 3/3, dfn 2/2, pre 3/3, h2 6/6,
+  h1 1/1, em 3/3, strong 3/3, a 3/3, table 1/1, tr 5/5, th 7/7, td 8/8);
+  a separate table/tr/th/td/p/div/html/head/body/title/script balance
+  check on `glossary.html` after its two-row addition — also balanced
+  (tr 366/366, td 1095/1095), plus a duplicate-term scan across all 365
+  first-column entries — zero duplicates; (3) a raw-unescaped-`&` regex
+  scan across both files — zero hits; (4) the lesson's `<dfn` tags
+  grepped and confirmed to carry both `data-en=` and `data-vn=` —
+  exactly 2 `dfn` tags, matching the 2 new terms, no orphaned attribute;
+  (5) `node --check` against `assets/nav.js`, `assets/gloss.js`, and
+  `assets/quiz.js` — all clean, both before and after the `nav.js` edit;
+  (6) a basic HTML well-formedness check (exactly one
+  `<!DOCTYPE html>`, one `<html>`/`</html>`, three script tags with
+  `nav.js` last) — clean; (7) a grep for stray markdown-style
+  `*emphasis*` left over from drafting — none found. Registered Lesson
+  109 in `nav.js` (date 2026-10-22, today's actual generation date)
+  right after `n: 108`, confirmed exactly one matching `n: 109` entry
+  and exactly one matching `0109-*.html` file on disk afterward. Added
+  one new RESOURCES.md line (pkg.go.dev's errgroup `SetLimit` section
+  plus Microsoft Learn's `SemaphoreSlim` class page) following the
+  existing per-topic grouping, placed right after Lesson 108's
+  `Task.WhenAll`/cancellation line. `bin/record-progress` ran clean on
+  the first attempt this round (`recorded: backend/lesson_generated
+  day=109 lesson=0109-bounded-fan-out-setlimit-semaphoreslim.html`).
+  No new `learning-records/` file this round — the topic came from this
+  round's own fresh gap scan plus Lesson 108's self-documented Scope
+  line, not a new surprise about the learner's baseline or a quiz
+  outcome, so it doesn't rise to a new durable fact worth its own
+  record. Candidates spotted but not picked this round, worth checking
+  fresh next time: `Task.WhenAny`'s full manual-cancellation pattern
+  (explicitly verified above as still a real, unaddressed gap — the
+  method itself does not auto-cancel siblings); Lesson 25's worker-pool
+  shape (a fixed set of long-lived goroutines reading off a channel) as
+  the alternative to a per-call-site cap, named in this lesson's own
+  Scope line; and picking the right numeric width for a given
+  downstream service's real capacity, which is an operational-tuning
+  question this lesson deliberately left as a judgment call rather than
+  a mechanism to teach.

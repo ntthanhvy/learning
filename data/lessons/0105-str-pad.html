@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 105 · Series.str.pad(): fixed-width alignment, and the sign trap zfill() doesn't have</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 105 · ~20 min · 22 Oct 2026</p>
+<h1>Series.str.pad(): fixed-width alignment, and the sign trap zfill() doesn't have</h1>
+<p class="byline">Lesson 104 closed the standing <code>.str.strip()</code> pick and carried forward three named candidates from the same text-cleanup family: <code>str.pad()</code>/<code>str.title()</code>/<code>str.join()</code>. Re-grepped all three case-insensitively across every lesson body and the glossary file before picking — all three are still genuine zero-hit gaps, never taught. Picked <code>.str.pad()</code> over its siblings: it is the direct SQL <code>LPAD()</code>/<code>RPAD()</code> equivalent (a classic interview ask — zero-padding IDs, zip codes, invoice numbers to a fixed width), and direct probing turned up a sharp, docs-contradicting trap involving its <code>zfill()</code> sibling that neither <code>.str.title()</code> nor <code>.str.join()</code> has an equivalent of.</p>
+
+<h2>1 · Fixed-width alignment: SQL's LPAD()/RPAD(), vectorized</h2>
+<p>SQL's <code>LPAD(col, width, fillchar)</code> and <code>RPAD(col, width, fillchar)</code> pad a text column out to a fixed width. Pandas' equivalent is <dfn data-en="a Series/Index string method, Series.str.pad(width, side='left', fillchar=' '), padding every string in the Series up to a minimum width by adding fillchar characters on the given side -- side='left' (the default) matches SQL's LPAD(), side='right' matches RPAD(), and side='both' centers the string with padding on each side" data-vn="giữ nguyên 'str.pad()' -- method Series.str.pad(width, side='left', fillchar=' '), bản LPAD()/RPAD() của SQL chạy vectorized trên cả cột; side='left' (mặc định) giống LPAD(), side='right' giống RPAD(), side='both' thì canh giữa, đệm 2 bên">Series.str.pad()</dfn> — one call pads the whole column at once:</p>
+<pre><code><span class="kw">import</span> pandas <span class="kw">as</span> pd
+
+s = pd.Series([<span class="str">"7"</span>, <span class="str">"42"</span>, <span class="str">"123"</span>])
+
+s.str.pad(width=<span class="kw">5</span>)
+<span class="cm"># ['    7', '   42', '  123']    -- side="left" is the default, pads with spaces</span>
+
+s.str.pad(width=<span class="kw">5</span>, side=<span class="str">"right"</span>)
+<span class="cm"># ['7    ', '42   ', '123  ']    -- SQL's RPAD()</span>
+
+s.str.pad(width=<span class="kw">5</span>, side=<span class="str">"both"</span>)
+<span class="cm"># ['  7  ', '  42 ', ' 123 ']    -- centers the string, extra space goes right when odd</span>
+
+s.str.pad(width=<span class="kw">5</span>, fillchar=<span class="str">"0"</span>)
+<span class="cm"># ['00007', '00042', '00123']    -- zero-padding an ID column, a common interview ask</span></code></pre>
+<p>Confirmed directly (pandas 3.0.6): <code>width=</code> is a <em>minimum</em> width, not an exact one — a string already as long as or longer than <code>width</code> passes through completely unchanged, confirmed with <code>pd.Series(["123"]).str.pad(width=1)</code> returning <code>"123"</code> untouched rather than truncating. <code>fillchar=</code> must be exactly one character — passing a multi-character string like <code>"00"</code> raises <code>TypeError: fillchar must be a character, not str</code> rather than repeating or truncating it. An invalid <code>side=</code> value (anything other than <code>"left"</code>/<code>"right"</code>/<code>"both"</code>) raises <code>ValueError: Invalid side</code>.</p>
+
+<h2>2 · The zfill() trap: the docs call it "equivalent", direct testing says otherwise</h2>
+<p>Pandas also ships <dfn data-en="a Series/Index string method that left-pads with '0' specifically, described in the official pandas docs as equivalent to Series.str.pad(side='left', fillchar='0') -- confirmed directly that this equivalence breaks on strings that start with a minus sign, since zfill() is sign-aware and str.pad() is not" data-vn="giữ nguyên 'str.zfill()' -- theo doc chính thức thì 'equivalent to' str.pad(side='left', fillchar='0'), nhưng test trực tiếp thì KHÔNG đúng với chuỗi có dấu trừ ở đầu -- zfill() biết xử lý dấu âm, str.pad() thì không">Series.str.zfill()</dfn>, a dedicated zero-pad shortcut. The official pandas docs describe it as "equivalent to <code>Series.str.pad(side='left', fillchar='0')</code>" — confirmed directly, that equivalence holds for plain positive-looking strings, but breaks exactly on a leading minus sign:</p>
+<pre><code>s = pd.Series([<span class="str">"-7"</span>, <span class="str">"42"</span>])
+
+s.str.zfill(<span class="kw">5</span>)
+<span class="cm"># ['-0007', '00042']    -- sign-aware: the '-' stays first, zeros go between sign and digits</span>
+
+s.str.pad(width=<span class="kw">5</span>, side=<span class="str">"left"</span>, fillchar=<span class="str">"0"</span>)
+<span class="cm"># ['000-7', '00042']    -- NOT sign-aware: '-' is just another character, pushed rightward</span></code></pre>
+<p>Confirmed directly and cross-checked against the official docs page for <code>Series.str.pad()</code> (which names <code>zfill()</code> as the documented "equivalent" call) and the docs page for <code>Series.str.zfill()</code> itself: the two calls agree on every plain numeric-looking string, but disagree specifically the moment a string starts with <code>"-"</code> — <code>zfill()</code> treats the sign as special and keeps it in front of the padding, exactly like Python's own built-in <code>str.zfill()</code>, while <code>str.pad(fillchar="0")</code> has no concept of a sign at all and simply fills from the left, producing a nonsensical <code>"000-7"</code> that no longer reads as a negative number at a glance.</p>
+<div class="callout">This is MISSION.md's "read code and predict its output" skill, applied to a case where the official docs' own wording ("equivalent to") is only true for the common case. If a source column can ever hold a negative number represented as a zero-padded string — a signed ID, a temperature, an accounting adjustment — reach for <code>.str.zfill()</code>, not <code>.str.pad(fillchar="0")</code>, specifically because of the sign. For everything else (non-numeric fixed-width alignment, custom fill characters, centering), <code>.str.pad()</code> is the general tool and <code>zfill()</code> is just its sign-aware zero-fill special case.</div>
+
+<h2>3 · NaN and non-string dtypes: the same shape as every other .str method</h2>
+<p>Confirmed directly, pandas 3.0.6 — the same pass-through/raise split as <code>.str.strip()</code> (Lesson 104) and <code>np.clip()</code> (Lesson 102):</p>
+<pre><code>pd.Series([<span class="str">"7"</span>, np.nan, <span class="str">"42"</span>]).str.pad(width=<span class="kw">5</span>, fillchar=<span class="str">"0"</span>)
+<span class="cm"># 0    00007
+# 1     NaN      -- passes straight through untouched, never padded or an error
+# 2    00042
+# dtype: str</span>
+
+pd.Series([<span class="kw">1</span>, <span class="kw">2</span>, <span class="kw">3</span>]).str.pad(width=<span class="kw">5</span>)
+<span class="cm"># AttributeError: Can only use .str accessor with string values, not integer</span></code></pre>
+
+<div class="interview">
+<p><strong>Q: "You need to zero-pad an account_id column to 8 digits for an export file. How would you do it, and what would you watch for?"</strong> A strong answer, out loud: <em>"I'd use df['account_id'].astype(str).str.pad(width=8, fillchar='0') — or just .str.zfill(8), which is the dedicated shortcut for exactly this case. The one thing I'd watch for is sign: if account_id could ever be a signed number represented as a string, like '-42', str.pad(fillchar='0') isn't sign-aware and would produce '000-042' — garbage — while str.zfill() specifically keeps the minus sign in front. So for pure zero-padding of possibly-signed values I'd reach for zfill(), and save str.pad() for everything else: custom fill characters, right-padding, or centering a column for a fixed-width report."</em> The signal: knowing zfill() isn't just a shorter spelling of pad() — it is a genuinely different, sign-aware behavior for the one case that matters most for IDs.</p>
+</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/105_str_pad.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/105_str_pad.py</code></pre>
+<p>Exercise 1 confirms <code>.str.pad()</code>'s three <code>side=</code> values (<code>"left"</code> default, <code>"right"</code>, <code>"both"</code>) each pad in the expected position, and that a string already at or past <code>width=</code> passes through unchanged (Section 1). Exercise 2 confirms <code>zfill()</code> and <code>pad(side="left", fillchar="0")</code> agree on a plain positive string but disagree on a string with a leading minus sign (Section 2). Exercise 3 confirms NaN passes through <code>.str.pad()</code> untouched while a real string in the same Series gets padded (Section 3).</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: side='left' is the documented default for str.pad(), matching SQL's LPAD() -- fill characters go on the left (start) of the string, leaving the original characters flush against the right edge.">
+    <p class="stem">Calling <code>s.str.pad(width=5)</code> with no <code>side=</code> argument given at all pads which side by default?</p>
+    <button class="opt" data-ok>the left side, same as SQL's LPAD() -- fill characters go in front of the original string</button>
+    <button class="opt">the right side, same as SQL's RPAD() -- fill characters always go right after the whole string</button>
+    <button class="opt">both sides evenly at once, centering the whole original string right inside the one given fixed width</button>
+  </div>
+  <div class="q" data-why="Confirmed directly and cross-checked against both official docs pages: zfill() is sign-aware and keeps a leading minus sign in front of the inserted zeros, while str.pad(side='left', fillchar='0') has no concept of a sign at all and simply fills from the left, pushing the minus sign rightward into the middle of the digits -- a real, docs-contradicting disagreement despite the docs calling the two 'equivalent'.">
+    <p class="stem">Given the string <code>"-7"</code>, how do <code>.str.zfill(5)</code> and <code>.str.pad(width=5, side="left", fillchar="0")</code> compare?</p>
+    <button class="opt" data-ok>they disagree here -- zfill gives "-0007", pad gives "000-7", since only zfill knows about the sign</button>
+    <button class="opt">they both produce the exact same "-0007" result here, fully matching the docs' own stated equivalence exactly</button>
+    <button class="opt">they both produce the exact same "000-7" result here, since neither one treats a minus sign specially</button>
+  </div>
+  <div class="q" data-why="Confirmed directly (pandas 3.0.6): .str.pad() leaves an existing NaN entry as NaN, the same pass-through-untouched shape as .str.strip() (Lesson 104) and np.clip() (Lesson 102) -- it never raises on a NaN, and it never pads a NaN into some fill-character string.">
+    <p class="stem">A Series holds <code>"7"</code>, <code>NaN</code>, and <code>"42"</code>. Calling <code>.str.pad(width=5, fillchar="0")</code> does what to that one <code>NaN</code> entry?</p>
+    <button class="opt" data-ok>leaves it as NaN untouched, while the two real strings each get properly padded</button>
+    <button class="opt">raises an exception right away, the moment it first reaches that one lone NaN</button>
+    <button class="opt">turns it into plain "00000" instead, five fill characters with nothing real left inside</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official <a href="https://pandas.pydata.org/docs/reference/api/pandas.Series.str.pad.html">pandas API reference for <code>Series.str.pad()</code></a> (per <code>RESOURCES.md</code>'s "Docs: pandas User Guide" entry, ~3 min) — states the <code>side=</code>/<code>fillchar=</code> parameters and names <code>zfill()</code> as the documented "equivalent" call; cross-check against the <a href="https://pandas.pydata.org/docs/reference/api/pandas.Series.str.zfill.html">docs page for <code>Series.str.zfill()</code></a> confirms the sign-aware behavior that makes the two calls disagree on negative-looking strings, despite that stated equivalence.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>str.pad()</code> and <code>str.zfill()</code> are new today, added right after Lesson 104's <code>str.strip()</code> entry.<br>
+<strong>Next lesson:</strong> <code>str.title()</code>/<code>str.join()</code> remain standing named candidates from the same text-cleanup family this round scanned — none promoted yet, left for tomorrow's own fresh scan to confirm or replace rather than being pre-committed.<br><br>
+💬 Anything unclear — the side=/fillchar= options, the zfill() sign trap, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -612,6 +612,15 @@
   <tr><td>traceback module</td><td>giữ nguyên "traceback module" — module chuẩn tự dựng ra đúng báo cáo traceback dưới dạng string, hoặc in thẳng ra, thay vì chỉ để Python tự in khi exception không ai bắt</td><td>The standard-library module that builds the same traceback report Day 8's uncaught-exception printout shows, on demand, inside a running <code>except</code> block — as a plain <code>str</code> via <code>format_exc()</code>, or written directly via <code>print_exc()</code> (to <code>stderr</code> by default, or anywhere else via <code>file=</code>).</td></tr>
 </table>
 
+<h2 id="day85">Day 85 — warnings: flagging trouble without stopping</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>warnings module</td><td>giữ nguyên "warnings module" — module chuẩn phát tín hiệu không gây dừng chương trình khi có gì đó khả nghi, mặc định in ra một lần cho mỗi chỗ gọi, caller có thể tắt, thu thập lại, hoặc biến thành exception thật nếu muốn</td><td>The standard-library module for raising a non-fatal signal that something is probably wrong — printed once per call site by default, with execution continuing right afterward — that a caller can also filter, collect in a test, or escalate into a real exception.</td></tr>
+  <tr><td>warnings.warn()</td><td>giữ nguyên "warn()" — hàm phát ra 1 warning kèm message và category (vd UserWarning), gọi xong code vẫn chạy tiếp bình thường, khác hẳn raise làm dừng hàm ngay lập tức</td><td><code>warnings.warn(message, category)</code> raises a non-fatal signal carrying a message and a category (e.g. <code>UserWarning</code>, <code>DeprecationWarning</code>); unlike <code>raise</code>, the function keeps running and still returns normally right after the call.</td></tr>
+  <tr><td>catch_warnings(record=True)</td><td>giữ nguyên "catch_warnings(record=True)" — context manager thu toàn bộ warning phát ra bên trong block vào 1 list thay vì in ra, dùng để test warning có thật sự xảy ra không; thường đi kèm simplefilter("always") để không bị filter mặc định (chỉ in 1 lần/vị trí) che mất lần lặp lại</td><td>A context manager that collects every warning raised inside its <code>with</code> block into a list instead of printing it — the way a test confirms a warning actually fired. Usually paired with <code>simplefilter("always")</code>, since the default filter only shows each distinct warning once per call site.</td></tr>
+  <tr><td>filterwarnings("error", ...)</td><td>giữ nguyên "filterwarnings" — đổi filter đang áp dụng; truyền "error" biến warning (theo category chỉ định) thành exception thật, raise lên như lỗi thay vì chỉ in ra 1 dòng</td><td><code>warnings.filterwarnings("error", category=...)</code> changes the active filter so a matching <code>warn()</code> call raises a real exception instead of printing a line — the same call, escalated by the filter in effect, letting a strict test or pipeline fail loudly on a normally-survivable condition.</td></tr>
+</table>
+
 <p class="next">💬 A term here still unclear? Ask your teacher — hỏi bằng tiếng Việt cũng được.</p>
 
 <script src="../assets/nav.js"></script>

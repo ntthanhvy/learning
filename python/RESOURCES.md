@@ -65,6 +65,8 @@ authors for *why*. Cite inline; each lesson recommends exactly one primary sourc
   Use for: Day 82 — `b64encode()`/`b64decode()` for carrying arbitrary bytes through a text-only format (JSON, a log line), `urlsafe_b64encode()`/`urlsafe_b64decode()` for the URL-safe `-`/`_` alphabet variant, and why encoding is not encryption.
 - [Docs: `traceback`](https://docs.python.org/3/library/traceback.html)
   Use for: Day 84 — `format_exc()`/`print_exc()` for capturing or writing out the same report an uncaught exception would print, from inside a running `except` block; `print_exc()`'s `file=` redirect; and how Day 15's `logging` `exc_info=True` calls this module internally.
+- [Docs: `warnings`](https://docs.python.org/3/library/warnings.html)
+  Use for: Day 85 — `warn()` for a non-fatal "probably wrong, keep going" signal distinct from `raise` and from Day 15's `logging.warning()`; `catch_warnings(record=True)`/`simplefilter("always")` for asserting a warning fired in a test; and `filterwarnings("error", ...)` for escalating a warning category into a real exception.
 - [PEP 8 — Style Guide for Python Code](https://peps.python.org/pep-0008/)
   Use for: naming and layout conventions, so written code looks like the ecosystem's.
 

@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 37 · Consumer lag monitoring: a real Python check, not a one-off CLI read</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 37 · ~20 min · 22 Oct 2026</p>
+<h1>Consumer lag monitoring: a real Python check, not a one-off CLI read</h1>
+<p class="byline">Today's tangible win: <code>scripts/check_consumer_lag.py</code>, a small script that computes lag for the real <code>warehouse-loader</code> group programmatically — the same number Day 18 read once by eye off <code>kafka-consumer-groups.sh --describe</code> — and exits non-zero past a threshold, the shape an Airflow sensor or an on-call alert actually calls instead of a human running a shell command. This closes a gap Day 33's own closing note named directly: lag monitoring stayed concept-plus-one-CLI-read on Day 18 and was never turned into something runnable.</p>
+
+<div class="callout"><strong>Before today — check Day 6 and Day 18 actually landed:</strong> today's script watches the real consumer group both of those days already created, so confirm it still exists:
+<pre><code>docker compose up -d
+docker compose exec kafka /opt/kafka/bin/kafka-consumer-groups.sh \
+  --bootstrap-server localhost:9092 --describe --group warehouse-loader</code></pre>
+Expected: a table with <code>GROUP TOPIC PARTITION CURRENT-OFFSET LOG-END-OFFSET LAG ...</code> for <code>warehouse-loader</code> against <code>order_events</code> (three rows, one per partition). If the group has never run, go back to Day 6 and run <code>scripts/consume_order_events.py</code> at least once first — today has nothing to measure without a group that has committed at least one offset.</div>
+
+<h2>1 · What Day 18 actually did, and the gap it left</h2>
+<p>Day 18 defined lag correctly and read it once: <dfn data-en="for one partition, the difference between its current high-water-mark offset (the offset of the next message the broker would write) and a specific consumer group's committed offset on that partition -- a rising lag means the consumer group is either processing slower than the producer is writing, or stuck/crashed outright" data-vn="giữ nguyên &quot;consumer lag&quot; — với 1 partition, là khoảng cách giữa high-water-mark offset hiện tại và committed offset của 1 consumer group cụ thể trên partition đó">consumer lag</dfn> is high-water mark minus committed offset, read straight off the <code>LAG</code> column of <code>kafka-consumer-groups.sh --describe</code>. That's the right definition and the right first command, but it's a human reading a terminal once. Nothing from that day can run on a schedule, raise an alert, or feed a dashboard — it was concept-plus-one-CLI-read, which is exactly how <code>PLAN.md</code>'s own Phase 2b bullet frames this topic ("consumer lag as the key health metric") without specifying a build. The gap is mechanical, not conceptual: turn the one-off shell read into a script that returns a real exit code, because that's the actual interface a monitoring system or an orchestrator needs.</p>
+<p>This also bridges directly to <code>MISSION.md</code>'s own Kafka bullet about the landing step being at-least-once: lag is the metric that tells you *when* to worry about that consumer, not just that it's theoretically safe. A consumer that's stopped committing entirely — crashed, OOM-killed, stuck in a retry loop — is invisible from the warehouse side until lag makes it visible.</p>
+
+<h2>2 · Why the CLI output alone doesn't compose into an alert</h2>
+<p><code>kafka-consumer-groups.sh --describe</code> is a Java tool shelling out through the broker's admin protocol; its output is text meant for a terminal, not a return value a Python process (or an Airflow task) can branch on. Getting the same number programmatically needs two separate broker calls, because Kafka itself exposes "how far the group has committed" and "how far the log currently extends" through two different APIs:</p>
+<table class="gloss">
+  <tr><th>What you need</th><th>Where it comes from</th></tr>
+  <tr><td>The group's committed offset per partition</td><td><code>AdminClient.list_consumer_group_offsets()</code> — an admin-level call, no need to join the group</td></tr>
+  <tr><td>The partition's current high-water mark</td><td>A real <code>Consumer</code>'s <code>get_watermark_offsets()</code> — asks the broker directly for a partition's low/high offsets</td></tr>
+</table>
+<p>Lag itself is just the subtraction between those two numbers, same as Day 18 — today's actual work is calling both APIs correctly and treating the result as a value a script can act on, not a line to read.</p>
+
+<h2>3 · Build: <code>scripts/check_consumer_lag.py</code></h2>
+<p>Adapted from Day 6's own consumer shape (same <code>BOOTSTRAP</code>/<code>GROUP_ID</code> constants, same "give the exact shape in full" rule for a script whose correctness depends on getting two admin calls right, not on something safe to leave as an exercise):</p>
+<pre><code><span class="cm">"""Compute consumer lag per partition for one group, in Python instead of
+reading kafka-consumer-groups.sh --describe by eye.
+
+Lag = high-water mark (log-end offset, from a real Consumer's own
+get_watermark_offsets) minus the group's committed offset (from
+AdminClient.list_consumer_group_offsets). Exits non-zero if any
+partition's lag exceeds LAG_THRESHOLD -- the shape a monitoring check or
+an Airflow sensor actually calls, not a line a human reads once.
+"""</span>
+<span class="kw">import</span> sys
+
+<span class="kw">from</span> confluent_kafka <span class="kw">import</span> Consumer, TopicPartition
+<span class="kw">from</span> confluent_kafka.admin <span class="kw">import</span> AdminClient
+<span class="kw">from</span> confluent_kafka._model <span class="kw">import</span> ConsumerGroupTopicPartitions
+
+BOOTSTRAP = <span class="str">"localhost:9092"</span>
+TOPIC = <span class="str">"order_events"</span>
+GROUP_ID = <span class="str">"warehouse-loader"</span>
+LAG_THRESHOLD = <span class="kw">1000</span>
+
+
+<span class="kw">def</span> main():
+    admin = AdminClient({<span class="str">"bootstrap.servers"</span>: BOOTSTRAP})
+
+    request = ConsumerGroupTopicPartitions(GROUP_ID)
+    group_future = admin.list_consumer_group_offsets([request])[GROUP_ID]
+    committed = group_future.result()  <span class="cm"># ConsumerGroupTopicPartitions</span>
+
+    <span class="cm"># A throwaway consumer, never subscribed or joined to any group, used
+    # only to ask the broker for each partition's current high-water mark.</span>
+    watermark_reader = Consumer(
+        {<span class="str">"bootstrap.servers"</span>: BOOTSTRAP, <span class="str">"group.id"</span>: <span class="str">"lag-checker-throwaway"</span>}
+    )
+
+    worst_lag = <span class="kw">0</span>
+    <span class="kw">print</span>(<span class="str">f"{'PARTITION':&lt;10}{'COMMITTED':&lt;12}{'LOG-END':&lt;10}{'LAG':&lt;8}"</span>)
+    <span class="kw">for</span> tp <span class="kw">in</span> committed.topic_partitions:
+        <span class="kw">if</span> tp.topic != TOPIC:
+            <span class="kw">continue</span>
+        _, high = watermark_reader.get_watermark_offsets(
+            TopicPartition(tp.topic, tp.partition), timeout=<span class="kw">10.0</span>
+        )
+        committed_offset = tp.offset <span class="kw">if</span> tp.offset <span class="kw">is</span> <span class="kw">not</span> <span class="kw">None</span> <span class="kw">and</span> tp.offset &gt;= <span class="kw">0</span> <span class="kw">else</span> <span class="kw">0</span>
+        lag = high - committed_offset
+        worst_lag = <span class="kw">max</span>(worst_lag, lag)
+        <span class="kw">print</span>(<span class="str">f"{tp.partition:&lt;10}{committed_offset:&lt;12}{high:&lt;10}{lag:&lt;8}"</span>)
+
+    watermark_reader.close()
+
+    <span class="kw">if</span> worst_lag &gt; LAG_THRESHOLD:
+        <span class="kw">print</span>(<span class="str">f"ALERT: lag {worst_lag} exceeds threshold {LAG_THRESHOLD}"</span>)
+        sys.exit(<span class="kw">1</span>)
+    <span class="kw">print</span>(<span class="str">f"OK: worst partition lag is {worst_lag}"</span>)
+
+
+<span class="kw">if</span> __name__ == <span class="str">"__main__"</span>:
+    main()</code></pre>
+<p>Two things worth naming out loud, because both are the kind of detail that looks like a typo until you've hit it once. First, <code>confluent_kafka.admin</code> does <em>not</em> re-export <code>ConsumerGroupTopicPartitions</code> in this installed version — it has to come from <code>confluent_kafka._model</code>, confirmed directly against the installed package this round rather than assumed, since the obvious `from confluent_kafka.admin import ConsumerGroupTopicPartitions` raises <code>AttributeError</code>. A leading underscore in a module path is usually a sign to stay away, but here it's the only working import for a class the public <code>admin</code> module's own docstring tells you to use — worth a one-line code comment in your repo so a future you doesn't "fix" it back to the import that fails. Second, <code>list_consumer_group_offsets</code> returns <em>futures</em>, one per group, because the admin API is async under the hood; <code>.result()</code> is what blocks for the real answer, same pattern <code>confluent-kafka</code> uses everywhere in the admin client.</p>
+<p>Run it against the real group:</p>
+<pre><code>uv run --with confluent-kafka python3 scripts/check_consumer_lag.py</code></pre>
+<p>Expected, if <code>warehouse-loader</code> is fully caught up (run Day 6's consumer once more first if not, so there's a committed offset to read):</p>
+<pre><code>PARTITION COMMITTED   LOG-END   LAG
+0         9           9         0
+1         7           7         0
+2         6           6         0
+OK: worst partition lag is 0</code></pre>
+<p>To see the alert path fire for real, produce a fresh batch with <code>scripts/produce_order_events.py</code> but do not run the consumer afterward — now the group is behind on purpose, the same deliberate gap Day 18 created manually:</p>
+<pre><code>PARTITION COMMITTED   LOG-END   LAG
+0         9           13        4
+1         7           10        3
+2         6           6         0
+OK: worst partition lag is 4</code></pre>
+<p>With <code>LAG_THRESHOLD = 1000</code> that's still <code>OK</code> — four messages behind is normal between batches, not an incident. The threshold is a judgment call tied to how often the consumer actually runs and how large a "normal" gap between runs is, the same kind of threshold-tuning conversation as an SLA breach minutes cutoff (Day 10's <code>sla_threshold_minutes</code>); a consumer that runs continuously might alert past a lag of 50, while one that only runs once an hour might reasonably sit at a few thousand between runs and alert only past a much higher number.</p>
+
+<h2>4 · Where this plugs in, without building new infrastructure today</h2>
+<p>This script is deliberately a leaf, not a new service. Two realistic next steps exist without writing a line of new monitoring code today: a cron-style call from outside Airflow entirely (the honest MVP), or — the shape that actually fits this course's own stack — an Airflow task that runs this script via <code>BashOperator</code> before <code>dbt_build</code> in the real <code>food_delivery_pipeline</code> DAG from Day 7, failing fast with a clear message if the Kafka side is badly behind, rather than letting <code>dbt build</code> run against a warehouse known to be stale. That wiring is a future day's work, explicitly not today's — today's scope is the check itself returning a trustworthy exit code, since an Airflow task calling a script that always exits 0 would be worse than no check at all.</p>
+<div class="callout"><strong>Scope check:</strong> no new Docker service, no Prometheus/Grafana, no new topic. One script, two broker calls, one threshold. Exactly the "working level" Kafka depth this course commits to — a real dashboard behind a real alert is an interesting follow-on, not today's build.</div>
+
+<div class="interview">
+<p><strong>Q: "Walk me through how you'd actually monitor Kafka consumer lag in production, not just define it."</strong> A strong answer, out loud: <em>"Lag is high-water mark minus committed offset, per partition, and I'd get both numbers programmatically rather than reading a CLI table by hand — AdminClient.list_consumer_group_offsets for the committed side, a real Consumer's get_watermark_offsets for the log-end side. I'd wrap that in a script that exits non-zero past a threshold, because the moment lag monitoring is just a number a human reads occasionally, it doesn't actually catch anything at 2am. The threshold itself depends on how the consumer runs — continuous versus scheduled batches — so it's a judgment call, not a universal constant. And I'd wire the check to run before anything downstream trusts the data it's watching, not as a separate dashboard nobody checks until something's already broken."</em> The signal: naming both actual API calls, not just the subtraction, and connecting the check to a concrete failure mode (stale data silently feeding a report) rather than treating monitoring as a checkbox.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="kafka-consumer-groups.sh --describe is a shell command whose output is text for a human terminal, not a return value a script or an orchestrator can branch on. Computing the same lag number programmatically needs two broker calls instead: AdminClient.list_consumer_group_offsets for the committed side, and a real Consumer's get_watermark_offsets for the high-water mark, with the subtraction done in code so the result is a value, not a line to read.">
+    <p class="stem">Why isn't Day 18's <code>kafka-consumer-groups.sh --describe</code> command enough for an automated lag alert?</p>
+    <button class="opt" data-ok>Its output is terminal text, not a branchable code value</button>
+    <button class="opt">It cannot ever show a LAG column for any topic</button>
+    <button class="opt">It only works while some consumer process stays connected now</button>
+  </div>
+  <div class="q" data-why="Getting a group's committed offset and a partition's current high-water mark are two separate broker calls. AdminClient.list_consumer_group_offsets answers the committed-offset side without needing to join the group at all, while a real Consumer's own get_watermark_offsets asks the broker directly for a partition's low/high offsets. Lag itself is just the subtraction between the two numbers once both calls return.">
+    <p class="stem">Which two calls does the lag-check script need to compute lag itself?</p>
+    <button class="opt" data-ok>list_consumer_group_offsets, and a real Consumer's own get_watermark_offsets call</button>
+    <button class="opt">produce, called alone twice against the same topic</button>
+    <button class="opt">describe_consumer_groups, called once for each single broker replica</button>
+  </div>
+  <div class="q" data-why="confluent_kafka.admin's own module does not re-export ConsumerGroupTopicPartitions in this installed version -- importing it from there raises AttributeError, confirmed directly against the installed package. The only working import path is confluent_kafka._model, a leading-underscore module that looks like it should be avoided but is, here, the class the public admin API's own list_consumer_group_offsets method actually requires as its request type.">
+    <p class="stem">Where does <code>ConsumerGroupTopicPartitions</code> actually have to be imported from, in this installed confluent-kafka version?</p>
+    <button class="opt" data-ok><code>confluent_kafka._model</code>, not the public <code>admin</code> module</button>
+    <button class="opt"><code>confluent_kafka.admin</code>, exactly where it is documented</button>
+    <button class="opt"><code>confluent_kafka.cimpl</code>, the package's compiled C extension</button>
+  </div>
+  <div class="q" data-why="A script that always returns exit code 0 regardless of how far behind the consumer actually is provides no real signal to anything calling it -- an Airflow task or cron job branching on that exit code would never detect a stuck or crashed consumer, which defeats the entire point of turning a one-off CLI read into an automated check. The threshold comparison and non-zero exit on breach are what make the check trustworthy enough to wire into something else.">
+    <p class="stem">What would make today's lag-check script useless to an Airflow task calling it, even if the lag math were correct?</p>
+    <button class="opt" data-ok>If it always exited 0 no matter how far behind</button>
+    <button class="opt">If it printed each partition's number before the lag value</button>
+    <button class="opt">If it queried partition 0 before querying partition 1 next</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> per <code>RESOURCES.md</code>, the <a href="https://docs.confluent.io/kafka-clients/python/current/overview.html">confluent-kafka Python client docs</a> are this course's cited source for producer/consumer and admin API usage; today's exact method signatures and docstrings (<code>AdminClient.list_consumer_group_offsets</code>, <code>ConsumerGroupTopicPartitions</code>, <code>Consumer.get_watermark_offsets</code>) were read directly off the installed <code>confluent-kafka</code> package this round via Python's own <code>inspect.getdoc()</code>, not re-fetched from the live docs site (no working web-fetch tool available this round, the same gap Days 17, 23, 26, 31 and 34 each hit) — confirm the hosted page still matches before quoting a signature in an interview. The <a href="https://kafka.apache.org/documentation/#design">Apache Kafka Design docs</a>, this course's standing primary source for offsets and consumer groups since Day 5, remain the authoritative source for the underlying concept lag itself measures.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 37.<br>
+<strong>Next lesson:</strong> open — the other named gap from Day 35's closing note, actually running <code>airflow dags test</code> end to end under interactive DB-migration approval, is still unresolved after two rounds of being blocked headlessly; worth another attempt, or else the spine returns to dbt/Airflow depth rather than Kafka a third round running.<br><br>
+💬 Anything unclear — why the committed offset and the high-water mark need two separate broker calls instead of one, or where this script would actually plug into the Day 7 DAG? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

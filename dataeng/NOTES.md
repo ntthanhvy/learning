@@ -4256,3 +4256,129 @@ along the Phase 2 spine, adapted to the learning records.
   hands-on), and Day 35's own open verification loop (actually running
   `airflow dags test` end to end under interactive approval, which this
   sandbox couldn't get approved headlessly that round or this one).
+- 2026-10-22 (headless 06:00 run, Day 37 generated): thirty-seventh lesson,
+  `0037-kafka-consumer-lag-monitoring-script.html`. Confirmed before writing
+  that no `0037-*.html` file existed in `lessons/` and no `2026-10-22` entry
+  existed in `assets/nav.js` (last entry was Day 36, dated 2026-10-21). Read
+  `MISSION.md`, `PLAN.md`, this file's tail, `RESOURCES.md`, the
+  `learning-records/` file, and `assets/nav.js`'s full `LESSONS` array before
+  writing anything, plus Day 18 and Day 6 in full for exact precedent and
+  domain conventions (`warehouse-loader` group id, `scripts/` as the real
+  script directory, the "give full code when correctness matters, not as an
+  exercise" rule).
+  **Topic choice:** this round's own brief named the Kafka consumer-lag
+  monitoring walkthrough as the strongest concretely-named gap — flagged by
+  Day 33's closing note and repeated unresolved through Days 34–36's own
+  closing notes. Confirmed the gap was real before writing, not assumed: Day
+  18 defined consumer lag correctly and read it once, live, off
+  `kafka-consumer-groups.sh --describe`, but nothing from that day runs on a
+  schedule or returns a value code can branch on — concept-plus-one-CLI-read,
+  exactly as the brief described it. Picked this over re-attempting Day 35's
+  blocked `airflow dags test` loop (still open, named below) since today's
+  gap had a concrete, buildable shape with no interactive-approval blocker in
+  the way.
+  **Content:** built `scripts/check_consumer_lag.py`, a script computing lag
+  for the real `warehouse-loader` group (Day 6's own consumer's group id,
+  reused not invented) via two broker calls — `AdminClient.
+  list_consumer_group_offsets` for the committed-offset side and a real
+  `Consumer`'s own `get_watermark_offsets` for the high-water-mark side —
+  exiting non-zero past `LAG_THRESHOLD`. Named explicitly where this plugs in
+  without building it today: a `BashOperator` task ahead of the real
+  `dbt_build` task in Day 7's `food_delivery_pipeline` DAG, failing fast
+  rather than letting `dbt build` run against a warehouse known to be stale
+  — named as a future day's work, not built this round, keeping today's scope
+  to the check itself returning a trustworthy exit code. No new Docker
+  service, no Prometheus/Grafana, no new topic — one script, two broker
+  calls, one threshold, matching this course's Kafka working-level depth
+  rather than reaching for production-monitoring infrastructure. No pandas,
+  no Python-language teaching (the script's own `for`/`if`/`sys.exit` are
+  working code, not a syntax lesson), no re-derivation of idempotency beyond
+  the already-established `warehouse-loader` consumer's own safety (reused,
+  not re-taught, and grepped afterward to confirm "idempot" appears zero
+  times in today's lesson text).
+  **A real API quirk caught by live inspection, not assumed:** this sandbox
+  could install `confluent-kafka` itself this round (`uv run --with
+  confluent-kafka python3 -c "import confluent_kafka; print(confluent_kafka.
+  __version__)"` → `2.16.0` installed, close to but not exactly this course's
+  pinned `2.15.1` since no exact version pin was given to `uv` this round —
+  flagged honestly). Used that install to discover, by actually trying the
+  documented-looking import and watching it fail, that `confluent_kafka.
+  admin` does **not** re-export `ConsumerGroupTopicPartitions` in this
+  installed version — `from confluent_kafka.admin import
+  ConsumerGroupTopicPartitions` raises `AttributeError: module
+  'confluent_kafka.admin' has no attribute 'ConsumerGroupTopicPartitions'.
+  Did you mean: '_ConsumerGroupTopicPartitions'?` — and the only working
+  import is `from confluent_kafka._model import ConsumerGroupTopicPartitions`,
+  a leading-underscore module path that looks wrong but is, confirmed by
+  direct inspection, the class the public `AdminClient.
+  list_consumer_group_offsets` method's own docstring requires as its
+  request type. Also confirmed via `inspect.getdoc()` against the installed
+  package: `list_consumer_group_offsets` returns a dict of per-group
+  futures (`.result()` blocks for the real `ConsumerGroupTopicPartitions`
+  answer), and `Consumer.get_watermark_offsets` returns a `(low, high)`
+  tuple with "high" defined as one past the last message's offset — both
+  read directly from docstrings rather than assumed from memory or a blog
+  post, same honesty pattern as Day 35's source-reading approach. This is a
+  real, worth-knowing gotcha for anyone building this in their own repo, not
+  a cosmetic detail, and is called out explicitly in the lesson's own
+  Section 3 and tested directly in the quiz (Q3).
+  **Verification — what actually ran live vs. what didn't:** `py_compile`
+  ran clean against the exact script text extracted character-for-character
+  out of the lesson's own `<pre><code>` block (not a separately-maintained
+  copy that could drift from what the lesson shows), confirmed by writing an
+  extraction script that stripped the `<span>` syntax-highlighting tags and
+  HTML-unescaped the entities, then diffing by eye against what was written.
+  No live Kafka broker, no live Postgres, and no live `warehouse-loader`
+  consumer group existed in this sandbox, so the script's own two broker
+  calls were never executed against a real cluster this round — only
+  imported, constructed up to the point of calling `AdminClient(...)` and
+  `Consumer(...)` (which succeed with no live broker, since the client
+  objects themselves don't connect until a call like `.list_consumer_group_
+  offsets()` or `.poll()` is actually made), and verified via `py_compile`
+  plus direct docstring/behavior inspection of the installed package. The
+  exact `PARTITION/COMMITTED/LOG-END/LAG` table values shown in the lesson's
+  own expected-output blocks are hand-derived to be arithmetically
+  consistent with the stated lag numbers, not captured from a live run —
+  flagged honestly in the lesson text rather than silently presented as a
+  captured transcript, matching Day 36's and this course's standing honesty
+  convention for anything needing a live broker/warehouse this sandbox
+  doesn't have. No dbt model or macro snippet exists in this lesson
+  (confirmed by grep for `dbt build`/`dbt parse`/`dbt run`/`models/` — the
+  only hits are an unmodified reference to Day 7's existing `dbt_build` task
+  name in prose), so `dbt parse` did not apply this round.
+  Ran a Python tag-balance/bare-`&`/dfn-attribute/quiz-word-count script
+  (written to `.scratch-dataeng-1022/`, deleted afterward, removal confirmed
+  via `ls`) against the lesson: every checked tag balanced, zero bare `&`,
+  the lesson's one `<dfn>` tag (`consumer lag`, deliberately reusing Day 18's
+  existing glossary row rather than duplicating it — `high-water mark` is
+  also reused in prose, without a repeated `<dfn>` tag, since Day 18 already
+  tagged it once) carries both `data-en=` and `data-vn=`. The first quiz
+  draft came up mismatched on three of four questions (12/10/9, 5/9/6 and
+  12/10/9 word splits on Q1/Q2/Q4; Q3 was already 6/6/6 on the first try);
+  rebalanced through several edit-and-recount passes, re-running the same
+  script after every edit and printing each option's exact tokenised word
+  list once hand-counting proved unreliable, to a final 10/10/10, 8/8/8,
+  6/6/6 and 10/10/10 across all four questions.
+  **No new glossary section added this round** — a deliberate, named choice,
+  not an oversight. Every term today (`consumer lag`, `high-water mark`) is
+  a direct reuse of Day 18's own existing rows; the API identifiers
+  introduced (`AdminClient`, `get_watermark_offsets`,
+  `list_consumer_group_offsets`, `ConsumerGroupTopicPartitions`) are code
+  names explained inline via docstrings and prose, not standalone jargon in
+  the glossary's "term a learner needs translated/anchored" sense — the same
+  distinction Day 35 drew between `on_retry_callback` (left as code) and
+  `try_number`/`max_tries` (given real glossary rows as genuinely new
+  vocabulary). Grepped the glossary case-insensitively for all four API
+  names first to confirm none already existed as rows, then decided none
+  needed to be added, rather than skipping the check. No `RESOURCES.md`
+  change either, for the same reason — both of today's citations
+  (confluent-kafka Python client docs, Apache Kafka Design docs) were
+  already listed by name.
+  Registered Lesson 37 in `assets/nav.js` (`node --check` clean).
+  **Next up, named honestly for whoever picks up next:** Day 35's own open
+  verification loop — actually running `airflow dags test` end to end under
+  interactive DB-migration approval — is still unresolved after two prior
+  rounds (35, 36) couldn't get it approved headlessly; worth a third attempt,
+  or else let the spine move to further dbt/Airflow depth rather than a third
+  Kafka round in a row, since Kafka has now run two of the last four rounds
+  (34, 37) against one each for dbt (36) and Airflow (0 since 35).

@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 85 · warnings: flagging trouble without stopping</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 85 · ~20 min · 22 Oct 2026</p>
+<h1><code>warnings</code>: flagging trouble without stopping</h1>
+<p class="byline">Day 8's <code>raise</code> stops a function cold. Day 15's <code>logging</code> writes an observation to a record, but never changes whether the program keeps going. Between those two sits a real gap: a function that notices something is probably wrong — a deprecated argument, a suspicious value it can still limp through — and needs to say so loudly, without crashing the caller over it. <dfn data-en="the warnings module is the standard-library module for raising a non-fatal signal that something is probably wrong, printed once per call site by default, that a caller can also choose to silence, collect, or escalate into a real exception" data-vn="giữ nguyên &quot;warnings module&quot; — module chuẩn phát tín hiệu không gây dừng chương trình khi có gì đó khả nghi, mặc định in ra một lần cho mỗi chỗ gọi, caller có thể tắt, thu thập lại, hoặc biến thành exception thật nếu muốn">The <code>warnings</code> module</dfn> is that signal.</p>
+
+<div class="callout"><strong>Why today, specifically:</strong> Day 84 ran its own fresh-gap scan after Day 83's review and named several confirmed-open candidates it didn't choose: <code>hmac</code>, <code>inspect</code>, <code>ChainMap</code>, <code>warnings</code>, <code>graphlib</code>, <code>weakref</code>, <code>calendar</code>. Re-ran the same case-insensitive grep across every lesson, every practice file, <code>reference/glossary.html</code>, and <code>RESOURCES.md</code> for all seven before picking — still zero hits for every one of them. Chose <code>warnings</code>: it sits exactly between Day 8's <code>raise</code> and Day 15's <code>logging</code>, a gap both lessons left open, and today is this cadence's second fresh topic since Day 83's review (Day 84 was the first) — one more fresh lesson should follow before a review is next due.</div>
+
+<h2>1 · The problem: not every problem deserves a crash</h2>
+<p>A function parsing a "rate" field might get <code>50</code> when it expected a fraction like <code>0.5</code> — probably a percent typed by mistake. Raising stops the whole batch over one likely-fixable value; silently "fixing" it and saying nothing hides a real data problem from whoever's debugging later:</p>
+<pre><code><span class="kw">def</span> parse_rate(value):
+    <span class="kw">if</span> value > <span class="num">1</span>:
+        value = value / <span class="num">100</span>   <span class="cm"># guesses it was a percent -- but tells no one</span>
+    <span class="kw">return</span> value
+
+<span class="kw">print</span>(parse_rate(<span class="num">50</span>))   <span class="cm"># 0.5 -- quietly "fixed", no trace it happened</span></code></pre>
+<p>This is the exact middle ground <code>raise</code> and a plain <code>return</code> both miss: keep running, but make the guess visible.</p>
+
+<h2>2 · <code>warnings.warn()</code>: a signal that doesn't stop anything</h2>
+<p><code>warnings.warn(message, category)</code> prints a one-line notice — by default once per distinct call site, to <code>stderr</code> — and then execution continues normally on the very next line:</p>
+<pre><code><span class="kw">import</span> warnings
+
+<span class="kw">def</span> parse_rate(value):
+    <span class="kw">if</span> value > <span class="num">1</span>:
+        warnings.warn(
+            <span class="str">f"rate {value} looks like a percent, not a fraction -- dividing by 100"</span>,
+            UserWarning,
+        )
+        value = value / <span class="num">100</span>
+    <span class="kw">return</span> value
+
+<span class="kw">print</span>(parse_rate(<span class="num">50</span>))
+<span class="cm"># &lt;stdin&gt;:1: UserWarning: rate 50 looks like a percent, not a fraction -- dividing by 100
+# 0.5</span></code></pre>
+<p>Confirmed live: the function's return value (<code>0.5</code>) and the warning text both appear — nothing about calling <code>warn()</code> changed control flow at all. <code>UserWarning</code> is the default, general-purpose category; <code>DeprecationWarning</code> (for "this still works, but stop using it") and <code>RuntimeWarning</code> (an unusual runtime condition) are the two other most common built-in categories, used the same way.</p>
+<div class="callout"><strong><code>warnings.warn()</code> vs. <code>logging.warning()</code>:</strong> both signal "something's off" without stopping. Day 15's <code>logging.warning()</code> just writes a line to wherever logging is configured to send it — no special handling available. <code>warnings.warn()</code> is built to be <em>programmatically acted on</em> by the caller: filtered, deduplicated, collected in a test, or turned into a real exception, as the next two sections show. Library code (e.g. "this argument is deprecated") reaches for <code>warnings</code>; application logging of routine events reaches for <code>logging</code>.</div>
+
+<h2>3 · Catching warnings in a test, and escalating one into an exception</h2>
+<p>A test that wants to confirm a warning actually fired needs to catch it rather than let it print — <code>warnings.catch_warnings(record=True)</code> plus <code>simplefilter("always")</code> collects every warning raised inside the <code>with</code> block into a plain list instead of printing it:</p>
+<pre><code><span class="kw">with</span> warnings.catch_warnings(record=<span class="kw">True</span>) <span class="kw">as</span> caught:
+    warnings.simplefilter(<span class="str">"always"</span>)
+    parse_rate(<span class="num">50</span>)
+    <span class="kw">assert</span> <span class="kw">len</span>(caught) == <span class="num">1</span>
+    <span class="kw">assert</span> <span class="str">"looks like a percent"</span> <span class="kw">in</span> <span class="kw">str</span>(caught[<span class="num">0</span>].message)
+    <span class="kw">assert</span> caught[<span class="num">0</span>].category <span class="kw">is</span> UserWarning
+<span class="cm"># all three asserts pass -- confirmed live, no print reached stderr</span></code></pre>
+<p><code>simplefilter("always")</code> matters here: Python's default filter only shows each distinct warning once per location, which would hide a second identical call in the same test run. The opposite direction also exists — <code>warnings.filterwarnings("error", category=UserWarning)</code> turns every matching warning into a real raised exception instead of a printed line, letting a test (or a strict pipeline) fail loudly on a condition that's normally survivable:</p>
+<pre><code>warnings.filterwarnings(<span class="str">"error"</span>, category=UserWarning)
+<span class="kw">try</span>:
+    warnings.warn(<span class="str">"bad input"</span>, UserWarning)
+<span class="kw">except</span> UserWarning <span class="kw">as</span> e:
+    <span class="kw">print</span>(<span class="str">"caught as exception:"</span>, e)
+<span class="cm"># caught as exception: bad input -- confirmed live</span></code></pre>
+<p>Same <code>warn()</code> call both times; the filter in effect decides whether it prints once and moves on, or stops the program like any other exception.</p>
+
+<div class="callout"><strong>Where pandas/NumPy go from here:</strong> nothing library-specific today — both libraries use exactly this module under the hood for their own deprecation notices (the "FutureWarning: ..." lines a pandas upgrade sometimes prints), but today's lesson stays in plain stdlib territory, per <code>MISSION.md</code>.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/85_warnings_module.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/85_warnings_module.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: writing a function that warns and still returns a value when a suspicious input arrives, catching that warning in a test with <code>catch_warnings(record=True)</code>/<code>simplefilter("always")</code> and checking its message and category, and escalating a warning category into a real exception with <code>filterwarnings("error", ...)</code> and catching it like any other.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="warnings.warn() prints a notice and then execution continues on the very next line -- the function still runs to completion and still returns its value. raise stops the function immediately and propagates up the call stack until something catches it.">
+    <p class="stem">What is the key behavioral difference between <code>warnings.warn()</code> and <code>raise</code>?</p>
+    <button class="opt" data-ok>warn() lets the function keep running and still return a value</button>
+    <button class="opt">warn() always stops the function right at that exact line too</button>
+    <button class="opt">warn() and raise both silently skip the rest of the function</button>
+  </div>
+  <div class="q" data-why="logging.warning() only writes a line to wherever logging sends it, with no special further handling available. warnings.warn() is built to be programmatically acted on by the caller: collected in a test via catch_warnings(), or escalated into a real exception via filterwarnings('error', ...) -- neither of which logging.warning() supports.">
+    <p class="stem">Why reach for <code>warnings.warn()</code> instead of <code>logging.warning()</code> for a deprecated-argument notice?</p>
+    <button class="opt" data-ok>a caller can filter, collect in tests, or escalate it to an error</button>
+    <button class="opt">warn() writes straight to a real database table while plain logging never can</button>
+    <button class="opt">there is truly no real difference at all between either one here today</button>
+  </div>
+  <div class="q" data-why="warnings.filterwarnings('error', category=UserWarning) changes the filter in effect, so a warn() call of that category raises a real exception instead of printing a line -- the exact same warn() call, just under a stricter filter, which is exactly why a test can make a normally-survivable condition fail loudly on purpose.">
+    <p class="stem">What does <code>warnings.filterwarnings("error", category=UserWarning)</code> do to a later <code>warn()</code> call?</p>
+    <button class="opt" data-ok>turns that warning into a real raised exception instead</button>
+    <button class="opt">permanently deletes every single future call to warn() itself</button>
+    <button class="opt">makes the next ten warnings print twice as loudly</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the standard library's <a href="https://docs.python.org/3/library/warnings.html"><code>warnings</code></a> docs — the "The Warnings Filter" section covers every filter action (<code>"error"</code>, <code>"ignore"</code>, <code>"always"</code>, <code>"default"</code>, and more) this lesson only samples two of, and the built-in warning category hierarchy (<code>DeprecationWarning</code>, <code>RuntimeWarning</code>, and others) beyond the single <code>UserWarning</code> shown here.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day85">glossary</a> under Day 85.<br>
+This is the second fresh lesson since Day 83's review (Days 80-82) — one more fresh topic should follow before the next review is due, per this course's settled three-fresh-then-review cadence, unless a stronger reason to deviate turns up then.<br><br>
+💬 Anything unclear — <code>warn()</code> vs. <code>raise</code> vs. <code>logging.warning()</code>, or how the filter mechanism decides what happens? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

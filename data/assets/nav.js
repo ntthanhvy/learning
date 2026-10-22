@@ -214,6 +214,8 @@
       file: "lessons/0103-to-timedelta.html" },
     { n: 104, date: "2026-10-21", title: "Series.str.strip(): the whitespace bug hiding in every merge key",
       file: "lessons/0104-str-strip.html" },
+    { n: 105, date: "2026-10-22", title: "Series.str.pad(): fixed-width alignment, and the sign trap zfill() doesn't have",
+      file: "lessons/0105-str-pad.html" },
   ];
 
   const REFS = [

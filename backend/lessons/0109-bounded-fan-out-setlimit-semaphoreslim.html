@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 109 · Fan out to 3 is easy. Fan out to 3,000 needs a limit.</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 109 · ~20 min</p>
+<h1>Fan out to 3 is easy. Fan out to 3,000 needs a limit.</h1>
+<p class="byline">Lesson 108's fan-out pattern launched exactly three goroutines (or three Tasks) and waited for all of them. That works fine for three fixed downstream calls. It breaks the moment the list isn't three items but three thousand — a batch of rows to reprocess, a directory of files to upload, a page of user IDs to notify. Launching one goroutine or Task per item, unbounded, can open thousands of outbound connections or threads at once and take the downstream service down. Today's lesson: bounding how many of those fan-out tasks run at once, in Go and in C#.</p>
+
+<h2>1 · Unbounded fan-out is a different bug than the one Lesson 108 covered</h2>
+<p>Take Lesson 108's shape and swap "3 fixed services" for "N items from a slice":</p>
+<pre><code><span class="kw">for</span> _, item := <span class="kw">range</span> items {   <span class="cm">// items has 3,000 elements</span>
+    item := item
+    g.Go(<span class="kw">func</span>() <span class="kw">error</span> {
+        <span class="kw">return</span> processItem(ctx, item)   <span class="cm">// opens an outbound call per item</span>
+    })
+}
+<span class="kw">if</span> err := g.Wait(); err != <span class="kw">nil</span> { <span class="kw">return</span> err }
+</code></pre>
+<p>This compiles, and it is still structured concurrency in Lesson 108's sense — nothing outlives <code>g.Wait()</code>, and a failure still cancels the group's <code>ctx</code>. But it now launches 3,000 goroutines <em>immediately</em>, each opening its own outbound connection to whatever <code>processItem</code> calls. A downstream service built to handle 20 concurrent requests sees 3,000 at once. This is a width problem, not a cancellation problem — Lesson 108's fail-fast gotcha and this lesson's width gotcha are independent bugs that can both be present in the same loop.</p>
+
+<h2>2 · Go: errgroup.Group.SetLimit bounds the group itself</h2>
+<p>The errgroup package's own answer is one method call, added directly to the <code>Group</code> used in Lesson 108:</p>
+<pre><code><span class="kw">g</span>, ctx := errgroup.WithContext(parentCtx)
+g.SetLimit(20)   <span class="cm">// at most 20 goroutines active in this group at once</span>
+
+<span class="kw">for</span> _, item := <span class="kw">range</span> items {
+    item := item
+    g.Go(<span class="kw">func</span>() <span class="kw">error</span> {              <span class="cm">// blocks here if 20 are already active</span>
+        <span class="kw">return</span> processItem(ctx, item)
+    })
+}
+<span class="kw">if</span> err := g.Wait(); err != <span class="kw">nil</span> { <span class="kw">return</span> err }
+</code></pre>
+<p>Per the package's own docs, <dfn data-en="a method on errgroup.Group that caps the number of active goroutines the group will run at once -- a negative value means no limit, and once the cap is reached, any further call to g.Go() blocks the calling goroutine until an active goroutine finishes and frees a slot" data-vn="SetLimit() (giữ nguyên) — method của errgroup.Group giới hạn số goroutine đang active cùng lúc trong group -- giá trị âm nghĩa là không giới hạn, và khi đã chạm giới hạn thì g.Go() tiếp theo sẽ block goroutine gọi nó cho tới khi có 1 goroutine active xong và nhường chỗ">SetLimit()</dfn> "limits the number of active goroutines in this group to at most n... any subsequent call to the Go method will block until it can add an active goroutine without exceeding the configured limit." A negative <code>n</code> means no limit (the Lesson 108 behavior); zero blocks every <code>Go()</code> call forever. One documented catch worth flagging explicitly: the limit must not be changed while goroutines in the group are already active — call <code>SetLimit</code> once, before the loop starts, not mid-flight.</p>
+
+<h2>3 · C#: no equivalent on Task.WhenAll — bring your own SemaphoreSlim</h2>
+<p><code>Task.WhenAll</code> has no built-in width cap at all; calling it with 3,000 pending Tasks starts all 3,000 immediately, same as the naive Go loop. The standard .NET answer is a <dfn data-en="a lightweight .NET synchronization primitive holding a count of free slots -- WaitAsync() asynchronously suspends the caller until a slot is free (decrementing the count), and Release() gives a slot back (incrementing the count), used here purely to cap how many tasks run their body at once, not for mutual exclusion of shared data" data-vn="SemaphoreSlim (giữ nguyên) — primitive đồng bộ nhẹ của .NET giữ số slot còn trống -- WaitAsync() tạm dừng caller (không chặn thread) cho tới khi có slot trống (giảm count), Release() trả slot lại (tăng count), ở đây dùng thuần để giới hạn số task chạy cùng lúc, không phải để khóa mutual exclusion dữ liệu dùng chung">SemaphoreSlim</dfn>, constructed with the width as its initial count, and a <code>WaitAsync()</code>/<code>Release()</code> pair wrapped around each task's body:</p>
+<pre><code><span class="kw">using</span> <span class="kw">var</span> gate = <span class="kw">new</span> SemaphoreSlim(<span class="kw">initialCount</span>: 20, <span class="kw">maxCount</span>: 20);
+
+<span class="kw">var</span> tasks = items.Select(<span class="kw">async</span> item => {
+    <span class="kw">await</span> gate.WaitAsync(ct);           <span class="cm">// suspends here if 20 slots are taken</span>
+    <span class="kw">try</span> { <span class="kw">return</span> <span class="kw">await</span> ProcessItemAsync(item, ct); }
+    <span class="kw">finally</span> { gate.Release(); }       <span class="cm">// always free the slot, success or throw</span>
+});
+
+<span class="kw">await</span> Task.WhenAll(tasks);
+</code></pre>
+<p>Per Microsoft's own docs, <code>WaitAsync()</code> "asynchronously waits to enter the SemaphoreSlim" — when the count is already zero, the awaiting Task simply suspends (the same non-blocking suspension Lesson 107 covered for any <code>await</code>) until some other task calls <code>Release()</code> and frees a slot. The <code>finally</code> block matters as much as the call itself: a <code>Release()</code> left out of a <code>finally</code> means one thrown exception permanently leaks a slot, and the gate slowly starves down to zero over the app's lifetime.</p>
+
+<div class="callout"><strong>Not the same thing as Lesson 50's bulkhead:</strong> a bulkhead partitions capacity <em>between different dependencies</em> (pricing gets its own pool, inventory gets its own, so one saturating can't starve the other). <code>SetLimit</code>/<code>SemaphoreSlim</code> here cap the width of <em>one single fan-out</em> against one dependency. The same semaphore pattern is in fact how a bulkhead's per-dependency slice is often implemented underneath — this lesson is the narrower, one-call-site version of that idea.</div>
+
+<div class="cmp-wrap">
+<table class="cmp">
+<thead><tr><th></th><th>Go: errgroup.Group</th><th>C#: Task.WhenAll</th></tr></thead>
+<tbody>
+<tr><th>Built-in width cap</th><td><code>g.SetLimit(n)</code>, one call</td><td>none — bring your own</td></tr>
+<tr><th>What enforces the cap</th><td>the group itself, inside <code>g.Go()</code></td><td>a <code>SemaphoreSlim</code> wrapped by hand per task</td></tr>
+<tr><th>Caller behavior at the cap</th><td><code>g.Go()</code> blocks the launching goroutine</td><td><code>WaitAsync()</code> suspends that one task</td></tr>
+<tr><th>Easy way to leak a slot</th><td>n/a — the group tracks it internally</td><td>forgetting <code>Release()</code> in a <code>finally</code></td></tr>
+</tbody>
+</table>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers capping how many fan-out tasks run concurrently, with <code>errgroup.Group.SetLimit</code> and a hand-wired <code>SemaphoreSlim</code>. It does not cover: picking the right width number for a given downstream service's actual capacity (an operational tuning question, not a mechanism one); <code>Task.WhenAny</code>'s manual first-one-wins pattern (Lesson 108's other flagged follow-on, still open); or a worker-pool with a fixed set of long-lived goroutines reading from a channel, which Lesson 25 already named as the alternative shape to a cap-per-call-site. Natural follow-ons, not covered here.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory, with no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Per the errgroup docs, once the configured limit is reached, any subsequent call to g.Go() blocks the calling goroutine until an active goroutine in the group finishes and frees a slot -- it does not drop, queue elsewhere, or error out.">
+    <p class="stem">In errgroup, once SetLimit's cap is reached, what does the next g.Go() call do?</p>
+    <button class="opt" data-ok>it blocks the caller until a slot frees up</button>
+    <button class="opt">it silently drops that queued goroutine call for good</button>
+    <button class="opt">it panics back at the goroutine that called it</button>
+    <button class="opt">it runs anyway and ignores the configured limit now</button>
+  </div>
+  <div class="q" data-why="Task.WhenAll itself has no width cap -- it starts every supplied Task immediately. The standard .NET pattern is a SemaphoreSlim, constructed with the desired width, wrapped with WaitAsync()/Release() around each task's own body.">
+    <p class="stem">What caps concurrent task width when using plain Task.WhenAll in C#?</p>
+    <button class="opt" data-ok>nothing built in -- wrap each task with SemaphoreSlim</button>
+    <button class="opt">a plain built-in maxDegreeOfParallelism argument sits right on Task.WhenAll</button>
+    <button class="opt">the .NET thread pool automatically caps this every time</button>
+    <button class="opt">CancellationToken itself already exposes its own built-in concurrency cap</button>
+  </div>
+  <div class="q" data-why="A Release() call left out of a finally block means any thrown exception inside the guarded body skips Release() entirely, so that one slot is never returned to the semaphore. Over the app's lifetime, enough leaked slots eventually starve the gate down toward zero free slots.">
+    <p class="stem">Why wrap SemaphoreSlim's guarded code in a try/finally around Release()?</p>
+    <button class="opt" data-ok>a thrown exception would otherwise skip Release and leak a slot</button>
+    <button class="opt">finally blocks make every single awaited call run measurably faster now</button>
+    <button class="opt">WaitAsync requires a matching finally block just to compile right here</button>
+    <button class="opt">it stops the semaphore slot count from ever changing at all</button>
+  </div>
+  <div class="q" data-why="A bulkhead (Lesson 50) partitions capacity between separate dependencies, so one saturating can't starve another's reserved slice. SetLimit/SemaphoreSlim here cap the width of one single fan-out against one dependency -- a narrower, one-call-site version of the same underlying idea, not the same scope.">
+    <p class="stem">How does this lesson's width cap differ from Lesson 50's bulkhead pattern?</p>
+    <button class="opt" data-ok>a bulkhead splits capacity across dependencies; this caps one call site</button>
+    <button class="opt">a bulkhead only exists in Go never in any C# codebase</button>
+    <button class="opt">they are simply two unrelated names for one identical mechanism here</button>
+    <button class="opt">this lesson cap applies to one process a bulkhead never does</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://pkg.go.dev/golang.org/x/sync/errgroup">pkg.go.dev: golang.org/x/sync/errgroup</a> (~5 min, the <code>SetLimit</code> section) is the primary source for the exact blocking behavior at the cap and the "must not be modified while active" constraint; <a href="https://learn.microsoft.com/en-us/dotnet/api/system.threading.semaphoreslim">Microsoft Learn: SemaphoreSlim</a> (~10 min) is the primary source for the constructor's initial/max count, <code>WaitAsync()</code>'s non-blocking suspension, and <code>Release()</code>.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a>. Click any dotted term for a popup (English first, tiếng Việt second). Builds directly on Lesson 108's fan-out shape, Lesson 50's bulkhead pattern, and Lesson 107's non-blocking <code>await</code> suspension. <strong>Anything unclear? Ask your teacher</strong>, the agent that made this lesson. Ask in Vietnamese anytime. A good follow-up: "does any fan-out loop in our codebase launch one goroutine or Task per row with no cap at all?"</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

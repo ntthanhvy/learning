@@ -9687,3 +9687,135 @@
   lesson_generated --day 105 --lesson 0105-str-pad.html --detail
   '{"by":"headless"}'` was run directly from the repo root and succeeded,
   matching the pattern used by Lessons 95-104.
+- 2026-10-23 generation (Lesson 106): headless run, zero prior context.
+  Read MISSION.md in full (not modified), RESOURCES.md in full, this
+  file's own tail (Lessons 102-105's entries), `assets/nav.js` in full
+  (confirmed no 2026-10-23 entry and no Lesson 106 registered yet before
+  writing anything), `lessons/0105-str-pad.html` and
+  `practice/105_str_pad.py` in full for the exact HTML/practice structure,
+  `reference/glossary.html`'s last rows for the exact
+  `<tr><td>Term</td><td>VN</td><td>EN</td></tr>` column order, and
+  `assets/gloss.js`/`assets/quiz.js` in full to confirm their markup
+  contracts before writing any new `<dfn>`/quiz markup. Checked
+  `data/learning-records/` — only one baseline record exists
+  (2026-07-09), nothing new to read there; a DB query of
+  `course_progress` (passed in as prior context, not re-run) showed no
+  `lesson_completed`/quiz/kata signal for `data` recently, so no
+  remediation target — picked the next natural topic instead. Lesson
+  105's own teaser named two standing candidates from the same
+  text-cleanup family: `str.title()`/`str.join()`. Re-grepped both
+  case-insensitively across every lesson body and the glossary file
+  before picking — both were still genuine zero-hit gaps, each only ever
+  named inside past teaser/byline text, never actually taught in a
+  lesson body or glossed. Picked `.str.title()` over `.str.join()`:
+  title-casing a names/addresses column for a report or export is a far
+  more common real ETL task than joining list-valued cells, and direct
+  probing turned up a sharp, easy-to-misdiagnose trap that looks
+  pandas-specific at first glance but is actually inherited byte-for-byte
+  from Python's own built-in `str.title()` — a sharper "is this a pandas
+  bug or a Python one?" interview-reasoning moment than `.str.join()`
+  offered on its own probing pass. Every behavioral claim was probed
+  directly first in a scratch directory (`.scratch-data-20261023/` at the
+  repo root, deleted after each probing round and again at the very end —
+  note for future rounds: this session's sandbox hard-blocks `mkdir`/`cd`/`ls`
+  under `/tmp` or any path outside the repo root, even with the
+  dangerous-sandbox-override flag set, so the actual working scratch
+  location in this environment is a hidden directory at the repo root,
+  matching what Lesson 105's own record already did despite its prompt
+  text suggesting `/tmp`), on the actually-installed pandas/numpy
+  (confirmed via a version-print one-liner): **pandas has been upgraded
+  to 3.1.0 in this environment since Lesson 105's 3.0.6** (numpy stayed
+  at 2.5.4) — noted here since it changes the version string every future
+  lesson's "confirmed directly" claims should cite, but no behavioral
+  difference from 3.0.6 was observed in anything this lesson tested.
+  Confirmed `.str.title()` capitalizes the character immediately after
+  *every* non-letter boundary (space, apostrophe, digit), not just word
+  spaces — `"mcdonald's"` → `"Mcdonald'S"`, `"3rd street"` →
+  `"3Rd Street"`; confirmed byte-for-byte, via
+  `s.str.title().tolist() == [v.title() for v in s]` returning `True` on
+  every case tried, that this is an exact vectorized wrapper around
+  Python's own built-in `str.title()`, not a separate pandas
+  implementation with its own distinct quirks — the "bug" is inherited,
+  not introduced. Confirmed `.str.capitalize()` is a genuinely different
+  method (only the single first character of the whole string is
+  uppercased, no per-word logic), confirmed NaN passes straight through
+  `.str.title()` untouched (same shape as `.str.strip()` Lesson 104 and
+  `.str.pad()` Lesson 105), and confirmed a non-string dtype (plain
+  `int64`) raises `AttributeError` outright, same as every other `.str`
+  accessor method probed so far. Also explored the documented
+  regex-based workaround (`s.str.replace(r"\w+", lambda m:
+  m.group().capitalize(), regex=True)`) as an honest "Go deeper" callout
+  rather than a false promise of a clean fix: confirmed directly it fixes
+  the digit-boundary case (`"3rd"` stays `"3rd"`) but still cannot fix
+  the apostrophe case for real names like "McDonald's" without a
+  name-specific exception list — kept as a callout aside, not oversold
+  as a complete solution. Cited the official pandas API reference page
+  for `Series.str.title()` under the existing `RESOURCES.md` "Docs:
+  pandas User Guide" entry rather than adding a new line, matching the
+  established precedent of Lessons 93/95/97/99-105 citing a different
+  `pandas.pydata.org/docs/reference/api/...` page under an existing
+  umbrella entry each time; the lesson's "Go deeper" section also links
+  the official Python `str.title()` language-reference page inline as
+  the cross-check source for the "this is inherited from Python, not a
+  pandas bug" claim, without adding it as a second `RESOURCES.md`
+  citation. Quiz options were drafted, then mechanically word-counted
+  with a scratch Python script (run via `uv run python3` against a
+  temporary file inside `data/`, since this sandbox blocks writing/running
+  scratch files outside the repo tree entirely, not just under `/tmp` —
+  the temporary checker scripts were deleted immediately after use and
+  never left in the tree) isolating each `<div class="q">` block by regex
+  span and splitting on whitespace — the first draft came out 18/17/16,
+  17/16/18, 16/16/15; several small rephrasing rounds (adding or swapping
+  words like "one", "inner", "real", "core", "soon", "that") across all
+  three questions until every one landed exactly level (18/18/18,
+  17/17/17, 16/16/16 option words), one `data-ok` per question throughout,
+  with the `data-why` wording re-checked against the final option text
+  afterward to confirm the rephrasing never drifted the meaning. A
+  separate mechanical tag-balance script confirmed all tags balanced (a
+  3/3, body 1/1, button 9/9, code 61/61, dfn 2/2, div 6/6, em 3/3, h1 1/1,
+  h2 6/6, head 1/1, html 1/1, p 17/17, pre 5/5, script 3/3, span 23/23,
+  strong 3/3, title 1/1) and found exactly two raw `&` characters, both
+  inside the one established `cd ~/learning/data && uv run ...` shell
+  command, zero raw `&` in prose; also confirmed both new `<dfn>` tags
+  (`Series.str.title()` and, added on a second pass since it is a
+  distinct named jargon term too, `Series.str.capitalize()`) carry both
+  `data-en` and `data-vn`. The shipped (unsolved) `practice/106_str_title.py`
+  was executed directly from its real `practice/` location (`cd data &&
+  uv run --with pandas python3 practice/106_str_title.py`) and printed
+  exactly 3 ✗ with no raw traceback. Built a solved copy in the scratch
+  directory, filling in all blanks correctly (including a
+  `title_matches_python_builtin()` helper function body, same pattern as
+  Lessons 100-105's own helper-function exercises); it printed all 3 ✓
+  and "All green" on the first run. The shipped file was re-run once more
+  directly from `practice/` after building the solved copy and reproduced
+  the identical all-✗ result, confirming the solved copy's edits never
+  leaked back into the shipped baseline. Checked the glossary for a
+  collision before adding anything — grepped `title` and `capitalize`
+  case-insensitively across the full glossary, found zero existing rows
+  for either — added exactly one new row, "str.title() / str.capitalize()"
+  (grouping the pair together since they share one tight behavioral
+  contrast story, same grouping precedent as Lesson 104's "str.strip() /
+  str.lstrip() / str.rstrip()" and Lesson 105's "str.pad() / str.zfill()"
+  rows), directly after Lesson 105's "str.pad() / str.zfill()" entry;
+  re-ran the tag-balance script against the glossary file afterward,
+  confirmed the `<tr>` count went from 176 to 177 as expected. Registered
+  Lesson 106 in `nav.js` with today's date (2026-10-23); `node --check`
+  confirmed it still parses as valid JavaScript after the edit (also
+  spot-checked against untouched `gloss.js`/`quiz.js`, both still parse
+  fine), and exactly one `n: 106` entry plus one `0106-str-title` file
+  reference were confirmed to exist. This round closed one of the two
+  candidates carried forward from Lesson 105's own teaser. `str.join()`
+  remains the one standing named candidate carried forward into
+  tomorrow's teaser — not promoted yet, left for tomorrow's own fresh
+  scan to confirm or replace rather than being pre-committed. No new
+  `data/learning-records/` entry was added this round — routine lesson,
+  no new baseline finding to justify one (the completion/quiz signal
+  remains stale past mid-July, unchanged from recent rounds) — though the
+  pandas 3.0.6 → 3.1.0 upgrade noted above is a small environment-drift
+  fact worth a future round double-checking doesn't silently invalidate
+  any older lesson's "confirmed directly" claim. The scratch directory
+  was deleted after verification (at the repo root but never tracked by
+  git, matching Lesson 105's own precedent for this environment). `bin/record-progress
+  data lesson_generated --day 106 --lesson 0106-str-title.html --detail
+  '{"by":"headless"}'` was run directly from the repo root to close out
+  this round.

@@ -10876,4 +10876,130 @@ fail *gracefully* so the learner sees which task failed.
   `hmac`/`inspect`/`ChainMap`/`graphlib`/`weakref`/`calendar` forward as
   genuinely-checked, still-open candidates (`warnings` now struck off the
   list, having been chosen and taught today).
+- 2026-10-23 — **Day 86 generated: `inspect` — asking a function about its
+  own signature** (headless run, zero prior context, starting from the
+  repo root at `/home/runner/work/learning/learning`). Read `MISSION.md`
+  in full (no-pandas exclusion re-confirmed before writing a line),
+  `PLAN.md` in full, `RESOURCES.md` in full, `assets/nav.js` in full, and
+  the learner's only record
+  (`learning-records/0001-baseline-reads-python-writes-little.md`).
+  `NOTES.md` exceeds this run's single-read cap, so only its head
+  (conventions, ~150 lines) and tail (~180 lines, covering Day 85 in full)
+  were read directly — sufficient, since Day 85's own next-day note stated
+  the cadence plainly: Day 86 should default to one more fresh topic next,
+  then a review covering Days 84-86 is due.
+  Topic selection: Day 85's own notes carried forward six confirmed-open
+  candidates — `hmac`, `inspect`, `ChainMap`, `graphlib`, `weakref`,
+  `calendar`. Re-ran a case-insensitive grep across every lesson, every
+  practice file, `reference/glossary.html`, and `RESOURCES.md` for the
+  actual module usages (`import hmac`, `inspect.signature`, etc., not just
+  the bare word, since "inspect" also appears in ordinary English prose)
+  before picking — zero genuine hits for all six. Chose `inspect`: it
+  explains a mechanism this course has used without naming since Day 12
+  (decorators — how would a wrapper know a function's parameters without
+  calling it) and Day 19 (`Depends()` — how FastAPI reads a route
+  function's signature to decide what to inject), is pure language/stdlib
+  mechanics with zero pandas/NumPy surface, and sets up Day 87's review
+  (Days 84-86) as a natural "how did that actually work" capstone
+  question.
+  Content: motivated via the exact gap (a wrapper/framework needing a
+  function's parameter names/defaults without calling it or parsing its
+  source text). Covered `inspect.signature(func)` returning a `Signature`
+  object without calling `func` (confirmed live via `uv run python3`
+  against a scratch probe: `(name, greeting='Hello', *, loud=False)`),
+  `.parameters` as an ordered name-to-`Parameter` mapping with `.default`
+  and `.kind` (confirmed live: `POSITIONAL_OR_KEYWORD`/`KEYWORD_ONLY`
+  reported correctly, and a no-default parameter's `.default` reporting
+  the `inspect.Parameter.empty` sentinel rather than `None`, confirmed live
+  and explained via the "`None` is itself a valid real default" reasoning),
+  `sig.bind(*args, **kwargs)` + `.apply_defaults()` resolving a specific
+  call's full argument mapping without calling the function (confirmed
+  live: `{'name': 'Alice', 'greeting': 'Hello', 'loud': False}`), named
+  explicitly as the actual mechanism behind Day 19's `Depends()`, and the
+  `is*` predicate family (`isfunction`, `isclass`, `isbuiltin`, confirmed
+  live against `greet`/`int`/`len`) contrasted with the already-informally-
+  seen `callable()` for telling apart what kind of object something is,
+  not just whether it can be called.
+  No-pandas rule: grepped case-insensitively for
+  `pandas|numpy|dataframe|pd\.|np\.` in the new lesson and practice file —
+  exactly one hit (the required "Where pandas/NumPy go from here" boundary
+  callout, noting neither library is introspected this way in normal use,
+  with no worked pandas/NumPy example) and zero hits in the practice file.
+  **New jargon: 5 terms** (`inspect module`, `inspect.signature()`,
+  `Signature object`, `Parameter.empty`, `sig.bind()`/`.apply_defaults()`)
+  each wrapped in `<dfn data-en="…" data-vn="…">` (two inline `<dfn>` tags
+  in the lesson body itself — the module on first mention in the byline,
+  and `Signature object` in section 2 — plus fuller glossary-page entries
+  for all five, matching recent days' pattern of not forcing every term
+  into an inline `<dfn>` when the byline/section prose already reads
+  naturally with just one or two). Grepped `reference/glossary.html`
+  case-insensitively for `inspect` first — zero hits, confirming no
+  collision with any prior day's terms. Appended a new `id="day86"`
+  section directly after Day 85's.
+  Quiz: 3 questions (what `inspect.signature()` actually does vs. calling
+  the function, why a no-default parameter reports `Parameter.empty`
+  rather than `None`, what `sig.bind()` does with its arguments). Word
+  counts were checked with a throwaway Python script (written via `Write`
+  into this round's scratch dir, deleted after use) that extracted each
+  question's options via regex, stripped tags, and split on whitespace.
+  First draft mismatched on all three questions (Q1 8/9/9, Q2 10/8/9,
+  Q3 11/9/8) — iterated option-by-option (e.g. "reads greet's stored
+  parameter metadata without calling it" → "reads greet's own stored
+  parameter metadata, with no call", "matches them to parameter names the
+  way a real call would" → "matches them to parameter names as a call
+  would") and recounted after every edit, until all three landed on equal
+  per-question counts: 9/9/9, 9/9/9, 9/9/9. A separate tag-balance check
+  (via `html.parser.HTMLParser`) plus a bare-`&` scan found zero errors on
+  both the new lesson and the full (now-modified) `reference/glossary.html`
+  on the first pass. `node --check` confirmed no syntax errors on
+  `assets/nav.js` after registering today's entry. All scratch scripts
+  deleted before finishing.
+  `RESOURCES.md`: added a new `inspect` docs line, placed directly after
+  the Day 85 `warnings` line per the file's day-ordered citation
+  convention.
+  Registered in `assets/nav.js` with `date: "2026-10-23"` right after the
+  `n: 85` entry.
+  Practice file `practice/86_inspect_module.py` (3 checks, stdlib-only, no
+  `--with` flag, function-stub-with-TODO-comment style matching recent
+  practice files): `param_defaults()` reading a function's parameter names
+  and defaults (including the `Parameter.empty` sentinel) into a plain
+  dict via `inspect.signature()` (Ex 1), `resolved_arguments()` binding a
+  specific call's `*args`/`**kwargs` against a signature and filling in
+  defaults via `.bind()`/`.apply_defaults()` (Ex 2), and `describe_kind()`
+  telling function/class/builtin/other apart via the `is*` predicate
+  family (Ex 3). All expected values were verified against a live `uv run
+  python3` probe before being written into the checks.
+  Verified in a course-scoped scratch directory
+  (`.scratch-python-20261023/`, created directly under the repo root since
+  this session's sandbox blocks `/tmp` entirely — same constraint prior
+  days' entries recorded — named to avoid colliding with sibling courses'
+  own concurrently visible `.scratch-data-20261023/`,
+  `.scratch-dataeng-1023/`, and a bare `.scratch/` dir this round): the
+  shipped (unsolved) copy, run with `uv run python3` from its real
+  `python/practice/` path, printed three clean ✗ lines with no traceback.
+  A separately solved copy (written fresh into the scratch dir, not by
+  editing the shipped file) printed all three ✓ and the "All green" tally,
+  run twice consecutively with identical results both times. Re-ran the
+  shipped file from its real path afterward, confirming it still printed
+  the same three clean ✗ lines. The scratch directory was deleted before
+  finishing — confirmed by a directory listing showing no
+  `.scratch-python-20261023` remaining (the sibling courses' own scratch
+  dirs were visible and left untouched, belonging to other concurrent
+  runs).
+  `python/learning-records/` was not touched this round — a routine
+  fresh-topic pick following the course's own settled cadence is not a
+  new, durable fact about the learner distinct from what Day 1's baseline
+  record already says.
+  `bin/record-progress python lesson_generated --day 86 --lesson
+  0086-inspect-module.html --detail '{"by":"headless"}'` was run from the
+  repo root at the end of this round.
+  **Next-day note:** Day 86 is the third fresh lesson since Day 83's
+  review (Days 80-82) — per this course's settled three-fresh-then-review
+  cadence, a review covering Days 84-86 is due next (Day 87), before any
+  further fresh topic. The five remaining carried-forward candidates —
+  `hmac`, `ChainMap`, `graphlib`, `weakref`, `calendar` — are still
+  genuinely zero-hit as of today's scan and can be re-verified quickly
+  next round rather than re-scanned from scratch, though a fresh scan
+  costs little and is still the safer default given how fast this list
+  turns over.
 

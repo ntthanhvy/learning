@@ -216,6 +216,8 @@
       file: "lessons/0104-str-strip.html" },
     { n: 105, date: "2026-10-22", title: "Series.str.pad(): fixed-width alignment, and the sign trap zfill() doesn't have",
       file: "lessons/0105-str-pad.html" },
+    { n: 106, date: "2026-10-23", title: "Series.str.title(): title-casing a column, and the apostrophe trap it shares with plain Python",
+      file: "lessons/0106-str-title.html" },
   ];
 
   const REFS = [

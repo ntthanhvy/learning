@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 86 · inspect: asking a function about its own signature</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 86 · ~20 min · 23 Oct 2026</p>
+<h1><code>inspect</code>: asking a function about its own signature</h1>
+<p class="byline">Day 12's decorators and Day 19's <code>Depends()</code> both rely on something never explained: how does a wrapper, or a framework, know what parameters a function takes <em>without calling it</em> — their names, their defaults, whether they're positional or keyword-only? <dfn data-en="the standard-library module for examining live Python objects programmatically -- a function's parameters and defaults, its source code, or what kind of object something is -- without calling or guessing at it" data-vn="giữ nguyên &quot;inspect module&quot; — module chuẩn cho phép xem thông tin của object Python đang chạy (tham số hàm, default, source code, loại object...) một cách tự động, không cần gọi hàm hay đoán">The <code>inspect</code> module</dfn> is that answer — the same mechanism FastAPI itself uses to read a route function's parameters and decide what to inject.</p>
+
+<div class="callout"><strong>Why today, specifically:</strong> Day 85 closed a three-fresh-topic run since Day 83's review (Days 80-82) with a note to default to one more fresh topic (today) before a review covering Days 84-86 is next due. A fresh grep across every lesson, practice file, <code>reference/glossary.html</code>, and <code>RESOURCES.md</code> confirmed <code>inspect</code>, <code>hmac</code>, <code>ChainMap</code>, <code>graphlib</code>, <code>weakref</code>, and <code>calendar</code> are all still genuinely untaught. Chose <code>inspect</code>: it explains a mechanism this course has used without naming since Day 12 (decorators) and Day 19 (<code>Depends()</code>), is pure language/stdlib mechanics with zero pandas/NumPy surface, and sets up Day 87's review nicely as a "how did that actually work" capstone question.</div>
+
+<h2>1 · The problem: a wrapper that doesn't know what it's wrapping</h2>
+<p>Day 12's generic decorator shape — <code>def wrapper(*args, **kwargs): return func(*args, **kwargs)</code> — works precisely because it never needs to know <code>func</code>'s parameter names. But plenty of real code <em>does</em> need to know them: a framework that validates arguments before calling a function, a debugger printing "called with x=1, y=2," or a library deciding which of a function's parameters to fill in automatically. Hand-parsing a function's text for this would be fragile and wrong half the time. Python instead keeps that information live, on the function object itself, and <code>inspect</code> is the standard way to read it back out:</p>
+<pre><code><span class="kw">import</span> inspect
+
+<span class="kw">def</span> greet(name, greeting=<span class="str">"Hello"</span>, *, loud=<span class="kw">False</span>):
+    <span class="kw">return</span> <span class="str">f"{greeting}, {name}!"</span>
+
+<span class="kw">print</span>(inspect.signature(greet))
+<span class="cm"># (name, greeting='Hello', *, loud=False) -- confirmed live</span></code></pre>
+<p><code>inspect.signature(greet)</code> never calls <code>greet</code> — it reads the function object's own stored metadata and hands back a description of its parameters, as data you can walk through in code.</p>
+
+<h2>2 · <code>Signature</code> and <code>Parameter</code>: the shape as data, not text</h2>
+<p><code>inspect.signature()</code> returns a <dfn data-en="the object inspect.signature(func) returns: an ordered mapping, .parameters, from each parameter's name to a Parameter object describing its default value and kind (positional, keyword-only, etc.) -- the function's parameter list as structured data, not as a printed string" data-vn="giữ nguyên &quot;Signature object&quot; — object trả về từ inspect.signature(), chứa .parameters là 1 mapping tên tham số -> Parameter (default, kind...), biểu diễn danh sách tham số dưới dạng data có thể lặp qua, không phải string in ra">a <code>Signature</code> object</dfn> whose <code>.parameters</code> is an ordered mapping from each parameter's name to a <code>Parameter</code> describing it — looping over it reads the same thing <code>print()</code> showed, but as data a program can act on:</p>
+<pre><code>sig = inspect.signature(greet)
+<span class="kw">for</span> pname, p <span class="kw">in</span> sig.parameters.items():
+    <span class="kw">print</span>(pname, <span class="str">"default:"</span>, p.default, <span class="str">"kind:"</span>, p.kind)
+<span class="cm"># name default: &lt;class 'inspect._empty'&gt; kind: POSITIONAL_OR_KEYWORD
+# greeting default: Hello kind: POSITIONAL_OR_KEYWORD
+# loud default: False kind: KEYWORD_ONLY        -- confirmed live</span></code></pre>
+<p>Confirmed live: a parameter with no default (<code>name</code>) reports its <code>.default</code> as the sentinel <code>inspect.Parameter.empty</code>, not <code>None</code> — <code>None</code> is a perfectly valid real default, so a separate sentinel is needed to mean "this parameter truly has none." <code>loud</code> reports <code>kind: KEYWORD_ONLY</code> because Day 4's <code>*</code> syntax marked it so — the same distinction Day 4 taught is readable back out as data here, not just enforced at call time.</p>
+
+<h2>3 · <code>bind()</code>: matching real arguments against the signature</h2>
+<p>A <code>Signature</code> can also check a specific set of arguments against itself — <code>sig.bind(*args, **kwargs)</code> matches them to parameter names exactly as a real call would, raising <code>TypeError</code> on a mismatch, without ever calling the function:</p>
+<pre><code>bound = sig.bind(<span class="str">"Alice"</span>)
+bound.apply_defaults()
+<span class="kw">print</span>(bound.arguments)
+<span class="cm"># {'name': 'Alice', 'greeting': 'Hello', 'loud': False} -- confirmed live</span></code></pre>
+<p><code>.apply_defaults()</code> fills in every parameter <code>bind()</code> left out with its declared default, so <code>bound.arguments</code> ends up a complete name-to-value mapping for the call — exactly the kind of lookup a framework needs before deciding what to pass each parameter. This is the actual mechanism behind Day 19's <code>Depends()</code>: FastAPI inspects a route function's signature once, at startup, to learn each parameter's name and type hint, then uses that information on every request to work out what value to supply for each one — no magic, just <code>inspect</code> run ahead of time.</p>
+
+<h2>4 · The <code>is*</code> family: what kind of object is this, really</h2>
+<p><code>inspect</code> also answers a plainer question — not "what does this take," but "what <em>is</em> this" — with a family of boolean checks, useful when code receives an object of unknown origin (a plugin, a dynamically loaded callable) and needs to branch on its kind safely:</p>
+<pre><code>inspect.isfunction(greet)      <span class="cm"># True -- a plain def</span>
+inspect.isclass(<span class="kw">int</span>)          <span class="cm"># True -- int is a class</span>
+inspect.isbuiltin(<span class="kw">len</span>)         <span class="cm"># True -- implemented in C, not Python
+# all three confirmed live</span></code></pre>
+<p>These matter because <code>callable(x)</code> alone (seen informally in earlier lessons) only answers "can this be called with <code>()</code>" — it's <code>True</code> for a function, a class, and an object with <code>__call__</code> all alike. The <code>is*</code> checks tell them apart when the distinction changes what to do next.</p>
+
+<div class="callout"><strong>Where pandas/NumPy go from here:</strong> neither library is introspected this way in normal use — <code>inspect</code> is a language/framework tool, not a data-analysis one, so there is nothing to contrast today; this callout exists only to confirm the absence, per <code>MISSION.md</code>'s no-pandas rule.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/86_inspect_module.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/86_inspect_module.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: reading a function's parameter names, defaults, and kinds out of <code>inspect.signature()</code> into a plain dict; using <code>sig.bind()</code> plus <code>.apply_defaults()</code> to work out the full set of arguments a specific call would use; and writing a small dispatcher that uses <code>inspect.isfunction()</code>/<code>inspect.isclass()</code> to describe an arbitrary object's kind.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="inspect.signature(func) reads the function object's own stored parameter metadata and returns it as a Signature object -- it never calls func, and the function's body never runs. This is exactly why a framework can inspect a route function safely before any request arrives.">
+    <p class="stem">What does <code>inspect.signature(greet)</code> actually do?</p>
+    <button class="opt" data-ok>reads greet's own stored parameter metadata, with no call</button>
+    <button class="opt">calls greet once quietly, just to see what happens</button>
+    <button class="opt">rewrites greet's actual source code into brand new text</button>
+  </div>
+  <div class="q" data-why="A parameter with no declared default reports its .default as the sentinel inspect.Parameter.empty, specifically because None is itself a valid real default a parameter could have -- a separate sentinel is required so 'no default at all' can be told apart from 'the default really is None.'">
+    <p class="stem">Why does a parameter with no default report <code>inspect.Parameter.empty</code>, not <code>None</code>?</p>
+    <button class="opt" data-ok>because None is itself already one valid, real default</button>
+    <button class="opt">because empty parameters always raise before signature even runs</button>
+    <button class="opt">because every single parameter reports that one exact value</button>
+  </div>
+  <div class="q" data-why="sig.bind(*args, **kwargs) matches a specific set of arguments against the signature's parameters exactly as a real call would, raising TypeError on a mismatch -- all without ever calling the underlying function, which is what makes it safe to run ahead of time, before any real call happens.">
+    <p class="stem">What does <code>sig.bind(*args, **kwargs)</code> do with those arguments?</p>
+    <button class="opt" data-ok>matches them to parameter names as a call would</button>
+    <button class="opt">immediately forwards them straight into one brand new call</button>
+    <button class="opt">silently discards any one argument a signature left out</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the standard library's <a href="https://docs.python.org/3/library/inspect.html"><code>inspect</code></a> docs — the "Introspecting callables with the Signature object" section covers <code>bind()</code>/<code>bind_partial()</code>/<code>apply_defaults()</code> in full, and the "Types and members" table lists every <code>is*</code> predicate beyond the three sampled here (<code>isgenerator</code>, <code>iscoroutinefunction</code>, and more — several of which Phase 2b's <code>async</code>/<code>await</code> work will recognize).</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day86">glossary</a> under Day 86.<br>
+This closes the third fresh lesson since Day 83's review (Days 80-82) — a review covering Days 84-86 is due next, per this course's settled three-fresh-then-review cadence, unless a stronger reason to deviate turns up then.<br><br>
+💬 Anything unclear — <code>signature()</code> vs. <code>bind()</code>, or how this connects to Day 19's <code>Depends()</code>? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -48,6 +48,7 @@
     { n: 35, date: "2026-10-20", title: "Airflow retries, for real: on_retry_callback and try_number on the production DAG", file: "lessons/0035-airflow-retry-callback-on-the-real-dag.html" },
     { n: 36, date: "2026-10-21", title: "dbt_utils date_spine: making zero-order days visible", file: "lessons/0036-dbt-utils-date-spine.html" },
     { n: 37, date: "2026-10-22", title: "Kafka consumer lag monitoring: a real Python check script", file: "lessons/0037-kafka-consumer-lag-monitoring-script.html" },
+    { n: 38, date: "2026-10-23", title: "Finishing Day 21's TODO: a real growth check with a Variable cursor", file: "lessons/0038-airflow-asset-growth-check-variable-cursor.html" },
   ];
 
   const REFS = [

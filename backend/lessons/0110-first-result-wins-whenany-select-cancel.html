@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 110 · First result wins: Task.WhenAny and Go's select, minus the losers</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 110 · ~20 min</p>
+<h1>First result wins: Task.WhenAny and Go's select, minus the losers</h1>
+<p class="byline">Lessons 108 and 109 both waited for <em>every</em> fan-out task to finish, bounded or not. Some calls don't need that: ask three cache replicas for the same key and take whichever answers first, or race a slow primary against a fast fallback. That's a different shape — "first one back wins, the rest become pointless" — and it's the exact gap Lesson 108's own Scope line and Lesson 109's own Scope line both flagged as still open: <code>Task.WhenAny</code>'s manual cancellation pattern. Today's lesson closes it, in C# and in Go.</p>
+
+<h2>1 · Why this isn't just WhenAll with fewer tasks</h2>
+<p>Lesson 108's <code>errgroup</code>/<code>Task.WhenAll</code> shape answers "did all of these succeed, or what's the first error?" This lesson answers a different question: "which one finished first, and can I stop paying for the rest?" The two shapes often get confused because both start by launching several concurrent calls — but <code>WhenAll</code> is wrong here. Waiting for all three cache replicas when the first answer is already usable just adds the slowest replica's latency to every request, for no benefit.</p>
+
+<h2>2 · C#: Task.WhenAny tells you who won, and nothing else</h2>
+<p>Per Microsoft's own docs, <dfn data-en="a static Task method that creates a new task completing as soon as any one of the supplied tasks completes -- its Result is the task that finished first, even if that task ended Canceled or Faulted, and it does not look at or wait for any of the other supplied tasks" data-vn="Task.WhenAny (giữ nguyên) — static method tạo 1 task mới, complete ngay khi 1 trong các task truyền vào xong trước -- Result là task xong đầu tiên, dù task đó Canceled hay Faulted, và nó không quan tâm/không chờ các task còn lại">Task.WhenAny</dfn> resolves the instant the fastest of its input tasks finishes:</p>
+<pre><code><span class="kw">var</span> cts = <span class="kw">new</span> CancellationTokenSource();
+<span class="kw">var</span> tasks = replicas.Select(r => FetchAsync(r, cts.Token)).ToList();
+
+<span class="kw">var</span> winner = <span class="kw">await</span> Task.WhenAny(tasks);
+cts.Cancel();                 <span class="cm">// tell the losers to stop, they won't on their own</span>
+<span class="kw">var</span> value = <span class="kw">await</span> winner;    <span class="cm">// unwrap: rethrows if the winner itself faulted</span>
+</code></pre>
+<p>The catch is in Microsoft's own wording, called out as a documented tip on the API page: "when the method returns the first completed task, the other tasks will continue running until completion, even if any of them completed in the <code>Canceled</code> or <code>Faulted</code> state. If that behavior is undesirable, you can cancel all the remaining tasks once the first task completes." <code>WhenAny</code> only tells you who won — it does nothing to the losers. Skip the <code>cts.Cancel()</code> line and all three replica calls keep running to completion anyway, wasting the connections and the downstream load exactly like an unbounded fan-out from Lesson 109, just shaped as "pick one" instead of "wait for all."</p>
+
+<h2>3 · Go: select plus a shared context.WithCancel does the same job natively</h2>
+<p>Go's answer isn't a library method at all — it's <code>select</code> over a channel, combined with the <code>context.WithCancel</code> Lesson 41 already introduced. Each racer writes its answer to one shared channel; whichever write lands first is read by the one <code>select</code> waiting on it, and <code>cancel()</code> tells every goroutine still running to stop:</p>
+<pre><code><span class="kw">func</span> firstReply(parent context.Context, replicas []string) (Result, <span class="kw">error</span>) {
+    ctx, cancel := context.WithCancel(parent)
+    <span class="kw">defer</span> cancel()               <span class="cm">// always cancel: releases every loser the instant we return</span>
+
+    out := <span class="kw">make</span>(<span class="kw">chan</span> Result, <span class="kw">len</span>(replicas))
+    <span class="kw">for</span> _, r := <span class="kw">range</span> replicas {
+        r := r
+        <span class="kw">go</span> <span class="kw">func</span>() {
+            <span class="kw">if</span> v, err := fetch(ctx, r); err == <span class="kw">nil</span> {
+                <span class="kw">select</span> {
+                <span class="kw">case</span> out <- v:
+                <span class="kw">case</span> <-ctx.Done():     <span class="cm">// someone else already won; drop this result</span>
+                }
+            }
+        }()
+    }
+
+    <span class="kw">select</span> {
+    <span class="kw">case</span> v := <-out:
+        cancel()                    <span class="cm">// winner found: stop every other goroutine now</span>
+        <span class="kw">return</span> v, <span class="kw">nil</span>
+    <span class="kw">case</span> <-parent.Done():
+        <span class="kw">return</span> Result{}, parent.Err()
+    }
+}
+</code></pre>
+<p>Each racing goroutine must itself check <code>ctx.Done()</code> (inside <code>fetch</code>, and in the <code>select</code> guarding the channel write) to actually stop early — <code>cancel()</code> only flips a signal, same as Lesson 41 and Lesson 108 already established; nothing is forcibly killed. The real difference from C# isn't the mechanism, it's the defaults: Go has no "WhenAny that forgets to cancel" trap, because there's no library call to reach for in the first place — cancellation is wired by hand either way, so it's never missing by omission.</p>
+
+<div class="callout"><strong>Not Lesson 108's fail-fast cancellation:</strong> Lesson 108's <code>errgroup</code> cancels siblings on the first <em>error</em>, to stop wasted work after a failure. This lesson cancels siblings on the first <em>success</em>, to stop wasted work after a win. Same mechanism (a derived, cancellable context), opposite trigger.</div>
+
+<div class="cmp-wrap">
+<table class="cmp">
+<thead><tr><th></th><th>C#: Task.WhenAny</th><th>Go: select + context.WithCancel</th></tr></thead>
+<tbody>
+<tr><th>What it returns</th><td>the Task that finished first</td><td>whatever value the winning goroutine sent</td></tr>
+<tr><th>Cancels the losers?</th><td>no — must call <code>cts.Cancel()</code> by hand</td><td>no — must call <code>cancel()</code> by hand</td></tr>
+<tr><th>Do losers notice the cancel?</th><td>only if they poll/observe the token</td><td>only if they check <code>ctx.Done()</code></td></tr>
+<tr><th>Risk of forgetting</th><td>easy — one line, easy to omit after <code>await</code></td><td>low — no bare "WhenAny" shortcut to tempt skipping it</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers the first-result-wins shape: <code>Task.WhenAny</code> plus manual cancellation in C#, and <code>select</code> over a result channel plus <code>context.WithCancel</code> in Go. It does not cover: timeout/deadline patterns for a single call (<code>context.WithTimeout</code>, <code>CancellationTokenSource</code>'s own timeout constructor — Lesson 41 already covers the Go half; the full side-by-side is a natural next lesson); retry-with-backoff composed on top of a race (Lesson 32's territory, one layer below this one); or racing more than one *kind* of result where the loser's partial work must be rolled back, not just dropped — a transactional concern out of scope here.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory, with no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Per Microsoft's own documented tip on the Task.WhenAny API page, the other supplied tasks keep running to completion on their own once WhenAny returns -- nothing about WhenAny itself stops them, even if one of them later ends Canceled or Faulted.">
+    <p class="stem">After Task.WhenAny returns the winning task, what happens to the other tasks by default?</p>
+    <button class="opt" data-ok>they keep running to completion, fully untouched by it</button>
+    <button class="opt">the dotnet runtime cancels every one of them instantly</button>
+    <button class="opt">they each throw an exception the instant winner returns</button>
+    <button class="opt">their thread pool slot gets reclaimed immediately after that</button>
+  </div>
+  <div class="q" data-why="Task.WhenAny does nothing to the losing tasks on its own. The documented fix is to call Cancel() on a shared CancellationTokenSource once the winner is known, which only works if the losing tasks were started with that same token and actually observe it.">
+    <p class="stem">How do you actually stop the losing tasks after Task.WhenAny picks a winner?</p>
+    <button class="opt" data-ok>share one token, then call Cancel once winner known</button>
+    <button class="opt">do nothing, WhenAny already fully cancels them for you</button>
+    <button class="opt">call Dispose on the Task.WhenAny result object right now</button>
+    <button class="opt">downgrade every losing task into a plain synchronous call</button>
+  </div>
+  <div class="q" data-why="In the Go pattern, cancel() only flips a signal on the shared context -- it does not forcibly stop a goroutine. Each racing goroutine must itself check ctx.Done() (directly or via a select case) to notice the signal and actually stop early, the same cooperative mechanism Lesson 41 and Lesson 108 already established.">
+    <p class="stem">In the Go select + context.WithCancel pattern, what makes a losing goroutine actually stop?</p>
+    <button class="opt" data-ok>the goroutine itself checks ctx.Done and exits early there</button>
+    <button class="opt">cancel forcibly kills every other goroutine running right then</button>
+    <button class="opt">the Go runtime garbage-collects it once it falls behind</button>
+    <button class="opt">closing the result channel instantly halts every sender there</button>
+  </div>
+  <div class="q" data-why="Lesson 108's errgroup cancels siblings on the first non-nil error, to stop wasted work after a failure. This lesson's pattern cancels siblings on the first success, to stop wasted work after a win -- the trigger is opposite, but the underlying mechanism (a derived, cancellable context propagated to every sibling) is the same one both lessons use.">
+    <p class="stem">How does this lesson's cancellation differ from Lesson 108's errgroup cancellation?</p>
+    <button class="opt" data-ok>this cancels on first success; errgroup cancels on first error</button>
+    <button class="opt">errgroup never cancels anything at all, unlike this lesson does</button>
+    <button class="opt">this lesson cancels on error too, identical to errgroup here</button>
+    <button class="opt">only this lesson's pattern uses any context object at all</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://learn.microsoft.com/en-us/dotnet/api/system.threading.tasks.task.whenany">Microsoft Learn: Task.WhenAny</a> (~5 min) is the primary source for the exact "other tasks will continue running until completion" tip quoted above; <a href="https://pkg.go.dev/context">pkg.go.dev: context package</a> (~10 min) is the primary source for <code>WithCancel</code>'s derived-context behavior reused here from Lesson 41.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a>. Click any dotted term for a popup (English first, tiếng Việt second). Builds directly on Lesson 108's structured-concurrency fan-out, Lesson 109's width-capped fan-out, and Lesson 41's <code>context.Context</code> cancellation signal. <strong>Anything unclear? Ask your teacher</strong>, the agent that made this lesson. Ask in Vietnamese anytime. A good follow-up: "does any 'race two things, take the first' code in our codebase actually cancel the loser, or does it just let it run to completion?"</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

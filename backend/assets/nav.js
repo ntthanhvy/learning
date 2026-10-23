@@ -224,6 +224,8 @@
       file: "lessons/0108-structured-concurrency-errgroup-whenall.html" },
     { n: 109, date: "2026-10-22", title: "Fan out to 3 is easy. Fan out to 3,000 needs a limit.",
       file: "lessons/0109-bounded-fan-out-setlimit-semaphoreslim.html" },
+    { n: 110, date: "2026-10-23", title: "First result wins: Task.WhenAny and Go's select, minus the losers",
+      file: "lessons/0110-first-result-wins-whenany-select-cancel.html" },
   ];
 
   const REFS = [

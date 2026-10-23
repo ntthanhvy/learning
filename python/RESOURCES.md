@@ -67,6 +67,8 @@ authors for *why*. Cite inline; each lesson recommends exactly one primary sourc
   Use for: Day 84 — `format_exc()`/`print_exc()` for capturing or writing out the same report an uncaught exception would print, from inside a running `except` block; `print_exc()`'s `file=` redirect; and how Day 15's `logging` `exc_info=True` calls this module internally.
 - [Docs: `warnings`](https://docs.python.org/3/library/warnings.html)
   Use for: Day 85 — `warn()` for a non-fatal "probably wrong, keep going" signal distinct from `raise` and from Day 15's `logging.warning()`; `catch_warnings(record=True)`/`simplefilter("always")` for asserting a warning fired in a test; and `filterwarnings("error", ...)` for escalating a warning category into a real exception.
+- [Docs: `inspect`](https://docs.python.org/3/library/inspect.html)
+  Use for: Day 86 — `signature()`/`Signature`/`Parameter` for reading a function's parameter names, defaults, and kinds as data instead of text; `bind()`/`apply_defaults()` for matching real arguments against a signature without calling the function, the mechanism behind Day 19's `Depends()`; and the `is*` predicate family (`isfunction`, `isclass`, `isbuiltin`) for telling apart what kind of object something actually is.
 - [PEP 8 — Style Guide for Python Code](https://peps.python.org/pep-0008/)
   Use for: naming and layout conventions, so written code looks like the ecosystem's.
 

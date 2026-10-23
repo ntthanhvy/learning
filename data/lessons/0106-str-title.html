@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 106 · Series.str.title(): title-casing a column, and the apostrophe trap it shares with plain Python</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 106 · ~20 min · 23 Oct 2026</p>
+<h1>Series.str.title(): title-casing a column, and the apostrophe trap it shares with plain Python</h1>
+<p class="byline">Lesson 105 closed the standing <code>.str.pad()</code> pick and carried forward two named candidates from the same text-cleanup family: <code>str.title()</code>/<code>str.join()</code>. Re-grepped both case-insensitively across every lesson body and the glossary file before picking — both are still genuine zero-hit gaps, only ever named in past teaser text, never actually taught. Picked <code>.str.title()</code> over <code>.str.join()</code>: title-casing a names/addresses column for a report or export is a far more common real-task than joining list-valued cells, and direct probing turned up a sharp, easy-to-misdiagnose trap (apostrophes and digit boundaries) that looks pandas-specific at first glance but is actually inherited straight from Python's own built-in <code>str.title()</code> — a good "is this a pandas bug or a Python one?" interview-reasoning moment.</p>
+
+<h2>1 · Title-casing a whole column in one call</h2>
+<p>A names or address column pulled from a sloppy source often arrives as <code>"JOHN SMITH"</code>, <code>"john smith"</code>, or some other inconsistent casing. SQL has no single standard function for this (vendors differ: some offer <code>INITCAP()</code>, others nothing at all), so it is usually hand-rolled. Pandas ships <dfn data-en="a Series/Index string method, Series.str.title(), uppercasing the first letter after every non-letter boundary (space, punctuation, digit) and lowercasing every other letter, matching Python's own built-in str.title() exactly -- it is NOT the same as str.capitalize(), which only uppercases the single first character of the whole string and lowercases everything else" data-vn="giữ nguyên 'str.title()' -- method Series.str.title(), viết hoa chữ đầu tiên sau MỌI ranh giới không-phải-chữ-cái (dấu cách, dấu câu, số), chữ còn lại hạ thường hết, giống CHÍNH XÁC str.title() có sẵn của Python -- KHÁC str.capitalize() (chỉ viết hoa 1 chữ đầu của CẢ chuỗi, phần còn lại hạ thường hết)">Series.str.title()</dfn> as a one-call fix:</p>
+<pre><code><span class="kw">import</span> pandas <span class="kw">as</span> pd
+
+s = pd.Series([<span class="str">"JOHN SMITH"</span>, <span class="str">"jane doe"</span>, <span class="str">"MaRy Jones"</span>])
+
+s.str.title()
+<span class="cm"># ['John Smith', 'Jane Doe', 'Mary Jones']    -- every word's first letter up, rest down</span></code></pre>
+<p>Confirmed directly (pandas 3.1.0): <code>.str.title()</code> uppercases the character right after <em>every</em> non-letter boundary — not just spaces, but punctuation and digits too — and lowercases every other letter. That "every boundary" rule is exactly where it stops matching the plain-English idea of "capitalize each word."</p>
+
+<h2>2 · The apostrophe and digit trap — inherited from Python, not a pandas bug</h2>
+<p>Confirmed directly, side by side with Python's own built-in <code>str.title()</code> (no pandas involved at all):</p>
+<pre><code>s = pd.Series([<span class="str">"o'brien's shop"</span>, <span class="str">"mcdonald's"</span>, <span class="str">"3rd street"</span>])
+
+s.str.title()
+<span class="cm"># ["O'Brien'S Shop", "Mcdonald'S", '3Rd Street']</span>
+
+<span class="cm"># the exact same wrong-looking capitals come from plain Python, no pandas at all:</span>
+<span class="str">"o'brien's shop"</span>.title()
+<span class="cm"># "O'Brien'S Shop"    -- identical result</span></code></pre>
+<p>Confirmed directly: running <code>s.str.title().tolist() == [v.title() for v in s]</code> (the Python builtin applied one string at a time) returns <code>True</code> on every case tried — <code>.str.title()</code> is a thin, exact vectorized wrapper around Python's own <code>str.title()</code>, sharing its behavior byte for byte, not a separate pandas implementation with its own bugs. The apostrophe in <code>"'s"</code> counts as a non-letter boundary exactly like a space does, so the <code>s</code> right after it gets capitalized too — <code>"Mcdonald'S"</code>, not the human-expected <code>"McDonald's"</code>. The same rule hits digits: <code>"3rd"</code> becomes <code>"3Rd"</code>, because the letter right after the digit boundary gets capitalized.</p>
+<div class="callout">This is a genuinely useful interview distinction to name out loud: when a result looks buggy, check whether the behavior is coming from the pandas layer at all, or whether pandas is just a thin, faithful wrapper around a Python (or NumPy) primitive that already behaves this way. Here it is the latter — <code>.str.title()</code> is doing exactly what Python's <code>str.title()</code> does, just across a whole column at once. There is no cleaner built-in fix for the apostrophe case; the usual workaround is a regex that only capitalizes real word starts (<code>s.str.replace(r"\w+", lambda m: m.group().capitalize(), regex=True)</code>), which fixes the digit case (<code>"3rd"</code> stays <code>"3rd"</code>) but still cannot fix "McDonald's" without a name-specific exception list — title-casing real names correctly is a known-hard problem, not a quick one-liner.</div>
+
+<h2>3 · capitalize() is a different method — don't reach for the wrong one</h2>
+<p>Confirmed directly: <dfn data-en="a Series/Index string method, Series.str.capitalize(), uppercasing ONLY the single first character of the entire string and lowercasing every other character -- no per-word logic at all, unlike str.title()" data-vn="giữ nguyên 'str.capitalize()' -- method Series.str.capitalize(), CHỈ viết hoa 1 ký tự đầu tiên của CẢ CHUỖI, phần còn lại hạ thường hết -- không có logic theo từng từ như str.title()">Series.str.capitalize()</dfn> uppercases only the single first character of the <em>entire</em> string and lowercases everything else — it has no per-word logic at all, unlike <code>.str.title()</code>:</p>
+<pre><code>s.str.capitalize()
+<span class="cm"># ["O'brien's shop", "Mcdonald's", '3rd street']    -- only the very first character is touched</span></code></pre>
+<p>NaN and non-string dtypes behave exactly like every other <code>.str</code> method probed so far (Lessons 102, 104, 105): confirmed directly (pandas 3.1.0) —</p>
+<pre><code><span class="kw">import</span> numpy <span class="kw">as</span> np
+
+pd.Series([<span class="str">"abc"</span>, np.nan, <span class="str">"def"</span>]).str.title()
+<span class="cm"># 0    Abc
+# 1    NaN      -- passes straight through untouched
+# 2    Def
+# dtype: str</span>
+
+pd.Series([<span class="kw">1</span>, <span class="kw">2</span>, <span class="kw">3</span>]).str.title()
+<span class="cm"># AttributeError: Can only use .str accessor with string values, not integer</span></code></pre>
+
+<div class="interview">
+<p><strong>Q: "A customer_name column came in as all-caps from an old system export. How would you normalize it, and what would you double-check?"</strong> A strong answer, out loud: <em>"I'd start with df['customer_name'].str.title() — it's the vectorized equivalent of Python's own str.title(), one call for the whole column. But before shipping it I'd sample names with apostrophes, like O'Brien or McDonald, and names with embedded digits or hyphens — title() capitalizes after every non-letter boundary, not just spaces, so O'Brien becomes O'Brien'S and 3rd-floor-tenant becomes 3Rd-Floor-Tenant. For a small, known set of exceptions I'd follow up with a targeted .str.replace() or a mapping dict; there's no single built-in call that gets real names exactly right."</em> The signal: knowing <code>.str.title()</code> isn't broken — it's doing exactly what Python's own <code>str.title()</code> does — and knowing where that stops being good enough for real names.</p>
+</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/106_str_title.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/106_str_title.py</code></pre>
+<p>Exercise 1 confirms <code>.str.title()</code> title-cases a simple multi-word Series the expected way (Section 1). Exercise 2 confirms the apostrophe/digit trap reproduces the exact same result as Python's own built-in <code>str.title()</code> applied one string at a time, and confirms <code>.str.capitalize()</code> gives a different, single-first-character-only result on the same input (Sections 2-3). Exercise 3 confirms NaN passes through <code>.str.title()</code> untouched while a real string in the same Series gets title-cased (Section 3).</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly (pandas 3.1.0), cross-checked byte for byte against Python's own builtin str.title(): the apostrophe in 's counts as a non-letter boundary exactly like a space, so the letter right after it also gets capitalized, producing Mcdonald'S instead of the human-expected McDonald's.">
+    <p class="stem">Calling <code>.str.title()</code> on the string <code>"mcdonald's"</code> gives which result?</p>
+    <button class="opt" data-ok>"Mcdonald'S" -- the letter right after the apostrophe gets capitalized too, since it counts as one word boundary</button>
+    <button class="opt">"McDonald's" -- it correctly recognizes this one as a well-known, real proper brand name needing special inner capitals</button>
+    <button class="opt">"Mcdonald's" -- apostrophes are fully ignored here, so only the very first letter of it ever changes case</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: running s.str.title().tolist() == [v.title() for v in s] (Python's own builtin, called one string at a time) returns True on every case tried -- .str.title() is an exact vectorized wrapper around Python's own str.title(), not a separate pandas implementation with its own distinct bugs.">
+    <p class="stem">The "wrong-looking" capitals that <code>.str.title()</code> produces on names like <code>"o'brien's"</code> come from which source?</p>
+    <button class="opt" data-ok>Python's own built-in str.title() method -- pandas calls it per element, inheriting the exact same boundary rule</button>
+    <button class="opt">a distinct pandas-only string-casing engine -- separate, custom code entirely apart from any plain Python core builtin</button>
+    <button class="opt">a known bug specific to this one pandas version, already fixed in a newer, unreleased pandas release</button>
+  </div>
+  <div class="q" data-why="Confirmed directly (pandas 3.1.0): .str.title() leaves an existing NaN entry as NaN, the same pass-through-untouched shape as .str.strip() (Lesson 104), .str.pad() (Lesson 105), and np.clip() (Lesson 102) -- it never raises on a NaN, and it never title-cases a NaN into some string.">
+    <p class="stem">A Series holds <code>"abc"</code>, <code>NaN</code>, and <code>"def"</code>. Calling <code>.str.title()</code> does what to that one <code>NaN</code> entry?</p>
+    <button class="opt" data-ok>leaves that one entry as plain NaN, while the two real strings each get title-cased normally</button>
+    <button class="opt">raises an exception right away, the very instant it first reaches that one lone NaN entry</button>
+    <button class="opt">turns it into the literal text "Nan" instead, title-casing that one word as a real string</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official <a href="https://pandas.pydata.org/docs/reference/api/pandas.Series.str.title.html">pandas API reference for <code>Series.str.title()</code></a> (per <code>RESOURCES.md</code>'s "Docs: pandas User Guide" entry, ~3 min) — its own worked example already shows <code>"this is a title"</code> → <code>"This Is A Title"</code> alongside <code>.str.capitalize()</code>'s single-first-character contrast; the apostrophe/digit boundary behavior matches Python's own <a href="https://docs.python.org/3/library/stdtypes.html#str.title">built-in <code>str.title()</code> documentation</a>, which states the rule plainly: "words start with uppercased characters, all remaining cased characters have lower case," where a word boundary is any non-alphabetic character.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>str.title()</code> and <code>str.capitalize()</code> are new today, added right after Lesson 105's <code>str.pad()</code>/<code>str.zfill()</code> entry.<br>
+<strong>Next lesson:</strong> <code>str.join()</code> remains a standing named candidate from the same text-cleanup family this round scanned — not promoted yet, left for tomorrow's own fresh scan to confirm or replace rather than being pre-committed.<br><br>
+💬 Anything unclear — the apostrophe/digit boundary rule, the capitalize() contrast, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -8868,3 +8868,111 @@
   downstream service's real capacity, which is an operational-tuning
   question this lesson deliberately left as a judgment call rather than
   a mechanism to teach.
+- **2026-10-23 generation (Lesson 110, headless run):** No topic was handed
+  in pre-decided this round. Rather than a fresh gap scan from scratch, the
+  pick came from the two most recent lessons' own Scope lines, both of which
+  independently flagged the same open item: `Task.WhenAny`'s manual
+  first-one-wins/cancellation pattern (named in Lesson 108's Scope line as
+  "the other Lesson 108 follow-on," and again in Lesson 109's Scope line,
+  with Lesson 109's own body already confirming via a direct fetch of
+  Microsoft's `Task.WhenAny` docs that it "does **not** auto-cancel the
+  remaining tasks"). Confirmed genuinely still open via a case-insensitive
+  grep of `WhenAny`/`select.*channel` across every lesson and the glossary —
+  only Scope-line mentions, no actual `<dfn>` or worked example anywhere.
+  Read `MISSION.md`, this file's tail, the last three `learning-records/`
+  files, Lesson 109 in full for exact HTML/quiz/callout structure, `nav.js`'s
+  tail, and `glossary.html`'s tail, all before writing anything; confirmed
+  idempotency first (grepped `nav.js` for `date: "2026-10-23"` and globbed
+  `lessons/` for `0110*.html` — no match on either, clear to proceed).
+  Verified the core C# claim directly against Microsoft's own `Task.WhenAny`
+  API page before writing any prose: fetched it and confirmed its own
+  documented tip verbatim — "when the method returns the first completed
+  task, the other tasks will continue running until completion, even if any
+  of them completed in the Canceled or Faulted state. If that behavior is
+  undesirable, you can cancel all the remaining tasks once the first task
+  completes" — this is the lesson's whole hook (section 2's callout and the
+  first quiz question quote this directly). For the Go side, two spec-page
+  fetches (`go.dev/ref/spec#Select_statements`, `go.dev/doc/effective_go#channels`)
+  both returned truncated/incomplete content with no quotable select-statement
+  behavior text, so rather than assert an unverified `select`-arbitration
+  claim, the Go example was built on `context.WithCancel` (already verified
+  and taught in Lesson 41, reused again in Lesson 108) combined with a plain
+  `select` over a results channel — a pattern whose correctness was verified
+  the stronger way, by compiling and vetting it directly instead of citing a
+  spec quote for the mechanism itself. This keeps the lesson's Go claims
+  grounded in already-verified material rather than a half-fetched spec
+  section. One new term, checked against the glossary first via
+  case-insensitive grep across the whole file — zero collisions confirmed
+  before writing: `Task.WhenAny`. `context.WithCancel` and `select` are
+  reused from Lessons 41/108 and plain Go syntax respectively, deliberately
+  not given new `<dfn>` entries. Added the one new row immediately after
+  Lesson 109's `SemaphoreSlim` row, same Term/Tiếng Việt (dev-style)/In
+  software column order, confirmed by inspecting the file's actual last two
+  existing rows directly rather than assumed. The Go scaffold (a
+  `firstReply` function racing three goroutines over a shared channel,
+  guarded by `context.WithCancel`) was compile-checked in a scratch
+  directory — but not at the `/tmp/scratch-backend-20261023/` path named in
+  this round's brief: both `mkdir` and `cd` against any path under `/tmp`
+  were blocked outright by this session's sandbox ("may only create
+  directories/change directories to the allowed working directories for
+  this session," scoped to the repo root), a tighter restriction than the
+  filename-collision problem the brief anticipated. Used `.scratch/backend-
+  lesson110/` inside the repo instead — the exact convention this file's own
+  2026-07-17 entry already established for Lesson 11 (`.scratch/backend-
+  lesson11/`) and already covered by the repo's root `.gitignore`
+  (`.scratch/`), so nothing scratch-related was ever at risk of being
+  committed. `go build -C .scratch/backend-lesson110 -o scratch_bin .` and
+  `go vet -C .scratch/backend-lesson110 ./...` both ran clean with no output;
+  actually executing the built binary was blocked by a separate approval
+  gate in this sandboxed session (running an arbitrary built binary path
+  needs interactive approval with no user present), so correctness rests on
+  a clean build + vet rather than an observed run — consistent with the
+  rigor most previous rounds (e.g. Lesson 11, Lesson 12) used. The scratch
+  directory was deleted immediately after (`rm -rf .scratch/backend-
+  lesson110`), confirmed empty afterward. Verification performed
+  mechanically via Node one-liners run directly in this session (no `/tmp`
+  script-path friction this round, since nothing ad hoc was written outside
+  the repo): (1) a quiz-word-count check scoped per `<div class="q">` block
+  — first draft landed uneven (spreads of 7–11 words across options within
+  the same question), fixed through several rewrite-and-recount cycles per
+  option, converged to exactly 9/9/9/9, 9/9/9/9, 9/9/9/9, and 10/10/10/10
+  across the four questions, exactly one `data-ok` and four options per
+  question confirmed the same way; (2) an HTML tag-balance check across
+  div/p/code/button/script/dfn/pre/h2/h1/em/strong/a/table/tr/th/td — clean
+  on the first pass after the quiz fix (div 7/7, p 15/15, code 30/30, button
+  16/16, script 3/3, dfn 1/1, pre 2/2, h2 6/6, h1 1/1, em 3/3, strong 3/3, a
+  3/3, table 1/1, tr 5/5, th 7/7, td 8/8); a separate table/tr/th/td/p/div/
+  html/head/body/title/script balance check on `glossary.html` after its
+  one-row addition — also balanced (tr 367/367, td 1098/1098), plus a
+  duplicate-term scan across all 366 first-column entries — zero
+  duplicates; (3) a raw-unescaped-`&` regex scan across both files — zero
+  hits; (4) the lesson's `<dfn` tags grepped and confirmed to carry both
+  `data-en=` and `data-vn=` — exactly 1 `dfn` tag, matching the 1 new term,
+  no orphaned attribute; (5) `node --check` against `assets/nav.js`,
+  `assets/gloss.js`, and `assets/quiz.js` — all clean, both before and after
+  the `nav.js` edit; (6) a basic HTML well-formedness check (exactly one
+  `<!DOCTYPE html>`, one `<html>`/`</html>`, three script tags with
+  `nav.js` last) — clean. Registered Lesson 110 in `nav.js` (date
+  2026-10-23, today's actual generation date) right after `n: 109`,
+  confirmed exactly one matching `n: 110` entry and exactly one matching
+  `0110-*.html` file on disk afterward. Added one new RESOURCES.md line
+  (Microsoft Learn's `Task.WhenAny` page plus pkg.go.dev's `context`
+  package doc) following the existing per-topic grouping, placed right
+  after Lesson 109's `SetLimit`/`SemaphoreSlim` line. `bin/record-progress`
+  ran clean on the first attempt this round (`recorded: backend/
+  lesson_generated day=110 lesson=0110-first-result-wins-whenany-select-
+  cancel.html`).
+  No new `learning-records/` file this round — the topic came from the
+  two most recent lessons' own self-documented Scope lines, not a new
+  surprise about the learner's baseline or a quiz outcome, so it doesn't
+  rise to a new durable fact worth its own record. Candidates spotted but
+  not picked this round, worth checking fresh next time: a full side-by-side
+  of single-call timeout/deadline patterns (`context.WithTimeout` vs
+  `CancellationTokenSource`'s own timeout constructor), named in this
+  lesson's own Scope line as the natural next step since Lesson 41 only
+  covers the Go half; retry-with-backoff composed on top of a race
+  (Lesson 32's territory, one layer below this one); and the Go spec's own
+  `select`-statement arbitration rules (which case wins when multiple are
+  ready simultaneously) — flagged above as unverified this round due to two
+  truncated fetches, worth a direct, full-page read next time rather than
+  another partial fetch.

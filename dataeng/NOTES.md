@@ -4382,3 +4382,126 @@ along the Phase 2 spine, adapted to the learning records.
   or else let the spine move to further dbt/Airflow depth rather than a third
   Kafka round in a row, since Kafka has now run two of the last four rounds
   (34, 37) against one each for dbt (36) and Airflow (0 since 35).
+- 2026-10-23 (headless run, Day 38 generated): thirty-eighth lesson,
+  `0038-airflow-asset-growth-check-variable-cursor.html`. Confirmed before
+  writing that no `0038-*.html` file existed in `lessons/` and no
+  `2026-10-23` entry existed in `assets/nav.js` (last entry was Day 37,
+  dated 2026-10-22). Read `MISSION.md`, `PLAN.md` in full, this file's tail
+  back through Day 37's own close, `RESOURCES.md`, the one
+  `learning-records/` file, and `assets/nav.js`'s full `LESSONS` array (all
+  37 titles) before writing anything, plus Days 20, 21 and 22 in full for
+  exact precedent (`order_events_landed.py`'s real shape, the
+  `Asset`/`outlets=` mechanics, and the `Variable.get()`/XCom distinction).
+  **Topic choice, and a course correction from this round's own brief:**
+  this round's incoming brief named "schema evolution" as today's topic, but
+  that is already lesson 17 (`0017-kafka-schema-evolution.html`, dated
+  2026-10-02) — confirmed directly by reading `assets/nav.js`'s existing
+  entry before writing anything, not assumed from the brief. Re-derived the
+  actual next topic from first principles instead: cross-referenced every
+  `PLAN.md` Phase 2a/2b/2c/2d spine bullet against all 37 existing lesson
+  titles (a dedicated sub-agent did this cross-check) and confirmed every
+  spine bullet has been covered at least once as of Day 30, exactly as Day
+  36's own note already found — so the real driver for today was each
+  recent round's own "Next up" closing note, not an unmet spine bullet.
+  Day 37's own closing note repeated the single named, still-open thread:
+  Day 35's blocked `airflow db migrate`/`airflow dags test` loop, with an
+  explicit steer toward "further dbt/Airflow depth rather than a third Kafka
+  round in a row" if it stayed blocked (Kafka had run Days 34 and 37 of the
+  last four). Re-attempted that exact blocked command live, first, before
+  picking anything else: `AIRFLOW_HOME=... uv run --with
+  "apache-airflow==3.3.1" airflow db migrate` required interactive approval
+  again this round with no human present to grant it — confirmed live, the
+  fourth round running (35, 36, 37, 38) to hit this specific gate on this
+  specific command. Rather than retry a fifth time or invent a topic, picked
+  the strongest genuinely-open, concretely-named Airflow gap instead: Day 21
+  itself left `check_order_events_grew`'s body as a bare `TODO` with a
+  comment naming the real risk (`outlets=` fires on success regardless of
+  real data change) — a real, previously-deferred piece of unfinished work
+  in an existing file, not a new topic, and squarely Airflow depth per Day
+  37's own steer.
+  **Content:** replaced Day 21's `TODO` with a real growth check — compares
+  `raw.order_events`'s current row count (plain `psycopg`, same DSN as Day
+  6's own consumer) against the last-seen count stored in an Airflow
+  `Variable` (`order_events_last_count`), raising instead of returning on
+  no-growth (the only way to suppress `outlets=`, which fires strictly on
+  success) and writing the Variable only after confirming real growth, so a
+  failed/no-growth run can never erase a prior real cursor value. Chose a
+  Variable over XCom deliberately, naming why: XCom is scoped to one DAG
+  run, per Day 20's own line, while this cursor needs to be read by the same
+  task in a *later*, separate run. No new Docker service, no new DAG file —
+  one task body, in the one file Day 21 already built, same restraint as
+  recent rounds' "no new infrastructure" scoping.
+  **A real bug caught by live inspection, not assumed:** this sandbox could
+  install `apache-airflow==3.3.1` and `psycopg[binary]` this round and
+  construct the real edited DAG directly. An early draft used
+  `Variable.get(key, default_var="0")`, the keyword name several Airflow
+  2.x-era sources use — calling it against the pinned 3.3.1
+  `airflow.sdk.Variable.get()` raised `TypeError: Variable.get() got an
+  unexpected keyword argument 'default_var'`, confirmed live, with
+  `inspect.signature(Variable.get)` showing the real keyword is `default`.
+  Fixed before shipping and named explicitly in the lesson's own Section 2
+  and its "Go deeper" source note, the same honesty convention Day 37 used
+  for its own `ConsumerGroupTopicPartitions` import-path gotcha. Separately
+  confirmed `DagBag.get_dag(dag_id)` (the form Day 22's own lesson used)
+  requires an already-migrated metadata DB and fails with
+  `sqlite3.OperationalError: no such table: dag` against a brand-new
+  `AIRFLOW_HOME`, while `DagBag(...).dags[dag_id]` does not — switched the
+  lesson's own Verify section to the dict-access form and said why, rather
+  than copying Day 22's command blind.
+  **Verification — what actually ran live vs. what didn't:** `py_compile`
+  passed clean against the exact DAG body extracted character-for-character
+  out of the lesson's own `<pre><code>` block (written by hand into a
+  scratch file and diffed by eye against the lesson source line-for-line,
+  since the sandbox's `python3`-via-Bash extraction step itself hit an
+  approval gate this round — noted honestly, worked around by writing the
+  identical text directly). Went further than a syntax check: imported the
+  real DAG module directly (`importlib.util`) against the installed
+  `apache-airflow==3.3.1`, confirmed `dag.dag_id`, the task's real `outlets`
+  list, and `bag.import_errors == {}`. Then exercised the growth-check
+  *algorithm itself* with `psycopg.connect` and `Variable.get`/`Variable.set`
+  mocked: a first run with no prior cursor (default `"0"`) succeeds and
+  writes `"42"`; a second run at the same count raises
+  `ValueError: no growth: 42 <= last checked 42` and leaves the cursor
+  unchanged at `"42"`; a third run at a higher count succeeds and advances
+  the cursor to `"50"` — all three cases passed exactly as the lesson's own
+  prose describes, strictly stronger verification than `py_compile` alone.
+  `airflow db migrate` itself stayed blocked as described above, so the
+  `dags test`/`asset_event`-row claims in the Verify section are given as
+  the correct next check, not presented as captured live output — said so
+  explicitly in the lesson's own closing callout, the same qualification
+  Days 35-37 used for whatever that round's sandbox couldn't run live. All
+  scratch work happened under `.scratch-dataeng-1023/` at the repo root
+  (`/tmp` is outside this sandbox's allowed write paths this round, a new,
+  narrower constraint than prior rounds hit — confirmed by a direct `mkdir`
+  denial), deleted afterward and confirmed removed via a directory listing
+  attempt. No dbt snippet exists in this lesson (confirmed by grep for
+  `dbt build`/`dbt parse`/`models/` — the only hits are unmodified prose
+  references to Day 7's existing `dbt_build` task), so `dbt parse` did not
+  apply this round.
+  Ran a Python tag-balance/bare-`&`/dfn-attribute/quiz-word-count script
+  (same shape as recent rounds', written to the same scratch directory,
+  deleted with it) against the lesson: every checked tag balanced, zero bare
+  `&`, the lesson's one `<dfn>` tag (`Variable`) carries both `data-en=` and
+  `data-vn=`. The first quiz draft came up mismatched on all four questions
+  (14/11/11, 11/10/12, 11/9/9 and 11/9/9 word splits); rebalanced through
+  several edit-and-recount passes, re-running the same script after every
+  edit, to a final 13/13/13, 13/13/13, 9/9/9 and 9/9/9 across all four
+  questions.
+  **No new glossary section added this round** — a deliberate, named choice,
+  confirmed by grep before deciding, not an oversight. The lesson's only
+  `<dfn>` tag (`Variable`) and its two other code-level concepts reused this
+  round (`Asset`, `outlets=`) all already have glossary rows from Days 21
+  and 22; today repurposes `Variable` as persistent cross-run state rather
+  than read-only config, but that is a usage nuance covered in this lesson's
+  own prose, not a new term needing its own row. No `RESOURCES.md` change
+  either — today's citation (Airflow's own Variables docs) was already
+  listed by Day 22.
+  Registered Lesson 38 in `assets/nav.js` (`node --check` clean).
+  **Next up, named honestly for whoever picks up next:** the `airflow db
+  migrate`/`airflow dags test` approval-gate block is now four rounds
+  running (35, 36, 37, 38) with no successful headless approval; a human
+  granting it once would unblock a real end-to-end run this course has
+  wanted since Day 35. Absent that, the spine's next concrete, nameable gap
+  is dbt: Day 15's CI workflow (`state:modified+`, deferral) has never been
+  exercised live by any round — a real gap parallel to the Airflow one, and
+  dbt per Day 37's own steer away from a third-in-a-row Kafka round.

@@ -176,6 +176,8 @@
       file: "lessons/0084-traceback-module.html" },
     { n: 85, date: "2026-10-22", title: "warnings: flagging trouble without stopping",
       file: "lessons/0085-warnings-module.html" },
+    { n: 86, date: "2026-10-23", title: "inspect: asking a function about its own signature",
+      file: "lessons/0086-inspect-module.html" },
   ];
 
   const REFS = [

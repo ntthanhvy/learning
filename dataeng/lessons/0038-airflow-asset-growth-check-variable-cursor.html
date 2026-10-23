@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 38 · Finishing Day 21's TODO: a real growth check with a Variable cursor</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 38 · ~20 min · 23 Oct 2026</p>
+<h1>Finishing Day 21's TODO: a real growth check with a Variable cursor</h1>
+<p class="byline">Today's tangible win: <code>check_order_events_grew</code> — the task Day 21 left as a bare <code>TODO</code> inside <code>dags/order_events_landed.py</code> — now actually compares this run's <code>raw.order_events</code> row count against the count from its own last successful run, stored in an Airflow Variable, and only lets the Asset fire when the count really grew. Confirmed this round, directly against a real Airflow 3.3.1 install, that <code>Variable.get()</code>'s default-string gotcha from Day 22 is exactly the bug a naive first draft of this task would ship.</p>
+
+<div class="callout"><strong>Before today — check Day 21's two DAGs still parse:</strong> today edits one task body inside an existing file and touches nothing else.
+<pre><code>AIRFLOW_HOME="$(pwd)/airflow_home" uv run --with "apache-airflow==3.3.1" airflow dags list-import-errors</code></pre>
+Expected: <code>No data found</code> (Day 22's own round confirmed current Airflow 3.3.1 names the no-errors case explicitly, not blank output). If <code>order_events_landed</code> or <code>dbt_build_on_events</code> is missing, go back to Day 21 first — today assumes both files already exist exactly as that lesson built them.</div>
+
+<h2>1 · The gap Day 21 named and deliberately left open</h2>
+<p>Day 21 built the real mechanics of an <code>Asset</code>-scheduled DAG — a task with <code>outlets=[order_events_asset]</code> firing an asset event on success, and a separate DAG scheduled by <code>schedule=[order_events_asset]</code> instead of a cron string — and proved the link was real by reading a row out of Airflow's own <code>asset_event</code> table. But it left <code>check_order_events_grew</code>'s body as a bare <code>...</code>, with a comment naming the exact risk out loud: an <code>outlets=</code> task fires its asset event on <em>success</em>, not on "did the data really change." A task that always returns without raising would mark the asset updated — and trigger <code>dbt_build_on_events</code> — every ten minutes, whether or not Kafka's consumer actually landed a single new row since the last check. That's not a hypothetical: Day 21's own schedule for <code>order_events_landed</code> is <code>"*/10 * * * *"</code>, so a no-op "always succeed" version of this task would run <code>dbt build</code> against the warehouse 144 times a day for a stream that might see long quiet stretches overnight.</p>
+<p>Fixing it needs exactly one thing Day 21 didn't reach for: somewhere to remember what the count was <em>last time</em>, so this run can compare against it. That's a one-row, one-number piece of state that lives in Airflow itself, not in the data warehouse — a job for Day 22's <dfn data-en="an Airflow key/value store for a single configuration value that isn't a connection to an external system -- set via AIRFLOW_VAR_KEYNAME, the CLI, or the UI, and looked up at task-run time via Variable.get(); today repurposes it as small persistent state a task writes to itself between runs, not just read-only config" data-vn="giữ nguyên &quot;Variable&quot; — kho key/value của Airflow cho 1 giá trị config, hôm nay dùng làm nơi lưu state nhỏ (con số) giữa các lần task chạy, task tự ghi lại cho chính nó, không chỉ đọc config tĩnh">Variable</dfn>, used today not as read-only config but as a tiny cursor a task reads from and writes back to on every single run.</p>
+
+<h2>2 · Why a Variable, and not Day 20's XCom</h2>
+<p>Day 20 drew a sharp line: XCom is for passing a small value between tasks <em>inside one DAG run</em>, and it is explicitly not a data transport for anything larger or longer-lived. A growth cursor is a different shape of problem — the same single task, in <em>different</em> DAG runs ten minutes apart, needs to read a value one of its own past runs wrote. XCom is keyed by <code>(dag_id, task_id, run_id)</code> by default, so reading "the previous run's XCom" from inside a running task means reaching across runs, which is exactly the kind of workaround that signals the wrong tool. A Variable has no run boundary at all — it's a single named value living in Airflow's metadata database, visible to any task in any DAG that asks for it by key, which is precisely "small persistent state that outlives one run" and nothing more.</p>
+<pre><code><span class="kw">from</span> airflow.sdk <span class="kw">import</span> Variable
+
+Variable.<span class="kw">set</span>(<span class="str">"order_events_last_count"</span>, <span class="str">"42"</span>)
+<span class="kw">print</span>(Variable.get(<span class="str">"order_events_last_count"</span>, default=<span class="str">"0"</span>))</code></pre>
+<p>A real naming gotcha caught this round by actually calling it, not by assuming: the keyword that supplies a fallback for a missing key is <code>default</code> on the pinned <code>apache-airflow==3.3.1</code>'s <code>airflow.sdk.Variable.get()</code> — not <code>default_var</code>, which several older Airflow 2.x blog posts and even some still-cached doc snippets use, and which raises a plain <code>TypeError: Variable.get() got an unexpected keyword argument 'default_var'</code> on this install, confirmed by calling it both ways against the real installed signature (<code>inspect.signature(Variable.get)</code> prints <code>(key: 'str', default: 'Any' = NOTSET, deserialize_json: 'bool' = False)</code>). That fallback matters for a cursor's very first run — no prior value has ever been written, and the task must not crash on a missing key, it must treat "never run before" as "last count was zero." Day 22 already surfaced the sharper gotcha this task depends on getting right: <code>Variable.get()</code> always returns a plain <code>str</code>, never an <code>int</code>, unless <code>deserialize_json=True</code> is passed. A first draft that writes <code>Variable.set("order_events_last_count", new_count)</code> (an <code>int</code>) and later compares <code>Variable.get(...) &gt; last_count</code> without casting both sides to <code>int</code> first will compare a <code>str</code> to an <code>int</code> and raise <code>TypeError</code> the moment it actually runs — not on import, which is why Day 21's own DAG-parse checks never would have caught it.</p>
+
+<h2>3 · Build: finish <code>check_order_events_grew</code></h2>
+<p>Replace the <code>TODO</code> body inside <code>dags/order_events_landed.py</code> (the file Day 21 built — only this one task's body changes, nothing else in that file or in <code>dbt_build_on_events.py</code>):</p>
+<pre><code><span class="kw">from</span> __future__ <span class="kw">import</span> annotations
+
+<span class="kw">from</span> datetime <span class="kw">import</span> datetime
+
+<span class="kw">import</span> psycopg
+<span class="kw">from</span> airflow.sdk <span class="kw">import</span> DAG, Asset, Variable, task
+
+order_events_asset = Asset(<span class="str">"postgres://fdp/raw.order_events"</span>)
+PG_DSN = <span class="str">"host=localhost dbname=fdp user=fdp password=fdp"</span>  <span class="cm"># same DSN as Day 6's consumer</span>
+CURSOR_KEY = <span class="str">"order_events_last_count"</span>
+
+<span class="kw">with</span> DAG(
+    dag_id=<span class="str">"order_events_landed"</span>,
+    schedule=<span class="str">"*/10 * * * *"</span>,
+    start_date=datetime(<span class="kw">2026</span>, <span class="kw">9</span>, <span class="kw">21</span>),
+    catchup=<span class="kw">False</span>,
+) <span class="kw">as</span> dag:
+    <span class="kw">@task</span>(outlets=[order_events_asset])
+    <span class="kw">def</span> check_order_events_grew() -&gt; <span class="kw">int</span>:
+        <span class="kw">with</span> psycopg.connect(PG_DSN) <span class="kw">as</span> conn, conn.cursor() <span class="kw">as</span> cur:
+            cur.execute(<span class="str">"SELECT count(*) FROM raw.order_events"</span>)
+            current_count = cur.fetchone()[<span class="kw">0</span>]
+
+        last_count = <span class="kw">int</span>(Variable.get(CURSOR_KEY, default=<span class="str">"0"</span>))
+
+        <span class="kw">if</span> current_count &lt;= last_count:
+            <span class="cm"># No growth since the last check: raise, so this task is marked</span>
+            <span class="cm"># failed and outlets=[order_events_asset] never fires. A no-op</span>
+            <span class="cm"># *success* here would trigger dbt_build_on_events every ten</span>
+            <span class="cm"># minutes regardless of whether Kafka delivered anything new --</span>
+            <span class="cm"># the exact risk Day 21's own comment named and left unbuilt.</span>
+            <span class="kw">raise</span> ValueError(
+                <span class="str">f"no growth: {current_count} &lt;= last checked {last_count}"</span>
+            )
+
+        Variable.<span class="kw">set</span>(CURSOR_KEY, <span class="kw">str</span>(current_count))
+        <span class="kw">return</span> current_count
+
+    check_order_events_grew()</code></pre>
+<p>Two choices worth defending out loud, because both are easy to get wrong in a way that still parses and still runs. First, raising on no-growth rather than returning early with no asset-firing side effect: Airflow's <code>outlets=</code> mechanism fires strictly on task <em>success</em>, with no API for "succeeded but don't count it" — so "don't fire the asset" and "fail the task" are the same lever here, and a monitoring dashboard built later (Day 27's data-quality story) needs to know this DAG's expected failure rate is not zero, it's "however many ten-minute windows see no new orders," most likely every night. Second, writing the Variable <em>after</em> the growth check and not before: if this task raises, the cursor must stay at its old value, so the next run still compares against the last real count that grew — writing it unconditionally near the top would silently erase the ability to ever detect growth across a no-growth run.</p>
+<div class="callout">This task's own correctness has nothing to do with Postgres or psycopg syntax — Day 6 already established that exact connection shape. The entire day's real skill is the cursor: read it as an <code>int</code> with a safe default, compare, raise instead of silently succeeding on no-growth, and only then overwrite it. Get that sequencing wrong and the DAG still parses, still runs, and still looks fine in the UI right up until someone checks whether <code>dbt_build_on_events</code> is actually running on every single schedule tick rather than only when data grew.</div>
+
+<h2>4 · Verify</h2>
+<pre><code>AIRFLOW_HOME="$(pwd)/airflow_home" uv run --with "apache-airflow==3.3.1" --with "psycopg[binary]" \
+  airflow dags list-import-errors
+AIRFLOW_HOME="$(pwd)/airflow_home" uv run --with "apache-airflow==3.3.1" --with "psycopg[binary]" \
+  python3 -c "
+from airflow.dag_processing.dagbag import DagBag
+bag = DagBag(dag_folder='dags')
+t = bag.dags['order_events_landed'].get_task('check_order_events_grew')
+print(t.task_id, t.outlets)
+"</code></pre>
+<p>Expected: <code>list-import-errors</code> prints <code>No data found</code>, and the second command prints <code>check_order_events_grew [Asset(name='postgres://fdp/raw.order_events', ...)]</code> — the task still declares the same outlet Day 21 gave it; today changed the body, not the contract. This round confirmed both commands directly, including the specific form <code>bag.dags['order_events_landed']</code> rather than Day 22's <code>bag.get_dag(...)</code>: the dict-access form parses the DAG file straight out of a fresh <code>DagBag</code> with no metadata database involved at all, while <code>get_dag()</code> additionally queries the (already-migrated, from Day 7 onward) <code>dag</code> table and fails with <code>sqlite3.OperationalError: no such table: dag</code> against a brand-new, never-migrated <code>AIRFLOW_HOME</code> — a real difference between the two accessors worth knowing, not a typo. Then run it twice in a row with no new orders landed in between, which should behave exactly as today's logic demands:</p>
+<pre><code>AIRFLOW_HOME="$(pwd)/airflow_home" uv run --with "apache-airflow==3.3.1" --with "psycopg[binary]" \
+  airflow dags test order_events_landed 2026-10-23
+AIRFLOW_HOME="$(pwd)/airflow_home" uv run --with "apache-airflow==3.3.1" --with "psycopg[binary]" \
+  airflow variables get order_events_last_count
+AIRFLOW_HOME="$(pwd)/airflow_home" uv run --with "apache-airflow==3.3.1" --with "psycopg[binary]" \
+  airflow dags test order_events_landed 2026-10-23
+</code></pre>
+<p>Expected: the first run succeeds and <code>variables get</code> shows the real row count as a string; the second run — same count, nothing new landed — fails with <code>ValueError: no growth: N &lt;= last checked N</code> in the task log, and a check of <code>asset_event</code> confirms no second row was written for this task between the two attempts:</p>
+<pre><code>sqlite3 airflow_home/airflow.db \
+  "SELECT count(*) FROM asset_event WHERE source_task_id = 'check_order_events_grew';"</code></pre>
+<p>Expected: <code>1</code>, not <code>2</code> — exactly one asset event, from the run that actually saw growth, confirming the second run's failure genuinely suppressed <code>outlets=</code> rather than firing anyway.</p>
+<div class="callout"><strong>What this round could and couldn't run live:</strong> this sandbox could install <code>apache-airflow==3.3.1</code> and <code>psycopg[binary]</code>, construct the real edited DAG, and confirm <code>bag.import_errors</code> is empty and the task's <code>outlets</code> survive unchanged. The growth-check <em>algorithm itself</em> — first-run success with no prior cursor, a no-growth run raising and leaving the cursor untouched, a real-growth run advancing it — was verified directly by calling the task's underlying function with <code>psycopg.connect</code> and <code>Variable.get</code>/<code>Variable.set</code> mocked, and all three cases passed exactly as this section describes. <code>airflow db migrate</code> itself was blocked by this sandbox's interactive-approval gate with no human present to grant it, the same specific block Days 35–37 each hit on that one command — so the <code>dags test</code>/<code>asset_event</code> commands above are given as the correct next check, not claimed as captured output from a live run this round. The one real bug this round's live checks did catch: an early draft used <code>default_var=</code>, which raises <code>TypeError</code> against the pinned 3.3.1 <code>Variable.get()</code> — fixed to <code>default=</code> before this lesson shipped, exactly the kind of thing that looks right from memory and breaks the moment it actually runs.</div>
+
+<div class="interview">
+<p><strong>Q: "Your data-aware DAG checks every ten minutes. How do you stop it from triggering downstream work when nothing actually changed?"</strong> A strong answer, out loud: <em>"Airflow's outlets= fires on task success, full stop — there's no 'succeeded but don't count it' option. So the task itself has to make 'no real change' a failure, not a successful no-op. I store the last-seen row count in an Airflow Variable, compare it against the current count on every run, and raise instead of returning if nothing grew — only on real growth do I update the stored cursor and let the task succeed, which is the only way outlets actually fires. The subtle bug to avoid is that Variable.get() always returns a string, so comparing it directly to an int silently does the wrong thing instead of crashing where you'd notice — I cast it explicitly on the way in."</em> The signal: naming outlets' success-only semantics as the root constraint, not just "I added an if statement."</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Airflow's outlets= mechanism fires an asset event strictly on task success, with no separate API for 'succeeded but don't count this run.' So a task that wants to skip firing the asset when nothing really changed has only one lever available: make that case a real failure (raise), not a successful no-op -- exactly the gap Day 21 named in its own TODO comment and left unbuilt.">
+    <p class="stem">Why does today's task raise an exception on no-growth instead of just returning early?</p>
+    <button class="opt" data-ok>outlets= fires strictly on success, so failing is the only way to skip</button>
+    <button class="opt">Airflow tasks are simply never allowed to return any value at all here</button>
+    <button class="opt">Raising is always required before any task can ever declare an outlets= list</button>
+  </div>
+  <div class="q" data-why="XCom is keyed to one specific DAG run (dag_id, task_id, run_id by default) and exists to pass a small value between tasks inside that single run, per Day 20's own line. A growth cursor needs the opposite: the same task, in a later and separate DAG run, reading a value one of its own earlier runs wrote -- state that outlives any one run, which is exactly what a Variable is for and what XCom is explicitly not designed to be reached across.">
+    <p class="stem">Why does today's cursor use a Variable instead of Day 20's XCom?</p>
+    <button class="opt" data-ok>The value must persist across separate runs, not only just inside one run</button>
+    <button class="opt">XCom simply cannot ever hold a plain integer value under any real circumstance</button>
+    <button class="opt">Variables are a much newer feature that fully replaced XCom in Airflow 3</button>
+  </div>
+  <div class="q" data-why="Variable.get() always returns a plain string, confirmed directly against a real Airflow 3.3.1 install (Day 22 first surfaced this), unless deserialize_json=True is passed. A first draft that stores an int via Variable.set and later compares the retrieved value to an int without an explicit int() cast would compare a str to an int and raise TypeError the first time the task actually executes -- a bug invisible to any DAG-parse check, since parsing never calls the task body.">
+    <p class="stem">What bug would a first draft hit if it compared <code>Variable.get(CURSOR_KEY)</code> directly to an <code>int</code> without casting?</p>
+    <button class="opt" data-ok><code>TypeError</code>, a string compared wrongly to an int itself</button>
+    <button class="opt">A silent, wrong answer that always just evaluates true</button>
+    <button class="opt">Nothing at all, since Airflow casts every Variable automatically</button>
+  </div>
+  <div class="q" data-why="If the Variable were overwritten unconditionally near the top of the task, before the growth comparison, then any run that fails the growth check would still have already erased the cursor's old value. The next run would then compare against a value from a run that itself saw no growth, breaking the cursor's whole job: remembering the last count that actually represented real growth. The write must happen only after confirming growth, and only on the success path.">
+    <p class="stem">What would go wrong if the Variable were overwritten before checking whether the count actually grew?</p>
+    <button class="opt" data-ok>A run with no growth could erase it first</button>
+    <button class="opt">Airflow would simply refuse to let the DAG parse</button>
+    <button class="opt">The outlets= list would silently detach from the task</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> per <code>RESOURCES.md</code>, Airflow's own <a href="https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/variables.html">Variables</a> docs are this course's cited source, and Day 22 already used them for the <code>AIRFLOW_VAR_</code>/<code>Variable.get()</code> mechanics this lesson builds on directly. Today's specific claims — the real keyword being <code>default</code> rather than the older <code>default_var</code>, and <code>Variable.get()</code> always returning a plain string — were confirmed this round by exercising a real, installed <code>apache-airflow==3.3.1</code> directly (constructing the DAG, calling <code>Variable.get()</code> both ways, and reading <code>inspect.signature(Variable.get)</code>), not re-fetched from the live docs page (no working <code>WebFetch</code> tool this round, the same gap Days 17, 23, 26, 31, 34 and 37 each hit); confirm the hosted page still matches before quoting it in an interview. Read that page next for the UI- and secrets-backend-based ways to set a Variable, both left at vocabulary level here since today's cursor is deliberately the simplest form: one task reading and writing its own single key.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 38.<br>
+<strong>Next up:</strong> Day 35's own open verification loop — actually running <code>airflow db migrate</code>/<code>airflow dags test</code> end to end under this sandbox's interactive approval gate — stayed blocked again this round (confirmed live before writing today's lesson); worth a fifth attempt whenever a human is present to grant it, or else the spine continues with further dbt depth (e.g. exercising Day 15's CI workflow's <code>state:modified+</code>/deferral live, never yet run end to end by any round) rather than retrying the same blocked command a sixth time.<br><br>
+💬 Anything unclear — why outlets= can't skip firing without a real failure, or how this cursor pattern would change against a real multi-partition growth signal instead of one global count? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

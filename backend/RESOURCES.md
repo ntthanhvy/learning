@@ -35,6 +35,8 @@
   Vendor primary source for exactly when `Task.WhenAll`'s returned Task completes (only once every supplied task has completed, aggregating all faulted tasks' exceptions) and for `CancellationTokenSource`/`CancellationToken`'s source-vs-token split. Use for: C# structured-concurrency fan-out and the fail-fast-cancellation gap versus Go's errgroup (Lesson 108).
 - [Docs: pkg.go.dev — golang.org/x/sync/errgroup (SetLimit section)](https://pkg.go.dev/golang.org/x/sync/errgroup) and [Docs: Microsoft Learn — SemaphoreSlim](https://learn.microsoft.com/en-us/dotnet/api/system.threading.semaphoreslim)
   Vendor primary source for `errgroup.Group.SetLimit`'s blocking-at-the-cap behavior and its "must not be modified while active" constraint, and for `SemaphoreSlim`'s initial/max count constructor, `WaitAsync()`'s non-blocking suspension, and `Release()`. Use for: bounding fan-out width — how many concurrent goroutines/Tasks a fan-out loop is allowed to run at once (Lesson 109).
+- [Docs: Microsoft Learn — Task.WhenAny](https://learn.microsoft.com/en-us/dotnet/api/system.threading.tasks.task.whenany) and [Docs: pkg.go.dev — context package](https://pkg.go.dev/context)
+  Vendor primary source for `Task.WhenAny`'s documented tip that losing tasks "will continue running until completion" unless cancelled by hand, and the primary source for `context.WithCancel`'s derived-context behavior behind Go's `select`-based first-result-wins pattern. Use for: "first result wins" races and why the loser doesn't stop on its own (Lesson 110).
 
 ## Wisdom (Communities)
 

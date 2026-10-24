@@ -11002,4 +11002,122 @@ fail *gracefully* so the learner sees which task failed.
   next round rather than re-scanned from scratch, though a fresh scan
   costs little and is still the safer default given how fast this list
   turns over.
+- 2026-10-24 — **Day 87 generated: Review day 15, retrieval across Days
+  84-86** (headless run, zero prior context, starting from the repo root
+  at `/home/runner/work/learning/learning`). Read `MISSION.md` in full
+  (no-pandas exclusion re-confirmed before writing a line), `PLAN.md`
+  (noted stale, `NOTES.md` treated as authoritative), `RESOURCES.md` in
+  full, and the learner's only record
+  (`learning-records/0001-baseline-reads-python-writes-little.md`, the
+  Day 1 "can read Python, can't produce it" recognition-vs-recall gap,
+  with no later record and no quiz/kata-failure signal in the DB).
+  `NOTES.md` exceeds this run's single-read cap, so only its cadence-rule
+  grep hits and tail (~310 lines, covering Days 84-86 in full) were read
+  directly — sufficient, since Day 86's own next-day note stated the
+  cadence plainly: Day 86 closed the third fresh lesson since Day 83's
+  review (Days 80-82), so a review covering Days 84-86 is due next at
+  Day 87, before any further fresh topic — matching this course's settled
+  three-fresh-then-review pattern (Day 71 reviewed 68-70, Day 75 reviewed
+  72-74, Day 79 reviewed 76-78, Day 83 reviewed 80-82). Confirmed by
+  reading all three reviewed lessons
+  (`0084-traceback-module.html`, `0085-warnings-module.html`,
+  `0086-inspect-module.html`) and the most recent review day
+  (`0083-review-retrieval-day-14.html`) in full as the structural template,
+  plus Day 79's for a second cadence data point — no deviation from the
+  stated cadence was warranted.
+  Topic/format selection: a fresh-gap grep ran anyway first, per every
+  prior review day's own discipline — case-insensitive search across all
+  86 lessons, every practice file, `reference/glossary.html`, and
+  `RESOURCES.md` for Day 86's five carried-forward candidates (`hmac`,
+  `ChainMap`, `graphlib`, `weakref`, `calendar`) — all five still
+  genuinely zero-hit, none strong enough to override the cadence math, so
+  today stayed a review day covering exactly Days 84-86.
+  Content: three fold-out retrieval questions in original teaching order
+  — Day 84 (`traceback.format_exc()` vs. `str(e)`, and the
+  no-exception-active `"NoneType: None"` edge case), Day 85
+  (`warnings.warn()` vs. `raise`'s control-flow difference, and why
+  `warn()` over `logging.warning()` for a deprecation notice), Day 86
+  (`inspect.signature()` never calling the function, and why a no-default
+  parameter reports `Parameter.empty` rather than `None`) — each answer
+  drawn directly from the original lesson's own confirmed-live content,
+  no new claims introduced. Section 2 names the shared throughline (all
+  three are a program examining *itself* mid-run — failure, a survivable
+  condition, its own signature — rather than external data) per this
+  course's interleaving convention.
+  No-pandas rule: grepped case-insensitively for
+  `pandas|numpy|dataframe|pd\.|np\.` in the new lesson and practice file —
+  exactly one hit in the lesson (the required "Where pandas/NumPy go from
+  here" boundary callout, with no worked pandas/NumPy example) and zero
+  hits in the practice file.
+  **New jargon: 0 terms**, by design — a pure review day, matching Day 83
+  and Day 79's precedent. Every term revisited already has a glossary
+  entry under its original day (84, 85, 86); `reference/glossary.html`
+  was not modified this round.
+  Quiz: 3 questions, one per reviewed day, each reused verbatim from its
+  original lesson's own already-verified quiz question (same stem, same
+  three options, same `data-why`) rather than redrafted from scratch —
+  word counts were therefore already equal per question from the
+  original lessons (10/10/10, 11/11/11, 9/9/9), re-verified this round
+  with a throwaway Python script (written via `Write` into this round's
+  scratch dir, deleted after use) that extracted each question's options
+  via regex, stripped tags, and split on whitespace — confirmed all three
+  still land on equal per-question counts after reuse. A separate
+  tag-balance check (via `html.parser.HTMLParser`) plus a bare-`&` scan
+  found zero errors on the new lesson on the first pass. `node --check`
+  confirmed no syntax errors on `assets/nav.js` after registering today's
+  entry. The scratch script was deleted before finishing.
+  `RESOURCES.md`: not modified this round — a review day cites each
+  reviewed lesson's own already-listed primary source
+  (`traceback`/`warnings`/`inspect`, all already present) rather than
+  adding anything new, matching Day 83's and Day 79's precedent.
+  Registered in `assets/nav.js` with `date: "2026-10-24"` right after the
+  `n: 86` entry.
+  Practice file `practice/87_review_retrieval_day_15.py` (3 checks,
+  stdlib-only, no `--with` flag, function-stub-with-TODO-comment style
+  matching recent practice files, one exercise per reviewed day per Day
+  83's own review-practice-file template): `parse_batch()` capturing a
+  bad record's full traceback via `format_exc()` while the rest of a
+  batch keeps processing (Ex 1, Day 84), `parse_rate()`/
+  `rate_with_warning_count()` warning on a suspicious value while still
+  returning one, caught in-process via `catch_warnings(record=True)`
+  (Ex 2, Day 85), and `describe_params()` reading a function's parameter
+  names/defaults — including the `Parameter.empty` sentinel — via
+  `inspect.signature()` (Ex 3, Day 86). All expected values were verified
+  against a live `uv run python3` probe before being written into the
+  checks.
+  Verified in a scratch directory created directly under the repo root
+  (`.scratch-python-20261024/`) since this session's sandbox blocks
+  `/tmp` entirely (confirmed directly this round: `uv run python3` could
+  not open a file written under `/tmp`, matching prior days' recorded
+  constraint) — a sibling course's own concurrently visible
+  `.scratch-dataeng-1024/` scratch dir was visible and left untouched,
+  belonging to another concurrent run. The shipped (unsolved) copy, run
+  with `uv run python3` from its real `python/practice/` path, printed
+  three clean ✗ lines with no traceback both before and after the solved
+  check. A separately solved copy (written fresh into the scratch dir,
+  not by editing the shipped file) printed all three ✓ and the "All
+  green" tally, run twice consecutively with identical results both
+  times. The scratch directory was deleted before finishing — confirmed
+  by a directory listing showing only the sibling course's own
+  `.scratch-dataeng-1024/` remaining, no `.scratch-python-20261024`.
+  `python/learning-records/` was not touched this round — a routine
+  cadence-driven review day, with no new quiz/kata-failure signal in the
+  DB and no later learning-record on file, is not itself a new, durable
+  fact about the learner distinct from what Day 1's baseline record
+  already says. The Day 1 "recognition ≠ recall" flag was instead acted
+  on directly in the lesson content: all three quiz questions are
+  recall-style (stem asks "what does X actually do / what's the
+  difference," not a read-and-recognize restatement), and the practice
+  file requires writing the real solving code from the TODO comments
+  rather than only re-reading the original lesson.
+  `bin/record-progress python lesson_generated --day 87 --lesson
+  0087-review-retrieval-day-15.html --detail '{"by":"headless"}'` was run
+  from the repo root at the end of this round (output: `recorded:
+  python/lesson_generated day=87 lesson=0087-review-retrieval-day-15.html`).
+  **Next-day note:** Day 87's review closes this cadence cycle (Days
+  84-86 reviewed, following Day 83's review of 80-82) — per this course's
+  settled three-fresh-then-review cadence, Day 88 should default to a
+  fresh topic next, starting its own gap scan from scratch, though the
+  five candidates named above (`hmac`, `ChainMap`, `graphlib`, `weakref`,
+  `calendar`) are a reasonable starting point to re-verify quickly first.
 

@@ -315,6 +315,12 @@
   <tr><td>date_spine</td><td>giữ nguyên "date_spine" — macro dbt_utils tạo 1 bảng có đúng 1 dòng cho mỗi ngày (hoặc đơn vị thời gian khác) giữa 2 mốc ngày, với 1 cột date_day; dùng làm bảng gốc để left-join dữ liệu thật vào, nhờ đó mọi ngày trong khoảng đều xuất hiện đúng 1 lần, bất kể có dữ liệu thật cho ngày đó hay không</td><td>A dbt_utils macro that generates one row per date (or other datepart interval) between a start and end date expression, with a single <code>date_day</code> column — used as a base table to left-join real data onto, so every date in a range appears exactly once regardless of whether any real row exists for it. Compiles to a recursive CTE, no table queried. Confirmed this round against <code>mart_delivery_sla</code>'s real grain: crossing the spine against distinct cities and left-joining the real per-city-per-day aggregation onto it turns a silently missing zero-order city-day into a real row with <code>order_count = 0</code>.</td></tr>
 </table>
 
+<h2 id="day39">Day 39 — dbt CI for real: closing Day 15's two TODOs</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>artifact</td><td>giữ nguyên "artifact" — file (hoặc nhóm file) 1 job GitHub Actions upload lên, job/run khác sau đó download lại bằng đúng tên đó; đây là cách giữ dữ liệu sống lâu hơn 1 job, vì disk của job bị xoá ngay khi job đó kết thúc</td><td>A named file or set of files a GitHub Actions job uploads (<code>actions/upload-artifact</code>) so a later, separate job or workflow run can download it by that same name (<code>actions/download-artifact</code>) — the mechanism for persisting data past the lifetime of the one job that produced it, since a job's own filesystem is discarded the moment it ends. <code>download-artifact</code> resolves a name to the most recent successful upload repo-wide, not scoped to the downloading run's own branch. Used here to carry Day 15's <code>manifest.json</code> from a <code>main</code>-branch full build into every later PR's slim-CI job.</td></tr>
+</table>
+
 <script src="../assets/nav.js"></script>
 </body>
 </html>

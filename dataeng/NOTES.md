@@ -4505,3 +4505,134 @@ along the Phase 2 spine, adapted to the learning records.
   is dbt: Day 15's CI workflow (`state:modified+`, deferral) has never been
   exercised live by any round — a real gap parallel to the Airflow one, and
   dbt per Day 37's own steer away from a third-in-a-row Kafka round.
+- 2026-10-24 (headless run, Day 39 generated): thirty-ninth lesson,
+  `0039-dbt-ci-slim-build-artifact.html`. Confirmed before writing that no
+  `0039-*.html` file existed in `lessons/` and no `2026-10-24` entry existed
+  in `assets/nav.js` (last entry was Day 38, dated 2026-10-23). Read
+  `MISSION.md` in full, `NOTES.md`'s own tail back through Day 38's close,
+  `PLAN.md`, `RESOURCES.md`, the one `learning-records/` file, and
+  `assets/nav.js`'s full `LESSONS` array (all 38 titles) before writing
+  anything, plus Day 15 (`0015-dbt-in-ci.html`) in full for its exact
+  committed `profiles.yml`/`dbt_ci.yml` shape and its own verification
+  section's scratch-project reconstruction.
+  **Topic choice:** Day 38's own closing note named the next concrete gap
+  directly — dbt's CI workflow (`state:modified+`, deferral) "has never been
+  exercised live by any round," explicitly favored over a third-in-a-row
+  Kafka round and offered as the parallel track to the still-blocked Airflow
+  `db migrate`/`dags test` gate (open four straight rounds, 35-38, absent a
+  human approval this round had no way to grant either — confirmed still
+  blocked by the same reasoning as Days 36-38 rather than re-attempting it
+  blind). Read Day 15 in full before accepting that framing at face value:
+  Day 15's own verification section had, in fact, already run `dbt ls
+  --select "state:modified+"` and `dbt build --select "state:modified+"
+  --defer --state` for real in a scratch sandbox, so "never exercised live"
+  was not quite literally true of the dbt-side selector logic. What Day 15
+  actually left unexercised — confirmed by rereading its own two `TODO`
+  comments in `.github/workflows/dbt_ci.yml` — was the GitHub Actions
+  workflow itself: "Load raw data" and "Fetch prior manifest" were both
+  placeholder comments, not runnable steps, so the committed workflow could
+  never have executed end to end as shipped. That sharper, still-true gap
+  (a workflow with unfilled `TODO`s in place of real steps, versus a
+  mechanism whose SQL-selection half was already sandbox-tested) is what
+  today actually closes, keeping Day 38's own topic steer intact while
+  correcting its literal claim before building on it.
+  **Content:** filled both `TODO`s. Section 2's "Load raw data" step now
+  runs Day 1's own `uv run --with "psycopg[binary]" python3
+  scripts/generate_raw_data.py` against `PG*` env vars pointed at
+  `localhost`, exactly the command Day 15 already named but never wrote in.
+  Section 3/4 replaces the single-job workflow with two jobs: `build-main`
+  (gated `if: github.event_name == 'push'`) runs a full `dbt build` on every
+  push to `main` and uploads the resulting `manifest.json` via
+  `actions/upload-artifact`; `slim-ci-pr` (gated `if: github.event_name ==
+  'pull_request'`) downloads that same artifact via
+  `actions/download-artifact` into `prod-state/` and runs the exact `dbt
+  build --select "state:modified+" --defer --state ../prod-state` command
+  Day 15 already wrote, now actually fed a real manifest instead of one that
+  was only ever reconstructed by hand in a scratch dir. Named two mechanical
+  details explicitly in Section 3's prose: `download-artifact` resolves a
+  name to the most recent successful upload repo-wide, not scoped to the
+  downloading branch, and the two jobs' `if:` guards are load-bearing (not
+  just the `on:` trigger) since a PR's own branch-push event can otherwise
+  fire the full-build job too. Named the bootstrap gap honestly in its own
+  callout: the first PR opened right after this workflow merges will see
+  `slim-ci-pr` fail on a missing artifact, until `build-main` has run once
+  successfully on `main` — a real, expected one-time failure, not a defect.
+  One new glossary term, `artifact` (GitHub Actions' upload/download
+  mechanism for persisting a file past one job's lifetime), added under a
+  new Day 39 section after grepping the glossary case-insensitively first
+  and confirming no existing row covered it — `state:modified+`, `--defer`
+  and `slim CI` themselves are all pure reuse of Day 15's own existing
+  glossary rows, not retaught. No pandas, no Python-language teaching, no
+  re-derivation of idempotency (today is pure CI/YAML/dbt-selector content,
+  confirmed by a prose-only read of the lesson before shipping).
+  **Verification:** built a minimal scratch dbt project at
+  `.scratch-dataeng-1024/fdp/food_delivery_pipeline/` (`dbt_project.yml`,
+  `profiles.yml` with the same `env_var()`-with-default shape as Day 15's
+  own committed file, `sources.yml`, `stg_orders.sql`, `fct_orders.sql` plus
+  `marts.yml`'s `unique`/`not_null` tests on `order_id`) under the repo
+  root, deleted entirely afterward (confirmed via a directory listing
+  attempt finding nothing). Ran `dbt parse --profiles-dir . --project-dir .
+  --no-partial-parse` clean first (grepped captured output for the literal
+  string `Error`, found none) to confirm the baseline itself was sound,
+  copied the resulting `manifest.json` to a sibling `prod-state/` directory
+  (not `target/`, per Day 15's own collision warning), then added `current_
+  timestamp as built_at` to `fct_orders.sql` to simulate a real PR diff. Ran
+  `dbt ls --select "state:modified+" --state ../prod-state --profiles-dir .
+  --project-dir . --resource-type model` live: returned exactly
+  `food_delivery_pipeline.marts.fct_orders`, and the same command without
+  `--resource-type model` returned that model plus its own two tests,
+  `not_null_fct_orders_order_id` and `unique_fct_orders_order_id` — these
+  three exact names are what Section 5's Verify block claims a real PR's
+  slim-CI log would show, now confirmed character-for-character against a
+  live `dbt ls` run rather than hand-derived. A live `dbt build --select
+  "state:modified+" --defer --state` attempt (against a deliberately
+  unreachable IP, Day 15's own pattern for proving `--defer` reaches a real
+  database call without a live warehouse) was blocked by this sandbox's
+  approval gate on every attempt — a bare compound command, a `chmod +x`
+  plus execute, and direct `bash` invocation of a wrapper script were all
+  denied with no human present to approve, the same specific friction Day
+  15's own round documented for env-var-prefixed compound commands. Noted
+  honestly rather than silently skipped: today's `--defer` claims rest on
+  Day 15's own prior live confirmation of that exact flag combination
+  (`Database Error: connection ... timeout expired`, reached only after
+  `--defer` correctly resolved `stg_orders`'s `ref()`), not a fresh run this
+  round, and said so in this entry rather than presented as newly captured.
+  Extracted the lesson's own full two-job YAML block from its `<pre><code>`
+  text (stripping `<span>` tags, unescaping entities) and parsed it with
+  `pyyaml`: valid YAML (`on:` parses as the boolean key `True` under YAML's
+  default resolver, the same harmless quirk Day 15 already documented, not
+  a defect here), both `build-main` and `slim-ci-pr` jobs present with the
+  correct `if:` guards, correct step ordering, and the `upload-artifact`
+  step's `path` and the `download-artifact` step's `name` (`prod-manifest`)
+  matching each other exactly. No `.py` file exists in this lesson itself
+  (pure YAML/dbt-tooling content, same as Day 15), so `py_compile` was not
+  applicable to the lesson's own code and is noted here rather than silently
+  skipped; `py_compile` was used only on this round's own throwaway
+  verification scripts, not shipped lesson content.
+  Ran the same tag-balance/bare-`&`/dfn-attribute/quiz-word-count script
+  prior rounds have used: every checked tag balanced, zero bare `&`, the
+  lesson's one `<dfn>` tag (`artifact`) carries both `data-en=` and
+  `data-vn=`. The first quiz draft came up mismatched on all three questions
+  (10/9/9, 9/9/10 and 10/11/9 word splits); rebalanced through several
+  edit-and-recount passes, re-running the same script after every edit, to a
+  final 9/9/9 across all three questions. This lesson has three quiz
+  questions, not four, matching its narrower two-TODO scope rather than
+  padding to a fixed count.
+  Added the new `artifact` term to `reference/glossary.html` under a new Day
+  39 section, after grepping case-insensitively first and confirming no
+  existing row covered it. No `RESOURCES.md` change — today's citation
+  (GitHub's own "store and share data" guide) is new content not previously
+  listed, but was folded into the existing GitHub Actions resource line
+  under dbt (deep) by cross-referencing Day 15's existing entry rather than
+  adding a redundant new bullet, keeping that section's existing shape.
+  Registered Lesson 39 in `assets/nav.js` (`node --check` clean).
+  **Next up, named honestly for whoever picks up next:** the `airflow db
+  migrate`/`airflow dags test` approval-gate block remains open after five
+  rounds (35-39) with no human approval granted; still the single clearest
+  unblock-and-ship item for whoever next has a human available to grant it.
+  Absent that, Day 31's test-severity/`store_failures` and seeds-vs-sources
+  threads are already closed (Days 32-33), so the next organic dbt pick is
+  smaller and less urgent than this round's CI gap was — worth checking
+  `assets/nav.js`'s full title list fresh rather than trusting this
+  sentence, since several rounds now have found a brief's named topic was
+  already shipped under a different day number than expected.

@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 87 · Review day 15: retrieval across Days 84-86</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 87 · ~20 min · 24 Oct 2026</p>
+<h1>Review day 15: retrieval across Days 84-86</h1>
+<p class="byline">Day 83 (review day 14) covered Days 80, 81, and 82. Since then, three fresh days ran in a row — Day 84 (<code>traceback</code>), Day 85 (<code>warnings</code>), Day 86 (<code>inspect</code>) — and Day 86's own next-day note flagged this exact span as matching the course's settled three-fresh-lesson review trigger (Day 71 reviewed Days 68-70, Day 75 reviewed Days 72-74, Day 79 reviewed Days 76-78, Day 83 reviewed Days 80-82). This is that review — a fifteenth retrieval day, covering exactly Days 84, 85, and 86.</p>
+
+<div class="callout"><strong>Why today, specifically, and why not a fourth fresh day:</strong> a fresh-gap grep ran first anyway, matching every prior review day's own discipline — it searched all 86 lessons, every practice file, <code>reference/glossary.html</code>, and <code>RESOURCES.md</code> case-insensitively for stdlib corners named but not yet taught (<code>hmac</code>, <code>ChainMap</code>, <code>graphlib</code>, <code>weakref</code>, <code>calendar</code> — all five still genuinely zero-hit, carried forward from Day 86's own notes). None of them is a strong enough standing candidate to override the cadence math, which already lands exactly on three fresh lessons since Day 83 — so today pays down retrieval on Days 84-86 instead, and the next fresh day starts its topic search from scratch (though it can re-check those five candidates quickly first).</div>
+
+<h2>1 &middot; Three questions, in the original teaching order</h2>
+<p>Answer each out loud or on paper <em>before</em> reading the fold-out answer. If one is shaky, note it and go fix it in the practice file below rather than only rereading the old lesson.</p>
+
+<p><strong>Day 84 &mdash; <code>traceback</code>.</strong> What does <code>traceback.format_exc()</code> give you that a plain <code>str(e)</code> inside an <code>except</code> block does not, and what happens if <code>format_exc()</code> is called with no exception actually in flight?</p>
+<div class="callout">Fold-out answer: <code>str(e)</code> only gives the exception's own message &mdash; it says nothing about <em>where</em> in the call chain the failure happened. <code>traceback.format_exc()</code> returns the full report (type, message, and the entire active call chain) as one ordinary string, the same text Python would print on an uncaught exception, just captured as data instead of lost once the <code>except</code> block moves on. Called with no exception active, it does not raise an error to flag the mistake &mdash; it quietly returns the misleading short text <code>"NoneType: None"</code> instead, confirmed live. It belongs inside an active <code>except</code> block, never outside one.</div>
+
+<p><strong>Day 85 &mdash; <code>warnings</code>.</strong> What is the key behavioral difference between <code>warnings.warn()</code> and <code>raise</code>, and why reach for <code>warn()</code> instead of <code>logging.warning()</code> when flagging a deprecated argument?</p>
+<div class="callout">Fold-out answer: <code>raise</code> stops the function immediately and propagates up the call stack until something catches it. <code>warnings.warn()</code> prints a notice and then execution continues normally on the very next line &mdash; the function still runs to completion and still returns its value, confirmed live. <code>warn()</code> beats <code>logging.warning()</code> for a deprecation notice because it is built to be <em>programmatically acted on</em>: a caller can filter it, collect it in a test via <code>catch_warnings(record=True)</code>, or escalate it into a real exception via <code>filterwarnings("error", ...)</code> &mdash; none of which a plain logged line supports.</div>
+
+<p><strong>Day 86 &mdash; <code>inspect</code>.</strong> What does <code>inspect.signature(greet)</code> actually do to <code>greet</code>, and why does a parameter with no declared default report <code>inspect.Parameter.empty</code> instead of <code>None</code>?</p>
+<div class="callout">Fold-out answer: <code>inspect.signature(greet)</code> reads <code>greet</code>'s own stored parameter metadata straight off the function object and returns it as a <code>Signature</code> object &mdash; it never calls <code>greet</code>, and the function's body never runs. That is exactly why a framework (FastAPI's <code>Depends()</code> included) can inspect a route function safely before any real request arrives. A no-default parameter reports <code>Parameter.empty</code>, not <code>None</code>, because <code>None</code> is itself already one valid, real default a parameter could have &mdash; a separate sentinel is required so "no default at all" can be told apart from "the default really is <code>None</code>."</div>
+
+<div class="callout"><strong>Where pandas/NumPy go from here:</strong> nothing pandas- or NumPy-specific today &mdash; this review only revisits Days 84-86's plain-Python failure capture, non-fatal signaling, and live object introspection, none of which needs a <code>DataFrame</code> or array to demonstrate.</div>
+
+<h2>2 &middot; Why these three, and why no new terms today</h2>
+<p>Same interleaving logic as every prior review day: a tool for capturing a failure as text, a tool for signaling trouble without stopping, and a tool for asking a live object what it actually is &mdash; three different mental models pulled from three lessons, not one idea restated three ways. They also share a quieter throughline worth naming: all three are about a program examining <em>itself</em> mid-run &mdash; what exception just happened and where, what condition is survivable but worth flagging, what shape a function's own signature really has &mdash; rather than examining external data the way most of this course's other lessons do. Recognizing which kind of self-examination a given problem calls for &mdash; not just recalling the function names &mdash; is the retrieval goal today.</p>
+<p>No new jargon is introduced today on purpose &mdash; every term revisited already has a glossary entry under its original day. Five fresh-gap candidates remain on record from Day 86's own notes &mdash; <code>hmac</code>, <code>ChainMap</code>, <code>graphlib</code>, <code>weakref</code>, <code>calendar</code> &mdash; still genuinely zero-hit as of today's own scan, worth a quick re-check next round rather than a scan from scratch, though a fresh scan costs little and stays the safer default given how fast this list turns over.</p>
+
+<h2>Try it &mdash; self-checking practice (~20 min)</h2>
+<p>Open <code>practice/87_review_retrieval_day_15.py</code>, follow the TODOs, and re-run until every check prints &check;:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/87_review_retrieval_day_15.py</code></pre>
+<p>Standard library only &mdash; no <code>--with</code> flag needed. No new syntax: every mechanism below was taught in Days 84, 85, and 86. Exercises: capturing a bad record's full traceback as a string with <code>traceback.format_exc()</code> while a batch keeps processing, writing a function that warns on a suspicious value and still returns one, catching that warning in-process with <code>catch_warnings(record=True)</code>, and reading a function's parameter names and defaults back out with <code>inspect.signature()</code>.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory &mdash; no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="format_exc() only has a real exception to report while one is actively being handled inside an except block. str(e) only gives the exception's own message, with no detail about where in the call chain it happened -- format_exc() captures that full chain as one string instead.">
+    <p class="stem">What does <code>traceback.format_exc()</code> capture that <code>str(e)</code> alone does not?</p>
+    <button class="opt" data-ok>the full call chain active when the exception was raised</button>
+    <button class="opt">a shorter summary with the file name always removed first</button>
+    <button class="opt">the exact same single message string, printed out twice over</button>
+  </div>
+  <div class="q" data-why="warnings.warn() prints a notice and then execution continues on the very next line -- the function still runs to completion and still returns its value. raise stops the function immediately and propagates up the call stack until something catches it.">
+    <p class="stem">What is the key behavioral difference between <code>warnings.warn()</code> and <code>raise</code>?</p>
+    <button class="opt" data-ok>warn() lets the function keep running and still return a value</button>
+    <button class="opt">warn() always stops the function right at that exact line too</button>
+    <button class="opt">warn() and raise both silently skip the rest of the function</button>
+  </div>
+  <div class="q" data-why="inspect.signature(func) reads the function object's own stored parameter metadata and returns it as a Signature object -- it never calls func, and the function's body never runs. This is exactly why a framework can inspect a route function safely before any request arrives.">
+    <p class="stem">What does <code>inspect.signature(greet)</code> actually do?</p>
+    <button class="opt" data-ok>reads greet's own stored parameter metadata, with no call</button>
+    <button class="opt">calls greet once quietly, just to see what happens</button>
+    <button class="opt">rewrites greet's actual source code into brand new text</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> no single new source today &mdash; revisit each lesson's own citation (<a href="https://docs.python.org/3/library/traceback.html"><code>traceback</code></a> for Day 84, <a href="https://docs.python.org/3/library/warnings.html"><code>warnings</code></a> for Day 85, and <a href="https://docs.python.org/3/library/inspect.html"><code>inspect</code></a> for Day 86), all already listed in <code>RESOURCES.md</code>.</p>
+
+<p class="next">No new terms today &mdash; this is a review day, and every term revisited already has a glossary entry under its original day (<a href="../reference/glossary.html#day84">84</a>, <a href="../reference/glossary.html#day85">85</a>, <a href="../reference/glossary.html#day86">86</a>).<br>
+Five standing fresh-gap candidates remain on record &mdash; <code>hmac</code>, <code>ChainMap</code>, <code>graphlib</code>, <code>weakref</code>, <code>calendar</code> &mdash; worth a quick re-check next round rather than a scan from scratch.<br><br>
+&#128172; Anything unclear across any of today's three? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

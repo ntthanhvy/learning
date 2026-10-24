@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 107 · Series.str.join(): collapsing a list column back to text, and the silent NaN it leaves behind</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 107 · ~20 min · 24 Oct 2026</p>
+<h1>Series.str.join(): collapsing a list column back to text, and the silent NaN it leaves behind</h1>
+<p class="byline">Lesson 106 closed the standing <code>.str.title()</code> pick and carried forward the one remaining named candidate from the same text-cleanup family: <code>str.join()</code>. Re-grepped it case-insensitively across every lesson body and the glossary file before picking — still a genuine zero-hit gap, only ever named inside past teaser text (Lessons 102-106), never actually taught in a lesson body or glossed. Confirmed no sharper alternative topic surfaced on a fresh scan either, so the carryover is promoted as-is: <code>.str.join()</code> is the natural close to this family, since it is the exact reverse of <code>.str.split()</code> (Lesson curriculum's text-wrangling arc) — and probing it directly turned up a real, documented trap worth naming: one bad element silently turns a whole row to <code>NaN</code>, no exception at all.</p>
+
+<h2>1 · The reverse of split() — collapsing a list column back to one string</h2>
+<p><code>.str.split()</code> turns one string into a list per row. <dfn data-en="a Series/Index string method, Series.str.join(sep), the exact reverse of str.split(): for each row whose value is itself a list (or tuple) of strings, joins every item into one string using sep as the glue between items -- equivalent to Python's own str.join() called once per row" data-vn="giữ nguyên 'str.join()' -- method Series.str.join(sep), NGƯỢC LẠI với str.split(): mỗi hàng có giá trị là 1 list (hay tuple) chuỗi, nối các phần tử lại thành 1 chuỗi, dùng sep làm dấu nối giữa các phần tử -- tương đương str.join() có sẵn của Python, gọi riêng cho từng hàng">Series.str.join(sep)</dfn> does the opposite — it collapses a list-valued row back into one plain string, gluing each item together with <code>sep</code>:</p>
+<pre><code><span class="kw">import</span> pandas <span class="kw">as</span> pd
+
+s = pd.Series([<span class="str">"a,b,c"</span>, <span class="str">"x,y"</span>])
+split_result = s.str.split(<span class="str">","</span>)
+split_result
+<span class="cm"># 0    [a, b, c]
+# 1       [x, y]</span>
+
+joined_back = split_result.str.join(<span class="str">","</span>)
+joined_back
+<span class="cm"># 0    a,b,c
+# 1      x,y</span>
+
+(joined_back == s).all()
+<span class="cm"># True    -- confirmed directly: split() then join() on the same sep round-trips exactly</span></code></pre>
+<p>Confirmed directly (pandas 3.1.0): running <code>.str.split(sep)</code> immediately followed by <code>.str.join(sep)</code> with the same separator reproduces the original Series byte for byte. SQL has no single built-in for this shape at all — getting a list-valued "column" in SQL already requires an aggregate step (Postgres <code>array_agg()</code>), and collapsing it back to text needs a second explicit step (<code>array_to_string()</code>); pandas needs no groupby here because the list already lives inside one row's cell, not across several grouped rows.</p>
+
+<h2>2 · The trap: one non-string item silently turns the whole row to NaN</h2>
+<p>The official pandas docs state this plainly, and it is confirmed directly: <strong>if even one item inside a row's list is not a string, that row's result is <code>NaN</code> — not an exception, not a partial join, just a silent gap.</strong></p>
+<pre><code>mixed = pd.Series([[<span class="str">"a"</span>, <span class="kw">1</span>, <span class="str">"b"</span>], [<span class="str">"c"</span>, <span class="str">"d"</span>]])
+mixed.str.join(<span class="str">"-"</span>)
+<span class="cm"># 0    NaN       -- row 0 had a non-string item (the int 1) in its list -- silently NaN, no error raised
+# 1    c-d       -- row 1's list was all strings -- joined normally, untouched by row 0's problem</span></code></pre>
+<p>This is a genuinely sharp interview trap because it fails exactly the way a careless reviewer would not expect: no traceback anywhere, every other row looks completely fine, and the one broken row just quietly becomes a missing value sitting next to perfectly good ones. Confirmed directly against the official <code>Series.str.join()</code> docstring, which names this outcome explicitly: <em>"If any of the list items is not a string object, the result of the join will be NaN."</em> This is a <em>per-row</em> rule, not a whole-Series rule — one row's bad list item never touches any other row's result.</p>
+<div class="callout">Where this actually bites in a real pipeline: a column built by grouping and aggregating into lists (e.g. <code>df.groupby("order_id")["sku"].agg(list)</code>) almost always comes out all-string if the source column was already string, but the moment one upstream row had a stray <code>None</code>, a float, or a numeric ID mixed into that list, <code>.str.join()</code> on the aggregated column drops that one row to <code>NaN</code> with zero warning. The fix is to coerce every list item to <code>str</code> first — e.g. <code>s.apply(lambda lst: [str(x) for x in lst])</code> before calling <code>.str.join()</code> — or to sanity-check with <code>s.apply(lambda lst: all(isinstance(x, str) for x in lst))</code> before trusting the join at all.</div>
+
+<h2>3 · NaN rows, and calling it on a Series that isn't list-valued</h2>
+<p>An existing whole-row <code>NaN</code> (not a list at all, just a missing row) passes straight through untouched — the same pass-through shape as every other <code>.str</code> method probed so far in this family (Lessons 104-106):</p>
+<pre><code><span class="kw">import</span> numpy <span class="kw">as</span> np
+
+s2 = pd.Series([[<span class="str">"a"</span>, <span class="str">"b"</span>], np.nan, [<span class="str">"c"</span>, <span class="str">"d"</span>]])
+s2.str.join(<span class="str">"-"</span>)
+<span class="cm"># 0    a-b
+# 1    NaN      -- a real missing row, passes through untouched, same shape as every other .str method
+# 2    c-d</span></code></pre>
+<p>Confirmed directly: calling <code>.str.join()</code> on a Series of plain strings (no lists at all) treats each string as if it were a list of its own characters — <code>pd.Series(["abc"]).str.join("-")</code> gives <code>"a-b-c"</code>, the same behavior Python's own built-in <code>"-".join("abc")</code> produces, since a plain string is itself an iterable of one-character strings. And calling it on a Series that is neither strings nor lists at all (plain integers, say) raises <code>AttributeError: Can only use .str accessor with string values, not integer</code> outright — the same accessor-gate error every other <code>.str</code> method in this course has raised so far.</p>
+
+<div class="interview">
+<p><strong>Q: "You grouped orders by customer and aggregated the SKUs into a list column with <code>.agg(list)</code>. Now you need that as a comma-separated string for a CSV export. What do you reach for, and what would you double-check before trusting it?"</strong> A strong answer, out loud: <em>"I'd reach for <code>.str.join(",")</code> — it's the direct reverse of str.split(), collapsing each row's list back into one string. But before shipping it I'd check whether every item inside every list is actually a string, because if even one item in one row's list isn't — a stray None, a numeric SKU ID that never got cast to str — pandas doesn't raise anything; it silently turns just that one row's result into NaN. I'd either coerce every item to str first, or spot-check row counts: the number of non-null rows after join() should match the number of rows where every list item was already a string."</em> The signal: knowing <code>.str.join()</code>'s failure mode is silent and per-row, not a loud exception — the opposite of a safe default.</p>
+</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/107_str_join.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/107_str_join.py</code></pre>
+<p>Exercise 1 confirms <code>.str.split()</code> followed by <code>.str.join()</code> with the same separator round-trips exactly back to the original Series (Section 1). Exercise 2 confirms a row with a non-string list item joins to <code>NaN</code> while a sibling row with an all-string list joins normally in the same call (Section 2). Exercise 3 confirms a genuine whole-row NaN passes through <code>.str.join()</code> untouched, same shape as every other <code>.str</code> method this course has covered (Section 3).</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly (pandas 3.1.0): calling .str.split(sep) then .str.join() with that exact same sep reproduces the original Series byte for byte, since join() is the documented exact reverse of split() -- each list item gets glued back together with the same separator that split it apart.">
+    <p class="stem">Calling <code>.str.split(",")</code> then <code>.str.join(",")</code> on the same Series, in that order, gives which result?</p>
+    <button class="opt" data-ok>the exact original Series right back -- join() exactly reverses what split() with the same separator just did</button>
+    <button class="opt">a Series of NaN values -- chaining split() then join() back on one same Series always fails outright</button>
+    <button class="opt">a Series of nested lists -- join() never actually collapses any list back into one single plain string</button>
+  </div>
+  <div class="q" data-why="Confirmed directly against the official Series.str.join() docstring, which states this outcome explicitly: if any list item in a row is not a string object, that one row's join result is NaN -- no exception raised at all, and every other row's own list is unaffected by this one row's problem.">
+    <p class="stem">A Series has two rows: <code>["a", 1, "b"]</code> and <code>["c", "d"]</code>. Calling <code>.str.join("-")</code> does what?</p>
+    <button class="opt" data-ok>row one becomes NaN silently, no error raised at all; row two joins fine as "c-d", unaffected by row one</button>
+    <button class="opt">the whole call raises a loud TypeError immediately, since one single row somewhere has one non-string item inside it still</button>
+    <button class="opt">row one becomes "a-1-b" instead right away, silently converting that one lone integer item straight into plain text first here</button>
+  </div>
+  <div class="q" data-why="Confirmed directly (pandas 3.1.0): .str.join() leaves an existing whole-row NaN entry as NaN, the same pass-through-untouched shape as .str.strip() (Lesson 104), .str.pad() (Lesson 105), and .str.title() (Lesson 106) -- it never raises on a NaN row, and it never joins a NaN into some new string.">
+    <p class="stem">A Series holds <code>["a","b"]</code>, <code>NaN</code>, and <code>["c","d"]</code>. Calling <code>.str.join("-")</code> does what to that one <code>NaN</code> row?</p>
+    <button class="opt" data-ok>leaves that one single row as plain NaN, while the two real list rows each join into a string normally</button>
+    <button class="opt">raises a loud exception right away immediately, the very first moment it ever reaches that one single lone NaN row</button>
+    <button class="opt">turns it into the literal text "nan" instead, joining that one short plain word as a brand new real string</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official <a href="https://pandas.pydata.org/docs/reference/api/pandas.Series.str.join.html">pandas API reference for <code>Series.str.join()</code></a> (per <code>RESOURCES.md</code>'s "Docs: pandas User Guide" entry, ~3 min) — its own "Notes" section states the silent-NaN rule in one line, and its worked examples show the exact mixed-type-list case this lesson probed directly; the reverse method, <a href="https://pandas.pydata.org/docs/reference/api/pandas.Series.str.split.html">Series.str.split()</a>, is linked there too as the documented "See Also" pairing.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>str.join()</code> is new today, added right after Lesson 106's <code>str.title()</code>/<code>str.capitalize()</code> entry.<br>
+<strong>Next lesson:</strong> this closes the <code>.str.*</code> text-cleanup family started at Lesson 104 (strip → pad → title → join) with no further named candidate carried over — tomorrow's own fresh scan picks the next topic from the curriculum spine with no pre-committed pick.<br><br>
+💬 Anything unclear — the silent-NaN trap, the split()/join() round trip, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

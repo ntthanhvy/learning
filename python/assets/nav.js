@@ -178,6 +178,8 @@
       file: "lessons/0085-warnings-module.html" },
     { n: 86, date: "2026-10-23", title: "inspect: asking a function about its own signature",
       file: "lessons/0086-inspect-module.html" },
+    { n: 87, date: "2026-10-24", title: "Review day 15: retrieval across Days 84-86",
+      file: "lessons/0087-review-retrieval-day-15.html" },
   ];
 
   const REFS = [

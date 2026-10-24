@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 111 · One call, one deadline: context.WithTimeout vs CancellationTokenSource's timeout</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 111 · ~20 min</p>
+<h1>One call, one deadline: context.WithTimeout vs CancellationTokenSource's timeout</h1>
+<p class="byline">Lessons 108–110 were all about racing or bounding <em>several</em> concurrent calls. Today is the simpler, far more common case underneath all of them: one call, one deadline — "don't let this take longer than N seconds." Lesson 41 already named the Go half of this (<code>context.WithTimeout</code>) back in August. The C# half — <code>CancellationTokenSource</code>'s own timeout constructor — was flagged as an open gap by both Lesson 110's and Lesson 109's own Scope lines and never shown. Today closes it, side by side.</p>
+
+<h2>1 · The problem one call has, that fan-out doesn't</h2>
+<p>Every pattern since Lesson 108 assumed <em>multiple</em> concurrent operations — all of them, the first one, or a capped number. Most calls in a real backend aren't that: a handler calls one downstream HTTP service, or runs one query, and needs exactly one guarantee — "give up and return an error after N seconds, instead of hanging forever if the other side never answers." That's not fan-out logic at all. It's a plain deadline attached to a single call, and both ecosystems have a dedicated, minimal shape for it.</p>
+
+<h2>2 · Go: context.WithTimeout, already named, now the main character</h2>
+<p>Lesson 41 introduced <code>context.WithTimeout</code> in passing, as one of two things a context can carry. Per <a href="https://pkg.go.dev/context">pkg.go.dev</a>'s own doc comment, it is literally defined as <code>WithDeadline(parent, time.Now().Add(timeout))</code> — a convenience wrapper that turns a duration into an absolute point in time:</p>
+<pre><code><span class="kw">func</span> fetchPricing(parent context.Context, sku <span class="ty">string</span>) (Price, <span class="kw">error</span>) {
+    ctx, cancel := context.WithTimeout(parent, <span class="kw">3</span>*time.Second)
+    <span class="kw">defer</span> cancel()  <span class="cm">// always: releases the timer even if the call finishes early</span>
+
+    <span class="kw">return</span> callPricingService(ctx, sku)
+}
+</code></pre>
+<p>If <code>callPricingService</code> respects <code>ctx</code> (checks <code>ctx.Done()</code>, or passes it into an HTTP request so the client aborts the socket on cancellation), the call returns with <code>ctx.Err()</code> — <code>context.DeadlineExceeded</code> — the instant 3 seconds pass, whether or not the pricing service ever answers. Nothing races, nothing forks a goroutine: it's the same single call chain Lesson 41 described, just with a shorter leash than the one the caller handed in.</p>
+
+<h2>3 · C#: CancellationTokenSource's own timeout constructor does the same job</h2>
+<p>Lesson 109 used <code>CancellationTokenSource</code> paired with a <code>SemaphoreSlim</code> for width, and Lesson 110 used it paired with <code>Task.WhenAny</code> for racing. Both times, the token source was created plain and cancelled by hand. Per <a href="https://learn.microsoft.com/en-us/dotnet/api/system.threading.cancellationtokensource.-ctor">Microsoft's own docs</a>, there is a constructor overload that needs no hand-written cancel call at all: pass a <code>TimeSpan</code> (or a millisecond count) and the source cancels itself once that delay elapses — "the countdown...starts during the call to the constructor. When the delay expires, the constructed <code>CancellationTokenSource</code> is canceled, if it has not been canceled already":</p>
+<pre><code><span class="kw">async</span> Task&lt;Price&gt; FetchPricingAsync(<span class="ty">string</span> sku)
+{
+    <span class="kw">using</span> <span class="kw">var</span> cts = <span class="kw">new</span> CancellationTokenSource(TimeSpan.FromSeconds(<span class="kw">3</span>));
+    <span class="kw">return</span> <span class="kw">await</span> CallPricingServiceAsync(sku, cts.Token);
+    <span class="cm">// if 3s pass before this returns, cts.Token is cancelled on its own --
+    // CallPricingServiceAsync must itself observe the token to actually stop</span>
+}
+</code></pre>
+<p>There's also a method version for a timeout decided after construction: <dfn data-en="a method on CancellationTokenSource that arms (or re-arms) a countdown to automatic cancellation after the given delay -- calling it again before the countdown fires resets the delay, replacing the pending one, rather than stacking a second countdown on top of the first" data-vn="CancelAfter() (giữ nguyên) — method của CancellationTokenSource đặt (hoặc đặt lại) đồng hồ đếm ngược tới lúc tự hủy sau khoảng delay cho -- gọi lại lần nữa trước khi đồng hồ cũ kêu thì sẽ reset delay, thay thế cái đang chờ, không phải cộng dồn thêm 1 đồng hồ nữa">CancelAfter()</dfn> (<code>cts.CancelAfter(TimeSpan.FromSeconds(3))</code>) arms the same countdown on a plain <code>CancellationTokenSource()</code>, and per the same docs page, calling <code>CancelAfter</code> again before it fires <em>resets</em> the countdown rather than stacking a second one — useful for a "reset the clock on every heartbeat" shape, out of scope for today's single-call case but worth knowing the method exists.</p>
+
+<div class="callout"><strong>Same catch as Lesson 110, one layer down.</strong> Neither <code>context.WithTimeout</code> nor the timeout constructor stops anything by itself — they only flip a signal (close a channel; cancel a token) once the clock runs out. The downstream call still has to <em>check</em> <code>ctx.Done()</code> or the token, the same cooperative-cancellation fact Lessons 41, 108, 109, and 110 have each independently relied on. A call that ignores its context/token entirely will keep running past its own deadline, deadline or not.</div>
+
+<div class="cmp-wrap">
+<table class="cmp">
+<thead><tr><th></th><th>Go: context.WithTimeout</th><th>C#: CancellationTokenSource(TimeSpan)</th></tr></thead>
+<tbody>
+<tr><th>Shape</th><td>wraps WithDeadline(now + timeout)</td><td>constructor arg, or CancelAfter() later</td></tr>
+<tr><th>Who must release it</th><td>caller: <code>defer cancel()</code>, always</td><td>caller: <code>using var cts = ...</code>, always</td></tr>
+<tr><th>What fires at the deadline</th><td><code>ctx.Done()</code> channel closes</td><td><code>cts.Token</code> is cancelled</td></tr>
+<tr><th>Does the callee stop on its own?</th><td>no — must check <code>ctx.Done()</code>/<code>ctx.Err()</code></td><td>no — must observe <code>cts.Token</code></td></tr>
+</tbody>
+</table>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers attaching a deadline to a single call: Go's <code>context.WithTimeout</code> (first named in Lesson 41, elaborated here) and C#'s <code>CancellationTokenSource(TimeSpan)</code> constructor plus <code>CancelAfter()</code>. It does not cover: racing multiple calls and keeping the fastest (Lesson 110's <code>Task.WhenAny</code>/<code>select</code> territory); retry-with-backoff after a timeout fires (Lesson 32's territory — a timeout tells you to give up on <em>this attempt</em>, not whether to try again); or choosing the right duration for a given downstream service, which is an operational-tuning judgment call, not a mechanism.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory, with no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="pkg.go.dev's own doc comment defines context.WithTimeout as returning WithDeadline(parent, time.Now().Add(timeout)) -- it converts a duration into an absolute deadline and is implemented as a thin wrapper around WithDeadline, not a separate mechanism.">
+    <p class="stem">Per its own documentation, how is context.WithTimeout actually implemented?</p>
+    <button class="opt" data-ok>as a wrapper calling WithDeadline with now plus the timeout</button>
+    <button class="opt">as a brand new goroutine that sleeps for that duration</button>
+    <button class="opt">as a syscall-level alarm registered directly with the OS kernel</button>
+    <button class="opt">as a retry loop that polls the clock each cycle</button>
+  </div>
+  <div class="q" data-why="Per Microsoft's own CancellationTokenSource constructor docs, the TimeSpan/millisecond overload starts its countdown the moment the constructor runs, and cancels the source on its own once that delay elapses -- no separate Cancel() or CancelAfter() call is needed for the timeout itself to fire.">
+    <p class="stem">What triggers cancellation when you use CancellationTokenSource(TimeSpan.FromSeconds(3))?</p>
+    <button class="opt" data-ok>the delay elapsing on its own cancels the source automatically</button>
+    <button class="opt">nothing, Cancel must still be called by hand after it</button>
+    <button class="opt">only the next await anywhere in the process triggers it</button>
+    <button class="opt">only disposing the CancellationTokenSource object itself truly triggers it now</button>
+  </div>
+  <div class="q" data-why="Per the same Microsoft docs, calling CancelAfter again on a source whose countdown has not yet fired resets the delay rather than stacking a second countdown on top of the first one -- the most recent CancelAfter call is the one that governs when cancellation actually happens.">
+    <p class="stem">What happens if you call CancelAfter a second time before the first countdown fires?</p>
+    <button class="opt" data-ok>the delay resets, replacing the first pending countdown entirely now</button>
+    <button class="opt">both countdowns run and whichever finishes first cancels it then</button>
+    <button class="opt">the second call throws since one is already running there</button>
+    <button class="opt">it is silently ignored and only the original delay counts</button>
+  </div>
+  <div class="q" data-why="Both mechanisms are purely cooperative signals: context.WithTimeout closes a Done() channel, and CancellationTokenSource cancels its Token, once the deadline passes. Neither one forcibly stops the downstream call by itself -- the callee must actually check ctx.Done()/ctx.Err() or observe the token for the timeout to have any real effect, the same fact Lessons 41 and 108-110 already established for cancellation generally.">
+    <p class="stem">Once a context or token's deadline passes, what actually happens to the running callee?</p>
+    <button class="opt" data-ok>nothing automatic, it must itself check the signal to stop</button>
+    <button class="opt">the runtime force-stops it immediately at that exact instant now</button>
+    <button class="opt">its thread or goroutine gets killed by the scheduler then</button>
+    <button class="opt">the process receives a signal and terminates that call now</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://pkg.go.dev/context#WithTimeout">pkg.go.dev: context.WithTimeout</a> (~5 min) is the primary source for the exact "returns WithDeadline(parent, time.Now().Add(timeout))" definition quoted above; <a href="https://learn.microsoft.com/en-us/dotnet/api/system.threading.cancellationtokensource.-ctor">Microsoft Learn: CancellationTokenSource constructors</a> (~5 min) is the primary source for the <code>TimeSpan</code>/millisecond overload's self-cancelling countdown and <code>CancelAfter</code>'s reset behavior quoted above.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a>. Click any dotted term for a popup (English first, tiếng Việt second). Builds directly on Lesson 41's <code>context.Context</code>, and Lessons 108–110's <code>CancellationTokenSource</code> usage. <strong>Anything unclear? Ask your teacher</strong>, the agent that made this lesson. Ask in Vietnamese anytime. A good follow-up: "does any single outbound call in our codebase have no timeout at all, meaning it can hang forever if the other side never answers?"</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

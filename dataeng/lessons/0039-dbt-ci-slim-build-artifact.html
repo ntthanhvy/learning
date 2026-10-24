@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 39 · dbt CI for real: closing Day 15's two TODOs</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 39 · ~20 min · 24 Oct 2026</p>
+<h1>dbt CI for real: closing Day 15's two TODOs</h1>
+<p class="byline">Today's tangible win: <code>.github/workflows/dbt_ci.yml</code> actually runs end to end. Day 15 shipped the right shape — a disposable Postgres service container, <code>state:modified+</code>, <code>--defer --state</code> — but left two <code>TODO</code> comments unfilled: how raw data actually gets into the CI database, and where <code>prod-state/manifest.json</code> actually comes from. Today is a full, buildable <code>main</code>-branch job plus a PR job that downloads its output, so slim CI stops being a described mechanism and starts being a workflow that runs.</p>
+
+<div class="callout"><strong>Before today — confirm Day 15 is the version in your repo:</strong>
+<pre><code>cat .github/workflows/dbt_ci.yml</code></pre>
+Expected: two <code>TODO</code> comments, one under <code>Load raw data</code> and one under <code>Fetch prior manifest</code> (Day 15's Section 2 and Section 4). If both are already filled in with something else, read it before changing anything — today assumes Day 15's exact unfinished shape.</div>
+
+<h2>1 · A workflow that was never actually exercised</h2>
+<p>Day 15 built a real mechanism and even proved the dbt side of it works, in a scratch sandbox, against a project reconstructed to match: <code>dbt ls --select "state:modified+"</code> correctly returned one changed model, and <code>dbt build --select "state:modified+" --defer --state</code> correctly reached a real database call rather than failing on a missing upstream table. What never ran, in that sandbox or any round since, is the actual GitHub Actions workflow itself — because two steps were left as <code>TODO</code>, unrunnable as committed. A workflow with a <code>TODO</code> in place of a shell command isn't a CI pipeline with a known gap; it's prose describing one. Today fills in both, so the YAML Day 15 wrote finally does something a runner can execute.</p>
+
+<h2>2 · TODO #1: loading raw data into the CI database</h2>
+<p>Day 15 named the fix already — the exact command Day 1's own Verify block uses, pointed at <code>localhost</code> instead of <code>docker compose</code>'s network name, since the service container is reachable the same way on a GitHub-hosted runner:</p>
+<pre><code><span class="cm">-- .github/workflows/dbt_ci.yml -- Section 2's TODO, filled in</span>
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Load raw data
+        env:
+          PGHOST: localhost
+          PGUSER: fdp
+          PGPASSWORD: fdp_dev_password
+          PGDATABASE: fdp
+        run: uv run --with <span class="str">"psycopg[binary]"</span> python3 scripts/generate_raw_data.py
+
+      - name: dbt build
+        working-directory: food_delivery_pipeline
+        run: uv run --with <span class="str">"dbt-postgres==1.11.0"</span> dbt build --profiles-dir .
+        env:
+          DBT_HOST: localhost
+          DBT_USER: fdp
+          DBT_PASSWORD: fdp_dev_password
+          DBT_DBNAME: fdp</code></pre>
+<p>Nothing about <code>generate_raw_data.py</code> changes — it's Day 1's own deterministic seed script, planted bad rows and all, reading its connection fields from the same <code>PG*</code> environment variables <code>psycopg</code> and most Postgres tooling already honor by convention. The only new fact is that a GitHub Actions service container is reachable at <code>localhost</code> from every step in the job, the same property Day 15's own <code>dbt build</code> step already relied on.</p>
+
+<h2>3 · TODO #2: where <code>prod-state/manifest.json</code> actually comes from</h2>
+<p>Section 4's deferred TODO was more deliberately left open than Section 2's — Day 15 named the standard answer (<a href="https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/store-and-share-data"><code>actions/upload-artifact</code></a> / <code>actions/download-artifact</code>, run on every successful <code>main</code>-branch build) without wiring it. That requires a second job, not just a second step: one job builds the full project on <code>main</code> and uploads its <code>manifest.json</code>; every PR job downloads the most recent one before running slim CI against it.</p>
+<pre><code><span class="cm">-- .github/workflows/dbt_ci.yml -- the full file, both jobs</span>
+name: dbt CI
+
+on:
+  push:
+    branches: [main]
+    paths: [<span class="str">'food_delivery_pipeline/**'</span>]
+  pull_request:
+    paths:
+      - <span class="str">'food_delivery_pipeline/**'</span>
+      - <span class="str">'.github/workflows/dbt_ci.yml'</span>
+
+jobs:
+  build-main:
+    <span class="cm"># Runs only on pushes to main: a full build, then the resulting manifest.json</span>
+    <span class="cm"># is uploaded as an artifact for every later PR job to defer against.</span>
+    if: github.event_name == <span class="str">'push'</span>
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: fdp
+          POSTGRES_PASSWORD: fdp_dev_password
+          POSTGRES_DB: fdp
+        ports: [<span class="str">'5432:5432'</span>]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - name: Load raw data
+        env: { PGHOST: localhost, PGUSER: fdp, PGPASSWORD: fdp_dev_password, PGDATABASE: fdp }
+        run: uv run --with <span class="str">"psycopg[binary]"</span> python3 scripts/generate_raw_data.py
+      - name: dbt build (full)
+        working-directory: food_delivery_pipeline
+        run: uv run --with <span class="str">"dbt-postgres==1.11.0"</span> dbt build --profiles-dir .
+        env: { DBT_HOST: localhost, DBT_USER: fdp, DBT_PASSWORD: fdp_dev_password, DBT_DBNAME: fdp }
+      - name: Upload manifest for future PRs to defer against
+        uses: actions/upload-artifact@v4
+        with:
+          name: prod-manifest
+          path: food_delivery_pipeline/target/manifest.json
+          retention-days: 30
+
+  slim-ci-pr:
+    <span class="cm"># Runs on every PR: downloads the most recent main-branch manifest and</span>
+    <span class="cm"># builds only state:modified+, deferring everything else to it.</span>
+    if: github.event_name == <span class="str">'pull_request'</span>
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env: { POSTGRES_USER: fdp, POSTGRES_PASSWORD: fdp_dev_password, POSTGRES_DB: fdp }
+        ports: [<span class="str">'5432:5432'</span>]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - name: Load raw data
+        env: { PGHOST: localhost, PGUSER: fdp, PGPASSWORD: fdp_dev_password, PGDATABASE: fdp }
+        run: uv run --with <span class="str">"psycopg[binary]"</span> python3 scripts/generate_raw_data.py
+      - name: Fetch prior manifest
+        uses: actions/download-artifact@v4
+        with:
+          name: prod-manifest
+          path: prod-state
+      - name: dbt build (slim CI)
+        working-directory: food_delivery_pipeline
+        run: |
+          uv run --with <span class="str">"dbt-postgres==1.11.0"</span> dbt build \
+            --select <span class="str">"state:modified+"</span> \
+            --defer --state ../prod-state \
+            --profiles-dir .
+        env: { DBT_HOST: localhost, DBT_USER: fdp, DBT_PASSWORD: fdp_dev_password, DBT_DBNAME: fdp }</code></pre>
+<p>Two mechanical details make this actually work, both easy to get backwards: <code>actions/download-artifact</code> defaults to the <em>most recent successful</em> upload of that artifact name across the whole repo, not something scoped to the current branch, so a PR genuinely compares against the latest real <code>main</code> build rather than against itself. And the two jobs are mutually exclusive by the <code>if:</code> guards, not by the trigger alone — <code>push</code> and <code>pull_request</code> both fire on a PR's own branch-push event on some repo configurations, so without the guard a PR could accidentally run the full-build job against its own unmerged code and upload that as if it were production's manifest.</p>
+<div class="callout"><strong>The first real run after merging this will fail once, on purpose.</strong> <code>download-artifact</code> has nothing to fetch until <code>build-main</code> has succeeded at least once on <code>main</code> — so the very first PR opened after this workflow lands will see its <code>slim-ci-pr</code> job fail with an artifact-not-found error. That's expected, not a bug: merge this workflow file itself via the plain full-build path (or trigger <code>build-main</code> manually once), then every PR after that has a real manifest to defer against.</div>
+
+<h2>4 · Why this needed a second job, not a second step</h2>
+<p>Day 15's <code>profiles.yml</code> and <code>--defer --state</code> flags were already correct — the gap was entirely about <em>where the comparison manifest lives between separate CI runs</em>, which is exactly what a job boundary and an <dfn data-en="a named file or set of files a GitHub Actions job uploads so a later, separate job or workflow run can download it by that same name -- the mechanism for persisting data past the lifetime of the one job that produced it, since a job's own filesystem is discarded the moment it ends" data-vn="giữ nguyên &quot;artifact&quot; — file (hoặc nhóm file) 1 job GitHub Actions upload lên, job/run khác sau đó download lại bằng đúng tên đó; đây là cách giữ dữ liệu sống lâu hơn 1 job, vì disk của job bị xoá ngay khi job đó kết thúc">artifact</dfn> exist to solve. A single job's own filesystem disappears when that job ends; nothing it writes is visible to a different job, let alone a different pull request opened days later. <code>upload-artifact</code>/<code>download-artifact</code> is GitHub Actions' own answer to "persist one file from one run so a later, unrelated run can read it" — the artifact store, not the runner's disk, is what makes <code>prod-state/manifest.json</code> outlive the job that produced it.</p>
+
+<div class="interview">
+<p><strong>Q: "You said your dbt CI does slim builds with state:modified+. Where does the comparison manifest actually come from?"</strong> A strong answer, out loud: <em>"A separate job, triggered only on pushes to main, runs a full dbt build and then uploads the resulting manifest.json as a GitHub Actions artifact. Every pull-request job downloads that same artifact — by name, which always resolves to the most recent successful upload across the repo — into a prod-state folder before running dbt build with --select state:modified+ --defer --state pointed at it. The two jobs are gated by if: conditions on the event type so a PR's own branch push can never accidentally run the full-build job and overwrite what main's manifest should mean. The real trade-off: the very first PR after this workflow ships has nothing to download yet, since build-main has to succeed on main at least once first — and if build-main ever starts failing silently, every PR after that keeps deferring to a manifest that's now stale, which is slim CI's whole known risk, not a new one I introduced."</em> The signal: naming the artifact as what actually bridges two separate jobs/runs, not just reciting the dbt flags, and naming the bootstrap gap honestly instead of glossing over it.</p>
+</div>
+
+<h2>5 · Verify</h2>
+<pre><code>git log -1 --format=%H -- .github/workflows/dbt_ci.yml
+git push origin main   <span class="cm"># or merge the PR that adds/edits this file</span></code></pre>
+<p>Expected: the Actions tab shows <code>build-main</code> run and finish green, ending with <code>Done. PASS=26 WARN=0 ERROR=0 SKIP=0 NO-OP=0 REUSED=0 TOTAL=26</code> (Day 14's own count, unchanged), and its own summary page lists <code>prod-manifest</code> under "Artifacts." Then open any small PR that touches one model:</p>
+<pre><code><span class="cm"># in a PR branch, e.g. add `current_timestamp as built_at` to fct_orders.sql</span>
+git push origin HEAD</code></pre>
+<p>Expected: the <code>slim-ci-pr</code> job's "Fetch prior manifest" step succeeds (not "artifact not found"), and its <code>dbt build (slim CI)</code> step's own first log lines name exactly one selected model plus its two existing tests — <code>food_delivery_pipeline.fct_orders</code>, <code>unique_fct_orders_order_id</code>, <code>not_null_fct_orders_order_id</code> — not all 26 nodes, proving the artifact round-trip and the selector are both doing real, separate work rather than silently falling back to a full build.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A job's own filesystem is thrown away the moment that job ends, and is never visible to a separate job, let alone a separate pull request's own later run. upload-artifact/download-artifact is GitHub Actions' mechanism for persisting one file past the job that produced it so an unrelated, later run can read it -- exactly the gap between Day 15's correct --defer --state flags and an actual manifest.json to point them at.">
+    <p class="stem">Why does <code>prod-state/manifest.json</code> need an artifact upload/download at all, instead of just being written to disk?</p>
+    <button class="opt" data-ok>A job's own disk disappears the moment it ends</button>
+    <button class="opt"><code>--defer</code> only ever works given an uploaded artifact file</button>
+    <button class="opt">GitHub Actions forbids any job from ever writing JSON</button>
+  </div>
+  <div class="q" data-why="download-artifact resolves an artifact name to the most recent successful upload of that name across the whole repository's workflow runs, not something scoped to the current branch or PR -- which is exactly what makes a PR's slim-ci-pr job compare against a real, current main-branch build rather than against its own branch or an empty default.">
+    <p class="stem">When a PR job runs <code>actions/download-artifact</code> for <code>prod-manifest</code>, which upload does it actually fetch?</p>
+    <button class="opt" data-ok>The most recent successful upload of that name, repo-wide</button>
+    <button class="opt">Whatever that same PR branch itself uploaded most recently</button>
+    <button class="opt">A new, empty manifest generated fresh for this job</button>
+  </div>
+  <div class="q" data-why="download-artifact has nothing to fetch until build-main has succeeded at least once on main and produced a real upload -- so the very first PR opened right after this workflow file merges will see its slim-ci-pr job fail on a missing artifact. That is an expected one-time bootstrap gap, not a bug in the YAML, and is fixed by letting build-main run successfully once before relying on any PR's slim build.">
+    <p class="stem">What happens on the very first PR opened right after this two-job workflow is merged?</p>
+    <button class="opt" data-ok>Its slim build fails: no prior manifest upload exists</button>
+    <button class="opt">It silently skips dbt and reports a false green</button>
+    <button class="opt">Nothing unusual; every PR behaves identically from day one</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> GitHub's own <a href="https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/store-and-share-data">store and share data</a> guide documents <code>upload-artifact</code>/<code>download-artifact</code>'s exact name-resolution and retention behavior — worth reading directly before changing <code>retention-days</code> or relying on artifact lookup across forks, which that page calls out as a real restriction this course's single-repo setup doesn't hit. Day 15's own cited <a href="https://docs.getdbt.com/reference/node-selection/defer">defer</a> docs remain the source for exactly what <code>--defer</code> does once the manifest actually exists.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 39.<br>
+<strong>Next up:</strong> the <code>airflow db migrate</code>/<code>airflow dags test</code> approval-gate block named on Days 35-38 is still open with no human unblock yet; absent that, Day 31's test-severity/<code>store_failures</code> and seeds-vs-sources threads (named back on Day 31, still not individually revisited since Day 32-33 closed them) are smaller dbt candidates, alongside a second real Kafka Connect/Debezium hands-on pass if Days 34/37's pattern of alternating away from three-in-a-row holds.<br><br>
+💬 Anything unclear — why the two jobs need <code>if:</code> guards, or how artifact retention interacts with a repo that prunes old runs? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

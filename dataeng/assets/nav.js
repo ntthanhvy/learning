@@ -49,6 +49,7 @@
     { n: 36, date: "2026-10-21", title: "dbt_utils date_spine: making zero-order days visible", file: "lessons/0036-dbt-utils-date-spine.html" },
     { n: 37, date: "2026-10-22", title: "Kafka consumer lag monitoring: a real Python check script", file: "lessons/0037-kafka-consumer-lag-monitoring-script.html" },
     { n: 38, date: "2026-10-23", title: "Finishing Day 21's TODO: a real growth check with a Variable cursor", file: "lessons/0038-airflow-asset-growth-check-variable-cursor.html" },
+    { n: 39, date: "2026-10-24", title: "dbt CI for real: closing Day 15's two TODOs", file: "lessons/0039-dbt-ci-slim-build-artifact.html" },
   ];
 
   const REFS = [

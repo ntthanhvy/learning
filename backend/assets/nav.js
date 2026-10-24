@@ -226,6 +226,8 @@
       file: "lessons/0109-bounded-fan-out-setlimit-semaphoreslim.html" },
     { n: 110, date: "2026-10-23", title: "First result wins: Task.WhenAny and Go's select, minus the losers",
       file: "lessons/0110-first-result-wins-whenany-select-cancel.html" },
+    { n: 111, date: "2026-10-24", title: "One call, one deadline: context.WithTimeout vs CancellationTokenSource's timeout",
+      file: "lessons/0111-single-call-timeout-withtimeout-cancelafter.html" },
   ];
 
   const REFS = [

@@ -37,6 +37,8 @@
   Vendor primary source for `errgroup.Group.SetLimit`'s blocking-at-the-cap behavior and its "must not be modified while active" constraint, and for `SemaphoreSlim`'s initial/max count constructor, `WaitAsync()`'s non-blocking suspension, and `Release()`. Use for: bounding fan-out width — how many concurrent goroutines/Tasks a fan-out loop is allowed to run at once (Lesson 109).
 - [Docs: Microsoft Learn — Task.WhenAny](https://learn.microsoft.com/en-us/dotnet/api/system.threading.tasks.task.whenany) and [Docs: pkg.go.dev — context package](https://pkg.go.dev/context)
   Vendor primary source for `Task.WhenAny`'s documented tip that losing tasks "will continue running until completion" unless cancelled by hand, and the primary source for `context.WithCancel`'s derived-context behavior behind Go's `select`-based first-result-wins pattern. Use for: "first result wins" races and why the loser doesn't stop on its own (Lesson 110).
+- [Docs: pkg.go.dev — context.WithTimeout](https://pkg.go.dev/context#WithTimeout) and [Docs: Microsoft Learn — CancellationTokenSource constructors](https://learn.microsoft.com/en-us/dotnet/api/system.threading.cancellationtokensource.-ctor)
+  Vendor primary source for `context.WithTimeout`'s exact definition as `WithDeadline(parent, time.Now().Add(timeout))`, and for the `CancellationTokenSource(TimeSpan)` overload's self-cancelling countdown plus `CancelAfter()`'s delay-reset behavior. Use for: attaching a deadline to a single call, as distinct from racing or bounding several (Lesson 111).
 
 ## Wisdom (Communities)
 

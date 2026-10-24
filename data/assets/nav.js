@@ -218,6 +218,8 @@
       file: "lessons/0105-str-pad.html" },
     { n: 106, date: "2026-10-23", title: "Series.str.title(): title-casing a column, and the apostrophe trap it shares with plain Python",
       file: "lessons/0106-str-title.html" },
+    { n: 107, date: "2026-10-24", title: "Series.str.join(): collapsing a list column back to text, and the silent NaN it leaves behind",
+      file: "lessons/0107-str-join.html" },
   ];
 
   const REFS = [

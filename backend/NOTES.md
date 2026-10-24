@@ -8976,3 +8976,122 @@
   ready simultaneously) — flagged above as unverified this round due to two
   truncated fetches, worth a direct, full-page read next time rather than
   another partial fetch.
+- **2026-10-24 generation (Lesson 111, headless run):** No topic was handed
+  in pre-decided this round beyond the orchestrator naming Lesson 110's own
+  three closing-teaser candidates: (a) `context.WithTimeout` vs
+  `CancellationTokenSource`'s timeout pattern, (b) retry-with-backoff
+  composed on a race, (c) Go `select`'s own arbitration rules. Picked (a):
+  it is the one Lesson 110's Scope line itself called "a natural next step
+  since Lesson 41 only covers the Go half," it continues the Lessons
+  107-110 Go+.NET concurrency-pairing arc with the simplest possible next
+  rung (one call, one deadline, no fan-out at all), and it was the
+  candidate most directly grounded in an already-identified, already-named
+  gap rather than a fresh scan. (b) was set aside as Lesson 32's territory,
+  one layer below timeouts, not newly open. (c) was set aside again,
+  unchanged from Lesson 110's round: a quick repeat check (see below) still
+  couldn't get a clean full-page fetch of `go.dev/ref/spec#Select_statements`
+  worth quoting from, so it stays deferred rather than risk an unverified
+  claim. Read `MISSION.md`, this file's tail (including the full 2026-10-15
+  through 2026-10-23 run of entries for exact house style), the last three
+  `learning-records/` files, Lesson 110 in full for exact HTML/quiz/callout/
+  comparison-table structure, `nav.js`'s tail for the entry shape, and
+  `glossary.html`'s tail for the row/column order, all before writing
+  anything. Confirmed idempotency first: no `backend/lessons/0111-*.html`
+  on disk and no `date: "2026-10-24"` in `nav.js` before starting. Verified
+  both halves' core claims directly against primary sources before writing
+  any prose: fetched pkg.go.dev's `context#WithTimeout` page and confirmed
+  its own doc comment verbatim — "WithTimeout returns WithDeadline(parent,
+  time.Now().Add(timeout))" — plus its own example's `defer cancel()`
+  comment ("releases resources associated with it, so code should call
+  cancel as soon as the operations running in this Context complete"); and
+  fetched Microsoft Learn's `CancellationTokenSource` constructor page,
+  confirming verbatim that for the `TimeSpan`/`int` overloads, "the
+  countdown...starts during the call to the constructor. When the delay
+  expires, the constructed CancellationTokenSource is canceled, if it has
+  not been canceled already," and that "subsequent calls to CancelAfter
+  will reset the delay for the constructed CancellationTokenSource, if it
+  has not been canceled already" — this reset behavior became this
+  lesson's third quiz question. One new term, checked against the glossary
+  first via case-insensitive grep across the whole file — zero collisions
+  confirmed before writing: `CancelAfter()`. `context.WithTimeout` and
+  `CancellationTokenSource` are both reused from Lessons 41/109/110 and
+  deliberately not given new `<dfn>` entries, since they were already
+  defined there. Added the one new row immediately after Lesson 110's
+  `Task.WhenAny` row, same Term/Tiếng Việt (dev-style)/In software column
+  order, confirmed by inspecting the file's actual last existing row
+  directly rather than assumed. The Go scaffold (`fetchPricing`/
+  `callPricingService`, built on `context.WithTimeout` wrapping a
+  `select`/`ctx.Done()` call already verified in Lesson 110's style) was
+  compile-checked in a scratch directory at `.scratch/backend-lesson111/`
+  inside the repo (not `/tmp` — consistent with Lesson 110's round, which
+  found `mkdir`/`cd` under `/tmp` blocked outright by this session's
+  sandbox, and with the repo's own `.gitignore` already covering
+  `.scratch/`): `go build -C .scratch/backend-lesson111 -o scratch_bin .`
+  and `go vet -C .scratch/backend-lesson111 ./...` both ran clean with no
+  output on the first attempt; the scratch directory was deleted
+  immediately after, confirmed gone via a failed `ls`. The C# snippets
+  (`FetchPricingAsync` using the `CancellationTokenSource(TimeSpan)`
+  constructor) could again NOT be toolchain-verified: `which dotnet`
+  succeeded (`/usr/bin/dotnet`), but a direct `dotnet --version` call hit
+  the same "this command requires approval" sandbox gate every prior C#
+  round from Lesson 103 onward has hit, confirmed still standing this
+  round rather than assumed — even a retry with the sandbox-override flag
+  set was blocked the same way. Verified by careful reading against the
+  fetched Microsoft docs instead, the same fallback every prior C# round
+  has used: the `CancellationTokenSource(TimeSpan)`/`(int)` constructor
+  overloads, `CancelAfter(TimeSpan)`, and `using var cts = ...` disposal
+  are all real, standard .NET API shapes with correct signatures as far as
+  the fetched docs confirm; flagging here, as instructed, that this
+  snippet was not toolchain-compiled this round, only verified by direct
+  quote-matching against the vendor docs. Verification performed
+  mechanically otherwise: (1) a Node quiz-word-count script scoped per
+  `<div class="q">` block, splitting every option both via `.split(/\s+/)`
+  and `.split(" ")` — first draft landed uneven across all four questions
+  (spreads of 8-11 words per option, including the familiar trap of a
+  bare `--` or a comma inflating a count unexpectedly), fixed through
+  several rewrite-and-recount cycles per option, converged to exactly
+  10/10/10/10 across all four questions, both counting methods agreeing
+  exactly, exactly one `data-ok` and four options per question confirmed
+  the same way; (2) an HTML tag-balance check across div/p/code/button/
+  script/dfn/pre/h2/h1/em/strong/a/table/tr/th/td — clean on the first
+  pass after the quiz fix (div 7/7, p 15/15, code 37/37, button 16/16,
+  script 3/3, dfn 1/1, pre 2/2, h2 6/6, h1 1/1, em 5/5, strong 3/3, a 5/5,
+  table 1/1, tr 5/5, th 7/7, td 8/8); a separate table/tr/th/td/p/div/
+  html/head/body/title/script balance check on `glossary.html` after its
+  one-row addition — also balanced (tr 368/368, td 1101/1101), plus a
+  duplicate-term scan across all 366 first-column entries — zero
+  duplicates; (3) a raw-unescaped-`&` regex scan across both files — zero
+  hits; (4) the lesson's `<dfn` tags grepped and confirmed to carry both
+  `data-en=` and `data-vn=` — exactly 1 `dfn` tag, matching the 1 new
+  term, no orphaned attribute; (5) `node --check` against `assets/nav.js`,
+  `assets/gloss.js`, and `assets/quiz.js` — all clean, both before and
+  after the `nav.js` edit; (6) a basic HTML well-formedness check (exactly
+  one `<!DOCTYPE html>`, one `<html>`/`</html>`, three script tags with
+  `nav.js` last) — clean. Registered Lesson 111 in `nav.js` (date
+  2026-10-24, today's actual generation date) right after `n: 110`,
+  confirmed exactly one matching `n: 111` entry and exactly one matching
+  `0111-*.html` file on disk afterward. Added one new RESOURCES.md line
+  (pkg.go.dev's `context.WithTimeout` section plus Microsoft Learn's
+  `CancellationTokenSource` constructors page) following the existing
+  per-topic grouping, placed right after Lesson 110's `Task.WhenAny`/
+  `context` package line. `bin/record-progress` ran clean on the first
+  attempt this round (`recorded: backend/lesson_generated day=111
+  lesson=0111-single-call-timeout-withtimeout-cancelafter.html`).
+  No new `learning-records/` file this round — the topic came from
+  Lesson 110's own closing teaser (an orchestrator-surfaced candidate
+  list, not this round's own fresh gap scan), and no quiz outcome or new
+  surprise about the learner's baseline surfaced this round either, so it
+  doesn't rise to a new durable fact worth its own record; the
+  three-week-old open items from learning-records 0002/0003 (pacing
+  steady, 8 lessons shipped since the last flagged gap with no new
+  negative signal) remain accurate and unchanged, not re-litigated here.
+  Candidates spotted but not picked this round, worth checking fresh next
+  time: retry-with-backoff composed on top of a timeout (Lesson 32's
+  territory, one layer below this one, and Lesson 110's own Scope-line
+  candidate (b), set aside again); and Go's `select`-statement arbitration
+  rules (which case wins when multiple are ready simultaneously) — tried
+  again this round via a fresh fetch of `go.dev/ref/spec#Select_statements`
+  and still got back truncated, unquotable content, the same result
+  Lesson 110's round hit, so it remains deferred rather than risk an
+  unverified claim; worth a direct full-page read (not a partial fetch)
+  next time.

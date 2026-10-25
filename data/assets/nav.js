@@ -220,6 +220,8 @@
       file: "lessons/0106-str-title.html" },
     { n: 107, date: "2026-10-24", title: "Series.str.join(): collapsing a list column back to text, and the silent NaN it leaves behind",
       file: "lessons/0107-str-join.html" },
+    { n: 108, date: "2026-10-25", title: "Series.mode(): the most-frequent value, and why it can hand back more than one",
+      file: "lessons/0108-mode.html" },
   ];
 
   const REFS = [

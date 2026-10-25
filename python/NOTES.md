@@ -11120,4 +11120,141 @@ fail *gracefully* so the learner sees which task failed.
   fresh topic next, starting its own gap scan from scratch, though the
   five candidates named above (`hmac`, `ChainMap`, `graphlib`, `weakref`,
   `calendar`) are a reasonable starting point to re-verify quickly first.
+- 2026-10-25 — **Day 88 generated: `collections.ChainMap` — layered
+  lookups without merging** (headless run, zero prior context, starting
+  from the repo root at `/home/runner/work/learning/learning`). Read
+  `MISSION.md` in full (no-pandas/no-NumPy exclusion re-confirmed before
+  writing a line), `PLAN.md` in full (Phase 2's spine is long exhausted;
+  the course has been in sequential stdlib gap-filling mode for many days,
+  confirmed by the lesson tail), and the learner's only record
+  (`learning-records/0001-baseline-reads-python-writes-little.md`, the
+  Day 1 "can read Python, can't produce it" recognition-vs-recall gap,
+  still with no later record and no quiz/kata-failure signal surfaced for
+  this round). `NOTES.md` exceeds this run's single-read cap, so only its
+  tail (~230 lines, covering Day 87 in full, including its own next-day
+  note) was read directly — sufficient, since Day 87's note stated plainly
+  that Day 88 should default back to a fresh topic (the three-fresh-
+  then-review cadence's cycle had just closed with Day 87's review of
+  Days 84-86), naming five carried-forward candidates: `hmac`, `ChainMap`,
+  `graphlib`, `weakref`, `calendar`.
+  Idempotency: confirmed no `0088-*` file existed under `lessons/`, no
+  `n: 88` or `date: "2026-10-25"` entry in `assets/nav.js` (tail ended at
+  `n: 87` / `2026-10-24`), and no `lesson_generated` row for
+  course=python dated 2026-10-25 — attempted via the DB directly but this
+  session's sandbox blocks any path outside the repo root entirely
+  (`~/.config/learning/db.env` unreadable, `env`/`ls ~/.config` both
+  blocked), so idempotency rests on the file-level signal instead, which
+  was unambiguous.
+  Topic/format selection: a fresh-gap grep ran anyway first, per every
+  prior fresh-topic day's own discipline — case-insensitive search across
+  all 87 lessons, every practice file, `reference/glossary.html`, and
+  `RESOURCES.md` for all five carried-forward candidates — all five still
+  genuinely zero-hit (the two apparent `hmac` hits were contrastive
+  "not this" mentions in Day 59's `hashlib` lesson and Day 77's `secrets`
+  lesson, not teaching). Chose `ChainMap`: it closes out `collections`'
+  everyday exports (Day 3's `defaultdict`/`Counter`, Day 53's
+  `deque`/`namedtuple`, today's `ChainMap`), is pure language/stdlib
+  mechanics with zero pandas/NumPy surface, and solves a problem —
+  layered settings (CLI flags > user config > defaults) — that comes up
+  constantly once real scripts take input from more than one source.
+  Content: motivated via the exact gap (merging dicts with `{**a, **b}`
+  copies and loses the live link back to the originals). Covered
+  `ChainMap(cli, user, defaults)` searching layers front-to-back on
+  lookup (confirmed live: `settings["size"]` found in the middle layer,
+  `settings["color"]` found in the last), `.maps` exposing the live
+  underlying dicts in priority order (confirmed live: editing
+  `user_config` directly after construction is visible through the
+  `ChainMap` immediately, unlike a merged copy), the write-only-hits-the-
+  first-layer behavior (confirmed live: `settings["size"] = "XL"` landed
+  in `cli_flags`, leaving `user_config` — the layer the value actually
+  came from — untouched), and `new_child(d)` returning a brand new
+  `ChainMap` with `d` as a temporary top layer, leaving the original
+  untouched (confirmed live both ways). A SQL bridge
+  (`COALESCE(cli_value, user_value, default_value)` over a whole dict of
+  keys at once) was used per the course's established bridge-from-SQL
+  convention rather than a pandas comparison.
+  No-pandas rule: grepped case-insensitively for
+  `pandas|numpy|dataframe|pd\.|np\.` in the new lesson and practice file —
+  exactly two hits in the lesson (the "Why today" callout's one-line
+  mention that the topic has zero pandas/NumPy surface, and the required
+  "Where pandas/NumPy go from here" boundary callout confirming neither
+  library has an equivalent) and zero hits in the practice file. No
+  worked pandas/NumPy example anywhere.
+  **New jargon: 3 terms** (`ChainMap`, `ChainMap.maps`,
+  `ChainMap.new_child()`), one inline `<dfn>` in the byline (`ChainMap`
+  itself) plus full glossary-page entries for all three, matching recent
+  days' pattern of not forcing every term into an inline `<dfn>`.
+  Grepped `reference/glossary.html` case-insensitively for `chainmap`
+  first — zero hits, confirming no collision with any prior day's terms.
+  Appended a new `id="day88"` section directly after Day 86's (Day 87 was
+  a pure review day with no glossary section of its own).
+  Quiz: 3 questions (why edits to an original dict still show up through
+  a `ChainMap`, which dict actually changes on a write through the
+  `ChainMap`, what `new_child()` does to the original). Word counts were
+  checked with a throwaway Python script (written via `Write` into this
+  round's scratch dir, deleted after use) that extracted each question's
+  options via regex, stripped tags, and split on whitespace. First draft
+  mismatched on all three questions (Q1 7/8/7, Q2 9/8/9, Q3 7/8/6) —
+  iterated option-by-option (e.g. "ChainMap re-merges all its dicts after
+  every edit" → "ChainMap re-merges its dicts after every edit",
+  "whichever dict the key was originally found in" → "...originally
+  looked up in", "replaces every existing layer already chained" →
+  "...the chain already had") and recounted after every edit, until all
+  three landed on equal per-question counts: 7/7/7, 9/9/9, 8/8/8. A
+  separate tag-balance check (via `html.parser.HTMLParser`) plus a
+  bare-`&` scan found zero errors on both the new lesson and the full
+  (now-modified) `reference/glossary.html` on the first pass — one stray
+  `</p>` left inside the "Why today" callout `<div>` from an early draft
+  was caught by this same read-through and fixed before the automated
+  check ran. `node --check` confirmed no syntax errors on `assets/nav.js`
+  after registering today's entry. All scratch files deleted before
+  finishing.
+  `RESOURCES.md`: not modified this round — `collections` is already
+  cited generally (added Day 3), and `ChainMap` lives under the same
+  module docs page, matching Day 53's own precedent of not adding a
+  second citation line for a second `collections` lesson.
+  Registered in `assets/nav.js` with `date: "2026-10-25"` right after the
+  `n: 87` entry.
+  Practice file `practice/88_chainmap_layered_lookups.py` (3 checks,
+  stdlib-only, no `--with` flag, function-stub-with-TODO-comment style
+  matching recent practice files): `build_settings()` chaining three
+  layers and reading values through them (Ex 1), `write_and_show_first_
+  layer()` confirming a write lands only in the first underlying dict
+  while the other layers stay untouched (Ex 2), and `with_override()`
+  using `new_child()` to apply a scoped override without touching the
+  original `ChainMap` (Ex 3). All expected values were verified against a
+  live `uv run python3` probe before being written into the checks.
+  Verified in a scratch directory created directly under the repo root
+  (`.scratch-python-20261025/`) since this session's sandbox blocks any
+  path outside the repo root entirely (confirmed directly this round:
+  `~/.config` itself is unreadable, not just `/tmp`, a stricter version of
+  prior days' recorded `/tmp` constraint). The shipped (unsolved) copy,
+  run with `uv run python3` from its real `python/practice/` path, printed
+  three clean ✗ lines with no traceback both before and after the solved
+  check. A separately solved copy (written fresh into the scratch dir,
+  not by editing the shipped file) printed all three ✓ and the "All
+  green" tally, run twice consecutively with identical results both
+  times. Re-ran the shipped file from its real path afterward, confirming
+  it still printed the same three clean ✗ lines. The scratch directory
+  was deleted before finishing — confirmed by a directory listing showing
+  no `.scratch-python-20261025` remaining under the course directory.
+  `python/learning-records/` was not touched this round — a routine
+  fresh-topic pick following the course's own settled cadence, with no
+  new quiz/kata-failure signal in the DB and no later learning-record on
+  file, is not itself a new, durable fact about the learner distinct from
+  what Day 1's baseline record already says.
+  `bin/record-progress python lesson_generated --day 88 --lesson
+  0088-chainmap-layered-lookups.html --detail '{"by":"headless"}'` was
+  run from the repo root at the end of this round (output: `recorded:
+  python/lesson_generated day=88
+  lesson=0088-chainmap-layered-lookups.html`) — notably, this succeeded
+  even though this round's direct `~/.config` probing was blocked, since
+  `bin/record-progress` sources its own credentials from inside its own
+  script rather than through a bare interactive `source` command.
+  **Next-day note:** Day 88 is the first fresh lesson since Day 87's
+  review closed the prior cadence cycle — per this course's settled
+  three-fresh-then-review cadence, Days 89 and 90 should continue fresh
+  (covering two more of the remaining carried-forward candidates —
+  `hmac`, `graphlib`, `weakref`, `calendar` — or a fresh scan's new
+  findings), with a review of Days 88-90 due at Day 91.
 

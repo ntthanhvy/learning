@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 112 · After the timeout fires: retry-with-backoff, now in C# too</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 112 · ~20 min</p>
+<h1>After the timeout fires: retry-with-backoff, now in C# too</h1>
+<p class="byline">Lesson 111's own Scope line drew the boundary deliberately: "a timeout tells you to give up on <em>this attempt</em>, not whether to try again." Today picks up exactly there. Lesson 32 already taught the strategy — exponential backoff plus jitter — but only in Go. Every C# lesson since 107 has had a Go-side twin; this is the one place where the gap ran the other way. Today closes it.</p>
+
+<h2>1 · A timeout firing is an answer to one question, not two</h2>
+<p><code>context.WithTimeout</code> and <code>CancellationTokenSource(TimeSpan)</code> — Lesson 111's whole lesson — answer exactly one question: should this specific attempt keep running? Once the deadline passes, the answer is no, and the call returns an error. What that error means next is a completely separate question the timeout mechanism has no opinion on at all: was this a one-off hiccup worth trying again, or a dependency that's actually down, where trying again just adds load to something already struggling? Lesson 32 named that second question for Go. Today asks it again, in C#, reusing the exact same strategy rather than inventing a new one.</p>
+
+<h2>2 · The strategy doesn't change between ecosystems — only the vocabulary does</h2>
+<p>Lesson 32's shape still holds completely: wait after a failure, double the wait each subsequent failure (<code>exponential backoff</code>), randomize that wait so many clients failing together don't retry together (<code>jitter</code>), skip retrying a <code>4xx</code> since the request itself was wrong, and stop immediately if the caller's own outer deadline has already passed. None of that is Go-specific; it's a statement about distributed systems. What's different in C# is only the shape of two things: how a single attempt gets its own deadline (Lesson 111's <code>CancellationTokenSource(TimeSpan)</code>, not Go's <code>context.WithTimeout</code>), and how "wait without blocking a thread" is spelled.</p>
+
+<h2>3 · C#'s wait-without-blocking is Task.Delay, not time.Sleep</h2>
+<p>Go's backoff loop in Lesson 32 waited with a <code>select</code> over <code>time.After</code> and <code>ctx.Done()</code> — never <code>time.Sleep</code>, because <code>Sleep</code> can't be interrupted by a cancelled context. C# has the exact same trap and the exact same fix: <code>Thread.Sleep</code> blocks the OS thread outright (the sync-over-async mistake Lesson 107 already named), so the backoff wait has to be <code>await Task.Delay(delay, cancellationToken)</code> instead — a delay that is itself cancellable, and that releases the thread back to the pool while waiting, the same cooperative-yield Lesson 107 described for every other <code>await</code>:</p>
+<pre><code><span class="kw">async</span> Task&lt;Price&gt; FetchPricingWithRetryAsync(<span class="ty">string</span> sku, CancellationToken outerToken)
+{
+    <span class="kw">var</span> rng = <span class="kw">new</span> Random();
+    <span class="ty">var</span> baseDelay = TimeSpan.FromMilliseconds(<span class="kw">200</span>);
+    <span class="ty">var</span> capDelay = TimeSpan.FromSeconds(<span class="kw">5</span>);
+    Exception lastError = <span class="kw">null</span>;
+
+    <span class="kw">for</span> (<span class="kw">int</span> attempt = <span class="kw">0</span>; attempt &lt; <span class="kw">4</span>; attempt++)
+    {
+        <span class="kw">using</span> <span class="kw">var</span> attemptCts = CancellationTokenSource.CreateLinkedTokenSource(outerToken);
+        attemptCts.CancelAfter(TimeSpan.FromSeconds(<span class="kw">3</span>)); <span class="cm">// Lesson 111's per-attempt deadline</span>
+        <span class="kw">try</span>
+        {
+            <span class="kw">return</span> <span class="kw">await</span> CallPricingServiceAsync(sku, attemptCts.Token);
+        }
+        <span class="kw">catch</span> (Exception ex) <span class="kw">when</span> (IsRetriable(ex))
+        {
+            lastError = ex;
+            <span class="kw">if</span> (attempt == <span class="kw">3</span>) <span class="kw">break</span>; <span class="cm">// last attempt already used, no point waiting again</span>
+
+            <span class="kw">var</span> backoff = TimeSpan.FromMilliseconds(Math.Min(
+                capDelay.TotalMilliseconds, baseDelay.TotalMilliseconds * Math.Pow(<span class="kw">2</span>, attempt)));
+            <span class="kw">var</span> jittered = TimeSpan.FromMilliseconds(rng.NextDouble() * backoff.TotalMilliseconds);
+            <span class="kw">await</span> Task.Delay(jittered, outerToken); <span class="cm">// outer token: caller's own deadline can still cut this short</span>
+        }
+    }
+    <span class="kw">throw</span> <span class="kw">new</span> Exception(<span class="str">$"giving up after 4 attempts"</span>, lastError);
+}
+</code></pre>
+<p>Two tokens are doing two different jobs, deliberately not collapsed into one: <code>attemptCts.Token</code> (linked to <code>outerToken</code>, with its own 3-second <code>CancelAfter</code>) bounds a single attempt exactly the way Lesson 111 taught; the bare <code>outerToken</code> passed straight into <code>Task.Delay</code> bounds the whole retry loop, so a caller who cancels the entire operation doesn't have to wait out a queued backoff sleep first.</p>
+
+<div class="callout"><strong>CreateLinkedTokenSource is new, and it's the only genuinely new mechanism today.</strong> <dfn data-en="a static CancellationTokenSource factory method that creates a new token source which cancels itself automatically the moment any one of the supplied source tokens cancels, combining several independent cancellation signals into one token to pass downstream" data-vn="CreateLinkedTokenSource() (giữ nguyên) — static method tạo 1 CancellationTokenSource mới, tự hủy ngay khi 1 trong các token gốc truyền vào bị hủy -- gộp nhiều nguồn hủy độc lập thành 1 token duy nhất để đưa xuống dưới">CancellationTokenSource.CreateLinkedTokenSource()</dfn> combines the caller's outer token and this attempt's own timeout into a single token: the attempt stops if <em>either</em> the whole operation was cancelled <em>or</em> this one attempt's 3 seconds ran out — whichever comes first. Go's equivalent is unglamorous by comparison: nesting <code>context.WithTimeout(outerCtx, 3*time.Second)</code> already does this for free, since a child context Lesson 41 taught is cancelled whenever its parent is, with no separate linking step needed.</div>
+
+<h2>4 · Idempotency still isn't optional</h2>
+<p>Lesson 32's closing warning carries over unchanged: a timeout on the client side doesn't prove the server side didn't finish the work before the response was lost. Retrying a non-idempotent write after a timeout can double-create, in C# exactly as much as in Go. Lesson 26's <code>Idempotency-Key</code> is still the thing that makes retrying safe; today's loop only decides the timing, not the safety.</p>
+
+<h2>Scope line</h2>
+<p>This lesson covers composing retry-with-backoff (Lesson 32's strategy: exponential backoff, full jitter, a retriable-error check, respecting an outer deadline) on top of a single-call timeout (Lesson 111), now shown in C# for the first time using <code>Task.Delay</code> and <code>CancellationTokenSource.CreateLinkedTokenSource()</code>. It does not re-derive the backoff math or the retry-storm problem — Lesson 32 already covers both in full and nothing about them changes in C#. It does not cover a circuit breaker (Lesson 28) as the outer stop-retrying-entirely guard, nor Polly or any .NET resilience library's packaged version of this same loop — the mechanism is taught here from first principles, same as Lesson 32 did in Go, per MISSION.md's "concepts first" rule.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory, with no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A timeout (context.WithTimeout or CancellationTokenSource's timeout, Lesson 111) only answers whether this one attempt should keep running. It has no opinion on whether a second attempt is worth making -- that is a separate decision, the one Lesson 32's retry-with-backoff strategy answers.">
+    <p class="stem">What question does a single-call timeout mechanism actually answer?</p>
+    <button class="opt" data-ok>only whether this one single attempt should keep running</button>
+    <button class="opt">whether a second retry attempt is even worth trying</button>
+    <button class="opt">whether the entire downstream dependency is down right now</button>
+    <button class="opt">whether the caller should open a circuit breaker instead</button>
+  </div>
+  <div class="q" data-why="Thread.Sleep blocks the underlying OS thread outright, the same sync-over-async mistake Lesson 107 named -- it cannot be interrupted by a cancelled token. Task.Delay given a CancellationToken releases the thread back to the pool while waiting and can be cancelled early, the same cooperative-yield shape every other await uses.">
+    <p class="stem">Why does the C# backoff loop use Task.Delay instead of Thread.Sleep?</p>
+    <button class="opt" data-ok>Sleep blocks the thread and cannot honor a cancellation token</button>
+    <button class="opt">Delay somehow runs permanently faster on every single machine today</button>
+    <button class="opt">Sleep was entirely removed from the latest stable .NET runtime</button>
+    <button class="opt">Delay needs no await keyword written anywhere near its call</button>
+  </div>
+  <div class="q" data-why="CreateLinkedTokenSource combines several independent cancellation sources into one token that cancels the moment any one of them cancels. In the loop above, that means a single attempt stops if either the caller's outer token cancels the whole operation, or that attempt's own CancelAfter timeout elapses -- whichever happens first.">
+    <p class="stem">What does CancellationTokenSource.CreateLinkedTokenSource() actually do?</p>
+    <button class="opt" data-ok>makes one new token cancel once any source token cancels first</button>
+    <button class="opt">makes every token in the whole app cancel together always now</button>
+    <button class="opt">permanently merges two separate tokens into one single shared object itself</button>
+    <button class="opt">delays how soon any one single token is allowed to cancel</button>
+  </div>
+  <div class="q" data-why="A client-side timeout only tells the caller it stopped waiting -- it says nothing about whether the server-side write had already completed before the response was lost in transit. Blindly retrying a non-idempotent write after a timeout can therefore double-create the same resource, in C# exactly as much as in Go; Lesson 26's Idempotency-Key is what makes the retry itself safe.">
+    <p class="stem">Why isn't a client-side timeout proof that a retried write is safe?</p>
+    <button class="opt" data-ok>the server side may have already finished the first write</button>
+    <button class="opt">the server side always rejects every single retried call outright</button>
+    <button class="opt">the client side always doubles its own request body size</button>
+    <button class="opt">the client side already used up its one allowed attempt</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> Lesson 32's own primary source — <a href="https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/">"Exponential Backoff And Jitter" — AWS Architecture Blog</a> (~10 min) — still covers the strategy itself in full; nothing about the backoff math changes between Go and C#. <a href="https://learn.microsoft.com/en-us/dotnet/api/system.threading.cancellationtokensource.createlinkedtokensource">Microsoft Learn: CancellationTokenSource.CreateLinkedTokenSource</a> (~5 min) is the primary source for today's one new C#-specific mechanism, confirming it returns a source "that will be in the canceled state when any of the source tokens are in the canceled state."</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a>. Click any dotted term for a popup (English first, tiếng Việt second). Builds directly on Lesson 32's backoff strategy, Lesson 107's async/await and sync-over-async, and Lesson 111's per-call timeout. <strong>Anything unclear? Ask your teacher</strong>, the agent that made this lesson. Ask in Vietnamese anytime. A good follow-up: "does any retry loop in our codebase actually check whether the error is retriable, or does it just retry everything blindly?"</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

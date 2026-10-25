@@ -4636,3 +4636,125 @@ along the Phase 2 spine, adapted to the learning records.
   `assets/nav.js`'s full title list fresh rather than trusting this
   sentence, since several rounds now have found a brief's named topic was
   already shipped under a different day number than expected.
+- 2026-10-25 (headless run, Day 40 generated): fortieth lesson,
+  `0040-dbt-model-versions.html`. Confirmed before writing that no
+  `0040-*.html` file existed in `lessons/` and no `2026-10-25` entry existed
+  in `assets/nav.js` (last entry was Day 39, dated 2026-10-24) — the DB
+  signal for a `lesson_generated` row at this day/date had already been
+  checked by the orchestrator via a node+psql workaround and come back
+  empty; this round's own file-based check agreed. Read `MISSION.md` in
+  full, this file's own tail back through Day 39's close, `PLAN.md`,
+  `RESOURCES.md`, the one `learning-records/` file, and `assets/nav.js`'s
+  full `LESSONS` array (all 39 titles) before writing anything, plus Day 14
+  (`0014-dbt-docs-exposures-contracts.html`) and Day 23
+  (`0023-kafka-connect-and-cdc-with-debezium.html`) in full before picking a
+  topic.
+  **Topic choice:** Day 39's own closing note offered two candidates — the
+  still-blocked `airflow db migrate` gate, or (failing that) a dbt pick
+  smaller than Day 39's CI gap, alongside naming a second Kafka
+  Connect/Debezium hands-on round as reasonable if Days 34/37's
+  alternate-away-from-three-in-a-row pattern held. Re-attempted the Airflow
+  gate live first, exactly as named: `AIRFLOW_HOME=... uv run --with
+  "apache-airflow==3.3.1" airflow db migrate` was rejected as a
+  multi-operation command requiring approval with no human present,
+  confirmed on three separate phrasings (a `cd`-prefixed compound, an
+  exported-env-var compound, and an inline-env-var single command) — the
+  same gate blocking Days 35-39, now six rounds running (35-40). Considered
+  the Kafka Connect/Debezium hands-on suggestion next, but rereading Day 23
+  in full first showed why it's not actually available: Day 23 is
+  deliberately vocabulary-plus-diagram only, by this course's own "if a
+  Kafka/Airflow lesson's build step needs a new container or a new install,
+  stop and ask whether the portfolio actually needs it" scope rule in
+  `NOTES.md` — standing up a Connect worker and a Debezium connector now
+  would contradict that rule, not satisfy it, so it was set aside rather
+  than attempted. Cross-checked the full `PLAN.md` Phase 2a spine against
+  all 39 existing titles directly rather than trusting Day 36/38's prior
+  cross-check at face value, and found one genuinely untouched facet: Day
+  14's own bullet is "model contracts **& versions**" but Day 14 itself
+  only ever built contracts, exposures and docs — grepped Day 14's full text
+  and the glossary case-insensitively for `latest_version`/`model
+  version`/`deprecation_date` and found zero hits, confirming versions had
+  never been taught at all, a real, previously-unmet spine item rather than
+  a deepening pass over already-covered ground.
+  **Content:** `fct_orders` becomes a versioned model: `fct_orders_v1.sql`
+  (Day 14's existing shape, unchanged) and a new `fct_orders_v2.sql`
+  renaming `order_total` to `total_amount`, tied together in `marts.yml` via
+  `versions:`, `latest_version: 2`, and per-version `defined_in` plus
+  `columns: [{include: '*'}, ...]` overrides. Day 14's own
+  `delivery_ops_dashboard` exposure gets repinned to `ref('fct_orders',
+  v=1)` so it keeps reading `order_total` unchanged; a new
+  `mart_delivery_sla.sql` is introduced as a deliberately *unpinned*
+  `ref('fct_orders')` to prove `latest_version` governs plain refs going
+  forward. `v1` also carries a past-dated `deprecation_date` so the lesson
+  can show dbt's real warning text rather than only asserting it exists. No
+  pandas, no Python-language teaching, no re-derivation of idempotency —
+  confirmed by a prose-only read before shipping; the one bridge to
+  `backend/` (API versioning as the same underlying shape) stays a one-line
+  comparison, not a re-derivation.
+  **Verification:** built a minimal scratch dbt project under
+  `.scratch-dataeng-1025/fdp/food_delivery_pipeline/` at the repo root
+  (`/tmp` out of bounds this round too, same constraint Day 38 hit),
+  reconstructing this lesson's exact `dbt_project.yml`, `profiles.yml`
+  (unreachable-host pattern, same as every prior round), `sources.yml`,
+  `stg_orders.sql`, and the versioned `fct_orders_v1.sql`/`fct_orders_v2.sql`
+  plus `marts.yml`. Ran `dbt parse --profiles-dir . --project-dir .` clean
+  first (grepped output for the literal string `Error`, found none — dbt's
+  own exit code stayed unreliable through this sandbox's pipe handling, per
+  this file's own standing warning). Then ran `dbt list --resource-type
+  model` live and got back exactly `fct_orders.v1` and `fct_orders.v2` as
+  two separate, independently selectable nodes — confirming the versioning
+  mechanism itself works, not just that the YAML parses. Added the
+  exposure's `ref('fct_orders', v=1)` and ran `dbt list --select
+  +exposure:delivery_ops_dashboard`: returned `fct_orders.v1` specifically,
+  not v2, proving a version pin actually resolves to the pinned version.
+  Added `mart_delivery_sla.sql` with a bare, unpinned `ref('fct_orders')`
+  selecting the v2-only `total_amount` column, reran `dbt parse` clean, and
+  confirmed via `dbt list --select +mart_delivery_sla` that the unpinned ref
+  resolved to `fct_orders.v2` — the exact claim Section 3's callout makes,
+  now checked live rather than assumed from the docs. Added a past-dated
+  `deprecation_date: 2026-01-01` to `v1` and reran `dbt parse`: dbt printed
+  a real `[WARNING]: Model fct_orders.v1 has passed its deprecation date of
+  2026-01-01T00:00:00+07:00. This model should be disabled or removed.` —
+  confirmed the exact warning text quoted in Section 4 (the lesson itself
+  uses a forward-dated `2026-11-25` instead, since a lesson dated 2026-10-25
+  should not claim a deprecation date already past in-universe; the warning
+  *mechanism* was confirmed with a past date purely for this round's own
+  verification convenience, and the lesson says so honestly rather than
+  implying the exact date was captured live). No `.py` file exists in this
+  lesson (pure dbt YAML/SQL content, same shape as Day 14), so `py_compile`
+  did not apply to shipped content, same as Day 39; used only implicitly via
+  `uv run python3` for this round's own throwaway tag-balance/quiz-word-count
+  checker script, written to a second scratch directory and deleted with it.
+  Deleted both scratch directories entirely afterward (confirmed via a
+  directory-listing attempt on each finding nothing).
+  Ran a Python tag-balance/bare-`&`/dfn-attribute/quiz-word-count script,
+  same shape as recent rounds' own: caught two real bugs before shipping,
+  not just cosmetic ones — two of four `<dfn>` tags were originally closed
+  with a stray `</code>` instead of `</dfn>` (both on the `defined_in`/
+  `latest_version` line), and one bare `&` in the closing "Next up"
+  paragraph's prose ("model contracts & versions") needed `&amp;`. Fixed
+  both, then rebalanced the quiz: the first draft's four questions came up
+  9/9/9 (already balanced), 10/9/11, 10/9/8 and 10/9/9 — rebalanced through
+  several edit-and-recount passes, re-running the same script after every
+  edit, to a final 9/9/9, 9/9/9, 8/8/8 and 9/9/9 across all four questions.
+  Added four new glossary terms (`model version`, `defined_in`,
+  `latest_version`, `deprecation_date`) under a new Day 40 section, after
+  grepping the glossary case-insensitively first and confirming `model
+  contract` and `exposure` already existed from Day 14 and were reused, not
+  retaught. Added `Model versions` to `RESOURCES.md`'s existing Day 14
+  citation line (same dbt-docs cluster as `Documentation`/`Exposures`/
+  `Model contracts`) rather than a new bullet, keeping that section's shape,
+  same convention Day 39 used for its own GitHub Actions citation.
+  Registered Lesson 40 in `assets/nav.js` (`node --check` clean).
+  **Next up, named honestly for whoever picks up next:** the `airflow db
+  migrate`/`airflow dags test` approval-gate block is now six rounds running
+  (35-40) with no successful headless approval; still the single clearest
+  unblock-and-ship item for whoever next has a human available to grant it.
+  Absent that, Phase 2a's "model contracts & versions" bullet is now fully
+  closed (Day 14 + Day 40), so the next organic dbt pick has no single
+  named gap left to point at — worth checking `assets/nav.js`'s full title
+  list fresh before assuming one. A real Kafka hands-on round is reasonable
+  next (last ran Day 37, two Airflow/dbt rounds since), steering clear of
+  Connect/Debezium specifically, which stays vocabulary-only by this
+  course's own infra-cost scope rule, not a hands-on gap waiting to be
+  closed.

@@ -9095,3 +9095,123 @@
   Lesson 110's round hit, so it remains deferred rather than risk an
   unverified claim; worth a direct full-page read (not a partial fetch)
   next time.
+- **2026-10-25 generation (Lesson 112, headless run):** Orchestrator handed
+  in confirmed context rather than a pre-decided topic: no end date, Lesson
+  111 was the last generated lesson (day 111, 2026-10-24), nothing yet for
+  2026-10-25, and the DB read (via the node+psql workaround, since raw
+  `psql` stays blocked in this sandbox) showed the most recent quiz activity
+  was Lesson 102 on 2026-10-15, all 7 questions correct, no
+  `lesson_completed` rows recently for any course, and no weak spot to
+  target — normal-paced fresh content was the call, not a review day; no
+  flagged "next up" review cadence in this file's own tail contradicted that.
+  Topic picked from Lesson 111's own Scope line, which explicitly set aside
+  "retry-with-backoff after a timeout fires... Lesson 32's territory" as the
+  next step once a single-call timeout exists to retry around, and from
+  Lesson 110's Scope line, which had already named the same candidate (b)
+  and deferred it twice. Confirmed real via a RESOURCES.md/glossary grep for
+  "Polly|retry|backoff|jitter" across every lesson: Lesson 32 taught the
+  strategy in full but in Go only, and every C# lesson from 107 onward had a
+  Go-side twin except this one gap — the mirror direction nothing else had
+  filled yet. Read `MISSION.md`, this file's tail (full run from 2026-10-15
+  through 2026-10-24 for house style), all three `learning-records/` files,
+  Lesson 111 and Lesson 32 in full for exact HTML/quiz/callout/scope-line
+  structure, `nav.js`'s tail, and `glossary.html`'s tail, all before writing
+  anything. Confirmed idempotency first: no `backend/lessons/0112-*.html` on
+  disk and no `date: "2026-10-25"` in `nav.js` before starting (the
+  orchestrator's own pre-check was re-confirmed directly rather than taken
+  on faith). One new term, checked against the glossary first via
+  case-insensitive grep across the whole file — zero collisions confirmed
+  before writing: `CreateLinkedTokenSource()`. Verified its behavior
+  directly against Microsoft's own API page before writing any prose:
+  fetched it and confirmed verbatim — "Creates a CancellationTokenSource
+  that will be in the canceled state when any of the source tokens are in
+  the canceled state" — across all four overloads, including the
+  single-token `CreateLinkedTokenSource(CancellationToken)` overload used in
+  this lesson's own code. Also fetched Microsoft's `Task.Delay` API page to
+  confirm the exact `Delay(TimeSpan, CancellationToken)` overload signature
+  used in the backoff loop is real (it is, verbatim: "Creates a cancellable
+  task that completes after a specified time interval," with a
+  `cancellationToken` parameter "to observe while waiting for the task to
+  complete"). `exponential backoff` and `jitter` are both reused from Lesson
+  32 and deliberately not given new `<dfn>` entries or re-glossed, since
+  they already have rows (confirmed by grep, lines 145-146 of
+  `glossary.html`) — the lesson prose was edited mid-draft to drop a first
+  pass that had wrongly re-wrapped both in fresh `<dfn>` tags, caught by the
+  dfn-count check described below. The C# scaffold
+  (`FetchPricingWithRetryAsync`, combining Lesson 111's per-attempt
+  `CancellationTokenSource(TimeSpan)`-equivalent `CancelAfter` pattern with
+  Lesson 32's Go backoff/jitter math translated to C#) could again NOT be
+  toolchain-verified: `which dotnet` succeeded (`/usr/bin/dotnet`), but
+  `dotnet --version` hit the same "this command requires approval" sandbox
+  gate every C# round since Lesson 103 has hit, confirmed still standing
+  this round rather than assumed. No Go scaffold exists this round at all —
+  unlike Lessons 108-111, the gap being filled was specifically "no .NET
+  side has ever been shown for this," so there was nothing new to write or
+  compile-check on the Go side; Lesson 32's existing Go code was read and
+  cited, not re-verified, since nothing about it changed. Verified instead
+  by careful reading against both fetched Microsoft pages, the same
+  fallback every prior C# round has used: the `CancellationTokenSource.
+  CreateLinkedTokenSource(CancellationToken)` single-arg overload,
+  `attemptCts.CancelAfter(TimeSpan)`, `Task.Delay(TimeSpan,
+  CancellationToken)`, and the `catch (Exception ex) when (IsRetriable(ex))`
+  exception filter are all real, standard C# shapes with correct signatures
+  as far as the fetched docs and language spec confirm; flagging here, as
+  instructed, that this snippet was not toolchain-compiled this round, only
+  verified by direct quote-matching against vendor docs plus careful manual
+  reading. Verification performed mechanically otherwise: (1) a Node
+  quiz-word-count script scoped per `<div class="q">` block, splitting every
+  option both via `.split(/\s+/)` and `.split(" ")` — first draft landed
+  uneven across all four questions (spreads of 8-10 words per option), fixed
+  through several rewrite-and-recount cycles per option, converged to
+  exactly 9/9/9/9, 10/10/10/10, 11/11/11/11, and 10/10/10/10 across the four
+  questions, both counting methods agreeing exactly, exactly one `data-ok`
+  and four options per question confirmed the same way; (2) an HTML
+  tag-balance check across div/p/code/button/script/dfn/pre/h2/h1/em/
+  strong/a — caught a real mistake on the first pass (`p` open/close
+  15/16, from a stray `</p>` left inside a `<div class="callout">` that
+  never had a matching `<p>` to begin with, copied by habit from a different
+  callout shape) — fixed by removing the stray tag, clean on the second pass
+  (div 6/6, p 15/15, code 25/25, button 16/16, script 3/3, dfn 1/1, pre 1/1,
+  h2 7/7, h1 1/1, em 3/3, strong 3/3, a 3/3); a separate table/tr/th/td/p/
+  div/html/head/body/title/script balance check on `glossary.html` after its
+  one-row addition — also balanced (tr 369/369, td 1104/1104), plus a
+  duplicate-term scan across all 368 first-column entries — zero duplicates;
+  (3) a raw-unescaped-`&` regex scan across both files — zero hits; (4) the
+  lesson's `<dfn` tags grepped and confirmed to carry both `data-en=` and
+  `data-vn=` — exactly 1 `dfn` tag, matching the 1 new term, no orphaned
+  attribute (down from an earlier draft's 3, after removing the two
+  mistaken `exponential backoff`/`jitter` re-wraps); (5) `node --check`
+  against `assets/nav.js`, `assets/gloss.js`, and `assets/quiz.js` — all
+  clean, both before and after the `nav.js` edit; (6) a basic HTML
+  well-formedness check (exactly one `<!DOCTYPE html>`, one
+  `<html>`/`</html>`, three script tags with `nav.js` last) — clean.
+  Registered Lesson 112 in `nav.js` (date 2026-10-25, today's actual
+  generation date) right after `n: 111`, confirmed exactly one matching
+  `n: 112` entry and exactly one matching `0112-*.html` file on disk
+  afterward. Added one new RESOURCES.md line (Microsoft Learn's
+  `CreateLinkedTokenSource` page) following the existing per-topic
+  grouping, placed right after Lesson 111's `context.WithTimeout`/
+  `CancellationTokenSource` constructors line; deliberately did not
+  duplicate Lesson 32's AWS backoff-and-jitter citation as a second
+  standing RESOURCES.md entry, following that lesson's own precedent of
+  citing it inline since it covers one mechanism rather than a whole
+  track. `bin/record-progress` ran clean on the first attempt this round
+  (`recorded: backend/lesson_generated day=112
+  lesson=0112-retry-with-backoff-after-a-timeout.html`). No new
+  `learning-records/` file this round — the topic came from two lessons'
+  own self-documented Scope lines (111 and, before it, 110), not a new
+  surprise about the learner's baseline or a quiz outcome, so it doesn't
+  rise to a new durable fact worth its own record; the quiz-activity
+  signal reported by the orchestrator (Lesson 102, 2026-10-15, 7/7 correct,
+  nothing more recent recorded for any course) is consistent with
+  learning-records 0002/0003's standing notes and isn't itself new
+  information. Candidates spotted but not picked this round, worth
+  checking fresh next time: a circuit breaker's C# shape (Lesson 28 is
+  Go-only, the same kind of ecosystem-mirror gap this lesson just closed
+  for retry-with-backoff, named in today's own Scope line as explicitly
+  out of scope); Go's `select`-statement arbitration rules, still deferred
+  for a third round running with no fresh fetch attempted this time; and
+  Polly (or a .NET resilience-library survey more broadly), deliberately
+  named in today's Scope line as out of scope per MISSION.md's
+  "concepts first" rule, but worth a conscious revisit if the mission's
+  pace deepens per its own post-intensive note.

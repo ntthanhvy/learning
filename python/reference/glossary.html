@@ -631,6 +631,14 @@
   <tr><td>sig.bind() / .apply_defaults()</td><td>giữ nguyên "bind()"/".apply_defaults()" — bind() khớp 1 bộ argument cụ thể với signature giống như 1 lệnh gọi thật (raise TypeError nếu sai), không gọi hàm thật; apply_defaults() điền thêm default cho tham số bị thiếu, cho ra đủ argument của lệnh gọi đó</td><td><code>sig.bind(*args, **kwargs)</code> matches a specific set of arguments against the signature's parameters exactly as a real call would, raising <code>TypeError</code> on a mismatch, without calling the function itself; <code>.apply_defaults()</code> then fills in any parameter left out with its declared default, leaving a complete name-to-value mapping for that call.</td></tr>
 </table>
 
+<h2 id="day88">Day 88 — collections.ChainMap: layered lookups without merging</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>ChainMap</td><td>giữ nguyên "ChainMap" — bọc nhiều dict thành 1 view để tra cứu, tìm ở dict đầu trước rồi dict sau, không copy hay merge gì cả; viết (write) luôn đi vào dict đầu tiên</td><td><code>collections.ChainMap(d1, d2, ...)</code> wraps several dicts as one lookup view, searching <code>d1</code> first, then <code>d2</code>, and so on, without copying or merging any of the underlying dicts — each layer stays live, so editing an original dict afterward is visible through the <code>ChainMap</code> immediately. A write through the <code>ChainMap</code> always goes into the first dict only, regardless of which layer a key currently resolves from on lookup.</td></tr>
+  <tr><td>ChainMap.maps</td><td>giữ nguyên ".maps" — thuộc tính trả về list các dict gốc đang được ChainMap tra cứu, theo đúng thứ tự ưu tiên, vẫn là các dict độc lập có thể sửa trực tiếp</td><td>The attribute exposing the exact list of original dicts a <code>ChainMap</code> is searching, in priority order — each one remains an independent, directly mutable dict, not a copy.</td></tr>
+  <tr><td>ChainMap.new_child()</td><td>giữ nguyên "new_child()" — trả về 1 ChainMap MỚI với dict truyền vào là lớp ưu tiên cao nhất, phía trước các lớp cũ; ChainMap gốc không bị đổi gì</td><td><code>settings.new_child(d)</code> returns a brand new <code>ChainMap</code> with <code>d</code> as its highest-priority layer in front of the existing ones, leaving the original <code>ChainMap</code> and all of its layers completely unmodified — a clean way to apply a temporary, scoped override.</td></tr>
+</table>
+
 <p class="next">💬 A term here still unclear? Ask your teacher — hỏi bằng tiếng Việt cũng được.</p>
 
 <script src="../assets/nav.js"></script>

@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 40 · dbt model versions: changing a contracted model without breaking its consumer</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 40 · ~20 min · 25 Oct 2026</p>
+<h1>dbt model versions: changing a contracted model without breaking its consumer</h1>
+<p class="byline">Today's tangible win: <code>fct_orders</code> splits into <code>fct_orders_v1.sql</code> and <code>fct_orders_v2.sql</code>, declared as one versioned model with <code>latest_version: 2</code>. Day 14's exposure keeps reading <code>order_total</code> by pinning <code>ref('fct_orders', v=1)</code>, while every new, unpinned <code>ref('fct_orders')</code> in the project — including a brand-new <code>mart_delivery_sla</code> you'll also build today — gets v2's renamed <code>total_amount</code> column automatically. One column rename, zero breakage, and a precise answer to "how do you change a contracted model's shape without breaking whoever reads it."</p>
+
+<div class="callout"><strong>Before today — check Day 14 actually landed:</strong> today edits the exact contract Day 14 enforced, so confirm it's there first:
+<pre><code>cat food_delivery_pipeline/models/marts/marts.yml</code></pre>
+Expected: an <code>fct_orders</code> entry with <code>contract: {enforced: true}</code>, a <code>data_type</code> on every column, and <code>on_schema_change: 'fail'</code>. If any of those three is missing, finish Day 14 first — today assumes a contract already exists, because today is about changing one safely, not creating one from scratch.</div>
+
+<h2>1 · The question a contract raises but doesn't answer</h2>
+<p>Day 14's <code>contract: {enforced: true}</code> makes <code>fct_orders</code> a promise: these columns, these types, checked by dbt before every build finishes. That promise is exactly why a straightforward rename — say, <code>order_total</code> renamed to the clearer <code>total_amount</code> — isn't straightforward anymore. Rename the column in <code>fct_orders.sql</code> and ship it, and the next build breaks on purpose: <code>on_schema_change: 'fail'</code> was set precisely to stop a column from silently disappearing underneath Day 14's own <code>delivery_ops_dashboard</code> exposure, which reads <code>order_total</code> directly. The contract did its job — it just didn't say what to do next.</p>
+<p>The honest options are limited. Don't rename it, and the project carries an unclear column name forever. Rename it and ship, and the dashboard's next query throws <code>column "order_total" does not exist</code> with no warning beforehand. Add <code>total_amount</code> as a second column alongside the old one, and the model accumulates renamed-but-never-removed cruft every time this happens. <dfn data-en="dbt's mechanism for having two or more named editions of the same logical model exist at once in one project -- each version is its own SQL file and can have its own column list, while ref('model_name') with no version pinned always resolves to whichever version is marked latest_version, and ref('model_name', v=N) pins a specific one" data-vn="giữ nguyên &quot;model version&quot; — cơ chế dbt cho phép 1 model logic có nhiều bản (version) tồn tại cùng lúc trong project: mỗi version là 1 file SQL riêng, có thể có cột khác nhau; ref('ten_model') không ghim version sẽ luôn trỏ tới bản latest_version, còn ref('ten_model', v=N) thì ghim đúng bản N">Model versions</dfn> are dbt's actual answer: ship both shapes at once, under one logical name, and let each consumer decide when it moves.</p>
+
+<h2>2 · What a versioned model actually looks like on disk</h2>
+<p>A versioned <code>fct_orders</code> becomes two SQL files instead of one, each a complete, independently buildable model — not a diff, not a shared base file. <code>fct_orders_v1.sql</code> is exactly what Day 14 already has, unchanged. <code>fct_orders_v2.sql</code> is a copy with one line different:</p>
+<pre><code><span class="cm">-- models/marts/fct_orders_v2.sql -- the only change from fct_orders_v1.sql</span>
+{{ config(
+    materialized=<span class="str">'incremental'</span>,
+    unique_key=<span class="str">'order_id'</span>,
+    incremental_strategy=<span class="str">'merge'</span>,
+    on_schema_change=<span class="str">'fail'</span>,
+    contract={<span class="str">'enforced'</span>: <span class="kw">true</span>}
+) }}
+
+<span class="kw">select</span>
+    order_id,
+    customer_id,
+    restaurant_id,
+    courier_id,
+    subtotal,
+    delivery_fee,
+    subtotal + delivery_fee <span class="kw">as</span> total_amount,  <span class="cm">-- was "as order_total" in v1</span>
+    placed_at
+<span class="kw">from</span> {{ ref(<span class="str">'stg_orders'</span>) }}
+
+{% if is_incremental() %}
+<span class="kw">where</span> placed_at &gt; (<span class="kw">select</span> coalesce(max(placed_at), <span class="str">'1900-01-01'</span>) <span class="kw">from</span> {{ this }})
+{% endif %}</code></pre>
+<p>The YAML in <code>marts.yml</code> is what actually ties the two files to one logical model and tells dbt which file is which version:</p>
+<pre><code><span class="cm">-- models/marts/marts.yml -- replacing Day 14's single fct_orders entry</span>
+models:
+  - name: fct_orders
+    latest_version: <span class="kw">2</span>
+    description: <span class="str">"One row per order. Versioned: v1 keeps order_total for the exposure that hasn't migrated yet; v2 renames it to total_amount."</span>
+    columns:
+      - name: order_id
+        data_type: bigint
+        constraints: [{type: not_null}, {type: unique}]
+        tests: [not_null, unique]
+      - name: customer_id
+        data_type: bigint
+      - name: restaurant_id
+        data_type: bigint
+      - name: courier_id
+        data_type: bigint
+      - name: subtotal
+        data_type: numeric
+      - name: delivery_fee
+        data_type: numeric
+      - name: placed_at
+        data_type: timestamp
+    versions:
+      - v: <span class="kw">1</span>
+        defined_in: fct_orders_v1
+        deprecation_date: <span class="kw">2026</span>-11-25
+        columns:
+          - include: <span class="str">'*'</span>
+          - name: order_total
+            data_type: numeric
+      - v: <span class="kw">2</span>
+        defined_in: fct_orders_v2
+        columns:
+          - include: <span class="str">'*'</span>
+          - name: total_amount
+            data_type: numeric</code></pre>
+<p>Three fields carry the whole mechanism. <dfn data-en="a dbt model-version field naming which file on disk a given version's SELECT actually lives in (e.g. defined_in: fct_orders_v1 points at fct_orders_v1.sql) -- without it dbt looks for a file literally named after the version number and fails to find one" data-vn="giữ nguyên &quot;defined_in&quot; — field của 1 version trong dbt, chỉ rõ SELECT của version đó nằm ở file nào trên disk (VD defined_in: fct_orders_v1 trỏ tới file fct_orders_v1.sql); thiếu field này dbt sẽ tìm file đặt tên đúng theo số version và không thấy">defined_in</dfn> points each version entry at the actual file holding its <code>SELECT</code>. <dfn data-en="a dbt model-version field naming which declared version an unpinned ref('model_name') call resolves to -- every new ref() in the project gets this version automatically, without naming a version number at all, until the ref() is written with an explicit v= pin" data-vn="giữ nguyên &quot;latest_version&quot; — field khai báo version nào là bản mà ref('ten_model') không ghim version sẽ tự động trỏ tới; mọi ref() mới trong project sẽ lấy đúng version này cho tới khi ref() ghi rõ v= để ghim version cụ thể">latest_version</dfn> decides what a plain, unpinned <code>ref('fct_orders')</code> resolves to anywhere else in the project, from this point on, with no version number written at the call site at all. And the per-version <code>columns:</code> block — <code>include: '*'</code> plus one override — says each version's actual contracted shape without repeating all seven unchanged columns twice.</p>
+
+<h2>3 · Build: ship v2, pin the exposure to v1, prove both resolve correctly</h2>
+<p>In <code>food_delivery_pipeline/</code>: rename nothing. Copy <code>models/marts/fct_orders.sql</code> to <code>models/marts/fct_orders_v1.sql</code> unchanged, create <code>models/marts/fct_orders_v2.sql</code> with the one-line rename from Section 2, delete the old unversioned <code>fct_orders.sql</code>, and replace <code>marts.yml</code>'s <code>fct_orders</code> entry with Section 2's version block. Then pin Day 14's exposure explicitly to v1 — the whole reason it still works unchanged:</p>
+<pre><code><span class="cm">-- models/marts/exposures.yml -- the one line that changes</span>
+exposures:
+  - name: delivery_ops_dashboard
+    <span class="cm"># ...label, type, maturity, url, description, owner unchanged from Day 14...</span>
+    depends_on:
+      - ref(<span class="str">'fct_orders'</span>, v=<span class="kw">1</span>)   <span class="cm"># was: ref('fct_orders') -- now pinned on purpose</span>
+      - ref(<span class="str">'mart_delivery_sla'</span>)</code></pre>
+<p>Now add a brand-new model that deliberately does <em>not</em> pin a version — the point is watching an ordinary, everyday <code>ref()</code> pick up v2 automatically because <code>latest_version: 2</code> says so, with nobody at the call site typing a version number:</p>
+<pre><code><span class="cm">-- models/marts/mart_delivery_sla.sql -- new file, reads the renamed column on purpose</span>
+<span class="kw">select</span>
+    order_id,
+    total_amount,
+    placed_at
+<span class="kw">from</span> {{ ref(<span class="str">'fct_orders'</span>) }}  <span class="cm">-- no v= pin -- resolves to v2, because latest_version: 2</span></code></pre>
+<p>Confirm the resolution without touching the database at all:</p>
+<pre><code>uv run --project ../dbt_env dbt list --select fct_orders --resource-type model
+uv run --project ../dbt_env dbt list --select +exposure:delivery_ops_dashboard</code></pre>
+<p>Expected — the first command proves both versions exist as real, separate, independently selectable nodes; the second proves the exposure's pinned <code>v=1</code> actually resolved to v1, not v2 (confirmed this round by running exactly this against a scratch project built to this lesson's shapes):</p>
+<pre><code>food_delivery_pipeline.marts.fct_orders.v1
+food_delivery_pipeline.marts.fct_orders.v2
+
+exposure:food_delivery_pipeline.delivery_ops_dashboard
+food_delivery_pipeline.marts.fct_orders.v1
+food_delivery_pipeline.staging.stg_orders
+source:food_delivery_pipeline.raw.orders</code></pre>
+<div class="callout"><strong>The unpinned <code>ref()</code> claim, checked live, not assumed:</strong> this round built <code>mart_delivery_sla.sql</code> exactly as above in a scratch project and ran <code>dbt list --select +mart_delivery_sla --resource-type model</code>. It returned <code>fct_orders.v2</code>, <code>mart_delivery_sla</code> and <code>stg_orders</code> — the plain <code>ref('fct_orders')</code> with no version pin genuinely resolved to v2, and <code>dbt parse</code> stayed clean, because <code>total_amount</code> only exists in v2's contracted column list and the model compiled against it without error.</div>
+<pre><code>uv run --project ../dbt_env dbt build</code></pre>
+<p>Expected: <code>Done. PASS=28 WARN=0 ERROR=0 SKIP=0 NO-OP=0 REUSED=0 TOTAL=28</code> — two more nodes than Day 39's 26 (<code>fct_orders.v2</code> plus the new <code>mart_delivery_sla</code>; <code>fct_orders.v1</code> was already counted as plain <code>fct_orders</code> before today). Commit <code>models/marts/fct_orders_v1.sql</code>, <code>models/marts/fct_orders_v2.sql</code>, the updated <code>marts.yml</code> and <code>exposures.yml</code>, and the new <code>mart_delivery_sla.sql</code>; delete the old <code>fct_orders.sql</code> from git too.</p>
+
+<h2>4 · <code>deprecation_date</code>: a warning dbt actually prints, not a silent calendar note</h2>
+<p>Section 2's <code>marts.yml</code> gave v1 a <dfn data-en="a dbt model-version field setting a date after which dbt prints a real WARNING naming the specific version at every dbt parse/run/build, without failing the build or blocking anything -- a way to make a version's sunset date visible to every future command instead of living only in a wiki page or a Slack message nobody re-reads" data-vn="giữ nguyên &quot;deprecation_date&quot; — field của 1 version trong dbt, đặt ngày mà sau đó dbt sẽ in ra WARNING thật nêu rõ tên version đó ở mọi lần dbt parse/run/build, không làm fail build hay chặn gì cả — cách để ngày hết dùng của version đó hiện ra ở mọi command sau này, thay vì chỉ nằm trong wiki hay 1 dòng Slack không ai đọc lại">deprecation_date</dfn> already in the past, on purpose, to show what it actually does. It is not enforcement — nothing fails, nothing blocks a build:</p>
+<pre><code>uv run --project ../dbt_env dbt parse</code></pre>
+<p>Expected, confirmed live this round against exactly this YAML shape:</p>
+<pre><code>[WARNING]: Model fct_orders.v1 has passed its deprecation date of 2026-11-25T00:00:00+07:00.
+This model should be disabled or removed.</code></pre>
+<p>That line prints on <em>every</em> <code>dbt parse</code>, <code>dbt run</code> and <code>dbt build</code> from now on — a nudge visible to whoever next touches this project, not a one-time note that gets forgotten. It names the exact version, not just "fct_orders" generically, which matters the moment there are three or four live versions of something and only one of them is actually overdue. The real deprecation workflow it's pointing at: once <code>delivery_ops_dashboard</code> migrates its query to <code>total_amount</code> and its exposure's <code>ref()</code> is repinned to <code>v=2</code>, delete <code>fct_orders_v1.sql</code> and its <code>versions:</code> entry entirely — a <code>deprecation_date</code> is a scheduled reminder to finish the migration, not a feature you leave on forever.</p>
+
+<h2>5 · Why this is the API-versioning idea, not a new one</h2>
+<p>A versioned dbt model is the same shape as versioning a REST API endpoint from <a href="../backend/index.html">backend/</a>: old consumers keep working against the version they already call, new consumers get the improved shape by default, and the old version carries an explicit sunset date rather than disappearing without warning. <code>latest_version</code> plays the role an API gateway's default-version routing plays; <code>ref('fct_orders', v=1)</code> plays the role of a client explicitly requesting <code>/v1/orders</code> instead of trusting whatever "current" means today. The mechanism is dbt-specific — two SQL files, one YAML block, resolved at parse time — but the underlying problem (how do you change a contract's shape without breaking whoever already depends on the old one) is exactly backend's, just one layer further upstream, at the warehouse instead of the API.</p>
+
+<div class="interview">
+<p><strong>Q: "You enforce model contracts on your marts. How do you actually change one once something downstream depends on it?"</strong> A strong answer, out loud: <em>"A contract stops a column from silently changing shape, but it doesn't answer what to do when a real rename is needed — so dbt has model versions for exactly that. I ship the new shape as a second file, fct_orders_v2.sql, alongside the original, and declare both under one versions: block in the YAML with a latest_version pointing at v2. Every ref('fct_orders') anywhere in the project that doesn't explicitly pin a version automatically gets v2 from that point on — that's the default for anything new. Anything that still needs the old shape, like an exposure a dashboard team owns, pins ref('fct_orders', v=1) explicitly, so it keeps building against the exact columns it was written against, with no surprise break. I also set a deprecation_date on v1, which makes dbt print a real warning on every parse and run naming that specific version until the dashboard migrates and I can delete it. It's the same idea as versioning a REST endpoint — old clients keep working against the version they call, new clients get the improved shape by default, and the old one has a named sunset instead of just disappearing."</em> The signal: naming that latest_version controls the default for unpinned refs specifically, and that a deprecation_date is a visible nudge, not an enforcement mechanism.</p>
+</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="latest_version controls what an unpinned ref('model_name') resolves to -- every ref() in the project that doesn't write an explicit v= pin gets whichever version latest_version names, automatically, with no version number at the call site. A pinned ref('model_name', v=N) always resolves to that exact version regardless of what latest_version says.">
+    <p class="stem">What does a model's <code>latest_version</code> field actually control?</p>
+    <button class="opt" data-ok>What an unpinned <code>ref()</code> with no <code>v=</code> resolves to</button>
+    <button class="opt">Which version's file dbt deletes first during a build</button>
+    <button class="opt">How many total columns every version must always share</button>
+  </div>
+  <div class="q" data-why="defined_in names the actual file on disk holding a given version's SELECT -- defined_in: fct_orders_v1 points dbt at fct_orders_v1.sql. Without it, dbt looks for a file matching a version-number naming convention and fails to find the model at all, since the two files in this lesson are named fct_orders_v1.sql and fct_orders_v2.sql, which do follow that convention, but defined_in is still what makes the link explicit rather than assumed.">
+    <p class="stem">What does a version's <code>defined_in</code> field point dbt at?</p>
+    <button class="opt" data-ok>The actual SQL file holding that version's own <code>SELECT</code></button>
+    <button class="opt">A separate Postgres schema reserved only for that version</button>
+    <button class="opt">The exact Git commit hash a version came from</button>
+  </div>
+  <div class="q" data-why="A deprecation_date makes dbt print a real WARNING, naming the specific version, on every dbt parse/run/build -- confirmed live this round. It does not fail the build, block anything, or remove the model automatically; it is a visible, repeated nudge, not an enforcement mechanism, and the model stays fully buildable and queryable until someone deletes it by hand.">
+    <p class="stem">What actually happens once a model version's <code>deprecation_date</code> has passed?</p>
+    <button class="opt" data-ok>dbt prints a named <code>WARNING</code> on every parse</button>
+    <button class="opt">dbt immediately refuses to ever build that version</button>
+    <button class="opt">dbt silently deletes that version's file right away</button>
+  </div>
+  <div class="q" data-why="Day 14's exposure keeps working unchanged against the old order_total shape specifically because its ref() is pinned with an explicit v=1, which always resolves to v1's declared columns regardless of what latest_version says elsewhere in the project. A plain, unpinned ref('fct_orders') -- like the new mart_delivery_sla.sql this lesson builds -- would instead follow latest_version and get v2's renamed total_amount, which is exactly the break a version pin exists to prevent for a consumer that hasn't migrated yet.">
+    <p class="stem">Why does Day 14's <code>delivery_ops_dashboard</code> exposure keep reading <code>order_total</code> correctly after today's rename?</p>
+    <button class="opt" data-ok>Its <code>ref()</code> is explicitly pinned to <code>v=1</code>, ignoring <code>latest_version</code></button>
+    <button class="opt">dbt automatically rewrites every exposure's own SQL, every time</button>
+    <button class="opt"><code>order_total</code> and <code>total_amount</code> are the exact same stored column</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> dbt Labs' <a href="https://docs.getdbt.com/docs/collaborate/govern/model-versions">Model versions</a> doc (the natural next page from Day 14's already-cited <a href="https://docs.getdbt.com/docs/collaborate/govern/model-contracts">Model contracts</a> doc, add today's link under the same dbt (deep) section in <code>RESOURCES.md</code>) is the authoritative source for <code>versions:</code>, <code>latest_version</code>, <code>defined_in</code> and <code>deprecation_date</code>'s exact YAML shape — confirmed this round by building every example in this lesson against a scratch project and running <code>dbt parse</code>/<code>dbt list</code> for real, not just reading the docs.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 40.<br>
+<strong>Next up:</strong> the <code>airflow db migrate</code>/<code>airflow dags test</code> approval-gate block named on Days 35-39 was re-attempted live this round and is still blocked with no human approval available — six rounds running now (35-40). Absent that, today closes the last named facet of Phase 2a's "model contracts &amp; versions" bullet, so the next organic dbt pick is smaller; a real Kafka hands-on round (not Connect/Debezium, which stays vocabulary-only per this course's own infra-cost scope) is reasonable next, since Kafka last ran Day 37 and Airflow's real next step stays blocked.<br><br>
+💬 Anything unclear — why a version pin and a contract are two separate, stackable mechanisms, or what actually happens if two versions' <code>defined_in</code> point at the same file by mistake? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

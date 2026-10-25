@@ -39,6 +39,8 @@
   Vendor primary source for `Task.WhenAny`'s documented tip that losing tasks "will continue running until completion" unless cancelled by hand, and the primary source for `context.WithCancel`'s derived-context behavior behind Go's `select`-based first-result-wins pattern. Use for: "first result wins" races and why the loser doesn't stop on its own (Lesson 110).
 - [Docs: pkg.go.dev — context.WithTimeout](https://pkg.go.dev/context#WithTimeout) and [Docs: Microsoft Learn — CancellationTokenSource constructors](https://learn.microsoft.com/en-us/dotnet/api/system.threading.cancellationtokensource.-ctor)
   Vendor primary source for `context.WithTimeout`'s exact definition as `WithDeadline(parent, time.Now().Add(timeout))`, and for the `CancellationTokenSource(TimeSpan)` overload's self-cancelling countdown plus `CancelAfter()`'s delay-reset behavior. Use for: attaching a deadline to a single call, as distinct from racing or bounding several (Lesson 111).
+- [Docs: Microsoft Learn — CancellationTokenSource.CreateLinkedTokenSource](https://learn.microsoft.com/en-us/dotnet/api/system.threading.cancellationtokensource.createlinkedtokensource)
+  Vendor primary source confirming the method "creates a CancellationTokenSource that will be in the canceled state when any of the source tokens are in the canceled state." Use for: combining an outer caller deadline with a per-attempt timeout in a C# retry loop (Lesson 112). Lesson 32's own AWS backoff-and-jitter source still covers the retry strategy itself in full and is cited inline there rather than duplicated here, per that lesson's own precedent for single-mechanism citations.
 
 ## Wisdom (Communities)
 

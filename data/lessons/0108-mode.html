@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 108 · Series.mode(): the most-frequent value, and why it can hand back more than one</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 108 · ~20 min · 25 Oct 2026</p>
+<h1>Series.mode(): the most-frequent value, and why it can hand back more than one</h1>
+<p class="byline">Lesson 107 closed the <code>.str.*</code> text-cleanup family (strip → pad → title → join) with no pre-committed next topic. A fresh scan across every lesson body and the glossary turned up <code>.mode()</code> as a genuine zero-hit gap: Lesson 9 taught <code>value_counts()</code> to see every value's frequency, but never the single dedicated method for "just give me the most frequent one(s)" — and probing it directly surfaced a real shape trap: it always returns a <em>Series</em>, not a scalar, because there can genuinely be more than one correct answer.</p>
+
+<h2>1 · mode() always returns a Series — even when there's exactly one answer</h2>
+<p><code>value_counts()</code> (Lesson 9) ranks every distinct value by frequency. <dfn data-en="a Series/DataFrame method, Series.mode(), returning the value(s) that occur most often -- the statistical mode. Always returns a Series, never a bare scalar, because more than one value can be tied for the top frequency" data-vn="giữ nguyên 'mode()' -- method Series.mode(), trả về giá trị (hay CÁC giá trị) xuất hiện nhiều lần nhất -- số mode trong thống kê. LUÔN trả về 1 Series, không phải 1 giá trị đơn lẻ, vì có thể có nhiều giá trị cùng hoà ở vị trí cao nhất">Series.mode()</dfn> skips the ranking and hands back only the value(s) sitting at the very top. On this course's own <code>orders_raw.csv</code> fixture, where <code>customer</code> has An×3, Binh×2, Chi×1, there is exactly one most-frequent value — but the result is still a one-row Series, not a plain string:</p>
+<pre><code><span class="kw">import</span> pandas <span class="kw">as</span> pd
+
+orders = pd.read_csv(<span class="str">"practice/data/orders_raw.csv"</span>)
+orders[<span class="str">"customer"</span>].mode()
+<span class="cm"># 0    An
+# Name: customer, dtype: str   -- a Series with ONE row, not a bare "An" string</span>
+
+orders[<span class="str">"customer"</span>].mode().iloc[<span class="kw">0</span>]
+<span class="cm"># "An"   -- pull out the scalar explicitly once you know there's only one</span></code></pre>
+<p>Confirmed directly (pandas 3.1.0): <code>orders["customer"].mode().iloc[0]</code> equals <code>orders["customer"].value_counts().index[0]</code> exactly — same answer, reached two different ways — but <code>mode()</code> never shows the actual counts the way <code>value_counts()</code> does. SQL has no single built-in either: the usual shape is <code>GROUP BY customer ORDER BY COUNT(*) DESC LIMIT 1</code>, which also silently drops any tie past the first row unless written more carefully — exactly the trap the next section makes explicit instead of hiding.</p>
+
+<h2>2 · The real reason it's a Series: ties come back as multiple rows</h2>
+<p>The Series shape is not an accident of API design — it's the only correct shape, because <strong>more than one value can be tied for most frequent</strong>, and <code>mode()</code> returns every one of them, confirmed directly against the official docs:</p>
+<pre><code>s = pd.Series([<span class="str">"a"</span>, <span class="str">"b"</span>, <span class="str">"a"</span>, <span class="str">"b"</span>, <span class="str">"c"</span>])
+s.mode()
+<span class="cm"># 0    a
+# 1    b
+# Name: ..., dtype: str   -- "a" and "b" are BOTH tied at 2 occurrences each; "c" (1) is left out</span></code></pre>
+<p>Pushed to the extreme: a Series where every value is unique has every single value tied at a frequency of exactly 1 — so <code>mode()</code> returns the <em>entire</em> Series back, sorted, not an error and not an empty result:</p>
+<pre><code>pd.Series([<span class="kw">3</span>, <span class="kw">1</span>, <span class="kw">2</span>]).mode()
+<span class="cm"># 0    1
+# 1    2
+# 2    3   -- every value occurred exactly once, so every value is "the mode"</span></code></pre>
+<div class="callout">This is the sharp interview trap: code that blindly does <code>df["col"].mode()[0]</code> or <code>.mode().iloc[0]</code> assuming "the one most common value" will <em>silently return an arbitrary member of a tie</em> instead of raising anything — no exception, no warning, just the first row of whatever the tie-break order happens to produce. Always check <code>len(s.mode())</code> before trusting index <code>0</code> alone when ties are even remotely plausible (categorical columns with few distinct values, especially).</div>
+
+<h2>3 · Missing values: dropped by default, but not always</h2>
+<p>Confirmed directly: <code>mode()</code> ignores <code>NaN</code> by default (<code>dropna=True</code>), the same default direction as <code>value_counts()</code> — but unlike <code>value_counts()</code>, flipping <code>dropna=False</code> doesn't just add NaN's count to the ranking, it lets NaN <em>win outright</em> if NaN is genuinely the single most frequent entry:</p>
+<pre><code><span class="kw">import</span> numpy <span class="kw">as</span> np
+
+s2 = pd.Series([<span class="kw">1</span>, <span class="kw">1</span>, <span class="kw">2</span>, np.nan, np.nan, np.nan])
+s2.mode()
+<span class="cm"># 0    1.0   -- dropna=True (default): NaN excluded from the count entirely, 1.0 wins among real values</span>
+
+s2.mode(dropna=<span class="kw">False</span>)
+<span class="cm"># 0    NaN   -- NaN occurs 3 times, more than any real value -- it IS the mode here</span></code></pre>
+<p>Confirmed directly: an all-empty Series returns an empty mode Series (no error, no NaN row) — <code>mode()</code> never raises on empty or all-NaN input, unlike <code>idxmax()</code>'s documented <code>ValueError</code> on all-NaN data (Lessons 20/91/93). <code>DataFrame.mode()</code> (no column selected) runs this column-by-column and stacks the results side by side, each column padded with NaN down to the longest column's tie count — a shape worth knowing exists, out of scope to drill here.</p>
+
+<div class="interview">
+<p><strong>Q: "How would you find the most common value in a column, and what would you watch out for?"</strong> A strong answer, out loud: <em>"I'd reach for <code>.mode()</code> — it's purpose-built for exactly this, versus manually sorting <code>value_counts()</code>. But I wouldn't blindly take <code>.iloc[0]</code>: <code>mode()</code> always returns a Series, not a scalar, specifically because ties are possible — if two or more values are tied for most frequent, it returns all of them as separate rows, and grabbing index 0 silently picks an arbitrary one with no warning. I'd check the length first, and if NaN itself might be the most common entry, I'd explicitly decide whether <code>dropna=True</code> or <code>False</code> is the right call for that column."</em> The signal: knowing <code>mode()</code>'s return shape is deliberate, not incidental — it exists to represent "there may be more than one right answer" honestly.</p>
+</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/108_mode.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/108_mode.py</code></pre>
+<p>Exercise 1 confirms <code>.mode()</code> on the real <code>orders_raw.csv</code> fixture's <code>customer</code> column returns a one-row Series whose single value matches <code>value_counts()</code>'s own top entry (Section 1). Exercise 2 confirms a two-way tie returns both tied values as separate rows, in the same call (Section 2). Exercise 3 confirms <code>dropna=False</code> lets NaN win outright when NaN is genuinely the most frequent entry, while the default <code>dropna=True</code> excludes it (Section 3).</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly (pandas 3.1.0): Series.mode() always returns a Series, never a bare scalar, even when there is exactly one most-frequent value -- because ties are a real possibility the method must always be able to represent, so the return shape never changes based on whether a tie actually happened this time.">
+    <p class="stem">A column has exactly one clear most-frequent value, no ties at all. What does <code>.mode()</code> return?</p>
+    <button class="opt" data-ok>still a one-row Series holding that value, never a bare plain scalar value on its own</button>
+    <button class="opt">a bare plain scalar value directly, since there just happens to be no tie this time</button>
+    <button class="opt">a plain Python tuple pairing that one single value together with its own exact raw count</button>
+  </div>
+  <div class="q" data-why="Confirmed directly against the official docs: when two or more values are tied for the single highest frequency, mode() returns every tied value as its own separate row in the result, in the same call -- it never arbitrarily drops every tied value but one, and it never raises an exception over a tie either.">
+    <p class="stem">A Series has <code>"a"</code> and <code>"b"</code> each occurring twice, <code>"c"</code> occurring once. Calling <code>.mode()</code> returns what?</p>
+    <button class="opt" data-ok>both "a" and "b" together, each one as its own separate row, since both are truly tied here</button>
+    <button class="opt">only "a" alone every time, since it just happens to come first in the original row order here</button>
+    <button class="opt">a loud ValueError raised right away instead, since more than just one single value is tied right here</button>
+  </div>
+  <div class="q" data-why="Confirmed directly (pandas 3.1.0): mode()'s default dropna=True excludes NaN from the frequency count entirely, so the most frequent REAL value wins regardless of how many NaN rows exist. Passing dropna=False instead folds NaN into the same count, and if NaN truly occurs more often than any single real value, NaN itself becomes the returned mode.">
+    <p class="stem">A column has three <code>NaN</code> rows, more than any single real value's own count. What changes between <code>mode()</code>'s default and <code>mode(dropna=False)</code>?</p>
+    <button class="opt" data-ok>default excludes NaN, a real value wins; dropna=False includes it, so NaN itself becomes the mode</button>
+    <button class="opt">neither call differs at all here, since NaN never counts toward any mode either way regardless</button>
+    <button class="opt">default raises an error over the NaN rows; dropna=False silently drops those same rows first instead</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official <a href="https://pandas.pydata.org/docs/reference/api/pandas.Series.mode.html">pandas API reference for <code>Series.mode()</code></a> (per <code>RESOURCES.md</code>'s "Docs: pandas User Guide" entry, ~3 min) — its signature and examples confirm the always-a-Series return shape and the <code>dropna=</code> default used in this lesson. Worth knowing but out of scope here: <code>df.groupby("g")["col"].agg(pd.Series.mode)</code> runs <code>mode()</code> per group, and when a tie happens inside just one group, that one group's cell silently holds an array of values instead of a single scalar — the exact same "ties don't disappear, they change the shape" idea from Section 2, one level deeper.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>mode()</code> is new today, added right after Lesson 107's <code>str.join()</code> entry.<br>
+<strong>Next lesson:</strong> no candidate is carried forward pre-committed — tomorrow's own fresh scan across lesson bodies and the glossary picks the next genuinely-uncovered topic from the curriculum spine, same standing convention as every prior round.<br><br>
+💬 Anything unclear — the always-a-Series shape, the tie behavior, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

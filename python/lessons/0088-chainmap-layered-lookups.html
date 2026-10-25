@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 88 · collections.ChainMap: layered lookups without merging</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 88 · ~20 min · 25 Oct 2026</p>
+<h1><code>collections.ChainMap</code>: layered lookups without merging</h1>
+<p class="byline">Day 3 spent <code>defaultdict</code>/<code>Counter</code> and Day 53 spent <code>deque</code>/<code>namedtuple</code> — <code>collections</code>' last everyday export is <dfn data-en="collections.ChainMap(d1, d2, ...) wraps several dicts as one lookup view, searching d1 first, then d2, and so on -- without copying or merging any of the underlying dicts. A write always goes into the FIRST dict only." data-vn="giữ nguyên &quot;ChainMap&quot; — bọc nhiều dict thành 1 view để tra cứu, tìm ở dict đầu trước, rồi dict sau, KHÔNG copy hay merge gì cả. Viết (write) luôn đi vào dict ĐẦU TIÊN.">ChainMap</dfn>: a way to search several dicts as if they were layered, without ever copying or merging them into a new one.</p>
+
+<div class="callout"><strong>Why today, specifically:</strong> Day 87's review closed the three-fresh-then-review cycle (Days 84-86 reviewed), so per this course's settled cadence Day 88 defaults back to a fresh topic. A fresh grep across every lesson, practice file, <code>reference/glossary.html</code>, and <code>RESOURCES.md</code> confirmed <code>ChainMap</code>, <code>hmac</code>, <code>graphlib</code>, <code>weakref</code>, and <code>calendar</code> are all still genuinely untaught. Chose <code>ChainMap</code>: it closes out <code>collections</code> (Day 3's <code>defaultdict</code>/<code>Counter</code>, Day 53's <code>deque</code>/<code>namedtuple</code>, today's <code>ChainMap</code>), is pure language/stdlib mechanics with zero pandas/NumPy surface, and solves a problem — layered settings — that comes up constantly once real scripts take CLI flags, config files, and defaults all at once.</div>
+
+<h2>1 · The problem: three sources of settings, one priority order</h2>
+<p>A command-line tool typically has settings from several places at once, with a clear priority: explicit CLI flags should win, then a user's config file, then the program's built-in defaults. The naive fix is merging them into one dict — but merging <em>copies</em> every key, so a later change to the original config file or defaults silently stops reaching the merged copy:</p>
+<pre><code>defaults = {<span class="str">"color"</span>: <span class="str">"blue"</span>, <span class="str">"size"</span>: <span class="str">"M"</span>}
+user_config = {<span class="str">"size"</span>: <span class="str">"L"</span>}
+cli_flags = {}  <span class="cm"># user passed no flags this run</span>
+
+<span class="cm"># the naive way: merge into a new dict, losing the layers</span>
+merged = {**defaults, **user_config, **cli_flags}
+<span class="cm"># merged is now its own object -- editing user_config after this point</span>
+<span class="cm"># does nothing to merged; the link back to the sources is gone</span></code></pre>
+<p>A <code>ChainMap</code> solves this without copying anything — it keeps the three dicts as separate, live layers, and searches through them in order:</p>
+<pre><code><span class="kw">from</span> collections <span class="kw">import</span> ChainMap
+
+settings = ChainMap(cli_flags, user_config, defaults)
+<span class="kw">print</span>(settings[<span class="str">"size"</span>])    <span class="cm"># L -- found in user_config, cli_flags had nothing</span>
+<span class="kw">print</span>(settings[<span class="str">"color"</span>])   <span class="cm"># blue -- found in defaults, the only layer that has it
+# both confirmed live</span></code></pre>
+<p><code>ChainMap(cli_flags, user_config, defaults)</code> checks <code>cli_flags</code> first, then <code>user_config</code>, then <code>defaults</code> — returning the first match it finds and ignoring the rest. <strong>Bridge from SQL:</strong> this is <code>COALESCE(cli_value, user_value, default_value)</code> applied to a whole dict of keys at once instead of one column — take the first non-missing value, checked in a fixed priority order, without touching the tables (dicts) themselves.</p>
+
+<h2>2 · <code>.maps</code>: the layers are still separate, live dicts</h2>
+<p>A <code>ChainMap</code> never merges its inputs — <code>.maps</code> exposes the exact list of original dicts it's searching, in priority order, and each one stays independently mutable:</p>
+<pre><code><span class="kw">print</span>(settings.maps)
+<span class="cm"># [{}, {'size': 'L'}, {'color': 'blue', 'size': 'M'}] -- confirmed live</span>
+
+user_config[<span class="str">"color"</span>] = <span class="str">"red"</span>   <span class="cm"># edit the ORIGINAL dict directly</span>
+<span class="kw">print</span>(settings[<span class="str">"color"</span>])       <span class="cm"># red -- confirmed live: ChainMap sees it immediately</span></code></pre>
+<p>That last line is the entire point: because <code>settings</code> holds a live reference to <code>user_config</code> rather than a copy, editing <code>user_config</code> after the fact is visible through <code>settings</code> right away — exactly the "merge loses the link" problem from Section 1, solved. <code>len(settings)</code> and <code>settings.keys()</code> count each distinct key once, even though <code>"size"</code> and <code>"color"</code> each appear in more than one layer.</p>
+
+<h2>3 · Writes only ever touch the first layer</h2>
+<p>A <code>ChainMap</code> supports item assignment, but it is not symmetric with lookup — a write always goes into the <em>first</em> dict in the chain, never into whichever layer the value was actually found in:</p>
+<pre><code>settings[<span class="str">"size"</span>] = <span class="str">"XL"</span>
+<span class="kw">print</span>(settings[<span class="str">"size"</span>])     <span class="cm"># XL -- confirmed live</span>
+<span class="kw">print</span>(cli_flags)             <span class="cm"># {'size': 'XL'} -- went here, the FIRST map</span>
+<span class="kw">print</span>(user_config)           <span class="cm"># {'size': 'L', 'color': 'red'} -- untouched, even though
+                          #   'size' was originally found here, not in cli_flags
+# both confirmed live</span></code></pre>
+<p>This makes sense once named for what it is: writing through a <code>ChainMap</code> means "record an override at the highest-priority layer," not "edit wherever this key currently lives." It is exactly the behavior a CLI tool wants — setting <code>settings["size"] = "XL"</code> should act like the user just passed a flag, landing in <code>cli_flags</code>, leaving the saved config file's own dict alone.</p>
+
+<h2>4 · <code>new_child()</code>: pushing a temporary layer on top</h2>
+<p><code>new_child(d)</code> returns a <em>new</em> <code>ChainMap</code> with <code>d</code> as its highest-priority layer in front of the existing ones — the original <code>ChainMap</code> is left completely unaffected, which makes it a clean way to apply a temporary override, like one request's or one test's settings, without disturbing the shared chain underneath:</p>
+<pre><code>scoped = settings.new_child({<span class="str">"size"</span>: <span class="str">"S"</span>})
+<span class="kw">print</span>(scoped[<span class="str">"size"</span>])      <span class="cm"># S -- the new top layer wins</span>
+<span class="kw">print</span>(settings[<span class="str">"size"</span>])    <span class="cm"># XL -- original ChainMap is untouched
+# both confirmed live</span></code></pre>
+<p>This is the same shape as a function call's local scope sitting in front of its enclosing scope and the module's globals behind that — Python's own variable lookup is a chain of layered mappings, which is one reason <code>ChainMap</code> lives in the standard library at all rather than being a niche recipe.</p>
+
+<div class="callout"><strong>Where pandas/NumPy go from here:</strong> neither library has an equivalent — <code>ChainMap</code> layers plain dicts for settings-style key lookup, not tabular data, so there is nothing to contrast; this callout exists only to confirm the absence, per <code>MISSION.md</code>'s no-pandas rule.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/88_chainmap_layered_lookups.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/88_chainmap_layered_lookups.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: building a <code>ChainMap</code> from CLI/user/default layers and reading a merged-looking value out of it, confirming a write lands in the first layer only (and the other layers stay untouched), and using <code>new_child()</code> to apply a temporary override without disturbing the original chain.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="ChainMap never copies or merges its input dicts -- it keeps a live reference to each one and searches through them in priority order on every lookup. That is exactly why editing one of the original dicts after the ChainMap was built is immediately visible through it.">
+    <p class="stem">Why does editing <code>user_config</code> after building a <code>ChainMap</code> from it still show up in lookups?</p>
+    <button class="opt" data-ok>ChainMap holds live references, never a copy</button>
+    <button class="opt">ChainMap re-merges its dicts after every edit</button>
+    <button class="opt">ChainMap only copies values, never dict structure</button>
+  </div>
+  <div class="q" data-why="Assigning through a ChainMap always writes into the first dict in the chain, regardless of which layer a key currently resolves from during lookup. It behaves like recording a new override at the highest-priority layer, not like editing wherever the key happens to live.">
+    <p class="stem">When you assign <code>settings["size"] = "XL"</code> on a <code>ChainMap</code>, which dict actually changes?</p>
+    <button class="opt" data-ok>only the first dict in the chain, every time</button>
+    <button class="opt">whichever dict the key was originally looked up in</button>
+    <button class="opt">every single dict currently in the chain, at once</button>
+  </div>
+  <div class="q" data-why="new_child(d) builds and returns a brand new ChainMap with d as its new highest-priority layer in front of the existing ones -- the original ChainMap object, and all of its own layers, are left completely unmodified.">
+    <p class="stem">What does <code>settings.new_child(d)</code> do to the original <code>settings</code> ChainMap?</p>
+    <button class="opt" data-ok>nothing; it returns a brand new separate ChainMap</button>
+    <button class="opt">permanently inserts d as its new first layer</button>
+    <button class="opt">replaces every existing layer the chain already had</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the standard library's <a href="https://docs.python.org/3/library/collections.html#collections.ChainMap"><code>collections.ChainMap</code></a> docs (same <code>collections</code> link already cited generally in <code>RESOURCES.md</code> since Day 3) — the "ChainMap objects" section covers <code>new_child()</code>'s optional <code>m</code> parameter and <code>.parents</code> (every layer except the first) beyond what today covered.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day88">glossary</a> under Day 88.<br>
+That closes out <code>collections</code>' everyday exports across three lessons — <code>defaultdict</code>/<code>Counter</code> (Day 3) for grouping and counting, <code>deque</code>/<code>namedtuple</code> (Day 53) for queues and lightweight records, <code>ChainMap</code> (today) for layered lookups.<br><br>
+💬 Anything unclear — why writes only hit the first layer, or <code>new_child()</code> vs. editing in place? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -228,6 +228,8 @@
       file: "lessons/0110-first-result-wins-whenany-select-cancel.html" },
     { n: 111, date: "2026-10-24", title: "One call, one deadline: context.WithTimeout vs CancellationTokenSource's timeout",
       file: "lessons/0111-single-call-timeout-withtimeout-cancelafter.html" },
+    { n: 112, date: "2026-10-25", title: "After the timeout fires: retry-with-backoff, now in C# too",
+      file: "lessons/0112-retry-with-backoff-after-a-timeout.html" },
   ];
 
   const REFS = [

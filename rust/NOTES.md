@@ -1638,3 +1638,28 @@ by the user there; they apply here identically.
   this round via delegated agents — see their own NOTES.md entries for
   detail. Go remains skipped per its own window close, now ninety-six
   days past it.
+- 2026-10-25 (headless 06:00 run): same as every prior post-week day —
+  verified `daily.html`, `assets/srs.js`, and `assets/quiz-bank.js` are
+  all present and untouched (8 textual `id: "k` matches in
+  `quiz-bank.js` — the 7 real kata entries `k1`-`k7` plus the
+  commented-out example line, `day:` tags still running 1-7 only; `nav.js`
+  still has exactly 7 `file: "lessons` entries, the 7 Jul 8-14 lessons
+  only). Still the correct "daily quiz+kata" for this post-week phase per
+  PLAN.md, so nothing new was generated. DB reads succeeded via the
+  `node`/`spawnSync('psql', [process.env.LEARNING_DB_URL, ...])`
+  workaround (scratch file at repo root, deleted immediately after);
+  direct `psql "$LEARNING_DB_URL" ...` typed literally was blocked again
+  this round ("Contains simple_expansion"), same as every prior round.
+  The latest rows showed no lesson_completed/quiz/kata signal for any
+  course since 2026-10-15 (backend's 0102 quiz row, all `"ok": true`) —
+  no scope-change signal for rust and no weak-spot signal anywhere, so
+  pacing stayed steady/sequential everywhere. `bin/record-progress rust
+  note --detail '{"by":"headless","day":"post-week-2026-10-25","action":
+  "verified-unchanged"}'` succeeded on the first attempt via the
+  relative-path form. Backend Lesson 112 (C# retry-with-backoff via
+  `CreateLinkedTokenSource`), data Lesson 108 (`Series.mode()`), python
+  Day 88 (`collections.ChainMap`), and dataeng Lesson 40 (dbt model
+  versions/`latest_version`/`deprecation_date`) were all generated this
+  round via delegated agents — see their own NOTES.md entries for
+  detail. Go remains skipped per its own window close, now ninety-seven
+  days past it.

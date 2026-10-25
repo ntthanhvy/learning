@@ -180,6 +180,8 @@
       file: "lessons/0086-inspect-module.html" },
     { n: 87, date: "2026-10-24", title: "Review day 15: retrieval across Days 84-86",
       file: "lessons/0087-review-retrieval-day-15.html" },
+    { n: 88, date: "2026-10-25", title: "collections.ChainMap: layered lookups without merging",
+      file: "lessons/0088-chainmap-layered-lookups.html" },
   ];
 
   const REFS = [

@@ -9940,3 +9940,118 @@
   data lesson_generated --day 107 --lesson 0107-str-join.html --detail
   '{"by":"headless"}'` was run directly from the repo root and succeeded,
   matching the pattern used by Lessons 95-106.
+- 2026-10-25 generation (Lesson 108): headless run, confirmed-facts brief
+  from the orchestrator reported no `lesson_completed`/quiz/kata signal
+  recorded for `data` recently (the only recent quiz signal in the whole
+  DB was for `backend` Lesson 102, unrelated course) — so no remediation
+  target, proceeded topic-driven per this course's own standing pattern.
+  Read `MISSION.md` in full (not modified), this file's own tail
+  (Lessons 105-107's entries) for exact house style, `data/learning-
+  records/` (still only the single 2026-07-09 baseline, nothing new),
+  `assets/nav.js` in full (confirmed no 2026-10-25 entry and no Lesson
+  108 registered yet), `lessons/0107-str-join.html` and
+  `practice/107_str_join.py` in full for the exact HTML/practice
+  structure, and `reference/glossary.html`'s tail for the exact column
+  order. The brief's suggestion to consider a review/retrieval day "per
+  this course's own established cadence... around lesson 69" did not
+  hold up on direct inspection: Lesson 69 was itself fresh content
+  (`.sample()`, confirmed by reading its own NOTES.md entry), and a
+  file-system check of `data/lessons/` turned up zero review-day lesson
+  files in this course's entire history — so fresh content continued,
+  matching the unbroken precedent of Lessons 1-107. Lesson 107 closed
+  the `.str.*` family with explicitly no carried-over candidate, so this
+  round did its own fresh gap-check: grepped the full glossary's term
+  column and every lesson body for roughly fifteen candidate methods
+  (`mode()`, `diff()`, `np.ravel()`/`flatten()`, `applymap`,
+  `to_numeric`, etc.) — `diff()` turned out to already be taught as its
+  own named section inside Lesson 23 (not a gap, despite never getting
+  its own `<dfn>`), but `.mode()` was a genuine zero-hit gap: Lesson 9
+  taught `value_counts()` to rank every value's frequency, but never the
+  single dedicated "most frequent value(s)" method. Picked `.mode()`
+  over `np.ravel()`/`.flatten()`: higher interview frequency per
+  MISSION.md's front-load-by-frequency directive, and a cleaner
+  pandas-Series-shaped lesson than a NumPy array-reshape detour. Every
+  behavioral claim was probed directly first via a temporary script
+  inside `data/` (`uv run --with pandas python3 <tempfile>.py`, deleted
+  immediately after use — this sandbox round allowed writing temp `.py`
+  files directly, no block hit this time): confirmed on the real
+  `orders_raw.csv` fixture that `.mode()` on `customer` (An×3, Binh×2,
+  Chi×1, no tie) returns a one-row Series whose value matches
+  `value_counts().index[0]` exactly, but is still a Series, not a bare
+  scalar; confirmed a genuine two-way tie (`"a"`/`"b"` both at count 2)
+  returns both values as separate rows in one call, not just the first
+  one found; confirmed the extreme case — a Series of all-unique values —
+  returns the *entire* Series back sorted, since every value is tied at
+  frequency 1; confirmed `dropna=True` (default) excludes NaN from the
+  frequency count entirely, while `dropna=False` lets NaN win outright
+  if it is genuinely the single most frequent entry, and confirmed an
+  empty Series returns an empty mode Series with no error, unlike
+  `idxmax()`'s documented `ValueError` on all-NaN input (Lessons
+  20/91/93). Also explored `groupby(...).agg(pd.Series.mode)` as a
+  "Go deeper" aside only (not a full section, to keep the ~20 min scope):
+  confirmed directly a tie inside one group produces an array-valued
+  cell in that one row instead of a scalar, the same "ties don't vanish,
+  they change the shape" idea one level deeper — noted as worth knowing
+  but deliberately not drilled in the practice file. Confirmed the
+  actually-installed pandas/numpy versions directly via a one-liner:
+  still pandas 3.1.0 / numpy 2.5.4, unchanged from Lessons 106-107, no
+  further version-drift note needed. Cited the official pandas API
+  reference page for `Series.mode()` under the existing `RESOURCES.md`
+  "Docs: pandas User Guide" entry rather than adding a new line,
+  matching the established precedent of Lessons 93/95/97/99-107 citing a
+  different `pandas.pydata.org/docs/reference/api/...` page under an
+  existing umbrella entry each time. Quiz options were drafted, then
+  mechanically word-counted with a temporary Python script (written
+  directly inside `data/`, run via `uv run python3`, deleted immediately
+  after use) isolating each `<div class="q">` block by regex span and
+  splitting on whitespace — the first draft came out 15/15/14, 17/16/14,
+  16/16/16; several small rephrasing rounds (adding words like "value",
+  "here", "right", "just", "instead") across the first two questions
+  until every one landed exactly level (16/16/16, 18/18/18, 16/16/16
+  option words), one `data-ok` per question throughout, with the
+  `data-why` wording re-checked against the final option text afterward
+  to confirm the rephrasing never drifted the meaning. The same temp
+  script also confirmed all tags balanced (a 2/2, body 1/1, button 9/9,
+  code 62/62, dfn 1/1, div 6/6, em 5/5, h1 1/1, h2 6/6, head 1/1, html
+  1/1, p 17/17, pre 5/5, script 3/3, span 26/26, strong 4/4, title 1/1)
+  and found exactly two raw `&` characters, both inside the one
+  established `cd ~/learning/data && uv run ...` shell command, zero raw
+  `&` in prose. Exactly one new `<dfn>` tag was needed (`Series.mode()`
+  itself), carrying both `data-en` and `data-vn`. The shipped (unsolved)
+  `practice/108_mode.py` was executed directly from its real `practice/`
+  location (`cd data && uv run --with pandas python3 practice/108_mode.py`)
+  and printed exactly 3 ✗ with no raw traceback. Built a solved copy in a
+  scratch directory (`.scratch-data-20261025/` at the repo root, deleted
+  after verification, never tracked by git, matching Lessons 104-107's
+  own precedent), filling in all three blanks correctly (including a
+  `top_values()` helper function body, same pattern as Lessons 100-107's
+  own helper-function exercises); it printed all 3 ✓ and "All green" on
+  the first run. The shipped file was re-run once more directly from
+  `practice/` after building the solved copy and reproduced the
+  identical all-✗ result, confirming the solved copy's edits never
+  leaked back into the shipped baseline. Checked the glossary for a
+  collision before adding anything — grepped `mode` case-insensitively
+  across the full glossary, found zero existing rows — added exactly one
+  new row, "mode()", directly after Lesson 107's "str.join()" entry;
+  re-ran the tag-balance script against the glossary file afterward,
+  confirmed it stayed balanced (tr 178/178 → 179/179 as expected, td
+  534/534, zero raw `&` introduced). Registered Lesson 108 in `nav.js`
+  with today's date (2026-10-25); `node --check` confirmed it still
+  parses as valid JavaScript after the edit (also spot-checked against
+  untouched `gloss.js`/`quiz.js`, both still parse fine), and exactly one
+  `n: 108` entry plus one `0108-mode` file reference were confirmed to
+  exist. This round's own fresh scan also surfaced `np.ravel()`/
+  `.flatten()` as a genuine zero-hit candidate, named explicitly in this
+  round's own notes for whoever scans next — not pre-committed as
+  tomorrow's pick, since this course's standing convention is a fresh
+  scan each round rather than blind carryover. No new `data/learning-
+  records/` entry was added this round — routine lesson, no new baseline
+  finding to justify one (the completion/quiz signal remains stale past
+  mid-July, unchanged from recent rounds). `git status --short` after all
+  edits confirmed only the intended `data/` files were touched
+  (`data/assets/nav.js`, `data/reference/glossary.html`, new
+  `data/lessons/0108-mode.html`, new `data/practice/108_mode.py`) plus
+  unrelated concurrent changes in `backend/`/`python/`/`bin/` from other
+  runs, not touched by this one. `bin/record-progress data
+  lesson_generated --day 108 --lesson 0108-mode.html --detail
+  '{"by":"headless"}'` was run directly from the repo root and succeeded.

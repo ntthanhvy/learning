@@ -639,6 +639,12 @@
   <tr><td>ChainMap.new_child()</td><td>giữ nguyên "new_child()" — trả về 1 ChainMap MỚI với dict truyền vào là lớp ưu tiên cao nhất, phía trước các lớp cũ; ChainMap gốc không bị đổi gì</td><td><code>settings.new_child(d)</code> returns a brand new <code>ChainMap</code> with <code>d</code> as its highest-priority layer in front of the existing ones, leaving the original <code>ChainMap</code> and all of its layers completely unmodified — a clean way to apply a temporary, scoped override.</td></tr>
 </table>
 
+<h2 id="day89">Day 89 — hmac: keyed hashing for message authentication</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>hmac</td><td>giữ nguyên "hmac" — hmac.new(key, msg, digestmod) tính 1 hash CÓ KHOÁ: ra 1 tag mà chỉ ai biết khoá chung mới tạo hay kiểm tra được, khác hash thường (hashlib) ai có message cũng tính được, không cần khoá gì cả. Theo RFC 2104, HMAC nghĩa là "Keyed-Hashing for Message Authentication"; digestmod là tham số bắt buộc, không có giá trị mặc định; không giống việc hash key nối với message ghép lại</td><td><code>hmac.new(key, msg, digestmod)</code> computes a keyed hash: a tag that only someone who knows the shared key can produce or verify, unlike a plain <code>hashlib</code> digest, which anyone holding the message can compute with no key at all. Per RFC 2104, HMAC stands for "Keyed-Hashing for Message Authentication." <code>digestmod</code> is a required argument with no default, confirmed directly (omitting it raises <code>TypeError: Missing required argument 'digestmod'</code>); <code>key</code> must be <code>bytes</code>/<code>bytearray</code>. Confirmed directly: <code>hashlib.sha256(key + msg)</code> does not equal the real <code>hmac</code> tag for the same inputs — HMAC is a distinct, standardized construction, not simple concatenation. Supports the same chunked <code>.update()</code> interface as Day 59's <code>hashlib</code> objects; verify a resulting tag against a supplied value with Day 77's <code>hmac.compare_digest()</code>, never plain <code>==</code>.</td></tr>
+</table>
+
 <p class="next">💬 A term here still unclear? Ask your teacher — hỏi bằng tiếng Việt cũng được.</p>
 
 <script src="../assets/nav.js"></script>

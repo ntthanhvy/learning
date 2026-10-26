@@ -11258,3 +11258,84 @@ fail *gracefully* so the learner sees which task failed.
   `hmac`, `graphlib`, `weakref`, `calendar` — or a fresh scan's new
   findings), with a review of Days 88-90 due at Day 91.
 
+- 2026-10-26 generation (Lesson 89, headless 06:00 run): idempotency
+  check first — confirmed no `lessons/0089-*.html` on disk and no
+  `n: 89`/`date: "2026-10-26"` entry in `nav.js` before writing anything
+  (highest prior lesson was 88, dated 2026-10-25). DB access: a direct
+  `psql "$LEARNING_DB_URL" ...` attempt hit the standing "Contains
+  simple_expansion" sandbox block, and `bin/query-progress` hit the
+  standing "requires approval" gate with no user present — consistent
+  with every course's own documented pattern since mid-July — so pacing
+  came from `learning-records/` and this file's own log alone. Topic
+  choice: Day 88's own next-day note named four carried-forward
+  candidates — `hmac`, `graphlib`, `weakref`, `calendar` — continuing
+  the three-fresh-then-review cadence (Days 88-90 fresh, review due at
+  91). Re-confirmed all four still genuinely untaught via a fresh grep
+  across `lessons/*.html`, `reference/glossary.html`, and `RESOURCES.md`
+  before picking (zero hits for `hmac` as a taught topic — it only
+  appeared as a named-but-untaught candidate inside Days 85/86/87/88's
+  own prose). Picked `hmac`: it directly closes a gap Day 59's `hashlib`
+  (unkeyed content hashing) and Day 77's `secrets.compare_digest()` (safe
+  comparison, but nothing to compare against yet) each left half-open —
+  neither lesson ever showed how to *produce* a value that proves a
+  message came from someone holding a shared secret. Probed real
+  behavior directly in `.scratch-python-109/` (deleted after, never
+  tracked by git) via `uv run python3 probe.py` rather than trusting
+  memory: confirmed `hmac.new(key, msg, digestmod)` requires `digestmod`
+  with no default (`TypeError: Missing required argument 'digestmod'`
+  when omitted, matching the stdlib docs' own "despite its argument
+  position, it is required" wording, fetched via `WebFetch` against
+  `docs.python.org/3/library/hmac.html`), `key` must be `bytes`/
+  `bytearray` (`TypeError: key: expected bytes or bytearray, but got
+  'str'` confirmed live), `hashlib.sha256(key + msg)` does NOT equal the
+  real `hmac` tag for the same inputs (confirmed live, the lesson's
+  central "not just concatenation" point), and incremental `.update()`
+  matches the one-shot call exactly (same chunked interface as Day 59's
+  `hashlib`). Deliberately did not assert the cryptography-internals
+  reason naive concatenation is weaker (length-extension-attack
+  resistance) since no fetched source this round confirmed that specific
+  claim in Python's own docs — scoped it out explicitly in the lesson's
+  own Scope line rather than assert an unverified mechanism. Checked the
+  glossary for a collision before writing — grepped `hmac`
+  case-insensitively across the full `glossary.html`, zero existing rows
+  — added one new `<h2 id="day89">`/`<table class="gloss">` block
+  (matching Day 88's per-day section structure, not a flat table) with
+  exactly one row. Verification performed mechanically: (1) a Node
+  quiz-word-count script per `<div class="q">` block — first draft landed
+  uneven on the third question (9/9/10), fixed by trimming one word from
+  the mismatched option, converged to 10/10/10, 10/10/10, 9/9/9, one
+  `data-ok` per question throughout; (2) an HTML tag-balance check across
+  div/p/code/button/script/dfn/pre/h2/h1/em/strong/a — clean on the first
+  pass after the word-count fix (div 7/7, p 19/19, code 68/68, button
+  9/9, script 3/3, dfn 1/1, pre 5/5, h2 8/8, h1 1/1, em 4/4, strong 3/3,
+  a 2/2); a separate table/tr/th/td/h2/p/div balance check on
+  `glossary.html` after its new section — also balanced (h2 76/76, table
+  76/76, tr 330/330, td 762/762), plus a duplicate-`id="dayNN"` scan —
+  zero duplicates; (3) a raw-unescaped-`&` regex scan on both files —
+  zero hits (this course's own convention escapes `&&` as `&amp;&amp;`
+  inside the practice-run code block, unlike the data course's
+  convention of leaving it raw, confirmed matching Day 88's own
+  precedent); (4) `node --check` against `assets/nav.js` (after the
+  edit) and the untouched `gloss.js`/`quiz.js` — all clean. Registered
+  Lesson 89 in `nav.js` with today's date (2026-10-26) right after the
+  `n: 88` entry. Added one new `RESOURCES.md` line for `hmac` (a genuinely
+  new module, not covered under any existing citation), placed right
+  after Day 86's `inspect` entry and before the PEP 8 line, following the
+  file's chronological-by-day ordering. The shipped (unsolved)
+  `practice/89_hmac_keyed_hashing_for_authentication.py` was executed
+  directly from its real `practice/` location and printed exactly 3 ✗
+  with no raw traceback. A solved copy built in `.scratch-python-109/`
+  (deleted after, never tracked) printed all 3 ✓ and "All green" on the
+  first run; the shipped file was re-run afterward and reproduced the
+  identical all-✗ result, confirming no leakage back into the baseline.
+  `python/learning-records/` was not touched this round — a routine
+  fresh-topic pick following the course's own settled cadence and Day
+  88's own named candidate list, not a new durable fact about the
+  learner distinct from Day 1's baseline record. Candidates spotted but
+  not picked this round, still open for Day 90: `graphlib`, `weakref`,
+  `calendar` — a review of Days 88-90 is due at Day 91. `bin/
+  record-progress python lesson_generated --day 89 --lesson
+  0089-hmac-keyed-hashing-for-authentication.html --detail
+  '{"by":"headless"}'` was run from the repo root at the end of this
+  round and succeeded.
+

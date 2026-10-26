@@ -10055,3 +10055,86 @@
   runs, not touched by this one. `bin/record-progress data
   lesson_generated --day 108 --lesson 0108-mode.html --detail
   '{"by":"headless"}'` was run directly from the repo root and succeeded.
+- 2026-10-26 generation (Lesson 109, headless 06:00 run): idempotency check
+  first — confirmed no `lessons/0109-*.html` on disk and no `n: 109`/
+  `date: "2026-10-26"` entry in `nav.js` before writing anything (highest
+  prior lesson was 108, dated 2026-10-25). DB access: a direct `psql
+  "$LEARNING_DB_URL" ...` attempt hit the standing "Contains
+  simple_expansion" sandbox block, and `bin/query-progress` hit the
+  standing "requires approval" gate with no user present — same pattern
+  documented across every course since mid-July — so pacing came from
+  `learning-records/` and this file's own log alone. Topic choice: did not
+  start from a blind fresh scan this round — Lesson 102's own round
+  (2026-10-19) had already confirmed `np.cumsum()`/`np.cumprod()`/
+  `np.diff()` as raw NumPy functions (distinct from the pandas
+  `Series.cumsum()`/`Series.diff()` already taught in Lessons 7/23) as a
+  genuine zero-hit gap, re-named in Lesson 108's own closing note as still
+  open; grepped `reference/glossary.html` and `lessons/*.html` fresh this
+  round to confirm it was still uncovered (zero hits for all three, and
+  for `cumprod` specifically — no pandas-side lesson for it exists
+  either) before committing to it. Probed all three functions directly
+  this round rather than trusting memory: `cd .scratch-data-109/` (deleted
+  after, never tracked by git) with `uv run --with pandas --with numpy
+  python3 probe.py`/`probe2.py` scripts confirming numpy 2.5.4/pandas
+  3.1.0 (same versions Lesson 108 reported) and surfacing the lesson's
+  actual hook — `np.cumsum()` dispatches to `Series.cumsum()` on a Series
+  input (Series back, NaN-aware resume, matching Lesson 102's `np.clip()`
+  finding exactly), but `np.diff()` does NOT dispatch the same way: it
+  returns a plain one-element-shorter `ndarray` with the Index gone,
+  while `Series.diff()` pads the first slot with NaN to stay the same
+  length. Also confirmed `np.cumprod()` on narrow integer dtypes
+  (int8/16/32) silently upgrades to int64 but leaves float32 unprotected.
+  Fetched three official NumPy doc pages directly to cite exact wording
+  rather than assert from the probe alone: `numpy.cumprod` (confirmed
+  verbatim, dtype defaults to the platform integer when `a`'s integer
+  precision is narrower), `numpy.diff` (confirmed verbatim, `out[i] =
+  a[i+1] - a[i]`, output shape smaller by `n` along `axis`, axis defaults
+  to the last one), and implicitly `numpy.cumsum` via the same dtype
+  family. One collision check before writing: grepped `cumsum`, `diff`,
+  and `cumprod` case-insensitively across the full glossary — found
+  existing rows for plain `cumsum()` (Lesson 7, pandas) and `pct_change()`
+  mentioning `diff()` only inline, but no existing `np.cumsum()`,
+  `np.cumprod()`, or `np.diff()` rows and no standalone `diff()` row to
+  collide with — added three new rows, all directly after Lesson 108's
+  `mode()` entry. Verification performed mechanically: (1) a Node
+  quiz-word-count script per `<div class="q">` block — first draft landed
+  uneven (11/13/14 and 12/13/12), fixed through two rewrite-and-recount
+  cycles to converge on 13/13/13 and 13/13/13 (third question was already
+  10/10/10 on the first pass), one `data-ok` per question throughout; (2)
+  an HTML tag-balance script across div/p/code/button/script/dfn/pre/h2/
+  h1/em/strong/a — caught a real mistake on the first pass (`p` open/close
+  21/22, a stray `</p>` left inside the Section 2 `<div class="callout">`
+  that should have closed with `</div>` alone) — fixed by removing the
+  stray tag, clean on the second pass (div 6/6, p 21/21, code 91/91,
+  button 9/9, script 3/3, dfn 2/2, pre 6/6, h2 8/8, h1 1/1, em 5/5, strong
+  4/4, a 4/4); a separate table/tr/th/td/p balance check on `glossary.html`
+  after its three-row addition — also balanced (tr 182/182, td 543/543),
+  plus a duplicate-term scan across all 181 first-column entries — zero
+  duplicates; (3) a raw-unescaped-`&` regex scan on both files — found
+  exactly the two expected `&` characters inside the lesson's own `cd
+  ~/learning/data && uv run ...` shell command, matching every prior
+  lesson's pattern, zero raw `&` elsewhere; (4) `node --check` against
+  `assets/nav.js` (after the edit) and the untouched `gloss.js`/
+  `quiz.js` — all clean; (5) exactly one new `<dfn>`-pair-carrying tag
+  count of 2 (`np.cumsum()`, `np.cumprod()` — `np.diff()` itself was
+  introduced via a `<dfn>` too, bringing the total to 2 new dfn tags this
+  lesson, confirmed against the two new non-`np.` glossary rows' absence
+  of any dfn mismatch). The shipped (unsolved) `practice/
+  109_np_cumsum_cumprod_diff.py` was executed directly from its real
+  `practice/` location and printed exactly 3 ✗ with no raw traceback. A
+  solved copy built in `.scratch-data-109/` (deleted after, never tracked)
+  printed all 3 ✓ and "All green" on the first run; the shipped file was
+  not altered. Registered Lesson 109 in `nav.js` with today's date
+  (2026-10-26); confirmed exactly one `n: 109` entry plus one
+  `0109-np-cumsum-cumprod-diff` file reference afterward. Did not add a
+  new RESOURCES.md line — all three NumPy API pages fall under the
+  existing "Docs: NumPy fundamentals" entry Lesson 102 already cited
+  under, same single-grouping precedent. No new `data/learning-records/`
+  entry this round — routine lesson, no new baseline finding (completion/
+  quiz signal remains stale past mid-July, unchanged). Candidates spotted
+  but not picked this round, still worth checking: `cummax()`/`cummin()`
+  (an older, still-open zero-hit candidate from a pre-Lesson-100 scan) and
+  `np.ravel()`/`.flatten()` (named explicitly in Lesson 108's own round).
+  `bin/record-progress data lesson_generated --day 109 --lesson
+  0109-np-cumsum-cumprod-diff.html --detail '{"by":"headless"}'` was run
+  directly from the repo root and succeeded.

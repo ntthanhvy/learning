@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 109 · np.cumsum(), np.cumprod(), np.diff(): running totals, products, and differences, one array layer down</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 109 · ~20 min · 26 Oct 2026</p>
+<h1>np.cumsum(), np.cumprod(), np.diff(): running totals, products, and differences, one array layer down</h1>
+<p class="byline">Lesson 108's own fresh scan left two zero-hit candidates on the table. One of them, <code>np.cumsum()</code>/<code>np.cumprod()</code>/<code>np.diff()</code> as raw NumPy array functions, has actually been sitting confirmed-uncovered since Lesson 102's own scan — Lesson 7 taught <code>Series.cumsum()</code> and Lesson 23 taught <code>Series.diff()</code>, but never the plain-array NumPy functions underneath them, the exact same kind of lineage gap Lesson 102 closed for <code>clip()</code>. <code>cumprod()</code> has no pandas-side lesson at all yet — today is its first appearance in either library.</p>
+
+<h2>1 · Two you already know, one you've never seen</h2>
+<p><dfn data-en="a NumPy function returning the running/cumulative sum of an array's elements -- out[i] equals the sum of every element up to and including index i, in the array's current order" data-vn="giữ nguyên 'np.cumsum()' — tổng dồn trên array, out[i] = tổng mọi phần tử tính tới vị trí i (theo thứ tự hiện có); Series.cumsum() gọi xuống hàm này">np.cumsum()</dfn> is Lesson 7's <code>Series.cumsum()</code>, one layer lower — same running-total idea, now on any array-like, not only a Series. <dfn data-en="a NumPy function returning the running/cumulative product of an array's elements -- out[i] equals the product of every element up to and including index i -- the multiplication sibling of cumsum(), never taught in either library before today" data-vn="giữ nguyên 'np.cumprod()' — tích dồn trên array, out[i] = tích mọi phần tử tính tới vị trí i; anh em của cumsum() nhưng dùng phép nhân -- hôm nay mới học lần đầu">np.cumprod()</dfn> is the one genuinely new function today — same accumulate-as-you-go idea as <code>cumsum()</code>, multiplying instead of adding, with no pandas-side lesson to compare it against yet:</p>
+<pre><code><span class="kw">import</span> numpy <span class="kw">as</span> np
+<span class="kw">import</span> pandas <span class="kw">as</span> pd
+
+arr = np.array([<span class="kw">1</span>, <span class="kw">2</span>, <span class="kw">3</span>, <span class="kw">4</span>])
+np.cumsum(arr)
+<span class="cm"># array([ 1,  3,  6, 10])   -- 1, 1+2, 1+2+3, 1+2+3+4</span>
+
+np.cumprod(arr)
+<span class="cm"># array([ 1,  2,  6, 24])   -- 1, 1*2, 1*2*3, 1*2*3*4</span></code></pre>
+<p>Confirmed directly (pandas 3.1.0, numpy 2.5.4): <code>np.cumsum()</code> called on a plain array and on a Series built from the same numbers produces the same running totals — the only question, next section, is what <em>type</em> comes back.</p>
+
+<h2>2 · The dispatch catch: cumsum keeps the Series, diff quietly drops it</h2>
+<p>Lesson 102 found that <code>np.clip()</code> recognizes a pandas Series as input and hands one back — NumPy's dispatch machinery routes the call down to the Series's own method. <code>np.cumsum()</code> does the exact same thing, confirmed directly with a Series that has a <code>NaN</code> in the middle:</p>
+<pre><code>s = pd.Series([<span class="kw">1.0</span>, np.nan, <span class="kw">3.0</span>, <span class="kw">4.0</span>])
+
+s.cumsum()                      <span class="cm"># Series.cumsum(), Lesson 7, default skipna=True</span>
+<span class="cm"># 0    1.0
+# 1    NaN
+# 2    4.0    -- accumulation RESUMES after the NaN: 1 + 3
+# 3    8.0    -- 1 + 3 + 4
+# dtype: float64</span>
+
+np.cumsum(s)
+<span class="cm"># 0    1.0
+# 1    NaN
+# 2    4.0    -- identical to s.cumsum() -- np.cumsum() dispatched down to it
+# 3    8.0
+# dtype: float64   (still a Series)</span></code></pre>
+<p><code>np.diff()</code> breaks that pattern. Confirmed directly, same Series:</p>
+<pre><code>s.diff()                        <span class="cm"># Series.diff(), Lesson 23</span>
+<span class="cm"># 0    NaN   -- nothing before row 0 to subtract
+# 1    NaN   -- row1 - row0, and row0's NaN poisons this one subtraction
+# 2    NaN   -- row2 - row1, and row1 IS NaN, poisons this one too
+# 3    1.0   -- row3 - row2 = 4.0 - 3.0, neither side is NaN
+# dtype: float64   -- 4 values, same length as s</span>
+
+np.diff(s)
+<span class="cm"># array([nan, nan,  1.])   -- a plain ndarray, only 3 values, Index gone entirely</span></code></pre>
+<p>Two differences at once, confirmed directly: the return type (Series versus bare <code>ndarray</code>), and the length (4 versus 3). Per the official NumPy docs' own definition, <code>diff()</code> computes <code>out[i] = a[i+1] - a[i]</code> — an <em>n</em>-length input produces an <em>n-1</em>-length output, with nothing padded in front. <code>Series.diff()</code> pads that missing first slot with <code>NaN</code> to keep the result the same length as the Series it came from, so every row still lines up with its own Index; <code>np.diff()</code> does no such padding, because a plain array was never going to have row-alignment to preserve in the first place.</p>
+<div class="callout"><strong>The trap:</strong> <code>np.cumsum()</code> and <code>np.clip()</code> train you to expect "pass in a Series, get a Series back, same shape." <code>np.diff()</code> looks like it should follow the same rule — it's spelled the same way, called the same way — but it quietly hands back a shorter, Index-less array instead. Code that does <code>np.diff(df["col"])</code> and then tries to assign the result straight back into a same-length column will fail on a length mismatch, where <code>df["col"].diff()</code> would not.</div>
+
+<h2>3 · cumprod()'s one real gotcha: small integers get silently upgraded</h2>
+<p>Confirmed directly against the official NumPy docs for <code>dtype=</code>: cumulative-product (and cumulative-sum) results on a smaller integer type get silently promoted:</p>
+<pre><code><span class="kw">for</span> dt <span class="kw">in</span> (np.int8, np.int16, np.int32, np.int64):
+    <span class="kw">print</span>(dt, <span class="str">"-&gt;"</span>, np.cumprod(np.array([<span class="kw">10</span>, <span class="kw">10</span>, <span class="kw">10</span>], dtype=dt)).dtype)
+<span class="cm"># int8  -&gt; int64
+# int16 -&gt; int64
+# int32 -&gt; int64
+# int64 -&gt; int64   -- every integer width ends up int64, the platform default</span></code></pre>
+<p>Per the docs, verbatim: if <code>dtype</code> isn't specified, the result "defaults to the dtype of <code>a</code>, unless <code>a</code> has an integer dtype with a precision less than that of the default platform integer. In that case, the default platform integer is used instead." That's a real overflow guard — an <code>int8</code> running product can blow past 127 after multiplying just two double-digit numbers, so NumPy quietly widens it before that happens. Confirmed directly that the same rule does <em>not</em> apply to floats: a <code>float32</code> array's <code>cumprod()</code> stays <code>float32</code>, with no automatic widening to <code>float64</code> — floating-point precision loss from repeated multiplication is a real risk the dtype promotion rule does nothing to prevent.</p>
+
+<h2>4 · axis=None: the one argument a 1-D Series never needed</h2>
+<p>A Series is always one-dimensional, so Lessons 7 and 23 never needed an <code>axis</code> argument. A plain NumPy array can be 2-D, and <code>cumsum()</code>/<code>cumprod()</code> default to flattening it first — confirmed directly against the docs' own phrasing, "by default the input is flattened":</p>
+<pre><code>m = np.array([[<span class="kw">1</span>, <span class="kw">2</span>, <span class="kw">3</span>], [<span class="kw">4</span>, <span class="kw">5</span>, <span class="kw">6</span>]])
+np.cumsum(m)
+<span class="cm"># array([ 1,  3,  6, 10, 15, 21])   -- flattened to 1-D first, no axis given</span>
+
+np.cumsum(m, axis=<span class="kw">0</span>)
+<span class="cm"># array([[1, 2, 3],
+#        [5, 7, 9]])   -- running sum DOWN each column</span>
+
+np.cumsum(m, axis=<span class="kw">1</span>)
+<span class="cm"># array([[ 1,  3,  6],
+#        [ 4,  9, 15]])   -- running sum ACROSS each row</span></code></pre>
+<p>Out of scope to drill here, but worth knowing by name: <code>DataFrame.cumsum(axis=1)</code> exposes this exact same argument for a 2-D pandas object — it's not purely a NumPy-only concept, just one a 1-D Series was never in a position to need.</p>
+
+<div class="interview">
+<p><strong>Q: "What's the difference between calling .diff() on a Series versus calling np.diff() on that same Series?"</strong> A strong answer, out loud: <em>"They compute the same differences, but np.diff() returns a plain NumPy array one element shorter than the input, with the Index gone — Series.diff() pads the missing first value with NaN to stay the same length and keep every row aligned to its original Index. It's easy to assume np.diff() behaves like np.cumsum(), which does hand a Series back for a Series input — but diff() specifically doesn't preserve the wrapper, so reassigning its result straight into a DataFrame column can fail on a length mismatch."</em> The signal: naming the length difference, not just the type difference, and knowing cumsum()'s Series-preserving behavior doesn't generalize to every NumPy function that looks similar.</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>np.cumsum()</code> and <code>np.diff()</code> as the raw-array layer under Lesson 7's <code>Series.cumsum()</code> and Lesson 23's <code>Series.diff()</code>, the type/length mismatch between the Series and array forms, <code>np.cumprod()</code> as a brand-new function with its integer-dtype-upcast rule, and the <code>axis=</code> argument a 1-D Series never needed. It does not cover <code>DataFrame.cumsum(axis=)</code>/<code>cumprod(axis=)</code> in any depth (named in Section 4, not drilled), <code>cummax()</code>/<code>cummin()</code> (a separate still-open candidate from an earlier scan), or <code>np.nancumsum()</code>/<code>np.nancumprod()</code> (NaN-as-zero variants, worth knowing exist but not today's focus).</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/109_np_cumsum_cumprod_diff.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/109_np_cumsum_cumprod_diff.py</code></pre>
+<p>Exercise 1 confirms the basic <code>cumsum()</code>/<code>cumprod()</code> running totals on a plain array (Section 1). Exercise 2 confirms <code>np.cumsum()</code> on a Series with a <code>NaN</code> matches <code>Series.cumsum()</code> exactly, while <code>np.diff()</code> on that same Series comes back one element shorter and is not a Series (Section 2). Exercise 3 confirms an <code>int8</code> array's <code>cumprod()</code> result upgrades to <code>int64</code> (Section 3).</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly (pandas 3.1.0, numpy 2.5.4): np.cumsum() recognizes a pandas Series as input and dispatches down to Series.cumsum() itself, returning a Series back with identical values -- including resuming accumulation correctly after a NaN, the same skipna=True default Lesson 7 taught.">
+    <p class="stem">Calling <code>np.cumsum(a_series)</code> on a pandas Series with a <code>NaN</code> in it returns what?</p>
+    <button class="opt" data-ok>a Series, matching Series.cumsum() exactly, accumulation correctly resuming right after the NaN entry</button>
+    <button class="opt">a plain NumPy array only, since np.cumsum() always strips every Index away entirely</button>
+    <button class="opt">a Series, but every value after the NaN turns permanently into NaN forever</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: np.diff() does NOT dispatch like np.cumsum() or np.clip() do. It returns a plain ndarray one element shorter than the input (per the official out[i] = a[i+1] - a[i] definition, an n-length input makes an n-1-length output), with the Index gone entirely -- unlike Series.diff(), which pads the missing first value with NaN to stay the same length.">
+    <p class="stem">How does <code>np.diff(a_series)</code>'s result differ from <code>a_series.diff()</code>'s result?</p>
+    <button class="opt" data-ok>np.diff() comes back one element shorter, as a plain array, with Index gone</button>
+    <button class="opt">np.diff() comes back exactly the same length, just as a plain array instead</button>
+    <button class="opt">np.diff() raises an exception right away, since any Series input is never allowed</button>
+  </div>
+  <div class="q" data-why="Confirmed directly against the official NumPy docs for the dtype parameter: an integer array narrower than the platform's default integer gets silently upgraded to that default (int64 on this system) before cumprod() runs, specifically to guard against the running product overflowing a small integer type almost immediately.">
+    <p class="stem">Why does <code>np.cumprod()</code> on an <code>int8</code> array return an <code>int64</code> result instead of staying <code>int8</code>?</p>
+    <button class="opt" data-ok>small integer types upgrade automatically to guard against quick overflow</button>
+    <button class="opt">int8 arrays are rejected outright, so NumPy substitutes int64 instead</button>
+    <button class="opt">cumprod() always returns float64 for absolutely every integer input type</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official NumPy API reference for <a href="https://numpy.org/doc/stable/reference/generated/numpy.cumsum.html"><code>numpy.cumsum()</code></a>, <a href="https://numpy.org/doc/stable/reference/generated/numpy.cumprod.html"><code>numpy.cumprod()</code></a>, and <a href="https://numpy.org/doc/stable/reference/generated/numpy.diff.html"><code>numpy.diff()</code></a> (per <code>RESOURCES.md</code>'s "Docs: NumPy fundamentals" entry, ~5 min combined) — confirms the dtype-upcast rule for integer <code>cumprod()</code>/<code>cumsum()</code> quoted above, the <code>out[i] = a[i+1] - a[i]</code> definition and shape-shrinks-by-<code>n</code> rule for <code>diff()</code>, and the "flattened by default" behavior of <code>axis=None</code>.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>np.cumsum()</code>, <code>np.cumprod()</code>, and <code>np.diff()</code> are new today, added right after Lesson 108's <code>mode()</code> entry.<br>
+<strong>Next lesson:</strong> no standing candidate named this round — <code>cummax()</code>/<code>cummin()</code> remains a confirmed zero-hit candidate from an earlier scan but isn't promoted ahead of tomorrow's own fresh curriculum/glossary scan.<br><br>
+💬 Anything unclear — the Series-vs-array dispatch split, the cumprod dtype upgrade, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

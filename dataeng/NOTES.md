@@ -4758,3 +4758,108 @@ along the Phase 2 spine, adapted to the learning records.
   Connect/Debezium specifically, which stays vocabulary-only by this
   course's own infra-cost scope rule, not a hands-on gap waiting to be
   closed.
+
+- 2026-10-26 (headless 06:00 run, Day 41 generated): forty-first lesson,
+  idempotency check first — confirmed no `lessons/0041-*.html` on disk and
+  no `n: 41`/`date: "2026-10-26"` entry in `assets/nav.js` before writing
+  anything (highest prior lesson was 40, dated 2026-10-25). DB access: a
+  direct `psql "$LEARNING_DB_URL" ...` attempt hit the standing "Contains
+  simple_expansion" sandbox block, and `bin/query-progress` hit the
+  standing "requires approval" gate with no user present, consistent with
+  every other course's documented pattern this round — pacing came from
+  this file's own log and `lessons/*.html`/`assets/nav.js` file state
+  alone. Topic choice: Day 40's own closing note said a real Kafka
+  hands-on round was reasonable next (last ran Day 37), without naming a
+  specific sub-topic, and confirmed Phase 2a's dbt spine fully closed, so
+  this round ran its own fresh scan over Kafka rather than picking from a
+  pre-named candidate: grepped `lessons/*.html` for `dead.letter`/`DLQ`
+  (zero hits) and for manual-offset-commit/poison-message handling more
+  broadly, and re-read Day 6's `consume_order_events.py` directly — its
+  bare `json.loads()`/`cur.execute()` with no `try`/`except` around either
+  call is a genuine, demonstrable bug: an unhandled exception on one
+  malformed message crashes the process before the Kafka offset commits,
+  so a restart re-polls and re-crashes on the exact same message forever.
+  Picked quarantining it into a new `raw.dead_letter_events` table
+  (same database, no second Kafka topic, keeping infra cost at zero) as
+  the fix, bridging one line to backend's Day 49 dead-letter-queue pattern
+  without re-deriving it (different mechanism — retry-budget-then-
+  dead-letter for a job queue there, vs. catch-quarantine-commit-anyway
+  for a Kafka consumer here — per this course's own hard scope rule to
+  bridge, not re-derive, backend concepts).
+  **Verification:** this sandbox has no learner Kafka/Postgres stack to
+  run against. `docker ps` succeeded this round (unlike several prior
+  Kafka/Airflow rounds), but spinning up a full matching Kafka+Postgres
+  compose stack from scratch just to verify one lesson was judged
+  disproportionate to the task, so verification followed Day 17's own
+  precedent instead: a standalone control-flow simulation in
+  `dataeng/.scratch-dataeng-41/` (deleted entirely before finishing,
+  confirmed via a directory listing afterward, never tracked by git) using
+  fake message objects, no real broker or database. `simulate_poison_
+  message.py` ran four messages (two good, two poison: malformed JSON and
+  valid JSON missing `event_id`) through the exact try/except-then-commit
+  shape the real fix uses; asserted and confirmed live: both good messages
+  landed, both poison messages were quarantined with their real offsets
+  and real exception text, and all four offsets committed in order with
+  none skipped — the one property the whole fix depends on. A separate
+  `show_errors.py` ran the actual failing calls (`json.loads(b"not-valid-
+  json{{{")`, a missing-key dict index) to get verbatim error text rather
+  than guessing it, confirming `JSONDecodeError: Expecting value: line 1
+  column 1 (char 0)` and `KeyError: 'event_id'` exactly as quoted in the
+  lesson. The full modified `consume_order_events.py` (Day 6's script plus
+  the try/except and dead-letter insert) was written out in full and
+  `py_compile`-checked clean; the inline `python3 -c "..."` message-
+  injection snippet shown to the learner was also written to its own file
+  and `py_compile`-checked clean before the lesson's shell-escaped version
+  was trusted. This static-vs-live distinction is stated plainly inside
+  the lesson's own Section 4 callout too, not only here, matching Day 17's
+  own honesty convention rather than presenting a simulation as a live
+  broker run. No dbt snippet appears in this lesson (a pure-Kafka/Python
+  day), so the `dbt parse` verification path was not applicable and was
+  not run.
+  **WebFetch:** confirmed PostgreSQL's own transactions documentation
+  verbatim — a statement failure puts the transaction in an "aborted
+  state," and `ROLLBACK` (or `ROLLBACK TO` a savepoint) is required to
+  regain control — the primary source for Section 3's `conn.rollback()`
+  call on the dead-letter path, cited inline and added as a new
+  `RESOURCES.md` line under the Kafka section (a genuinely new source, not
+  reusing an existing citation, unlike most rounds since this course
+  started).
+  Checked the glossary for a collision before writing — grepped `dead.
+  letter`/`dead letter` case-insensitively across the full
+  `reference/glossary.html`, zero existing rows — added one new `<h2
+  id="day41">`/`<table class="gloss">` block (matching the per-day section
+  structure established since roughly Day 30) with exactly one row,
+  `dead-letter table`. Verification performed mechanically: (1) a Node
+  quiz-word-count script per `<div class="q">` block — first draft landed
+  uneven across all four questions (9/9/10, 10/9/8, 9/9/8, 10/9/9), fixed
+  through several rewrite-and-recount cycles per mismatched option,
+  converged to 9/9/9 on all four questions, one `data-ok` per question
+  throughout; (2) an HTML tag-balance check across div/p/code/button/
+  script/dfn/pre/h2/h1/em/strong/a — clean on the first pass (div 8/8, p
+  21/21, code 58/58, button 12/12, script 3/3, dfn 1/1, pre 7/7, h2 7/7,
+  h1 1/1, em 3/3, strong 6/6, a 3/3); a separate table/tr/th/td/h2 balance
+  check on `glossary.html` after its new section — also balanced (h2
+  40/40, table 40/40, tr 163/163, td 369/369); a duplicate-`id="dayNN"`
+  scan found one pre-existing duplicate (`day1`, present before this
+  round's edit, confirmed by checking both occurrences predate today's
+  diff) — left untouched, per this task's own "only add, don't rewrite
+  existing content" rule, and flagged here rather than silently ignored;
+  (3) a raw-unescaped-`&` regex scan on both files — zero hits; (4) `node
+  --check` against `assets/nav.js` (after the edit) and the untouched
+  `gloss.js`/`quiz.js` — all clean. Registered Lesson 41 in `assets/
+  nav.js` with today's date (2026-10-26) right after the `n: 40` entry,
+  matching this file's single-line-per-entry format. `bin/record-progress
+  dataeng lesson_generated --day 41 --lesson
+  0041-kafka-dead-letter-events.html --detail '{"by":"headless"}'` was run
+  from the repo root at the end of this round and succeeded.
+  `dataeng/learning-records/` was not touched this round — a routine
+  fresh-scan pick, not a new durable fact about the learner distinct from
+  the single 2026-09-14 baseline record on file.
+  **Next up:** the `airflow db migrate`/`airflow dags test` approval-gate
+  block is now seven rounds running (35-41) with no successful headless
+  approval — still the single clearest unblock-and-ship item for whoever
+  next has a human available to grant it. Absent that, both dbt's Phase 2a
+  spine and today's Kafka pick came from fresh scans rather than named
+  candidates, so the next round (dbt, Kafka, or another Airflow attempt)
+  should start with its own fresh scan too rather than assuming a
+  carried-over gap exists.

@@ -222,6 +222,8 @@
       file: "lessons/0107-str-join.html" },
     { n: 108, date: "2026-10-25", title: "Series.mode(): the most-frequent value, and why it can hand back more than one",
       file: "lessons/0108-mode.html" },
+    { n: 109, date: "2026-10-26", title: "np.cumsum(), np.cumprod(), np.diff(): running totals, products, and differences, one array layer down",
+      file: "lessons/0109-np-cumsum-cumprod-diff.html" },
   ];
 
   const REFS = [

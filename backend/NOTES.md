@@ -9215,3 +9215,60 @@
   named in today's Scope line as out of scope per MISSION.md's
   "concepts first" rule, but worth a conscious revisit if the mission's
   pace deepens per its own post-intensive note.
+- 2026-10-26 generation (Lesson 113, headless 06:00 run): idempotency check
+  first — confirmed no `lessons/0113-*.html` on disk and no `n: 113`/
+  `date: "2026-10-26"` entry in `nav.js` before writing anything (highest
+  prior lesson was 112, dated 2026-10-25). DB access: a direct
+  `psql "$LEARNING_DB_URL" ...` attempt hit the same "Contains
+  simple_expansion" sandbox block documented in every round since mid-July,
+  and `bin/query-progress` hit the standing generic "requires approval"
+  gate with no user present — consistent with the roughly fifteen-week
+  pattern, so pacing came from `learning-records/` and this file's own log
+  alone, not a live DB read. Topic choice: Lesson 112's own closing note
+  named exactly one candidate explicitly — a circuit breaker's C# shape,
+  Lesson 28 having been Go-only — so no fresh gap search was needed this
+  round. Wrote a `CircuitBreaker` class mirroring Lesson 28's Go struct
+  (`BreakerState` enum, `Allow()`/`RecordResult()` each under their own
+  `lock (gate) { ... }` block, `CallAsync<T>` awaiting the dependency with
+  no lock held). `dotnet --version` was attempted once per this round's
+  own check and hit the same "this command requires approval" gate every
+  C# round since Lesson 103 has hit — not toolchain-compiled, verified
+  instead by fetching two Microsoft Learn pages directly: the `lock`
+  statement page (confirmed verbatim, "You can't use the await expression
+  in the body of a lock statement," plus the `Monitor.Enter`/`Monitor.Exit`
+  try/finally desugaring for a plain-object lock) and the `Mutex` class
+  page (confirmed verbatim, "A synchronization primitive that can also be
+  used for interprocess synchronization," used to justify why the lesson
+  reaches for `lock` rather than `Mutex` for in-process state). One new
+  term, checked against the glossary first via grep — zero collisions:
+  `lock statement`. Verification performed mechanically: (1) a Node
+  quiz-word-count script per `<div class="q">` block — converged to
+  9/9/9/9 across all four questions on the first pass, exactly one
+  `data-ok` and four options per question; (2) an HTML tag-balance check
+  across div/p/code/button/script/dfn/pre/h2/h1/em/strong/a/table/tr/th/td/
+  ul/li — clean (div 7/7, p 15/15, code 40/40, button 16/16, script 3/3,
+  dfn 1/1, pre 1/1, h2 7/7, h1 1/1, em 1/1, strong 6/6, a 3/3, table 1/1,
+  tr 5/5, th 7/7, td 8/8); a separate table/tr/th/td/p/div balance check on
+  `glossary.html` after its one-row addition — also balanced (tr 370/370,
+  td 1107/1107), plus a duplicate-term scan across all 369 first-column
+  entries — zero duplicates; (3) a raw-unescaped-`&` regex scan — zero
+  hits; (4) `node --check` against `assets/nav.js`, `assets/gloss.js`, and
+  `assets/quiz.js` — all clean; (5) exactly one `<!DOCTYPE html>` and three
+  script tags with `nav.js` last, confirmed. Registered Lesson 113 in
+  `nav.js` (date 2026-10-26) right after `n: 112`. Added one new
+  RESOURCES.md line (Microsoft Learn's lock-statement page) following the
+  existing per-topic grouping, right after Lesson 112's
+  `CreateLinkedTokenSource` line; deliberately did not duplicate Lesson
+  28's Martin Fowler citation as a second standing RESOURCES.md entry,
+  following the same single-mechanism-citation precedent Lesson 112 used
+  for Lesson 32's AWS source. `bin/record-progress` ran clean on the first
+  attempt this round (`recorded: backend/lesson_generated day=113
+  lesson=0113-circuit-breaker-lock-statement.html`). No new
+  `learning-records/` file this round — the topic came from Lesson 112's
+  own self-documented closing note, not a new surprise about the learner's
+  baseline or a quiz outcome. Candidates spotted but not picked this
+  round, still worth checking fresh next time: Go's `select`-statement
+  arbitration rules, now deferred for a fourth round running with no fresh
+  fetch attempted; and Polly (or a .NET resilience-library survey more
+  broadly), still deliberately out of scope per MISSION.md's "concepts
+  first" rule.

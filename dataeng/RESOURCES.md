@@ -70,6 +70,8 @@ before Phase 2.
   Deep reference, free download from Confluent (registration). Use for: Phase 2b delivery semantics, retention and compaction.
 - [Docs: Kafka Connect — Apache Kafka Documentation](https://kafka.apache.org/documentation/#connect)
   The connector/source/sink/worker/task vocabulary, straight from the project that ships the framework. Use for: Phase 2b's Kafka Connect and CDC lesson, the primary source for Connect itself.
+- [Docs: PostgreSQL — Transactions](https://www.postgresql.org/docs/current/tutorial-transactions.html)
+  Authoritative on why a failed statement leaves a transaction unusable until `ROLLBACK`. Use for: Day 41's `conn.rollback()` call on the dead-letter path, right after a failed `INSERT` and before the dead-letter table's own insert on the same connection.
 - [Docs: Debezium Architecture](https://debezium.io/documentation/reference/stable/architecture.html)
   How Debezium attaches to a database's write-ahead/replication log as a Kafka Connect source connector, and the shape of a real change event (before/after, one topic per table). Use for: Phase 2b's Kafka Connect and CDC lesson, the primary source for Debezium specifically. Not fetched live on 2026-10-08 (this sandbox's fetch tool was unavailable that round, same gap Day 17 hit) — confirm exact field names against the live page before quoting them in an interview.
 

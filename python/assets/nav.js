@@ -182,6 +182,8 @@
       file: "lessons/0087-review-retrieval-day-15.html" },
     { n: 88, date: "2026-10-25", title: "collections.ChainMap: layered lookups without merging",
       file: "lessons/0088-chainmap-layered-lookups.html" },
+    { n: 89, date: "2026-10-26", title: "hmac: keyed hashing for message authentication",
+      file: "lessons/0089-hmac-keyed-hashing-for-authentication.html" },
   ];
 
   const REFS = [

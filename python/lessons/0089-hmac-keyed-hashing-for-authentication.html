@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 89 · hmac: keyed hashing for message authentication</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 89 · ~20 min · 26 Oct 2026</p>
+<h1><code>hmac</code>: keyed hashing for message authentication</h1>
+<p class="byline">Day 59 taught <code>hashlib.sha256</code> for detecting whether content changed. Day 77 taught <code>secrets.compare_digest()</code> for safely comparing a secret against untrusted input — but neither lesson covered how to actually <em>produce</em> a value that proves a message came from someone holding a shared secret. <code>hmac</code> closes that loop today.</p>
+
+<div class="callout"><strong>Why today, specifically:</strong> Day 88's <code>ChainMap</code> closed out a fresh topic with four named-but-untaught candidates left on the table: <code>hmac</code>, <code>graphlib</code>, <code>weakref</code>, <code>calendar</code>. A fresh grep across every lesson, practice file, <code>reference/glossary.html</code>, and <code>RESOURCES.md</code> confirmed all four are still genuinely untaught. Chose <code>hmac</code>: it directly closes a gap Day 59 and Day 77 each left half-open, it's pure language/stdlib mechanics with zero pandas/NumPy surface, and keyed message authentication is exactly the kind of thing that shows up the moment a real script needs to verify a webhook or a signed API request — this is Day 89, continuing the fresh run Day 88 started; a review of Days 88-90 is due at Day 91.</div>
+
+<h2>1 · hashlib has no secret — anyone can compute the same digest</h2>
+<p>Day 59's <code>hashlib.sha256(data)</code> takes no key at all — it is a pure function of the bytes you give it. That's exactly why it's good at detecting whether content changed: two people with the same file get the same digest, no coordination needed. It's also exactly why it proves nothing about <em>who</em> sent something — anyone holding the same bytes computes the identical digest, attacker included. <dfn data-en="hmac.new(key, msg, digestmod) computes a keyed hash: a tag that only someone who knows the shared key can produce or verify, unlike a plain hashlib digest which anyone holding the message can compute with no key at all. Per RFC 2104, HMAC stands for 'Keyed-Hashing for Message Authentication'" data-vn="giữ nguyên &quot;hmac&quot; — hmac.new(key, msg, digestmod) tính 1 hash CÓ KHOÁ: ra 1 tag mà chỉ ai biết khoá chung mới tạo hay kiểm tra được, khác hash thường (hashlib) ai có message cũng tính được, không cần khoá gì cả. Theo RFC 2104, HMAC nghĩa là &quot;Keyed-Hashing for Message Authentication&quot;">hmac</dfn> fixes exactly that gap: it mixes a secret key into the hash, so only someone who already knows that key can produce — or verify — the matching tag:</p>
+<pre><code><span class="kw">import</span> hashlib
+<span class="kw">import</span> hmac
+
+key = <span class="str">b"shared-secret-key"</span>
+msg = <span class="str">b'{"order_id": 42, "amount": 19.99}'</span>
+
+mac = hmac.new(key, msg, hashlib.sha256)
+mac.hexdigest()
+<span class="cm"># '59b0217ce452106f4e168d6bd22afc7acb081ddd24f4feb22ac22ec099b5d9c8' -- confirmed live</span>
+
+hmac.new(<span class="str">b"different-key"</span>, msg, hashlib.sha256).hexdigest() == mac.hexdigest()
+<span class="cm"># False -- a different key produces a completely different tag, confirmed live</span></code></pre>
+<p>Same key and same message always reproduce the same tag — confirmed directly, two separate calls with identical inputs matched exactly. A different key, or a changed message, produces a completely different tag, with no partial resemblance. This is the entire mechanism behind verifying a webhook signature or a signed API request: the sender computes <code>hmac.new(shared_secret, body, sha256).hexdigest()</code> and attaches it; the receiver recomputes the same thing over the body it actually got and checks the two tags match.</p>
+
+<h2>2 · digestmod is required — hashlib never made you choose anything</h2>
+<p><code>hashlib.sha256()</code> needs no arguments to pick an algorithm — the function name <em>is</em> the algorithm. <code>hmac.new()</code> works differently: confirmed directly, calling it without a third argument raises an error rather than picking a default:</p>
+<pre><code>hmac.new(key, msg)
+<span class="cm"># TypeError: Missing required argument 'digestmod'. -- confirmed live, no default algorithm exists</span></code></pre>
+<p>Per the standard library docs, <code>digestmod</code> is required "despite its argument position" — <code>hmac</code> deliberately refuses to guess which hash function the other side expects, since a mismatched algorithm would silently produce a tag that can never match. <code>key</code> must be <code>bytes</code>/<code>bytearray</code> (confirmed directly: a plain <code>str</code> key raises <code>TypeError: key: expected bytes or bytearray, but got 'str'</code>) — the same bytes-only rule Day 59's <code>hashlib</code> already enforced.</p>
+
+<h2>3 · Not just hash(key + message) stuck together</h2>
+<p>It's tempting to assume <code>hmac</code> is just a shorthand for hashing the key and message concatenated — confirmed directly, it is not:</p>
+<pre><code>hashlib.sha256(key + msg).hexdigest() == hmac.new(key, msg, hashlib.sha256).hexdigest()
+<span class="cm"># False -- confirmed live: these are genuinely different constructions, not the same thing spelled two ways</span></code></pre>
+<div class="callout">Per the standard library's own module description, <code>hmac</code> "implements the HMAC algorithm as described by RFC 2104" — a specific, standardized construction for combining a key and a message, not a shortcut anyone could hand-roll by gluing bytes together before hashing. The exact reason the naive concatenation is weaker is a cryptography-internals question beyond today's scope; the takeaway for everyday code is narrower and firmer: always reach for <code>hmac.new()</code> itself for a keyed tag, never <code>hashlib.sha256(key + msg)</code> as a shortcut, even though both compile and run without error.</div>
+
+<h2>4 · Same chunked interface as Day 59, verified with Day 77's tool</h2>
+<p><code>hmac</code> objects support <code>.update()</code> exactly like Day 59's <code>hashlib</code> objects — the same constant-memory, chunk-at-a-time pattern for hashing something too large to hold all at once:</p>
+<pre><code>mac = hmac.new(key, digestmod=hashlib.sha256)   <span class="cm"># no msg yet</span>
+mac.update(msg)                                 <span class="cm"># fed in a separate step</span>
+mac.hexdigest() == hmac.new(key, msg, hashlib.sha256).hexdigest()
+<span class="cm"># True -- confirmed live: incremental update() matches the one-shot call exactly</span></code></pre>
+<p>And once a tag needs checking against a value supplied by someone else — verifying a webhook's signature header, for instance — Day 77's rule still applies unchanged: compare with <code>hmac.compare_digest(received_tag, mac.hexdigest())</code>, never plain <code>==</code>, for the same timing-safety reason Day 77 already covered in full.</p>
+
+<div class="interview">
+<p><strong>Q: "How would you verify an incoming webhook actually came from the service that claims to have sent it?"</strong> A strong answer, out loud: <em>"I'd recompute hmac.new(shared_secret, raw_body, hashlib.sha256).hexdigest() over the exact raw request body, using the secret both sides already agreed on, then compare that against the signature header the request sent — with hmac.compare_digest(), not ==, so the comparison itself doesn't leak timing information. A plain hashlib.sha256(body) digest wouldn't prove anything here, since anyone could compute that same hash with no secret at all; the key is what proves it came from someone who holds it."</em> The signal: naming that the key is what turns a hash into proof of origin, and reaching for compare_digest() unprompted for the final check.</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>hmac.new(key, msg, digestmod)</code>, <code>.hexdigest()</code>/<code>.digest()</code>, <code>.update()</code>'s chunked interface, <code>digestmod</code>'s required-argument behavior, and the keyed-vs-unkeyed distinction against Day 59's <code>hashlib</code>, bridging to Day 77's <code>compare_digest()</code> for verification. It does not cover <code>hashlib.pbkdf2_hmac()</code> or password storage (still deferred to a future FastAPI-phase authentication lesson, per Day 59's own note), the HTTP-level conventions of any particular webhook provider's signature header format (an application-protocol topic, not a language-mechanics one), or HMAC's internal padding construction and exactly why naive key-concatenation is weaker (cryptography internals beyond today's scope — RFC 2104 is cited by name only).</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/89_hmac_keyed_hashing_for_authentication.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/89_hmac_keyed_hashing_for_authentication.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: computing a keyed tag with <code>hmac.new()</code> and confirming a different key changes it, confirming <code>hashlib.sha256(key + msg)</code> does not equal the real <code>hmac</code> tag for the same inputs, and confirming an incremental <code>.update()</code> call matches the one-shot result.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="hashlib.sha256(data) takes no secret at all -- it is a pure function of the bytes, so anyone holding the same data computes the exact same digest with no special knowledge required. That is useful for detecting whether content changed (Day 59), but it proves nothing about who produced the message, since an attacker with the same bytes gets the same hash too.">
+    <p class="stem">Why can't a plain <code>hashlib.sha256(data)</code> digest prove who sent a message?</p>
+    <button class="opt" data-ok>anyone holding the same data can compute the identical hash</button>
+    <button class="opt">a sha256 digest silently expires after a short fixed window</button>
+    <button class="opt">hashlib functions always need a secret key argument passed first</button>
+  </div>
+  <div class="q" data-why="Per the standard library docs, digestmod is a required argument to hmac.new() despite its argument position -- there is no default algorithm the way hashlib.sha256()'s own name already picks one. Confirmed directly: omitting it raises TypeError: Missing required argument 'digestmod', not a silent fallback to any particular hash function.">
+    <p class="stem">What happens if <code>digestmod</code> is left out of <code>hmac.new(key, msg)</code>?</p>
+    <button class="opt" data-ok>it immediately raises TypeError since digestmod has no default value</button>
+    <button class="opt">it silently falls back to using the sha256 algorithm instead</button>
+    <button class="opt">it quietly pauses and prompts the user to pick one</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: hashlib.sha256(key + msg).hexdigest() does not equal hmac.new(key, msg, hashlib.sha256).hexdigest() for the same key and message. Per the hmac module's own description, HMAC implements the specific, standardized RFC 2104 construction, not a shortcut equivalent to hashing the key and message concatenated together.">
+    <p class="stem">Does <code>hashlib.sha256(key + msg)</code> equal the real <code>hmac.new(key, msg, sha256)</code> tag?</p>
+    <button class="opt" data-ok>no, hmac follows a distinct standardized construction, confirmed different</button>
+    <button class="opt">yes, concatenating key and message produces an identical digest</button>
+    <button class="opt">yes, but only once both key and message match</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the standard library's <a href="https://docs.python.org/3/library/hmac.html"><code>hmac</code></a> docs — confirms <code>digestmod</code> is required "despite its argument position," that <code>key</code> must be <code>bytes</code>/<code>bytearray</code> while <code>msg</code> accepts anything <code>hashlib</code> does, and that <code>compare_digest()</code> is the recommended way to check a computed digest against an externally supplied one. The module's opening line — "implements the HMAC algorithm as described by RFC 2104" — is the primary source for today's "specific standardized construction, not simple concatenation" claim.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day89">glossary</a> under Day 89.<br>
+That leaves <code>graphlib</code>, <code>weakref</code>, and <code>calendar</code> as the remaining carried-forward candidates for Day 90, per Day 88's own note and this course's settled three-fresh-then-review cadence (review of Days 88-90 due at Day 91).<br><br>
+💬 Anything unclear — why keyed hashing needs a secret at all, or the digestmod requirement? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

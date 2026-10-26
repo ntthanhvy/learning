@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 41 · Kafka poison messages: a dead-letter table so one bad event doesn't wedge the consumer forever</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 41 · ~20 min · 26 Oct 2026</p>
+<h1>Kafka poison messages: a dead-letter table so one bad event doesn't wedge the consumer forever</h1>
+<p class="byline">Today's tangible win: <code>scripts/consume_order_events.py</code> stops crashing — and stops silently losing anything — the moment a malformed event lands in <code>order_events</code>. One bad message gets quarantined into a new <code>raw.dead_letter_events</code> table, the offset still commits, and every good message after it keeps landing exactly as before.</p>
+
+<div class="callout"><strong>Before today — check Day 6 actually landed:</strong> today edits the exact consumer loop Day 6 built, so confirm it's there first:
+<pre><code>grep -n "enable.auto.commit\|consumer.commit" scripts/consume_order_events.py</code></pre>
+Expected: <code>"enable.auto.commit": False</code> and a <code>consumer.commit(message=msg, asynchronous=False)</code> call right after the Postgres write. If either is missing, finish Day 6 first — today assumes manual offset commit already works, because today is about what happens when the message being committed-past is broken, not about building manual commit from scratch.</div>
+
+<h2>1 · The bug a manual commit doesn't protect against</h2>
+<p>Day 6's consumer loop does exactly one thing per message: parse it, write it, commit the Postgres transaction, then commit the Kafka offset. That order is correct for a <em>good</em> message — Day 6 named it "write first, commit second." It says nothing about a message that can never be written at all: malformed JSON, or valid JSON missing a field the <code>INSERT</code> needs. Confirmed directly, no broker needed to see the shape of this bug — it's in the code itself:</p>
+<pre><code>event = json.loads(msg.value())        <span class="cm"># raises JSONDecodeError on bad bytes</span>
+<span class="kw">with</span> conn.cursor() <span class="kw">as</span> cur:
+    cur.execute(INSERT_SQL, event)      <span class="cm"># raises KeyError if a required field is missing</span>
+conn.commit()
+consumer.commit(message=msg, asynchronous=<span class="kw">False</span>)   <span class="cm"># never reached if either line above raised</span></code></pre>
+<p>Nothing in that loop catches either exception. The whole process dies, <code>enable.auto.commit=False</code> means the Kafka offset for that message was never committed, and <code>auto.offset.reset: "earliest"</code> plus this consumer group's own last-committed position means the next start re-polls the exact same message — and dies on it again. The pipeline doesn't just drop one event; it stops making forward progress at all, forever, until a human finds and manually skips the offset.</p>
+
+<h2>2 · Two wrong fixes before the right one</h2>
+<p>A bare <code>try</code>/<code>except: continue</code> around the whole loop "fixes" the crash by silently discarding the poison message — no row, no log line a human will ever see, no trace it existed. A bare <code>try</code>/<code>except: pass</code> with no <code>continue</code> is worse: it skips the <code>INSERT</code> but falls through to <code>consumer.commit()</code> anyway, which happens to avoid the stall but is accidental, not designed — nothing about that code says on purpose "committing past a message we didn't actually process is fine here." <strong>Bridge from backend:</strong> this is the same shape backend's Lesson 49 named for a job queue — retrying forever and silently dropping are the two wrong answers, and a <dfn data-en="a separate table (or topic) that holds items which failed processing and could not be handled normally, kept for inspection with their original payload and error, instead of being silently dropped or allowed to block everything behind them" data-vn="giữ nguyên &quot;dead-letter table&quot; — bảng riêng chứa các message/job xử lý lỗi, không xử lý được theo cách thường, giữ lại để xem (kèm payload gốc + lỗi) thay vì xoá âm thầm hay để nó chặn hết các message phía sau">dead-letter table</dfn> is the third option: quarantine the payload somewhere a human can see it, then make forward progress anyway.</p>
+
+<h2>3 · Build: a dead-letter table, and a consumer that uses it</h2>
+<p>Add one table — same database, no second Kafka topic, keeping today's infra cost at zero:</p>
+<pre><code>docker compose exec -T postgres psql -U fdp -d fdp -c \
+  "CREATE TABLE raw.dead_letter_events (
+       id              BIGSERIAL PRIMARY KEY,
+       topic           TEXT NOT NULL,
+       kafka_partition INT NOT NULL,
+       kafka_offset    BIGINT NOT NULL,
+       raw_value       BYTEA NOT NULL,
+       error           TEXT NOT NULL,
+       failed_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+   );"</code></pre>
+<p>Then edit <code>scripts/consume_order_events.py</code>: wrap the parse-and-write in its own <code>try</code>/<code>except</code>, and move <code>consumer.commit()</code> to run after <em>either</em> outcome, not just the success path:</p>
+<pre><code>DEAD_LETTER_SQL = <span class="str">"""
+    INSERT INTO raw.dead_letter_events
+        (topic, kafka_partition, kafka_offset, raw_value, error, failed_at)
+    VALUES (%(topic)s, %(partition)s, %(offset)s, %(raw_value)s, %(error)s, now())
+"""</span>
+
+<span class="cm"># ...inside the while loop, replacing Day 6's bare parse-and-write block:</span>
+<span class="kw">try</span>:
+    event = json.loads(msg.value())
+    <span class="kw">with</span> conn.cursor() <span class="kw">as</span> cur:
+        cur.execute(INSERT_SQL, event)
+    conn.commit()
+    <span class="kw">print</span>(<span class="str">f"landed event_id={event['event_id']} ..."</span>)
+<span class="kw">except</span> Exception <span class="kw">as</span> exc:
+    conn.rollback()
+    <span class="kw">with</span> conn.cursor() <span class="kw">as</span> cur:
+        cur.execute(DEAD_LETTER_SQL, {
+            <span class="str">"topic"</span>: msg.topic(), <span class="str">"partition"</span>: msg.partition(),
+            <span class="str">"offset"</span>: msg.offset(), <span class="str">"raw_value"</span>: msg.value(),
+            <span class="str">"error"</span>: <span class="kw">str</span>(exc),
+        })
+    conn.commit()
+    <span class="kw">print</span>(<span class="str">f"dead-lettered offset={msg.offset()} error={exc}"</span>)
+
+<span class="cm"># Runs after EITHER branch above -- a clean land or a dead-letter write</span>
+<span class="cm"># both count as "handled." If this line only ran inside the try block's</span>
+<span class="cm"># success path, a poison message would still stall the consumer: quarantined</span>
+<span class="cm"># but never committed, so the next poll reads the exact same message again.</span>
+consumer.commit(message=msg, asynchronous=<span class="kw">False</span>)</code></pre>
+<p><code>conn.rollback()</code> on the failure path matters as much as the dead-letter insert itself: whatever partial work the failed <code>INSERT_SQL</code> attempt left on the connection must clear before the next transaction (the dead-letter insert itself) can run cleanly on the same connection.</p>
+
+<h2>4 · Verify: send one poison message, watch it get quarantined, not lose the stream</h2>
+<p>Publish one malformed event directly, bypassing the producer's own JSON encoding on purpose:</p>
+<pre><code>uv run --with confluent-kafka python3 -c "
+from confluent_kafka import Producer
+p = Producer({'bootstrap.servers': 'localhost:9092'})
+p.produce('order_events', key=b'bad-1', value=b'not-valid-json{{{')
+p.produce('order_events', key=b'102', value=b'{\"order_id\": 102, \"status\": \"placed\"}')  # missing event_id
+p.flush()
+"
+uv run --with confluent-kafka --with "psycopg[binary]" python3 scripts/consume_order_events.py</code></pre>
+<p>Expected — two dead-letter lines, zero crashes, and the process still exits cleanly once caught up, exactly like every prior consumer run:</p>
+<pre><code>dead-lettered offset=&lt;N&gt; error=Expecting value: line 1 column 1 (char 0)
+dead-lettered offset=&lt;N+1&gt; error='event_id'</code></pre>
+<div class="callout"><strong>Checked as a static proof this round, not a live broker (noted honestly, same convention Day 17 used):</strong> this sandbox has no learner Kafka/Postgres stack to run against, so the control-flow fix above was verified with a standalone script modeling exactly this logic on four fake messages (two good, two poison: bad JSON and a missing <code>event_id</code>) — confirmed the two good messages landed, the two poison messages were quarantined with the exact error text shown above (<code>json.loads()</code>'s real <code>JSONDecodeError</code> message and a real <code>KeyError</code> message, both produced by actually running the failing calls), and every one of the four offsets was committed in order with none skipped. The actual <code>consume_order_events.py</code> edit itself was separately checked with <code>py_compile</code>, clean.</div>
+<p>Confirm the quarantined rows exist, with their original bytes and the real error that explains why each one failed:</p>
+<pre><code>docker compose exec -T postgres psql -U fdp -d fdp -c \
+  "SELECT kafka_offset, raw_value, error FROM raw.dead_letter_events ORDER BY kafka_offset;"</code></pre>
+<p>Expected: two rows, the first's <code>raw_value</code> showing the literal <code>not-valid-json{{{</code> bytes and an <code>error</code> mentioning <code>Expecting value</code>; the second's <code>raw_value</code> showing the <code>order_id</code>-only JSON and an <code>error</code> of <code>'event_id'</code>. Commit <code>scripts/consume_order_events.py</code> and the new table (add its <code>CREATE TABLE</code> to whatever schema-migration file Day 1's raw tables live in, so a fresh clone of the repo gets it too).</p>
+
+<div class="interview">
+<p><strong>Q: "Your Kafka consumer just crashed in production on a message in the middle of the topic. What's your first move, and how do you stop it happening again?"</strong> A strong answer, out loud: <em>"First I'd check whether the offset for that message ever committed — if auto-commit is off and the crash happened before the commit call, restarting just re-reads the same message and crashes again, so the pipeline is fully stalled, not just missing one event. The actual fix is wrapping the per-message processing in its own try/except: on failure, write the raw payload and the error into a dead-letter table, then commit the offset anyway, since quarantining it counts as handling it. That gets you back to forward progress immediately, and nothing is silently lost — the bad message is sitting in a table with its exact bytes and error, waiting for someone to look at it, the same shape as a dead-letter queue for a job system, just landed in the warehouse instead of a second queue."</em> The signal: naming that the stall, not just the one lost message, is the real production risk, and that committing past a dead-lettered message is a deliberate decision, not an accident.</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers wrapping per-message Kafka consumer processing in <code>try</code>/<code>except</code>, landing the raw payload and error into a same-database <code>dead_letter_events</code> table, and committing the Kafka offset after quarantining so the consumer keeps making forward progress. It does not cover replaying or reprocessing dead-lettered rows later (a real follow-up workflow, not today's), a second Kafka topic as the dead-letter destination (Kafka Connect's own DLQ convention uses one; today stays in Postgres to keep infra cost at zero, per this course's own scope), or backend's Lesson 49 job-queue dead-letter pattern beyond the one-line naming bridge above — that lesson's retry-budget-then-dead-letter shape is a different mechanism for a different kind of queue, not re-derived here.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="enable.auto.commit=False means Kafka only advances a consumer group's committed offset when the code calls commit() itself. If the process crashes before reaching that call -- exactly what an unhandled exception during parsing or writing does -- the offset for that message was never committed, so the next start re-polls and re-processes the identical message, crashing again the same way.">
+    <p class="stem">Why does an unhandled exception on one message stall the whole consumer, not just skip it?</p>
+    <button class="opt" data-ok>its offset never committed, so restart re-reads it again</button>
+    <button class="opt">Kafka automatically retries that exact message three times total</button>
+    <button class="opt">the topic's other partitions pause until a human intervenes</button>
+  </div>
+  <div class="q" data-why="A bare except: continue with no logging silently discards the poison message with no trace it ever existed -- nobody can look at it later, and the data is simply gone. A dead-letter table keeps the exact raw payload and the real error, so the message is quarantined, not lost, and recoverable later.">
+    <p class="stem">What's wrong with fixing this bug with a bare <code>except: continue</code> and no logging?</p>
+    <button class="opt" data-ok>the bad message vanishes silently with no trace left</button>
+    <button class="opt">Postgres rejects the empty transaction with a syntax error</button>
+    <button class="opt">Kafka refuses to ever advance any further offsets afterward</button>
+  </div>
+  <div class="q" data-why="The offset commit call must run after BOTH outcomes -- a clean land or a dead-letter write -- because both represent the message being fully handled. If it only ran inside the success path, a dead-lettered message would still never have its offset committed, so the consumer would stall on it exactly as before, just with an extra unreachable INSERT added.">
+    <p class="stem">Why must <code>consumer.commit()</code> run after the dead-letter write too, not only after a successful land?</p>
+    <button class="opt" data-ok>skipping it there would still stall the consumer forever</button>
+    <button class="opt">Kafka requires exactly one commit call per topic partition</button>
+    <button class="opt">Postgres transactions silently fail without any final commit call</button>
+  </div>
+  <div class="q" data-why="conn.rollback() clears whatever partial state the failed INSERT_SQL attempt left on the connection -- without it, the next statement on that same connection (the dead-letter INSERT itself) can fail too, since Postgres leaves a transaction in a failed state after an error until it is explicitly rolled back or committed away."
+  >
+    <p class="stem">Why does the dead-letter path call <code>conn.rollback()</code> before inserting into <code>dead_letter_events</code>?</p>
+    <button class="opt" data-ok>clears the failed attempt so the next insert succeeds</button>
+    <button class="opt">deletes the poison message from the topic permanently now</button>
+    <button class="opt">forces Kafka to reassign this partition to another consumer</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the <a href="https://docs.confluent.io/kafka-clients/python/current/overview.html">confluent-kafka Python client</a> docs already cited for Days 5–6's producer/consumer API and manual-commit shape — nothing new to add there, since today's fix is ordinary Python exception handling around the same <code>poll()</code>/<code>commit()</code> loop, not a new Kafka-specific mechanism. <a href="https://www.postgresql.org/docs/current/tutorial-transactions.html">PostgreSQL's own transactions documentation</a> is the primary source for why a failed statement leaves a transaction unusable until <code>ROLLBACK</code>, the fact Section 3's <code>conn.rollback()</code> call relies on.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 41.<br>
+<strong>Next up:</strong> the <code>airflow db migrate</code>/<code>airflow dags test</code> approval-gate block named on Days 35-39 remains the standing, unresolved thread (seven rounds now, 35-41, each re-attempting live and failing). Day 40 already closed the last named facet of Phase 2a's dbt bullet list (every dbt item in <code>PLAN.md</code>'s spine — layering, snapshots, Jinja/macros, packages, unit tests, incremental strategies, docs/exposures/contracts/versions, CI — now has a lesson), so a future dbt round needs a fresh gap-scan rather than the next spine item; today's own pick came the same way, from a named-but-untaught Kafka gap rather than a pre-committed spine item. Reasonable next picks: another fresh-scan Kafka or dbt round, or revisiting Airflow's block with a different approach, depending on what the learner's own records show by then.<br><br>
+💬 Anything unclear — why committing past a dead-lettered message is safe, or the rollback-before-insert ordering? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

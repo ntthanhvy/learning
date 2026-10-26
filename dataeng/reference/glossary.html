@@ -330,6 +330,12 @@
   <tr><td>deprecation_date</td><td>giữ nguyên "deprecation_date" — field của 1 version trong dbt, đặt ngày mà sau đó dbt sẽ in ra WARNING thật nêu rõ tên version đó ở mọi lần dbt parse/run/build, không làm fail build hay chặn gì cả — cách để ngày hết dùng của version đó hiện ra ở mọi command sau này, thay vì chỉ nằm trong wiki hay 1 dòng Slack không ai đọc lại</td><td>A dbt model-version field setting a date after which dbt prints a real <code>WARNING</code> naming the specific version at every <code>dbt parse</code>/<code>run</code>/<code>build</code>, without failing the build or blocking anything — a way to make a version's sunset date visible to every future command instead of living only in a wiki page or a Slack message nobody re-reads. Confirmed live this round: <code>[WARNING]: Model fct_orders.v1 has passed its deprecation date of 2026-11-25T00:00:00+07:00. This model should be disabled or removed.</code></td></tr>
 </table>
 
+<h2 id="day41">Day 41 — Kafka poison messages: a dead-letter table so one bad event doesn't wedge the consumer forever</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>dead-letter table</td><td>giữ nguyên "dead-letter table" — bảng riêng chứa các message/job xử lý lỗi, không xử lý được theo cách thường, giữ lại để xem (kèm payload gốc + lỗi) thay vì xoá âm thầm hay để nó chặn hết các message phía sau; khác dead-letter QUEUE (1 topic Kafka riêng) ở chỗ đây là 1 bảng trong cùng database, không phải topic thứ hai</td><td>A separate table (or topic) that holds items which failed processing and could not be handled normally, kept for inspection with their original payload and error, instead of being silently dropped or allowed to block everything behind them. Confirmed directly this round via a standalone control-flow simulation (no live broker): two poison messages (malformed JSON and a JSON object missing a required field) were quarantined with their exact raw bytes and real exception text, while every message's Kafka offset — both the two good ones and the two poison ones — still committed in order, so the consumer kept making forward progress instead of stalling.</td></tr>
+</table>
+
 <script src="../assets/nav.js"></script>
 </body>
 </html>

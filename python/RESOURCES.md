@@ -69,6 +69,8 @@ authors for *why*. Cite inline; each lesson recommends exactly one primary sourc
   Use for: Day 85 — `warn()` for a non-fatal "probably wrong, keep going" signal distinct from `raise` and from Day 15's `logging.warning()`; `catch_warnings(record=True)`/`simplefilter("always")` for asserting a warning fired in a test; and `filterwarnings("error", ...)` for escalating a warning category into a real exception.
 - [Docs: `inspect`](https://docs.python.org/3/library/inspect.html)
   Use for: Day 86 — `signature()`/`Signature`/`Parameter` for reading a function's parameter names, defaults, and kinds as data instead of text; `bind()`/`apply_defaults()` for matching real arguments against a signature without calling the function, the mechanism behind Day 19's `Depends()`; and the `is*` predicate family (`isfunction`, `isclass`, `isbuiltin`) for telling apart what kind of object something actually is.
+- [Docs: `hmac`](https://docs.python.org/3/library/hmac.html)
+  Use for: Day 89 — `hmac.new(key, msg, digestmod)` for keyed message authentication, `digestmod` being a required argument unlike `hashlib`'s own named functions, confirming `hashlib.sha256(key + msg)` is not the same as a real HMAC tag, and bridging to Day 59's chunked `.update()` and Day 77's `compare_digest()` for safe verification.
 - [PEP 8 — Style Guide for Python Code](https://peps.python.org/pep-0008/)
   Use for: naming and layout conventions, so written code looks like the ecosystem's.
 

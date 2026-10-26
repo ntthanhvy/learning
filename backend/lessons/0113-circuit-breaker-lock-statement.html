@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 113 · Circuit breaker, now in C# too</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 113 · ~20 min</p>
+<h1>Circuit breaker, now in C# too</h1>
+<p class="byline">Lesson 112's own closing note named exactly one carried-over candidate: a circuit breaker's C# shape, the same kind of ecosystem-mirror gap Lesson 112 just closed for retry-with-backoff. Lesson 28 taught the full state machine in Go; today ports it to C#. The state machine doesn't change. One rule about where a lock is allowed to go, does.</p>
+
+<h2>1 · Same breaker, same three states — Lesson 28 already covers why</h2>
+<p>Nothing about <em>why</em> a circuit breaker exists changes between languages. Lesson 28 covers the full reasoning: a struggling dependency turns every naive retry into a <code>pool exhaustion</code> problem, and that is how one dependency's <code>cascading failure</code> becomes an outage of everything that calls it. The fix is still the same three-state machine — <strong>closed</strong> lets calls through and counts failures, <strong>open</strong> fails every call immediately for a cooldown instead of waiting out a timeout, and <strong>half-open</strong> lets exactly one probe through once the cooldown elapses. None of that is re-derived here; today is about what changes, and what doesn't, when the same state machine is written in C#.</p>
+
+<h2>2 · The state is still shared across every caller, so it still needs a guard</h2>
+<p>A circuit breaker's state — which of the three states it's in, how many consecutive failures it has counted, when it last tripped open — gets read and written on every single call through the breaker, and in a real service those calls happen concurrently. Go's version in Lesson 28 guarded that shared state with <code>sync.Mutex</code>; C# needs exactly the same guard for exactly the same reason — two concurrent callers checking and updating a failure counter at the same instant, unguarded, is a race condition no matter which language is doing it. C# reaches for the <dfn data-en="a C# statement that acquires a mutual-exclusion lock on a given object for the duration of its block, blocking every other thread from acquiring the same lock until the block finishes, and releasing it automatically even if an exception is thrown inside the block" data-vn="lock statement (giữ nguyên) — câu lệnh C# khóa độc quyền (mutual exclusion) trên 1 object trong phạm vi block, chặn mọi thread khác giành khóa đó tới khi block xong, tự nhả khóa dù exception xảy ra bên trong block">lock</dfn> statement for this, not the <code>Mutex</code> class — per Microsoft's own class description, <code>Mutex</code> "can also be used for interprocess synchronization," i.e. coordinating separate processes or even separate applications, which is overkill for guarding a few fields inside one object within a single process.</p>
+
+<div class="cmp-wrap">
+<table class="cmp">
+<thead><tr><th></th><th>Go: sync.Mutex</th><th>C#: lock statement</th></tr></thead>
+<tbody>
+<tr><th>Shape</th><td><code>mu.Lock()</code> then <code>defer mu.Unlock()</code></td><td><code>lock (gate) { ... }</code></td></tr>
+<tr><th>Release</th><td>manual, via <code>defer</code></td><td>automatic at block end</td></tr>
+<tr><th>Scope</th><td>one process</td><td>one process</td></tr>
+<tr><th>Can it wrap a suspend point?</th><td>yes — goroutines can block inside a locked section</td><td>no — the compiler rejects <code>await</code> inside the block</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2>3 · A minimal C# implementation</h2>
+<p>Same three fields Lesson 28's Go struct had — state, failure count plus threshold, and when it opened — plus the object the <code>lock</code> statement guards:</p>
+<pre><code><span class="kw">enum</span> BreakerState { Closed, Open, HalfOpen }
+
+<span class="kw">class</span> CircuitBreaker
+{
+    <span class="kw">private</span> <span class="kw">readonly</span> <span class="ty">object</span> gate = <span class="kw">new</span>();
+    <span class="kw">private</span> BreakerState state = BreakerState.Closed;
+    <span class="kw">private</span> <span class="ty">int</span> consecutiveFails;
+    <span class="kw">private</span> <span class="kw">readonly</span> <span class="ty">int</span> failureThreshold;
+    <span class="kw">private</span> <span class="kw">readonly</span> TimeSpan openTimeout;
+    <span class="kw">private</span> DateTimeOffset openedAt;
+
+    <span class="kw">public</span> CircuitBreaker(<span class="ty">int</span> failureThreshold, TimeSpan openTimeout)
+    {
+        <span class="kw">this</span>.failureThreshold = failureThreshold;
+        <span class="kw">this</span>.openTimeout = openTimeout;
+    }
+
+    <span class="kw">public</span> <span class="kw">async</span> Task&lt;T&gt; CallAsync&lt;T&gt;(Func&lt;Task&lt;T&gt;&gt; operation)
+    {
+        <span class="kw">if</span> (!Allow())
+            <span class="kw">throw</span> <span class="kw">new</span> InvalidOperationException(<span class="str">"circuit open"</span>); <span class="cm">// fails in microseconds — no call attempted</span>
+
+        <span class="kw">try</span>
+        {
+            <span class="kw">var</span> result = <span class="kw">await</span> operation(); <span class="cm">// no lock held anywhere near this line</span>
+            RecordResult(success: <span class="kw">true</span>);
+            <span class="kw">return</span> result;
+        }
+        <span class="kw">catch</span>
+        {
+            RecordResult(success: <span class="kw">false</span>);
+            <span class="kw">throw</span>;
+        }
+    }
+
+    <span class="kw">private</span> <span class="ty">bool</span> Allow()
+    {
+        <span class="kw">lock</span> (gate)
+        {
+            <span class="kw">switch</span> (state)
+            {
+                <span class="kw">case</span> BreakerState.Closed:
+                    <span class="kw">return</span> <span class="kw">true</span>;
+                <span class="kw">case</span> BreakerState.Open:
+                    <span class="kw">if</span> (DateTimeOffset.UtcNow - openedAt &lt; openTimeout)
+                        <span class="kw">return</span> <span class="kw">false</span>; <span class="cm">// still cooling down</span>
+                    state = BreakerState.HalfOpen; <span class="cm">// timeout elapsed — allow one probe</span>
+                    <span class="kw">return</span> <span class="kw">true</span>;
+                <span class="kw">default</span>: <span class="cm">// HalfOpen</span>
+                    <span class="kw">return</span> <span class="kw">false</span>; <span class="cm">// a probe is already out; block the rest</span>
+            }
+        }
+    }
+
+    <span class="kw">private</span> <span class="kw">void</span> RecordResult(<span class="ty">bool</span> success)
+    {
+        <span class="kw">lock</span> (gate)
+        {
+            <span class="kw">if</span> (success)
+            {
+                consecutiveFails = <span class="kw">0</span>;
+                state = BreakerState.Closed; <span class="cm">// success (incl. the probe) fully resets</span>
+                <span class="kw">return</span>;
+            }
+            consecutiveFails++;
+            <span class="kw">if</span> (state == BreakerState.HalfOpen || consecutiveFails &gt;= failureThreshold)
+            {
+                state = BreakerState.Open;
+                openedAt = DateTimeOffset.UtcNow;
+            }
+        }
+    }
+}
+</code></pre>
+<p>Every call to the dependency goes through <code>breaker.CallAsync(() => CallInventoryServiceAsync(sku))</code> instead of calling it directly — same shape as Go's <code>cb.Call(fn)</code>. <code>Allow()</code> is the gate, <code>RecordResult</code> is what actually moves the state, and <code>CallAsync</code> itself is the only place that ever <code>await</code>s anything.</p>
+
+<div class="callout"><strong>This isn't a style choice — the compiler enforces it.</strong> Per Microsoft's own language reference for the <code>lock</code> statement: "You can't use the await expression in the body of a lock statement." A plain <code>lock</code> desugars to <code>Monitor.Enter</code> paired with <code>Monitor.Exit</code> in a <code>try</code>/<code>finally</code>, and a monitor is tied to the thread that acquired it; suspending mid-<code>await</code> and resuming on a different pooled thread would leave that pairing broken, so the compiler refuses to let the two mix at all. That's why <code>Allow()</code> and <code>RecordResult()</code> are each their own small, synchronous, fully-locked method, and the <code>await operation()</code> line in <code>CallAsync</code> sits with no lock held anywhere near it. Go's version in Lesson 28 made the identical split — <code>allow()</code> and <code>recordResult()</code> each lock separately, <code>fn()</code> runs unlocked in between — but that was a deliberate design choice, not something <code>go build</code> would have rejected otherwise. C# just turns the same good habit into a compile error if you skip it.</div>
+
+<h2>4 · What the caller does when the circuit is open hasn't changed either</h2>
+<p>A breaker still only solves half the problem: failing fast instead of failing slow. The caller still has to decide what to return while the circuit is open — Lesson 28's <code>fallback</code> question, unchanged by language: a cached value that might be slightly stale, a "check back shortly" response, or an honest error returned immediately rather than after a timeout. That's a product decision in C# exactly as much as it was in Go.</p>
+
+<h2>Scope line</h2>
+<p>This lesson covers porting Lesson 28's circuit breaker (the closed/open/half-open state machine, why cascading failure makes blind retries worse, the fallback decision) to C#, plus the one genuinely new rule this port surfaces: a C# <code>lock</code> statement cannot contain an <code>await</code>, which is why the state-mutating methods stay separate, small, and synchronous. It does not re-derive the three states, cascading failure, or the rate-limiter-vs-breaker comparison — Lesson 28 already covers all three in full and nothing about them changes in C#. It does not cover Polly or any .NET resilience library's packaged breaker — the mechanism is taught here from first principles, same as Lesson 28 did in Go, per MISSION.md's "concepts first" rule.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory, with no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A circuit breaker's state (current state, consecutive failure count, when it opened) is read and written by every concurrent call through it, so it needs the same mutual-exclusion guard Go's sync.Mutex gave it in Lesson 28 -- the reason doesn't change just because the language did.">
+    <p class="stem">Why does a C# circuit breaker's shared state still need a lock, just like Go's version needed its mutex?</p>
+    <button class="opt" data-ok>many different callers can mutate that same shared state</button>
+    <button class="opt">C# requires every single class to declare one lock</button>
+    <button class="opt">the dependency call itself must hold the mutex open</button>
+    <button class="opt">every exception thrown automatically acquires a thread-level file lock</button>
+  </div>
+  <div class="q" data-why="Per Microsoft's own language reference for the lock statement: you can't use the await expression in the body of a lock statement -- this is a compile-time restriction, not a runtime race or a slow fallback path.">
+    <p class="stem">What happens if you try to put an await expression inside a C# lock block?</p>
+    <button class="opt" data-ok>the C# compiler refuses to allow that combination entirely</button>
+    <button class="opt">the await silently runs after the lock fully releases</button>
+    <button class="opt">the lock automatically upgrades itself into an async lock</button>
+    <button class="opt">the thread pool permanently blocks every other pending task</button>
+  </div>
+  <div class="q" data-why="Allow() and RecordResult() are each their own small, synchronous, fully-locked method specifically so the slow or awaited dependency call in CallAsync happens with no lock held at all -- satisfying the compiler's await-inside-lock restriction while matching the exact split Go's allow()/recordResult() already used.">
+    <p class="stem">In today's CircuitBreaker, why are Allow() and RecordResult() each their own separately locked method, instead of one lock around the whole call?</p>
+    <button class="opt" data-ok>so the real dependency call never runs while locked</button>
+    <button class="opt">so every single method in the class runs faster</button>
+    <button class="opt">so the breaker can skip checking its own state</button>
+    <button class="opt">so two different threads always share one single object</button>
+  </div>
+  <div class="q" data-why="Yes -- a circuit breaker decides whether to attempt a call at all (failing fast once enough consecutive failures trip it open), while a retry loop decides whether one single failed attempt is worth trying again. They guard different decisions and compose cleanly, the same complementary relationship Lesson 28's own table drew between a circuit breaker and a rate limiter.">
+    <p class="stem">Could Lesson 112's retry-with-backoff and today's circuit breaker be used together on the same outbound call?</p>
+    <button class="opt" data-ok>yes each one guards a different failure scenario still</button>
+    <button class="opt">no a single mechanism always replaces the other entirely</button>
+    <button class="opt">no circuit breakers never call CallAsync more than once</button>
+    <button class="opt">yes but only inside Go never inside any C#</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> Lesson 28's own primary source — <a href="https://martinfowler.com/bliki/CircuitBreaker.html">Martin Fowler — CircuitBreaker</a> (~10 min) — still covers the pattern itself in full; nothing about the three states changes in C#. <a href="https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/statements/lock">Microsoft Learn: The lock statement</a> (~5 min) is the primary source for today's one new C#-specific rule, confirming verbatim that "you can't use the await expression in the body of a lock statement" and that a plain-object lock desugars to <code>Monitor.Enter</code>/<code>Monitor.Exit</code> inside a <code>try</code>/<code>finally</code>.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a>. Click any dotted term for a popup (English first, tiếng Việt second). Builds directly on Lesson 28's circuit breaker and Lesson 112's retry-with-backoff. <strong>Anything unclear? Ask your teacher</strong>, the agent that made this lesson. Ask in Vietnamese anytime. A good follow-up: "if our codebase already uses Polly, which parts of today's hand-written version is it doing for us under the hood?"</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

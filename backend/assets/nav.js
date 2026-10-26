@@ -230,6 +230,8 @@
       file: "lessons/0111-single-call-timeout-withtimeout-cancelafter.html" },
     { n: 112, date: "2026-10-25", title: "After the timeout fires: retry-with-backoff, now in C# too",
       file: "lessons/0112-retry-with-backoff-after-a-timeout.html" },
+    { n: 113, date: "2026-10-26", title: "Circuit breaker, now in C# too",
+      file: "lessons/0113-circuit-breaker-lock-statement.html" },
   ];
 
   const REFS = [

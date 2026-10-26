@@ -41,6 +41,8 @@
   Vendor primary source for `context.WithTimeout`'s exact definition as `WithDeadline(parent, time.Now().Add(timeout))`, and for the `CancellationTokenSource(TimeSpan)` overload's self-cancelling countdown plus `CancelAfter()`'s delay-reset behavior. Use for: attaching a deadline to a single call, as distinct from racing or bounding several (Lesson 111).
 - [Docs: Microsoft Learn — CancellationTokenSource.CreateLinkedTokenSource](https://learn.microsoft.com/en-us/dotnet/api/system.threading.cancellationtokensource.createlinkedtokensource)
   Vendor primary source confirming the method "creates a CancellationTokenSource that will be in the canceled state when any of the source tokens are in the canceled state." Use for: combining an outer caller deadline with a per-attempt timeout in a C# retry loop (Lesson 112). Lesson 32's own AWS backoff-and-jitter source still covers the retry strategy itself in full and is cited inline there rather than duplicated here, per that lesson's own precedent for single-mechanism citations.
+- [Docs: Microsoft Learn — The lock statement](https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/statements/lock)
+  Vendor primary source confirming "you can't use the await expression in the body of a lock statement," and that a plain-object lock desugars to `Monitor.Enter`/`Monitor.Exit` inside a `try`/`finally`. Use for: guarding a C# circuit breaker's shared state without blocking the awaited dependency call (Lesson 113). Lesson 28's own Martin Fowler circuit-breaker source still covers the three-state pattern itself in full and is cited inline there rather than duplicated here, per the same single-mechanism-citation precedent.
 
 ## Wisdom (Communities)
 

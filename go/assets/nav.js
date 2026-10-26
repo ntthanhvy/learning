@@ -4,6 +4,8 @@
 // When a new lesson or reference sheet is authored, register it here.
 (() => {
   const ROOT = /\/(lessons|reference)\//.test(location.pathname) ? "../" : "";
+  // Course icon as the tab favicon (icons are shared, in /assets/icons/).
+  document.head.insertAdjacentHTML("beforeend", `<link rel="icon" href="${ROOT}../assets/icons/go.svg">`);
 
   const LESSONS = [
     { day: 1, date: "2026-07-07", title: "Interfaces & composition",

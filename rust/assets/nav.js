@@ -5,6 +5,8 @@
 // Exposes window.COURSE = { lessons, today } for srs.js.
 (() => {
   const ROOT = /\/(lessons|reference)\//.test(location.pathname) ? "../" : "";
+  // Course icon as the tab favicon (icons are shared, in /assets/icons/).
+  document.head.insertAdjacentHTML("beforeend", `<link rel="icon" href="${ROOT}../assets/icons/rust.svg">`);
 
   const LESSONS = [
     { day: 1, date: "2026-07-08", title: "Cargo & the shape of Rust",

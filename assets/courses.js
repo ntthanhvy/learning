@@ -1,6 +1,6 @@
 // Course registry for the landing page (/index.html).
 // ADD NEW COURSES HERE — one entry renders one card; nothing else to touch.
-// Fields: id (accent color key), title, desc, start/end (ISO, end omitted =
+// Fields: id (accent color key; also names the icon, assets/icons/<id>.svg), title, desc, start/end (ISO, end omitted =
 // open-ended), links [{label, href}] — first link is the primary button.
 window.COURSES = [
   {
@@ -122,7 +122,7 @@ window.COURSES = [
     card.style.borderTopColor = c.accent;
     const active = today >= c.start && (!c.end || today <= c.end);
     card.innerHTML =
-      `<h2 style="color:${c.accent}">${c.title}</h2>` +
+      `<h2 style="color:${c.accent}"><img class="course-icon" src="assets/icons/${c.id}.svg" alt="">${c.title}</h2>` +
       `<p class="course-status">${active ? "● " : ""}${status(c)}</p>` +
       `<p class="course-desc">${c.desc}</p>` +
       `<p class="course-links">` +

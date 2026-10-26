@@ -5,11 +5,67 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Learning · Courses</title>
 <link rel="stylesheet" href="go/assets/course.css">
+<link rel="icon" href="assets/icons/home.svg">
 <style>
   /* landing-only styles; everything else comes from the shared course.css */
   #course-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.2rem; margin-top: 1.6rem; }
   .course-card { border: 1px solid var(--rule); border-top: 4px solid var(--accent); border-radius: 10px; padding: 1.1rem 1.3rem 1.2rem; }
-  .course-card h2 { margin: 0 0 .3rem; font-size: 1.25rem; }
+  .course-card h2 { margin: 0 0 .3rem; font-size: 1.25rem; display: flex; align-items: center; gap: .6rem; }
+  .course-card h2 .course-icon { width: 2rem; height: 2rem; }
+  .course-icon { flex: none; border-radius: 22%; vertical-align: middle; }
+  .title-row { display: flex; align-items: center; gap: .8rem; }
+  .title-row img { width: 2.6rem; height: 2.6rem; border-radius: 22%; }
+  .title-row h1 { margin: 0; }
+
+  /* progress dashboard (filled by assets/dashboard.js) */
+  :root { --heat-0: #ebe9e2; --heat-1: #b7d3f6; --heat-2: #6da7ec; --heat-3: #256abf; --heat-4: #104281;
+          --bar-track: #cde2fb; --bar-fill: #256abf; --cell: 13px; }
+  @media (prefers-color-scheme: dark) {
+    :root { --heat-0: #262624; --heat-1: #104281; --heat-2: #256abf; --heat-3: #5598e7; --heat-4: #9ec5f4;
+            --bar-track: #0d366b; --bar-fill: #5598e7; }
+  }
+  #dashboard { font-family: -apple-system, "Helvetica Neue", sans-serif; margin-top: 1.4rem; }
+  #dashboard h3 { font-size: .8rem; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin: 1.8rem 0 .7rem; display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: .8rem; }
+  .stat { border: 1px solid var(--rule); border-radius: 10px; padding: .8rem 1rem; }
+  .stat-value { font-size: 1.9rem; font-weight: 600; line-height: 1.1; font-variant-numeric: tabular-nums; }
+  .stat-label { font-size: .85rem; margin-top: .15rem; }
+  .stat-sub { font-size: .75rem; color: var(--muted); margin-top: .2rem; }
+  .heat-scroll { overflow-x: auto; padding-bottom: .3rem; }
+  .heat { display: grid; grid-template-columns: auto auto; column-gap: 6px; width: max-content; font-size: .68rem; color: var(--muted); }
+  .heat-months { grid-column: 2; display: grid; column-gap: 3px; height: 1.1rem; }
+  .heat-months span { white-space: nowrap; }
+  .heat-days { display: grid; grid-template-rows: repeat(7, var(--cell)); row-gap: 3px; line-height: var(--cell); }
+  .heat-grid { display: grid; grid-template-rows: repeat(7, var(--cell)); gap: 3px; }
+  .cell { display: inline-block; width: var(--cell); height: var(--cell); border-radius: 3px; background: var(--heat-0); }
+  .cell.l1 { background: var(--heat-1); } .cell.l2 { background: var(--heat-2); }
+  .cell.l3 { background: var(--heat-3); } .cell.l4 { background: var(--heat-4); }
+  .heat-grid .cell:hover { outline: 2px solid var(--ink); outline-offset: 1px; }
+  .heat-legend { display: flex; align-items: center; gap: 3px; font-size: .7rem; color: var(--muted); margin-top: .5rem; }
+  .heat-legend .cell { width: 11px; height: 11px; }
+  .key { display: inline-flex; align-items: center; gap: .35rem; text-transform: none; letter-spacing: 0; font-weight: 400; }
+  .key i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-left: .4rem; }
+  .key-pub { background: var(--bar-track); } .key-std { background: var(--bar-fill); }
+  .course-bars { width: 100%; border-collapse: collapse; font-size: .85rem; }
+  .course-bars thead th { font-size: .7rem; font-weight: 400; color: var(--muted); text-align: left; padding: 0 0 .3rem; }
+  .course-bars th[scope=row] { font-weight: 500; text-align: left; white-space: nowrap; padding: .3rem .8rem .3rem 0; }
+  .course-bars th[scope=row] .course-icon { width: 1.2rem; height: 1.2rem; margin-right: .5rem; }
+  .course-bars tbody tr:hover th, .course-bars tbody tr:hover .num { color: var(--accent); }
+  .bar-cell { width: 100%; padding: .3rem 0; }
+  .bar { height: 12px; background: var(--bar-track); border-radius: 0 4px 4px 0; min-width: 4px; overflow: hidden; }
+  .bar-fill { height: 100%; background: var(--bar-fill); }
+  .num { text-align: right; white-space: nowrap; padding-left: .8rem; font-variant-numeric: tabular-nums; }
+  .num span { color: var(--muted); }
+  .dash-note { font-size: .78rem; color: var(--muted); margin-top: .8rem; }
+  .dash-tip { position: fixed; top: 0; left: 0; z-index: 200; pointer-events: none; opacity: 0; transition: opacity .1s;
+              background: var(--bg); color: var(--ink); border: 1px solid var(--rule); border-radius: 6px; padding: .45rem .65rem;
+              font: .78rem/1.45 -apple-system, "Helvetica Neue", sans-serif; box-shadow: 0 4px 16px rgba(0,0,0,.15); max-width: 18rem; }
+  @media (max-width: 560px) {
+    .course-bars thead { display: none; }
+    .course-bars tr { display: grid; grid-template-columns: 1fr auto; align-items: center; padding: .25rem 0; }
+    .course-bars th[scope=row] { grid-column: 1 / -1; padding: 0 0 .25rem; white-space: normal; }
+    .stats { grid-template-columns: 1fr 1fr; }
+  }
   .course-status { margin: 0 0 .6rem; font-size: .85rem; color: var(--muted); }
   .course-desc { margin: 0 0 1rem; font-size: .95rem; }
   .course-links a { margin-right: .9rem; font-size: .92rem; }
@@ -19,14 +75,20 @@
 <body>
 
 <p class="kicker">Learning home</p>
-<h1>Courses</h1>
+<div class="title-row"><img src="assets/icons/home.svg" alt=""><h1>Learning</h1></div>
 <p class="byline">Every track in one place. New lessons are generated each morning at 06:00 and appear here (and locally after the 07:30 pull) on their own.</p>
 
+<h2>Progress</h2>
+<div id="dashboard"></div>
+
+<h2>Courses</h2>
 <div id="course-list"></div>
 
 <p class="next">Adding a course? Register it in <code>assets/courses.js</code> — one entry, this page does the rest.<br><br>
 💬 Anything unclear in any lesson — ask your teacher in a session. Hỏi bằng tiếng Việt cũng được.</p>
 
 <script src="assets/courses.js"></script>
+<script src="assets/progress.js"></script>
+<script src="assets/dashboard.js"></script>
 </body>
 </html>

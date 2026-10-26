@@ -75,6 +75,12 @@ jobs:
           grep -Eiq '\bbackend\b.{0,4}:.{0,4}(generated|skipped)' gen-output.txt
           rm -f gen-output.txt
 
+      - name: Refresh progress dashboard data
+        env:
+          LEARNING_DB_URL: ${{ secrets.LEARNING_DB_URL }}
+          TZ: Asia/Ho_Chi_Minh
+        run: bin/export-progress
+
       - name: Commit & push
         run: |
           git config user.name "github-actions[bot]"

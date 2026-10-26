@@ -4,6 +4,8 @@
 // lessons are generated one at a time — register each new lesson/reference here.
 (() => {
   const ROOT = /\/(lessons|reference)\//.test(location.pathname) ? "../" : "";
+  // Course icon as the tab favicon (icons are shared, in /assets/icons/).
+  document.head.insertAdjacentHTML("beforeend", `<link rel="icon" href="${ROOT}../assets/icons/backend.svg">`);
 
   const LESSONS = [
     { n: 1, date: "2026-07-07", title: "What happens after fetch()?",

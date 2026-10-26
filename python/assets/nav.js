@@ -4,6 +4,8 @@
 // from 2026-08-05 the course is open-ended — register each new lesson here.
 (() => {
   const ROOT = /\/(lessons|reference)\//.test(location.pathname) ? "../" : "";
+  // Course icon as the tab favicon (icons are shared, in /assets/icons/).
+  document.head.insertAdjacentHTML("beforeend", `<link rel="icon" href="${ROOT}../assets/icons/python.svg">`);
 
   const LESSONS = [
     { n: 1, date: "2026-07-29", title: "Names, objects & mutability",

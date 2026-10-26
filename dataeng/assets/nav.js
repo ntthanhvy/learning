@@ -4,6 +4,8 @@
 // from 2026-09-22 the course is open-ended — register each new lesson here.
 (() => {
   const ROOT = /\/(lessons|reference)\//.test(location.pathname) ? "../" : "";
+  // Course icon as the tab favicon (icons are shared, in /assets/icons/).
+  document.head.insertAdjacentHTML("beforeend", `<link rel="icon" href="${ROOT}../assets/icons/dataeng.svg">`);
 
   const LESSONS = [
     // Phase 1 — date-locked, filenames pre-assigned in PLAN.md. Register each

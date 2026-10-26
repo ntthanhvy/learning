@@ -3,6 +3,8 @@
 // kit the day an interview lands on your calendar. Register new parts here.
 (() => {
   const ROOT = /\/(lessons|reference)\//.test(location.pathname) ? "../" : "";
+  // Course icon as the tab favicon (icons are shared, in /assets/icons/).
+  document.head.insertAdjacentHTML("beforeend", `<link rel="icon" href="${ROOT}../assets/icons/interview-go.svg">`);
 
   const LESSONS = [
     { day: 1, title: "Go fundamentals",

@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 110 · Series.cummax() / Series.cummin(): the running best-so-far, and the NumPy function that doesn't exist</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 110 · ~20 min · 27 Oct 2026</p>
+<h1>Series.cummax() / Series.cummin(): the running best-so-far, and the NumPy function that doesn't exist</h1>
+<p class="byline">Lesson 109's own closing note carried forward one named candidate: <code>cummax()</code>/<code>cummin()</code>, confirmed uncovered since an earlier scan. Lesson 7 taught <code>cumsum()</code> as the pandas spelling of SQL's <code>SUM() OVER (ORDER BY ...)</code>; today's pair is the exact same running-without-collapsing idea, swapped to "running biggest/smallest seen so far" — <code>MAX()</code>/<code>MIN() OVER (ORDER BY ...)</code>, running instead of whole-window.</p>
+
+<h2>1 · Same shape as cumsum(), different question</h2>
+<p><dfn data-en="a pandas Series method returning, at each row, the largest value seen so far in the current row order -- the running-maximum sibling of cumsum(), never decreasing as it goes" data-vn="giữ nguyên 'cummax()' — giá trị LỚN NHẤT từng gặp tính đến dòng đó (theo thứ tự hiện có); không bao giờ giảm">cummax()</dfn> and <dfn data-en="a pandas Series method returning, at each row, the smallest value seen so far in the current row order -- the running-minimum sibling of cumsum(), never increasing as it goes" data-vn="giữ nguyên 'cummin()' — giá trị NHỎ NHẤT từng gặp tính đến dòng đó; không bao giờ tăng">cummin()</dfn> walk top to bottom exactly like <code>cumsum()</code> does, in whatever order the rows currently are — but instead of adding, each row reports the best (or worst) value seen by that point:</p>
+<pre><code>s = pd.Series([<span class="kw">3</span>, <span class="kw">1</span>, <span class="kw">4</span>, <span class="kw">1</span>, <span class="kw">5</span>, <span class="kw">9</span>, <span class="kw">2</span>, <span class="kw">6</span>])
+
+s.cummax()
+<span class="cm"># 0    3
+# 1    3   -- 1 < 3, so the running max stays 3
+# 2    4   -- 4 > 3, new running max
+# 3    4
+# 4    5
+# 5    9
+# 6    9   -- 2 < 9, stays 9
+# 7    9
+# dtype: int64</span>
+
+s.cummin()
+<span class="cm"># 0    3
+# 1    1   -- new running min
+# 2    1
+# 3    1
+# 4    1
+# 5    1
+# 6    1
+# 7    1
+# dtype: int64</span></code></pre>
+<p>Confirmed directly (pandas 3.1.0): the last value of <code>s.cummax()</code> always equals <code>s.max()</code>, and the last value of <code>s.cummin()</code> always equals <code>s.min()</code> — the running version converges to the plain aggregate by the final row, same relationship <code>cumsum()</code>'s last value has to <code>sum()</code>.</p>
+
+<h2>2 · The one guarantee: it never moves the wrong way</h2>
+<p>Confirmed directly by diffing the result against itself: every step of <code>cummax()</code> is either flat or increases — it can never go down — and every step of <code>cummin()</code> is either flat or decreases — it can never go up. That single monotonic guarantee is the whole interview-answerable property, and it's what makes <code>groupby("customer")["amount"].cummax()</code> read naturally as "this customer's biggest order <em>so far</em>, as of this row," the running-record idea behind a leaderboard or a stock's running 52-week high:</p>
+<pre><code>df = pd.DataFrame({
+    <span class="str">"customer"</span>: [<span class="str">"An"</span>, <span class="str">"An"</span>, <span class="str">"Binh"</span>, <span class="str">"Binh"</span>, <span class="str">"An"</span>],
+    <span class="str">"amount"</span>:   [<span class="kw">10</span>, <span class="kw">30</span>, <span class="kw">5</span>, <span class="kw">20</span>, <span class="kw">15</span>],
+})
+df[<span class="str">"running_best"</span>] = df.groupby(<span class="str">"customer"</span>)[<span class="str">"amount"</span>].cummax()
+<span class="cm"># customer  amount  running_best
+#       An      10            10
+#       An      30            30   -- new personal best
+#     Binh       5             5
+#     Binh      20            20
+#       An      15            30   -- still 30 -- 15 didn't beat it, group resets independently</span></code></pre>
+<p>Same gotcha as Lesson 7's <code>cumsum()</code>: there is no <code>ORDER BY</code> argument. If "so far" is meant to track order <em>by date</em>, the rows must be <code>sort_values("order_date")</code>'d first — <code>cummax()</code> only ever trusts the order the rows are already in.</p>
+
+<h2>3 · NaN: resumes by default, poisons on request</h2>
+<p>Confirmed directly, same shape as <code>cumsum()</code>'s own NaN handling: the default <code>skipna=True</code> leaves a NaN in place at its own row, but resumes tracking the running max/min right after it, as if that row were simply skipped:</p>
+<pre><code>s2 = pd.Series([<span class="kw">3.0</span>, np.nan, <span class="kw">1.0</span>, <span class="kw">5.0</span>, np.nan, <span class="kw">2.0</span>])
+
+s2.cummax()                     <span class="cm"># default skipna=True</span>
+<span class="cm"># 0    3.0
+# 1    NaN   -- this row's own value IS NaN, stays NaN
+# 2    3.0   -- resumes tracking: max(3, 1) = 3, the NaN was skipped
+# 3    5.0
+# 4    NaN
+# 5    5.0
+# dtype: float64</span>
+
+s2.cummax(skipna=<span class="kw">False</span>)
+<span class="cm"># 0    3.0
+# 1    NaN   -- once skipna=False hits a NaN, EVERY row after turns NaN too
+# 2    NaN
+# 3    NaN
+# 4    NaN
+# 5    NaN
+# dtype: float64</span></code></pre>
+<p><code>skipna=False</code> is a one-way poison: the very first NaN permanently contaminates every row that follows, since "the running max including an unknown value" is itself unknown forever after. An all-NaN Series returns an all-NaN result either way, never raising.</p>
+
+<h2>4 · The NumPy layer: no np.cummax(), reach for np.maximum.accumulate() instead</h2>
+<p>Lesson 109 found a raw NumPy function under every pandas cumulative method so far: <code>np.cumsum()</code>, <code>np.cumprod()</code>, <code>np.diff()</code>. <code>cummax()</code>/<code>cummin()</code> break that pattern entirely — confirmed directly, <strong>there is no <code>np.cummax()</code> or <code>np.cummin()</code> function in NumPy at all</strong>; calling one raises <code>AttributeError: module 'numpy' has no attribute 'cummax'</code>. The actual NumPy equivalent lives under a different name, <dfn data-en="NumPy's accumulate-style running-maximum operation, built from the np.maximum ufunc's .accumulate() method rather than existing as its own top-level np.cummax() function -- the one cumulative operation in this course without a plain np.xxx() spelling" data-vn="giữ nguyên 'np.maximum.accumulate()' — cách NumPy viết cummax(), KHÔNG có hàm np.cummax() riêng, phải gọi qua .accumulate() của ufunc np.maximum">np.maximum.accumulate()</dfn>, reached through the <code>np.maximum</code> ufunc's own <code>.accumulate()</code> method rather than a standalone function:</p>
+<pre><code>arr = np.array([<span class="kw">3</span>, <span class="kw">1</span>, <span class="kw">4</span>, <span class="kw">1</span>, <span class="kw">5</span>, <span class="kw">9</span>, <span class="kw">2</span>, <span class="kw">6</span>])
+
+np.cummax(arr)
+<span class="cm"># AttributeError: module 'numpy' has no attribute 'cummax'</span>
+
+np.maximum.accumulate(arr)
+<span class="cm"># array([3, 3, 4, 4, 5, 9, 9, 9])   -- same running max, different spelling</span></code></pre>
+<p>Confirmed directly, one more twist: called on a pandas Series instead of a plain array, <code>np.maximum.accumulate()</code> <em>does</em> dispatch and hands back a Series — the same recognizes-a-Series behavior Lesson 109 found for <code>np.cumsum()</code>, just reached through a ufunc method instead of a plain function name.</p>
+<div class="callout"><strong>The trap:</strong> guessing <code>np.cummax(arr)</code> by analogy with <code>np.cumsum(arr)</code> is a reasonable guess that's simply wrong — NumPy never shipped a top-level <code>cummax</code>/<code>cummin</code> function, only the ufunc-accumulate spelling. <code>pd.Series.cummax()</code> itself is implemented on top of this exact ufunc machinery, so the pandas method and the "missing" NumPy function were never two different algorithms — only one has a short top-level name.</div>
+
+<h2>5 · One more contrast with cumprod(): dtype is never upgraded</h2>
+<p>Lesson 109 found <code>cumprod()</code> silently upgrades a narrow integer dtype (<code>int8</code>/<code>int16</code>/<code>int32</code>) to <code>int64</code> to guard against overflow. Confirmed directly, <code>cummax()</code>/<code>cummin()</code> need no such guard and trigger none — taking the max or min of two <code>int8</code> values can never overflow the way multiplying them can, so an <code>int8</code> Series's <code>cummax()</code> stays <code>int8</code>, dtype unchanged.</p>
+
+<div class="interview">
+<p><strong>Q: "How would you compute each stock's running 52-week high from a sorted price history?"</strong> A strong answer, out loud: <em>"Sort by date within each stock first — cummax() trusts row order, it has no ORDER BY of its own, same gotcha as cumsum(). Then groupby(stock)['price'].cummax() gives the running high as of each row: it only ever holds steady or increases, by definition, so the last value in each group always equals that stock's plain max(). If I needed the NumPy-array version instead of a Series, I'd reach for np.maximum.accumulate() — NumPy never shipped a plain np.cummax() function, which is an easy wrong guess by analogy with np.cumsum()."</em> The signal: naming the monotonic guarantee as the actual mechanism, not just the method name, and knowing the NumPy-layer gap exists instead of assuming every pandas cumulative method has a same-named NumPy twin.</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>Series.cummax()</code>/<code>Series.cummin()</code> as the running-best-so-far siblings of Lesson 7's <code>cumsum()</code>, their monotonic never-reverses guarantee, <code>groupby(...).cummax()</code> per-group behavior, the <code>skipna</code> NaN contrast (resume vs. permanently poison), and the missing-<code>np.cummax()</code> gap closed by <code>np.maximum.accumulate()</code>. It does not cover <code>DataFrame.cummax(axis=)</code> in depth, <code>cummax()</code>'s rarer sibling on non-numeric/categorical dtypes, or the wider family of NumPy ufunc <code>.accumulate()</code>/<code>.reduce()</code> methods beyond <code>maximum</code>/<code>minimum</code> — worth knowing the pattern exists, not today's focus.</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/110_cummax_cummin.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/110_cummax_cummin.py</code></pre>
+<p>Exercise 1 confirms the basic running-max/running-min values on a plain Series, and that the last value matches the plain <code>max()</code>/<code>min()</code> (Section 1). Exercise 2 confirms <code>groupby(...).cummax()</code> tracks each group's own running best independently (Section 2). Exercise 3 confirms the NaN contrast: default <code>skipna=True</code> resumes right after a NaN, while <code>skipna=False</code> poisons every row after the first NaN (Section 3).</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: diffing a Series's own cummax() result against itself never produces a negative step -- it only ever holds flat or increases, by definition of tracking the largest value seen so far. cummin() has the exact mirror guarantee, never increasing.">
+    <p class="stem">What is guaranteed about every step of <code>s.cummax()</code> compared to the step right before it?</p>
+    <button class="opt" data-ok>it only ever stays flat or climbs higher, by definition, never drops any lower</button>
+    <button class="opt">it always climbs higher by exactly one whole unit at every single new row</button>
+    <button class="opt">it resets back down to the first value whenever a new max shows up</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: there is no top-level np.cummax() or np.cummin() function in NumPy at all -- calling one raises AttributeError. The real NumPy equivalent is reached through the np.maximum ufunc's own .accumulate() method, np.maximum.accumulate(), not a same-named top-level function like np.cumsum() has.">
+    <p class="stem">Calling <code>np.cummax(arr)</code> on a plain NumPy array does what?</p>
+    <button class="opt" data-ok>it raises an AttributeError outright, since no top-level function quite like that even exists</button>
+    <button class="opt">it works fine, returning the exact same running max value the pandas method gives</button>
+    <button class="opt">it returns a running max fine, but it quietly drops every NaN it finds</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: the default skipna=True leaves a NaN's own row as NaN but resumes tracking the running max right after it, treating that row as skipped. skipna=False instead poisons permanently -- the first NaN encountered turns every following row NaN too, since the running max including an unknown value is itself unknown forever after.">
+    <p class="stem">How does <code>cummax(skipna=False)</code> behave differently from the default <code>skipna=True</code> once a NaN appears?</p>
+    <button class="opt" data-ok>every row after the first NaN turns NaN too, permanently, not just that row</button>
+    <button class="opt">nothing at all changes, since cummax never actually looks at the skipna flag here</button>
+    <button class="opt">only that one single NaN row changes, every later row still tracks completely normally</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official pandas API reference for <a href="https://pandas.pydata.org/docs/reference/api/pandas.Series.cummax.html"><code>Series.cummax()</code></a> and <a href="https://pandas.pydata.org/docs/reference/api/pandas.Series.cummin.html"><code>Series.cummin()</code></a> (per <code>RESOURCES.md</code>'s "Docs: pandas User Guide" entry, ~5 min) confirms the <code>skipna</code> default and the monotonic behavior described above; the NumPy <a href="https://numpy.org/doc/stable/reference/generated/numpy.ufunc.accumulate.html"><code>numpy.ufunc.accumulate()</code></a> reference page is the cross-check source for why <code>np.maximum.accumulate()</code> is reached through a ufunc method rather than a plain top-level function name.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>cummax()</code> / <code>cummin()</code> and <code>np.maximum.accumulate()</code> are new today, added right after Lesson 109's <code>np.diff()</code> entry.<br>
+<strong>Next lesson:</strong> no standing candidate named this round — tomorrow's own fresh curriculum/glossary scan picks the next topic with nothing pre-committed.<br><br>
+💬 Anything unclear — the monotonic guarantee, the missing np.cummax() gap, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -4863,3 +4863,141 @@ along the Phase 2 spine, adapted to the learning records.
   candidates, so the next round (dbt, Kafka, or another Airflow attempt)
   should start with its own fresh scan too rather than assuming a
   carried-over gap exists.
+
+- 2026-10-27 (headless run, Day 42 generated): forty-second lesson,
+  `0042-dbt-custom-generic-test.html`. Idempotency check first — confirmed
+  no `lessons/0042-*.html` on disk and no `n: 42`/`date: "2026-10-27"` entry
+  in `assets/nav.js` before writing anything (highest prior lesson was 41,
+  dated 2026-10-26). A DB query had already confirmed no `course_progress`
+  row for dataeng dated 2026-10-27 and no recent failure signal, so pacing
+  continued steady/sequential. Read `MISSION.md` in full, this file's own
+  tail back through Day 41's close, `PLAN.md`, `RESOURCES.md`, the one
+  `learning-records/` file, and `assets/nav.js`'s full `LESSONS` array (all
+  41 titles) before picking a topic.
+  **Topic choice:** Day 41's own closing note said both dbt's Phase 2a
+  spine and that round's Kafka pick came from fresh scans rather than named
+  candidates, and that the next round should scan fresh too. Ran that scan
+  directly rather than retrying the `airflow db migrate` gate an eighth
+  straight round for no new reason to expect it to clear: grepped
+  `lessons/*.html` for `{% test ` and `tests/generic/` (zero hits) after
+  first confirming Day 11 (packages, `dbt_utils.accepted_range`), Day 3
+  (singular tests), Day 12 (unit tests) and Day 32 (severity/
+  `store_failures`) between them cover singular tests, package generic
+  tests, unit tests and test severity — but never once show writing a new
+  *generic* test macro from scratch, the third tier dbt's own test
+  taxonomy actually has (built-in/package generic test vs. project-authored
+  generic test vs. singular test). Confirmed this is a real, previously
+  untaught mechanism, not a deepening pass: dbt_utils' own generic tests
+  (`accepted_range`, `relationships`, etc., all already used by this
+  course) bound a single column or check existence in another model's
+  column, never a same-row two-column comparison, so a genuine gap exists
+  in this project too — nothing has ever tested that `delivered_at` comes
+  after its own order's `placed_at`, a real omission sitting in
+  `mart_delivery_sla` since Day 6.
+  **Content:** promoted Day 6's inline placed/delivered join out of
+  `mart_delivery_sla.sql` into a new ephemeral `models/intermediate/
+  int_order_durations.sql` (same naming/materialization convention Day 8's
+  `int_orders_joined` set), giving the per-order `placed_at`/`delivered_at`
+  columns a real home to test before they get aggregated away into
+  `mart_delivery_sla`'s city/day grain. Wrote `tests/generic/
+  test_assert_column_is_after.sql`: a 5-line `{% test
+  assert_column_is_after(model, column_name, after_column) %}` macro,
+  wired onto `int_order_durations.delivered_at` via YAML's `arguments:`
+  block (`after_column: placed_at`). Named explicitly why no installed
+  package covered this already (the single-column-bound vs.
+  another-model's-column shape of `accepted_range`/`relationships` vs. a
+  same-row two-column comparison) rather than skipping straight to "write
+  it by hand," extending Day 11's own package-vs-hand-written decision
+  rule one level further: generic-but-uncovered-by-any-installed-package is
+  a third bucket, not the same as business-specific. One callout bridges to
+  Kafka's own at-least-once/ordering material (Days 6, 16, 34) for *why*
+  this rule is worth having (a real, not hypothetical, way a `delivered_at`
+  could land before its `placed_at`), without re-deriving any of that
+  material — a one-line naming bridge, per this course's own scope rule.
+  No pandas, no Python-language teaching, no re-derivation of backend
+  idempotency concepts — confirmed by a prose-only read before shipping;
+  this lesson is pure dbt Jinja/YAML/SQL content, no Python file at all.
+  **Verification:** built a minimal scratch dbt project under
+  `.scratch-dataeng-1027/fdp/food_delivery_pipeline/` at the repo root
+  (`/tmp` out of bounds again this round, same constraint recent rounds
+  hit), with `sources.yml`, `stg_orders`/`stg_restaurants`/
+  `stg_order_events`, the new `int_order_durations.sql` and its
+  `intermediate.yml` wiring the custom test, the rewritten
+  `mart_delivery_sla.sql` selecting from it, and the test macro itself
+  under `tests/generic/`. Ran `dbt parse --profiles-dir . --project-dir .
+  --no-partial-parse` clean (grepped output for the literal string `Error`,
+  found none — dbt's own exit code stayed unreliable through this
+  sandbox's pipe handling, per this file's standing warning, so output was
+  inspected directly rather than trusted via exit code). Ran `dbt list
+  --resource-type test` live and got back exactly
+  `food_delivery_pipeline.intermediate.
+  assert_column_is_after_int_order_durations_placed_at__delivered_at`
+  alongside the existing `not_null_mart_delivery_sla_city` — confirming the
+  custom test macro parses, resolves, and names itself exactly the way
+  Section 4 of the lesson claims a real build would. A follow-up `dbt
+  compile --select "test_name:assert_column_is_after"` was run against the
+  same unreachable-host `profiles.yml` pattern every recent round has used,
+  and it reached a real `Database Error: connection ... timeout expired` —
+  confirming the compiled SQL got far enough to attempt a live connection,
+  not blocked on a Jinja/parse error, the same style of proof Day 15's
+  round established for `--defer`. No `.py` file exists in this lesson
+  (pure dbt YAML/SQL/Jinja content), so `py_compile` did not apply to
+  shipped content; `uv run python3` was used only for this round's own
+  throwaway tag-balance/quiz-word-count checker scripts, written to a
+  second scratch directory and deleted with it. Also fetched dbt Labs'
+  live "Writing custom generic tests" guide via `WebFetch` and confirmed
+  the exact `{% test name(model, column_name) %}` syntax, the
+  `tests/generic/` vs. `macros/` file-location choice, and the standard
+  `model`/`column_name` argument convention character-for-character against
+  what was already written from memory — no corrections needed, but
+  confirmed live rather than assumed. Deleted both scratch directories
+  entirely afterward (confirmed via a directory-listing attempt on each
+  finding nothing).
+  Ran a Python tag-balance/bare-`&`/dfn-attribute/quiz-word-count script,
+  same shape as recent rounds': every checked tag balanced on the first
+  pass (div 8/8, p 26/26, code 109/109, button 12/12, script 3/3, dfn 2/2,
+  pre 11/11, h2 8/8, h1 1/1, em 7/7, strong 5/5, a 3/3), zero bare `&`, both
+  `<dfn>` tags carrying `data-en=` and `data-vn=`. The first quiz draft came
+  up uneven on three of four questions (7/6/7, 10/8/8, 12/10/9; only the
+  first question was already 10/10/10) — rebalanced through several
+  edit-and-recount passes, re-running the same script after every edit
+  (catching a false-pass along the way from a tag-stripping quirk in the
+  first checker script that collapsed `{% test %}` into fewer tokens than
+  the real rendered text has, caught by writing a second, simpler checker
+  and cross-checking both agreed), to a final 10/10/10, 8/8/8, 10/10/10 and
+  12/12/12 across all four questions. A separate pass on `reference/
+  glossary.html` after adding this round's new section confirmed it stayed
+  balanced too (h2 41/41, table 41/41, tr 165/165, td 372/372, th
+  123/123), zero bare `&`; the pre-existing duplicate `id="day1"` flagged
+  honestly in Day 41's own entry is still there, still untouched by this
+  round's diff, confirmed by the count staying at exactly 2 occurrences —
+  left alone per this task's own append-only rule for `glossary.html`.
+  Added one new glossary term, `custom generic test`, under a new Day 42
+  section, after grepping case-insensitively first and confirming no
+  existing row covered it — `generic test`, `singular test`, `dbt package`
+  and `severity`/`store_failures` are all pure reuse of Days 3/11/32's
+  existing glossary rows, not retaught. Added the "Writing custom generic
+  tests" guide as a new `RESOURCES.md` line under the existing dbt (deep)
+  section, right after the Day 14/40 model-contracts/model-versions line —
+  a genuinely new citation this round, not a reuse of an existing one.
+  Registered Lesson 42 in `assets/nav.js` right after the `n: 41` entry,
+  dated 2026-10-27 (`node --check` clean on `nav.js`, `gloss.js` and
+  `quiz.js`, the last two untouched but re-checked per habit). Ran
+  `bin/record-progress dataeng lesson_generated --day 42 --lesson
+  0042-dbt-custom-generic-test.html --detail '{"by":"headless"}'` from the
+  repo root at the end of this round; succeeded.
+  `dataeng/learning-records/` was not touched this round — today's pick
+  came from a fresh gap-scan of existing lesson content, not a new durable
+  fact about the learner distinct from the single 2026-09-14 baseline
+  record on file.
+  **Next up:** the `airflow db migrate`/`airflow dags test` approval-gate
+  block is now eight rounds running (35-42) with no attempt made this
+  round specifically (today's own closing note from Day 41 pointed at a
+  fresh scan instead, which is what this round did) — still worth a human
+  granting it once for whoever next has one available. Today's fresh scan
+  found dbt's test taxonomy had a real, previously-unexercised third tier;
+  worth noting for whoever picks up next that this course's own spine
+  items (`PLAN.md`'s Phase 2a/2b/2c bullets) are now close to fully covered
+  by name, so the highest-value move going forward is likely to keep
+  scanning existing lesson *content* for gaps the way Days 38, 39, 41 and
+  42 all did, rather than assuming an uncovered spine bullet remains.

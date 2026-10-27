@@ -11339,3 +11339,107 @@ fail *gracefully* so the learner sees which task failed.
   '{"by":"headless"}'` was run from the repo root at the end of this
   round and succeeded.
 
+- 2026-10-27 generation (Lesson 90, headless run): idempotency check
+  first — confirmed no `lessons/0090-*.html` on disk and no `n: 90`/
+  `date: "2026-10-27"` entry in `nav.js` before writing anything (highest
+  prior lesson was 89, dated 2026-10-26), and confirmed via a direct DB
+  query that no `course_progress` row for `python` dated 2026-10-27
+  existed yet, with no quiz/completion-failure signal requiring a
+  revisit. Read `MISSION.md` in full (no-pandas/no-NumPy exclusion
+  re-confirmed before writing a line — this course teaches the language
+  and stdlib, never pandas/NumPy APIs, that is `data/`'s scope), `PLAN.md`
+  in full (Phase 2's spine is long exhausted; the course has been in
+  sequential stdlib gap-filling mode for many days), and the tail of this
+  file (~310 lines, covering Days 88-89 in full) rather than the whole
+  770KB file, since it exceeds a single read's size cap — sufficient,
+  since Day 89's own next-day note stated the cadence and candidates
+  plainly: Day 88 closed the first fresh lesson since Day 87's review,
+  Day 89 was the second, so Day 90 continues the three-fresh-then-review
+  cadence as the third fresh lesson, with a review of Days 88-90 due at
+  Day 91, leaving three carried-forward candidates open — `graphlib`,
+  `weakref`, `calendar`. Also read the learner's only record
+  (`learning-records/0001-baseline-reads-python-writes-little.md`, the
+  Day 1 "can read Python, can't produce it" recognition-vs-recall gap,
+  still with no later record and no new quiz/kata-failure signal).
+  Topic/format selection: re-ran the fresh-gap grep anyway per every
+  prior fresh-topic day's own discipline — case-insensitive search
+  across all 89 lessons, every practice file, `reference/glossary.html`,
+  and `RESOURCES.md` for all three carried-forward candidates — all three
+  still genuinely zero-hit. Picked `graphlib`: it is pure stdlib ordering
+  logic with zero pandas/NumPy surface (unlike `weakref`'s narrower,
+  harder-to-motivate cache/circular-reference niche, or `calendar`'s
+  large overlap with Day 14's already-taught `datetime`), it pairs
+  naturally with Day 51's `heapq`/`bisect` (ordering structures without
+  a value to sort by) and Day 73's `ThreadPoolExecutor` (the `get_ready()`
+  batches are exactly what a thread pool would run concurrently), and it
+  solves a real, recurring shape — "run these steps, but only after their
+  prerequisites are done" — that a hand-written order silently gets wrong
+  once dependencies change or form a cycle. Probed real behavior directly
+  in `.scratch-python-20261027/` (deleted after, never tracked by git)
+  via `uv run python3 probe.py` rather than trusting memory: confirmed
+  `ts.add(node, *predecessors)` plus `static_order()` produces a valid
+  order (`['compile', 'test', 'package', 'deploy']` for a 4-step chain),
+  confirmed the dict-constructor shortcut produces the same shape of
+  result, confirmed a real cycle raises `graphlib.CycleError` with the
+  exact loop as its second argument (`('nodes are in a cycle', ['x', 'y',
+  'x'])`), confirmed a node mentioned only as somebody else's predecessor
+  is still included in the output with nothing to wait for, confirmed
+  `prepare()`/`get_ready()`/`done()` batches independent nodes together
+  (`('a',)` then `('b', 'c')` then `('d',)` for a diamond-shaped graph —
+  `b` and `c` both only needed `a`, so both came back ready at once),
+  confirmed `.add()` after `.prepare()` raises `ValueError`, and confirmed
+  calling `static_order()` a second time on the same sorter raises
+  `ValueError` rather than silently repeating. Checked the glossary for a
+  collision before writing — grepped `graphlib`/`TopologicalSorter`
+  case-insensitively across the full `glossary.html`, zero existing rows.
+  **New jargon: 5 terms** (`dependency`, `cycle`, `graphlib.
+  TopologicalSorter`, `ts.add(node, *predecessors)`, `static_order()`,
+  plus the `prepare()`/`get_ready()`/`done()` protocol as one combined
+  row) — two inline `<dfn>`s in the lesson body (`dependency` in the
+  byline, `cycle` in Section 1) plus full glossary-page entries for all
+  five rows, added as a new `<h2 id="day90">` section directly after Day
+  89's. Verification performed mechanically: (1) a throwaway Python
+  script (written via `Write` into this round's scratch dir, deleted
+  after use) extracted each quiz question's options via regex, stripped
+  tags, and split on whitespace — first draft mismatched on all three
+  questions (Q1 7/7/8, Q2 8/9/9, Q3 8/8/9), iterated option-by-option
+  (trimming/adding individual words, e.g. "both always land together in
+  the same batch" → "both always land in the same batch", "it raises
+  CycleError naming the exact loop found" → "...naming the exact loop it
+  found") and recounted after every edit, until all three landed on
+  equal per-question counts: 7/7/7, 9/9/9, 9/9/9; (2) an HTML tag-balance
+  check across div/p/code/button/script/dfn/pre/h2/h1/em/strong/a — clean
+  after the fix (div 6/6, p 18/18, code 58/58, button 9/9, script 3/3,
+  dfn 2/2, pre 6/6, h2 6/6, h1 1/1, em 2/2, strong 3/3, a 2/2); a separate
+  table/tr/th/td/h2/p/div balance check on `glossary.html` after its new
+  section — also balanced (h2 77/77, table 77/77, tr 337/337, td
+  780/780), plus a duplicate-`id="dayNN"` scan — zero duplicates among 77
+  ids, `day90` present exactly once at the tail; (3) a raw-unescaped-`&`
+  regex scan (excluding `&amp;`/`&quot;`/etc.) on both files — zero hits;
+  (4) `node --check` against `assets/nav.js` after the edit — clean; (5)
+  an `html.parser.HTMLParser` full-document parse of the new lesson —
+  no parse errors. Added one new `RESOURCES.md` line for `graphlib`,
+  placed directly after Day 89's `hmac` line and before the PEP 8 line,
+  following the file's chronological-by-day ordering. Registered Lesson
+  90 in `nav.js` with today's date (2026-10-27) right after the `n: 89`
+  entry. The shipped (unsolved) `practice/90_graphlib_topological_
+  sorting.py` was executed directly from its real `practice/` location
+  and printed exactly 3 ✗ with no raw traceback. A solved copy built in
+  `.scratch-python-20261027/` (copied from the shipped file, then each
+  `...` body filled in directly — never editing the shipped file itself,
+  deleted after) printed all 3 ✓ and "All green" on two consecutive runs;
+  the shipped file was re-run afterward and reproduced the identical
+  all-✗ result, confirming no leakage back into the baseline.
+  `python/learning-records/` was not touched this round — a routine
+  fresh-topic pick following the course's own settled cadence and Day
+  89's own named candidate list, not a new durable fact about the
+  learner distinct from Day 1's baseline record. Candidates spotted but
+  not picked this round, still open for a future fresh-topic day:
+  `weakref`, `calendar` — Day 90 is the third fresh lesson since Day 87's
+  review, so per the settled three-fresh-then-review cadence, a review
+  covering Days 88-90 is due next at Day 91, before either remaining
+  candidate. `bin/record-progress python lesson_generated --day 90
+  --lesson 0090-graphlib-topological-sorting.html --detail
+  '{"by":"headless"}'` was run from the repo root at the end of this
+  round and succeeded.
+

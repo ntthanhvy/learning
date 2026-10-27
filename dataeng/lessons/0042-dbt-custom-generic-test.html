@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 42 · dbt custom generic tests: writing your own, not just importing one</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 42 · ~20 min · 27 Oct 2026</p>
+<h1>dbt custom generic tests: writing your own, not just importing one</h1>
+<p class="byline">Today's tangible win: a new <code>models/intermediate/int_order_durations.sql</code> model pulls the placed/delivered join out of <code>mart_delivery_sla</code> into its own reusable node, and a hand-written generic test, <code>assert_column_is_after</code>, asserts <code>delivered_at</code> never comes before its own order's <code>placed_at</code> — in one file you write yourself, reusable on any two-timestamp pair this project ever adds.</p>
+
+<div class="callout"><strong>Before today — check Day 41 actually landed:</strong> today adds a new model next to <code>mart_delivery_sla</code>, so start from a clean build:
+<pre><code>cd food_delivery_pipeline
+uv run --project ../dbt_env dbt build</code></pre>
+Expected: no <code>ERROR</code> lines, same model/test count as your last successful Phase 2a round. If <code>mart_delivery_sla.sql</code> is missing its <code>placed</code>/<code>delivered</code> CTEs from Day 6, finish that lesson first — today's refactor assumes that join already works, because today is about <em>where</em> the join lives and what tests it, not about building it from scratch.</div>
+
+<h2>1 · A third option this course has never shown</h2>
+<p>By now you've written a test three different ways, and it's worth lining them up before adding a fourth: Day 3's <code>assert_positive_subtotal</code> was a <dfn data-en="a one-off dbt test written as a single .sql SELECT file in tests/ — fails if the query returns any rows, for a business rule too specific to express as a generic test" data-vn="giữ nguyên &quot;singular test&quot; — test viết riêng bằng 1 file .sql trong tests/, không dùng lại được cho cột khác">singular test</dfn>, one file, one rule, not reusable. Day 11's <code>dbt_utils.accepted_range</code> was a <em>package's</em> generic test — reusable, but someone else wrote the SQL; you only ever supplied arguments in YAML. Day 12's unit tests check model <em>logic</em> against fake rows, a different axis entirely (logic vs. real data), not a mechanism for writing a new kind of real-data check at all.</p>
+<p>What's never come up: dbt lets <em>you</em> write a brand-new generic test, with the exact same reusable, parameterized shape as a package's — declared in YAML, applied to any column, written once and reused everywhere — except the SQL inside it is yours. That's today's actual skill, and it closes a real gap: nothing in this project has ever tested that <code>delivered_at</code> comes after <code>placed_at</code> for the same order, a rule no built-in test and no installed package expresses, because it's a comparison between two columns on the same row, not a bound on one column alone.</p>
+
+<h2>2 · Build: promote the join into its own model first</h2>
+<p>Day 6's <code>mart_delivery_sla.sql</code> computes <code>placed_at</code>, <code>delivered_at</code> and <code>minutes_to_deliver</code> inside its own CTEs, then immediately aggregates them away into a city/day grain — there's no column left afterward to test the raw per-order comparison against. Pull that join into its own <code>intermediate</code> model first, the same layering move Day 8 made for the restaurant/courier join, so the per-order columns exist somewhere testable:</p>
+<pre><code><span class="cm">-- models/intermediate/int_order_durations.sql</span>
+with placed as (
+    select order_id, occurred_at as placed_at
+    from {{ ref(<span class="str">'stg_order_events'</span>) }}
+    where status = <span class="str">'placed'</span>
+),
+
+delivered as (
+    select order_id, occurred_at as delivered_at
+    from {{ ref(<span class="str">'stg_order_events'</span>) }}
+    where status = <span class="str">'delivered'</span>
+)
+
+select
+    o.order_id,
+    o.restaurant_id,
+    r.city,
+    p.placed_at,
+    d.delivered_at,
+    extract(epoch from (d.delivered_at - p.placed_at)) / <span class="kw">60</span> as minutes_to_deliver
+from {{ ref(<span class="str">'stg_orders'</span>) }} as o
+inner join placed as p on p.order_id = o.order_id
+inner join delivered as d on d.order_id = o.order_id
+inner join {{ ref(<span class="str">'stg_restaurants'</span>) }} as r on r.restaurant_id = o.restaurant_id</code></pre>
+<p>This is a line-for-line move of Day 6's own CTEs into their own file, materialized <code>ephemeral</code> per Day 8's convention (dbt-internal only, inlined at compile time, no extra storage). Rewrite <code>models/marts/mart_delivery_sla.sql</code> to select from it instead of repeating the join:</p>
+<pre><code><span class="cm">-- models/marts/mart_delivery_sla.sql -- TODO: select from int_order_durations instead</span>
+<span class="cm">-- Keep the same final select: city, date_trunc('day', placed_at)::date as order_date,</span>
+<span class="cm">-- count(*) as delivered_orders, avg(minutes_to_deliver), and the share_over_45_min</span>
+<span class="cm">-- case/sum you already wrote on Day 6 -- only the FROM/JOIN changes, from three</span>
+<span class="cm">-- joined CTEs down to one ref() against int_order_durations, which now carries</span>
+<span class="cm">-- every column this mart's aggregation needs.</span></code></pre>
+<pre><code>uv run --project ../dbt_env dbt build --select int_order_durations mart_delivery_sla</code></pre>
+<p>Expected — same row counts as before the refactor, <code>int_order_durations</code> itself printing no build line (ephemeral, inlined into <code>mart_delivery_sla</code>'s own query, same as Day 8's <code>int_orders_joined</code>):</p>
+<pre><code>1 of 1 OK created sql table model dbt_dev.mart_delivery_sla ...... [SELECT &lt;N&gt; in 0.05s]
+
+Done. PASS=1 WARN=0 ERROR=0 SKIP=0 TOTAL=1</code></pre>
+
+<h2>3 · Write the generic test itself</h2>
+<p>A <dfn data-en="a generic dbt test a project writes itself rather than installing from a package -- same reusable, parameterized shape as a built-in or package generic test (one .sql file defining a {% test %} macro, applied to any column via YAML), but the SQL inside is the project's own, for a rule no built-in or installed test expresses" data-vn="giữ nguyên &quot;custom generic test&quot; — generic test project tự viết thay vì cài từ package; vẫn tái sử dụng được qua YAML như generic test có sẵn, nhưng SQL bên trong là do project viết, cho rule mà built-in/package test không có">custom generic test</dfn> lives in a <code>.sql</code> file under <code>tests/generic/</code> — a special subfolder dbt recognizes alongside the singular tests you already have directly in <code>tests/</code> — and is defined with a <code>{% test %}</code> block, the same Jinja block shape as any macro. Every generic test's first two parameters are always named <code>model</code> and <code>column_name</code>, whether built into dbt, shipped by a package, or written here; the column being tested is one of them (<code>column_name</code>), and any other column it needs to compare against is just another named argument:</p>
+<pre><code><span class="cm">-- tests/generic/test_assert_column_is_after.sql</span>
+{% test assert_column_is_after(model, column_name, after_column) %}
+
+select *
+from {{ model }}
+where {{ column_name }} &lt; {{ after_column }}
+
+{% endtest %}</code></pre>
+<p>Read this the same way Day 3 read its own singular test: a dbt data test fails when its <code>select</code> returns any row at all, and the returned rows are the specific offenders. <code>{{ model }}</code> renders to whatever model this test is attached to in YAML — here, <code>int_order_durations</code> — and <code>{{ column_name }}</code>/<code>{{ after_column }}</code> render to whichever two columns that YAML names. Nothing about this SQL hardcodes <code>placed_at</code> or <code>delivered_at</code> anywhere; that's the entire point of the generic shape, identical in spirit to Day 11's <code>dbt_utils.accepted_range</code> taking a <code>min_value</code> argument instead of a hardcoded bound.</p>
+<p>Wire it onto <code>int_order_durations.delivered_at</code> in a new <code>models/intermediate/intermediate.yml</code>:</p>
+<pre><code><span class="cm">version: 2
+
+models:
+  - name: int_order_durations
+    columns:
+      - name: delivered_at
+        tests:
+          - assert_column_is_after:
+              arguments:
+                after_column: placed_at</span></code></pre>
+<p><code>arguments:</code> is the current dbt syntax for any extra, test-specific parameter beyond <code>model</code>/<code>column_name</code> — the same nesting Day 3 already flagged for <code>relationships</code>' <code>to:</code>/<code>field:</code>, not something new to today's test specifically. <code>column_name</code> itself never appears under <code>arguments:</code>: dbt supplies it automatically from the <code>- name: delivered_at</code> line the test is nested under.</p>
+
+<h2>4 · Verify: it catches a real bad row, then clears</h2>
+<pre><code>uv run --project ../dbt_env dbt build --select int_order_durations mart_delivery_sla</code></pre>
+<p>Expected — the new test runs and passes against today's real data, named exactly the way dbt names every generic test: <code>&lt;test macro name&gt;_&lt;model&gt;_&lt;column_name&gt;__&lt;extra args&gt;</code>:</p>
+<pre><code>assert_column_is_after_int_order_durations_placed_at__delivered_at ... [PASS in 0.02s]</code></pre>
+<p>Now prove it actually catches something, the same style of proof Day 3 used on the planted bad rows — hand-corrupt one event directly, moving a <code>delivered</code> timestamp before its own order's <code>placed</code> timestamp:</p>
+<pre><code>docker compose exec -T postgres psql -U fdp -d fdp -c \
+  "UPDATE raw.order_events SET occurred_at = occurred_at - interval '2 days'
+   WHERE order_id = 101 AND status = 'delivered';"
+uv run --project ../dbt_env dbt build --select int_order_durations mart_delivery_sla</code></pre>
+<p>Expected — the exact row for order 101 comes back as the failure, because the test's own <code>select *</code> returns the offending record itself, not just a count:</p>
+<pre><code>assert_column_is_after_int_order_durations_placed_at__delivered_at ... [FAIL 1 in 0.02s]
+
+Done. PASS=0 WARN=0 ERROR=0 FAIL=1 SKIP=0 TOTAL=1</code></pre>
+<p>Undo the corruption before moving on (<code>UPDATE raw.order_events SET occurred_at = occurred_at + interval '2 days' WHERE order_id = 101 AND status = 'delivered';</code>), rerun, confirm <code>PASS=1</code> again, then commit <code>tests/generic/test_assert_column_is_after.sql</code>, <code>models/intermediate/int_order_durations.sql</code>, <code>models/intermediate/intermediate.yml</code>, and the rewritten <code>mart_delivery_sla.sql</code>.</p>
+<div class="callout"><strong>Where this would actually have caught something real:</strong> Kafka's at-least-once delivery (Day 6) and the consumer lag/rebalancing work since (Days 34, 37) never guarantee a producer sends statuses in order, only that each one eventually lands. A clock skew bug, a replayed test message, or a producer retrying out of order could all produce a real <code>delivered_at</code> earlier than its own <code>placed_at</code> — not a hypothetical, the exact shape of bug a grain-level <code>not_null</code>/<code>unique</code> test is structurally blind to, because both timestamps are individually valid, non-null values. Only a test that compares the two columns to each other catches it.</div>
+
+<h2>5 · When this was worth writing, and when it wouldn't be</h2>
+<p>Day 11 already drew the package-vs-hand-written line: reach for a package when a rule is generic enough that it isn't really about your business at all, write it by hand when it's specific to your own data. Today's rule sits one level more generic than that line suggests at first glance — "one timestamp column must come after another" has nothing food-delivery-specific in it, which raises a fair question: why not check whether a package already has this?</p>
+<p><code>dbt_utils</code> does not ship a two-column ordering test — its generic tests bound a single column (<code>accepted_range</code>) or check relationships to another <em>model</em> (<code>relationships</code>, extended), not a same-row comparison between two columns. That gap is common enough that it's worth checking a package first every time, and real enough here that writing five lines yourself beat adding a second package dependency for one test. The deciding question isn't "is this rule generic" alone — it's "generic, <em>and</em> does an already-installed, already-trusted package actually express it." When both are true, import it. When only the first is true, five lines in <code>tests/generic/</code> gets you a real package-grade test without a new dependency to track.</p>
+
+<div class="interview">
+<p><strong>Q: "You've used dbt's built-in tests and a package's tests — when would you write your own generic test instead of either?"</strong> A strong answer, out loud: <em>"Built-in tests and package tests both cover genuinely generic rules — not_null, uniqueness, a value range — where someone else has already solved the exact shape I need and I'd just be re-solving it myself for no reason. I write my own generic test when the rule is still generic enough to be reusable across columns or models, but no built-in or installed package actually expresses it. In my project, nothing checks that a delivered_at timestamp comes after its own order's placed_at — that's a same-row, two-column comparison, which dbt_utils doesn't ship a test for. I wrote a five-line {% test %} macro, assert_column_is_after(model, column_name, after_column), that takes any two column names as arguments, so it's reusable the next time I add a pair of timestamps that need the same ordering guarantee — not a one-off singular test tied to this one column pair forever. The signal I'd want to give here is knowing there are really three tiers — built-in, package, and custom generic — and picking between them by how generic the rule is and whether something trustworthy already expresses it, not jumping straight to a singular test the moment a built-in test doesn't fit."</em> The signal: naming the three-tier structure explicitly and the real reason this rule needed the custom tier — a same-row column comparison no installed test covers.</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers writing one new custom dbt generic test (<code>{% test %}</code> in <code>tests/generic/</code>), applying it via YAML's <code>arguments:</code> block, and the intermediate-model refactor needed to give it a real column to test. It does not cover dbt's full macro/Jinja control-flow surface beyond the <code>{% test %}</code>/<code>{% endtest %}</code> block itself (Day 10 already covers Jinja and macros in depth), nor does it re-derive Kafka ordering/delivery guarantees (Days 6, 16, 34) beyond the one callout naming why this rule is worth having — this lesson only adds the test that would catch a violation, not the mechanism that could cause one.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A singular test is one .sql file, one rule, never reused. A package's generic test (like dbt_utils.accepted_range) is reusable and parameterized, but its SQL was written by someone else -- you only ever supply arguments in YAML. A custom generic test has the exact same reusable, parameterized YAML-driven shape, except the SQL inside the {% test %} block is the project's own.">
+    <p class="stem">What actually distinguishes a custom generic test from a package's generic test?</p>
+    <button class="opt" data-ok>Same reusable shape, but the project wrote the SQL itself</button>
+    <button class="opt">A custom test can never be applied through plain YAML</button>
+    <button class="opt">Only a custom test can ever run inside <code>dbt build</code></button>
+  </div>
+  <div class="q" data-why="Every generic test's first parameters are always named model and column_name by convention, no matter who wrote it -- built into dbt, shipped by a package, or hand-written here. Any rule needing a second column, like comparing delivered_at to placed_at, just adds another named argument beyond those two standard ones.">
+    <p class="stem">What are the two standard parameters every dbt generic test macro accepts?</p>
+    <button class="opt" data-ok><code>model</code> and <code>column_name</code>, always named this way</button>
+    <button class="opt"><code>table_name</code> and <code>schema_name</code>, hardcoded on every test</button>
+    <button class="opt"><code>severity</code> and <code>store_failures</code>, configured on every test</button>
+  </div>
+  <div class="q" data-why="dbt_utils' generic tests bound a single column (accepted_range) or check a value exists in another model's column (relationships) -- neither expresses a same-row comparison between two columns on one model, which is exactly the gap assert_column_is_after fills, and exactly why no installed package test was available to reach for instead.">
+    <p class="stem">Why didn't an existing <code>dbt_utils</code> generic test cover today's <code>delivered_at</code>/<code>placed_at</code> rule?</p>
+    <button class="opt" data-ok>No package test compares two separate columns on one row</button>
+    <button class="opt"><code>dbt_utils</code> itself was simply never installed earlier in this project</button>
+    <button class="opt">Generic tests can never reference any second column at all</button>
+  </div>
+  <div class="q" data-why="A dbt data test fails whenever its own select returns any row at all, and those returned rows are the specific offending records -- not just a pass/fail count. assert_column_is_after's select * from the model where column_name < after_column directly returns the exact bad row(s), the same reasoning Day 3's singular test already relied on.">
+    <p class="stem">Why does <code>assert_column_is_after</code>'s query return the specific failing row, not just a count?</p>
+    <button class="opt" data-ok>A test fails on any returned row, which is itself the offender</button>
+    <button class="opt">A <code>{% test %}</code> block can only ever return one full row</button>
+    <button class="opt">dbt always silently discards any aggregate count that a test now gets</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> dbt Labs' <a href="https://docs.getdbt.com/best-practices/writing-custom-generic-tests">Writing custom generic tests</a> guide — new to <code>RESOURCES.md</code> this round, added under the existing dbt (deep) section — covers the exact <code>{% test %}</code> syntax, the <code>tests/generic/</code> vs. <code>macros/</code> file-location choice, and the standard <code>model</code>/<code>column_name</code> argument convention used above, confirmed against the live page this round. The existing <a href="https://docs.getdbt.com/docs/build/data-tests">Data tests</a> doc (Day 3's primary source) still covers how any generic or singular test's pass/fail and <code>dbt build</code> output work underneath.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 42.<br>
+<strong>Next up:</strong> Day 41's own closing note flagged the <code>airflow db migrate</code>/<code>airflow dags test</code> approval-gate block as still open after seven straight rounds (35-41) with no human approval available; that remains the single clearest unblock-and-ship item for whoever next has a human present to grant it. Absent that, today closed a genuine, previously-untaught dbt testing tier (custom generic tests) found via a fresh scan of <code>lessons/*.html</code>, the same method Day 40 and Day 41 both used — a future round should keep scanning fresh rather than assume a named topic remains, since this course's spine items keep turning out either already covered or, like today, covered only in name and not in substance.<br><br>
+💬 Anything unclear — why the join needed its own intermediate model first, or the <code>arguments:</code> YAML shape? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -9272,3 +9272,104 @@
   fetch attempted; and Polly (or a .NET resilience-library survey more
   broadly), still deliberately out of scope per MISSION.md's "concepts
   first" rule.
+- 2026-10-27 generation (Lesson 114, headless run): idempotency check first
+  — confirmed no `lessons/0114-*.html` on disk and no `n: 114`/
+  `date: "2026-10-27"` entry in `nav.js` before writing anything (highest
+  prior lesson was 113, dated 2026-10-26). The orchestrator handed in
+  confirmed context rather than a pre-decided topic: no `course_progress`
+  row for backend dated 2026-10-27 yet, and no recent
+  `lesson_completed`/quiz-failure signal requiring a review day — normal
+  steady-paced fresh content was the call. Topic choice: this file's own
+  tail named Go's `select`-statement arbitration rules as the longest-
+  standing deferred candidate (now four rounds running, 110 through 113),
+  so that was tried first and fairly — `WebFetch` against
+  `https://go.dev/ref/spec#Select_statements` (twice, once via the anchor
+  and once via the bare `/ref/spec` page) hit the exact same truncation
+  every prior round hit, cutting off mid-"Composite literals" well before
+  the Select-statements section; `https://go.dev/tour/concurrency/6` came
+  back as an empty client-rendered shell (a JS SPA, nothing WebFetch could
+  read); and a direct `WebSearch` call was flatly denied by the sandbox
+  with no prompt available to grant it, headless. Five failed attempts
+  across two rounds (this one and Lesson 113's) on the same page is enough
+  to stop re-trying it blind — flagging here explicitly so a future round
+  either tries a different fetch strategy (e.g. a GitHub raw markdown
+  mirror, once sandbox domain approvals allow it) or accepts this gap stays
+  deferred. Pivoted instead to the other standing candidate this file's own
+  log had tracked since Lesson 109: Lesson 50's bulkhead pattern was
+  Go-only, and Lesson 109 itself had already named the exact C# building
+  block for it in passing ("the same semaphore pattern is in fact how a
+  bulkhead's per-dependency slice is often implemented underneath") —
+  confirmed via a grep of `bulkhead` across every lesson that Lesson 50 was
+  indeed the only one, and that no C#-side bulkhead port existed yet, the
+  same kind of ecosystem-mirror gap this run has been closing since Lesson
+  108. Read `MISSION.md`, this file's tail (full run from 2026-10-24 through
+  2026-10-26), both `learning-records/0002` and `/0003`, Lessons 50, 109,
+  and 113 in full for exact HTML/quiz/callout/scope-line structure, and
+  `nav.js`'s and `glossary.html`'s tails, all before writing anything. One
+  new term, checked against the glossary first via case-insensitive grep —
+  zero collisions confirmed before writing: `ConcurrentDictionary` (reusing
+  `SemaphoreSlim` and `bulkhead pattern`, both already glossed, without new
+  `<dfn>` wraps). Verified directly against two fetched Microsoft Learn
+  pages before writing any prose: `ConcurrentDictionary<TKey,TValue>`'s own
+  page, confirmed verbatim both the class summary ("a thread-safe collection
+  of key/value pairs that can be accessed by multiple threads concurrently")
+  and the sharper Remarks-section warning that `GetOrAdd`'s and
+  `AddOrUpdate`'s value-factory delegates "are called outside the locks ...
+  the code executed by these delegates is not subject to the atomicity of
+  the operation" — the actual mechanism behind today's lazy-construction
+  trap; and `SemaphoreSlim`'s own page, confirmed verbatim that all its
+  public/protected members are thread-safe "with the exception of
+  Dispose()," used to justify treating a shared `SemaphoreSlim` instance as
+  safe to read/release from multiple concurrent callers. `dotnet --version`
+  was attempted once per this round's own check and hit the same "this
+  command requires approval" gate every C# round since Lesson 103 has hit —
+  not toolchain-compiled, verified instead by the direct quote-matching
+  above. No Go scaffold was written or changed this round — Lesson 50's
+  existing Go struct is only referenced for comparison, not modified, so
+  nothing new needed `go build`/`go vet`. Verification performed
+  mechanically otherwise: (1) a Node quiz-word-count script per
+  `<div class="q">` block, splitting every option both via `.split(/\s+/)`
+  and `.split(" ")` — first draft landed uneven across all four questions
+  (spreads of 7-11 words per option), fixed through several
+  rewrite-and-recount cycles per option, explicit word-array literals used
+  for the last couple of rewrites to stop manual miscounts, converged to
+  exactly 9/9/9/9 across all four questions, both counting methods
+  agreeing exactly, exactly one `data-ok` and four options per question
+  confirmed the same way; (2) an HTML tag-balance check across div/p/code/
+  button/script/dfn/pre/h2/h1/em/strong/a/table/tr/th/td/ul/li — clean on
+  the first pass after the quiz fix (div 7/7, p 16/16, code 39/39, button
+  16/16, script 3/3, dfn 1/1, pre 2/2, h2 7/7, h1 1/1, em 2/2, strong 3/3,
+  a 2/2, table 1/1, tr 5/5, th 7/7, td 8/8); a separate table/tr/th/td/p/
+  div/html/head/body/title/script balance check on `glossary.html` after
+  its one-row addition — also balanced (tr 371/371, td 1110/1110), plus a
+  duplicate-term scan across all 370 first-column entries — zero
+  duplicates; (3) a raw-unescaped-`&` regex scan across both files — zero
+  hits; (4) the lesson's `<dfn` tags grepped and confirmed to carry both
+  `data-en=` and `data-vn=` — exactly 1 `dfn` tag, matching the 1 new term,
+  no orphaned attribute; (5) `node --check` against `assets/nav.js`,
+  `assets/gloss.js`, and `assets/quiz.js` — all clean, both before and
+  after the `nav.js` edit; (6) a basic HTML well-formedness check (exactly
+  one `<!DOCTYPE html>`, one `<html>`/`</html>`, three script tags with
+  `nav.js` last) — clean. Registered Lesson 114 in `nav.js` (date
+  2026-10-27, today's actual generation date) right after `n: 113`,
+  confirmed exactly one matching `n: 114` entry and exactly one matching
+  `0114-*.html` file on disk afterward. Added one new RESOURCES.md line
+  (Microsoft Learn's `ConcurrentDictionary<TKey,TValue>` page) following
+  the existing per-topic grouping, placed right after Lesson 113's
+  lock-statement line; deliberately did not duplicate Lesson 50's Michael
+  Nygard bulkhead citation as a second standing RESOURCES.md entry,
+  following the same single-mechanism-citation precedent every prior
+  C#-port lesson in this run has used. `bin/record-progress` ran clean on
+  the first attempt this round (`recorded: backend/lesson_generated
+  day=114
+  lesson=0114-bulkhead-pattern-semaphoreslim-concurrentdictionary.html`).
+  No new `learning-records/` file this round — the topic came from this
+  file's own standing candidate list (Lesson 109's closing callout plus
+  the four-round-deferred `select` attempt), not a new surprise about the
+  learner's baseline or a quiz outcome. Candidates spotted but not picked
+  this round, still worth checking fresh next time: Go's `select`-statement
+  arbitration rules, now deferred for a fifth round running, with a fetch
+  strategy change (not another blind retry of the same spec-page anchor)
+  recommended before the sixth; and Polly (or a .NET resilience-library
+  survey more broadly), still deliberately out of scope per MISSION.md's
+  "concepts first" rule.

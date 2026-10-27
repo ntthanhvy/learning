@@ -10138,3 +10138,150 @@
   `bin/record-progress data lesson_generated --day 109 --lesson
   0109-np-cumsum-cumprod-diff.html --detail '{"by":"headless"}'` was run
   directly from the repo root and succeeded.
+- 2026-10-27 generation (Lesson 110): headless run, zero prior context.
+  Idempotency check first — confirmed no `lessons/0110-*.html` on disk and
+  no `n: 110`/`date: "2026-10-27"` entry in `nav.js` before writing
+  anything (highest prior lesson was 109, dated 2026-10-26). Read
+  `MISSION.md` in full (not modified), this file's own tail (Lessons
+  107-109's entries) for exact house style, `data/learning-records/`
+  (still only the single 2026-07-09 baseline, nothing new — no quiz/
+  completion signal to act on, pacing stayed topic-driven per this
+  course's own standing pattern), `lessons/0109-np-cumsum-cumprod-diff.html`
+  and `practice/109_np_cumsum_cumprod_diff.py` in full for the exact
+  HTML/practice structure, and `reference/glossary.html`'s tail for the
+  exact column order. Topic choice: Lesson 109's own closing note had
+  already named one standing candidate explicitly — `cummax()`/`cummin()`,
+  itself carried forward from an earlier pre-109 scan — so this round
+  re-confirmed it was still a genuine gap before committing: grepped
+  `cummax`, `cummin`, `ravel`, and `flatten` case-insensitively across
+  the full glossary and every lesson body — all four came back zero-hit
+  as dedicated coverage (a handful of incidental lesson-body mentions of
+  `ravel`/`flatten` turned up inside unrelated reshape/stack lessons, not
+  as a taught method). Read Lesson 7 in full to confirm directly that it
+  teaches only `rank()` and `cumsum()`, no mention of `cummax()`/
+  `cummin()` anywhere — a genuine gap, not an oversight. Picked
+  `cummax()`/`cummin()` over `np.ravel()`/`.flatten()`: it continues the
+  cumulative-operations family Lesson 109 just closed one layer of
+  (cumsum/cumprod/diff), reuses the same `orders`-style running-total
+  framing Lesson 7 already set up, and resolves a candidate that has now
+  been carried forward across multiple rounds rather than opening a new
+  unrelated thread. Every behavioral claim was probed directly first via
+  temporary scripts in `.scratch-data-110/` at the repo root (deleted
+  after use, never tracked by git — this sandbox round blocked an inline
+  heredoc with quote-brace combinations specifically, worked around by
+  writing the probe as a real `.py` file instead): confirmed pandas
+  3.1.0 / numpy 2.5.4, unchanged from Lessons 106-109; confirmed
+  `cummax()`/`cummin()` on a plain Series produce the expected running
+  best-so-far and that the final value always equals the Series's own
+  `max()`/`min()`; confirmed the monotonic guarantee directly by diffing
+  each result against itself (cummax diffs never negative, cummin diffs
+  never positive); confirmed `groupby("customer")["amount"].cummax()`
+  tracks each group's own running best independently, matching Lesson
+  7's own per-group framing; confirmed the NaN contrast — default
+  `skipna=True` resumes tracking right after a NaN (that row stays NaN,
+  later rows are unaffected), while `skipna=False` permanently poisons
+  every row from the first NaN onward; confirmed, the round's sharpest
+  find, that **no top-level `np.cummax()`/`np.cummin()` function exists
+  in NumPy at all** — calling one raises `AttributeError: module 'numpy'
+  has no attribute 'cummax'` outright, breaking the pattern Lesson 109
+  established where every pandas cumulative method had a same-named raw
+  NumPy function underneath; the actual NumPy equivalent is
+  `np.maximum.accumulate()`/`np.minimum.accumulate()`, reached through
+  the `np.maximum`/`np.minimum` ufunc's own `.accumulate()` method
+  rather than a standalone function — also confirmed directly that
+  calling `np.maximum.accumulate()` on a Series (rather than a plain
+  array) dispatches and hands back a Series, the same recognizes-a-
+  Series behavior Lesson 109 found for `np.cumsum()`, just reached
+  through a ufunc method instead of a plain function name; confirmed,
+  as a clean contrast with Lesson 109's `cumprod()` int8→int64 upcast
+  finding, that `cummax()`/`cummin()` trigger no dtype promotion at all
+  on narrow integer dtypes, since taking a max/min can never overflow
+  the way repeated multiplication can; confirmed a string-dtype Series
+  calls `cummax()`/`cummin()` without raising (lexicographic comparison),
+  unlike every `.str.*` accessor method probed in past lessons. Cited
+  the official pandas API reference pages for `Series.cummax()` and
+  `Series.cummin()` under the existing `RESOURCES.md` "Docs: pandas User
+  Guide" entry rather than adding a new line, matching the established
+  precedent of Lessons 93/95/97/99-109 citing a different
+  `pandas.pydata.org/docs/reference/api/...` page under an existing
+  umbrella entry each time; the lesson's "Go deeper" section also links
+  the official NumPy `numpy.ufunc.accumulate()` reference page inline as
+  the cross-check source for the ufunc-method claim, without adding it
+  as a second `RESOURCES.md` citation. Quiz options were drafted, then
+  mechanically word-counted with a temporary Python script (written
+  directly inside `.scratch-check-110/` next to the repo root, run via
+  `uv run python3`, deleted immediately after use) isolating each
+  `<div class="q">` block by regex span and splitting on whitespace —
+  the first draft came out uneven across several rewrite-and-recount
+  cycles (13/12/12, 10/11/12, 14/12/12, then drifting further before
+  converging) until every one landed exactly level at 14/14/14 option
+  words for all three questions, one `data-ok` per question throughout,
+  with the `data-why` wording re-checked against the final option text
+  afterward to confirm the rephrasing never drifted the meaning. The
+  same mechanical pass caught a real authoring mistake on the first
+  draft: an HTML tag-balance check found `p` open/close at 21/22 — a
+  stray `</p>` left inside the Section 4 `<div class="callout">`, which
+  (matching Lesson 7's own callout-div precedent) should have no `<p>`
+  wrapper at all — fixed by removing the stray closing tag, clean on the
+  second pass (html 1/1, head 1/1, body 1/1, div 6/6, p 21/21, pre 5/5,
+  code 90/90, span 44/44, h1 1/1, h2 9/9, strong 5/5, em 4/4, button
+  9/9, script 3/3, dfn 3/3, title 1/1, a 4/4) and a raw-unescaped-`&`
+  regex scan found exactly the two expected `&` characters inside the
+  lesson's own `cd ~/learning/data && uv run ...` shell command, zero
+  raw `&` elsewhere. Exactly two new `<dfn>`-carrying tags were needed
+  this round (`cummax()`/`cummin()` grouped as one dfn pair inside a
+  shared sentence, and `np.maximum.accumulate()` separately), both
+  carrying both `data-en` and `data-vn`. The shipped (unsolved)
+  `practice/110_cummax_cummin.py` was executed directly from its real
+  `practice/` location (`cd data && uv run --with pandas python3
+  practice/110_cummax_cummin.py`) and printed exactly 3 ✗ with no raw
+  traceback. Building the solved copy in `.scratch-data-110/` caught a
+  real bug on the first run: Exercise 1's check compared
+  `ex1_cummax.iloc[-1] == s.max()` directly against `True` using `is`,
+  but pandas/NumPy scalar equality returns a `numpy.bool_`, and
+  `numpy.bool_(True) is True` evaluates to `False` in this environment
+  (identity check, not equality) — the check printed ✗ even with fully
+  correct code filled in. Fixed by wrapping both comparisons in
+  `bool(...)` in the shipped practice file itself (not just the solved
+  copy), confirmed the fix didn't change the unsolved file's own
+  all-✗ baseline (re-ran it after the fix, still exactly 3 ✗), then
+  re-built and re-ran the solved copy, which printed all 3 ✓ and "All
+  green" on the first run after the fix. The shipped file was re-run
+  once more directly from `practice/` after building the solved copy and
+  reproduced the identical all-✗ result, confirming the solved copy's
+  edits never leaked back into the shipped baseline. Checked the
+  glossary for a collision before adding anything — grepped `cummax`,
+  `cummin`, and `maximum.accumulate` case-insensitively across the full
+  glossary, found zero existing rows for any — added exactly one new
+  row, "cummax() / cummin()" (grouping the pair together with the
+  `np.maximum.accumulate()` NumPy-gap finding folded into the same row
+  rather than a separate row, since they share one tight behavioral
+  story), directly after Lesson 109's `np.diff()` entry; re-ran the
+  tag-balance script against the glossary file afterward, confirmed the
+  `<tr>` count went from 182 to 183 as expected (td 546/546, zero raw
+  `&` introduced, zero duplicate terms across all 182 first-column
+  entries). Registered Lesson 110 in `nav.js` with today's date
+  (2026-10-27); `node --check` confirmed it still parses as valid
+  JavaScript after the edit (also spot-checked against untouched
+  `gloss.js`/`quiz.js`, both still parse fine), and exactly one
+  `n: 110` entry plus one `0110-cummax-cummin` file reference were
+  confirmed to exist. This round's own fresh scan surfaced
+  `np.ravel()`/`.flatten()` as the one remaining named zero-hit
+  candidate (first named in Lesson 108's own round, still open after
+  three rounds) — not pre-committed as tomorrow's pick, since this
+  course's standing convention is a fresh scan each round rather than
+  blind carryover. No new `data/learning-records/` entry was added this
+  round — routine lesson, no new baseline finding to justify one (the
+  completion/quiz signal remains stale past mid-July, unchanged from
+  recent rounds). `git status --short` after all edits confirmed only
+  the intended `data/` files were touched (`data/assets/nav.js`,
+  `data/reference/glossary.html`, new `data/lessons/0110-cummax-cummin.html`,
+  new `data/practice/110_cummax_cummin.py`) plus unrelated concurrent
+  changes in `backend/`/`python/`/`dataeng/` from other runs, not
+  touched by this one. Both scratch directories
+  (`.scratch-data-110/`, `.scratch-check-110/`) were deleted after
+  verification, at the repo root but never tracked by git, matching
+  prior rounds' own precedent for this environment. `bin/record-progress
+  data lesson_generated --day 110 --lesson 0110-cummax-cummin.html
+  --detail '{"by":"headless"}'` was run directly from the repo root to
+  close out this round.

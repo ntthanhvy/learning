@@ -336,6 +336,12 @@
   <tr><td>dead-letter table</td><td>giữ nguyên "dead-letter table" — bảng riêng chứa các message/job xử lý lỗi, không xử lý được theo cách thường, giữ lại để xem (kèm payload gốc + lỗi) thay vì xoá âm thầm hay để nó chặn hết các message phía sau; khác dead-letter QUEUE (1 topic Kafka riêng) ở chỗ đây là 1 bảng trong cùng database, không phải topic thứ hai</td><td>A separate table (or topic) that holds items which failed processing and could not be handled normally, kept for inspection with their original payload and error, instead of being silently dropped or allowed to block everything behind them. Confirmed directly this round via a standalone control-flow simulation (no live broker): two poison messages (malformed JSON and a JSON object missing a required field) were quarantined with their exact raw bytes and real exception text, while every message's Kafka offset — both the two good ones and the two poison ones — still committed in order, so the consumer kept making forward progress instead of stalling.</td></tr>
 </table>
 
+<h2 id="day42">Day 42 — dbt custom generic tests: writing your own, not just importing one</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>custom generic test</td><td>giữ nguyên "custom generic test" — generic test project tự viết thay vì cài từ package; vẫn tái sử dụng được qua YAML như generic test có sẵn, nhưng SQL bên trong là do project viết, cho rule mà built-in/package test không có</td><td>A generic dbt test a project writes itself rather than installing from a package — same reusable, parameterized shape as a built-in or package generic test (one <code>.sql</code> file defining a <code>{% test %}</code> macro, applied to any column via YAML's <code>arguments:</code> block), but the SQL inside it is the project's own, for a rule no built-in or installed test expresses. Confirmed this round: <code>assert_column_is_after(model, column_name, after_column)</code>, a 5-line test comparing two columns on the same row, resolved correctly via a live <code>dbt list --resource-type test</code> run against a scratch project (named exactly <code>assert_column_is_after_int_order_durations_placed_at__delivered_at</code>, dbt's standard generic-test naming shape).</td></tr>
+</table>
+
 <script src="../assets/nav.js"></script>
 </body>
 </html>

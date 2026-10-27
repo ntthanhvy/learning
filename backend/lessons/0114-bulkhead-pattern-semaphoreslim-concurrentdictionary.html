@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 114 · The bulkhead pattern, now in C# too</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 114 · ~20 min</p>
+<h1>The bulkhead pattern, now in C# too</h1>
+<p class="byline">Lesson 50 taught the bulkhead pattern — giving each dependency its own fixed slice of a shared resource — in Go only. Lesson 109 already named the C# building block this needs, in passing: "the same semaphore pattern is in fact how a bulkhead's per-dependency slice is often implemented underneath." Today builds that underneath, for real, and hits one concurrency trap on the way that Go's version never has to think about.</p>
+
+<h2>1 · Same wall, same reason — Lesson 50 already covers why</h2>
+<p>Nothing about <em>why</em> a bulkhead exists changes between languages. Lesson 50 covers the full reasoning: one shared pool means one slow dependency can hold every slot in it, starving requests that never even called that dependency — the same cross-dependency starvation, just wearing a different ecosystem's connection type. The fix is still the same: stop sharing the resource, and give each dependency its own fixed-size partition that the others can never borrow from, even while it sits idle. None of that is re-derived here; today is about what the partition itself is made of in C#, and the one new trap that shows up assembling it.</p>
+
+<h2>2 · Go's map of pools becomes a ConcurrentDictionary of semaphores</h2>
+<p>Lesson 50's Go <code>Bulkhead</code> struct was a <code>map[string]*Pool</code> — one small custom pool per dependency name, built once up front in <code>NewBulkhead</code> and never touched again. C# has a ready-made width-limiter already introduced in Lesson 109: <code>SemaphoreSlim</code>. The dictionary holding one per dependency name needs to be safe for concurrent reads and writes too, so it's a <dfn data-en="a thread-safe .NET dictionary that can be read and written by multiple threads concurrently without external locking -- read operations are lock-free, and write operations use fine-grained internal locking, but the value-factory delegates passed to methods like GetOrAdd run outside those locks" data-vn="ConcurrentDictionary (giữ nguyên) — dictionary thread-safe của .NET, nhiều thread đọc/viết đồng thời không cần lock ngoài -- đọc không cần lock, viết dùng lock nội bộ chi tiết, nhưng delegate truyền vào GetOrAdd lại chạy ngoài lock đó">ConcurrentDictionary</dfn>, not a plain <code>Dictionary</code>. So a C# bulkhead is a <code>ConcurrentDictionary</code> from dependency name to its own <code>SemaphoreSlim</code>, and each call acquires a slot from the one matching its dependency before doing any work:</p>
+<pre><code><span class="kw">class</span> Bulkhead
+{
+    <span class="kw">private</span> <span class="kw">readonly</span> ConcurrentDictionary&lt;<span class="ty">string</span>, SemaphoreSlim&gt; partitions = <span class="kw">new</span>();
+
+    <span class="kw">public</span> <span class="kw">void</span> Configure(<span class="ty">string</span> dependency, <span class="ty">int</span> limit) =>
+        partitions[dependency] = <span class="kw">new</span> SemaphoreSlim(<span class="kw">initialCount</span>: limit, <span class="kw">maxCount</span>: limit);
+
+    <span class="kw">public</span> <span class="kw">async</span> Task&lt;T&gt; CallAsync&lt;T&gt;(<span class="ty">string</span> dependency, Func&lt;Task&lt;T&gt;&gt; operation)
+    {
+        <span class="kw">if</span> (!partitions.TryGetValue(dependency, <span class="kw">out</span> <span class="kw">var</span> gate))
+            <span class="kw">throw</span> <span class="kw">new</span> InvalidOperationException(<span class="str">$"no bulkhead partition configured for '{dependency}'"</span>);
+
+        <span class="kw">await</span> gate.WaitAsync();  <span class="cm">// this dependency's own slice only -- others untouched</span>
+        <span class="kw">try</span> { <span class="kw">return</span> <span class="kw">await</span> operation(); }
+        <span class="kw">finally</span> { gate.Release(); }
+    }
+}
+</code></pre>
+<p>Set up once at startup — <code>Configure("inventory", 8)</code>, <code>Configure("shipping", 4)</code>, <code>Configure("reports", 2)</code> — exactly like Lesson 50's <code>NewBulkhead(map[string]int{...})</code>. A reporting call that finds its 2-slot semaphore already at zero suspends on <code>WaitAsync()</code> until a slot frees, with no visibility into whether inventory's or shipping's semaphores have room — because it can't touch them.</p>
+
+<h2>3 · The trap: building partitions lazily races, if you're not careful</h2>
+<p>Lesson 50's Go map was built once, entirely, before any call could reach it — so there was nothing to race. A C# bulkhead that instead creates each dependency's <code>SemaphoreSlim</code> lazily, on first use, reaches for the obvious-looking one-liner:</p>
+<pre><code><span class="kw">var</span> gate = partitions.GetOrAdd(dependency, _ =&gt; <span class="kw">new</span> SemaphoreSlim(limit, limit));
+</code></pre>
+<p>This looks safe — <code>ConcurrentDictionary</code> is, per Microsoft's own docs, "a thread-safe collection of key/value pairs that can be accessed by multiple threads concurrently." But the same docs carry a sharper remark specifically about <code>GetOrAdd</code> and <code>AddOrUpdate</code>: their value-factory delegates "are called outside the locks to avoid the problems that can arise from executing unknown code under a lock. Therefore, the code executed by these delegates is not subject to the atomicity of the operation." In plain terms: if two calls for the same brand-new dependency name race in at the same instant, <code>new SemaphoreSlim(...)</code> can run twice — the dictionary itself stays correct and keeps only one winning entry, but the losing <code>SemaphoreSlim</code> was still fully constructed and then silently discarded, un-disposed.</p>
+<div class="callout"><strong>Why this one's forgivable, but worth knowing:</strong> a throwaway <code>SemaphoreSlim</code> holds no unmanaged handle unless its wait handle was ever requested, so the leak here is small — but the same <code>GetOrAdd</code> gotcha is far sharper for a value factory with real side effects (opening a connection, starting a background task), where "ran more than once, most results discarded" is a genuine bug, not just acceptable waste. The fix, when it matters: build every partition up front during <code>Configure</code>, the way Lesson 50's Go code always did, so <code>CallAsync</code> only ever reads an already-built dictionary and <code>GetOrAdd</code>'s race never gets a chance to fire.</div>
+
+<h2>4 · What doesn't change: the partition is still a hard wall</h2>
+<p>Lesson 50's trade-off carries over untouched: a dependency's semaphore sitting at full count while another dependency's semaphore is stuck at zero is correct, not wasteful — the moment one partition could lend a slot to another under pressure, the isolation the whole pattern exists for is gone. Sizing each <code>SemaphoreSlim</code>'s <code>maxCount</code> still comes from watching that one dependency's actual concurrent usage, same as Lesson 18 taught for a single shared pool and Lesson 50 taught for partitioning it.</p>
+
+<div class="cmp-wrap">
+<table class="cmp">
+<thead><tr><th></th><th>Go: map[string]*Pool</th><th>C#: ConcurrentDictionary&lt;string, SemaphoreSlim&gt;</th></tr></thead>
+<tbody>
+<tr><th>Per-dependency slot limiter</th><td>custom <code>Pool</code> struct + <code>sync.Mutex</code></td><td><code>SemaphoreSlim</code> (Lesson 109's limiter, reused)</td></tr>
+<tr><th>When partitions get built</th><td>once, up front, before any call</td><td>safest also up front; lazy <code>GetOrAdd</code> can double-construct</td></tr>
+<tr><th>Unconfigured dependency name</th><td><code>ok</code> false from map lookup</td><td><code>TryGetValue</code> returns false</td></tr>
+<tr><th>Can one partition borrow from another?</th><td>no</td><td>no</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers porting Lesson 50's bulkhead pattern (per-dependency resource partitioning, why it protects other dependencies rather than the callee or the caller, why partitions can't lend capacity to each other) to C#, built from <code>SemaphoreSlim</code> (Lesson 109) plus <code>ConcurrentDictionary</code>, and the one C#-specific trap <code>GetOrAdd</code>'s outside-the-lock value factory creates for lazy partition creation. It does not re-derive the bulkhead-vs-circuit-breaker-vs-rate-limiter comparison table — Lesson 50 already covers that in full and nothing about it changes in C#. It does not cover Polly's bulkhead isolation policy or any other .NET resilience library's packaged version — the mechanism is taught here from first principles, same as every prior C#-port lesson in this run, per MISSION.md's "concepts first" rule.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory, with no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A bulkhead's whole purpose is isolation between dependencies: giving each one a fixed, non-borrowable slice of a shared resource so that one dependency saturating its own slice cannot starve the others -- the same reasoning Lesson 50 taught in Go, just rebuilt from SemaphoreSlim in C#.">
+    <p class="stem">What does today's C# Bulkhead class actually protect, same as Lesson 50's Go version?</p>
+    <button class="opt" data-ok>other dependencies, kept safe from one saturated dependency entirely</button>
+    <button class="opt">the callee itself, from receiving too many simultaneous callers</button>
+    <button class="opt">the caller itself, from one dependency that keeps failing</button>
+    <button class="opt">the database itself, from every query missing its index</button>
+  </div>
+  <div class="q" data-why="Per Microsoft's own ConcurrentDictionary remarks, GetOrAdd's and AddOrUpdate's value-factory delegates run outside the dictionary's internal locks, so two concurrent calls for the same brand-new key can both construct a value -- the dictionary still ends up with only one winning entry, but the losing construction still fully happened.">
+    <p class="stem">Per Microsoft's own docs, why can ConcurrentDictionary.GetOrAdd construct a value more than once for the same new key?</p>
+    <button class="opt" data-ok>its own value-factory delegate always runs outside the lock</button>
+    <button class="opt">ConcurrentDictionary always silently drops every single key it stores</button>
+    <button class="opt">SemaphoreSlim always refuses every attempt at lazy construction itself</button>
+    <button class="opt">two threads can never safely share one dictionary instance</button>
+  </div>
+  <div class="q" data-why="Lesson 50's Go map was built entirely up front in NewBulkhead before any call could reach it, so there was nothing left to race. Doing the same in C# -- building every partition's SemaphoreSlim during Configure, before CallAsync ever runs -- means CallAsync only ever reads an already-built dictionary and GetOrAdd's race condition never gets a chance to fire at all.">
+    <p class="stem">What's the safest fix for the GetOrAdd double-construction trap in a C# bulkhead?</p>
+    <button class="opt" data-ok>build every partition up front as Lesson 50 did</button>
+    <button class="opt">switch every partition over to one plain Dictionary instead</button>
+    <button class="opt">call GetOrAdd exactly twice in a row per dependency</button>
+    <button class="opt">remove the try/finally wrapping each gate.WaitAsync() call entirely here</button>
+  </div>
+  <div class="q" data-why="A partition sitting idle while another sits saturated is the correct, intended behavior in both languages -- the instant one partition's spare capacity could flex over to cover another under pressure, the hard wall that makes a bulkhead's isolation actually hold stops existing, reopening the exact cross-dependency starvation the pattern exists to prevent.">
+    <p class="stem">Why can't a C# bulkhead's idle SemaphoreSlim lend its free slots to a saturated one, same as Go's version?</p>
+    <button class="opt" data-ok>lending capacity would recreate the exact starvation being prevented</button>
+    <button class="opt">SemaphoreSlim objects themselves can never exist more than one</button>
+    <button class="opt">ConcurrentDictionary forbids reading more than one value at once</button>
+    <button class="opt">ConfigureAwait(false) already blocks that exact kind of slot sharing</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> Lesson 50's own primary source — Michael Nygard's <em>Release It!</em> bulkhead chapter — still covers the pattern itself in full; nothing about the isolation or the trade-off changes in C#. <a href="https://learn.microsoft.com/en-us/dotnet/api/system.collections.concurrent.concurrentdictionary-2">Microsoft Learn: ConcurrentDictionary&lt;TKey,TValue&gt;</a> (~5 min) is the primary source for today's one new trap, confirming verbatim that <code>GetOrAdd</code>'s and <code>AddOrUpdate</code>'s delegates "are called outside the locks" and so "the code executed by these delegates is not subject to the atomicity of the operation."</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a>. Click any dotted term for a popup (English first, tiếng Việt second). Builds directly on Lesson 50's bulkhead pattern and Lesson 109's <code>SemaphoreSlim</code>. <strong>Anything unclear? Ask your teacher</strong>, the agent that made this lesson. Ask in Vietnamese anytime. A good follow-up: "does our own codebase build any cache or client dictionary lazily with GetOrAdd — and if so, could its value factory have side effects worth double-checking?"</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

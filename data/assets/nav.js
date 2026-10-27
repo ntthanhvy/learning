@@ -226,6 +226,8 @@
       file: "lessons/0108-mode.html" },
     { n: 109, date: "2026-10-26", title: "np.cumsum(), np.cumprod(), np.diff(): running totals, products, and differences, one array layer down",
       file: "lessons/0109-np-cumsum-cumprod-diff.html" },
+    { n: 110, date: "2026-10-27", title: "Series.cummax() / Series.cummin(): the running best-so-far, and the NumPy function that doesn't exist",
+      file: "lessons/0110-cummax-cummin.html" },
   ];
 
   const REFS = [

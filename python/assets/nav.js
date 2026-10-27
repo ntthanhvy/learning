@@ -186,6 +186,8 @@
       file: "lessons/0088-chainmap-layered-lookups.html" },
     { n: 89, date: "2026-10-26", title: "hmac: keyed hashing for message authentication",
       file: "lessons/0089-hmac-keyed-hashing-for-authentication.html" },
+    { n: 90, date: "2026-10-27", title: "graphlib: ordering tasks by their dependencies",
+      file: "lessons/0090-graphlib-topological-sorting.html" },
   ];
 
   const REFS = [

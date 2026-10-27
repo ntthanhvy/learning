@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 90 · graphlib: ordering tasks by their dependencies</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 90 · ~20 min · 27 Oct 2026</p>
+<h1><code>graphlib</code>: ordering tasks by their dependencies</h1>
+<p class="byline">Day 51 sorted a list by a <em>value</em> with <code>heapq</code>/<code>bisect</code> — today sorts a set of tasks by their <dfn data-en="A dependency is a prerequisite -- something that must finish before another thing can start. 'B depends on A' means A must run first." data-vn="giữ nguyên &quot;dependency&quot; — điều kiện phải xong trước thì việc khác mới được bắt đầu. 'B phụ thuộc A' nghĩa là A phải chạy trước.">dependencies</dfn> instead, using <code>graphlib.TopologicalSorter</code> from the standard library.</p>
+
+<div class="callout"><strong>Why today, specifically:</strong> Day 89's review cadence note left three untaught candidates open for Days 90-91: <code>graphlib</code>, <code>weakref</code>, <code>calendar</code>. A fresh grep across every lesson, practice file, <code>reference/glossary.html</code>, and <code>RESOURCES.md</code> confirmed all three are still genuinely zero-hit. Picked <code>graphlib</code>: it is pure stdlib ordering logic with zero pandas/NumPy surface, it is the third fresh lesson since Day 87's review (closing this cadence cycle — a review of Days 88-90 is due at Day 91), and it solves a real, recurring shape — "run these build steps, but only after their prerequisites are done" — that a hand-rolled loop gets subtly wrong under cycles.</div>
+
+<h2>1 · The problem: an order that respects "must happen before"</h2>
+<p>Some lists don't have one correct order — any permutation works. Others do: a build script can't run its "package" step before its "compile" step; a database migration can't add a foreign key before the table it points to exists. The naive fix is writing the order by hand, but that only works until the dependencies change, and a hand-written order can't notice if someone introduces a <dfn data-en="A cycle is a dependency loop: A depends on B, and B (directly or through others) depends back on A. There is then no valid order -- neither can go first." data-vn="giữ nguyên &quot;cycle&quot; — vòng phụ thuộc lặp lại: A cần B, và B (trực tiếp hoặc qua món khác) lại cần A. Lúc đó không có thứ tự nào đúng — không bên nào có thể đứng trước.">cycle</dfn> — a loop where nothing can legally go first:</p>
+<pre><code><span class="cm"># hand-written order, easy to get subtly wrong once there are many steps</span>
+steps = [<span class="str">"compile"</span>, <span class="str">"test"</span>, <span class="str">"package"</span>, <span class="str">"deploy"</span>]
+<span class="cm"># if "package" quietly grows a new dependency on a step added later,</span>
+<span class="cm"># nothing here notices -- the list just silently runs in the wrong order</span></code></pre>
+<p><code>graphlib.TopologicalSorter</code>, added to the standard library specifically for this, takes the dependencies as data instead and computes a valid order — or tells you plainly there isn't one:</p>
+<pre><code><span class="kw">from</span> graphlib <span class="kw">import</span> TopologicalSorter
+
+ts = TopologicalSorter()
+ts.add(<span class="str">"test"</span>, <span class="str">"compile"</span>)       <span class="cm"># "test" needs "compile" done first</span>
+ts.add(<span class="str">"package"</span>, <span class="str">"test"</span>)      <span class="cm"># "package" needs "test" done first</span>
+ts.add(<span class="str">"deploy"</span>, <span class="str">"package"</span>)   <span class="cm"># "deploy" needs "package" done first</span>
+
+<span class="kw">print</span>(<span class="kw">list</span>(ts.static_order()))
+<span class="cm"># ['compile', 'test', 'package', 'deploy'] -- confirmed live</span></code></pre>
+<p><code>ts.add(node, *predecessors)</code> reads as "<code>node</code> depends on each of <code>predecessors</code>." <code>static_order()</code> returns every node exactly once, each one after all of its own predecessors — a node with no predecessors at all (like <code>"compile"</code> here, added only as someone else's predecessor) is included automatically, with nothing to wait for.</p>
+
+<h2>2 · Building the graph from a dict, and the cycle error</h2>
+<p>For a graph that's already known up front, passing a dict straight to the constructor is shorter than calling <code>.add()</code> repeatedly — keys map to a list of their own predecessors, the same direction as <code>.add()</code>:</p>
+<pre><code>graph = {<span class="str">"a"</span>: [], <span class="str">"b"</span>: [<span class="str">"a"</span>], <span class="str">"c"</span>: [<span class="str">"a"</span>, <span class="str">"b"</span>]}
+ts = TopologicalSorter(graph)
+<span class="kw">print</span>(<span class="kw">list</span>(ts.static_order()))   <span class="cm"># ['a', 'b', 'c'] -- confirmed live</span></code></pre>
+<p>If the dependencies describe a cycle — two steps that each (directly or through others) depend on one another — there is no valid order, and <code>graphlib</code> says so with a dedicated exception rather than silently returning something wrong:</p>
+<pre><code>ts = TopologicalSorter()
+ts.add(<span class="str">"x"</span>, <span class="str">"y"</span>)
+ts.add(<span class="str">"y"</span>, <span class="str">"x"</span>)   <span class="cm"># x needs y, and y needs x -- a cycle</span>
+
+<span class="kw">list</span>(ts.static_order())
+<span class="cm"># graphlib.CycleError: ('nodes are in a cycle', ['x', 'y', 'x']) -- confirmed live</span></code></pre>
+<p>That error is the entire point of using <code>graphlib</code> over a hand-rolled sort: a cycle in a hand-written list just produces a wrong-looking order that someone has to notice; a cycle fed to <code>TopologicalSorter</code> raises <code>CycleError</code> immediately, naming the exact loop it found.</p>
+
+<h2>3 · When steps can run at the same time: the manual protocol</h2>
+<p><code>static_order()</code> is a flat sequence — fine for running steps one at a time, but it throws away information a scheduler running steps <em>concurrently</em> needs: which steps have no dependency on each other and could start together right now. <code>prepare()</code>/<code>get_ready()</code>/<code>done()</code> expose that, batch by batch:</p>
+<pre><code>ts = TopologicalSorter({<span class="str">"b"</span>: [<span class="str">"a"</span>], <span class="str">"c"</span>: [<span class="str">"a"</span>], <span class="str">"d"</span>: [<span class="str">"b"</span>, <span class="str">"c"</span>]})
+ts.prepare()
+<span class="kw">while</span> ts.is_active():
+    ready = ts.get_ready()         <span class="cm"># every node whose predecessors are all done</span>
+    <span class="kw">print</span>(<span class="str">"ready:"</span>, ready)
+    ts.done(*ready)                <span class="cm"># mark them finished, unlocking their dependents</span>
+<span class="cm"># ready: ('a',)
+# ready: ('b', 'c')   -- b and c both only needed a, so both are ready together
+# ready: ('d',)
+# confirmed live</span></code></pre>
+<p><code>get_ready()</code> returns a tuple, which may hold more than one node — exactly the steps a thread pool (Day 73's <code>ThreadPoolExecutor</code>) could hand out to run at once, since none of them is waiting on any of the others. <code>done(*ready)</code> tells the sorter those nodes finished, which is what unlocks the next batch. One rule to know: once <code>prepare()</code> has run, <code>.add()</code> raises <code>ValueError</code> — the graph is locked in before execution starts, so it can't be edited out from under a scheduler already consuming it. <code>static_order()</code>, under the hood, is calling exactly this protocol and flattening its batches into one sequence — it also can only be consumed once per sorter.</p>
+
+<div class="callout"><strong>Where pandas/NumPy go from here:</strong> neither library has an equivalent — <code>graphlib</code> orders discrete named steps by dependency, not rows or columns of tabular data, so there is nothing to contrast; this callout exists only to confirm the absence, per <code>MISSION.md</code>'s no-pandas rule.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/90_graphlib_topological_sorting.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/90_graphlib_topological_sorting.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: building a <code>TopologicalSorter</code> from a dependency dict and reading off a valid <code>static_order()</code>, detecting a cycle and recovering the exact loop <code>CycleError</code> reports, and using the manual <code>prepare()</code>/<code>get_ready()</code>/<code>done()</code> protocol to find which steps could run at the same time.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="ts.add(node, *predecessors) always reads as 'node depends on each of predecessors' -- so ts.add('package', 'test') means package needs test done first, matching static_order()'s own guarantee that every node comes after all of its predecessors.">
+    <p class="stem">After <code>ts.add("package", "test")</code>, what does <code>static_order()</code> guarantee?</p>
+    <button class="opt" data-ok>"test" will always come before "package" does</button>
+    <button class="opt">"package" will always come before "test" does</button>
+    <button class="opt">both always land in the same batch</button>
+  </div>
+  <div class="q" data-why="A cycle means two or more nodes depend on each other, directly or through others, so no legal order exists at all. TopologicalSorter does not guess or silently drop a node to make one up -- it raises CycleError naming the exact loop it found.">
+    <p class="stem">What does <code>static_order()</code> do when the dependencies contain a cycle?</p>
+    <button class="opt" data-ok>it raises CycleError, naming the exact loop it found</button>
+    <button class="opt">it returns nodes in the order they were added</button>
+    <button class="opt">it silently drops one node to break the loop</button>
+  </div>
+  <div class="q" data-why="get_ready() returns every node whose predecessors have all already been marked done() -- when more than one node qualifies at once, none of them depends on the others, so they are safe to run concurrently rather than one at a time in sequence.">
+    <p class="stem">Why might <code>get_ready()</code> return more than one node in the same call?</p>
+    <button class="opt" data-ok>none of those ready nodes depends on another one</button>
+    <button class="opt">get_ready() always returns exactly two nodes at a time</button>
+    <button class="opt">it returns every node still left in the graph</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the standard library's <a href="https://docs.python.org/3/library/graphlib.html"><code>graphlib</code></a> docs — the "Examples" section works through the exact build-pipeline framing used above, and covers <code>TopologicalSorter.copy()</code> (snapshotting a sorter mid-run) beyond what today touched.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day90">glossary</a> under Day 90.<br>
+💬 Anything unclear — why a cycle can't just be resolved automatically, or when to reach for the manual <code>get_ready()</code>/<code>done()</code> protocol instead of <code>static_order()</code>? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

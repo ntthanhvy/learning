@@ -11443,3 +11443,85 @@ fail *gracefully* so the learner sees which task failed.
   '{"by":"headless"}'` was run from the repo root at the end of this
   round and succeeded.
 
+- 2026-10-28 generation (Lesson 91, headless run): idempotency check
+  first — confirmed no `lessons/0091-*.html` on disk and no `n: 91`/
+  `date: "2026-10-28"` entry in `nav.js` before writing anything (highest
+  prior lesson was 90, dated 2026-10-27). `psql`/`bin/query-progress`
+  both hit this sandbox's approval gate with no human available to
+  approve, same as every recent round, so DB confirmation relied on the
+  orchestrator's own prior query instead of a fresh one: last recorded
+  `course_progress` row for `python` is `lesson_generated day=90
+  lesson=0090-graphlib-topological-sorting.html` on 2026-10-27, nothing
+  yet for 2026-10-28, and no quiz/kata/lesson_completed signal for any
+  course since 2026-10-15 — no weak-spot to chase, steady sequential
+  pacing continues. Read `MISSION.md` in full (no-pandas/no-NumPy
+  exclusion re-confirmed before writing a line), `PLAN.md` in full
+  (Phase 2's spine is long exhausted; the course has been in sequential
+  stdlib gap-filling mode for many days), and the tail of this file
+  (~450 lines, covering Days 89-90 in full) rather than the whole file,
+  since it exceeds a single read's size cap — sufficient, since Day 90's
+  own next-day note stated the cadence plainly: Day 87 reviewed Days
+  84-86, then Day 88 (`ChainMap`), Day 89 (`hmac`), Day 90 (`graphlib`)
+  ran as three fresh lessons in a row, so per the settled
+  three-fresh-then-review cadence a review of Days 88-90 is due at Day
+  91 — today. Topic/format selection: today is therefore a review day,
+  not a fresh-topic day, so no new stdlib module was chosen; ran the
+  fresh-gap grep anyway per every prior review day's own discipline —
+  case-insensitive search across all 90 lessons, every practice file,
+  `reference/glossary.html`, and `RESOURCES.md` for the two
+  carried-forward candidates named in Day 90's note (`weakref`,
+  `calendar`) — both still genuinely zero-hit, but neither strong enough
+  to override the cadence math, which lands exactly on three fresh
+  lessons since Day 87. Re-read Lessons 88, 89, and 90 in full to pull
+  the exact confirmed-live claims and numbers back into today's
+  fold-out answers and quiz `data-why` text, rather than paraphrasing
+  from memory — Day 88's "write always hits the first layer, other
+  layers untouched" behavior, Day 89's `TypeError: Missing required
+  argument 'digestmod'` and the "not equivalent to
+  `hashlib.sha256(key+msg)`" claim, and Day 90's `ts.add(node,
+  *predecessors)` reading plus the exact `CycleError` tuple shape. Also
+  read the learner's only record
+  (`learning-records/0001-baseline-reads-python-writes-little.md`, the
+  Day 1 "can read Python, can't produce it" gap, still with no later
+  record and no new quiz/kata-failure signal) — nothing here changes a
+  review day's shape. No glossary or `RESOURCES.md` edit this round —
+  matching every prior review day's own rule (Days 71, 75, 79, 83, 87):
+  a review introduces no new jargon, every term revisited already has a
+  glossary entry under its original day (88, 89, 90), so both files were
+  left untouched and confirmed untouched via `git diff --stat` at the
+  end of the round. Verification performed mechanically, from a
+  dedicated script in `.scratch-python-91/` (deleted after): (1) an
+  HTML tag-balance check across div/p/code/button/script/dfn/pre/h2/h1/
+  em/strong/a on the new lesson — balanced (div 9/9, p 16/16, code
+  54/54, button 9/9, script 3/3, dfn 0/0 — correctly zero, a review day
+  introduces no new `<dfn>`, pre 1/1, h2 5/5, h1 1/1, em 2/2, strong
+  6/6, a 6/6); (2) a raw-unescaped-`&` regex scan (excluding
+  `&amp;`/`&quot;`/`&mdash;`/`&middot;`/etc.) — zero hits; (3) a
+  word-count match per quiz question's three options, extracted via
+  regex and stripped of tags — all three landed equal on the first
+  draft this round (Q1 7/7/7, Q2 10/10/10, Q3 9/9/9), no iteration
+  needed; (4) an `html.parser.HTMLParser` full-document parse of the new
+  lesson — no parse errors; (5) `node --check` against `assets/nav.js`
+  after the edit, plus a spot-check parse of `gloss.js` and `quiz.js` —
+  all three clean. Confirmed exactly one `n: 91` entry in `nav.js` (via
+  grep -c) and exactly one `0091-*` file in `lessons/` (via `ls`).
+  Registered Lesson 91 in `nav.js` with today's date (2026-10-28) right
+  after the `n: 90` entry. The shipped (unsolved)
+  `practice/91_review_retrieval_day_16.py` was executed directly from
+  its real `practice/` location and printed exactly 3 ✗ with no raw
+  traceback. A solved copy built in `.scratch-python-91/` (copied from
+  the shipped file, then each `...`/TODO body filled in directly — never
+  editing the shipped file itself, deleted after) printed all 3 ✓ and
+  "All green" on two consecutive runs; the shipped file was re-run
+  afterward and reproduced the identical all-✗ result, confirming no
+  leakage back into the baseline. `python/learning-records/` was not
+  touched this round — a routine review-day pass following the course's
+  own settled cadence, not a new durable fact about the learner distinct
+  from Day 1's baseline record. No new `RESOURCES.md` line this round,
+  for the same no-new-jargon reason as the glossary. Candidates left
+  open for the next fresh-topic day (Day 92): `weakref`, `calendar` —
+  still unpicked, still genuinely zero-hit as of today's scan.
+  `bin/record-progress python lesson_generated --day 91 --lesson
+  0091-review-retrieval-day-16.html --detail '{"by":"headless"}'` was
+  run from the repo root at the end of this round and succeeded.
+

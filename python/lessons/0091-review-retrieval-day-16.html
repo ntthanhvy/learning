@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 91 · Review day 16: retrieval across Days 88-90</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 91 · ~20 min · 28 Oct 2026</p>
+<h1>Review day 16: retrieval across Days 88-90</h1>
+<p class="byline">Day 87 (review day 15) covered Days 84, 85, and 86. Since then, three fresh days ran in a row — Day 88 (<code>collections.ChainMap</code>), Day 89 (<code>hmac</code>), Day 90 (<code>graphlib</code>) — and both Day 89's and Day 90's own next-day notes flagged this exact span as matching the course's settled three-fresh-lesson review trigger (Day 71 reviewed Days 68-70, Day 75 reviewed Days 72-74, Day 79 reviewed Days 76-78, Day 83 reviewed Days 80-82, Day 87 reviewed Days 84-86). This is that review — a sixteenth retrieval day, covering exactly Days 88, 89, and 90.</p>
+
+<div class="callout"><strong>Why today, specifically, and why not a fourth fresh day:</strong> a fresh-gap grep ran first anyway, matching every prior review day's own discipline — it searched all 90 lessons, every practice file, <code>reference/glossary.html</code>, and <code>RESOURCES.md</code> case-insensitively for stdlib corners named but not yet taught (<code>weakref</code>, <code>calendar</code> — both still genuinely zero-hit, carried forward from Day 90's own notes). Neither is a strong enough standing candidate to override the cadence math, which already lands exactly on three fresh lessons since Day 87 — so today pays down retrieval on Days 88-90 instead, and the next fresh day starts its topic search from scratch (though it can re-check those two candidates quickly first).</div>
+
+<h2>1 &middot; Three questions, in the original teaching order</h2>
+<p>Answer each out loud or on paper <em>before</em> reading the fold-out answer. If one is shaky, note it and go fix it in the practice file below rather than only rereading the old lesson.</p>
+
+<p><strong>Day 88 &mdash; <code>collections.ChainMap</code>.</strong> A <code>ChainMap</code> never copies or merges its input dicts. What does that buy you that a one-time <code>{**defaults, **user_config, **cli_flags}</code> merge does not, and which dict actually changes when you assign through the <code>ChainMap</code>?</p>
+<div class="callout">Fold-out answer: because a <code>ChainMap</code> holds a live reference to each original dict rather than a copy, editing one of those dicts later (say, the user's config file reloads) is visible through the <code>ChainMap</code> immediately — a one-time merge is a frozen snapshot that silently stops tracking the sources the moment it's built. Assigning through the <code>ChainMap</code> always writes into the <em>first</em> dict in the chain, confirmed live, regardless of which layer a key currently resolves from during lookup — it behaves like "record a new override at the highest-priority layer," never "edit wherever this key happens to live."</div>
+
+<p><strong>Day 89 &mdash; <code>hmac</code>.</strong> Why can't a plain <code>hashlib.sha256(data)</code> digest prove who sent a message, and why does <code>hmac.new(key, msg)</code> raise <code>TypeError</code> if <code>digestmod</code> is left out?</p>
+<div class="callout">Fold-out answer: <code>hashlib.sha256(data)</code> takes no secret at all — it is a pure function of the bytes, so anyone holding the same data computes the identical digest with no special knowledge, attacker included; that proves content didn't change, not who produced it. <code>hmac.new()</code> has no default hash algorithm the way <code>hashlib.sha256()</code>'s own name already picks one, so per the standard library docs <code>digestmod</code> is required "despite its argument position" — confirmed live, omitting it raises <code>TypeError: Missing required argument 'digestmod'</code> rather than silently guessing an algorithm the other side might not expect.</div>
+
+<p><strong>Day 90 &mdash; <code>graphlib</code>.</strong> After <code>ts.add("package", "test")</code>, what does <code>static_order()</code> guarantee about the two, and what happens instead of a wrong-looking order when the dependencies contain a cycle?</p>
+<div class="callout">Fold-out answer: <code>ts.add(node, *predecessors)</code> always reads as "<code>node</code> depends on each of <code>predecessors</code>," so <code>static_order()</code> guarantees <code>"test"</code> comes before <code>"package"</code> in its returned sequence, every time. A cycle means two or more nodes depend on each other, directly or through others, so no legal order exists at all — <code>TopologicalSorter</code> does not guess or quietly drop a node to manufacture one; confirmed live, it raises <code>graphlib.CycleError</code> naming the exact loop it found (<code>('nodes are in a cycle', ['x', 'y', 'x'])</code> for a two-node cycle).</div>
+
+<div class="callout"><strong>Where pandas/NumPy go from here:</strong> nothing pandas- or NumPy-specific today &mdash; this review only revisits Days 88-90's layered dict lookups, keyed message authentication, and dependency-ordered task sequencing, none of which needs a <code>DataFrame</code> or array to demonstrate.</div>
+
+<h2>2 &middot; Why these three, and why no new terms today</h2>
+<p>Same interleaving logic as every prior review day: a tool for searching several dicts as layered priority without merging them, a tool for proving a message came from someone holding a shared secret, and a tool for ordering a set of tasks by "must happen before" instead of by value — three different mental models pulled from three lessons, not one idea restated three ways. They also share a quieter throughline worth naming: all three replace a hand-rolled version that looks right at first and then breaks in one specific, predictable way once real use pushes on it &mdash; a merged settings dict that stops tracking its sources, a concatenated hash that proves nothing about origin, a hand-written step order that silently drifts once dependencies change or loop back on themselves. Recognizing which of those three failure shapes a given problem is actually at risk of &mdash; not just recalling the function names &mdash; is the retrieval goal today.</p>
+<p>No new jargon is introduced today on purpose &mdash; every term revisited already has a glossary entry under its original day. Two fresh-gap candidates remain on record from Day 90's own notes &mdash; <code>weakref</code>, <code>calendar</code> &mdash; still genuinely zero-hit as of today's own scan, worth a quick re-check next round rather than a scan from scratch, though a fresh scan costs little and stays the safer default given how fast this list turns over.</p>
+
+<h2>Try it &mdash; self-checking practice (~20 min)</h2>
+<p>Open <code>practice/91_review_retrieval_day_16.py</code>, follow the TODOs, and re-run until every check prints &check;:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/91_review_retrieval_day_16.py</code></pre>
+<p>Standard library only &mdash; no <code>--with</code> flag needed. No new syntax: every mechanism below was taught in Days 88, 89, and 90. Exercises: building a <code>ChainMap</code> from layered settings dicts and confirming a write only ever lands in the first layer, computing an <code>hmac</code> tag and confirming a different key changes it while a plain concatenated hash does not match it, and building a <code>TopologicalSorter</code> from a dependency dict to read off a valid order and detect a cycle.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory &mdash; no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="ChainMap holds a live reference to each original dict rather than a copy, so it searches through the real, current dicts on every lookup -- that is exactly why editing one of the source dicts after the ChainMap was built is immediately visible through it, unlike a one-time **merge that freezes a snapshot.">
+    <p class="stem">Why does editing a source dict after building a <code>ChainMap</code> from it still show up in lookups?</p>
+    <button class="opt" data-ok>ChainMap holds live references, never a copy</button>
+    <button class="opt">ChainMap re-merges its dicts after every edit</button>
+    <button class="opt">ChainMap only copies values, never dict structure</button>
+  </div>
+  <div class="q" data-why="hashlib.sha256(data) takes no secret at all -- it is a pure function of the bytes, so anyone holding the same data computes the exact same digest with no special knowledge required. That proves content didn't change, but not who produced the message, since an attacker with the same bytes gets the same hash too.">
+    <p class="stem">Why can't a plain <code>hashlib.sha256(data)</code> digest prove who sent a message?</p>
+    <button class="opt" data-ok>anyone holding the same data can compute the identical hash</button>
+    <button class="opt">a sha256 digest silently expires after a short fixed window</button>
+    <button class="opt">hashlib functions always need a secret key argument passed first</button>
+  </div>
+  <div class="q" data-why="A cycle means two or more nodes depend on each other, directly or through others, so no legal order exists at all. TopologicalSorter does not guess or silently drop a node to make one up -- it raises CycleError naming the exact loop it found.">
+    <p class="stem">What does <code>static_order()</code> do when the dependencies contain a cycle?</p>
+    <button class="opt" data-ok>it raises CycleError, naming the exact loop it found</button>
+    <button class="opt">it returns nodes in the order they were added</button>
+    <button class="opt">it silently drops one node to break the loop</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> no single new source today &mdash; revisit each lesson's own citation (<a href="https://docs.python.org/3/library/collections.html#collections.ChainMap"><code>collections.ChainMap</code></a> for Day 88, <a href="https://docs.python.org/3/library/hmac.html"><code>hmac</code></a> for Day 89, and <a href="https://docs.python.org/3/library/graphlib.html"><code>graphlib</code></a> for Day 90), all already listed in <code>RESOURCES.md</code>.</p>
+
+<p class="next">No new terms today &mdash; this is a review day, and every term revisited already has a glossary entry under its original day (<a href="../reference/glossary.html#day88">88</a>, <a href="../reference/glossary.html#day89">89</a>, <a href="../reference/glossary.html#day90">90</a>).<br>
+Two standing fresh-gap candidates remain on record &mdash; <code>weakref</code>, <code>calendar</code> &mdash; worth a quick re-check next round rather than a scan from scratch.<br><br>
+&#128172; Anything unclear across any of today's three? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

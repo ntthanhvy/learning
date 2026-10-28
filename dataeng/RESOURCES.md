@@ -38,7 +38,7 @@ before Phase 2.
 - [Docs: Incremental models](https://docs.getdbt.com/docs/build/incremental-models)
   `is_incremental()`, `unique_key`, strategies. Use for: Day 4 and Phase 2a incremental depth.
 - [Docs: Snapshots](https://docs.getdbt.com/docs/build/snapshots)
-  SCD type 2 in dbt. Use for: Phase 2a.
+  SCD type 2 in dbt. Use for: Phase 2a (Day 9) and Day 43's `hard_deletes` config (`ignore`/`invalidate`/`new_record`, replacing the older `invalidate_hard_deletes` boolean from dbt 1.8 and earlier) — confirmed live against the page both rounds.
 - [Docs: Jinja and macros](https://docs.getdbt.com/docs/build/jinja-macros) · [var()](https://docs.getdbt.com/reference/dbt-jinja-functions/var) · [target](https://docs.getdbt.com/reference/dbt-jinja-functions/target)
   DRY SQL via reusable Jinja functions, project variables and the active-connection object. Use for: Day 10, the primary source.
 - [Guide: How we structure our dbt projects — dbt Labs](https://docs.getdbt.com/best-practices/how-we-structure/1-guide-overview)

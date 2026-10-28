@@ -55,6 +55,7 @@
     { n: 40, date: "2026-10-25", title: "dbt model versions: changing a contracted model without breaking its consumer", file: "lessons/0040-dbt-model-versions.html" },
     { n: 41, date: "2026-10-26", title: "Kafka poison messages: a dead-letter table so one bad event doesn't wedge the consumer forever", file: "lessons/0041-kafka-dead-letter-events.html" },
     { n: 42, date: "2026-10-27", title: "dbt custom generic tests: writing your own, not just importing one", file: "lessons/0042-dbt-custom-generic-test.html" },
+    { n: 43, date: "2026-10-28", title: "dbt snapshots: hard deletes, the gap Day 9 left open", file: "lessons/0043-dbt-snapshot-hard-deletes.html" },
   ];
 
   const REFS = [

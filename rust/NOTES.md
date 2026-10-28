@@ -1694,3 +1694,22 @@ by the user there; they apply here identically.
   tests) were all generated this round via delegated agents — see their
   own NOTES.md entries for detail. Go remains skipped per its own window
   close, now ninety-eight days past it.
+- 2026-10-28 (headless check-in): same as every prior post-week day —
+  verified `daily.html`, `assets/srs.js`, and `assets/quiz-bank.js` are all
+  present and untouched (8 textual `id: "k` matches in `quiz-bank.js` — the
+  7 real kata entries `k1`-`k7` plus the commented-out example line, `day:`
+  tags still running 1-7 only; `nav.js` still has exactly 7
+  `file: "lessons` entries, the 7 Jul 8-14 lessons only). Still the correct
+  "daily quiz+kata" for this post-week phase per PLAN.md — the "After the
+  week" section only calls for `daily.html` to keep serving the existing
+  bank via `assets/srs.js`'s Leitner schedule, not for new content — so
+  nothing new was generated, nav.js was untouched, and no bank content was
+  added. Per the orchestrator's context for this run, the DB was already
+  checked and the last rust row is a `note` dated 2026-10-27
+  `{"by":"headless","day":"post-week-2026-10-27","action":
+  "verified-unchanged"}`, with no quiz/kata/lesson_completed signal for any
+  course since 2026-10-15 — no scope-change or weak-spot signal to act on,
+  so this round did not re-query the DB directly. `bin/record-progress rust
+  note --detail '{"by":"headless","day":"post-week-2026-10-28","action":
+  "verified-unchanged"}'` was run to log today's check. No new learning
+  record beyond the Day-1 baseline.

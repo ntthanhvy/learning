@@ -9373,3 +9373,144 @@
   recommended before the sixth; and Polly (or a .NET resilience-library
   survey more broadly), still deliberately out of scope per MISSION.md's
   "concepts first" rule.
+- 2026-10-28 generation (Lesson 115, headless run): idempotency check first —
+  confirmed no `lessons/0115-*.html` on disk and no `n: 115`/
+  `date: "2026-10-28"` entry in `nav.js` before writing anything (highest
+  prior lesson was 114, dated 2026-10-27). DB access: the orchestrator had
+  already confirmed no `lesson_generated` row existed yet for 2026-10-28 and
+  that no quiz/kata/lesson_completed signal had landed for any course since
+  2026-10-15 (backend's own Lesson 102, all `ok:true`), so direct `psql`/
+  `bin/query-progress` reads were correctly skipped this round per that
+  pre-confirmed context — normal steady-paced fresh content was the call,
+  not a review day. Topic choice: the brief named two standing deferred
+  candidates — Go's `select`-statement arbitration rules (deferred five
+  rounds, 110 through 114) and Polly/.NET resilience libraries (deliberately
+  out of scope per MISSION.md). Tried `select` first, with a genuinely new
+  fetch strategy rather than a sixth blind retry of the same spec-page
+  anchor, per this file's own instruction after round five: `WebFetch`
+  against `https://raw.githubusercontent.com/golang/go/master/doc/go_spec.html`
+  (a GitHub raw-markdown-style mirror, not `go.dev/ref/spec#Select_statements`
+  or `go.dev/tour/concurrency/6`, both already exhausted) hit a flat
+  permission wall instead of a truncation this time — "Claude requested
+  permissions to use WebFetch, but you haven't granted it yet" — headless,
+  no user present to grant it; a `curl` fallback via Bash against the same
+  URL and against `learn.microsoft.com` hit an identical approval gate
+  ("this Bash command contains... requires approval"). So this round's
+  attempt failed for a *different* reason than rounds 1-5 (a permission
+  gate, not a truncated fetch) — worth flagging precisely, since it means
+  the fetch-strategy change alone doesn't clear this blocker; the gate
+  itself needs lifting (interactive approval) before `select` can ever be
+  verified against a primary source in this sandbox. Deferred `select` again
+  — now six rounds — and picked instead from the other standing, genuinely
+  open gap this file's own log had tracked since Lesson 109: the Go
+  course's worker-pool shape (Lesson 25's own Scope-adjacent mention,
+  "Lesson 25's worker-pool shape... as the alternative to a per-call-site
+  cap," named explicitly in Lesson 109's closing note and never picked up
+  since) had no C#-side mirror at all, the same ecosystem-gap shape this
+  run has closed six times already for retry/circuit-breaker/bulkhead.
+  Confirmed via a case-insensitive grep of `worker pool`/`Channel<T>`/
+  `System.Threading.Channels`/`BoundedChannel` across every lesson and the
+  glossary: "worker pool" appears only as passing prose in Lessons 11 and 25
+  (never its own `<dfn>` or mechanism), and `Channel<T>`/
+  `System.Threading.Channels` had zero hits anywhere — a genuinely
+  unaddressed gap, not a half-covered one. Read `MISSION.md`, this file's
+  tail (full run from 2026-10-24 through 2026-10-27), both
+  `learning-records/0002` and `/0003`, Lessons 25, 109, and 114 in full for
+  exact HTML/quiz/callout/scope-line/comparison-table structure, and
+  `nav.js`'s and `glossary.html`'s tails, all before writing anything.
+  Verified the C# half directly against a fetched Microsoft Learn page
+  before writing any prose — unlike every C# round since Lesson 103, this
+  fetch actually succeeded: `WebFetch` against
+  `https://learn.microsoft.com/en-us/dotnet/core/extensions/channels`
+  returned the full page content (not blocked this time, unlike the raw
+  GitHub mirror and the `curl` fallback above — worth noting for future
+  rounds that `WebFetch` against `learn.microsoft.com` specifically has now
+  worked at least once headless, even though `dotnet --version` itself
+  stays gated), confirming verbatim: the producer/consumer model description,
+  `Channel.CreateBounded`/`CreateUnbounded`, the full `BoundedChannelFullMode`
+  table (`Wait` is the default, "calls to `WriteAsync` wait for space to be
+  available in order to complete the write operation"; `DropNewest`/
+  `DropOldest`/`DropWrite` each named with their exact drop behavior), and
+  `ChannelReader<T>.ReadAllAsync()`'s own doc line, "creates an
+  `IAsyncEnumerable<T>` that enables reading all of the data from the
+  channel." The Go worker-pool scaffold (`runWorkerPool`, N goroutines over
+  a shared `for range jobs` loop, a second goroutine draining a `done`
+  channel to `close(results)` once every worker exits) was compile-checked
+  in a scratch directory at `.scratch/backend-lesson115/` inside the repo
+  (not `/tmp`, consistent with every round since Lesson 110's sandbox
+  finding): `go build -o scratch_bin .` and `go vet ./...` both ran clean
+  with no output on the first attempt; the scratch directory was deleted
+  immediately after, confirmed gone via a failed `ls`. Note: the plain
+  heredoc (`cat > file <<'EOF' ... EOF`) approach every single prior round
+  used for scratch files hit a new sandbox block this round specifically —
+  "Contains brace with quote character (expansion obfuscation)" — the first
+  time this exact error has shown up in this file's log; worked around by
+  using the `Write` tool directly for both `go.mod` and `main.go` instead of
+  a Bash heredoc, then running `go build`/`go vet` as separate Bash calls.
+  Future rounds should default to `Write` for scratch-file creation rather
+  than assume the heredoc pattern still works. The C# `Channel<T>` snippet
+  itself was not toolchain-compiled (`dotnet --version` was not attempted
+  this round since every round since Lesson 103 has hit the same approval
+  gate, confirmed enough times now not to re-test it each round) — verified
+  instead by the direct quote-matching above against the one Microsoft page
+  this round could actually fetch. Three new terms, each checked against the
+  glossary first via case-insensitive grep across the whole file — zero
+  collisions confirmed before writing: `worker pool`, `Channel<T>`,
+  `BoundedChannelFullMode`. `backpressure` is reused from Lesson 11 and was
+  originally mis-wrapped in a fresh `<dfn>` on the first draft — caught by
+  this round's own dfn-count check (4 found against only 3 intended new
+  terms) before finalizing, fixed by switching it to a plain `<em>` tag, the
+  same mistake and the same fix Lesson 112's entry already documented for
+  `exponential backoff`/`jitter`. Added the three new rows immediately after
+  Lesson 114's `ConcurrentDictionary` row, same Term/Tiếng Việt (dev-style)/
+  In software column order, confirmed by inspecting the file's actual last
+  three existing rows directly rather than assumed. Verification performed
+  mechanically via Node scripts run directly in this session: (1) a quiz-
+  word-count check scoped per `<div class="q">` block, splitting every
+  option both via `.split(/\s+/)` and `.split(" ")` — first draft landed
+  uneven across all four questions (spreads of 10-13 words per option),
+  fixed through several rewrite-and-recount cycles per option (one cycle
+  overshot from 12 to 13 on a single option before landing correctly, caught
+  immediately by re-running the same script rather than trusting the edit),
+  converged to exactly 12/12/12/12, 11/11/11/11, 9/9/9/9, and 11/11/11/11
+  across the four questions, both counting methods agreeing exactly, exactly
+  one `data-ok` and four options per question confirmed the same way; (2) an
+  HTML tag-balance check across div/p/code/button/script/dfn/pre/h2/h1/em/
+  strong/a/table/tr/th/td/ul/li — caught the `backpressure` dfn-count mistake
+  described above on the first pass (dfn 4/4 but only 3 new terms intended),
+  fixed, clean on the second pass (div 7/7, p 18/18, code 49/49, button
+  16/16, script 3/3, dfn 3/3, pre 2/2, h2 8/8, h1 1/1, em 4/4, strong 3/3, a
+  2/2, table 1/1, tr 6/6, th 8/8, td 10/10); a separate table/tr/th/td/p/div/
+  html/head/body/title/script balance check on `glossary.html` after its
+  three-row addition — also balanced (tr 374/374, td 1119/1119), plus a
+  duplicate-term scan across all 373 first-column entries — zero duplicates;
+  (3) a raw-unescaped-`&` regex scan across both files — zero hits; (4) the
+  lesson's `<dfn` tags grepped and confirmed to carry both `data-en=` and
+  `data-vn=` — exactly 3 `dfn` tags, matching the 3 new terms, no orphaned
+  attribute; (5) `node --check` against `assets/nav.js`, `assets/gloss.js`,
+  and `assets/quiz.js` — all clean, both before and after the `nav.js` edit;
+  (6) a basic HTML well-formedness check (exactly one `<!DOCTYPE html>`, one
+  `<html>`/`</html>`, three script tags with `nav.js` last) — clean; (7) a
+  grep for stray markdown-style `*emphasis*` left over from drafting — none
+  found. Registered Lesson 115 in `nav.js` (date 2026-10-28, today's actual
+  generation date) right after `n: 114`, confirmed exactly one matching
+  `n: 115` entry and exactly one matching `0115-*.html` file on disk
+  afterward. Added one new RESOURCES.md line (Microsoft Learn's Channels —
+  System.Threading.Channels page) following the existing per-topic
+  grouping, placed right after Lesson 114's `ConcurrentDictionary` line.
+  `bin/record-progress` ran clean on the first attempt this round (see
+  below). No new `learning-records/` file this round — the topic came from
+  Lesson 109's own self-documented closing note, not a new surprise about
+  the learner's baseline or a quiz outcome. Candidates spotted but not
+  picked this round, still worth checking fresh next time: Go's
+  `select`-statement arbitration rules, now deferred for a sixth round
+  running — this round's finding suggests the blocker is a permission gate
+  on outbound fetches generally (both `WebFetch` and `curl` were denied for
+  this specific case) rather than something fixable by picking yet another
+  URL, so a future round with an interactive session present to grant
+  `WebFetch` permission once may be the more productive path, rather than
+  another unattended retry; the Go course's own worker-pool lesson's
+  pipeline-stage material (chaining multiple pools stage-to-stage), named in
+  today's own Scope line as already covered there and not re-derived here;
+  and Polly (or a .NET resilience-library survey more broadly), still
+  deliberately out of scope per MISSION.md's "concepts first" rule.

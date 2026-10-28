@@ -236,6 +236,8 @@
       file: "lessons/0113-circuit-breaker-lock-statement.html" },
     { n: 114, date: "2026-10-27", title: "The bulkhead pattern, now in C# too",
       file: "lessons/0114-bulkhead-pattern-semaphoreslim-concurrentdictionary.html" },
+    { n: 115, date: "2026-10-28", title: "Worker pools: the other way to bound fan-out",
+      file: "lessons/0115-worker-pools-channel-t.html" },
   ];
 
   const REFS = [

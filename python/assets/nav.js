@@ -188,6 +188,8 @@
       file: "lessons/0089-hmac-keyed-hashing-for-authentication.html" },
     { n: 90, date: "2026-10-27", title: "graphlib: ordering tasks by their dependencies",
       file: "lessons/0090-graphlib-topological-sorting.html" },
+    { n: 91, date: "2026-10-28", title: "Review day 16: retrieval across Days 88-90",
+      file: "lessons/0091-review-retrieval-day-16.html" },
   ];
 
   const REFS = [

@@ -5001,3 +5001,146 @@ along the Phase 2 spine, adapted to the learning records.
   by name, so the highest-value move going forward is likely to keep
   scanning existing lesson *content* for gaps the way Days 38, 39, 41 and
   42 all did, rather than assuming an uncovered spine bullet remains.
+
+- 2026-10-28 (headless run, Day 43 generated): forty-third lesson,
+  `0043-dbt-snapshot-hard-deletes.html`. Idempotency check first — confirmed
+  no `lessons/0043-*.html` on disk and no `n: 43`/`date: "2026-10-28"` entry
+  in `assets/nav.js` before writing anything (highest prior lesson was 42,
+  dated 2026-10-27). A direct `psql "$LEARNING_DB_URL" ...` attempt and
+  `bin/query-progress` both hit this sandbox's standing gates (simple_expansion
+  block and an approval requirement respectively) with no human present, same
+  pattern every recent round has hit — pacing came from the orchestrator's own
+  prior DB read (no dataeng row for 2026-10-28, no quiz/kata/lesson_completed
+  signal for any course since 2026-10-15, so steady sequential pacing
+  continues) plus this file's own log and `lessons/*.html`/`assets/nav.js`
+  file state. Read `MISSION.md` in full, `PLAN.md`, this file's own tail back
+  through Day 42's close, `RESOURCES.md`, the one `learning-records/` file,
+  and `assets/nav.js`'s full `LESSONS` array (all 42 titles) before picking a
+  topic.
+  **Topic choice:** Day 42's own closing note said this course's named
+  `PLAN.md` spine bullets are now close to fully covered, and pointed at
+  auditing existing lesson *content* for untested edges rather than assuming
+  an uncovered bullet remains — the same method Days 38, 39, 41 and 42 all
+  used. Re-read Day 9's `restaurants_snapshot.sql` directly with that lens:
+  it's a plain `select ... from {{ source('raw', 'restaurants') }}` compared
+  against recorded history by the `timestamp` strategy, with no `hard_deletes`
+  config set at all (dbt's own default, `ignore`). Traced the actual
+  consequence through Day 9's own point-in-time join (`... or dbt_valid_to is
+  null`): a restaurant hard-deleted from `raw.restaurants` would leave its
+  last snapshot row's `dbt_valid_to` permanently `null`, so the join would
+  keep treating a deleted restaurant as currently valid forever — a genuine,
+  demonstrable gap in a lesson that shipped on Day 9, not a hypothetical.
+  Grepped `lessons/*.html` for `hard.delet`/`invalidate_hard_deletes`/
+  `dbt_is_deleted` first to confirm no prior lesson had touched this — zero
+  hits, confirming a real gap rather than a deepening pass.
+  **Content:** one new config key, `hard_deletes`, added to Day 9's existing
+  `restaurants_snapshot.sql` `config()` block, with `invalidate` built and
+  verified end to end (delete a restaurant with no orders against it, rerun
+  `dbt snapshot`, confirm `dbt_valid_to` is no longer null); `ignore` (the
+  default) and `new_record` (the richer alternative, closing the row out
+  *and* inserting an explicit deletion-marker row) named as vocabulary and
+  left for "go further," since `new_record` would need a second concept
+  (`dbt_is_deleted`) Day 9's existing join was never written to expect.
+  **A real correction caught mid-round, not assumed from memory:** this
+  round's first draft was written from memory as the older boolean,
+  `invalidate_hard_deletes: true` — a `WebFetch` against dbt Labs' live
+  Snapshots docs (the same page Day 9 already cites) caught that this is the
+  pre-1.9 config, superseded by `hard_deletes` (three settings: `ignore`,
+  `invalidate`, `new_record`) in dbt 1.9 and higher; this course pins
+  dbt-core 1.12.4 per `MISSION.md`, so the lesson was rewritten before
+  shipping to teach the current `hard_deletes` key, naming the older boolean
+  only as a one-line "still readable in older projects" note. A second
+  `WebFetch` against the same page confirmed the `dbt_is_deleted` column's
+  exact behavior (string `'True'`/`'False'`, set on the explicit marker row
+  `new_record` inserts) before that config was named in Section 5, even
+  though it wasn't built today.
+  No pandas, no Python-language teaching, no re-derivation of backend
+  idempotency or Kafka delivery-semantics concepts — confirmed by a
+  prose-only read before shipping; this lesson is pure dbt YAML/Jinja/SQL
+  content extending Day 9's own snapshot, no Python file at all.
+  **Verification:** built a minimal scratch dbt project under
+  `.scratch-dataeng-1028/fdp/food_delivery_pipeline/` at the repo root
+  (`/tmp` out of bounds again this round, same constraint recent rounds hit),
+  with `sources.yml`, `snapshots/restaurants_snapshot.sql` (first with
+  `invalidate_hard_deletes=True` to confirm the old key's shape, then
+  corrected to `hard_deletes='invalidate'` after the `WebFetch` correction
+  above), and two mart models reading from the snapshot (one filtering
+  `dbt_valid_to is null`, a second also selecting `dbt_is_deleted` to confirm
+  that column name is at least referenceable in a downstream `select`). Ran
+  `dbt parse --profiles-dir . --project-dir food_delivery_pipeline
+  --no-partial-parse` clean after every edit (grepped output for the literal
+  string `Error`, found none each time — dbt's own exit code stayed
+  unreliable through this sandbox's pipe handling, per this file's standing
+  warning). Ran `dbt list --resource-type snapshot` and `dbt list --select
+  +fct_orders_with_commission` live and got back exactly the expected DAG
+  shape (`restaurants_snapshot` depending on `source:food_delivery_pipeline.
+  raw.restaurants`, the mart depending on the snapshot) — confirming the
+  `hard_deletes` config key itself parses and the snapshot still resolves as
+  a normal DAG node, not just that the YAML/Jinja is syntactically valid. No
+  live Postgres was available in this sandbox, so the actual `DELETE` →
+  `dbt snapshot` → non-null `dbt_valid_to` behavior shown in the lesson's
+  Section 4 output is written from the documented mechanism and Day 9's own
+  already-confirmed snapshot mechanics (closing a row on a detected change),
+  not re-run live against a real broker-free but Postgres-backed stack this
+  round — stated honestly here rather than implied as a live capture, same
+  disclosure convention Day 17 and Day 41 both used for their own
+  simulation-vs-live gaps. No `.py` file exists in this lesson (pure dbt
+  YAML/Jinja/SQL content), so `py_compile` did not apply to shipped content;
+  `uv run python3` was used only for this round's own throwaway
+  tag-balance/bare-`&`/dfn-attribute/quiz-word-count checker script, written
+  to a second scratch directory and deleted with it. Deleted both scratch
+  directories entirely afterward (confirmed via a directory-listing attempt
+  on each finding nothing).
+  Ran a Python tag-balance/bare-`&`/dfn-attribute/quiz-word-count script,
+  same shape as recent rounds': every checked tag balanced on the first pass
+  (div 8/8, p 23/23, code 87/87, button 12/12, script 3/3, dfn 1/1, pre 7/7,
+  h2 8/8, h1 1/1, em 5/5, strong 5/5, a 3/3, table 1/1, tr 4/4, td 6/6, th
+  2/2), zero bare `&`, the one `<dfn>` tag carrying both `data-en=` and
+  `data-vn=`. The first quiz draft came up uneven on all four questions
+  (12/13/7, 10/9/11, 9/9/8, 9/10/8) — rebalanced through several
+  edit-and-recount passes, re-running the script after every edit (the
+  script was itself corrected mid-round to replace stripped tags with a
+  space rather than deleting them outright, after an early pass silently
+  concatenated adjacent words across a removed `<code>` tag and under-counted
+  as a result — caught by eyeballing the actual word lists printed, not just
+  the counts), to a final 11/11/11, 11/11/11, 9/9/9 and 10/10/10 across all
+  four questions. A separate pass on `reference/glossary.html` after adding
+  this round's new section confirmed it stayed balanced too (h2 42/42, table
+  42/42, tr 168/168, td 378/378, th 126/126), zero bare `&`; the pre-existing
+  duplicate `id="day1"` flagged honestly in Day 41's own entry is still
+  there, still untouched by this round's diff, confirmed by the count
+  staying at exactly 2 occurrences — left alone per this task's own
+  append-only rule for `glossary.html`.
+  Added two new glossary terms (`hard delete`, `hard_deletes config`) under
+  a new Day 43 section, after grepping case-insensitively first and
+  confirming no existing row covered `hard.delet`/`invalidate_hard_deletes`/
+  `dbt_is_deleted` — `dbt_valid_from`/`dbt_valid_to`, `snapshot strategy`,
+  `SCD Type 2` and `point-in-time join` are all pure reuse of Day 9's
+  existing glossary rows, not retaught. No new `RESOURCES.md` line added —
+  today revisits the exact Snapshots doc URL Day 9 already cites, so the
+  existing line was annotated in place with a Day 43 mention (the
+  `hard_deletes` config and its three settings, confirmed live against the
+  page) rather than duplicated as a second bullet, matching Day 39's own
+  precedent for a reused citation.
+  Registered Lesson 43 in `assets/nav.js` right after the `n: 42` entry,
+  dated 2026-10-28 (`node --check` clean on `nav.js`, `gloss.js` and
+  `quiz.js`, the last two untouched but re-checked per habit). Ran
+  `bin/record-progress dataeng lesson_generated --day 43 --lesson
+  0043-dbt-snapshot-hard-deletes.html --detail '{"by":"headless"}'` from the
+  repo root at the end of this round; succeeded.
+  `dataeng/learning-records/` was not touched this round — today's pick came
+  from re-auditing Day 9's own shipped snapshot against a case it was never
+  checked against, not a new durable fact about the learner distinct from
+  the single 2026-09-14 baseline record on file.
+  **Next up:** the `airflow db migrate`/`airflow dags test` approval-gate
+  block is now nine rounds running (35-43) with no attempt made this round
+  specifically (today's own closing note from Day 42 pointed at a content
+  audit instead, which is what this round did) — still worth a human
+  granting it once for whoever next has one available. Today's audit found
+  a real, previously-shipped gap in Day 9's own snapshot; worth noting for
+  whoever picks up next that re-testing earlier lessons' own built artifacts
+  against edge cases (hard deletes here; what else might a fresh pair of
+  eyes find in Days 2-8's staging/marts layer, or Day 13's incremental
+  strategies, under a late-arriving or out-of-order event) is now at least
+  as promising a source of fresh, substantive material as scanning
+  `PLAN.md`'s named bullets, which are themselves running thin.

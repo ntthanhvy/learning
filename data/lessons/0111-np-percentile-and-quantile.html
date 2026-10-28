@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 111 · np.percentile() and np.quantile(): same math, two scales, and a NaN trap pandas doesn't have</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 111 · ~20 min · 28 Oct 2026</p>
+<h1>np.percentile() and np.quantile(): same math, two scales, and a NaN trap pandas doesn't have</h1>
+<p class="byline">This round's fresh scan confirmed <code>np.ravel()</code>/<code>.flatten()</code> was still open (named three rounds running since Lesson 108), but it also turned up a sharper gap: Lesson 18 taught <code>qcut()</code> to bin rows by quantile, but the raw NumPy functions underneath — <code>np.percentile()</code> and <code>np.quantile()</code> — were never covered on their own. They continue the "raw NumPy layer under a pandas method" family Lessons 93/95/97/99-102/109/110 have been building, and this one hides a genuinely sharp NaN contrast with <code>Series.quantile()</code>.</p>
+
+<h2>1 · Same computation, two different scales</h2>
+<p><dfn data-en="a NumPy function computing the q-th percentile of an array's values, where q is given on a 0-100 scale -- the raw-array layer under pandas' quantile-based binning" data-vn="giữ nguyên 'np.percentile()' — tính percentile thứ q của mảng, q theo thang 0-100 (ví dụ 50 = trung vị)">np.percentile()</dfn> and <dfn data-en="a NumPy function computing the same percentile/quantile value as np.percentile(), but with q given on a 0-1 scale instead of 0-100 -- the exact same computation, just rescaled" data-vn="giữ nguyên 'np.quantile()' — giống hệt np.percentile() về cách tính, chỉ khác thang đo: q theo 0-1 (ví dụ 0.5 = trung vị) thay vì 0-100">np.quantile()</dfn> compute the exact same statistic — "the value below which q% (or fraction q) of the data falls" — the only difference is which scale <code>q</code> is written on:</p>
+<pre><code>arr = np.array([<span class="kw">3</span>, <span class="kw">1</span>, <span class="kw">4</span>, <span class="kw">1</span>, <span class="kw">5</span>, <span class="kw">9</span>, <span class="kw">2</span>, <span class="kw">6</span>])
+
+np.percentile(arr, <span class="kw">50</span>)     <span class="cm"># 3.5  -- 50 out of 100</span>
+np.quantile(arr, <span class="kw">0.5</span>)      <span class="cm"># 3.5  -- 0.5 out of 1, identical result</span>
+
+np.percentile(arr, [<span class="kw">25</span>, <span class="kw">50</span>, <span class="kw">75</span>])
+<span class="cm"># array([1.75, 3.5 , 5.25])   -- multiple q values at once, one array back</span></code></pre>
+<p>Confirmed directly (numpy 2.5.4): passing a value outside each function's own valid range raises <code>ValueError</code> immediately rather than silently clamping — <code>np.percentile(arr, 150)</code> raises <code>"Percentiles must be in the range [0, 100]"</code>, and <code>np.quantile(arr, 1.5)</code> raises the 0-1 equivalent. Mixing the two scales up — passing <code>0.5</code> to <code>np.percentile()</code> expecting a median — doesn't raise at all; it silently computes the 0.5th percentile (essentially the minimum), the easiest wrong-guess mistake with this pair.</p>
+
+<h2>2 · The NumPy-layer gap: it does NOT dispatch to a Series back</h2>
+<p>Lessons 109/110 found a mixed pattern: <code>np.cumsum()</code>/<code>np.clip()</code> dispatch to the pandas method and hand a Series back when called on a Series, but <code>np.cummax()</code> doesn't even exist as a top-level function. <code>np.percentile()</code>/<code>np.quantile()</code> add a third shape to that pattern: confirmed directly, calling either one on a pandas Series does <strong>not</strong> dispatch to <code>Series.quantile()</code> — it always returns a bare <code>numpy.float64</code> scalar (or a plain <code>ndarray</code> for multiple <code>q</code> values), with the Index gone entirely, same "index disappears" behavior <code>np.diff()</code> had in Lesson 109:</p>
+<pre><code>s = pd.Series(arr)
+
+np.percentile(s, <span class="kw">50</span>)          <span class="cm"># 3.5, type numpy.float64 -- a bare scalar, no Index</span>
+s.quantile(<span class="kw">0.5</span>)                <span class="cm"># 3.5, same value, but via the pandas method instead</span>
+
+s.quantile([<span class="kw">0.25</span>, <span class="kw">0.5</span>, <span class="kw">0.75</span>])
+<span class="cm"># 0.25    1.75
+# 0.50    3.50
+# 0.75    5.25
+# dtype: float64   -- pandas keeps the q values as a labeled Index; NumPy never does</span></code></pre>
+<p>The groupby-friendly version only exists on the pandas side, confirmed directly: <code>df.groupby("g")["v"].quantile(0.5)</code> returns one quantile per group with the group labels as Index — there is no NumPy-level equivalent that understands groups at all, since <code>np.quantile()</code> only ever sees a flat array.</p>
+
+<div class="callout"><strong>The trap:</strong> reaching for <code>np.percentile()</code>/<code>np.quantile()</code> inside a pandas pipeline expecting a Series back (to assign into a new column, say) silently breaks — it hands back a bare scalar or array with no row alignment at all. <code>Series.quantile()</code>/<code>DataFrame.quantile()</code> are the pandas-native spelling precisely because this NumPy pair never learned to carry index/group context.</div>
+
+<h2>3 · NaN: np.percentile() poisons silently, Series.quantile() just drops it</h2>
+<p>Confirmed directly, this is the sharpest trap in the pair: unlike every pandas method probed so far in this course (which default to <code>skipna=True</code>, Lessons 7/109/110), <code>np.percentile()</code>/<code>np.quantile()</code> have no <code>skipna</code> concept at all — a single NaN anywhere in the input poisons the entire result to NaN, with no warning:</p>
+<pre><code>arr_nan = np.array([<span class="kw">1.0</span>, <span class="kw">2.0</span>, np.nan, <span class="kw">4.0</span>])
+
+np.percentile(arr_nan, <span class="kw">50</span>)      <span class="cm"># nan -- one NaN anywhere wrecks the whole computation</span>
+np.nanpercentile(arr_nan, <span class="kw">50</span>)   <span class="cm"># 2.0 -- the NaN-aware sibling function, ignores NaN entirely</span>
+
+pd.Series(arr_nan).quantile(<span class="kw">0.5</span>)
+<span class="cm"># 2.0  -- Series.quantile() drops NaN automatically, matching np.nanpercentile(), NOT np.percentile()</span></code></pre>
+<p>So <code>Series.quantile()</code>'s default behavior actually matches <code>np.nanpercentile()</code>, not the plain <code>np.percentile()</code> it looks like the obvious NumPy counterpart of — calling the wrong one of the pair on NaN-containing data is a silent, no-exception, wrong-number bug.</p>
+
+<h2>4 · method=, not interpolation= — a hard break, not just a rename</h2>
+<p>Confirmed directly against the official NumPy docs: the parameter controlling how a percentile that falls between two data points gets computed is <code>method=</code> (default <code>"linear"</code>), offering choices like <code>"nearest"</code>, <code>"lower"</code>, <code>"higher"</code>, and several statistical variants. It used to be called <code>interpolation=</code> — but in the installed version this course uses, that old name is fully removed, not merely deprecated: passing <code>interpolation=</code> now raises <code>TypeError: percentile() got an unexpected keyword argument 'interpolation'</code> outright, the same hard-break pattern Lesson 103 found with <code>pd.to_timedelta()</code>'s removed <code>errors="ignore"</code>.</p>
+<pre><code>np.percentile(arr, <span class="kw">50</span>, method=<span class="str">"nearest"</span>)
+<span class="cm"># 4  -- snaps to the nearest actual data point instead of interpolating</span>
+
+np.percentile(arr, <span class="kw">50</span>, interpolation=<span class="str">"linear"</span>)
+<span class="cm"># TypeError: percentile() got an unexpected keyword argument 'interpolation'</span></code></pre>
+
+<div class="interview">
+<p><strong>Q: "What's the difference between np.percentile() and np.quantile()?"</strong> A strong answer, out loud: <em>"Same algorithm, different scale for q — percentile takes 0 to 100, quantile takes 0 to 1, so percentile(arr, 50) and quantile(arr, 0.5) give the identical number. Neither one dispatches on a Series the way cumsum() does — you get a bare NumPy scalar back with no index, so inside a pandas pipeline I'd reach for Series.quantile() instead. And the NaN behavior is the trap: the plain NumPy versions let one NaN poison the whole result silently, while Series.quantile() quietly drops NaN by default — closer to np.nanpercentile() than to np.percentile() itself, even though the names look like direct counterparts."</em> The signal: naming the scale difference correctly, knowing neither dispatches to a Series, and catching the NaN mismatch between the "obvious" NumPy counterpart and what pandas actually does by default.</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>np.percentile()</code>/<code>np.quantile()</code>'s shared computation and scale difference, the no-dispatch-to-Series behavior, the NaN-poisons-silently trap versus <code>Series.quantile()</code>'s default NaN-dropping, and the <code>method=</code> parameter (and its fully-removed <code>interpolation=</code> predecessor). It does not cover the full list of <code>method=</code> interpolation variants beyond <code>"linear"</code>/<code>"nearest"</code>, the <code>axis=</code> parameter on multi-dimensional arrays, or <code>np.nanpercentile()</code>/<code>np.nanquantile()</code> beyond naming them as the NaN-aware siblings — worth knowing they exist, not today's focus.</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/111_np_percentile_quantile.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/111_np_percentile_quantile.py</code></pre>
+<p>Exercise 1 confirms <code>np.percentile()</code> and <code>np.quantile()</code> give the identical value on matching 0-100/0-1 scales, and that passing multiple <code>q</code> values returns an array in order (Section 1). Exercise 2 confirms calling either one on a Series returns a bare scalar, not a Series, while <code>Series.quantile()</code> stays a Series (Section 2). Exercise 3 confirms the NaN contrast: plain <code>np.percentile()</code> poisons to NaN, while <code>Series.quantile()</code> drops the NaN and returns a real number (Section 3).</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: np.percentile(arr, 50) and np.quantile(arr, 0.5) return the identical value, because both compute the same statistic -- the only difference is that percentile's q argument is written on a 0-100 scale while quantile's q argument is written on a 0-1 scale.">
+    <p class="stem">What is the actual difference between <code>np.percentile(arr, 50)</code> and <code>np.quantile(arr, 0.5)</code>?</p>
+    <button class="opt" data-ok>nothing really about the result -- only the scale the q argument is written on differs here</button>
+    <button class="opt">percentile always rounds its own final result to the nearest whole number, but quantile never once does</button>
+    <button class="opt">quantile silently ignores every single NaN value present here, but percentile always raises loudly on just one</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: unlike np.cumsum() or np.clip(), calling np.percentile()/np.quantile() on a pandas Series does not dispatch down to the Series method -- it always hands back a bare numpy.float64 scalar (or plain ndarray for multiple q values), with the Series's own Index gone entirely.">
+    <p class="stem">Calling <code>np.percentile(some_series, 50)</code> on a pandas Series returns what?</p>
+    <button class="opt" data-ok>a bare NumPy scalar with no Index at all, since it never dispatches to the Series method here</button>
+    <button class="opt">a full pandas Series back, with the exact same Index the original input series already had right there</button>
+    <button class="opt">a Series, but only the Index itself gets kept -- every one of the original values gets dropped</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: np.percentile() has no skipna concept at all, so one NaN anywhere in the array poisons the whole computed result to NaN with zero warning. Series.quantile(), by contrast, quietly drops NaN by default and returns a real number instead -- matching np.nanpercentile(), not the plain np.percentile() its name suggests.">
+    <p class="stem">Given an array with exactly one NaN mixed in, what does plain <code>np.percentile(arr, 50)</code> return?</p>
+    <button class="opt" data-ok>nan every single time -- one NaN anywhere silently poisons the entire computed result here</button>
+    <button class="opt">a correct real number, since NaN gets dropped automatically right before any computing even happens</button>
+    <button class="opt">it raises a loud ValueError right away instead of silently returning anything at all here</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official NumPy reference pages for <a href="https://numpy.org/doc/stable/reference/generated/numpy.percentile.html"><code>numpy.percentile()</code></a> and <a href="https://numpy.org/doc/stable/reference/generated/numpy.quantile.html"><code>numpy.quantile()</code></a> (per <code>RESOURCES.md</code>'s "Docs: NumPy fundamentals" entry, ~5 min) confirm the scale difference, the <code>method=</code> parameter's options and its renamed-from-<code>interpolation=</code> history, and that neither function has native NaN-skipping — <code>numpy.nanpercentile()</code>/<code>numpy.nanquantile()</code> are the documented NaN-aware siblings.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>np.percentile() / np.quantile()</code> is new today, added right after Lesson 110's <code>cummax() / cummin()</code> entry.<br>
+<strong>Next lesson:</strong> no standing candidate named this round — tomorrow's own fresh curriculum/glossary scan picks the next topic with nothing pre-committed. (<code>np.ravel()</code>/<code>.flatten()</code> remains open, named four rounds running since Lesson 108, but still not pre-committed per this course's own fresh-scan-every-round convention.)<br><br>
+💬 Anything unclear — the scale difference, the no-dispatch gap, or the NaN trap? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

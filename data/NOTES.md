@@ -10285,3 +10285,159 @@
   data lesson_generated --day 110 --lesson 0110-cummax-cummin.html
   --detail '{"by":"headless"}'` was run directly from the repo root to
   close out this round.
+- 2026-10-28 generation (Lesson 111): headless run, zero prior context.
+  Idempotency check first — confirmed no `lessons/0111-*.html` on disk and
+  no `n: 111`/`date: "2026-10-28"` entry in `nav.js` before writing
+  anything (highest prior lesson was 110, dated 2026-10-27). DB access: the
+  orchestrator's own brief reported last data row `lesson_generated day=110`
+  on 2026-10-27, nothing for 2026-10-28 yet, and no quiz/kata/lesson_completed
+  signal for any course since 2026-10-15 — so no weak-spot to target,
+  continued steady topic-driven pacing per this course's own standing
+  pattern; `psql`/`bin/query-progress` were not retried per the brief's own
+  note that both hit a sandbox gate here with no human to approve.
+  Read `MISSION.md` in full (not modified), this file's own tail (Lessons
+  108-110's entries) for exact house style, `data/learning-records/`
+  (still only the single 2026-07-09 baseline, nothing new),
+  `lessons/0110-cummax-cummin.html` and `practice/110_cummax_cummin.py` in
+  full for the exact HTML/practice structure, and `reference/glossary.html`'s
+  tail for the exact column order. Topic choice: Lesson 110's own closing
+  note named one standing candidate — `np.ravel()`/`.flatten()`, open for
+  four rounds running since Lesson 108 — but per this course's own stated
+  convention (fresh scan each round, no blind carryover), did a broad fresh
+  gap-check first rather than taking that candidate on faith: grepped the
+  full glossary and every lesson body for roughly fifty candidate
+  method/function names (`nlargest`/`nsmallest`, `duplicated()`,
+  `pivot_table`, `np.histogram`, `np.digitize`, `np.bincount`, `np.lexsort`,
+  `np.nan_to_num`, `np.percentile`/`np.quantile`, `np.ravel`/`flatten`,
+  `np.reshape`, `np.vectorize`, `np.meshgrid`, `einsum`, and more). Most
+  came back already covered (`nlargest()`/`duplicated()` both have existing
+  dedicated glossary rows from Lessons 10/11) or out of MISSION.md scope
+  (`einsum`/`meshgrid` are the "deep NumPy linear algebra" the mission
+  explicitly excludes). Two genuine zero-hit gaps surfaced: the carried-over
+  `np.ravel()`/`.flatten()`, and `np.percentile()`/`np.quantile()` — the
+  latter confirmed zero-hit not just in the glossary but across every lesson
+  body too (Lessons 17/18 teach `qcut()`/`crosstab()` using `quantile()`
+  conceptually but never cite the raw NumPy functions by name). Picked
+  `np.percentile()`/`np.quantile()` over the carried-over `ravel`/`flatten`
+  candidate: it continues the "raw NumPy layer under a pandas method" family
+  Lessons 93/95/97/99-102/109/110 have been building all along (a tighter
+  fit with the curriculum's recent spine than an unrelated array-reshape
+  detour), and probing it directly turned up a sharper, more interview-
+  relevant trap than initially expected — ravel/flatten remains open,
+  renamed below for whoever scans next. Every behavioral claim was probed
+  directly first via a temporary script in `.scratch-data-111/` at the repo
+  root (deleted after use, never tracked by git; writing the probe as a real
+  `.py` file via the Write tool rather than an inline bash heredoc, since an
+  initial heredoc attempt hit a "Contains simple_expansion" parser error on
+  this sandbox, same shape of block noted in past rounds for different
+  reasons): confirmed numpy 2.5.4 / pandas 3.1.0, unchanged from Lessons
+  106-110; confirmed `np.percentile(arr, 50)` and `np.quantile(arr, 0.5)`
+  return the byte-identical value (3.5 on the lesson's own fixture), the
+  only difference being the 0-100 vs. 0-1 scale on `q`; confirmed a `q`
+  outside each function's own valid range raises `ValueError` immediately
+  (`"Percentiles must be in the range [0, 100]"` / the 0-1 equivalent for
+  quantile) rather than silently clamping; confirmed, the round's sharpest
+  find, that neither function dispatches to `Series.quantile()` when called
+  on a Series — both return a bare `numpy.float64` scalar (confirmed via
+  `type()`), with the Index gone entirely, the same "Index disappears" shape
+  `np.diff()` had in Lesson 109, while `s.quantile([0.25, 0.5, 0.75])` keeps
+  the q values themselves as a real Index; confirmed there is no
+  groupby-aware equivalent on the NumPy side at all — `np.quantile()` only
+  ever sees a flat array, while `df.groupby("g")["v"].quantile(0.5)` returns
+  one value per group with group labels as Index. The NaN finding, confirmed
+  directly and the single sharpest trap of the lesson: `np.percentile()`/
+  `np.quantile()` have no `skipna` concept whatsoever — one NaN anywhere in
+  a 4-element test array poisoned the entire result to `nan`, while
+  `np.nanpercentile()` on the identical array returned a real number (2.0);
+  confirmed separately that `pd.Series(arr_nan).quantile(0.5)` also returns
+  2.0 by default — meaning `Series.quantile()`'s own default behavior
+  actually matches `np.nanpercentile()`, not the plain `np.percentile()` its
+  name suggests, a genuinely easy wrong-guess trap. Confirmed directly
+  against the official NumPy docs (fetched both `numpy.percentile` and
+  `numpy.quantile` reference pages via WebFetch to quote exact wording
+  rather than assert from the probe alone) that the interpolation-choice
+  parameter is `method=` (default `"linear"`), and that the older
+  `interpolation=` name is fully removed in the installed version, not
+  merely deprecated — passing it raised `TypeError: percentile() got an
+  unexpected keyword argument 'interpolation'` directly in the probe,
+  matching Lesson 103's `pd.to_timedelta()` hard-break precedent for a
+  removed-not-deprecated kwarg. Did not add a new `RESOURCES.md` line — both
+  NumPy API pages fall under the existing "Docs: NumPy fundamentals" entry
+  Lesson 102 already cited under, same single-grouping precedent Lessons
+  93/95/97/99-110 established. One collision check before writing: grepped
+  `percentile` and `quantile` case-insensitively across the full glossary —
+  found only incidental, non-colliding mentions (`describe()`'s row
+  mentions "percentiles" in prose, `rank(pct=True)`'s own row is a different
+  method entirely) and zero existing dedicated rows for either function —
+  added exactly one new row, "np.percentile() / np.quantile()" (grouping the
+  pair together, same one-row-per-tight-story precedent as Lesson 110's
+  `cummax()`/`cummin()` row), directly after Lesson 110's `cummax() /
+  cummin()` entry. Verification performed mechanically, via temporary
+  scripts in `.scratch-check-111/` (deleted after, never tracked by git):
+  (1) a quiz-word-count script per `<div class="q")` block — first draft
+  came out uneven (16/13/12, 18/15/17, 14/13/14); several rewrite-and-
+  recount cycles later converged on exactly 17/17/17, 18/18/18, and 15/15/15
+  option words across the three questions, one `data-ok` per question
+  throughout, `data-why` wording re-checked against the final option text
+  afterward; (2) an HTML tag-balance check caught a real authoring mistake
+  on the first pass — `p` open/close at 19/20, a stray `</p>` left inside
+  the Section 2 `<div class="callout">`, the exact same class of bug Lesson
+  110 itself found and fixed in its own callout — removed the stray closing
+  tag, clean on the second pass (html 1/1, head 1/1, body 1/1, div 6/6, p
+  19/19, pre 5/5, code 85/85, h1 1/1, h2 8/8, em 1/1, strong 5/5, button
+  9/9, script 3/3, dfn 2/2, span 39/39, a 3/3, title 1/1); (3) a raw-
+  unescaped-`&` regex scan found exactly the two expected `&` characters
+  inside the lesson's own `cd ~/learning/data && uv run ...` shell command,
+  zero raw `&` elsewhere; (4) `node --check` against `assets/nav.js` (after
+  the edit) and the untouched `gloss.js`/`quiz.js` — all clean; (5) exactly
+  2 `<dfn>`-carrying tags, matching the 2 new terms (`np.percentile()`,
+  `np.quantile()`), both carrying `data-en` and `data-vn`. A separate table-
+  balance check on `glossary.html` after its one-row addition — balanced
+  (tr 183/183 → 184/184 as expected, td 549/549, zero raw `&` introduced),
+  plus a duplicate-term scan across all 182 first-column entries — zero
+  duplicates. The shipped (unsolved) `practice/111_np_percentile_quantile.py`
+  was executed directly from its real `practice/` location and printed
+  exactly 3 ✗ with no raw traceback — but only after fixing a real design
+  bug caught during that very first run: Exercise 2's original check
+  computed `ex2_multi_has_index` from a fixed, unconditional call to
+  `s.quantile([0.25, 0.5, 0.75])` rather than from the student's own
+  fill-in-the-blank, so the exercise printed ✓ even fully unsolved (the
+  blank being graded was never actually exercised by the check). Fixed by
+  wrapping both pieces of Exercise 2 in small helper functions
+  (`np_percentile_on_series()`, `series_quantile_multi()`) whose bodies are
+  themselves the blanks to fill in, same shape as Exercise 2's own
+  `running_best()`/`top_values()` helper-function pattern from Lessons
+  108-110 — re-ran the shipped file after the fix and confirmed all three
+  exercises now correctly show ✗ unsolved. Built a solved copy in
+  `.scratch-data-111/practice/` (deleted after, never tracked by git),
+  filling in all blanks correctly; it printed all 3 ✓ and "All green" on the
+  first run after the fix — watched specifically for the numpy-scalar
+  `is`-vs-`==` gotcha Lesson 110 found (`numpy.bool_(True) is True` is
+  `False`), but every comparison in this file's own checks was already
+  wrapped in `bool(...)` before any `is True` test, so no equivalent bug
+  surfaced this round. The shipped file was re-run once more directly from
+  `practice/` after building the solved copy and reproduced the identical
+  all-✗ result, confirming the solved copy's edits never leaked back into
+  the shipped baseline. Registered Lesson 111 in `nav.js` with today's date
+  (2026-10-28); `node --check` confirmed it still parses as valid JavaScript
+  after the edit, and exactly one `n: 111` entry plus one
+  `0111-np-percentile-and-quantile` file reference were confirmed to exist.
+  This round's own fresh scan reconfirms `np.ravel()`/`.flatten()` as the
+  one remaining named zero-hit candidate (first named in Lesson 108's own
+  round, still open after five rounds) — not pre-committed as tomorrow's
+  pick, since this course's standing convention is a fresh scan each round
+  rather than blind carryover. No new `data/learning-records/` entry was
+  added this round — routine lesson, no new baseline finding to justify one
+  (the completion/quiz signal remains stale past mid-October, unchanged
+  from recent rounds). `git status --short` after all edits confirmed only
+  the intended `data/` files were touched (`data/assets/nav.js`,
+  `data/reference/glossary.html`, new
+  `data/lessons/0111-np-percentile-and-quantile.html`, new
+  `data/practice/111_np_percentile_quantile.py`) plus unrelated concurrent
+  changes in `backend/`/`python/`/`rust/`/`dataeng/` from other runs, not
+  touched by this one. Both scratch directories (`.scratch-data-111/`,
+  `.scratch-check-111/`) were deleted after verification, at the repo root
+  but never tracked by git, matching prior rounds' own precedent for this
+  environment. `bin/record-progress data lesson_generated --day 111
+  --lesson 0111-np-percentile-and-quantile.html --detail '{"by":"headless"}'`
+  was run directly from the repo root to close out this round.

@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 115 · Worker pools: the other way to bound fan-out</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 115 · ~20 min</p>
+<h1>Worker pools: the other way to bound fan-out</h1>
+<p class="byline">Lesson 109 bounded a fan-out loop with a cap at the call site: <code>errgroup.Group.SetLimit</code> or a <code>SemaphoreSlim</code>, one slot acquired per item, released when that item's work finishes. There's a second, older shape for the same problem — a fixed set of long-lived workers that read items off a queue themselves, rather than a cap that stops new launches. Lesson 25 named this shape in passing as Go's "worker pool" and deferred it; today builds it for real, in Go and in C#'s own purpose-built version of the same idea.</p>
+
+<h2>1 · Same goal, a different mechanic</h2>
+<p>Lesson 109's cap and today's pool both answer "how many of these run at once?" — but they get there differently. <code>SetLimit</code>/<code>SemaphoreSlim</code> still launches one task <em>per item</em>; the cap only blocks the <em>next</em> launch once the limit is full, so under the hood the program still creates as many goroutines or Tasks as there are items, just throttled. A <dfn data-en="a fixed, small number of long-lived workers that each repeatedly pull one item at a time off a shared queue and process it, rather than one short-lived task being spawned per item" data-vn="worker pool (giữ nguyên) — một số lượng cố định, ít các worker sống lâu, mỗi worker lần lượt lấy từng item từ 1 queue chung ra xử lý, thay vì tạo task riêng cho mỗi item">worker pool</dfn> flips that: a small, fixed number of workers are started once, and every item — however many thousands arrive — gets pulled off one shared queue by whichever worker is free next. No per-item goroutine or Task ever gets created; the workers themselves are the only concurrent units that exist for the whole run.</p>
+<p>The two shapes suit different inputs. A fixed list of N known calls (Lesson 108's three services) or a one-off burst (Lesson 109's batch) fits a cap just fine — launch, throttle, done. A <em>queue</em> that work keeps arriving on indefinitely — a job table, an incoming request stream, a message broker — fits a worker pool better: the workers just keep running, pulling the next item whenever one appears, with no "loop over N items" to even write.</p>
+
+<h2>2 · Go: workers reading off one channel</h2>
+<p>A Go worker pool is a fixed number of goroutines, each running the same <code>for range</code> loop over one shared channel. The channel itself is what Go calls a queue here — no separate queue data structure is needed, since a channel already serializes handoff between goroutines:</p>
+<pre><code><span class="kw">func</span> runWorkerPool(ctx context.Context, jobs &lt;-<span class="kw">chan</span> Job, workerCount <span class="ty">int</span>) &lt;-<span class="kw">chan</span> Result {
+    results := <span class="kw">make</span>(<span class="kw">chan</span> Result)
+    done := <span class="kw">make</span>(<span class="kw">chan</span> <span class="kw">struct</span>{})
+
+    <span class="kw">for</span> w := <span class="dv">0</span>; w &lt; workerCount; w++ {
+        <span class="kw">go</span> <span class="kw">func</span>() {
+            <span class="kw">for</span> j := <span class="kw">range</span> jobs {          <span class="cm">// blocks here until a job arrives or jobs closes</span>
+                err := processJob(ctx, j)
+                results &lt;- Result{ID: j.ID, Err: err}
+            }
+            done &lt;- <span class="kw">struct</span>{}{}         <span class="cm">// this worker drained the queue, signal exit</span>
+        }()
+    }
+
+    <span class="kw">go</span> <span class="kw">func</span>() {
+        <span class="kw">for</span> i := <span class="dv">0</span>; i &lt; workerCount; i++ { &lt;-done }
+        <span class="kw">close</span>(results)
+    }()
+    <span class="kw">return</span> results
+}
+</code></pre>
+<p>Exactly <code>workerCount</code> goroutines exist for the life of this call, no matter whether <code>jobs</code> carries 20 items or 20,000 — each worker's <code>for range jobs</code> simply blocks on an empty channel and wakes up the instant the next item is sent, until the sender calls <code>close(jobs)</code> and every worker's range loop ends on its own. Lesson 11's <em>backpressure</em> shows up here for free: if <code>jobs</code> is an unbuffered or small-buffered channel, a producer sending faster than the pool drains simply blocks on its own send, with no separate throttling code required.</p>
+
+<h2>3 · C#: the same shape has a name, Channel&lt;T&gt;</h2>
+<p>C# doesn't ask you to hand-roll a queue plus a lock the way Go pre-channels did — <code>System.Threading.Channels</code> is the BCL's own purpose-built answer, and Microsoft's own docs describe it plainly: it provides "synchronization data structures for passing data between producers and consumers asynchronously," implementing "the producer/consumer conceptual programming model." A <dfn data-en="the generic producer/consumer queue type in System.Threading.Channels, created via Channel.CreateBounded or Channel.CreateUnbounded, exposing a Writer for producers and a Reader for consumers" data-vn="Channel&lt;T&gt; (giữ nguyên) — kiểu queue producer/consumer tổng quát trong System.Threading.Channels, tạo bằng Channel.CreateBounded hoặc Channel.CreateUnbounded, có Writer cho producer và Reader cho consumer">Channel&lt;T&gt;</dfn> is created once, and a fixed number of consumer <code>Task</code>s each loop over its <code>Reader</code>, same shape as Go's goroutines over a shared channel:</p>
+<pre><code><span class="kw">var</span> jobs = Channel.CreateBounded&lt;Job&gt;(<span class="dv">1_000</span>);
+
+<span class="kw">var</span> workers = Enumerable.Range(<span class="dv">0</span>, workerCount)
+    .Select(_ =&gt; Task.Run(<span class="kw">async</span> () =&gt; {
+        <span class="kw">await</span> <span class="kw">foreach</span> (<span class="kw">var</span> job <span class="kw">in</span> jobs.Reader.ReadAllAsync())
+            <span class="kw">await</span> ProcessJobAsync(job);
+    }))
+    .ToArray();
+
+<span class="kw">await</span> Task.WhenAll(workers);  <span class="cm">// after the producer calls jobs.Writer.Complete()</span>
+</code></pre>
+<p>Fixed number of worker <code>Task</code>s, same as the fixed goroutine count — the only thing that scales with the number of jobs is how long <code>ReadAllAsync()</code> keeps yielding items, never how many workers exist. Microsoft's own docs confirm <code>ReadAllAsync()</code> is exactly built for this: it "creates an <code>IAsyncEnumerable&lt;T&gt;</code> that enables reading all of the data from the channel," meant to be driven by <code>await foreach</code> until the writer signals it's done.</p>
+
+<h2>4 · The one knob Channel&lt;T&gt; has that a bare Go channel doesn't name explicitly</h2>
+<p>A bounded Go channel just blocks a sender once full — that's the only behavior, full stop. <code>Channel.CreateBounded</code> makes that choice a named, explicit option: <dfn data-en="the enum controlling what a bounded Channel&lt;T&gt; does when a writer tries to add an item to an already-full channel — Wait (the default) suspends the writer until space frees, DropNewest/DropOldest silently discard an existing queued item to make room, and DropWrite silently discards the new item being written" data-vn="BoundedChannelFullMode (giữ nguyên) — enum quyết định hành vi khi writer ghi vào 1 Channel&lt;T&gt; bounded đã đầy -- Wait (mặc định) làm writer chờ tới khi có chỗ, DropNewest/DropOldest âm thầm bỏ 1 item đang nằm trong queue để lấy chỗ, DropWrite âm thầm bỏ luôn item mới">BoundedChannelFullMode</dfn>. Per Microsoft's own table, the default, <code>Wait</code>, matches Go's only behavior verbatim — "calls to <code>WriteAsync</code> wait for space to be available in order to complete the write operation" — but three other values exist precisely because sometimes blocking the producer is the wrong trade-off: <code>DropOldest</code>/<code>DropNewest</code> silently discard a queued item to make room, and <code>DropWrite</code> silently discards the newly written one instead, trading "producer never blocks" for "some items never get processed."</p>
+<div class="callout"><strong>Pick deliberately, not by accident:</strong> a job queue that must process every row (an outbox relay, a billing event) belongs on the default <code>Wait</code> — the same guarantee a bounded Go channel gives for free, since it has no drop modes to misconfigure. A live-metrics or position feed, where only the newest reading matters and a stale queued one is actively wrong to keep, is the rare case where <code>DropOldest</code> is the correct choice, not a bug. The trap is reaching for a drop mode out of habit "to be safe against blocking" on a queue where every dropped item is actually lost real work — Go's bounded channel never tempts you into that choice, because it was never offered.</div>
+
+<h2>5 · What stays identical to Lesson 109's cap, in both languages</h2>
+<p>Sizing the pool is the same judgment call Lesson 109 already taught for <code>SetLimit</code>/<code>SemaphoreSlim</code>: too few workers and the queue backs up under load; too many and the downstream dependency the workers call gets hit with more concurrent load than it can take, the exact failure Lesson 109's own opening section described. A worker pool doesn't remove that judgment call — it just changes where the limit lives: not "how many launches are in flight," but "how many workers exist," fixed once at startup either way.</p>
+
+<div class="cmp-wrap">
+<table class="cmp">
+<thead><tr><th></th><th>Lesson 109: cap at the call site</th><th>Lesson 115: worker pool</th></tr></thead>
+<tbody>
+<tr><th>Unit launched per item?</th><td>yes — one goroutine/Task per item, throttled</td><td>no — zero; a fixed pool pulls items off a queue</td></tr>
+<tr><th>Best fit</th><td>a known, fixed list of calls or a one-off batch</td><td>an open-ended or continuously arriving queue</td></tr>
+<tr><th>Go mechanism</th><td><code>errgroup.Group.SetLimit</code></td><td>N goroutines, <code>for range</code> over one <code>chan</code></td></tr>
+<tr><th>C# mechanism</th><td><code>SemaphoreSlim</code></td><td>N <code>Task</code>s, <code>await foreach</code> over <code>Channel&lt;T&gt;.Reader.ReadAllAsync()</code></td></tr>
+<tr><th>Behavior when the queue/cap is full</th><td>next launch blocks until a slot frees</td><td>bounded channel: producer blocks (or drops, if configured)</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers the worker-pool shape (a fixed number of long-lived consumers reading off one shared queue) as the alternative to Lesson 109's per-call-site cap, in Go (goroutines over a <code>chan</code>) and C# (<code>System.Threading.Channels</code>' <code>Channel&lt;T&gt;</code>, <code>Channel.CreateBounded</code>/<code>CreateUnbounded</code>, <code>BoundedChannelFullMode</code>). It does not cover the Go course's own worker-pool lesson's pipeline-stage material (chaining multiple pools stage-to-stage) — that's already taught there in full and not re-derived here. It does not cover choosing a numeric pool size for a specific downstream dependency's real capacity — Lesson 109 already named that an operational-tuning judgment call, unchanged here. It does not cover Go's <code>select</code>-statement arbitration rules — still an open gap, not attempted this round since this lesson's topic came from Lesson 109's own closing note rather than the deferred-candidate list.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory, with no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A worker pool fixes the number of long-lived consumers up front and has them pull items off one shared queue one at a time, so the count of concurrent units never changes no matter how many items arrive. Lesson 109's SetLimit/SemaphoreSlim cap, by contrast, still launches one goroutine or Task per item -- it only blocks the next launch once the cap is full.">
+    <p class="stem">What's the core difference between Lesson 109's cap and today's worker pool?</p>
+    <button class="opt" data-ok>a pool launches no new unit per item, a cap still does</button>
+    <button class="opt">a pool allows fully unlimited work, a cap always forbids any work</button>
+    <button class="opt">a cap exists only in C#, a pool exists only in Go</button>
+    <button class="opt">a pool always requires a table, a cap never touches one ever</button>
+  </div>
+  <div class="q" data-why="Per Microsoft's own Channel<T> docs, ReadAllAsync() creates an IAsyncEnumerable<T> meant to be driven with await foreach, yielding each item as it becomes available and completing only once the channel's writer has signaled completion -- exactly the shape a fixed set of consumer Tasks needs to drain a shared queue.">
+    <p class="stem">What does Channel&lt;T&gt;.Reader.ReadAllAsync() actually hand back, per Microsoft's own docs?</p>
+    <button class="opt" data-ok>an IAsyncEnumerable meant to be driven with an await foreach loop</button>
+    <button class="opt">a single Task that completes the instant the channel gets created</button>
+    <button class="opt">a plain List already holding every item ever written so far</button>
+    <button class="opt">a brand new worker Task spawned for every item currently queued</button>
+  </div>
+  <div class="q" data-why="Wait is BoundedChannelFullMode's default, and per Microsoft's own table it matches a bounded Go channel's only behavior exactly: calls to WriteAsync suspend the writer until space frees, rather than silently discarding any item. DropOldest/DropNewest/DropWrite are the three modes that trade that guarantee away.">
+    <p class="stem">Which BoundedChannelFullMode value matches a bounded Go channel's one and only full behavior?</p>
+    <button class="opt" data-ok>Wait, the default, where WriteAsync suspends until space frees</button>
+    <button class="opt">DropOldest, which silently discards the queue's own oldest item</button>
+    <button class="opt">DropNewest, which silently discards the queue's own newest item</button>
+    <button class="opt">DropWrite, which silently discards the item being written now</button>
+  </div>
+  <div class="q" data-why="A billing event or outbox relay queue must process every item that arrives -- dropping one is a correctness bug, not acceptable waste. Wait, the shared default both languages effectively use, is the right choice there. DropOldest only belongs on a queue like a live-position feed, where a stale queued reading is actively wrong to act on and losing it is the correct, intended behavior.">
+    <p class="stem">Why would an outbox-relay queue pick BoundedChannelFullMode.Wait over DropOldest?</p>
+    <button class="opt" data-ok>every single queued event must eventually get processed, none ever lost</button>
+    <button class="opt">DropOldest simply does not exist in any currently released .NET version</button>
+    <button class="opt">Wait is the only mode any unbounded channel gets to use</button>
+    <button class="opt">outbox relays can never run inside any bounded channel at all</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://learn.microsoft.com/en-us/dotnet/core/extensions/channels">Microsoft Learn: Channels - .NET</a> (~10 min) is the primary source for today's C# half, confirming verbatim the producer/consumer model, <code>Channel.CreateBounded</code>/<code>CreateUnbounded</code>, the <code>BoundedChannelFullMode</code> table, and <code>ReadAllAsync()</code>'s <code>IAsyncEnumerable</code> contract. The Go half builds on your Go course's own worker-pool lesson, not re-derived here.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a>. Click any dotted term for a popup (English first, tiếng Việt second). Builds directly on Lesson 109's bounded fan-out and Lesson 11's backpressure. <strong>Anything unclear? Ask your teacher</strong>, the agent that made this lesson. Ask in Vietnamese anytime. A good follow-up: "does our own codebase have any background queue that could be a worker pool instead of a per-request goroutine or Task?"</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

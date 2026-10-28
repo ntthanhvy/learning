@@ -228,6 +228,8 @@
       file: "lessons/0109-np-cumsum-cumprod-diff.html" },
     { n: 110, date: "2026-10-27", title: "Series.cummax() / Series.cummin(): the running best-so-far, and the NumPy function that doesn't exist",
       file: "lessons/0110-cummax-cummin.html" },
+    { n: 111, date: "2026-10-28", title: "np.percentile() and np.quantile(): same math, two scales, and a NaN trap pandas doesn't have",
+      file: "lessons/0111-np-percentile-and-quantile.html" },
   ];
 
   const REFS = [

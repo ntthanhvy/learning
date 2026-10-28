@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 43 · dbt snapshots: hard deletes, the gap Day 9 left open</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 43 · ~20 min · 28 Oct 2026</p>
+<h1>dbt snapshots: hard deletes, the gap Day 9 left open</h1>
+<p class="byline">Today's tangible win: <code>snapshots/restaurants_snapshot.sql</code> gets one new config key, <code>hard_deletes: 'invalidate'</code>, and you prove — by actually deleting a restaurant row and rerunning the snapshot — that it now closes out that restaurant's history instead of silently leaving it "current forever," the exact failure Day 9's snapshot has had sitting in it since the day it shipped.</p>
+
+<div class="callout"><strong>Before today — check Day 9 actually landed:</strong> today edits the exact snapshot Day 9 built, so start from a clean build and confirm it's there:
+<pre><code>cd food_delivery_pipeline
+uv run --project ../dbt_env dbt build
+uv run --project ../dbt_env dbt snapshot</code></pre>
+Expected: <code>dbt build</code> passes with no new errors, and <code>dbt snapshot</code> reports <code>OK snapshot dbt_dev_snapshots.restaurants_snapshot</code> with <code>INSERT 0 0</code> if nothing changed since your last run. If <code>snapshots/restaurants_snapshot.sql</code> doesn't exist, finish Day 9 first — today only adds one config key to it, it doesn't build it from scratch.</div>
+
+<h2>1 · The question Day 9 never asked</h2>
+<p>Day 9 proved a dbt snapshot correctly versions a row that <em>changes</em> — update <code>commission_rate</code>, rerun <code>dbt snapshot</code>, get a closed-out old row and a fresh current one. It never asked the other question a real restaurants table eventually faces: what happens when a row is <em>deleted</em> from <code>raw.restaurants</code> entirely — a restaurant that closed down, or got merged into another's listing?</p>
+<p>Try reasoning through Day 9's own snapshot SQL with that case in mind: it's a plain <code>select ... from {{ source('raw', 'restaurants') }}</code>, comparing today's current rows against what it already recorded. If a row simply isn't there anymore, there is nothing left to compare — dbt's default behavior is to do precisely nothing about it. The restaurant's last-known version stays in <code>restaurants_snapshot</code> with <code>dbt_valid_to</code> still <code>null</code>, meaning "still current," forever. <code>fct_orders_with_commission</code>'s point-in-time join from Day 9 would keep treating a deleted restaurant as perfectly valid, with no error, no warning, and no row anywhere telling you it's gone.</p>
+
+<h2>2 · Naming it: a hard delete is a different event than an update</h2>
+<p>A <dfn data-en="a row removed entirely from a source table (e.g. DELETE FROM raw.restaurants), as opposed to a row that still exists but has a changed column value -- a dbt snapshot comparing current source rows to its own recorded history has nothing left to compare a hard-deleted row against, so by default it does nothing about it at all" data-vn="giữ nguyên &quot;hard delete&quot; — dòng bị xoá hẳn khỏi bảng nguồn (DELETE FROM...), khác với dòng vẫn còn nhưng đổi giá trị cột; snapshot so sánh dòng nguồn hiện tại với lịch sử đã ghi, dòng bị hard delete thì không còn gì để so sánh, nên mặc định snapshot không làm gì cả">hard delete</dfn> is a fundamentally different event from the <code>updated_at</code>-driven change Day 9's <code>timestamp</code> strategy watches for: an update still has a row to compare against; a hard delete leaves nothing at all. dbt's <a href="https://docs.getdbt.com/docs/build/snapshots">Snapshots</a> docs (the same primary source Day 9 cited, revisited today) name the fix as the <code>hard_deletes</code> config, with three settings:</p>
+<table class="gloss">
+  <tr><th>Setting</th><th>What happens to a deleted source row</th></tr>
+  <tr><td><code>ignore</code> (dbt's default)</td><td>nothing — the last-known version stays "current" forever, Day 9's actual gap</td></tr>
+  <tr><td><code>invalidate</code></td><td>the snapshot closes out that row's <code>dbt_valid_to</code> the next time it runs, the same way an update closes out an old version</td></tr>
+  <tr><td><code>new_record</code></td><td>closes it out <em>and</em> inserts one further marker row recording the deletion itself, so a later restore is distinguishable from the restaurant never having been deleted at all</td></tr>
+</table>
+<p>This replaces an older boolean, <code>invalidate_hard_deletes: true</code>, still readable in older tutorials and pre-1.9 projects; this course pins dbt-core 1.12.4 per <code>MISSION.md</code>, so today uses the current <code>hard_deletes</code> key, which the docs say directly replaces it. <code>invalidate</code> is today's choice — it fixes exactly Day 9's gap with a one-line config change and no new column to learn; <code>new_record</code> is named here as the richer alternative and left as the "go further" option at the end, not built today, since it adds a second marker-row concept Day 9's existing join was never written to expect.</p>
+
+<h2>3 · Build: add <code>hard_deletes: 'invalidate'</code></h2>
+<p>One line into the same <code>config()</code> block Day 9 wrote:</p>
+<pre><code><span class="cm">-- snapshots/restaurants_snapshot.sql</span>
+{% snapshot restaurants_snapshot %}
+
+{{
+    config(
+        target_schema=<span class="str">'dbt_dev_snapshots'</span>,
+        unique_key=<span class="str">'restaurant_id'</span>,
+        strategy=<span class="str">'timestamp'</span>,
+        updated_at=<span class="str">'updated_at'</span>,
+        hard_deletes=<span class="str">'invalidate'</span>,
+    )
+}}
+
+select
+    restaurant_id,
+    name,
+    cuisine,
+    city,
+    commission_rate,
+    updated_at
+from {{ source(<span class="str">'raw'</span>, <span class="str">'restaurants'</span>) }}
+
+{% endsnapshot %}</code></pre>
+<p>Nothing else about the snapshot changes — the <code>select</code> is identical to Day 9's. The only new behavior is what happens on the <em>next</em> <code>dbt snapshot</code> run after a row vanishes from the source, which is the part worth actually watching happen rather than taking on faith.</p>
+
+<h2>4 · Verify: delete a restaurant, rerun, watch it get invalidated</h2>
+<p>Pick a restaurant with no orders against it yet, so deleting it doesn't also violate Day 3's <code>relationships</code> test on <code>fct_orders</code> — restaurant 40, say, if your seed data leaves it unused. Confirm first, then delete it directly, the same kind of one-time hand-edit Day 9 used to simulate a rate change:</p>
+<pre><code>docker compose exec -T postgres psql -U fdp -d fdp -c \
+  "SELECT count(*) FROM raw.orders WHERE restaurant_id = 40;"
+docker compose exec -T postgres psql -U fdp -d fdp -c \
+  "DELETE FROM raw.restaurants WHERE restaurant_id = 40;"</code></pre>
+<p>Expected on the first query — <code>0</code>, confirming it's safe to delete without tripping an unrelated test. Now rerun the snapshot:</p>
+<pre><code>uv run --project ../dbt_env dbt snapshot</code></pre>
+<pre><code>1 of 1 OK snapshot dbt_dev_snapshots.restaurants_snapshot ...... [INSERT 0 0 in 0.05s]
+
+Done. PASS=1 WARN=0 ERROR=0 SKIP=0 TOTAL=1</code></pre>
+<p>The log line looks almost identical to any ordinary run — the real proof is in the row itself, not the console output:</p>
+<pre><code>docker compose exec -T postgres psql -U fdp -d fdp -c \
+  "SELECT restaurant_id, commission_rate, dbt_valid_from, dbt_valid_to
+   FROM dbt_dev_snapshots.restaurants_snapshot
+   WHERE restaurant_id = 40 ORDER BY dbt_valid_from;"</code></pre>
+<pre><code> restaurant_id | commission_rate |       dbt_valid_from       |        dbt_valid_to
+---------------+------------------+-----------------------------+-----------------------------
+            40 |             0.18 | 2026-09-15 09:03:11.20+00   | 2026-10-28 06:00:04.88+00
+(1 row)</code></pre>
+<p><code>dbt_valid_to</code> is no longer <code>null</code> — it now carries the timestamp of the snapshot run that noticed restaurant 40 was gone, the same closing-out mechanism Day 9's rate-change update triggered, now triggered by an absence instead of a changed value. Before today's config change, this exact <code>DELETE</code> would have left <code>dbt_valid_to</code> at <code>null</code> forever, and Day 9's own point-in-time join (<code>... or dbt_valid_to is null</code>) would have kept matching restaurant 40 to any order placed after the deletion — there are none here, but at 100 restaurants and real attrition, that's a silent wrong answer waiting to happen, not a hypothetical one.</p>
+<div class="callout"><strong>Where <code>fct_orders_with_commission</code> was already exposed:</strong> nothing in that model's own SQL needs to change today — it joins on <code>dbt_valid_from</code>/<code>dbt_valid_to</code> exactly as Day 9 wrote it, and a closed-out row for restaurant 40 simply stops matching any order placed after <code>2026-10-28 06:00:04.88+00</code>, which is the entire point. The bug <code>hard_deletes: 'invalidate'</code> fixes was never in the join — it was in the snapshot never closing the row out in the first place.</div>
+<p>Rerun <code>dbt build</code> once more to confirm nothing else broke, then commit the one-line change to <code>snapshots/restaurants_snapshot.sql</code>.</p>
+
+<div class="interview">
+<p><strong>Q: "Your SCD Type 2 snapshot handles updates correctly. Does it handle a row being deleted from the source?"</strong> A strong answer, out loud: <em>"Not by default — dbt's snapshot strategy only compares rows that still exist in the source against what it already recorded, so a row that's been hard-deleted has nothing to compare against, and dbt's default behavior is to leave its last known version marked as still current, with a null dbt_valid_to, forever. I caught this as a real gap in my own restaurants snapshot: I was versioning commission_rate changes correctly, but a restaurant that got deleted from the source would still look valid today in every downstream join. The fix is a config, hard_deletes, with three settings — ignore, the default; invalidate, which closes out the row's dbt_valid_to the next time the snapshot runs, same mechanism as an update; and new_record, which does that plus inserts an explicit marker row, so a later restore is distinguishable from it never having been deleted. I used invalidate, since it closes the actual gap with no new column for downstream joins to learn, and it's a one-line change to an existing config block, not a new mechanism."</em> The signal: knowing a hard delete and an update are different events a snapshot has to be told to handle differently, not assuming "SCD Type 2" by itself covers both for free.</p>
+</div>
+
+<h2>5 · When <code>new_record</code> would be worth the extra concept</h2>
+<p><code>invalidate</code> closes Day 9's actual gap and stops here deliberately — it's the smallest change that makes "what was true in the past" queries correct again. <code>new_record</code> buys one more thing <code>invalidate</code> can't: a query that asks "was restaurant 40 ever deleted, and when" without having to infer it from a suspiciously-closed <code>dbt_valid_to</code> next to no newer row. That distinction matters once something downstream specifically needs to tell "deleted" apart from "superseded by a newer version" — a compliance report counting churned restaurants, say. This project's own <code>fct_orders_with_commission</code> never asks that question, so <code>invalidate</code> is the right-sized fix today, the same "generic enough, but does anything here actually need it" filter Day 42 applied to custom tests.</p>
+
+<h2>Scope line</h2>
+<p>This lesson covers one dbt snapshot config, <code>hard_deletes</code> (its <code>invalidate</code> setting built, <code>ignore</code> default and <code>new_record</code> named as vocabulary), applied to the exact snapshot Day 9 built. It does not re-teach the <code>timestamp</code>/<code>check</code> strategy choice, the point-in-time join, or SCD Type 1 vs. Type 2 vocabulary — all Day 9's own material, reused here, not rederived.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A dbt snapshot strategy compares each current source row to what it already recorded. A row that still exists but has a changed column value has something to compare against -- an update. A row that has been hard-deleted has nothing left in the source to compare at all, which is a structurally different case dbt's default behavior does not handle on its own.">
+    <p class="stem">Why doesn't Day 9's original snapshot handle a restaurant being deleted from <code>raw.restaurants</code>?</p>
+    <button class="opt" data-ok>A deleted row leaves nothing left in the source to compare</button>
+    <button class="opt">dbt snapshots can only ever read from a dbt model directly</button>
+    <button class="opt"><code>timestamp</code> strategy snapshots always reject every single raw <code>DELETE</code> statement issued</button>
+  </div>
+  <div class="q" data-why="ignore is dbt's default and does nothing to a hard-deleted row's last recorded version, leaving dbt_valid_to null -- 'still current' -- forever. invalidate closes that row out the next run, the same closing mechanism an update already triggers. new_record does that plus adds an explicit marker row for the deletion itself.">
+    <p class="stem">What does dbt's <code>hard_deletes</code> config default to if you never set it?</p>
+    <button class="opt" data-ok><code>ignore</code> — the deleted row's last version just stays marked current</button>
+    <button class="opt"><code>invalidate</code> — every single deleted row gets closed out automatically now</button>
+    <button class="opt">dbt refuses to even run <code>dbt snapshot</code> at all until set</button>
+  </div>
+  <div class="q" data-why="hard_deletes: 'invalidate' makes a hard-deleted source row's dbt_valid_to get set to the run's own timestamp the next time dbt snapshot runs, the exact same closing-out mechanism an updated_at change already triggers for an ordinary update -- it is not a new mechanism, just a new trigger for the same one.">
+    <p class="stem">What does <code>hard_deletes: 'invalidate'</code> actually do on the next <code>dbt snapshot</code> run after a row is deleted?</p>
+    <button class="opt" data-ok>Sets that row's <code>dbt_valid_to</code> to the run's own timestamp</button>
+    <button class="opt">Permanently deletes that row from the snapshot table too</button>
+    <button class="opt">Silently recreates the deleted row back inside <code>raw.restaurants</code> itself</button>
+  </div>
+  <div class="q" data-why="new_record does everything invalidate does (closing out dbt_valid_to) plus inserts one further marker row specifically recording that a deletion happened, so a later query can tell 'this restaurant was deleted' apart from 'this restaurant was merely superseded by a newer version' without having to infer it. invalidate alone leaves that distinction unrecorded.">
+    <p class="stem">What does <code>hard_deletes: 'new_record'</code> buy beyond what <code>invalidate</code> already does?</p>
+    <button class="opt" data-ok>An explicit marker row that records the deletion itself happening</button>
+    <button class="opt">Nothing extra — the two settings behave identically either way</button>
+    <button class="opt">Skipping the need for a <code>unique_key</code> on the snapshot entirely</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> dbt Labs' <a href="https://docs.getdbt.com/docs/build/snapshots">Snapshots</a> docs — Day 9's own primary source, revisited today for the <code>hard_deletes</code> config specifically, confirmed live this round (the current config name, its three settings, and that it replaces the older <code>invalidate_hard_deletes</code> boolean from dbt 1.8 and earlier).</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 43.<br>
+<strong>Next up:</strong> the <code>airflow db migrate</code>/<code>airflow dags test</code> approval-gate block is now nine rounds running (35-43) with no human approval available — still the clearest unblock-and-ship item for whoever next has one. Absent that, today's pick came from testing Day 9's own snapshot against a case it was never checked against, the same method Days 38, 39, 41 and 42 used; a future round should keep auditing existing lesson content for untested edges like this one rather than assuming every named <code>PLAN.md</code> bullet still has substance left in it.<br><br>
+💬 Anything unclear — why a hard delete needs its own config at all, or when <code>new_record</code> would actually be worth the extra row? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

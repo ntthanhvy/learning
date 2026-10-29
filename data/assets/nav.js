@@ -230,6 +230,8 @@
       file: "lessons/0110-cummax-cummin.html" },
     { n: 111, date: "2026-10-28", title: "np.percentile() and np.quantile(): same math, two scales, and a NaN trap pandas doesn't have",
       file: "lessons/0111-np-percentile-and-quantile.html" },
+    { n: 112, date: "2026-10-29", title: "np.ravel() vs .flatten(): the view-or-copy trap hiding behind two functions that look interchangeable",
+      file: "lessons/0112-np-ravel-flatten-reshape.html" },
   ];
 
   const REFS = [

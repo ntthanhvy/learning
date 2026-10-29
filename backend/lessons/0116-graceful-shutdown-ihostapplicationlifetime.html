@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 116 · Graceful shutdown, now in C# too</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 116 · ~20 min</p>
+<h1>Graceful shutdown, now in C# too</h1>
+<p class="byline">Lesson 27 covered graceful shutdown in Go: catch SIGTERM, flip readiness to unhealthy first, then let <code>http.Server.Shutdown</code> drain in-flight requests up to a deadline. That lesson never got a C# mirror, even though every other Go-only mechanism from the same stretch of the course — retry, circuit breaker, bulkhead, worker pool — has been ported since Lesson 112. Today closes that gap: the same two-step shutdown sequence, as ASP.NET Core's own generic host actually implements it.</p>
+
+<h2>1 · The same two steps, a different owner</h2>
+<p>Lesson 27's rule still holds exactly: stop accepting new work, then let work already in flight finish up to a deadline, in that order. What changes in ASP.NET Core is who performs each step. In Go, the two lines of signal-catching code in Lesson 27's snippet <em>are</em> the whole mechanism — nothing else is watching for SIGTERM unless that code is written. In ASP.NET Core, a built-in component called <dfn data-en="the default IHostLifetime implementation used by the ASP.NET Core / generic host, which listens for SIGINT, SIGQUIT, and SIGTERM and attempts to stop the host gracefully when one arrives, rather than letting the OS kill the process outright" data-vn="ConsoleLifetime (giữ nguyên) — IHostLifetime mặc định của generic host, tự lắng nghe SIGINT, SIGQUIT, SIGTERM và cố dừng host gọn gàng khi nhận được tín hiệu, thay vì để OS kill process ngay">ConsoleLifetime</dfn> already does the signal-catching for you — the wiring Lesson 27 had to hand-write in Go is on by default the moment a host is built.</p>
+<p>Per Microsoft's own docs, before .NET 6 there was no clean way to intercept SIGTERM at all — <code>ConsoleLifetime</code> worked around it by subscribing to <code>AppDomain.ProcessExit</code>, which also fires when code calls <code>Environment.Exit</code>, causing real deadlocks the docs describe outright. Since .NET 6, POSIX signals are handled directly, and <code>ConsoleLifetime</code> "handles SIGTERM gracefully" without that workaround. The practical rule the docs state plainly: call <code>IHostApplicationLifetime.StopApplication()</code> to shut down on purpose, never <code>Environment.Exit</code> — the latter skips the graceful path entirely.</p>
+
+<h2>2 · IHostApplicationLifetime: the events Lesson 27's single <code>ctx.Done()</code> fans out into</h2>
+<p>Go's snippet blocked on one channel, <code>ctx.Done()</code>, and ran the whole shutdown sequence linearly after it. ASP.NET Core instead exposes <dfn data-en="a framework-provided service with three cancellation-token-backed events (ApplicationStarted, ApplicationStopping, ApplicationStopped) marking host lifecycle points, plus a StopApplication() method to trigger a graceful shutdown from inside application code" data-vn="IHostApplicationLifetime (giữ nguyên) — service có sẵn với 3 event dùng CancellationToken (ApplicationStarted, ApplicationStopping, ApplicationStopped) đánh dấu các mốc lifecycle của host, cộng method StopApplication() để tự kích hoạt graceful shutdown từ code">IHostApplicationLifetime</dfn>, injectable into any class, with <code>ApplicationStopping</code> as the direct equivalent of Lesson 27's <code>ctx.Done()</code> firing — the moment to start step 1, stop accepting new work:</p>
+<pre><code><span class="kw">public</span> <span class="kw">class</span> DrainOnShutdown {
+    <span class="kw">public</span> DrainOnShutdown(IHostApplicationLifetime lifetime, HealthState health) {
+        lifetime.ApplicationStopping.Register(() =&gt; {
+            health.MarkUnready();                       <span class="cm">// step 1: readiness flips first</span>
+            Console.WriteLine(<span class="st">"shutdown signal received, draining in-flight requests"</span>);
+        });
+        lifetime.ApplicationStopped.Register(() =&gt;
+            Console.WriteLine(<span class="st">"shutdown complete"</span>));
+    }
+}
+</code></pre>
+<p><code>ApplicationStopping</code> fires when <code>ConsoleLifetime</code> catches SIGTERM/SIGINT/SIGQUIT — no hand-written signal handler required, unlike Go's <code>signal.NotifyContext</code> line. <code>ApplicationStopped</code> fires once every hosted service's <code>StopAsync</code> has returned, the direct equivalent of Go's "shutdown complete" log line after <code>srv.Shutdown</code> returns.</p>
+
+<h2>3 · Who does step 2's actual draining — Kestrel, not your code</h2>
+<p>In Go, step 2 is one explicit call: <code>srv.Shutdown(shutdownCtx)</code>, written by hand with its own timeout. In ASP.NET Core, the generic host calls this for you: once <code>ApplicationStopping</code> fires, the host calls the web server's own <code>StopAsync</code> "with a shutdown timeout that you can configure (default 30s)." Per Microsoft's own docs, Kestrel then "close[s] their port bindings and stop[s] accepting new connections," and tells already-open connections to stop processing new requests — for HTTP/2, by sending a <code>GOAWAY</code> frame; for HTTP/1.1, by simply ending the connection's request loop once the current request finishes. Configuring the timeout is one line, the C# equivalent of Go's <code>context.WithTimeout(..., 10*time.Second)</code>:</p>
+<pre><code><span class="kw">builder</span>.Host.ConfigureHostOptions(opts =&gt;
+    opts.ShutdownTimeout = TimeSpan.FromSeconds(<span class="dv">10</span>));   <span class="cm">// same knob as Go's shutdownCtx deadline</span>
+</code></pre>
+<p>If every active request finishes first, the host returns early, same as Go's <code>srv.Shutdown</code> returning before its deadline. If the timeout expires first, the docs are explicit about the cost: "pending connections and requests are aborted forcefully, which can cause errors in the logs and to the clients" — the same trade-off Lesson 27 named for a Go handler still running when <code>shutdownCtx</code> expires.</p>
+
+<div class="callout"><strong>Readiness-first still isn't automatic:</strong> Lesson 27's ordering bug — the load balancer still routing new traffic in because nothing told it the instance is leaving — is just as possible in ASP.NET Core. <code>ConsoleLifetime</code> catching the signal and Kestrel draining connections says nothing about a separate <code>/health/ready</code> endpoint a load balancer polls. The docs' own load-balancer checklist spells out the same order Lesson 27 taught: bring up the new instance, stop sending traffic to the old one, <em>then</em> signal it to shut down. Wiring <code>ApplicationStopping</code> to flip readiness unhealthy (as the snippet in section 2 does) is still something you write — the framework automates the signal-catching and the connection-draining, not the readiness flip itself.</div>
+
+<div class="cmp-wrap">
+<table class="cmp">
+<thead><tr><th></th><th>Lesson 27: Go</th><th>Lesson 116: C# / ASP.NET Core</th></tr></thead>
+<tbody>
+<tr><th>Catches SIGTERM/SIGINT</th><td>hand-written <code>signal.NotifyContext</code></td><td><code>ConsoleLifetime</code>, on by default</td></tr>
+<tr><th>Signal that step 1 should start</th><td><code>ctx.Done()</code> unblocks</td><td><code>IHostApplicationLifetime.ApplicationStopping</code></td></tr>
+<tr><th>Drains in-flight requests</th><td><code>srv.Shutdown(shutdownCtx)</code>, called by hand</td><td>host calls Kestrel's <code>StopAsync</code> automatically</td></tr>
+<tr><th>Drain deadline, configured</th><td><code>context.WithTimeout(..., 10*time.Second)</code></td><td><code>HostOptions.ShutdownTimeout</code> (default 30s)</td></tr>
+<tr><th>"Fully stopped" signal</th><td>log line after <code>Shutdown</code> returns</td><td><code>ApplicationStopped</code> event</td></tr>
+<tr><th>Readiness flipped before draining</th><td>written by hand, same lesson</td><td>written by hand, same as Go</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers ASP.NET Core's graceful-shutdown sequence — <code>ConsoleLifetime</code>'s signal handling, <code>IHostApplicationLifetime</code>'s three events plus <code>StopApplication()</code>, Kestrel's connection-draining under <code>HostOptions.ShutdownTimeout</code> — as the C# mirror of Lesson 27's Go sequence. It does not cover Kestrel's HTTP/1.1 vs HTTP/2 vs HTTP/3 draining differences beyond the one `GOAWAY` fact already stated; IIS's distinct 503-based shutdown behavior, mentioned once in the source but not a concept this course tracks; or <code>IHostedLifecycleService</code>'s extra Starting/Started/Stopping/Stopped hooks around <code>IHostedService</code> itself, already flagged as out of scope by Lesson 105. It does not cover Go's <code>select</code>-statement arbitration rules — still deferred, not attempted this round; see this round's NOTES.md entry for why.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory, with no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="ConsoleLifetime is the default IHostLifetime and listens for SIGINT, SIGQUIT, and SIGTERM on its own, attempting a graceful stop the moment one arrives -- unlike Go, where Lesson 27 had to write signal.NotifyContext by hand because nothing catches the signal otherwise.">
+    <p class="stem">What catches SIGTERM in a default ASP.NET Core host, with no code written for it?</p>
+    <button class="opt" data-ok>ConsoleLifetime, the built-in default IHostLifetime implementation, with zero extra code</button>
+    <button class="opt">nothing at all -- C# always requires one hand-written handler</button>
+    <button class="opt">Kestrel alone intercepts every signal before any host even starts</button>
+    <button class="opt">the .NET garbage collector pauses first and then forwards it</button>
+  </div>
+  <div class="q" data-why="ApplicationStopping fires the moment ConsoleLifetime catches a shutdown signal, before any connection draining has happened -- the direct equivalent of Go's ctx.Done() unblocking in Lesson 27's snippet, the cue to start step 1 (flip readiness, stop accepting new work).">
+    <p class="stem">Which IHostApplicationLifetime event is the equivalent of Go's ctx.Done() unblocking?</p>
+    <button class="opt" data-ok>ApplicationStopping, fired the instant a shutdown signal gets caught first</button>
+    <button class="opt">ApplicationStopped, fired only once every open connection has fully drained</button>
+    <button class="opt">ApplicationStarted, fired once when the host first finishes booting up</button>
+    <button class="opt">StopApplication, a plain method that only ever runs once manually</button>
+  </div>
+  <div class="q" data-why="Per Microsoft's own docs, once the shutdown timeout (HostOptions.ShutdownTimeout, default 30s) expires with requests still active, those pending connections and requests get aborted forcefully, which can surface as errors in logs and to clients -- the same trade-off Lesson 27 described for a Go handler still running past shutdownCtx's own deadline.">
+    <p class="stem">What happens if ShutdownTimeout expires while a request is still being handled?</p>
+    <button class="opt" data-ok>the pending request simply gets aborted forcefully once the deadline passes</button>
+    <button class="opt">ASP.NET Core quietly extends that same timeout on its own forever</button>
+    <button class="opt">Kestrel pauses every other request until that one finishes up fully</button>
+    <button class="opt">the host simply ignores the timeout value and restarts right away</button>
+  </div>
+  <div class="q" data-why="The docs are explicit that calling Environment.Exit skips the graceful host-shutdown path entirely -- it raises ProcessExit and exits directly, bypassing IHostApplicationLifetime's events and Kestrel's own connection-draining step. StopApplication() is the documented, graceful way to trigger shutdown from application code on purpose.">
+    <p class="stem">Why do the docs say to call StopApplication() instead of Environment.Exit for a deliberate shutdown?</p>
+    <button class="opt" data-ok>Environment.Exit skips the entire graceful shutdown path by design choice</button>
+    <button class="opt">Environment.Exit is simply not a real, callable method in .NET</button>
+    <button class="opt">StopApplication always runs measurably faster than Environment.Exit does right now</button>
+    <button class="opt">only StopApplication is ever permitted legally inside any ASP.NET project</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://learn.microsoft.com/en-us/dotnet/core/extensions/generic-host">Microsoft Learn: .NET Generic Host</a> (~15 min, the "IHostApplicationLifetime" and "Host shutdown" sections) is the primary source for today's C# half, confirming verbatim <code>ConsoleLifetime</code>'s SIGINT/SIGQUIT/SIGTERM handling, the pre-.NET-6 <code>ProcessExit</code> workaround and its deadlock history, <code>IHostApplicationLifetime</code>'s three events plus <code>StopApplication()</code>, the default 30-second <code>ShutdownTimeout</code>, and Kestrel's HTTP/1.1 vs HTTP/2 draining behavior. Lesson 27's own 12factor.net Disposability citation still covers the Go half and the two-step shutdown sequence itself in full, not duplicated here.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a>. Click any dotted term for a popup (English first, tiếng Việt second). Builds directly on Lesson 27's graceful-shutdown sequence and Lesson 105's <code>IHostedService</code>/<code>BackgroundService</code> material. <strong>Anything unclear? Ask your teacher</strong>, the agent that made this lesson. Ask in Vietnamese anytime. A good follow-up: "does our own ASP.NET Core service configure ShutdownTimeout explicitly, or is it still sitting on the 30-second default?"</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

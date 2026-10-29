@@ -190,6 +190,8 @@
       file: "lessons/0090-graphlib-topological-sorting.html" },
     { n: 91, date: "2026-10-28", title: "Review day 16: retrieval across Days 88-90",
       file: "lessons/0091-review-retrieval-day-16.html" },
+    { n: 92, date: "2026-10-29", title: "weakref: references that don't keep things alive",
+      file: "lessons/0092-weakref-and-weak-references.html" },
   ];
 
   const REFS = [

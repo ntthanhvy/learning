@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 92 · weakref: references that don't keep things alive</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 92 · ~20 min · 29 Oct 2026</p>
+<h1><code>weakref</code>: references that don't keep things alive</h1>
+<p class="byline">Every reference held so far — a variable, a list element, a dict value — is a <dfn data-en="A strong reference is an ordinary Python reference (a variable, a list/dict entry, an attribute) that keeps the object it points to alive -- the object cannot be garbage-collected while at least one strong reference to it still exists." data-vn="giữ nguyên &quot;strong reference&quot; — tham chiếu Python bình thường (biến, phần tử list/dict, attribute), giữ cho object còn sống; object không thể bị garbage-collect khi còn ít nhất 1 strong reference trỏ tới nó.">strong reference</dfn>: it keeps the object it points to alive. Today's module, <code>weakref</code>, builds the one kind of reference that doesn't — useful for a cache that should never be the reason an object outlives its real owner.</p>
+
+<div class="callout"><strong>Why today, specifically:</strong> Day 90's closing note left two candidates open for the next fresh-topic day — <code>weakref</code>, <code>calendar</code>. A fresh grep across every lesson, practice file, <code>reference/glossary.html</code>, and <code>RESOURCES.md</code> confirmed both are still genuinely zero-hit as *taught* topics (both names appear only inside prior days' own "candidates still open" prose, never as actual lesson content). Picked <code>weakref</code> over <code>calendar</code>: <code>calendar</code> overlaps heavily with Day 14's already-taught <code>datetime</code> (both lessons' own prior notes flagged this), while <code>weakref</code> is pure object-model/memory-management mechanics with zero pandas/NumPy surface, and it closes a real gap — nothing taught so far distinguishes "a reference that keeps something alive" from "a reference that doesn't," even though Day 1 built the entire mental model of names and objects on the assumption that every reference is the strong kind.</div>
+
+<h2>1 · A normal reference keeps the object alive — that's the whole problem</h2>
+<p>Day 1 taught that assigning a name, or storing something in a list or dict, creates a reference — and every one of those references is <em>strong</em>: as long as at least one exists, the object cannot be garbage-collected, no matter how it got there.</p>
+<pre><code><span class="kw">class</span> Node:
+    <span class="kw">def</span> __init__(<span class="kw">self</span>, name):
+        <span class="kw">self</span>.name = name
+
+cache = {}
+obj = Node(<span class="str">"strong"</span>)
+cache[<span class="str">"k"</span>] = obj   <span class="cm"># a second strong reference, now owned by the dict</span>
+<span class="kw">del</span> obj             <span class="cm"># only the *name* obj is gone -- the dict's reference remains</span>
+
+<span class="kw">print</span>(cache[<span class="str">"k"</span>].name)
+<span class="cm"># strong -- confirmed live: the object is still fully alive</span></code></pre>
+<p>That's correct and desired for almost everything. But it becomes a bug in one specific shape: a cache, registry, or "who's listening" list that exists purely to <em>look up</em> objects owned elsewhere. If that structure holds strong references, every object it ever saw stays alive forever — a memory leak with a very innocent-looking cause.</p>
+
+<h2>2 · <code>weakref.ref()</code>: a reference that doesn't count</h2>
+<p><code>weakref.ref(obj)</code> returns a callable <dfn data-en="A weak reference is a reference to an object that does NOT keep it alive -- when every strong reference is gone, the object is garbage-collected regardless of how many weak references still point to it. Calling a weakref.ref object returns the live object, or None once it has been collected." data-vn="giữ nguyên &quot;weak reference&quot; — tham chiếu tới object nhưng KHÔNG giữ cho nó sống; khi hết strong reference, object bị garbage-collect dù còn bao nhiêu weak reference trỏ tới; gọi weakref.ref như hàm trả về object (nếu còn sống) hoặc None (nếu đã bị collect).">weak reference</dfn> object: call it, and you get the real object back — or <code>None</code>, once nothing else is keeping it alive:</p>
+<pre><code><span class="kw">import</span> weakref
+
+obj = Node(<span class="str">"cache-entry"</span>)
+r = weakref.ref(obj)
+<span class="kw">print</span>(r())          <span class="cm"># Node object -- confirmed live, obj is still referenced by the name "obj"</span>
+
+<span class="kw">del</span> obj           <span class="cm"># the only strong reference is gone</span>
+<span class="kw">print</span>(r())          <span class="cm"># None -- confirmed live, collected as soon as nothing strong pointed to it</span></code></pre>
+<p>Holding <code>r</code> itself never kept <code>obj</code> alive — that's the entire point. Not every object can be weakly referenced, either: plain <code>int</code>, <code>str</code>, and <code>tuple</code> don't support it at all (<code>weakref.ref(5)</code> raises <code>TypeError: cannot create weak reference to 'int' object</code>, confirmed live) — weak references exist for ordinary instances of your own classes, not for the language's own immutable built-ins.</p>
+
+<h2>3 · <code>WeakValueDictionary</code>: a cache that cleans up after itself</h2>
+<p>Calling <code>weakref.ref()</code> by hand and checking for <code>None</code> everywhere is tedious. <code>weakref.WeakValueDictionary</code> is a dict whose <em>values</em> are held weakly — an entry quietly disappears on its own the moment nothing else holds its value alive, with no manual cleanup code anywhere:</p>
+<pre><code>cache = weakref.WeakValueDictionary()
+obj = Node(<span class="str">"weak-value"</span>)
+cache[<span class="str">"k"</span>] = obj
+<span class="kw">print</span>(<span class="kw">len</span>(cache), <span class="kw">dict</span>(cache))
+<span class="cm"># 1 {'k': Node(...)} -- confirmed live, obj is still alive elsewhere</span>
+
+<span class="kw">del</span> obj
+<span class="kw">print</span>(<span class="kw">len</span>(cache))
+<span class="cm"># 0 -- confirmed live, the entry vanished with no code deleting cache["k"] directly</span>
+cache[<span class="str">"k"</span>]
+<span class="cm"># KeyError: 'k' -- confirmed live</span></code></pre>
+<p><code>weakref.WeakKeyDictionary</code> is the mirror image — the <em>keys</em> are held weakly instead, useful for attaching extra metadata to objects you don't own without keeping them alive just by having annotated them (confirmed live the same way: the entry vanishes once the key object itself is gone).</p>
+
+<h2>4 · <code>weakref.finalize()</code>: run cleanup exactly once, on collection</h2>
+<p><code>weakref.finalize(obj, func, *args)</code> schedules <code>func(*args)</code> to run when <code>obj</code> is garbage-collected — without creating any reference that would keep <code>obj</code> alive itself:</p>
+<pre><code><span class="kw">def</span> on_gone(name):
+    <span class="kw">print</span>(<span class="kw">f</span><span class="str">"cleaned up {name}"</span>)
+
+obj = Node(<span class="str">"finalized"</span>)
+f = weakref.finalize(obj, on_gone, <span class="str">"finalized"</span>)
+<span class="kw">print</span>(f.alive)   <span class="cm"># True -- confirmed live</span>
+
+<span class="kw">del</span> obj
+<span class="cm"># cleaned up finalized  -- confirmed live, printed automatically on collection</span>
+<span class="kw">print</span>(f.alive)   <span class="cm"># False -- confirmed live</span></code></pre>
+<p>A finalizer can also be fired early, by calling <code>f()</code> directly — that runs <code>func</code> immediately and returns its return value. Calling <code>f()</code> a second time (or letting collection happen after an early manual call) is a safe no-op that just returns <code>None</code> — confirmed live: <code>f()</code> first returned <code>'cleaned up manual'</code> while printing the message once, and the very next call returned <code>None</code> with no second print. Either path — collection or a manual call — only ever runs <code>func</code> once.</p>
+
+<div class="callout"><strong>Where pandas/NumPy go from here:</strong> neither library has an equivalent — <code>weakref</code> is pure CPython object-lifetime mechanics, with nothing resembling it in tabular data handling; this callout exists only to confirm the absence, per <code>MISSION.md</code>'s no-pandas rule.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/92_weakref_and_weak_references.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/92_weakref_and_weak_references.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: building a plain <code>weakref.ref()</code> and confirming it returns <code>None</code> once the object is collected, using a <code>WeakValueDictionary</code> as a self-cleaning cache, and scheduling a <code>finalize()</code> callback and reading its one-shot <code>.alive</code>/return-value behavior.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A weak reference never counts toward keeping its target alive -- only strong references (a variable, a list/dict entry, an attribute) do that. Once every strong reference is gone the object is collected regardless of how many weakref.ref objects still point at it, and calling one afterward returns None instead of raising.">
+    <p class="stem">Why does <code>r()</code> return <code>None</code> after <code>del obj</code>, even though <code>r</code> still exists?</p>
+    <button class="opt" data-ok>weak references never keep their own target object alive</button>
+    <button class="opt">weakref.ref() objects always expire right after exactly one call</button>
+    <button class="opt">del obj also deletes every weakref.ref pointing at it</button>
+  </div>
+  <div class="q" data-why="A WeakValueDictionary holds its values weakly, so an entry is only present as long as some other strong reference to that value exists elsewhere. The moment the last strong reference goes away, the garbage collector reclaims the object and the dictionary's own entry disappears on its own -- no code anywhere calls del on that key.">
+    <p class="stem">Why does a key disappear from a <code>WeakValueDictionary</code> with no code ever calling <code>del</code> on it?</p>
+    <button class="opt" data-ok>its value had no strong references left; collected</button>
+    <button class="opt">WeakValueDictionary silently drops its oldest entry once full</button>
+    <button class="opt">every key there expires automatically after a timeout</button>
+  </div>
+  <div class="q" data-why="weakref.finalize() guarantees its callback runs exactly once per object, whichever path triggers it first. Calling the finalizer object directly fires the callback immediately and returns its return value, flips .alive to False, and permanently disarms it -- a second call, or collection happening afterward, is a safe no-op that just returns None instead of running the callback again.">
+    <p class="stem">After calling a <code>finalize()</code> object <code>f()</code> once by hand, what happens on a second call to <code>f()</code>?</p>
+    <button class="opt" data-ok>nothing runs again; it just returns None</button>
+    <button class="opt">the callback function itself runs once again</button>
+    <button class="opt">it raises an exception, already used up</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the standard library's <a href="https://docs.python.org/3/library/weakref.html"><code>weakref</code></a> docs — the module overview covers <code>WeakSet</code> and the lower-level <code>proxy()</code> beyond what today touched, and spells out exactly which built-in types support weak references at all.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day92">glossary</a> under Day 92.<br>
+💬 Anything unclear — why a cache would ever want entries to vanish on their own, or when <code>WeakKeyDictionary</code> beats <code>WeakValueDictionary</code>? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

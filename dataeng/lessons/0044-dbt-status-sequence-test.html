@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 44 · dbt: testing an event sequence, not just a value</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 44 · ~20 min · 29 Oct 2026</p>
+<h1>dbt: testing an event sequence, not just a value</h1>
+<p class="byline">Today's tangible win: a new <code>models/intermediate/int_order_status_history.sql</code> model ranks every <code>order_events</code> row by where its status sits in the delivery lifecycle, and a second hand-written generic test, <code>assert_monotonic_by_group</code>, catches an order whose own statuses arrive out of order, duplicated, or after it was already <code>delivered</code> — a failure mode Day 27 named out loud and left open, and that nothing built since has actually tested.</p>
+
+<div class="callout"><strong>Before today — check Day 43 actually landed:</strong> this lesson adds a new model next to <code>int_order_durations</code> (Day 42), so start from a clean build:
+<pre><code>cd food_delivery_pipeline
+uv run --project ../dbt_env dbt build</code></pre>
+Expected: no <code>ERROR</code> lines, same model/test count as your last successful Phase 2a round. If <code>stg_order_events</code> is missing, finish Day 6 first — today reads from it directly.</div>
+
+<h2>1 · A gap named on Day 27, never actually closed</h2>
+<p>Day 27's own data-quality story said this, plainly, about the Kafka consumer: it "never looks at whether <code>status</code> is a real status, whether <code>occurred_at</code> is a sane timestamp, or whether the same order's events arrive in a sensible order." Two of those three got a real fix since: Day 6's <code>accepted_values</code> test covers "is <code>status</code> a real status," and Day 42's <code>assert_column_is_after</code> covers "is <code>occurred_at</code> sane" for exactly one pair, <code>placed_at</code> before <code>delivered_at</code>. The third clause — "the same order's events arrive in a sensible order" — was never built. Grep this project's own test files and the word <em>sequence</em> never shows up next to <code>status</code> anywhere.</p>
+<p>It's worth being precise about why Day 42's test doesn't already cover this. <code>assert_column_is_after</code> compares two named columns <em>on one row</em> of <code>int_order_durations</code> — one row per order, already collapsed down to just its <code>placed_at</code> and <code>delivered_at</code> timestamps. It has no way to see <code>accepted</code> or <code>picked_up</code> at all, because those statuses were never selected into that model in the first place, and it has no way to see a <em>duplicate</em> status, because duplicates don't make two columns compare wrong — they make two separate rows of <code>raw.order_events</code> exist, a problem about how many rows there are and what order they're in, not about two columns on the one row a model happened to keep.</p>
+<p>A real, not hypothetical, way this bites: Day 6's own consumer is at-least-once, and Days 34/37 showed a rebalance can briefly reassign a partition mid-read. Nothing in this pipeline's design makes it impossible for a retried producer send, a replayed test message, or a redelivered-then-reprocessed event to land a <code>picked_up</code> row for an order that's already <code>delivered</code>, or two <code>accepted</code> rows for the same order. Every one of those rows is individually valid — a real <code>event_id</code>, a real <code>status</code> from the accepted set, a real timestamp — so <code>not_null</code>, <code>unique</code> and <code>accepted_values</code> all pass. Only looking at the <em>sequence</em> catches it.</p>
+
+<h2>2 · Build: rank each status, so "in order" becomes a comparable number</h2>
+<p>A status sequence is really an ordering problem in disguise: <code>placed</code> must come before <code>accepted</code>, which must come before <code>picked_up</code>, which must come before <code>delivered</code> or <code>cancelled</code>. Give that ordering an explicit number, the same way a <code>CASE</code> expression gives any categorical column a comparable rank, in a new intermediate model — one source, one reshape, dbt-internal only, the same shape Day 8 set for this layer:</p>
+<pre><code><span class="cm">-- models/intermediate/int_order_status_history.sql</span>
+select
+    order_id,
+    status,
+    occurred_at,
+    case status
+        when <span class="str">'placed'</span>     then <span class="kw">1</span>
+        when <span class="str">'accepted'</span>   then <span class="kw">2</span>
+        when <span class="str">'picked_up'</span>  then <span class="kw">3</span>
+        when <span class="str">'delivered'</span>  then <span class="kw">4</span>
+        when <span class="str">'cancelled'</span>  then <span class="kw">4</span>
+        else null
+    end as status_rank
+from {{ ref(<span class="str">'stg_order_events'</span>) }}</code></pre>
+<p><code>delivered</code> and <code>cancelled</code> share rank 4 on purpose: both are terminal states an order reaches exactly once, and neither can legitimately come before the other for the same order — an order that's already <code>delivered</code> should never later show <code>cancelled</code>, or vice versa. Giving them the same rank means <em>any</em> second terminal-state event for one order reads as "no higher than the last one," which is exactly the failure this test needs to catch, not a special case it needs separate logic for.</p>
+<p>Mark it <code>ephemeral</code> in <code>dbt_project.yml</code>'s existing <code>intermediate:</code> block from Day 8 — nothing to add there, it already applies to every model in this folder.</p>
+
+<h2>3 · The test itself: a window function compares a row to the <em>previous</em> row, not another column</h2>
+<p>Day 42 already established the mechanics of a custom generic test — a <code>{% test %}</code> block in <code>tests/generic/</code>, <code>model</code> and <code>column_name</code> as the first two parameters, anything extra nested under YAML's <code>arguments:</code>. Today's test needs one new SQL idea on top of that: a <dfn data-en="a SQL function that computes a value across a set of rows related to the current row -- lag() specifically returns a column's value from the previous row within a defined partition and order, which is exactly what's needed to compare 'this row's status rank' against 'the row before it, for the same order'" data-vn="giữ nguyên &quot;window function&quot; — hàm SQL tính trên 1 tập dòng liên quan tới dòng hiện tại; lag() lấy giá trị cột từ dòng TRƯỚC trong 1 partition/order xác định, đúng thứ cần để so sánh rank của dòng này với dòng trước nó, cùng 1 order_id">window function</dfn>, specifically <code>lag()</code>, to compare a row against the row before it — not another column on the same row, which is all Day 42's test ever needed.</p>
+<pre><code><span class="cm">-- tests/generic/test_assert_monotonic_by_group.sql</span>
+{% test assert_monotonic_by_group(model, column_name, partition_by_column, order_by_column) %}
+
+with ranked as (
+
+    select
+        {{ partition_by_column }} as group_key,
+        {{ order_by_column }} as position_column,
+        {{ column_name }} as value_column,
+        lag({{ column_name }}) over (
+            partition by {{ partition_by_column }}
+            order by {{ order_by_column }}
+        ) as previous_value
+
+    from {{ model }}
+
+)
+
+select *
+from ranked
+where previous_value is not null
+  and value_column &lt;= previous_value
+
+{% endtest %}</code></pre>
+<p><dfn data-en="a SQL clause on a window function (lag(), lead(), row_number(), rank(), etc.) that restricts each row's window to only the other rows sharing the same value in the named column -- here, partition by order_id means lag() only ever looks back at the previous row for that same order, never across into a different order entirely" data-vn="giữ nguyên &quot;partition by&quot; (trong window function) — giới hạn 'window' của mỗi dòng chỉ còn các dòng cùng giá trị ở cột được chỉ định; ở đây partition by order_id nghĩa là lag() chỉ nhìn lại dòng trước CÙNG 1 order, không bao giờ nhìn sang order khác">partition by</dfn> <code>order_id</code> is what keeps this test from ever comparing one order's status against a completely different order's — the same per-key isolation Day 5's Kafka partition key already gave this domain for free at the streaming layer; here it's the same idea expressed in SQL, at the warehouse layer, for a different purpose. <code>previous_value is not null</code> excludes each group's very first row, which has nothing before it to compare against and would otherwise always "fail" a <code>&lt;=</code> check against a null it can never be true against anyway — the same null-handling instinct Day 9's point-in-time join and Day 27's own overlap test both already needed.</p>
+<p>Wire it onto <code>int_order_status_history.status_rank</code> in a new <code>models/intermediate/intermediate.yml</code> (or add to the existing one from Day 42, if that file already exists in your project):</p>
+<pre><code><span class="cm">-- models/intermediate/intermediate.yml -- add alongside Day 42's int_order_durations entry</span>
+models:
+  - name: int_order_status_history
+    columns:
+      - name: status_rank
+        tests:
+          - assert_monotonic_by_group:
+              arguments:
+                partition_by_column: order_id
+                order_by_column: occurred_at</code></pre>
+<div class="callout"><strong>Why this couldn't be a package test either:</strong> <code>dbt_utils</code> ships <code>sequential_values</code>, which sounds close — but it checks that one column's own values step by a fixed amount with no gaps (consecutive integers, one row per calendar day), a property of a single ungrouped column. It has no notion of <em>groups</em> at all, so it can't express "monotonic within each order_id, reset for the next one." That's the same package-vs-hand-written line Day 42 already drew: generic enough to be worth checking for, and genuinely not covered once checked.</div>
+
+<h2>4 · Verify: it passes on real data, then catches a planted bad sequence</h2>
+<pre><code>uv run --project ../dbt_env dbt build --select int_order_status_history</code></pre>
+<p>Expected, naming the test the same way dbt names every generic test (<code>&lt;macro&gt;_&lt;model&gt;_&lt;column&gt;__&lt;extra args&gt;</code>):</p>
+<pre><code>assert_monotonic_by_group_int_order_status_history_status_rank__occurred_at__order_id ... [PASS in 0.02s]</code></pre>
+<p>Now prove it has teeth, the same standard Day 3 and Day 42 both set — plant a real bad sequence rather than trust the SQL on faith. Pick an already-delivered order and insert a second <code>picked_up</code> event for it, landing after its own <code>delivered</code> row:</p>
+<pre><code>docker compose exec -T postgres psql -U fdp -d fdp -c \
+  "INSERT INTO raw.order_events (event_id, order_id, status, occurred_at)
+   SELECT gen_random_uuid(), 101, 'picked_up', max(occurred_at) + interval '1 hour'
+   FROM raw.order_events WHERE order_id = 101;"
+uv run --project ../dbt_env dbt build --select int_order_status_history</code></pre>
+<p>Expected — the planted row comes back as the exact failure, because the test's own <code>select *</code> returns the offending record, not just a count:</p>
+<pre><code>assert_monotonic_by_group_int_order_status_history_status_rank__occurred_at__order_id ... [FAIL 1 in 0.02s]
+
+Done. PASS=0 WARN=0 ERROR=0 FAIL=1 SKIP=0 TOTAL=1</code></pre>
+<p>Order 101's already-<code>delivered</code> status has rank 4; the planted <code>picked_up</code> row also has rank 3, which is <code>&lt;=</code> the previous row's rank (4) by the window's own <code>order by occurred_at</code> — caught, exactly as claimed. Undo the plant before moving on (<code>DELETE FROM raw.order_events WHERE order_id = 101 AND status = 'picked_up' AND occurred_at > (SELECT min(occurred_at) FROM raw.order_events WHERE order_id = 101 AND status = 'picked_up');</code> — careful to delete only the one you just inserted), rerun, confirm <code>PASS=1</code> again, then commit <code>models/intermediate/int_order_status_history.sql</code>, the <code>intermediate.yml</code> addition, and <code>tests/generic/test_assert_monotonic_by_group.sql</code>.</p>
+<div class="callout"><strong>One case worth checking by hand before trusting the rank table:</strong> an order cancelled early — <code>placed</code>, <code>accepted</code>, <code>cancelled</code>, nothing after — must <em>pass</em>, not fail, even though it never reaches <code>picked_up</code> or <code>delivered</code>. Rank 1 → 2 → 4 is strictly increasing, so the test is correctly silent about it: a shorter-than-usual sequence isn't a sequence <em>violation</em>, and this test was never meant to enforce that every order reaches every status, only that whichever statuses do arrive for one order never go backward or repeat.</div>
+
+<div class="interview">
+<p><strong>Q: "Your pipeline checks that an order's delivered_at comes after its placed_at. Does that cover your event data being in order?"</strong> A strong answer, out loud: <em>"No, and it's worth being specific about why not. That test compares two named columns on one already-aggregated row — it can't see the statuses in between, like accepted or picked_up, because they were never selected into that model, and it can't see a duplicate or out-of-order event, because that's a row-count and row-order problem, not a two-column comparison. I closed that separately with a different generic test that ranks each status by where it sits in the order lifecycle, then uses a lag() window function partitioned by order_id and ordered by occurred_at to check that each event's rank is strictly higher than the one before it for that same order. That catches a duplicated status, a status arriving out of sequence, or any event landing after an order is already delivered or cancelled — failure modes that are real here specifically because the Kafka consumer is at-least-once and a rebalance can briefly reassign a partition mid-read, not something I'm testing against a hypothetical."</em> The signal: naming precisely what the first test can and can't see, instead of assuming one timestamp-ordering test already covers "events are in order" in general.</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers one new intermediate model and one new custom generic test using a window function, extending Day 42's custom-generic-test mechanism to a new shape — a cross-row sequence check, not a same-row column comparison. It does not re-derive why Kafka is at-least-once or how a consumer rebalance works (Days 6, 34, 37 already cover both); today only adds the test that would catch a sequence violation those mechanisms can produce, naming the connection once rather than re-teaching it.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="assert_column_is_after compares two named columns on one already-aggregated row of int_order_durations, which only ever holds placed_at and delivered_at -- it has no way to see accepted or picked_up at all, since those statuses were never selected into that model, and no way to see a duplicate status, since a duplicate is a row-count problem, not a two-column comparison on one row.">
+    <p class="stem">Why can't Day 42's <code>assert_column_is_after</code> catch a duplicated or out-of-order <code>accepted</code>/<code>picked_up</code> status?</p>
+    <button class="opt" data-ok>It compares two named columns on one already-collapsed row</button>
+    <button class="opt">It already checks every intermediate status column by default</button>
+    <button class="opt"><code>accepted_values</code> alone already makes this whole check fully redundant</button>
+  </div>
+  <div class="q" data-why="partition by order_id restricts each row's window to only the other rows sharing that same order_id, so lag() looks back at the previous row for that same order and never crosses into a different order's own sequence -- the same per-key isolation Day 5's Kafka partition key already gave this domain, expressed here in SQL instead.">
+    <p class="stem">What does <code>partition by order_id</code> do inside the test's <code>lag()</code> window?</p>
+    <button class="opt" data-ok>Keeps each order's own sequence isolated from every other</button>
+    <button class="opt">Sorts every single order's own events by <code>status</code> name</button>
+    <button class="opt">Deletes any order carrying fewer than four events total</button>
+  </div>
+  <div class="q" data-why="delivered and cancelled are both terminal states an order reaches at most once, and neither should legitimately follow the other for the same order. Giving them the same rank (4) means any second terminal-state event for one order has a rank no higher than the previous one, which the test's <= comparison correctly flags as a violation, with no separate special-case logic needed.">
+    <p class="stem">Why do <code>delivered</code> and <code>cancelled</code> share the same <code>status_rank</code> (4) instead of different ranks?</p>
+    <button class="opt" data-ok>Both are terminal; a second one after either must fail</button>
+    <button class="opt"><code>cancelled</code> orders are always fully excluded from this one model</button>
+    <button class="opt">dbt requires every <code>CASE</code> expression branch to share a value</button>
+  </div>
+  <div class="q" data-why="dbt_utils' sequential_values checks that one ungrouped column's own values step by a fixed amount with no gaps, like consecutive integers or one row per calendar day -- it has no notion of groups at all, so it cannot express 'monotonic within each order_id, reset for the next one,' which is exactly why this rule needed a hand-written test instead.">
+    <p class="stem">Why doesn't <code>dbt_utils</code>' <code>sequential_values</code> test already cover this rule?</p>
+    <button class="opt" data-ok>It has no per-group notion, only one ungrouped column</button>
+    <button class="opt"><code>dbt_utils</code> itself was never installed earlier in this project</button>
+    <button class="opt">Window functions can never run inside any dbt test</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> dbt Labs' <a href="https://docs.getdbt.com/best-practices/writing-custom-generic-tests">Writing custom generic tests</a> guide (already Day 42's primary source, cited again here since today reuses the exact same <code>{% test %}</code>/<code>arguments:</code> mechanism) covers the generic-test shape itself; it doesn't address window functions specifically, but a generic test's body is plain SQL run against <code>{{ model }}</code>, and <code>lag() over (partition by ... order by ...)</code> is standard SQL, not a dbt-specific feature — worth confirming against your own adapter's SQL reference if ever in doubt.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 44.<br>
+<strong>Next up:</strong> the <code>airflow db migrate</code>/<code>airflow dags test</code> approval-gate block remains open for whoever next has a human available to grant it. Absent that, today closed a gap Day 27 named explicitly but left unbuilt — worth checking whether Days 2-8's staging/marts layer or Day 13's incremental models have a similar named-but-unclosed loop before assuming a fresh scan is needed from zero.<br><br>
+💬 Anything unclear — the rank design, the <code>lag()</code> window, or why a shorter sequence isn't itself a failure? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

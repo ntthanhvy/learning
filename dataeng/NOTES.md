@@ -5144,3 +5144,143 @@ along the Phase 2 spine, adapted to the learning records.
   strategies, under a late-arriving or out-of-order event) is now at least
   as promising a source of fresh, substantive material as scanning
   `PLAN.md`'s named bullets, which are themselves running thin.
+
+- 2026-10-29 (headless run, Day 44 generated): forty-fourth lesson,
+  `0044-dbt-status-sequence-test.html`. Idempotency check first — confirmed
+  no `lessons/0044-*.html` on disk and no `n: 44`/`date: "2026-10-29"` entry
+  in `assets/nav.js` before writing anything (highest prior lesson was 43,
+  dated 2026-10-28). The orchestrator had already queried `course_progress`
+  this round and found no dataeng row for 2026-10-29 and no quiz/kata/
+  lesson_completed signal for any course since 2026-10-15, so pacing
+  continued steady/sequential; a direct `psql`/`bin/query-progress` attempt
+  was not retried this round given that standing context. Read `MISSION.md`
+  in full, `PLAN.md`, this file's own tail back through Day 43's close,
+  `RESOURCES.md`, the one `learning-records/` file, and `assets/nav.js`'s
+  full `LESSONS` array (all 43 titles) before picking a topic.
+  **Topic choice:** Day 43's own closing note pointed at auditing earlier
+  lessons' shipped artifacts for genuine, previously-unfound gaps as at
+  least as promising as scanning `PLAN.md`'s own named (and thinning)
+  bullets. Checked Day 13's incremental strategies first, since Day 43
+  named it specifically (late-arriving/out-of-order events) — read it in
+  full and found it already closes that exact gap with a lookback-window
+  `HAVING` filter, built and verified two rounds ago; not a fresh gap.
+  Widened the audit and found a cleaner one: Day 27's own data-quality
+  story explicitly named, in its own prose, that Day 6's Kafka consumer
+  "never looks at ... whether the same order's events arrive in a sensible
+  order" — then never closed it, and Day 27's own closing section named
+  only two different remaining gaps (schema evolution, consumer lag),
+  dropping this third one silently. Grepped `lessons/*.html` for
+  `sequence`/`state machine`/`monotonic`/`out-of-order` next to `status` to
+  confirm nothing built since (Days 33, 34, 37, 41, 42, 43) ever closed it
+  — zero hits naming a per-order status-sequence check. Day 42's own
+  `assert_column_is_after` looked like a near-miss but isn't: it compares
+  two *columns* on one already-aggregated row (`placed_at`/`delivered_at`
+  on `int_order_durations`), with no way to see `accepted`/`picked_up` at
+  all (never selected into that model) or a duplicated status (a row-count
+  problem, not a two-column comparison) — confirmed by rereading Day 42's
+  own SQL directly, not assumed.
+  **Content:** a new ephemeral intermediate model,
+  `models/intermediate/int_order_status_history.sql`, ranking every
+  `stg_order_events` row by lifecycle position (`placed`=1, `accepted`=2,
+  `picked_up`=3, `delivered`/`cancelled`=4, the two terminal statuses
+  sharing one rank on purpose). A new custom generic test,
+  `assert_monotonic_by_group(model, column_name, partition_by_column,
+  order_by_column)`, extends Day 42's `{% test %}`/`tests/generic/`
+  mechanism to a genuinely new shape: a `lag()` window function
+  (`partition by order_id order by occurred_at`) comparing each row's rank
+  to the *previous row's*, not to another column on the same row — catches
+  a duplicated, backward, or post-terminal status Day 42's own test
+  structurally cannot see. Confirmed `dbt_utils.sequential_values` doesn't
+  already cover this before writing it: that macro checks one *ungrouped*
+  column's own values step with no gaps (consecutive integers, one row per
+  day), with no per-group notion at all, so it can't express "monotonic
+  within each `order_id`, reset for the next one."
+  No pandas, no Python-language teaching, no re-derivation of Kafka's
+  at-least-once/rebalancing mechanics (Days 6, 34, 37) beyond one naming
+  callout for *why* the rule is worth having — confirmed by a prose-only
+  read before shipping; this lesson is pure dbt YAML/Jinja/SQL content, no
+  Python file at all.
+  **Verification:** built a minimal scratch dbt project under
+  `.scratch-dataeng-1029/fdp/food_delivery_pipeline/` at the repo root
+  (`/tmp` out of bounds again this round, same constraint recent rounds
+  hit), with `sources.yml`, `stg_order_events`/`stg_orders`, the new
+  `int_order_status_history.sql`, `intermediate.yml` wiring the test, and
+  the test macro itself under `tests/generic/`. Ran `dbt parse
+  --profiles-dir . --project-dir . --no-partial-parse` clean twice (before
+  and after copying the lesson's exact final SQL into the scratch project),
+  grepping output for the literal string `Error` both times and finding
+  none — dbt's own exit code stayed unreliable through this sandbox's pipe
+  handling, per this file's standing warning. Ran `dbt list --select
+  "+int_order_status_history"` live and got back exactly the expected DAG
+  shape (`source → stg_order_events → int_order_status_history`, plus the
+  test node named
+  `assert_monotonic_by_group_int_order_status_history_status_rank__occurred_at__order_id`,
+  dbt's standard generic-test naming). A follow-up `dbt compile --select
+  "test_name:assert_monotonic_by_group"` reached a real `Database Error:
+  connection ... refused` — confirming the compiled SQL got far enough to
+  attempt a live connection, not blocked on a Jinja/parse error, the same
+  proof style Day 15/42 established. No live Postgres was available in
+  this sandbox, so the actual plant-a-bad-row-and-watch-it-fail sequence in
+  Section 4 was instead verified in pure Python: a throwaway script
+  (`verify_logic.py`) replicated the SQL's exact `lag()`/`partition by`/
+  `order by` semantics against five hand-built order-event sequences
+  (clean, backward transition, duplicate status, early cancellation,
+  event-after-terminal-state) and confirmed each one passes or fails
+  exactly as the lesson's Sections 3-5 claim, including the two edge cases
+  worth getting right (an early `cancelled` must pass; any row after a
+  terminal state must fail) — stated honestly here as a logic simulation,
+  not a live database capture, same disclosure convention Day 17/41/43
+  used for their own simulation-vs-live gaps. `uv run python3` ran both
+  that verification script and this round's own throwaway tag-balance/
+  bare-`&`/dfn-attribute/quiz-word-count checker script, both written to
+  scratch locations and deleted with them. Deleted both scratch
+  directories entirely afterward (confirmed via a directory-listing
+  attempt on each finding nothing).
+  Ran a Python tag-balance/bare-`&`/dfn-attribute/quiz-word-count script,
+  same shape as recent rounds': every checked tag balanced on the first
+  pass (div 9/9, p 24/24, code 105/105, button 12/12, script 3/3, dfn 2/2,
+  pre 8/8, h2 7/7, h1 1/1, em 10/10, strong 6/6, a 2/2), zero bare `&`, both
+  `<dfn>` tags carrying `data-en=` and `data-vn=`. The first quiz draft came
+  up uneven on three of four questions (9/8/6, 8/7/9, 10/8/10, 9/8/10) —
+  rebalanced through several edit-and-recount passes, re-running the script
+  after every edit, to a final 9/9/9, 9/9/9, 10/10/10 and 9/9/9 across all
+  four questions. A separate pass on `reference/glossary.html` after adding
+  this round's new section confirmed it stayed balanced too (h2 43/43,
+  table 43/43, tr 171/171, td 384/384, th 129/129), zero bare `&`; the
+  pre-existing duplicate `id="day1"` flagged honestly in Day 41's own entry
+  is still there, still untouched by this round's diff, confirmed by the
+  count staying at exactly 2 occurrences — left alone per this task's own
+  append-only rule for `glossary.html`.
+  Added two new glossary terms (`window function`, `partition by (window
+  function)`) under a new Day 44 section, after grepping case-insensitively
+  first and confirming no existing row covered `window function`/
+  `partition by`/`lag(` — `custom generic test`, `arguments:` nesting and
+  the `model`/`column_name` convention are all pure reuse of Day 42's
+  existing glossary row, not retaught. No new `RESOURCES.md` line added —
+  today reuses Day 42's exact "Writing custom generic tests" citation, so
+  the existing line was annotated in place with a Day 44 mention (the
+  window-function extension, confirmed to still be plain SQL inside a
+  generic test body) rather than duplicated as a second bullet, matching
+  Day 43's own precedent for a reused citation.
+  Registered Lesson 44 in `assets/nav.js` right after the `n: 43` entry,
+  dated 2026-10-29 (`node --check` clean on `nav.js`, `gloss.js` and
+  `quiz.js`, the last two untouched but re-checked per habit). Ran
+  `bin/record-progress dataeng lesson_generated --day 44 --lesson
+  0044-dbt-status-sequence-test.html --detail '{"by":"headless"}'` from the
+  repo root at the end of this round; succeeded.
+  `dataeng/learning-records/` was not touched this round — today's pick
+  came from re-auditing Day 27's own prose against what was actually built
+  since, not a new durable fact about the learner distinct from the single
+  2026-09-14 baseline record on file.
+  **Next up:** the `airflow db migrate`/`airflow dags test` approval-gate
+  block is now ten rounds running (35-44) with no attempt made this round
+  specifically (today's own closing note from Day 43 pointed at an artifact
+  audit instead, which is what this round did) — still worth a human
+  granting it once for whoever next has one available. Today's audit found
+  Day 27 had already named a real gap in its own prose, three lessons
+  before Day 42 built the adjacent-but-different `assert_column_is_after`
+  and five before today's fix — worth noting for whoever picks up next that
+  re-reading earlier lessons' own prose for a named-but-silently-dropped
+  gap (the way Day 27's closing section quietly kept two gaps and dropped a
+  third) is a distinct, and this round proved productive, variant of Day
+  43's own "re-audit shipped artifacts" method, not just a repeat of it.

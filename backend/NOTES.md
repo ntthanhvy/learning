@@ -9514,3 +9514,122 @@
   today's own Scope line as already covered there and not re-derived here;
   and Polly (or a .NET resilience-library survey more broadly), still
   deliberately out of scope per MISSION.md's "concepts first" rule.
+- 2026-10-29 generation (Lesson 116, headless run): idempotency check first —
+  confirmed no `lessons/0116-*.html` on disk and no `n: 116`/
+  `date: "2026-10-29"` entry in `nav.js` before writing anything (highest
+  prior lesson was 115, dated 2026-10-28). The orchestrator handed in
+  confirmed context rather than a pre-decided topic: no `course_progress`
+  row for backend dated 2026-10-29 yet, and no quiz/kata/lesson_completed
+  signal for any course since 2026-10-15 (backend's own Lesson 102, all
+  `ok:true`) — normal steady-paced fresh content was the call, not a review
+  day. Topic choice: tried Go's `select`-statement arbitration rules first,
+  fairly, per this file's own standing instruction — `WebFetch` against
+  `https://go.dev/ref/spec#Select_statements` was attempted again (the exact
+  URL exhausted across all six prior rounds): this round it returned content
+  cleanly with no permission gate (unlike Lesson 115's round, which hit a
+  flat denial), but the fetched page itself truncated mid-"Composite
+  literals" before ever reaching the Select-statements section — the same
+  truncation every round from 110 through 114 hit, now confirmed a seventh
+  time. This rules out both hypotheses the last two rounds raised (a
+  permission gate, a need for a different mirror URL): the content itself is
+  what's truncating, consistently, regardless of permission state — a
+  genuinely different fetch source (not another `go.dev` URL, not a GitHub
+  raw mirror, both already tried) is the only thing left to try, so future
+  rounds should stop re-attempting this exact URL and either try a
+  completely different source (a book, a third-party deep-dive article) or
+  accept this specific primary-source citation stays unavailable
+  indefinitely. Deferred `select` again — now seven rounds — and picked
+  instead a different genuinely open gap surfaced by rereading every lesson
+  title end to end: Lesson 27's graceful-shutdown lesson (SIGTERM handling,
+  readiness-flip-before-drain, `http.Server.Shutdown`) was Go-only and had
+  never been ported to C#, the same ecosystem-mirror gap this run has closed
+  six times already for retry/circuit-breaker/bulkhead/worker-pool, just not
+  yet named explicitly in this file's own candidate list the way the others
+  were. Confirmed via a case-insensitive grep of `graceful shutdown`/
+  `SIGTERM`/`IHostApplicationLifetime`/`ApplicationStopping`/
+  `WaitForShutdownAsync`/`UseConsoleLifetime` across every lesson and the
+  glossary: `SIGTERM`/`graceful shutdown` hit only Lesson 27 (Go) and Lesson
+  41/29 in passing, and every `IHostApplicationLifetime`-family term had zero
+  hits anywhere — a genuinely unaddressed gap, not a half-covered one. Read
+  `MISSION.md`, this file's tail (full run from 2026-10-26 through
+  2026-10-28), both `learning-records/0002` and `/0003`, Lessons 27, 105,
+  109, and 115 in full for exact HTML/quiz/callout/scope-line/comparison-
+  table structure, and `nav.js`'s and `glossary.html`'s tails, all before
+  writing anything. Verified the C# half directly against a fetched
+  Microsoft Learn page before writing any prose: `WebFetch` against
+  `https://learn.microsoft.com/en-us/dotnet/core/extensions/generic-host`
+  returned the full page content cleanly (consistent with this run's
+  standing finding that `learn.microsoft.com` fetches reliably even when
+  `go.dev` and GitHub-mirror fetches don't), confirming verbatim:
+  `ConsoleLifetime`'s SIGINT/SIGQUIT/SIGTERM handling as the default
+  `IHostLifetime`, the pre-.NET-6 `AppDomain.ProcessExit`-based workaround
+  and the deadlock/exit-code-clobbering history that motivated POSIX-signal
+  support in .NET 6, `IHostApplicationLifetime`'s three events
+  (`ApplicationStarted`/`ApplicationStopping`/`ApplicationStopped`) plus
+  `StopApplication()`, the documented default 30-second
+  `HostOptions.ShutdownTimeout`, and Kestrel's exact HTTP/1.1-vs-HTTP/2
+  connection-draining behavior (`GOAWAY` for HTTP/2, ending the request loop
+  for HTTP/1.1) plus the load-balancer-ordering checklist that matches
+  Lesson 27's own readiness-first rule move for move. `dotnet --version` was
+  not attempted — consistent with every round since Lesson 103 hitting the
+  same approval gate, confirmed enough times not to re-test it each round —
+  verified instead by the direct quote-matching above against the one
+  Microsoft page this round fetched. No Go scaffold was written or changed
+  this round since Lesson 27's existing Go snippet is only referenced for
+  comparison, not modified, so nothing new needed `go build`/`go vet`; no
+  scratch toolchain directory was needed for the same reason. Two new terms,
+  each checked against the glossary first via case-insensitive grep across
+  the whole file — zero collisions confirmed before writing: `ConsoleLifetime`,
+  `IHostApplicationLifetime`. Added the two new rows immediately after
+  Lesson 115's `BoundedChannelFullMode` row, same Term/Tiếng Việt (dev-style)/
+  In software column order, confirmed by inspecting the file's actual last
+  row directly rather than assumed. Verification performed mechanically via
+  Node scripts run directly in this session, written with the `Write` tool
+  rather than a Bash heredoc per Lesson 115's own flagged sandbox finding:
+  (1) a quiz-word-count check scoped per `<div class="q">` block, splitting
+  every option both via `.split(/\s+/)` and `.split(" ")` — first draft
+  landed uneven across all four questions (spreads of 1-2 words per option
+  on three of four), fixed by rebuilding every option as an explicit
+  word-array literal and joining with spaces rather than hand-editing prose,
+  which converged in two passes to exactly 10/10/10/10, 10/10/10/10,
+  11/11/11/11, and 10/10/10/10 across the four questions, both counting
+  methods agreeing exactly, exactly one `data-ok` and four options per
+  question confirmed the same way; (2) an HTML tag-balance check across
+  div/p/code/button/script/dfn/pre/h2/h1/em/strong/a/table/tr/th/td/ul/li —
+  clean on the first pass (div 7/7, p 16/16, code 53/53, button 16/16,
+  script 3/3, dfn 2/2, pre 2/2, h2 6/6, h1 1/1, em 2/2, strong 3/3, a 2/2,
+  table 1/1, tr 7/7, th 9/9, td 12/12); a separate table/tr/th/td/p/div/html/
+  head/body/title/script balance check on `glossary.html` after its two-row
+  addition — also balanced (tr 376/376, td 1125/1125), plus a duplicate-term
+  scan across all 374 first-column entries — zero duplicates; (3) a
+  raw-unescaped-`&` regex scan across both files — zero hits; (4) the
+  lesson's `<dfn` tags grepped and confirmed to carry both `data-en=` and
+  `data-vn=` — exactly 2 `dfn` tags, matching the 2 new terms, no orphaned
+  attribute; (5) `node --check` against `assets/nav.js`, `assets/gloss.js`,
+  and `assets/quiz.js` — all clean, both before and after the `nav.js` edit;
+  (6) a basic HTML well-formedness check (exactly one `<!DOCTYPE html>`, one
+  `<html>`/`</html>`, three script tags with `gloss.js`/`quiz.js`/`nav.js` in
+  that order) — clean; (7) a grep for stray markdown-style `*emphasis*` left
+  over from drafting — none found. Registered Lesson 116 in `nav.js` (date
+  2026-10-29, today's actual generation date) right after `n: 115`,
+  confirmed exactly one matching `n: 116` entry and exactly one matching
+  `0116-*.html` file on disk afterward. Added one new RESOURCES.md line
+  (Microsoft Learn's .NET Generic Host page, the `IHostApplicationLifetime`
+  and Host-shutdown sections) following the existing per-topic grouping,
+  placed right after Lesson 115's Channels line; deliberately did not
+  duplicate Lesson 27's 12factor.net Disposability citation as a second
+  standing RESOURCES.md entry, following the same single-mechanism-citation
+  precedent every prior C#-port lesson in this run has used. `bin/record-
+  progress` ran clean on the first attempt this round (`recorded:
+  backend/lesson_generated day=116
+  lesson=0116-graceful-shutdown-ihostapplicationlifetime.html`). No new
+  `learning-records/` file this round — the topic came from a fresh gap scan
+  of existing lesson titles, not a new surprise about the learner's baseline
+  or a quiz outcome. Candidates spotted but not picked this round, still
+  worth checking fresh next time: Go's `select`-statement arbitration rules,
+  now deferred for a seventh round running, with a confirmed finding that
+  the blocker is the fetched page's own truncation (not a permission gate,
+  not the specific URL/mirror choice) — a genuinely different source is
+  needed before an eighth attempt is worth making; and Polly (or a .NET
+  resilience-library survey more broadly), still deliberately out of scope
+  per MISSION.md's "concepts first" rule.

@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 112 · np.ravel() vs .flatten(): the view-or-copy trap hiding behind two functions that look interchangeable</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 112 · ~20 min · 29 Oct 2026</p>
+<h1>np.ravel() vs .flatten(): the view-or-copy trap hiding behind two functions that look interchangeable</h1>
+<p class="byline">This round's fresh scan reconfirmed <code>np.ravel()</code>/<code>.flatten()</code> as still open — named a standing candidate for six rounds running since Lesson 108 — and it remained a genuine zero-hit across the full glossary and every lesson body (Lessons 93/109 use the word "flatten" conversationally to describe NumPy's default axis-less behavior, but neither names <code>.flatten()</code> or <code>np.ravel()</code> as methods in their own right). It closes out today, continuing the "raw NumPy layer under a pandas-adjacent idea" family Lessons 93/95/97/99-102/109-111 have been building, with a sharper trap than the two functions' near-identical output suggests: one always copies, the other sometimes doesn't.</p>
+
+<h2>1 · Same visible output, two different array-shaping functions</h2>
+<p><dfn data-en="an ndarray method returning a new 1-D array containing every element of the original, in row-major order by default -- always returns an independent copy, never a view" data-vn="giữ nguyên '.flatten()' — làm phẳng mảng nhiều chiều thành mảng 1 chiều, LUÔN trả về bản sao độc lập (copy), không bao giờ là view">.flatten()</dfn> and <dfn data-en="a NumPy function/ndarray method also returning a flattened 1-D array, but returning a VIEW sharing memory with the original whenever the array's memory layout allows it, falling back to a copy only when it can't" data-vn="giữ nguyên 'np.ravel()' — cũng làm phẳng mảng thành 1 chiều, nhưng CHỈ trả về view (chia sẻ vùng nhớ với mảng gốc) khi bố cục bộ nhớ cho phép; không cho phép thì mới âm thầm trả về copy">np.ravel()</dfn> produce visually identical results on an ordinary array:</p>
+<pre><code>arr = np.array([[<span class="kw">1</span>, <span class="kw">2</span>, <span class="kw">3</span>], [<span class="kw">4</span>, <span class="kw">5</span>, <span class="kw">6</span>]])
+
+arr.flatten()   <span class="cm"># array([1, 2, 3, 4, 5, 6])</span>
+arr.ravel()     <span class="cm"># array([1, 2, 3, 4, 5, 6])  -- same values, same order</span>
+np.ravel(arr)   <span class="cm"># array([1, 2, 3, 4, 5, 6])  -- top-level function form, identical result</span></code></pre>
+<p>Confirmed directly (numpy 2.5.4): both default to row-major (<code>order="C"</code>) flattening, and both accept an explicit <code>order="F"</code> (column-major) to change the element order — <code>arr.flatten(order="F")</code> and <code>arr.ravel(order="F")</code> both return <code>array([1, 4, 2, 5, 3, 6])</code> on the array above. At this level the two look like pure synonyms.</p>
+
+<h2>2 · The trap: .flatten() always copies, np.ravel() sometimes shares memory instead</h2>
+<p>Confirmed directly with <code>np.shares_memory()</code>, this is the real difference the matching output hides: <code>.flatten()</code> guarantees an independent copy every time — mutating its result never touches the original array. <code>np.ravel()</code> makes no such promise; when the array's memory is already laid out contiguously in the requested order, it hands back a <strong>view</strong> that shares memory with the original, and mutating that view mutates the original array too:</p>
+<pre><code>arr = np.array([[<span class="kw">1</span>, <span class="kw">2</span>, <span class="kw">3</span>], [<span class="kw">4</span>, <span class="kw">5</span>, <span class="kw">6</span>]])
+
+f = arr.flatten()
+f[<span class="kw">0</span>] = <span class="kw">999</span>
+arr        <span class="cm"># unchanged -- [[1, 2, 3], [4, 5, 6]], flatten() never aliases the original</span>
+
+r = arr.ravel()
+r[<span class="kw">0</span>] = <span class="kw">999</span>
+arr        <span class="cm"># [[999, 2, 3], [4, 5, 6]]  -- changed! ravel() returned a view here, same memory as arr</span>
+
+np.shares_memory(arr, arr.ravel())    <span class="cm"># True</span>
+np.shares_memory(arr, arr.flatten())  <span class="cm"># False</span></code></pre>
+<div class="callout"><strong>The trap:</strong> <code>np.ravel()</code>'s view-or-copy choice is silent and depends on the array's internal memory layout, not on anything visible at the call site. The exact same line of code, <code>arr.ravel()</code>, can alias the original on one array and quietly return an independent copy on another — confirmed directly, calling <code>.ravel()</code> on a transposed array (<code>arr.T</code>, which is no longer memory-contiguous) falls back to a copy automatically: mutating <code>arr.T.ravel()</code>'s result leaves the original <code>arr</code> untouched, with zero indication at the call site that the aliasing guarantee just silently disappeared.</div>
+
+<h2>3 · Neither exists on a Series or DataFrame — the NumPy-only gap continues</h2>
+<p>Confirmed directly, continuing the pattern Lesson 110 found for <code>cummax()</code>/<code>cummin()</code>: calling <code>.ravel()</code> or <code>.flatten()</code> directly on a pandas Series raises <code>AttributeError</code> outright — both are ndarray-only methods, with no pandas-native equivalent at all. Reaching the array first via <code>.to_numpy()</code> (Lesson 51's dtype-safe extractor) is required before either works:</p>
+<pre><code>s = pd.Series([<span class="kw">1</span>, <span class="kw">2</span>, <span class="kw">3</span>])
+s.ravel()      <span class="cm"># AttributeError: 'Series' object has no attribute 'ravel'</span>
+s.flatten()    <span class="cm"># AttributeError: 'Series' object has no attribute 'flatten'</span>
+
+df = pd.DataFrame({<span class="str">"a"</span>: [<span class="kw">1</span>, <span class="kw">2</span>], <span class="str">"b"</span>: [<span class="kw">3</span>, <span class="kw">4</span>]})
+df.to_numpy().ravel()    <span class="cm"># array([1, 3, 2, 4]) -- row-major over the 2-D values array</span></code></pre>
+<p>Note the element order on a DataFrame: <code>to_numpy()</code> exposes the data as a 2-D array shaped (rows, columns), so row-major raveling interleaves across columns (<code>1, 3, 2, 4</code> — row 0's values, then row 1's), not column-by-column.</p>
+
+<h2>4 · The related reshaping function: np.reshape() / .reshape()</h2>
+<p>Confirmed directly, the general-purpose sibling in the same family: <code>.reshape()</code> (and the top-level <code>np.reshape()</code>) reshapes an array into any compatible shape, not just flat — <code>arr.reshape(-1)</code> is the idiomatic way to flatten using this function (<code>-1</code> tells NumPy to infer that dimension's size), landing on the identical result as <code>.ravel()</code>/<code>.flatten()</code>. It shares <code>.ravel()</code>'s view-when-possible behavior, and raises loudly rather than guessing when the requested shape doesn't fit the element count:</p>
+<pre><code>arr.reshape(<span class="kw">3</span>, <span class="kw">2</span>)
+<span class="cm"># array([[1, 2], [3, 4], [5, 6]])  -- same 6 elements, new shape</span>
+
+arr.reshape(<span class="kw">4</span>, <span class="kw">2</span>)
+<span class="cm"># ValueError: cannot reshape array of size 6 into shape (4,2)</span></code></pre>
+
+<div class="interview">
+<p><strong>Q: "What's the difference between np.ravel() and .flatten()?"</strong> A strong answer, out loud: <em>"Both flatten a multi-dimensional array into 1-D and look identical on the output — same values, same default row-major order. The real difference is aliasing: flatten() always returns an independent copy, guaranteed, every time. ravel() returns a view sharing memory with the original whenever the layout allows it — which is faster, no copy needed — but silently falls back to a copy when it can't, like on a transposed array. So the same call, arr.ravel(), might let you accidentally mutate the original through the flattened result, or might not, depending on memory layout you can't see at the call site. If I need a guaranteed-safe copy, I reach for flatten(); if I just need to iterate or read, ravel() is cheaper when it can avoid copying at all."</em> The signal: naming the copy-vs-view distinction precisely, knowing it's conditional rather than fixed, and flagging that neither method exists on a Series/DataFrame directly.</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>.flatten()</code>'s always-copies guarantee, <code>np.ravel()</code>'s conditional view-or-copy behavior (and the transposed-array case where it silently falls back to a copy), the <code>order=</code> parameter shared by both, the <code>AttributeError</code> gap on Series/DataFrame, and <code>np.reshape()</code>/<code>.reshape()</code> as the general-shape sibling that shares <code>.ravel()</code>'s view semantics. It does not cover <code>order="A"</code>/<code>order="K"</code> beyond <code>"C"</code>/<code>"F"</code>, multi-dimensional (non-flat) reshape target shapes beyond the one example, or <code>np.resize()</code> (the padding/repeating cousin of <code>reshape()</code>) — worth knowing it exists, not today's focus.</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/112_np_ravel_flatten_reshape.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/112_np_ravel_flatten_reshape.py</code></pre>
+<p>Exercise 1 confirms <code>.flatten()</code> and <code>.ravel()</code> produce the identical flattened values and order on a plain 2-D array (Section 1). Exercise 2 confirms the aliasing trap directly: mutating a <code>.flatten()</code> result never changes the original array, while mutating a <code>.ravel()</code> result does (Section 2). Exercise 3 confirms <code>.reshape(-1)</code> matches <code>.ravel()</code>'s output and that an incompatible target shape raises <code>ValueError</code> (Section 4).</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: .flatten() always returns an independent copy, every single time, with zero exceptions. np.ravel() instead returns a view sharing memory with the original whenever the layout allows it, and only falls back to an independent copy when the layout doesn't permit a view -- the opposite of a fixed guarantee.">
+    <p class="stem">What is the actual guaranteed difference between <code>arr.flatten()</code> and <code>arr.ravel()</code>?</p>
+    <button class="opt" data-ok>flatten always copies; ravel shares memory when it can, else quietly falls back to copying instead</button>
+    <button class="opt">ravel always copies every single time; flatten shares memory with the original whenever it possibly can</button>
+    <button class="opt">neither one differs at all in this way; both of them always return a fresh copy</button>
+  </div>
+  <div class="q" data-why="Confirmed directly with np.shares_memory(): mutating the array returned by arr.flatten() never changes the original arr, since flatten() always copies. Mutating the array returned by arr.ravel() DOES change the original arr here, because ravel() returned a view sharing the same underlying memory in this case.">
+    <p class="stem">After <code>r = arr.ravel()</code> on a plain contiguous 2-D array, then <code>r[0] = 999</code>, what happens to <code>arr</code> itself?</p>
+    <button class="opt" data-ok>arr itself actually changes too, since ravel() returned a view sharing memory with it</button>
+    <button class="opt">arr itself stays completely untouched here, since ravel() always returns its own independent copy</button>
+    <button class="opt">a loud ValueError gets raised immediately here instead of silently mutating anything at all</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: calling .ravel() or .flatten() directly on a pandas Series raises AttributeError outright -- neither method exists on Series or DataFrame at all. Reaching the underlying NumPy array first via .to_numpy() is required before either one works.">
+    <p class="stem">Calling <code>some_series.ravel()</code> directly on a pandas Series does what?</p>
+    <button class="opt" data-ok>raises AttributeError right away -- ravel() does not exist as a Series method</button>
+    <button class="opt">returns that same Series completely unchanged here, since a Series is already one-dimensional</button>
+    <button class="opt">returns a plain flattened array back here, dispatching down through pandas automatically first</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official NumPy reference pages for <a href="https://numpy.org/doc/stable/reference/generated/numpy.ravel.html"><code>numpy.ravel()</code></a> and <a href="https://numpy.org/doc/stable/reference/generated/numpy.ndarray.flatten.html"><code>ndarray.flatten()</code></a> (per <code>RESOURCES.md</code>'s "Docs: NumPy fundamentals" entry, ~5 min) confirm the view-vs-copy distinction in the functions' own words: ravel's docs state it "returns a contiguous flattened array... a copy is made only if needed," while flatten's docs state plainly "a copy of the input array, flattened to one dimension."</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>.flatten() / np.ravel()</code> is new today, added right after Lesson 111's <code>np.percentile() / np.quantile()</code> entry.<br>
+<strong>Next lesson:</strong> no standing candidate named this round — tomorrow's own fresh curriculum/glossary scan picks the next topic with nothing pre-committed. (<code>np.reshape()</code>'s own non-flat shape targets and <code>np.resize()</code> remain open as a loose thread from today's Section 4, not yet a committed pick.)<br><br>
+💬 Anything unclear — the view-vs-copy trap, the Series/DataFrame gap, or the reshape sibling? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

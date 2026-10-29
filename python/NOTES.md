@@ -11525,3 +11525,118 @@ fail *gracefully* so the learner sees which task failed.
   0091-review-retrieval-day-16.html --detail '{"by":"headless"}'` was
   run from the repo root at the end of this round and succeeded.
 
+- 2026-10-29 generation (Lesson 92, headless 06:00 run): idempotency
+  check first — confirmed no `lessons/0092-*.html` on disk and no
+  `n: 92`/`date: "2026-10-29"` entry in `nav.js` before writing anything
+  (highest prior lesson was 91, dated 2026-10-28). The orchestrator's
+  own DB query this round already confirmed the last recorded
+  `course_progress` row for `python` is `lesson_generated day=91
+  lesson=0091-review-retrieval-day-16.html` on 2026-10-28, nothing yet
+  for 2026-10-29, and no quiz/kata/lesson_completed signal for any
+  course since 2026-10-15 — no weak-spot to chase, steady sequential
+  pacing continues; a direct `psql`/DB round-trip was not re-attempted
+  given that confirmed context. Read `MISSION.md` in full (no-pandas/
+  no-NumPy exclusion re-confirmed before writing a line), `PLAN.md` in
+  full (Phase 2's spine is long exhausted; the course has been in
+  sequential stdlib gap-filling mode for many days), and the tail of
+  this file (~400 lines, covering Days 88-91) rather than the whole
+  file, since it exceeds a single read's size cap — sufficient, since
+  Day 91's own next-day note (a review day closing the Days 88-90
+  cadence cycle) named exactly two carried-forward candidates still
+  open for Day 92: `weakref`, `calendar`. Also read the learner's only
+  record (`learning-records/0001-baseline-reads-python-writes-little.md`,
+  the Day 1 "can read Python, can't produce it" gap, still with no later
+  record and no new quiz/kata-failure signal). Topic/format selection:
+  re-ran the fresh-gap grep anyway per every prior fresh-topic day's own
+  discipline — case-insensitive search across all 91 lessons, every
+  practice file, `reference/glossary.html`, and `RESOURCES.md` for both
+  carried-forward candidates — both still genuinely zero-hit as *taught*
+  topics (the handful of `weakref`/`calendar` hits inside Days 85-91 are
+  all prior rounds' own "candidates still open" prose, never teaching
+  content). Picked `weakref` over `calendar`: `calendar` overlaps
+  heavily with Day 14's already-taught `datetime` (the same reason Day
+  90's own note gave for passing it over in favor of `graphlib`), while
+  `weakref` is pure object-model/memory-management stdlib mechanics with
+  zero pandas/NumPy surface, and closes a real gap — nothing taught so
+  far distinguishes a reference that keeps an object alive from one that
+  doesn't, even though Day 1's entire names-and-objects model implicitly
+  assumed every reference is the strong kind. Probed real behavior
+  directly in `.scratch-python-92/` (deleted after, never tracked by
+  git) via `uv run python3 probe.py`/`probe2.py` rather than trusting
+  memory: confirmed `weakref.ref(obj)()` returns the live object while a
+  strong reference remains and `None` once `del obj` + `gc.collect()`
+  runs; confirmed a `WeakValueDictionary` entry vanishes on its own
+  (`len()` 1 → 0, then `KeyError` on lookup) once the value's last strong
+  reference is gone, with no code calling `del` on the key directly;
+  confirmed the `WeakKeyDictionary` mirror image (entry vanishes when the
+  *key* object goes); confirmed `weakref.finalize(obj, func, *args)`
+  runs `func` exactly once on collection, flips `.alive` to `False`
+  after; confirmed calling the finalizer object directly (`f()`) runs
+  the callback immediately and returns its return value (`'cleaned up
+  manual'`), while a second call is a no-op returning `None` with the
+  callback not re-run; confirmed `weakref.ref(5)` and
+  `weakref.ref("hello")` both raise `TypeError: cannot create weak
+  reference to '...' object`, since plain `int`/`str`/`tuple` don't
+  support weak references at all. Checked the glossary for a collision
+  before writing — grepped `weakref` case-insensitively across the full
+  `glossary.html`, zero existing rows. **New jargon: 4 terms** (`strong
+  reference`, `weak reference`/`weakref.ref()`,
+  `WeakValueDictionary`/`WeakKeyDictionary` as one combined row,
+  `weakref.finalize()`) — two inline `<dfn>`s in the lesson body (`strong
+  reference` in the byline, `weak reference` in Section 2) plus full
+  glossary-page entries for all four rows, added as a new `<h2
+  id="day92">` section directly after Day 90's (Day 91 was a pure review
+  day with no glossary section of its own, matching every prior review
+  day's own precedent). Verification performed mechanically, from a
+  dedicated script in `.scratch-python-92/` (deleted after): (1) an HTML
+  tag-balance check across div/p/code/button/script/dfn/pre/h2/h1/em/
+  strong/a on the new lesson — balanced on the first pass (div 6/6, p
+  18/18, code 67/67, button 9/9, script 3/3, dfn 2/2, pre 5/5, h2 7/7,
+  h1 1/1, em 4/4, strong 3/3, a 2/2); (2) a raw-unescaped-`&` regex scan
+  (excluding `&amp;`/`&quot;`/etc.) on both the new lesson and the new
+  glossary section — zero hits on both; (3) a word-count match per quiz
+  question's three options, extracted via regex and stripped of tags —
+  first draft mismatched on all three questions (Q1 11/7/9, Q2 11/8/8,
+  Q3 7/7/9), iterated option-by-option (e.g. "weak references never keep
+  their target alive, only strong ones do" → "...never keep their own
+  target object alive", "its value had no strong references left, so it
+  was collected" → "...left; collected") and recounted after every edit,
+  until all three landed on equal per-question counts: 9/9/9, 8/8/8,
+  7/7/7; (4) an `html.parser.HTMLParser` full-document parse of the new
+  lesson — no parse errors; (5) a separate table/tr/td/h2/p/div balance
+  check on `glossary.html` after its new section, plus a duplicate-
+  `id="dayNN"` scan — balanced (table 78/78, tr 342/342, td 792/792, h2
+  78/78) with zero duplicates among 78 ids, `day92` present exactly
+  once; (6) `node --check` against `assets/nav.js`, `assets/gloss.js`,
+  and `assets/quiz.js` — all three clean. Added one new `RESOURCES.md`
+  line for `weakref`, placed directly after Day 90's `graphlib` line and
+  before the PEP 8 line, following the file's chronological-by-day
+  ordering. Registered Lesson 92 in `nav.js` with today's date
+  (2026-10-29) right after the `n: 91` entry. No-pandas rule: grepped
+  case-insensitively for `pandas|numpy|dataframe|pd\.|np\.` in the new
+  lesson and practice file — exactly two hits in the lesson (the "Why
+  today" callout's one-line mention that the topic has zero pandas/NumPy
+  surface, and the required "Where pandas/NumPy go from here" boundary
+  callout confirming neither library has an equivalent) and zero hits in
+  the practice file — no worked pandas/NumPy example anywhere. The
+  shipped (unsolved) `practice/92_weakref_and_weak_references.py` was
+  executed directly from its real `practice/` location and printed
+  exactly 3 ✗ with no raw traceback. A solved copy built in
+  `.scratch-python-92/` (never editing the shipped file itself, deleted
+  after) printed all 3 ✓ and "All green" on two consecutive runs; the
+  shipped file was re-run afterward and reproduced the identical
+  all-✗ result, confirming no leakage back into the baseline.
+  `python/learning-records/` was not touched this round — a routine
+  fresh-topic pick following the course's own settled cadence and Day
+  91's own named candidate list, not a new durable fact about the
+  learner distinct from Day 1's baseline record. No candidates remain
+  open from the Days 90-91 notes after today — the next fresh-topic
+  round should start from a new fresh-gap grep rather than a
+  carried-forward list. Day 92 is the first fresh lesson since Day 91's
+  review closed the prior cadence cycle, so per the settled
+  three-fresh-then-review cadence, Days 93 and 94 should continue fresh,
+  with a review of Days 92-94 due at Day 95. `bin/record-progress python
+  lesson_generated --day 92 --lesson 0092-weakref-and-weak-references.html
+  --detail '{"by":"headless"}'` was run from the repo root at the end of
+  this round and succeeded.
+

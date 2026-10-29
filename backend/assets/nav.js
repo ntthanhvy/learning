@@ -238,6 +238,8 @@
       file: "lessons/0114-bulkhead-pattern-semaphoreslim-concurrentdictionary.html" },
     { n: 115, date: "2026-10-28", title: "Worker pools: the other way to bound fan-out",
       file: "lessons/0115-worker-pools-channel-t.html" },
+    { n: 116, date: "2026-10-29", title: "Graceful shutdown, now in C# too",
+      file: "lessons/0116-graceful-shutdown-ihostapplicationlifetime.html" },
   ];
 
   const REFS = [

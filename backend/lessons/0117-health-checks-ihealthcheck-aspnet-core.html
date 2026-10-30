@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 117 · Health checks, now in C# too</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 117 · ~20 min</p>
+<h1>Health checks, now in C# too</h1>
+<p class="byline">Lesson 47 covered the liveness-vs-readiness split in Go: one trivial handler that never touches a dependency, one handler that pings the database with a short timeout, wired to two separate endpoints so a database blip can't trigger a fleet-wide restart. That lesson never got a C# mirror, even though every other Go-only mechanism from that stretch of the course — retry, circuit breaker, bulkhead, worker pool, graceful shutdown — has been ported since Lesson 112. Today closes that gap: the exact same split, built from ASP.NET Core's own health-check middleware instead of two hand-written handlers.</p>
+
+<h2>1 · Same two questions, one framework feature instead of two handlers</h2>
+<p>Lesson 47's rule still holds exactly: liveness answers "is this process alive and unstuck," never checks a dependency, and should be nearly free; readiness answers "can this instance serve real traffic right now," and is allowed to ping a dependency with a bounded timeout. What changes in ASP.NET Core is that both endpoints come from one built-in middleware system instead of two routes you write by hand. The building block is <dfn data-en="an ASP.NET Core interface with one method, CheckHealthAsync, that a class implements to report HealthCheckResult.Healthy, Degraded, or Unhealthy for one specific dependency or condition" data-vn="IHealthCheck (giữ nguyên) — interface của ASP.NET Core có 1 method CheckHealthAsync, implement để báo HealthCheckResult.Healthy/Degraded/Unhealthy cho 1 dependency hoặc điều kiện cụ thể">IHealthCheck</dfn>, registered with <dfn data-en="an extension method that registers the health-check service and lets individual checks be added with .AddCheck(), each one taggable by name" data-vn="AddHealthChecks() (giữ nguyên) — extension method đăng ký health-check service, cho phép thêm từng check riêng bằng .AddCheck(), mỗi check gắn được tag theo tên">AddHealthChecks()</dfn> and exposed at a route with <dfn data-en="an extension method that maps a URL path to the health-check middleware, optionally filtered to a subset of registered checks via a HealthCheckOptions.Predicate matching on tags" data-vn="MapHealthChecks() (giữ nguyên) — extension method gắn 1 URL path vào health-check middleware, có thể lọc theo tag bằng HealthCheckOptions.Predicate để chỉ chạy 1 phần check đã đăng ký">MapHealthChecks()</dfn>.</p>
+<p>Per Microsoft's own docs: "Register health check services with <code>AddHealthChecks</code> in <code>Program.cs</code>. Create a health check endpoint by calling <code>MapHealthChecks</code>." That's the whole wiring — no custom <code>http.ServeMux</code> route needed, because the framework already owns routing.</p>
+
+<h2>2 · The split: one predicate, not two separate handler bodies</h2>
+<p>Lesson 47's Go code kept liveness and readiness apart by writing two separate functions. ASP.NET Core keeps them apart with <strong>tags</strong> on each registered check plus a <code>Predicate</code> on each mapped endpoint — the liveness endpoint's predicate simply says "run zero of the registered checks":</p>
+<pre><code><span class="kw">var</span> builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddHealthChecks()
+    .AddDbContextCheck&lt;AppDbContext&gt;(<span class="st">"database"</span>, tags: <span class="kw">new</span>[] { <span class="st">"ready"</span> });
+    <span class="cm">// AddDbContextCheck calls EF Core's CanConnectAsync underneath --</span>
+    <span class="cm">// a connection attempt, not a test query, per the docs' own warning</span>
+    <span class="cm">// against running a query that could add load to a struggling DB.</span>
+
+<span class="kw">var</span> app = builder.Build();
+
+<span class="cm">// Liveness: run none of the registered checks. If this handler can</span>
+<span class="cm">// run at all, the process is alive -- same rule as Lesson 47's Go version.</span>
+app.MapHealthChecks(<span class="st">"/healthz/live"</span>, <span class="kw">new</span> HealthCheckOptions {
+    Predicate = _ =&gt; <span class="kw">false</span>
+});
+
+<span class="cm">// Readiness: run only checks tagged "ready" -- here, just the DB check.</span>
+app.MapHealthChecks(<span class="st">"/healthz/ready"</span>, <span class="kw">new</span> HealthCheckOptions {
+    Predicate = check =&gt; check.Tags.Contains(<span class="st">"ready"</span>)
+});
+
+app.Run();</code></pre>
+<p>The docs state the same rule Lesson 47 taught, almost word for word: "Use a <em>liveness probe</em> to describe the liveness of the process, no other checks are run... Use a <em>readiness probe</em> to indicate a 'not ready' state" while a dependency isn't available yet. Same two questions, same two consumers reacting differently — a liveness failure still means "kill and restart," a readiness failure still means "stop routing traffic, leave the process running."</p>
+
+<div class="callout"><strong>The frontend equivalent you already own.</strong> This is the same shape as a feature flag gating one widget versus a kill switch gating the whole app shell. The liveness predicate (<code>_ =&gt; false</code>) is the kill switch — if it ever fails, nothing more granular is checked, the whole thing restarts. The readiness predicate, filtered to one tag, is the scoped flag — only the piece that actually depends on something external gets re-evaluated, and the rest of the app keeps running untouched.</div>
+
+<h2>3 · HealthStatus has a third value Go's two-handler version didn't need</h2>
+<p>Lesson 47's Go handlers only ever returned 200 or 503 — alive/not-alive, ready/not-ready, a boolean each way. ASP.NET Core's <code>HealthCheckResult</code> carries a three-way <dfn data-en="the enum a CheckHealthAsync implementation returns to report one of three states for a single check — Healthy, Degraded (working but impaired), or Unhealthy — rather than a plain boolean" data-vn="HealthStatus (giữ nguyên) — enum mà CheckHealthAsync trả về để báo 1 trong 3 trạng thái cho 1 check — Healthy, Degraded (vẫn chạy nhưng kém), hoặc Unhealthy — không chỉ là boolean đơn giản">HealthStatus</dfn>: <code>Healthy</code>, <code>Degraded</code>, or <code>Unhealthy</code>. <code>Degraded</code> has no Go-side equivalent in Lesson 47 at all — it's for "this dependency answered, but slowly, or in a reduced capacity," a state a plain boolean can't express. By default the aggregate endpoint still collapses this to a simple HTTP status for the load balancer (<code>Healthy</code>/<code>Degraded</code> both read as 200, only <code>Unhealthy</code> flips to 503) — the three-way detail is mainly for whoever reads the response body or a dashboard, not the routing decision itself.</p>
+
+<div class="cmp-wrap">
+<table class="cmp">
+<thead><tr><th></th><th>Lesson 47: Go</th><th>Lesson 117: C# / ASP.NET Core</th></tr></thead>
+<tbody>
+<tr><th>Liveness/readiness split</th><td>two hand-written <code>http.HandleFunc</code> routes</td><td>one middleware, two <code>MapHealthChecks</code> calls filtered by <code>Predicate</code></td></tr>
+<tr><th>Checking the DB</th><td><code>h.db.PingContext(ctx)</code> by hand</td><td><code>AddDbContextCheck&lt;T&gt;()</code>, calls EF Core's <code>CanConnectAsync</code></td></tr>
+<tr><th>Bounding the check's time</th><td><code>context.WithTimeout</code> written explicitly</td><td>framework-managed per check (a <code>Timeout</code> can be set per registration)</td></tr>
+<tr><th>Result granularity</th><td>boolean: 200 or 503</td><td>three-way: Healthy / Degraded / Unhealthy</td></tr>
+<tr><th>Grouping checks by endpoint</th><td>separate functions, manual</td><td>tags + <code>Predicate</code> on the mapped route</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers ASP.NET Core's health-check middleware — <code>IHealthCheck</code>, <code>AddHealthChecks()</code>, <code>MapHealthChecks()</code>, tag-based <code>Predicate</code> filtering for separate liveness/readiness endpoints, <code>AddDbContextCheck&lt;T&gt;()</code>, and the three-way <code>HealthStatus</code> enum — as the C# mirror of Lesson 47's Go liveness-vs-readiness split. It does not cover writing a fully custom <code>IHealthCheck</code> class from scratch beyond the one-method contract already shown, the built-in health-check UI/dashboard packages, or Kubernetes-specific probe configuration (out of scope per MISSION.md). It does not cover Go's <code>select</code>-statement arbitration rules — still deferred; see this round's NOTES.md entry for why.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory, with no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Passing a Predicate of `_ => false` tells MapHealthChecks to run zero of the registered checks for that endpoint, matching Lesson 47's rule that liveness must never touch a dependency -- if the handler runs at all, the process counts as alive.">
+    <p class="stem">Why does the liveness endpoint's MapHealthChecks use Predicate = `_ => false`?</p>
+    <button class="opt" data-ok>It runs zero checks, since liveness must never touch a dependency</button>
+    <button class="opt">It permanently disables that one route from ever responding at all</button>
+    <button class="opt">It forces every single registered check to run twice per request</button>
+    <button class="opt">It silently redirects that whole route over to the readiness endpoint</button>
+  </div>
+  <div class="q" data-why="AddDbContextCheck<T>() calls EF Core's own CanConnectAsync method underneath -- a connection attempt, not a hand-written SQL query -- matching the docs' own warning that a query-based check risks adding load to a database that may already be struggling.">
+    <p class="stem">What does AddDbContextCheck&lt;T&gt;() actually do underneath, per the docs?</p>
+    <button class="opt">It deletes and then immediately recreates the entire configured database schema</button>
+    <button class="opt" data-ok>It calls EF Core's own CanConnectAsync method to attempt a connection</button>
+    <button class="opt">It runs every single pending EF Core migration before any request</button>
+    <button class="opt">It permanently caches only the very first ever SQL query result</button>
+  </div>
+  <div class="q" data-why="HealthStatus.Degraded means a check answered but reports being impaired or slow -- a state a plain boolean (as Lesson 47's Go handlers used) cannot express at all, since Go's version could only ever return 200 or 503, nothing in between those two.">
+    <p class="stem">What does HealthStatus.Degraded express that Lesson 47's Go booleans could not?</p>
+    <button class="opt">That the check itself crashed with an unhandled exception during startup</button>
+    <button class="opt">That the dependency is permanently gone and will never come back</button>
+    <button class="opt" data-ok>That a dependency answered back, slowly, or in a reduced capacity</button>
+    <button class="opt">That the entire host process itself has already been fully restarted</button>
+  </div>
+  <div class="q" data-why="Tags plus a Predicate on each mapped endpoint are what let one shared middleware system serve two different purposes -- the readiness endpoint's Predicate filters down to only checks tagged \"ready\", while a plain handler-per-route design (Lesson 47's Go version) has no shared registry to filter at all.">
+    <p class="stem">What lets one AddHealthChecks() registry serve two different endpoints with different checks?</p>
+    <button class="opt">Every single mapped endpoint always runs the exact same fixed checks</button>
+    <button class="opt" data-ok>Tags on each check, filtered per endpoint by its own HealthCheckOptions.Predicate</button>
+    <button class="opt">A completely separate WebApplication host instance built fresh for each one</button>
+    <button class="opt">Manually duplicating and pasting the whole check's entire source code twice</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://learn.microsoft.com/en-us/aspnet/core/host-and-deploy/health-checks">Microsoft Learn: Health checks in ASP.NET Core</a> (~15 min) is the primary source for today's C# half, confirming verbatim the <code>IHealthCheck</code> contract, the <code>AddHealthChecks</code>/<code>MapHealthChecks</code> registration-and-routing pair, the tag-plus-<code>Predicate</code> pattern for separate liveness/readiness endpoints (including its own worked example using those exact two names), <code>AddDbContextCheck</code> calling EF Core's <code>CanConnectAsync</code>, and the warning against a query-based check adding load to a struggling database. Lesson 47's own Twelve-Factor App Disposability citation still covers the liveness-vs-readiness concept itself in full, not duplicated here.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a>. Click any dotted term for a popup (English first, tiếng Việt second). Builds directly on Lesson 47's liveness/readiness split and Lesson 106's EF Core material. <strong>Anything unclear? Ask your teacher</strong>, the agent that made this lesson. Ask in Vietnamese anytime. A good follow-up: "does our own ASP.NET Core service at work use AddHealthChecks, or something hand-rolled like Lesson 47's Go handlers?"</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

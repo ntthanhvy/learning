@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 93 · sqlite3: a real database with no server to run</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 93 · ~20 min · 30 Oct 2026</p>
+<h1><code>sqlite3</code>: a real database with no server to run</h1>
+<p class="byline">Day 21 talked to PostgreSQL — a separate server process, reached over a network connection. Today's module, <code>sqlite3</code>, is a <dfn data-en="An embedded database is a real relational database that runs inside the same process as the application using it, with no separate server to install, start, or connect to over a network -- the whole database is a single file (or even just memory) the application opens directly." data-vn="giữ nguyên &quot;embedded database&quot; — database quan hệ thật nhưng chạy ngay trong process của chương trình, không cần server riêng để cài/khởi động/kết nối qua mạng; cả database chỉ là 1 file (hoặc memory) mà chương trình mở trực tiếp.">embedded database</dfn> built into the standard library: full SQL, zero setup, the whole thing a single file your script opens directly.</p>
+
+<div class="callout"><strong>Why today, specifically:</strong> a fresh case-insensitive grep across every lesson title, every practice file, <code>reference/glossary.html</code>, and <code>RESOURCES.md</code> — run clean, not from a carried-forward candidate list, per Day 92's own closing note that the next fresh-topic round should start that way — turned up zero prior hits for <code>sqlite3</code>, <code>struct</code>, <code>getpass</code>, <code>textwrap</code>, <code>string.Template</code>, <code>fractions</code>, <code>timeit</code>, <code>array</code>, <code>socket</code>, <code>threading</code>, <code>ast</code>/<code>literal_eval</code>, <code>types</code>/<code>SimpleNamespace</code>, <code>importlib</code>, and <code>locale</code> (<code>bisect</code> was already confirmed taught, alongside <code>heapq</code>, back on Day 51). Picked <code>sqlite3</code> over the rest: the learner's baseline record names strong SQL as an existing asset, and nothing taught so far lets that SQL run from inside a Python script without standing up a real server the way Day 21's PostgreSQL lesson required — a genuinely missing, well-scoped stdlib corner with zero pandas/NumPy surface.</div>
+
+<h2>1 · <code>connect()</code>, a cursor, and the SQL the learner already knows</h2>
+<p><code>sqlite3.connect(path)</code> opens a database file, creating it if it doesn't exist yet — or opens <code>":memory:"</code> for a database that lives only in RAM and disappears when the connection closes, handy for scripts and tests that need a real database with nothing left behind on disk. A <code>Connection</code> doesn't run SQL directly; a <code>Cursor</code>, made with <code>.cursor()</code>, does:</p>
+<pre><code><span class="kw">import</span> sqlite3
+
+con = sqlite3.connect(<span class="str">":memory:"</span>)
+cur = con.cursor()
+cur.execute(<span class="str">"CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, age INTEGER)"</span>)
+cur.execute(<span class="str">"INSERT INTO users (name, age) VALUES (?, ?)"</span>, (<span class="str">"Ada"</span>, 30))
+cur.execute(<span class="str">"INSERT INTO users (name, age) VALUES (?, ?)"</span>, (<span class="str">"Grace"</span>, 40))
+con.commit()
+
+cur.execute(<span class="str">"SELECT id, name, age FROM users WHERE age > ?"</span>, (20,))
+<span class="kw">print</span>(cur.fetchall())
+<span class="cm"># [(1, 'Ada', 30), (2, 'Grace', 40)] -- confirmed live, each row a plain tuple</span></code></pre>
+<p>Every value that comes from outside the program — anything typed by a user, read from a file, pulled off the network — goes in through a <code>?</code> placeholder and a separate tuple of values, never pasted straight into the SQL string with an f-string. <code>sqlite3</code> escapes the value correctly no matter what it contains, so a name like <code><span class="str">"Ada' OR '1'='1"</span></code> is searched for <em>literally</em> instead of breaking out of the query — confirmed live: that exact string as a parameter returns zero rows, not every row in the table. This is <dfn data-en="A parameterized query passes untrusted values through a separate argument (a ? placeholder plus a tuple of values) instead of pasting them directly into the SQL text -- the database driver escapes the value correctly no matter what it contains, which is what prevents SQL injection." data-vn="giữ nguyên &quot;parameterized query&quot; — truyền giá trị không tin tưởng qua 1 chỗ riêng (placeholder ? kèm tuple giá trị) thay vì dán thẳng vào chuỗi SQL; driver tự escape đúng bất kể giá trị là gì, đó là cách chặn SQL injection.">parameterized query</dfn>, and it is the one correct way to build a query from a variable, in <code>sqlite3</code> or any other database driver.</p>
+
+<h2>2 · Transactions: <code>commit()</code>, and the connection as a context manager</h2>
+<p>Changes made with <code>INSERT</code>/<code>UPDATE</code>/<code>DELETE</code> aren't durable until <code>con.commit()</code> runs; <code>con.rollback()</code> discards them instead. Using the connection itself as a <code>with</code> block wraps that for you — it commits automatically if the block finishes cleanly, or rolls back if an exception escapes:</p>
+<pre><code><span class="kw">try</span>:
+    <span class="kw">with</span> con:
+        cur.execute(<span class="str">"INSERT INTO users (name, age) VALUES (?, ?)"</span>, (<span class="str">"Temp"</span>, 1))
+        <span class="kw">raise</span> ValueError(<span class="str">"boom"</span>)
+<span class="kw">except</span> ValueError:
+    <span class="kw">print</span>(<span class="str">"caught"</span>)
+
+cur.execute(<span class="str">"SELECT COUNT(*) FROM users"</span>)
+<span class="kw">print</span>(cur.fetchone())
+<span class="cm"># (4,) -- confirmed live, the failed insert never committed; row count unchanged</span></code></pre>
+<p>That's a narrower job than Day 6's file context managers: <code>with con:</code> only manages the transaction — commit on success, rollback on an exception — it does <strong>not</strong> close the connection. The same <code>con</code> is still fully open and usable for more queries right after the block ends; only an explicit <code>con.close()</code> actually closes it, and a query attempted afterward raises <code>sqlite3.ProgrammingError: Cannot operate on a closed database.</code>, confirmed live.</p>
+
+<h2>3 · Reading rows by name with <code>sqlite3.Row</code></h2>
+<p>A plain row is a tuple — <code>row[1]</code> works, but says nothing about what column 1 means. Setting <code>con.row_factory = sqlite3.Row</code> switches every row fetched afterward to a tuple-like object that also supports lookup by column name:</p>
+<pre><code>con.row_factory = sqlite3.Row
+cur = con.cursor()
+cur.execute(<span class="str">"SELECT id, name, age FROM users WHERE name = ?"</span>, (<span class="str">"Ada"</span>,))
+row = cur.fetchone()
+<span class="kw">print</span>(row[<span class="str">"name"</span>], row[<span class="str">"age"</span>])   <span class="cm"># Ada 30 -- confirmed live, lookup by column name</span>
+<span class="kw">print</span>(row[0], row[1])         <span class="cm"># 1 Ada  -- confirmed live, index access still works too</span>
+<span class="kw">print</span>(<span class="kw">isinstance</span>(row, <span class="kw">tuple</span>))   <span class="cm"># False -- confirmed live, tuple-LIKE, not an actual tuple subclass</span></code></pre>
+<p>That one assignment on the connection affects every cursor made from it afterward — code reading a result by column name is far harder to break by reordering the <code>SELECT</code> list than code that counts on <code>row[1]</code> always meaning the same thing.</p>
+
+<h2>4 · When SQL itself rejects the data: <code>IntegrityError</code></h2>
+<p>A constraint declared in the schema — <code>UNIQUE</code>, <code>PRIMARY KEY</code>, a foreign key — is enforced by SQLite itself, not by Python code checking first. A violation raises <code>sqlite3.IntegrityError</code>, a narrow, catchable exception distinct from a plain syntax mistake:</p>
+<pre><code>cur.execute(<span class="str">"CREATE TABLE people (name TEXT UNIQUE)"</span>)
+cur.execute(<span class="str">"INSERT INTO people VALUES (?)"</span>, (<span class="str">"Ada"</span>,))
+<span class="kw">try</span>:
+    cur.execute(<span class="str">"INSERT INTO people VALUES (?)"</span>, (<span class="str">"Ada"</span>,))
+<span class="kw">except</span> sqlite3.IntegrityError <span class="kw">as</span> e:
+    <span class="kw">print</span>(e)  <span class="cm"># UNIQUE constraint failed: people.name -- confirmed live</span></code></pre>
+<p>Catching <code>sqlite3.IntegrityError</code> specifically — never a bare <code>except:</code> — lets a program tell "this exact row already exists" apart from every other way a query can fail, the same narrow-catching discipline Day 8 taught for exceptions generally.</p>
+
+<div class="callout"><strong>Where pandas/NumPy go from here:</strong> <code>pandas.read_sql()</code>/<code>DataFrame.to_sql()</code> can move a whole table in or out of a DataFrame in one call — useful once data needs reshaping or aggregating at scale, exactly <code>data/</code>'s job. Today's module is the other half: running SQL itself, transactions, and constraints, with no DataFrame involved at all.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/93_sqlite3_embedded_database.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/93_sqlite3_embedded_database.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: creating a table and inserting rows with a parameterized query, reading rows back by column name with <code>sqlite3.Row</code>, and catching <code>sqlite3.IntegrityError</code> from a broken <code>UNIQUE</code> constraint.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="sqlite3 escapes a ? placeholder's value correctly no matter what it contains, so a string like Ada' OR '1'='1 is searched for literally as data, never interpreted as SQL syntax. An f-string pastes the raw text straight into the query, so that same value could change what the query means entirely -- the textbook SQL injection shape.">
+    <p class="stem">Why does a <code>?</code> placeholder protect against SQL injection where an f-string-built query does not?</p>
+    <button class="opt" data-ok>the placeholder's value is escaped correctly as data</button>
+    <button class="opt">placeholders are rejected unless every input looks numeric</button>
+    <button class="opt">f-strings are blocked entirely inside any execute() call</button>
+  </div>
+  <div class="q" data-why="with con: on a sqlite3 Connection only wraps the transaction: it commits on a clean exit and rolls back if an exception escapes the block. It does not close the connection -- the same object is still fully open and usable for more queries right after the block ends, unlike Day 6's file context managers where the with block also closes the resource.">
+    <p class="stem">After <code>with con:</code> finishes, what is true of the connection <code>con</code> itself?</p>
+    <button class="opt" data-ok>still fully open; only the transaction was committed or rolled back</button>
+    <button class="opt">closed already, exactly like a file opened inside a with block</button>
+    <button class="opt">reset to completely empty, with every earlier table now gone too</button>
+  </div>
+  <div class="q" data-why="A UNIQUE, PRIMARY KEY, or foreign-key constraint declared in the schema is enforced by SQLite itself at the moment a conflicting row is inserted or updated, not by any check Python code runs first. That enforcement surfaces as sqlite3.IntegrityError, a narrow exception distinct from a plain syntax mistake, catchable on its own without a bare except.">
+    <p class="stem">What raises <code>sqlite3.IntegrityError</code> on an <code>INSERT</code> into a <code>UNIQUE</code> column?</p>
+    <button class="opt" data-ok>SQLite itself enforcing the schema's own declared constraint</button>
+    <button class="opt">Python pre-checking every row before sending the query</button>
+    <button class="opt">the cursor object itself silently rejecting duplicate parameters</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the standard library's <a href="https://docs.python.org/3/library/sqlite3.html"><code>sqlite3</code></a> docs — the tutorial section covers today's ground end to end, and the "How to use placeholders" section is the canonical source for the parameterized-query rule above; the module also covers named (<code>:name</code>) placeholders and custom row factories beyond what today touched.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day93">glossary</a> under Day 93.<br>
+💬 Anything unclear — why <code>:memory:</code> is useful for tests, or when a real file-based SQLite database is the right call instead of PostgreSQL? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

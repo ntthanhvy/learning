@@ -240,6 +240,8 @@
       file: "lessons/0115-worker-pools-channel-t.html" },
     { n: 116, date: "2026-10-29", title: "Graceful shutdown, now in C# too",
       file: "lessons/0116-graceful-shutdown-ihostapplicationlifetime.html" },
+    { n: 117, date: "2026-10-30", title: "Health checks, now in C# too",
+      file: "lessons/0117-health-checks-ihealthcheck-aspnet-core.html" },
   ];
 
   const REFS = [

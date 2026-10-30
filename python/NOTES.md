@@ -11640,3 +11640,111 @@ fail *gracefully* so the learner sees which task failed.
   --detail '{"by":"headless"}'` was run from the repo root at the end of
   this round and succeeded.
 
+- 2026-10-30 generation (Lesson 93, headless run): idempotency check first
+  — confirmed no `lessons/0093-*.html` on disk and no `n: 93`/
+  `date: "2026-10-30"` entry in `nav.js` before writing anything (highest
+  prior lesson was 92, dated 2026-10-29). Read `MISSION.md` in full
+  (no-pandas/no-NumPy exclusion re-confirmed before writing a line),
+  `PLAN.md` in full (Phase 2's written spine ends at the Day 26 FastAPI
+  capstone; lessons since have been open-ended stdlib gap-filling), and
+  the tail of this file (covering Days 90-92) rather than the whole
+  file, since it exceeds a single read's size cap. Day 92's own closing
+  note said no candidates remained open from the Days 90-91 notes and
+  that the next fresh-topic round should start from a fresh-gap grep
+  rather than a carried-forward list — followed that directly rather
+  than reusing Day 92's own two now-resolved candidates. Cadence state:
+  Day 91 was a review closing the Days 88-90 cycle; Day 92 (`weakref`)
+  was fresh, so today is fresh day 2 of 3, with a review of Days 92-94
+  due at Day 95. Topic/format selection: ran a fresh case-insensitive
+  grep across every lesson title, every practice file,
+  `reference/glossary.html`, and `RESOURCES.md` for a wide candidate
+  list — `sqlite3`, `struct`, `getpass`, `textwrap`, `string.Template`,
+  `fractions`, `timeit`, `array`, `socket`, `threading`, `ast`/
+  `literal_eval`, `types`/`SimpleNamespace`, `importlib`, `locale`, and
+  `bisect` — all genuinely zero-hit except `bisect`, which the grep
+  confirmed is already taught alongside `heapq` on Day 51
+  (`0051-heapq-and-bisect.html`), correctly excluded. Picked `sqlite3`
+  over the rest: the learner's baseline record
+  (`learning-records/0001-baseline-reads-python-writes-little.md`)
+  names strong SQL as an existing asset, and Day 21 already taught
+  talking to PostgreSQL — a separate server reached over a network —
+  but nothing taught so far lets that same SQL run from inside a
+  Python script with zero server to install or connect to; confirmed
+  Day 21's own lesson file has zero mention of `sqlite3` before writing,
+  so the two don't overlap. Probed real behavior directly in a scratch
+  dir (deleted after, never tracked by git) via `uv run python3
+  probe.py`/`probe2.py` rather than trusting memory: confirmed
+  `connect(":memory:")` plus `?`-placeholder `execute()`/`executemany()`
+  round-trips rows as plain tuples; confirmed a parameterized query
+  passed the literal string `"Ada' OR '1'='1"` as data returns zero
+  rows rather than the whole table, the actual SQL-injection-prevention
+  claim; confirmed `with con:` commits on a clean exit and rolls back
+  on an exception escaping the block, but does **not** close the
+  connection — the same `con` answered a plain `SELECT 1` immediately
+  after the block, and only an explicit `con.close()` made a later
+  query raise `sqlite3.ProgrammingError: Cannot operate on a closed
+  database.`; confirmed `con.row_factory = sqlite3.Row` makes a fetched
+  row support both `row["name"]` and `row[0]`, while
+  `isinstance(row, tuple)` is directly confirmed `False` — tuple-like,
+  not a real `tuple` subclass; confirmed a `UNIQUE` column violation on
+  `INSERT` raises `sqlite3.IntegrityError` with message text containing
+  `UNIQUE constraint failed: ...`, not any other exception type.
+  Checked the glossary for a collision before writing — grepped
+  `sqlite3` case-insensitively across the full `glossary.html`, zero
+  existing rows. **New jargon: 4 terms** (`embedded database`,
+  `parameterized query`, `sqlite3.Row`, `sqlite3.IntegrityError`) — two
+  inline `<dfn>`s in the lesson body (`embedded database` in the
+  byline, `parameterized query` in Section 1) plus full glossary-page
+  entries for all four rows, added as a new `<h2 id="day93">` section
+  directly after Day 92's. Verification performed mechanically, from a
+  dedicated scratch script (deleted after): (1) an HTML tag-balance
+  check across div/p/code/button/script/dfn/pre/h2/h1/em/strong/a on
+  the new lesson — first draft balanced on every tag already (div 6/6,
+  p 18/18, code 77/77, button 9/9, script 3/3, dfn 2/2, pre 5/5, h2
+  7/7, h1 1/1, em 1/1, strong 4/4, a 2/2); (2) a raw-unescaped-`&` regex
+  scan (excluding `&amp;`/`&quot;`/etc.) on both the new lesson and the
+  new glossary section — zero hits on both; (3) a word-count match per
+  quiz question's three options, extracted via regex and stripped of
+  tags — first draft mismatched on all three questions (Q1 9/8/8, Q2
+  10/11/9, Q3 7/8/7), iterated option-by-option across several passes
+  (e.g. "the placeholder's value is always escaped correctly as data"
+  → "...is escaped correctly as data", "reset to empty, with every
+  earlier table now gone" → "reset to completely empty, with every
+  earlier table now gone too") and recounted after every edit, until
+  all three landed on equal per-question counts: 8/8/8, 11/11/11,
+  8/8/8; (4) an `html.parser.HTMLParser` full-document parse of the
+  new lesson — no parse errors; (5) a separate table/tr/th/td/h2/p/div
+  balance check on `glossary.html` after its new section, plus a
+  duplicate-`id="dayNN"` scan — balanced (table 79/79, tr 347/347, td
+  804/804, h2 79/79) with zero duplicates among 79 ids, `day93` present
+  exactly once; (6) `node --check` against `assets/nav.js` after the
+  edit — clean. Added one new `RESOURCES.md` line for `sqlite3`, placed
+  directly after Day 92's `weakref` line and before the PEP 8 line,
+  following the file's chronological-by-day ordering. Registered Lesson
+  93 in `nav.js` with today's date (2026-10-30) right after the `n: 92`
+  entry. No-pandas rule: grepped case-insensitively for
+  `pandas|numpy|dataframe|pd\.|np\.` in the new lesson and practice file
+  — exactly two hits in the lesson (the "Why today" callout's one-line
+  confirmation that the fresh-gap grep found no overlap, and the
+  required "Where pandas/NumPy go from here" boundary callout naming
+  `pandas.read_sql()`/`DataFrame.to_sql()` without demonstrating either)
+  and zero hits in the practice file — no worked pandas/NumPy example
+  anywhere. The shipped (unsolved)
+  `practice/93_sqlite3_embedded_database.py` was executed directly from
+  its real `practice/` location and printed exactly 3 ✗ with no raw
+  traceback. A solved copy built in a scratch dir (copied from the
+  shipped file, then each `...`/TODO body filled in directly — never
+  editing the shipped file itself, deleted after) printed all 3 ✓ and
+  "All green" on two consecutive runs; the shipped file was re-run
+  afterward and reproduced the identical all-✗ result, confirming no
+  leakage back into the baseline. `python/learning-records/` was not
+  touched this round — a routine fresh-topic pick following the
+  course's own settled cadence and Day 92's own fresh-grep instruction,
+  not a new durable fact about the learner distinct from Day 1's
+  baseline record. Cadence note for the next round: Day 93 is fresh day
+  2 of 3 since Day 91's review — Day 94 should continue fresh, with a
+  review of Days 92-94 due at Day 95. `bin/record-progress python
+  lesson_generated --day 93 --lesson 0093-sqlite3-embedded-database.html
+  --detail '{"by":"headless"}'` was run from the repo root at the end of
+  this round and succeeded.
+

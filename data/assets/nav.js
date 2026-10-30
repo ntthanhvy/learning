@@ -232,6 +232,8 @@
       file: "lessons/0111-np-percentile-and-quantile.html" },
     { n: 112, date: "2026-10-29", title: "np.ravel() vs .flatten(): the view-or-copy trap hiding behind two functions that look interchangeable",
       file: "lessons/0112-np-ravel-flatten-reshape.html" },
+    { n: 113, date: "2026-10-30", title: "Series.to_frame() and DataFrame.squeeze(): crossing back and forth over the Series/DataFrame line",
+      file: "lessons/0113-to-frame-and-squeeze.html" },
   ];
 
   const REFS = [

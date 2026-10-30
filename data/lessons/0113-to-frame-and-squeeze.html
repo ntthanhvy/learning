@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 113 · Series.to_frame() and DataFrame.squeeze(): crossing back and forth over the Series/DataFrame line</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 113 · ~20 min · 30 Oct 2026</p>
+<h1>Series.to_frame() and DataFrame.squeeze(): crossing back and forth over the Series/DataFrame line</h1>
+<p class="byline">After three rounds in the raw NumPy array-shape layer (Lessons 109-112: running totals, percentiles, ravel/flatten/reshape), today returns to a pandas-native gap: a fresh scan of every lesson and the full glossary found zero mentions of <code>to_frame()</code> or <code>squeeze()</code> anywhere. Both sit at the exact seam every <code>groupby(...).sum()</code> or <code>value_counts()</code> result lands on — a one-column Series that sometimes needs to become a DataFrame, and back.</p>
+
+<h2>1 · groupby/agg results come back as a Series, not a DataFrame</h2>
+<p>A single aggregation chained after <code>groupby()</code> — <code>.sum()</code>, <code>.mean()</code>, <code>.size()</code> — always collapses to a <dfn data-en="a pandas Series method that wraps the Series into a one-column DataFrame, keeping the Series's own Index as the new DataFrame's row index (not promoting it to a column) and using the Series's .name as the one column's name" data-vn="giữ nguyên 'to_frame()' — bọc Series thành DataFrame 1 cột, GIỮ Index của Series làm index của DataFrame (không biến Index thành cột), lấy .name của Series làm tên cột">Series</dfn>, with the grouping key sitting in the Index rather than its own column:</p>
+<pre><code>totals = orders.groupby(<span class="str">"customer"</span>)[<span class="str">"amount"</span>].sum()
+
+<span class="kw">type</span>(totals)   <span class="cm"># pandas.Series</span>
+totals
+<span class="cm"># customer
+# An      162.0
+# Binh    215.5
+# Chi      99.9
+# Name: amount, dtype: float64</span></code></pre>
+<p>That's fine for more chaining, but a function expecting a DataFrame (a plotting call, a second <code>merge()</code>, anything column-based) needs an actual table. <code>to_frame()</code> does exactly that conversion and nothing else — same values, same Index, now wrapped as a one-column DataFrame:</p>
+<pre><code>totals.to_frame()
+<span class="cm">#           amount
+# customer
+# An         162.0
+# Binh       215.5
+# Chi         99.9</span>
+
+totals.to_frame(name=<span class="str">"total_amount"</span>)
+<span class="cm">#           total_amount
+# customer
+# An               162.0
+# Binh             215.5
+# Chi               99.9</span></code></pre>
+<p>Confirmed directly (pandas 3.1.0): the one column is named after the Series's own <code>.name</code> by default — <code>"amount"</code> here, since that's the column <code>groupby</code> was aggregating — or the plain integer <code>0</code> if the Series has no name at all. <code>name=</code> overrides it on the spot, which matters for an unnamed or confusingly-named Series before a later <code>merge()</code> or <code>rename()</code> needs a clean column label.</p>
+
+<h2>2 · to_frame() keeps the Index as the index — reset_index() is the different move</h2>
+<p>This is the part worth being precise about out loud: <code>to_frame()</code> never touches the Index. The customer names above stay the row index, not a column — the DataFrame still only has one data column, <code>amount</code>/<code>total_amount</code>. Getting the grouping key back as its own column is a separate, already-familiar operation:</p>
+<pre><code>totals.to_frame()<span class="cm">.columns</span>
+<span class="cm"># Index(['amount'], dtype='object') -- ONE column; "customer" is still the index, not a column</span>
+
+totals.reset_index()
+<span class="cm">#   customer  amount
+# 0       An   162.0
+# 1     Binh   215.5
+# 2      Chi    99.9
+# -- TWO columns now; reset_index() promoted the Index into a real column</span></code></pre>
+<p>In practice <code>reset_index()</code> — or <code>reset_index(name="total_amount")</code> on an unnamed Series — is the far more common next step after a <code>groupby</code> aggregation, since most downstream code wants the key as a normal column. <code>to_frame()</code> earns its keep in the narrower case: when the Index genuinely should stay the Index (the table is about to be reindexed, joined on that Index, or plotted with it as the x-axis) and promoting it to a column would just mean immediately calling <code>set_index()</code> again.</p>
+<div class="callout"><strong>The trap:</strong> calling <code>.to_frame()</code> expecting the groupby key to show up as a column is the easy wrong guess — it won't. If the next line is <code>df["customer"]</code> and it raises <code>KeyError</code>, the key is still sitting in the Index; either read it via <code>df.index</code> or reach for <code>reset_index()</code> instead.</div>
+
+<h2>3 · squeeze(): the inverse move, DataFrame back down to Series (or even a scalar)</h2>
+<p><dfn data-en="a DataFrame (or Series) method that drops any axis of length exactly 1, converting a one-column DataFrame to a Series, a one-row DataFrame to a Series, or a one-row-one-column DataFrame all the way down to a bare scalar -- a no-op if neither axis has length 1" data-vn="giữ nguyên 'squeeze()' — bỏ chiều nào có độ dài đúng 1: DataFrame 1 cột → Series, DataFrame 1 dòng → Series, DataFrame 1 dòng 1 cột → scalar; không chiều nào dài 1 thì giữ nguyên, không đổi gì">squeeze()</dfn> runs the opposite direction. On a one-column DataFrame it drops back to a Series automatically — same values, same Index, the column axis simply vanishes since it had length 1:</p>
+<pre><code>wrapped = totals.to_frame(name=<span class="str">"total_amount"</span>)
+<span class="kw">type</span>(wrapped)              <span class="cm"># DataFrame</span>
+<span class="kw">type</span>(wrapped.squeeze())   <span class="cm"># Series -- back to where to_frame() started</span>
+
+wrapped.iloc[[<span class="kw">0</span>]]             <span class="cm"># one row, one column -- "An", 162.0</span>
+wrapped.iloc[[<span class="kw">0</span>]].squeeze()  <span class="cm"># np.float64(162.0) -- BOTH axes had length 1, squeezes all the way to a bare scalar</span></code></pre>
+<p>Confirmed directly: a DataFrame with more than one row <em>and</em> more than one column squeezes to nothing — it's a pure no-op, same DataFrame back, since neither axis has length 1 to drop. <code>axis="columns"</code>/<code>axis="index"</code> restricts the squeeze to just that one axis, useful when a DataFrame happens to have exactly one row of several columns and only the row axis (not an accidental one-column case) should ever collapse.</p>
+
+<h2>4 · Where this actually shows up: a function boundary, not a everyday step</h2>
+<p><code>to_frame()</code>/<code>squeeze()</code> rarely appear inside an exploratory chain — they earn their place at a boundary where the Series-vs-DataFrame distinction suddenly matters: handing a <code>groupby().sum()</code> result to a library that only accepts DataFrames, or pulling a config/lookup table that's stored as a DataFrame but should behave like a plain Series everywhere else in the script. <code>pd.Index</code> objects carry the same <code>to_frame()</code> method too, for the same reason — turning a MultiIndex's levels into real columns without a full <code>reset_index()</code> on the DataFrame that carries it.</p>
+
+<div class="interview">
+<p><strong>Q: "You ran <code>groupby('customer')['amount'].sum()</code> and need a DataFrame for the next step — what do you reach for?"</strong> A strong answer, out loud: <em>"That result is a Series, with customer sitting in the Index, not a column. Two ways to get a DataFrame, and they do different things: to_frame() wraps it as a one-column DataFrame but leaves the Index exactly where it is — customer stays the index, not a column. reset_index() instead promotes that Index into a real column, giving a two-column table. Most of the time I want reset_index(), since downstream code usually expects the key as a plain column; to_frame() is for the narrower case where the Index should stay the Index — about to merge or reindex on it directly. And the reverse direction exists too: squeeze() drops a DataFrame back to a Series whenever an axis has length exactly one, all the way to a bare scalar if both axes do."</em> The signal: naming the Index-vs-column distinction precisely, and knowing which of the two is the common case versus the narrow one.</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>Series.to_frame()</code> (default naming and the <code>name=</code> override), its Index-preserving contrast with <code>reset_index()</code>, <code>DataFrame.squeeze()</code> (one-column → Series, one-row-one-column → scalar, the no-op case, and <code>axis=</code>), and <code>Index.to_frame()</code> as a brief aside. It does not cover squeezing a <code>Series</code> itself (a no-op unless length 1), the full <code>MultiIndex.to_frame()</code> workflow, or <code>DataFrame.to_frame()</code> (which does not exist — only Series and Index have it).</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/113_to_frame_and_squeeze.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/113_to_frame_and_squeeze.py</code></pre>
+<p>Exercise 1 confirms <code>to_frame()</code>'s default/overridden column naming and that the groupby key stays in the Index, not a column (Section 1). Exercise 2 confirms the Index-preserving contrast with <code>reset_index()</code> — two columns versus one (Section 2). Exercise 3 confirms <code>squeeze()</code>'s three outcomes: one-column DataFrame back to a Series, one-row-one-column all the way to a scalar, and the many-rows-many-columns no-op (Section 3).</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: to_frame() wraps the Series as a one-column DataFrame but never touches the Index -- the groupby key stays in the Index, not a column. reset_index() is the different operation that actually promotes the Index into a real column, producing two columns instead of one.">
+    <p class="stem">After <code>totals.to_frame()</code> on a Series whose Index is the groupby key, where does that key end up?</p>
+    <button class="opt" data-ok>it stays sitting inside the Index itself, never promoted into any column</button>
+    <button class="opt">it gets promoted automatically into its own brand new column beside values</button>
+    <button class="opt">it gets dropped completely during the conversion, leaving only plain bare values</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: squeeze() on a DataFrame with exactly one row AND exactly one column drops both length-1 axes, landing all the way down at a bare scalar (a numpy float here), not a Series. Only one length-1 axis would squeeze down to a Series instead.">
+    <p class="stem">Calling <code>.squeeze()</code> on a DataFrame with exactly one row and exactly one column returns what?</p>
+    <button class="opt" data-ok>a bare scalar value, since both of its axes get dropped together</button>
+    <button class="opt">a one-element Series value, since only its row axis gets dropped here</button>
+    <button class="opt">the identical one-row DataFrame back, left totally unchanged by that same squeeze</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: a DataFrame with more than one row and more than one column has no axis of length one at all, so squeeze() finds nothing to drop and returns the same DataFrame back unchanged -- a pure no-op, not an error and not a reshape.">
+    <p class="stem">Calling <code>.squeeze()</code> on a DataFrame with three rows and three columns does what?</p>
+    <button class="opt" data-ok>nothing changes at all, that exact same three-by-three DataFrame comes right back out</button>
+    <button class="opt">it raises a loud ValueError, since squeeze needs some axis of length one</button>
+    <button class="opt">it flattens every one of its nine cells down into one single Series</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official pandas API reference for <a href="https://pandas.pydata.org/docs/reference/api/pandas.Series.to_frame.html"><code>Series.to_frame()</code></a> and <a href="https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.squeeze.html"><code>DataFrame.squeeze()</code></a> (per <code>RESOURCES.md</code>'s "Docs: pandas User Guide" entry, ~5 min) confirm the default column-naming rule and the exact squeeze-by-axis-length behavior described above.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>to_frame()</code> and <code>squeeze()</code> are new today, added right after Lesson 112's <code>.flatten() / np.ravel()</code> entry.<br>
+<strong>Next lesson:</strong> no standing candidate named this round — tomorrow's own fresh curriculum/glossary scan picks the next topic with nothing pre-committed.<br><br>
+💬 Anything unclear — the Index-vs-column distinction, the squeeze axis rules, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

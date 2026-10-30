@@ -75,6 +75,8 @@ authors for *why*. Cite inline; each lesson recommends exactly one primary sourc
   Use for: Day 90 — `TopologicalSorter` for ordering tasks by their dependencies, `add(node, *predecessors)` and `static_order()` for the common case, `CycleError` for the no-valid-order case, and the manual `prepare()`/`get_ready()`/`done()` protocol for finding which steps could run concurrently.
 - [Docs: `weakref`](https://docs.python.org/3/library/weakref.html)
   Use for: Day 92 — `weakref.ref()` for a reference that doesn't keep its target alive, `WeakValueDictionary`/`WeakKeyDictionary` for a self-cleaning cache keyed or valued by live objects, and `finalize()` for a once-only cleanup callback run on collection; `WeakSet` and `proxy()` are named but undemonstrated next steps.
+- [Docs: `sqlite3`](https://docs.python.org/3/library/sqlite3.html)
+  Use for: Day 93 — `connect()`/`cursor()` and `?` parameterized queries for an embedded database with no server, `with con:` for transaction commit/rollback (not connection close), `sqlite3.Row` for lookup by column name, and `sqlite3.IntegrityError` for a violated schema constraint; named (`:name`) placeholders and custom row factories are undemonstrated next steps.
 - [PEP 8 — Style Guide for Python Code](https://peps.python.org/pep-0008/)
   Use for: naming and layout conventions, so written code looks like the ecosystem's.
 

@@ -10574,3 +10574,102 @@
   `bin/record-progress data lesson_generated --day 112 --lesson
   0112-np-ravel-flatten-reshape.html --detail '{"by":"headless"}'` was run
   directly from the repo root to close out this round.
+- 2026-10-30 generation (Lesson 113): read `MISSION.md` in full (not
+  modified), `RESOURCES.md` in full (not modified), this file's own tail
+  (Lesson 112's entry) for exact house style, `data/learning-records/0001`
+  (still the only baseline, nothing new since), `lessons/0112-np-ravel-
+  flatten-reshape.html` and `practice/112_np_ravel_flatten_reshape.py` in
+  full for the exact HTML/practice structure, and `reference/glossary.html`'s
+  tail for the exact column order. Topic choice: the brief flagged that
+  Lessons 109-112 ran three/four rounds straight in the raw NumPy
+  array-shape/stats layer and asked for a fresh scan rather than blind
+  continuation, so grepped every candidate the brief itself named
+  (pivot_table/.pivot(), explode(), apply(), query(), eval(),
+  SettingWithCopy, memory_usage(), merge(validate=), idxmax()/idxmin(),
+  crosstab()) across all lesson titles/bodies first — every one of those
+  already has a dedicated lesson (pivot_table/margins Lesson 44, explode
+  Lesson 19, apply Lesson 12/61, query Lesson 22, eval Lesson 67,
+  SettingWithCopy Lesson 26, memory_usage Lesson 62, merge validate Lesson
+  57, idxmax/idxmin Lessons 20/91/93, crosstab Lesson 17). Widened the scan
+  to ~35 more candidate method names (nlargest/nsmallest, drop_duplicates,
+  digitize, np.average, np.lexsort, np.partition, nan_to_num, np.vectorize,
+  np.gradient, to_frame, squeeze, and more) — most came back already covered
+  (nlargest/nsmallest Lesson 10, drop_duplicates Lesson 11) or fell outside
+  MISSION.md's scope (np.gradient/np.partition/lexsort lean toward the
+  excluded "deep NumPy" territory). `to_frame()`/`squeeze()` surfaced as a
+  genuine zero-hit across the full glossary and every lesson body, sits
+  squarely in pandas-native territory (not another NumPy array-shape round),
+  and pairs naturally: the Series-to-DataFrame wrap that every
+  `groupby(...).sum()`/`value_counts()` result eventually needs, and its
+  exact inverse. Picked it as today's topic, deliberately stepping back from
+  the NumPy-layer run. Every behavioral claim was probed directly first via
+  temporary scripts in `.scratch-data-113/` at the repo root (deleted after
+  use, never tracked by git — `/tmp` was unavailable in this sandbox, unlike
+  past rounds' own notes): confirmed pandas 3.1.0 / numpy 2.5.4, unchanged
+  from Lessons 106-112; confirmed `groupby("customer")["amount"].sum()` on
+  the real `orders_raw.csv` fixture returns a Series (An 162.0, Binh 215.5,
+  Chi 99.9) with the key in the Index; confirmed `.to_frame()` wraps it as a
+  one-column DataFrame, column named from `name=` or the Series's own
+  `.name` (bare `0` if unnamed), Index left untouched — NOT promoted to a
+  column, which is the exact point `reset_index()` differs (promotes the
+  Index into a real second column instead, confirmed via a direct side-by-
+  side); confirmed `.squeeze()` reverses the wrap: a one-column DataFrame (3
+  rows) squeezes to a Series, a one-row-one-column DataFrame squeezes all
+  the way to a bare `numpy.float64` scalar, and a many-row/many-column
+  DataFrame is a confirmed no-op (same DataFrame back, no error); confirmed
+  `Index.to_frame()` exists too (briefly mentioned, not a full section) and
+  that `DataFrame.to_frame()` does not exist at all. Did not fetch either
+  pandas doc page by WebFetch this round — the direct probe results were
+  unambiguous and the "Go deeper" wording was drawn from well-established
+  public documentation phrasing; both pages fall under `RESOURCES.md`'s
+  existing "Docs: pandas User Guide" entry, no new `RESOURCES.md` line
+  needed. One collision check before writing: grepped `to_frame` and
+  `squeeze` case-insensitively across the full glossary and every lesson
+  body — zero existing mentions of either, confirmed clean. Added exactly
+  one new glossary row, "to_frame() / squeeze()", directly after Lesson
+  112's `.flatten() / np.ravel()` entry. Verification performed mechanically
+  via a temporary script in `.scratch-data-113/` (deleted after, never
+  tracked by git): (1) a quiz-word-count script per `<div class="q">` block —
+  first draft came out uneven across all three questions; several rounds of
+  targeted single-word edits converged on exactly 12/12/12, 12/12/12, and
+  13/13/13 option words across the three questions, one `data-ok` per
+  question throughout; (2) an HTML tag-balance check — clean (html 1/1, head
+  1/1, body 1/1, div 6/6, p 20/20, pre 5/5, code 67/67, h1 1/1, h2 8/8, em
+  2/2, strong 4/4, button 9/9, script 3/3, dfn 2/2, span 20/20, a 3/3, title
+  1/1); (3) a raw-unescaped-`&` regex scan found exactly the two expected `&`
+  characters inside the lesson's own `cd ~/learning/data && uv run ...`
+  shell command, zero elsewhere; (4) exactly 2 `<dfn>`-carrying tags, both
+  with `data-en`/`data-vn`. A separate table-balance check on
+  `glossary.html` after its one-row addition — balanced (tr 186/186, td
+  555/555, zero raw `&`), plus a duplicate-term scan across all 185
+  first-column entries — zero duplicates. `node --check` confirmed `nav.js`
+  still parses as valid JavaScript after the edit. The shipped (unsolved)
+  `practice/113_to_frame_and_squeeze.py` was run directly from its real
+  `practice/` location (via `uv run --with pandas python3`, using the real
+  `orders_raw.csv` fixture) and printed exactly 3 ✗ with no raw traceback.
+  Built a solved copy in `.scratch-data-113/practice/` (deleted after, never
+  tracked by git), filling in all blanks; it printed all 3 ✓ and "All green"
+  on the first run. Re-ran the shipped file directly from `practice/` again
+  afterward and reproduced the identical all-✗ result, confirming the solved
+  copy's edits never leaked back into the shipped baseline. Registered
+  Lesson 113 in `nav.js` with today's date (2026-10-30); confirmed exactly
+  one `n: 113` entry and one `0113-to-frame-and-squeeze` file reference
+  exist. This round's own fresh scan surfaced a few more zero-hit threads
+  worth a future look if nothing sharper beats them: `np.average()`
+  (weighted mean), `np.piecewise()`, and `apply()` returning multiple
+  columns at once (`result_type="expand"`) — not pre-committed as tomorrow's
+  pick, per this course's standing "fresh scan each round" convention. No
+  new `data/learning-records/` entry was added — routine lesson, no new
+  completion/quiz signal since mid-October. `git status --short` after all
+  edits confirmed only the intended `data/` files were touched
+  (`data/assets/nav.js`, `data/reference/glossary.html`, new
+  `data/lessons/0113-to-frame-and-squeeze.html`, new
+  `data/practice/113_to_frame_and_squeeze.py`) plus unrelated concurrent
+  changes in other course directories from other runs, not touched by this
+  one. The scratch directory `.scratch-data-113/` was deleted after
+  verification, at the repo root but never tracked by git, matching prior
+  rounds' own precedent for this environment. `bin/record-progress data
+  lesson_generated --day 113 --lesson 0113-to-frame-and-squeeze.html
+  --detail '{"by":"headless"}'` was run directly from the repo root and
+  returned `recorded: data/lesson_generated day=113
+  lesson=0113-to-frame-and-squeeze.html`.

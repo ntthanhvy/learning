@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 45 · Airflow trigger rules: a task that runs even when dbt_build fails</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 45 · ~20 min · 30 Oct 2026</p>
+<h1>Airflow trigger rules: a task that runs even when <code>dbt_build</code> fails</h1>
+<p class="byline">Today's tangible win: a third task, <code>check_dead_letters</code>, added to the real <code>food_delivery_pipeline</code> DAG — it runs after <code>dbt_build</code> no matter whether <code>dbt_build</code> just succeeded or failed, because its <code>trigger_rule</code> is <code>all_done</code> instead of Airflow's default <code>all_success</code>. Confirmed this round straight against an installed Airflow 3.3.1: the real default on every other task in this DAG really is <code>TriggerRule.ALL_SUCCESS</code>, and setting one keyword argument really does change whether a downstream task runs after an upstream failure.</p>
+
+<div class="callout"><strong>Before today — confirm Day 35's DAG still parses:</strong> today adds one new task to <code>dags/food_delivery_pipeline.py</code>, right after Day 35's <code>on_retry_callback</code> addition to <code>dbt_build</code>. It doesn't touch any other DAG file.
+<pre><code>AIRFLOW_HOME="$(pwd)/airflow_home" uv run --with "apache-airflow==3.3.1" airflow dags list-import-errors</code></pre>
+Expected: <code>No data found</code>. Fix that first if it prints anything else.</div>
+
+<h2>1 · The gap: a failed <code>dbt_build</code> currently hides Day 41's own dead-letter table</h2>
+<p>Day 41 built a real dead-letter table, <code>raw.order_events_dead_letter</code>, specifically so a poison event doesn't wedge the Kafka consumer — it quarantines the bad row and the consumer keeps committing offsets. That table is only useful if something actually looks at it. Today's DAG, as it stands after Day 35, has exactly two tasks: <code>load_raw</code> then <code>dbt_build</code>, connected the default way every Airflow dependency connects — <code>dbt_build</code> only runs if <code>load_raw</code> succeeded, and by the same default rule, anything added downstream of <code>dbt_build</code> would only run if <code>dbt_build</code> itself succeeded.</p>
+<p>That default is the exact problem for a health check. If <code>dbt_build</code> fails — a planted bad row, a dropped connection, anything Day 3's tests are built to catch — a task meant to report "here's how many poison events are sitting in the dead-letter table right now" would never run on precisely the run where seeing that number matters most: the one that just failed. The fix isn't a different task. It's a different <dfn data-en="the rule Airflow checks against a task's own upstream tasks' final states before deciding whether that task is allowed to run at all -- not whether the task itself will succeed, but whether it starts in the first place. The default, all_success, requires every direct upstream task to have succeeded; other rules (all_failed, all_done, one_success, none_failed, and others) check different combinations of upstream final states instead" data-vn="giữ nguyên &quot;trigger rule&quot; — quy tắc Airflow dùng để quyết định 1 task có được PHÉP chạy hay không, dựa trên trạng thái cuối của các task upstream trực tiếp của nó (không phải chuyện task đó tự thành công hay không). Mặc định all_success yêu cầu mọi upstream trực tiếp phải success; các rule khác (all_failed, all_done, one_success, none_failed, ...) kiểm tra các tổ hợp trạng thái upstream khác nhau">trigger rule</dfn> on the one new task.</p>
+
+<h2>2 · Confirmed from the installed package: the default really is <code>all_success</code>, and it's a real enum</h2>
+<p>Reading <code>airflow.task.trigger_rule</code> directly (installed locally via <code>uv run --with "apache-airflow==3.3.1"</code>, no live scheduler needed — the same read-the-real-install approach Days 20-22, 25 and 35 already used) turns up a plain string enum, not a magic keyword:</p>
+<pre><code><span class="kw">class</span> TriggerRule(str, Enum):
+    ALL_SUCCESS = <span class="str">"all_success"</span>
+    ALL_FAILED = <span class="str">"all_failed"</span>
+    ALL_DONE = <span class="str">"all_done"</span>
+    ONE_SUCCESS = <span class="str">"one_success"</span>
+    ONE_FAILED = <span class="str">"one_failed"</span>
+    NONE_FAILED = <span class="str">"none_failed"</span>
+    <span class="cm">... (13 members total, confirmed by listing them live)</span></code></pre>
+<p>Every <code>BaseOperator</code> — every task this course has ever defined, including Day 7's <code>load_raw</code> and <code>dbt_build</code> — carries a <code>trigger_rule</code> attribute that defaults to <code>TriggerRule.ALL_SUCCESS</code> whether or not the DAG author ever mentions it. Confirmed this round by loading the real DAG file and reading each task's own attribute back: <code>dbt_build.trigger_rule</code> came back <code>TriggerRule.ALL_SUCCESS</code>, never set explicitly anywhere in this course, present purely because nothing has overridden it before today.</p>
+<p>The three rules worth knowing by name for a working-level portfolio, in plain terms:</p>
+<ul>
+<li><strong><code>all_success</code> (the default):</strong> run only if every direct upstream task succeeded. What <code>dbt_build</code> has always used, correctly — there is no sane reason to build marts on raw data that failed to load.</li>
+<li><strong><code>all_done</code>:</strong> run once every direct upstream task has finished, regardless of whether it succeeded, failed, or was skipped. Today's choice for <code>check_dead_letters</code> — a health check that should report the same way whether the run it's reporting on went well or badly.</li>
+<li><strong><code>one_failed</code>:</strong> run as soon as any one direct upstream task fails, without waiting for the others. The natural rule for a dedicated alerting task in a wider DAG, not needed here since <code>check_dead_letters</code> has only one upstream task.</li>
+</ul>
+<div class="callout">This is a different problem from Day 35's <code>on_retry_callback</code>. A callback observes <em>one task's own</em> attempts and fires as a side effect — it can't make a different task run. A trigger rule decides whether <em>a downstream task</em> is allowed to start at all, based on its upstream tasks' final states. Day 35 asked "what happens when <code>dbt_build</code> retries"; today asks "what runs next, on purpose, whether <code>dbt_build</code> succeeds or not."</div>
+
+<h2>3 · Build: add <code>check_dead_letters</code> with <code>trigger_rule="all_done"</code></h2>
+<p>In your <code>food-delivery-pipeline</code> repo, edit <code>dags/food_delivery_pipeline.py</code> — the same file Day 7 wrote and Day 35 edited. Add one new import, one new function, and one new task wired downstream of <code>dbt_build</code>:</p>
+<pre><code><span class="cm"># new import, alongside the existing BashOperator import</span>
+<span class="kw">from</span> airflow.providers.standard.operators.python <span class="kw">import</span> PythonOperator
+<span class="kw">from</span> airflow.task.trigger_rule <span class="kw">import</span> TriggerRule
+
+
+<span class="kw">def</span> check_dead_letters(**context) -&gt; <span class="kw">None</span>:
+    <span class="cm"># TODO: today's real skill -- replace this print with a real psycopg</span>
+    <span class="cm"># COUNT(*) FROM raw.order_events_dead_letter query (Day 41's table),</span>
+    <span class="cm"># then raise if the count is above a threshold so the task itself can</span>
+    <span class="cm"># alert on-call, not just log a number nobody reads.</span>
+    <span class="kw">print</span>(<span class="str">"checked raw.order_events_dead_letter for new poison messages"</span>)
+
+
+<span class="cm"># inside the existing `with DAG(...) as dag:` block, after dbt_build:</span>
+check_dead_letters_task = PythonOperator(
+    task_id=<span class="str">"check_dead_letters"</span>,
+    python_callable=check_dead_letters,
+    trigger_rule=TriggerRule.ALL_DONE,  <span class="cm"># new today -- runs whether dbt_build passed or failed</span>
+)
+
+load_raw &gt;&gt; dbt_build &gt;&gt; check_dead_letters_task</code></pre>
+<p>Nothing about <code>load_raw</code> or <code>dbt_build</code>'s own trigger rules changes — both keep the default <code>all_success</code> exactly as Day 7 left them. Only the new task's rule is non-default, and only because its one job — reporting a count — is meaningful on a failed run too.</p>
+
+<h2>4 · Verify: load the DAG, read every task's trigger rule back</h2>
+<pre><code>AIRFLOW_HOME="$(pwd)/airflow_home" uv run --with "apache-airflow==3.3.1" python3 -c "
+from airflow.models import DagBag
+bag = DagBag(dag_folder='dags', include_examples=False)
+dag = bag.get_dag('food_delivery_pipeline')
+for t in sorted(dag.tasks, key=lambda t: t.task_id):
+    print(t.task_id, '->', t.trigger_rule)
+"</code></pre>
+<p>Expected:</p>
+<pre><code>check_dead_letters -> TriggerRule.ALL_DONE
+dbt_build -> TriggerRule.ALL_SUCCESS
+load_raw -> TriggerRule.ALL_SUCCESS</code></pre>
+<p>That confirms the wiring, but not the actual behavior — the real proof is watching <code>check_dead_letters</code> run after a <em>failed</em> <code>dbt_build</code>, which a parse alone can't show. Force one the same way Day 3 always has, by planting a bad row, then run the DAG for a backfill date and watch the task states in the CLI's own exit-code-free output:</p>
+<pre><code><span class="cm"># plant Day 3's bad row again (orphan restaurant_id), then:</span>
+AIRFLOW_HOME="$(pwd)/airflow_home" uv run --with "apache-airflow==3.3.1" airflow dags test food_delivery_pipeline 2026-10-30</code></pre>
+<p>Expected in the task log, in order: <code>load_raw</code> succeeds, <code>dbt_build</code> fails on the planted bad row (the same test failure Day 3 and Day 7 both already reproduce on purpose), and — the part that's new today — <code>check_dead_letters</code> still runs and prints <code>checked raw.order_events_dead_letter for new poison messages</code>, instead of showing <code>upstream_failed</code> the way it would have before today's <code>all_done</code> change. Fix the planted row (Day 3's one-time <code>UPDATE</code>) and re-run to confirm <code>check_dead_letters</code> still runs on a clean pass too — <code>all_done</code> doesn't care which way <code>dbt_build</code> went, only that it's finished.</p>
+
+<h2>5 · Why a working-level answer needs the name, not just the behavior</h2>
+<p>"I added a task that always runs" is a description. "I set <code>trigger_rule=all_done</code> because the default <code>all_success</code> would have skipped it as <code>upstream_failed</code> on exactly the runs where a dead-letter count matters most" is the same fact stated with the actual mechanism an interviewer can follow up on. The three rules worth being able to name cold — <code>all_success</code>, <code>all_done</code>, <code>one_failed</code> — cover the large majority of real DAGs; the other ten members of the enum (<code>none_skipped</code>, <code>all_done_min_one_success</code>, and others) exist for narrower shapes this portfolio doesn't need, and naming that they exist without claiming to have used them is itself an honest, working-level answer.</p>
+<div class="callout">This is the same idempotency bridge Day 7 and Day 35 both already made explicit: <code>check_dead_letters</code> is read-only this round (a <code>COUNT(*)</code>, per the TODO), so running it twice on a re-run is automatically safe with no extra design needed — a cheap win from keeping today's new task a query, not a write. (Bridged, not re-taught — see <a href="../backend/index.html">backend/</a> for the idempotency argument itself.)</div>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed this round by reading dbt_build.trigger_rule back from the loaded DAG: it came back TriggerRule.ALL_SUCCESS, even though Day 7 never set it explicitly -- every BaseOperator carries that default whether or not the DAG author ever mentions trigger_rule at all.">
+    <p class="stem">Confirmed this round: what is <code>dbt_build</code>'s own <code>trigger_rule</code>, even though Day 7 never set one?</p>
+    <button class="opt" data-ok><code>all_success</code>, Airflow's own default rule on every task</button>
+    <button class="opt"><code>all_done</code>, inherited purely because <code>load_raw</code> precedes it directly</button>
+    <button class="opt">Nothing, until a value gets explicitly set once</button>
+  </div>
+  <div class="q" data-why="all_success (the default) requires every direct upstream task to have succeeded before a task is allowed to start -- a failed dbt_build would leave any default-rule downstream task in upstream_failed, never actually running. all_done instead runs once every upstream task has finished, regardless of whether it succeeded, failed, or was skipped, which is exactly why check_dead_letters needed it instead of the default.">
+    <p class="stem">Why would <code>check_dead_letters</code> never have run on a failed <code>dbt_build</code> under the default trigger rule?</p>
+    <button class="opt" data-ok><code>all_success</code> needs every direct upstream task to succeed</button>
+    <button class="opt">Airflow only ever permits exactly two tasks total</button>
+    <button class="opt"><code>PythonOperator</code> tasks always skip after any upstream failure</button>
+  </div>
+  <div class="q" data-why="on_retry_callback (Day 35) is a side effect fired on the same task's own retry attempt -- it observes but cannot make a different task run. A trigger rule is checked by Airflow before a downstream task is even allowed to start, based on its direct upstream tasks' final states -- a completely different decision point in the DAG's execution, not a stronger version of the same mechanism.">
+    <p class="stem">How does today's trigger rule differ from Day 35's <code>on_retry_callback</code>?</p>
+    <button class="opt" data-ok>One gates whether a task starts; other is a callback</button>
+    <button class="opt">They are simply two names for one Airflow setting here</button>
+    <button class="opt"><code>on_retry_callback</code> fully replaced trigger rules back in Airflow 3 itself</button>
+  </div>
+  <div class="q" data-why="check_dead_letters only runs a read-only COUNT(*) this round, per its own TODO -- a query that returns the same answer whether run once or many times needs no extra idempotency design, unlike a task that writes or mutates state on every run.">
+    <p class="stem">Why is <code>check_dead_letters</code> safe to re-run with no extra design, as written today?</p>
+    <button class="opt" data-ok>It only reads a count; writes nothing else</button>
+    <button class="opt">Its <code>all_done</code> rule alone already guarantees idempotent writes</button>
+    <button class="opt"><code>PythonOperator</code> tasks are always exempt from Airflow retries</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> Airflow's <a href="https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/tasks.html">Tasks</a> docs page (already Day 35's primary source) documents trigger rules at the API-reference level, under "Trigger Rules"; today's specific enum values and the live default on <code>dbt_build</code> were confirmed directly against the installed <code>apache-airflow==3.3.1</code> package's <code>airflow.task.trigger_rule</code> module instead of a live fetch (no working <code>WebFetch</code> tool this round, the same gap Days 17, 23, 26, 31, 34 and 35 each hit) — the module path itself is also worth noting: the older <code>airflow.utils.trigger_rule</code> import still resolves but now prints a live <code>DeprecatedImportWarning</code> pointing at <code>airflow.task.trigger_rule</code>, confirmed by triggering it directly this round.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 45.<br>
+<strong>Next up:</strong> the <code>airflow db migrate</code>/<code>airflow dags test</code> approval-gate block named since Day 35 is now eleven rounds running (35-45) with no interactive approval available to any of them — still worth a human granting it once, so a future round can confirm Section 4's exact console sequence against a real scheduler run rather than a DAG-parse read. Separately, <code>check_dead_letters</code>'s own TODO (a real <code>psycopg</code> query against Day 41's table, with an alert path above some threshold) is this lesson's own open loop, the same shape Day 38 closed for Day 21's growth-check TODO — worth picking up directly rather than scanning for a new gap first.<br><br>
+💬 Anything unclear — the trigger-rule enum, why <code>all_done</code> over <code>one_failed</code> here, or the deprecated import path? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -9633,3 +9633,121 @@
   needed before an eighth attempt is worth making; and Polly (or a .NET
   resilience-library survey more broadly), still deliberately out of scope
   per MISSION.md's "concepts first" rule.
+- 2026-10-31 generation (Lesson 118, headless run): idempotency check first —
+  confirmed no `lessons/0118-*.html` on disk and no `n: 118`/
+  `date: "2026-10-31"` entry in `nav.js` before writing anything (highest
+  prior lesson was 117, dated 2026-10-30). Note for future rounds: this
+  file's own log has no dated entry for Lesson 117 itself — the lesson file
+  and its `nav.js`/glossary registration all exist and are internally
+  consistent (confirmed by reading Lesson 117 in full and grepping its three
+  glossary rows), but whatever round generated it apparently didn't append a
+  NOTES.md entry, or it was lost. Not rewritten or backfilled here per this
+  round's own instruction to only append, never rewrite existing content;
+  flagging it so a future round doesn't mistake the gap for Lesson 117 never
+  having been generated. The orchestrator handed in confirmed context rather
+  than a pre-decided topic: no quiz/kata/lesson_completed signal for any
+  course since 2026-10-15 (backend's own Lesson 102, all `ok:true`), so
+  normal steady-paced fresh content was the call, not a review day. Topic
+  choice: reread every lesson title end to end looking for a Go-only
+  resilience mechanism from the Lesson 11–50 stretch still missing its C#
+  mirror, the same gap-shape this run has now closed seven times running
+  (retry/circuit-breaker/bulkhead/worker-pool/graceful-shutdown/health-checks,
+  Lessons 112–117). Lesson 11's token-bucket rate limiter stood out: a
+  hand-rolled Go `bucket` struct plus a `sync.Map`-keyed middleware, never
+  ported. Confirmed via case-insensitive grep across every lesson and the
+  glossary that `RateLimiter`/`RateLimiting`/`AddTokenBucketLimiter`/
+  `PartitionedRateLimiter` had zero hits anywhere except one unrelated passing
+  mention in Lesson 66 (API gateway), and that `token bucket` itself exists
+  only as Lesson 11's own Go-side glossary entry — a genuinely unaddressed
+  gap, not a half-covered one. Read `MISSION.md`, this file's tail (full run
+  from 2026-10-27 through 2026-10-30), both `learning-records/0002` and
+  `/0003`, Lessons 11, 109, 114, 116, and 117 in full for exact HTML/quiz/
+  callout/scope-line/comparison-table structure, and `nav.js`'s and
+  `glossary.html`'s tails, all before writing anything. Verified the C# half
+  directly against two fetched Microsoft Learn pages before writing any
+  prose: `WebFetch` against
+  `https://learn.microsoft.com/en-us/aspnet/core/performance/rate-limit`
+  returned the full conceptual page cleanly (consistent with this run's
+  standing finding that `learn.microsoft.com` fetches reliably), confirming
+  verbatim `AddRateLimiter`/`UseRateLimiter`, the token-bucket limiter's
+  per-period replenishment rule ("rather than adding back the requests taken
+  from the expired segment, a fixed number of tokens are added each
+  replenishment period"), `TokenBucketRateLimiterOptions`'s exact field names
+  (`TokenLimit`, `TokensPerPeriod`, `ReplenishmentPeriod`, `QueueLimit`,
+  `AutoReplenishment`), `PartitionedRateLimiter.Create`/`RateLimitPartition`
+  partitioning plus its own explicit warning that partitioning on
+  user-controlled input risks a memory-exhaustion DoS, `RejectionStatusCode`'s
+  `429` default, the `OnRejected` callback with `MetadataName.RetryAfter`
+  lease metadata, and the per-instance (in-memory, not fleet-wide) counter
+  caveat. A second `WebFetch` against
+  `https://learn.microsoft.com/en-us/dotnet/api/system.threading.ratelimiting.ratelimitpartition`
+  (the API reference page) confirmed the exact signature used in the lesson's
+  second snippet, `RateLimitPartition.GetTokenBucketLimiter<TKey>(TKey,
+  Func<TKey,TokenBucketRateLimiterOptions>)`, listed verbatim in the class's
+  own methods table alongside its fixed-window/sliding-window/concurrency
+  siblings — double-checked because the first page's own partitioning
+  examples only showed `GetFixedWindowLimiter` directly, not the token-bucket
+  variant the lesson needed. `dotnet --version` was attempted directly this
+  round (not skipped on the usual since-Lesson-103 assumption) to check
+  whether the gate had lifted — it still required approval and was not
+  re-attempted with a workaround, consistent with every round since Lesson
+  103; verified the snippet instead by the direct two-source quote-and-
+  signature matching above. No Go scaffold was written or changed this round
+  since Lesson 11's existing Go snippet is only referenced for comparison,
+  not modified, so nothing new needed `go build`/`go vet`; no scratch
+  toolchain directory was needed for the same reason. Three new terms, each
+  checked against the glossary first via case-insensitive grep across the
+  whole file — zero collisions confirmed before writing: `rate limiting
+  middleware`, `AddTokenBucketLimiter()`, `rate limiting partition` (the
+  pre-existing `token bucket` term from Lesson 11 was deliberately reused via
+  a plain `<code>`/prose reference rather than a second `<dfn>`, avoiding the
+  `backpressure`/`exponential backoff` mis-wrap mistake Lessons 112 and 115
+  both documented and fixed). Added the three new rows immediately after
+  Lesson 117's `HealthStatus` row, same Term/Tiếng Việt (dev-style)/In
+  software column order, confirmed by inspecting the file's actual last row
+  directly rather than assumed. Verification performed mechanically via Node
+  scripts run directly in this session, written with the `Write`/`Edit` tools
+  rather than a Bash heredoc per Lesson 115's own flagged sandbox finding:
+  (1) a quiz-word-count check scoped per `<div class="q">` block, splitting
+  every option both via `.split(/\s+/)` and `.split(" ")` — first draft
+  landed uneven across all four questions (spreads of 9-14 words per option),
+  fixed through several rewrite-and-recount cycles per option, converged to
+  exactly 11/11/11/11 across all four questions, both counting methods
+  agreeing exactly, exactly one `data-ok` and four options per question
+  confirmed the same way; (2) an HTML tag-balance check across div/p/code/
+  button/script/dfn/pre/h2/h1/em/strong/a/table/tr/th/td/ul/li — caught one
+  markdown-style backtick pair left in the byline prose (`` `sync.Map` ``
+  instead of `<code>sync.Map</code>`) on the first pass, fixed, clean on the
+  second pass (div 7/7, p 16/16, code 59/59, button 16/16, script 3/3, dfn
+  3/3, pre 3/3, h2 6/6, h1 1/1, em 0/0, strong 3/3, a 2/2, table 1/1, tr 6/6,
+  th 8/8, td 10/10); a separate table/tr/th/td/p/div/html/head/body/title/
+  script balance check on `glossary.html` after its three-row addition — also
+  balanced (tr 383/383, td 1146/1146), plus a duplicate-term scan across all
+  382 first-column entries — zero duplicates; (3) a raw-unescaped-`&` regex
+  scan across both files — zero hits; (4) the lesson's `<dfn` tags grepped and
+  confirmed to carry both `data-en=` and `data-vn=` — exactly 3 `dfn` tags,
+  matching the 3 new terms, no orphaned attribute; (5) `node --check` against
+  `assets/nav.js`, `assets/gloss.js`, and `assets/quiz.js` — all clean, both
+  before and after the `nav.js` edit; (6) a basic HTML well-formedness check
+  (exactly one `<!DOCTYPE html>`, one `<html>`/`</html>`, three script tags
+  with `gloss.js`/`quiz.js`/`nav.js` in that order) — clean; (7) a grep for
+  stray markdown-style backticks and `*emphasis*` left over from drafting —
+  caught and fixed per (2) above, clean after. Registered Lesson 118 in
+  `nav.js` (date 2026-10-31, today's actual generation date) right after
+  `n: 117`, confirmed exactly one matching `n: 118` entry and exactly one
+  matching `0118-*.html` file on disk afterward. Added one new RESOURCES.md
+  line (Microsoft Learn's Rate limiting middleware in ASP.NET Core page)
+  following the existing per-topic grouping, placed right after Lesson 117's
+  health-checks line. `bin/record-progress` ran clean on the first attempt
+  this round (`recorded: backend/lesson_generated day=118
+  lesson=0118-rate-limiting-aspnetcore-ratelimiter-middleware.html`). No new
+  `learning-records/` file this round — the topic came from a fresh gap scan
+  of existing lesson titles, not a new surprise about the learner's baseline
+  or a quiz outcome. Candidates spotted but not picked this round, still
+  worth checking fresh next time: Go's `select`-statement arbitration rules,
+  now deferred for an eighth round running, same standing finding that the
+  blocker is the fetched page's own content truncation, not a permission gate
+  or URL/mirror choice; Polly (or a .NET resilience-library survey more
+  broadly), still deliberately out of scope per MISSION.md's "concepts first"
+  rule; and the backfill-missing-Lesson-117-NOTES-entry gap flagged above,
+  worth a deliberate look next round rather than left indefinitely unexplained.

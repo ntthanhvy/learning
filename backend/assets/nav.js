@@ -242,6 +242,8 @@
       file: "lessons/0116-graceful-shutdown-ihostapplicationlifetime.html" },
     { n: 117, date: "2026-10-30", title: "Health checks, now in C# too",
       file: "lessons/0117-health-checks-ihealthcheck-aspnet-core.html" },
+    { n: 118, date: "2026-10-31", title: "Rate limiting, now in C# too",
+      file: "lessons/0118-rate-limiting-aspnetcore-ratelimiter-middleware.html" },
   ];
 
   const REFS = [

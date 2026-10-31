@@ -234,6 +234,8 @@
       file: "lessons/0112-np-ravel-flatten-reshape.html" },
     { n: 113, date: "2026-10-30", title: "Series.to_frame() and DataFrame.squeeze(): crossing back and forth over the Series/DataFrame line",
       file: "lessons/0113-to-frame-and-squeeze.html" },
+    { n: 114, date: "2026-10-31", title: "np.average(): the weighted mean pandas' own .mean() can't compute",
+      file: "lessons/0114-np-average.html" },
   ];
 
   const REFS = [

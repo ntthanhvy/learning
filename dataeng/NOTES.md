@@ -5284,3 +5284,127 @@ along the Phase 2 spine, adapted to the learning records.
   gap (the way Day 27's closing section quietly kept two gaps and dropped a
   third) is a distinct, and this round proved productive, variant of Day
   43's own "re-audit shipped artifacts" method, not just a repeat of it.
+
+- 2026-10-31 (headless run, Day 46 generated): forty-sixth lesson,
+  `0046-airflow-dead-letter-alert-threshold.html`. Idempotency check first —
+  confirmed no `lessons/0046-*.html` on disk and no `n: 46`/`date:
+  "2026-10-31"` entry in `assets/nav.js` before writing anything (highest
+  prior lesson was 45, dated 2026-10-30). No DB access attempted directly
+  this round; the orchestrator's own prior `course_progress` read found no
+  dataeng row for 2026-10-31 and no quiz/kata/lesson_completed signal for any
+  course since 2026-10-15, so pacing continued steady/sequential on that
+  context alone. Read `MISSION.md` in full, `PLAN.md`, `RESOURCES.md`,
+  `assets/nav.js`'s full `LESSONS` array (all 45 titles), the one
+  `learning-records/` file, and this file's own tail back through Day 45's
+  close before picking a topic.
+  **Topic choice:** Day 45's own closing note named its pick directly, not as
+  a scan-for-a-gap exercise: `check_dead_letters`'s body was left as a bare
+  `print()` stub with an explicit `TODO` comment calling for "a real
+  `psycopg` query against Day 41's table, with an alert path above some
+  threshold," and named that as "this lesson's own open loop — worth picking
+  up directly rather than scanning for a new gap first." Took that
+  instruction literally rather than re-scanning: reread Day 45's actual stub
+  and Day 41's actual `CREATE TABLE` side by side before building anything.
+  **A real correction caught mid-round, not assumed:** Day 45's own stub
+  comment and `print()` string both named the table as
+  `raw.order_events_dead_letter`. Day 41 — the lesson that actually ran
+  `CREATE TABLE` — built it as `raw.dead_letter_events`. Grepped both lessons
+  to confirm: Day 41's `CREATE TABLE raw.dead_letter_events (...)` is the
+  only dead-letter table this course has ever created; Day 45 misnamed it in
+  an unexecuted comment five days later and nothing caught it, since a
+  `TODO` stub's comment is never parsed against a real schema. Today's build
+  names this honestly in Section 1 as a small, true story about comment drift
+  vs. executable code, and uses the name Day 41 actually ran.
+  **Content:** one new module-level constant,
+  `DEAD_LETTER_ALERT_THRESHOLD = 5`, and a real body for `check_dead_letters`:
+  a `psycopg` `COUNT(*) FROM raw.dead_letter_events`, compared with `count >
+  DEAD_LETTER_ALERT_THRESHOLD` (not `>=`, defended explicitly — a count
+  exactly at the limit should still pass), `raise ValueError(...)` above the
+  threshold, `print(...)` otherwise. `trigger_rule=TriggerRule.ALL_DONE` from
+  Day 45 is untouched. Named two real, deliberate limitations rather than
+  building them this round: the query is a running total over every row ever
+  inserted, not a per-run delta (Day 41's table has no "already seen" marker
+  column, so once it trips it keeps failing every run until cleared), and
+  there is no actual notification on failure yet (Day 35's
+  `on_failure_callback` is the right hook, named not built). A scope line
+  states both explicitly, the same discipline Day 41's own scope line used.
+  Distinguished this from Day 25 explicitly (SLA/deadline alerting on
+  duration, not a data-quality count threshold) so the two don't blur.
+  No pandas, no Python-language teaching, no re-derivation of backend
+  idempotency concepts — confirmed by a prose-only read before shipping;
+  today's task is a read-only `COUNT(*)`, so (unlike Day 38's writable
+  cursor) the idempotency bridge wasn't needed and wasn't forced in.
+  **Verification:** built a scratch `dags/food_delivery_pipeline.py` under
+  `.scratch-dataeng-1031/` at the repo root (same constraint recent rounds
+  hit: no `/tmp` access), mirroring Day 7/35/45's real file with
+  `load_raw >> dbt_build >> check_dead_letters_task`. The
+  `airflow db migrate`/`airflow dags test` interactive-approval gate NOTES.md
+  has logged every round since Day 35 blocked again this round (now twelve
+  rounds, 35-46) — confirmed live before writing Section 4, not assumed from
+  memory. Worked around it the same way Day 45 did: imported the DAG file as
+  a plain Python module (`import food_delivery_pipeline as m`), which needs
+  no metadata database and never touches that gate. Got back real, exact
+  output — `TriggerRule.ALL_DONE`/`ALL_SUCCESS`/`ALL_SUCCESS` on the three
+  tasks in the right order, and `threshold: 5` — captured verbatim in
+  Section 4 as live output, not a simulation. No live Postgres was available
+  in this sandbox, so the two boundary-case `psql`/Python commands (one
+  under, one over threshold) are given as the correct next check and stated
+  honestly as not captured live this round, the same disclosure convention
+  Days 17, 41, 43 and 44 each used. The threshold's own boundary logic (`>`
+  not `>=`) was verified separately in a standalone script against a mocked
+  cursor returning 0, 5, 6 and 50 rows, confirming pass at exactly 5 and
+  raise starting at 6 — the precise boundary Section 3 argues for. Both the
+  real DAG file and the verification script were checked with `py_compile`,
+  clean. Deleted the scratch directory entirely afterward (confirmed via a
+  directory-listing attempt finding nothing).
+  Ran a Python tag-balance/bare-`&`/dfn-attribute/quiz-word-count script,
+  same shape as recent rounds': every checked tag balanced on the first pass
+  after one `<code>` tag was fixed (an earlier draft left a bare
+  Markdown-style `` `psql` `` instead of `<code>psql</code>` in the closing
+  paragraph, caught by this same script's own tag-count diff before and
+  after), ending at div 9/9, p 20/20, code 63/63, button 12/12, script 3/3,
+  dfn 1/1, pre 5/5, h2 7/7, h1 1/1, em 5/5, strong 5/5, a 3/3, zero bare `&`,
+  the one `<dfn>` tag carrying both `data-en=` and `data-vn=`. The first quiz
+  draft came up uneven on three of four questions (8/12/9, 10/10/9, 11/9/8,
+  12/10/10) — rebalanced through several edit-and-recount passes using a
+  precise no-added-space tag-stripping check (the course's own
+  `textContent`-accurate word count, since an earlier pass's tag-stripping
+  routine added spaces where `<code>` tags sit flush against surrounding
+  text and briefly over-counted), to a final 9/9/9, 10/10/10, 10/10/10 and
+  12/12/12 across all four questions. A separate pass on
+  `reference/glossary.html` after adding this round's new section confirmed
+  it stayed balanced too (h2 46/46, table 46/46, tr 177/177, td 394/394, th
+  136/136), zero bare `&`; the pre-existing duplicate `id="day1"` flagged
+  honestly in Day 41's own entry is still there, still untouched by this
+  round's diff — not independently reconfirmed this round, left alone per
+  this task's own append-only rule for `glossary.html`.
+  Added one new glossary term, `alert threshold`, under a new Day 46
+  section, after grepping case-insensitively first and confirming no
+  existing row covered it — `trigger rule`/`all_done` (Day 45),
+  `dead-letter table` (Day 41), and `Variable` (Day 38) are all pure reuse of
+  existing glossary rows, not retaught. No new `RESOURCES.md` line added —
+  today's Airflow citation reuses Day 35/45's existing Tasks docs line
+  verbatim (ordinary Python inside an existing task body, not a new Airflow
+  mechanism), and the dbt data-tests citation in "Go deeper" reuses Day 3's
+  existing line as a side-by-side comparison, not a new bullet; neither
+  needed a new or annotated `RESOURCES.md` entry this round.
+  Registered Lesson 46 in `assets/nav.js` right after the `n: 45` entry,
+  dated 2026-10-31 (`node --check` clean on `nav.js`, `gloss.js` and
+  `quiz.js`, the last two untouched but re-checked per habit). Ran
+  `bin/record-progress dataeng lesson_generated --day 46 --lesson
+  0046-airflow-dead-letter-alert-threshold.html --detail '{"by":"headless"}'`
+  from the repo root at the end of this round; succeeded.
+  `dataeng/learning-records/` was not touched this round — today's pick came
+  from directly executing Day 45's own named open loop, not a new durable
+  fact about the learner distinct from the single 2026-09-14 baseline record
+  on file.
+  **Next up:** the `airflow db migrate`/`airflow dags test` approval-gate
+  block is now thirteen rounds running (35-46) with no attempt made this
+  round specifically beyond the same already-logged live reconfirmation —
+  still worth a human granting it once for whoever next has one available.
+  Today's scope line named two concrete, non-speculative next steps rather
+  than a fresh gap-scan requirement: a real `on_failure_callback` notification
+  (Day 35's mechanism) on the dead-letter alert, and a per-run delta via a
+  Day-38-style `Variable` cursor instead of a running total. Either is a
+  direct pick; a fresh content audit (Days 38/39/41/42/43/44's method) or
+  `PLAN.md` spine item remains the fallback if neither appeals by then.

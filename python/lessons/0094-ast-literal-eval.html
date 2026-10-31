@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 94 · ast.literal_eval: parsing Python literals safely</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 94 · ~20 min · 31 Oct 2026</p>
+<h1><code>ast.literal_eval</code>: parsing Python literals safely</h1>
+<p class="byline">Day 76 taught <code>json.loads()</code> for text written in JSON's grammar. Some text isn't JSON at all — it's a string that looks like a Python literal: <code>"[1, 2, 3]"</code>, <code>"{'name': 'Ada', 'active': True}"</code>, a config value saved as <code>repr()</code> of the original value. <code>eval()</code> would parse that, but it would also run <em>anything</em> written there. <code>ast.literal_eval()</code> is the <dfn data-en="A safe subset of eval() that only parses Python literal syntax -- numbers, strings, bytes, bools, None, and literal lists/tuples/dicts/sets built from those -- and raises an error on anything else, including function calls, names, and attribute access. It can parse malicious-looking text without ever executing it." data-vn="giữ nguyên &quot;ast.literal_eval()&quot; — bản an toàn của eval(), chỉ parse literal Python (số, string, bytes, bool, None, và list/tuple/dict/set tạo từ các literal đó), raise error với mọi thứ khác (gọi hàm, tên biến, truy cập attribute...). Parse được text nhìn như độc hại mà không bao giờ chạy nó.">safe subset</dfn> of that: it parses literal syntax only, and refuses everything else.</p>
+
+<div class="callout"><strong>Why today, specifically:</strong> a fresh case-insensitive grep across every lesson title, every practice file, <code>reference/glossary.html</code>, and <code>RESOURCES.md</code> — run clean, not from a carried-forward candidate list, continuing Day 93's own closing instruction — turned up zero prior hits for <code>ast</code>/<code>literal_eval</code>, alongside other still-open candidates (<code>struct</code>, <code>getpass</code>, <code>string.Template</code>, <code>fractions</code>, <code>timeit</code>, <code>array</code>, <code>socket</code> as a taught module, <code>types.SimpleNamespace</code>, <code>importlib</code>, <code>locale</code>, <code>calendar</code>). Picked <code>ast.literal_eval()</code> over the rest: Day 76's <code>json</code> lesson already covers the "parse text into data" problem for JSON-shaped input, but the learner has no answer yet for text written in Python's own literal syntax — single-quoted strings, tuples, <code>repr()</code> output — short of the genuinely dangerous <code>eval()</code>, and the safe/unsafe-parsing contrast is a sharp, well-scoped stdlib corner with zero pandas/NumPy surface.</div>
+
+<h2>1 · What it parses, and what it flatly refuses</h2>
+<p><code>ast.literal_eval(text)</code> accepts exactly the literal forms Python's own grammar defines: numbers, strings, bytes, <code>True</code>/<code>False</code>/<code>None</code>, and lists, tuples, dicts, or sets built only from those — nested as deep as needed. Anything else — a function call, a bare name, even plain arithmetic — is rejected:</p>
+<pre><code><span class="kw">import</span> ast
+
+<span class="kw">print</span>(ast.literal_eval(<span class="str">"[1, 2, 3]"</span>))
+<span class="cm"># [1, 2, 3] -- confirmed live, a real list</span>
+<span class="kw">print</span>(ast.literal_eval(<span class="str">"{'name': 'Ada', 'active': True}"</span>))
+<span class="cm"># {'name': 'Ada', 'active': True} -- confirmed live, a real dict</span>
+<span class="kw">print</span>(ast.literal_eval(<span class="str">"(1, 2, 'x')"</span>))
+<span class="cm"># (1, 2, 'x') -- confirmed live, a real tuple; JSON has no syntax for this at all</span>
+
+ast.literal_eval(<span class="str">"1 + 2"</span>)
+<span class="cm"># confirmed live: ValueError: malformed node or string -- arithmetic is NOT a literal,</span>
+<span class="cm"># even though the result would be harmless; literal_eval parses syntax, not semantics</span></code></pre>
+<p>That last line is the detail easy to assume away: <code>literal_eval</code> does not evaluate expressions at all, not even safe-looking arithmetic. It walks the parsed syntax tree and accepts only literal nodes — anything else is rejected before it would ever run.</p>
+
+<h2>2 · Why not just use <code>eval()</code>?</h2>
+<p><code>eval()</code> runs arbitrary Python — any expression, including a function call. Given text from outside the program (a config file, a query parameter, a line from a log), that is a direct code-execution risk:</p>
+<pre><code><span class="kw">import</span> ast
+
+text = <span class="str">"__import__('os').system('echo pwned')"</span>
+
+<span class="kw">try</span>:
+    ast.literal_eval(text)
+<span class="kw">except</span> ValueError <span class="kw">as</span> e:
+    <span class="kw">print</span>(<span class="str">"blocked:"</span>, e)
+<span class="cm"># blocked: malformed node or string ... -- confirmed live, the call is rejected outright</span>
+
+<span class="cm"># eval(text) would actually run it -- never call eval() on text you did not write yourself</span></code></pre>
+<p>This is the same shape as Day 72's <code>pickle</code> warning against untrusted data, applied to a different format: <code>eval()</code> is powerful exactly because it runs anything, which is precisely why it's the wrong tool for parsing. <code>literal_eval()</code> gives up that power on purpose — it can turn malicious-looking text into a result without ever executing a single function call hidden inside it.</p>
+
+<h2>3 · Where it fits next to <code>json</code></h2>
+<p>Day 76's <code>json.loads()</code> is still the right choice for data that travels between systems — an HTTP body, a config file meant to be language-agnostic — because JSON's grammar is simple and universal. <code>literal_eval()</code> earns its place on a narrower job: text that is already Python-shaped, most often the output of <code>repr()</code> on a value, or a literal a person typed by hand expecting Python syntax:</p>
+<pre><code><span class="kw">import</span> ast, json
+
+<span class="kw">try</span>:
+    json.loads(<span class="str">"{'a': 1}"</span>)
+<span class="kw">except</span> json.JSONDecodeError <span class="kw">as</span> e:
+    <span class="kw">print</span>(<span class="str">"json rejects single quotes:"</span>, e)
+<span class="cm"># confirmed live -- JSON's grammar requires double quotes; this text is not valid JSON</span>
+
+<span class="kw">print</span>(ast.literal_eval(<span class="str">"{'a': 1}"</span>))   <span class="cm"># {'a': 1} -- fine, this is Python literal syntax</span></code></pre>
+<p>Neither module is a drop-in replacement for the other — they parse two different grammars that happen to overlap on simple cases.</p>
+
+<h2>4 · Malformed text: a different exception than "rejected on purpose"</h2>
+<p>A string that isn't valid Python syntax at all — not just disallowed, but actually broken — raises <code>SyntaxError</code> instead of the <code>ValueError</code> a disallowed-but-parseable expression raises:</p>
+<pre><code>ast.literal_eval(<span class="str">"[1, 2,"</span>)
+<span class="cm"># confirmed live: SyntaxError: '[' was never closed -- broken syntax, not a disallowed literal</span>
+
+ast.literal_eval(<span class="str">"some_name"</span>)
+<span class="cm"># confirmed live: ValueError: malformed node or string -- valid syntax (a name), but not a literal</span></code></pre>
+<p>Code calling <code>literal_eval()</code> on text it doesn't fully control should catch both: <code>except (ValueError, SyntaxError):</code> — catching only one leaves the other free to crash the program on ordinary bad input.</p>
+
+<div class="callout"><strong>Where pandas/NumPy go from here:</strong> nothing pandas-specific today — <code>literal_eval()</code> is a plain-text parsing tool with no DataFrame or array counterpart; the closest pandas gets is reading a CSV cell that happens to contain a stringified list, which still needs a plain Python parsing step like this one before it becomes a real list.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/94_ast_literal_eval.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/94_ast_literal_eval.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: parsing a literal list/dict string safely, catching both <code>ValueError</code> and <code>SyntaxError</code> from bad input without ever calling <code>eval()</code>, and telling a parseable-but-disallowed expression apart from truly broken syntax.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="literal_eval walks the parsed syntax tree and only accepts literal nodes -- numbers, strings, bytes, True/False/None, and lists/tuples/dicts/sets built from those. 1 + 2 is a BinOp node, not a literal, so it is rejected with ValueError even though evaluating it would be completely harmless. literal_eval parses syntax shape, not whether the result would be safe.">
+    <p class="stem">Why does <code>ast.literal_eval("1 + 2")</code> raise <code>ValueError</code> instead of returning <code>3</code>?</p>
+    <button class="opt" data-ok>arithmetic is not a literal node, regardless of the result's safety</button>
+    <button class="opt">addition is disabled only when both operands happen to be strings</button>
+    <button class="opt">literal_eval requires every number in the whole text to be pre-computed</button>
+  </div>
+  <div class="q" data-why="eval() runs arbitrary Python, including any function call written in the text -- given text from outside the program, that is a direct code-execution risk, confirmed live with __import__('os').system(...) style payloads. literal_eval() walks the parsed syntax tree and accepts only literal nodes, so a function call is rejected outright before anything in it could run.">
+    <p class="stem">Why is <code>ast.literal_eval()</code> safe to run on untrusted text where <code>eval()</code> is not?</p>
+    <button class="opt" data-ok>it rejects function calls and names, never executing any of it</button>
+    <button class="opt">it silently runs the text inside a separate, fully sandboxed subprocess</button>
+    <button class="opt">it automatically strips out any text that contains the word import</button>
+  </div>
+  <div class="q" data-why="Confirmed live: text that parses into a valid syntax tree but contains a disallowed node (a name, a call, an arithmetic op) raises ValueError -- the parse succeeded, the content was rejected. Text that isn't valid Python syntax at all, like an unclosed bracket, fails to parse in the first place and raises SyntaxError instead. Code calling literal_eval on uncontrolled input should catch both, since catching only one leaves the other free to crash the program.">
+    <p class="stem">What's the difference between <code>ast.literal_eval("[1, 2,")</code> and <code>ast.literal_eval("some_name")</code>?</p>
+    <button class="opt" data-ok>unparseable syntax raises a SyntaxError; a parseable but disallowed expression raises ValueError</button>
+    <button class="opt">both of them always raise the exact same exception type and message</button>
+    <button class="opt">one of them works correctly while the other one quietly returns None</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the standard library's <a href="https://docs.python.org/3/library/ast.html#ast.literal_eval"><code>ast.literal_eval()</code></a> docs — the function's own reference entry states the safe-subset guarantee and the exact node types accepted directly; the surrounding <code>ast</code> module page is the natural next step for reading Python source as a syntax tree beyond today's single function.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day94">glossary</a> under Day 94.<br>
+💬 Anything unclear — why <code>eval()</code> still exists at all, or when a config file is better off as JSON instead of Python-literal text? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

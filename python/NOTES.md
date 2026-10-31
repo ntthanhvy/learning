@@ -11748,3 +11748,115 @@ fail *gracefully* so the learner sees which task failed.
   --detail '{"by":"headless"}'` was run from the repo root at the end of
   this round and succeeded.
 
+- 2026-10-31 generation (Lesson 94, headless run): idempotency check first
+  — confirmed no `lessons/0094-*.html` on disk and no `n: 94`/
+  `date: "2026-10-31"` entry in `nav.js` before writing anything (highest
+  prior lesson was 93, dated 2026-10-30). The orchestrator's own DB query
+  this round confirmed no quiz/kata/lesson_completed signal for any course
+  since 2026-10-15 — no weak-spot to chase, steady sequential pacing
+  continues. Read `MISSION.md` in full (no-pandas/no-NumPy exclusion
+  re-confirmed before writing a line), `PLAN.md` in full (Phase 2's
+  written spine ends at the Day 26 FastAPI capstone; lessons since have
+  been open-ended stdlib gap-filling), and the tail of this file (covering
+  Days 91-93) rather than the whole file, since it exceeds a single read's
+  size cap. Cadence state: Day 91 was a review closing the Days 88-90
+  cycle; Day 92 (`weakref`) was fresh day 1, Day 93 (`sqlite3`) was fresh
+  day 2, so today is fresh day 3 of 3, with a review of Days 92-94 due at
+  Day 95. Topic/format selection: ran a fresh case-insensitive grep across
+  every lesson title, every practice file, `reference/glossary.html`, and
+  `RESOURCES.md` for a wide candidate list — `struct`, `getpass`,
+  `textwrap`, `string.Template`, `fractions`, `timeit`, `array`, `socket`,
+  `threading`, `ast`/`literal_eval`, `types`/`SimpleNamespace`,
+  `importlib`, `locale`, and `calendar` — then read each genuine hit in
+  context rather than trusting a bare match count: `textwrap` and
+  `string`'s constants were already covered as a short Day 55 aside (so
+  excluded), while `socket` and `threading` are both named/recognized in
+  passing (Days 21-26's HTTP lessons, Day 73's GIL discussion) but never
+  taught as their own lesson with a hands-on exercise — left open rather
+  than picked, since naming-in-passing isn't the same gap as a lesson
+  teaching the module directly, and Day 73's own note already deferred
+  `threading.Lock` on purpose. `struct`, `getpass`, `string.Template`,
+  `fractions` (named only in passing on Day 70), `timeit`, `array`,
+  `ast`/`literal_eval`, `types.SimpleNamespace`, `importlib`, and
+  `locale` were all genuinely zero-hit as *taught* topics. Picked
+  `ast.literal_eval()` over the rest: Day 76 already taught `json.loads()`
+  for JSON-shaped text, but nothing taught so far answers the adjacent
+  question of parsing text written in Python's own literal syntax
+  (single-quoted strings, tuples, `repr()` output) short of the genuinely
+  dangerous `eval()` — a sharp, well-scoped safe-vs-unsafe-parsing contrast
+  with zero pandas/NumPy surface, and a natural sequel to Day 72's
+  `pickle` untrusted-data warning applied to a different format. Probed
+  real behavior directly in a scratch dir outside the repo tree (deleted
+  after, never tracked by git; `uv run python3 probe.py`/`probe2.py`)
+  rather than trusting memory: confirmed `literal_eval()` parses nested
+  lists/dicts/tuples/bytes/sets correctly; confirmed it raises
+  `ValueError: malformed node or string` on a function call
+  (`__import__('os').system(...)`), a bare name, and even plain arithmetic
+  (`"1 + 2"`) — the last one the easiest detail to assume away, since the
+  module parses syntax shape, not whether a result would be safe; confirmed
+  malformed syntax (`"[1, 2,"`) raises `SyntaxError` instead, a different
+  exception than a parseable-but-disallowed expression; confirmed
+  `eval("1+2")` would actually run and return `3`, the contrast that
+  motivates never calling it on untrusted text; confirmed `json.loads()`
+  rejects the same single-quoted dict text `literal_eval()` accepts
+  (`JSONDecodeError: Expecting property name enclosed in double quotes`),
+  the concrete line between the two modules' grammars. Checked the
+  glossary for a collision before writing — grepped `literal_eval`/`ast\.`
+  case-insensitively across the full `glossary.html`, zero existing rows.
+  **New jargon: 3 terms** (`ast.literal_eval()`, `eval()`, "ValueError vs
+  SyntaxError (literal_eval)" as one combined row) — one inline `<dfn>`
+  in the lesson byline (`safe subset`) plus full glossary-page entries for
+  all three rows, added as a new `<h2 id="day94">` section directly after
+  Day 93's. Verification performed mechanically, from a dedicated script
+  in a scratch dir (deleted after): (1) an HTML tag-balance check across
+  div/p/code/button/script/dfn/pre/h2/h1/em/strong/a on the new lesson —
+  balanced on the first pass (div 6/6, p 18/18, code 65/65, button 9/9,
+  script 3/3, dfn 1/1, pre 5/5, h2 7/7, h1 1/1, em 1/1, strong 3/3, a 2/2);
+  (2) a raw-unescaped-`&` regex scan (excluding `&amp;`/`&quot;`/etc.) on
+  both the new lesson and the new glossary section — zero hits on both;
+  (3) a word-count match per quiz question's three options, extracted via
+  regex and stripped of tags, printing each option's exact text alongside
+  its count rather than guessing by eye — first draft mismatched on all
+  three questions (Q1 13/9/8, Q2 13/13/9, Q3 13/12/10), iterated
+  option-by-option across several passes until all three landed on equal
+  per-question counts: 11/11/11, 11/11/11, 12/12/12; (4) an
+  `html.parser.HTMLParser` full-document parse of the new lesson — no
+  parse errors; (5) a separate table/tr/th/td/h2/p/div balance check on
+  `glossary.html` after its new section, plus a duplicate-`id="dayNN"`
+  scan — balanced (table 80/80, tr 351/351, th 240/240, td 813/813, h2
+  80/80) with zero duplicates among 80 ids, `day94` present exactly once;
+  (6) `node --check` against `assets/nav.js`, `assets/gloss.js`, and
+  `assets/quiz.js` — all three clean. Added one new `RESOURCES.md` line
+  for `ast.literal_eval()`, placed directly after Day 93's `sqlite3` line
+  and before the PEP 8 line, following the file's chronological-by-day
+  ordering. Registered Lesson 94 in `nav.js` with today's date
+  (2026-10-31) right after the `n: 93` entry. No-pandas rule: grepped
+  case-insensitively for `pandas|numpy|dataframe|pd\.|np\.` in the new
+  lesson and practice file — exactly two hits in the lesson (the "Why
+  today" callout's reference to the full candidate list, and the required
+  "Where pandas/NumPy go from here" boundary callout noting a CSV cell
+  holding a stringified list as the nearest pandas touchpoint, not
+  demonstrated) and zero hits in the practice file — no worked pandas/
+  NumPy example anywhere. The shipped (unsolved)
+  `practice/94_ast_literal_eval.py` was executed directly from its real
+  `practice/` location and printed exactly 3 ✗ with no raw traceback. A
+  solved copy built in a scratch dir (copied from the shipped file, then
+  each `...`/TODO body filled in directly — never editing the shipped
+  file itself, deleted after) printed all 3 ✓ and "All green" on two
+  consecutive runs; the shipped file was re-run afterward and reproduced
+  the identical all-✗ result, confirming no leakage back into the
+  baseline. `python/learning-records/` was not touched this round — a
+  routine fresh-topic pick following the course's own settled cadence,
+  not a new durable fact about the learner distinct from Day 1's baseline
+  record. Cadence note for the next round: Day 94 is fresh day 3 of 3
+  since Day 91's review closed the prior cycle — Day 95 should be a
+  review of Days 92-94, continuing the settled three-fresh-then-review
+  rhythm. Candidates left open, confirmed still genuinely untaught as a
+  dedicated lesson: `struct`, `getpass`, `string.Template`, `timeit`,
+  `array`, `types.SimpleNamespace`, `importlib`, `locale`, plus `socket`
+  and `threading` as modules in their own right (both currently only
+  named in passing elsewhere). `bin/record-progress python
+  lesson_generated --day 94 --lesson 0094-ast-literal-eval.html --detail
+  '{"by":"headless"}'` was run from the repo root at the end of this
+  round and succeeded.
+

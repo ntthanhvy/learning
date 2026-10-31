@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 114 · np.average(): the weighted mean pandas' own .mean() can't compute</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 114 · ~20 min · 31 Oct 2026</p>
+<h1>np.average(): the weighted mean pandas' own .mean() can't compute</h1>
+<p class="byline">Lesson 113's own closing note named three standing candidates — <code>np.average()</code>, <code>np.piecewise()</code>, and <code>apply(result_type="expand")</code> — rather than pre-committing one. A fresh scan of every lesson and the full glossary confirms <code>np.average()</code> is still a genuine zero-hit, and it closes a real gap: <code>Series.mean()</code> and <code>groupby().mean()</code> have no <code>weights=</code> argument at all.</p>
+
+<h2>1 · mean() treats every row as equally important — that's not always true</h2>
+<p><code>Series.mean()</code> and <code>np.mean()</code> both compute the plain arithmetic average: every value counted once, divided by the count. That's the right answer when every row genuinely carries equal importance. It's the wrong answer the moment rows represent different-sized things — an average order <em>price</em> across orders of very different <em>quantity</em>, an average rating across reviews with very different vote counts, an average score across classes of very different student counts:</p>
+<pre><code>orders = pd.DataFrame({
+    <span class="str">"customer"</span>: [<span class="str">"An"</span>, <span class="str">"An"</span>, <span class="str">"Binh"</span>, <span class="str">"Binh"</span>, <span class="str">"Binh"</span>],
+    <span class="str">"price"</span>:    [<span class="kw">100.0</span>, <span class="kw">120.0</span>, <span class="kw">50.0</span>, <span class="kw">55.0</span>, <span class="kw">60.0</span>],
+    <span class="str">"qty"</span>:      [<span class="kw">1</span>, <span class="kw">3</span>, <span class="kw">2</span>, <span class="kw">2</span>, <span class="kw">4</span>],
+})
+orders.groupby(<span class="str">"customer"</span>)[<span class="str">"price"</span>].mean()
+<span class="cm"># customer
+# An      110.0   -- (100+120)/2, each ORDER counted once, quantity ignored
+# Binh     55.0   -- (50+55+60)/3</span></code></pre>
+<p>An's plain mean treats the 1-unit order and the 3-unit order as equally important, when the 3-unit order actually represents three times the units sold at that price. A genuinely quantity-weighted average price is a different, and often more honest, number.</p>
+
+<h2>2 · np.average(): the same mean, with an optional weights= argument</h2>
+<p><dfn data-en="a NumPy function computing the arithmetic mean by default (identical to np.mean() with no weights= given), or a WEIGHTED mean when weights= is supplied -- each value's contribution is scaled by its own weight before summing, then divided by the SUM of the weights rather than the plain count; raises ZeroDivisionError outright if the weights sum to exactly zero, and has no skipna concept at all, so one NaN anywhere in the values OR the weights poisons the whole result to NaN" data-vn="giữ nguyên 'np.average()' — mặc định tính trung bình thường (giống np.mean() khi không truyền weights=), truyền weights= thì tính trung bình CÓ TRỌNG SỐ: mỗi giá trị nhân với trọng số riêng rồi cộng lại, chia cho TỔNG trọng số (không phải số lượng phần tử); tổng trọng số bằng 0 thì báo lỗi ZeroDivisionError ngay; không có khái niệm skipna — chỉ 1 NaN trong values HOẶC trong weights là cả kết quả thành NaN luôn">np.average()</dfn> computes the exact same number as <code>np.mean()</code> when called with no <code>weights=</code> — but accepts one, turning the calculation into a genuine weighted mean: each value is scaled by its own weight before summing, and the total is divided by the <em>sum of the weights</em> instead of the plain row count:</p>
+<pre><code>an = orders[orders[<span class="str">"customer"</span>] == <span class="str">"An"</span>]
+np.average(an[<span class="str">"price"</span>], weights=an[<span class="str">"qty"</span>])
+<span class="cm"># 115.0  -- (100*1 + 120*3) / (1 + 3) = 460 / 4, NOT (100+120)/2</span>
+
+<span class="cm"># manual check, same formula:</span>
+(<span class="kw">100</span>*<span class="kw">1</span> + <span class="kw">120</span>*<span class="kw">3</span>) / (<span class="kw">1</span> + <span class="kw">3</span>)   <span class="cm"># 115.0</span></code></pre>
+<p>Confirmed directly (numpy 2.5.4): with no <code>weights=</code> at all, <code>np.average(arr)</code> is byte-identical to <code>np.mean(arr)</code> — the plain mean is just the special case where every weight is equal. Two sharp edges confirmed directly: weights summing to exactly zero raise <code>ZeroDivisionError</code> immediately ("Weights sum to zero, can't be normalized"), not a silent NaN or inf; and a values/weights length mismatch with no <code>axis=</code> raises <code>TypeError</code> outright rather than guessing how to pair them up.</p>
+
+<h2>3 · The actual gap: groupby() + mean() has no weights= at all</h2>
+<p>This is the part worth naming unprompted in an interview: <code>Series.mean()</code>, <code>DataFrame.mean()</code>, and <code>groupby().mean()</code> have no <code>weights=</code> parameter whatsoever — confirmed directly, passing one raises <code>TypeError: GroupBy.mean() got an unexpected keyword argument 'weights'</code>. A per-group weighted average needs <code>groupby().apply()</code> (Lesson 61) reaching down into <code>np.average()</code> one row-group at a time:</p>
+<pre><code>orders.groupby(<span class="str">"customer"</span>).apply(
+    <span class="kw">lambda</span> g: np.average(g[<span class="str">"price"</span>], weights=g[<span class="str">"qty"</span>]),
+    include_groups=<span class="kw">False</span>,
+)
+<span class="cm"># customer
+# An      115.00
+# Binh     56.25   -- (50*2 + 55*2 + 60*4) / (2+2+4) = 450/8</span></code></pre>
+<p>There is no shortcut around this — no <code>weighted_mean()</code> method anywhere in pandas. <code>np.average()</code> inside <code>groupby().apply()</code> (or the equivalent sum-of-products-over-sum-of-weights formula inside <code>.agg()</code>) is the standard answer, and knowing that gap exists — rather than guessing at a nonexistent <code>mean(weights=...)</code> call mid-interview — is itself the signal.</p>
+<div class="callout"><strong>The trap:</strong> <code>np.average()</code> has no <code>skipna</code> concept, same family as Lesson 111's <code>np.percentile()</code> gap. One NaN anywhere in the <em>values</em> or the <em>weights</em> silently poisons the entire result to NaN — confirmed directly, a single missing weight is enough. Clean (or at least explicitly fill) both columns before weighting, the same discipline Lesson 3 already taught for plain aggregates.</div>
+
+<h2>4 · Negative weights run quietly — there's no sign check</h2>
+<p>Confirmed directly: <code>np.average()</code> performs no validation that weights are non-negative. A negative weight is accepted and folded into the sum like any other number, which can pull the "average" outside the actual range of the values entirely — a genuine footgun if a weight column was meant to represent something like a count or a price and a data-entry error let a negative value through unnoticed.</p>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>np.average()</code>'s default (unweighted) behavior matching <code>np.mean()</code>, the <code>weights=</code> parameter and its sum-of-products-over-sum-of-weights formula, the confirmed <code>ZeroDivisionError</code>/<code>TypeError</code> edge cases, the fact that no pandas method (<code>mean()</code>, <code>groupby().mean()</code>) accepts <code>weights=</code> at all, and the NaN-poisoning/no-sign-check traps. It does not cover <code>returned=True</code>'s secondary sum-of-weights output in depth, multi-dimensional <code>axis=</code> weighting, or any statistics/visualization use of weighted means (out of `MISSION.md`'s scope).</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/114_np_average.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/114_np_average.py</code></pre>
+<p>Exercise 1 confirms <code>np.average()</code> with no weights matches <code>np.mean()</code>, and that <code>weights=</code> changes the result to the sum-of-products formula (Section 2). Exercise 2 confirms <code>groupby().mean()</code> has no <code>weights=</code> parameter and that <code>groupby().apply()</code> with <code>np.average()</code> is the actual per-group weighted-average path (Section 3). Exercise 3 confirms the NaN-poisoning trap on both the values and the weights (Section 3's callout).</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: np.average() with no weights= argument is byte-identical to np.mean() -- the plain mean is just the special case where every weight is equal. weights= is what turns it into a genuinely different, weighted calculation.">
+    <p class="stem">Calling <code>np.average(arr)</code> with no <code>weights=</code> argument at all returns what?</p>
+    <button class="opt" data-ok>the exact same plain mean that np.mean() on that array would return</button>
+    <button class="opt">a ZeroDivisionError, since passing some nonzero weight value is always required here</button>
+    <button class="opt">a brand new array holding every one of the original input values</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: Series.mean(), DataFrame.mean(), and groupby().mean() all raise TypeError on a weights= keyword -- pandas' own mean() has no weighting concept whatsoever. The working path is groupby().apply() calling np.average() per group, or the equivalent formula inside .agg().">
+    <p class="stem">Passing <code>weights=</code> straight into <code>df.groupby("customer")["price"].mean()</code> does what?</p>
+    <button class="opt" data-ok>raises TypeError immediately, since groupby().mean() takes no such argument</button>
+    <button class="opt">quietly computes the correct per-group weighted mean right away</button>
+    <button class="opt">silently ignores that argument, returning the plain unweighted mean</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: np.average() has no skipna concept at all, matching np.percentile()'s own gap from Lesson 111. One missing entry anywhere in either the values array or the weights array is enough to poison the entire returned average to NaN.">
+    <p class="stem">One NaN sitting inside the <code>weights=</code> array passed to <code>np.average()</code> causes what?</p>
+    <button class="opt" data-ok>the whole returned average becomes NaN, since there is no skipna option</button>
+    <button class="opt">that one row gets skipped quietly, every other row still averages fine</button>
+    <button class="opt">a loud, immediate ValueError naming the exact row that holds that NaN</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official NumPy API reference for <a href="https://numpy.org/doc/stable/reference/generated/numpy.average.html"><code>numpy.average()</code></a> (per <code>RESOURCES.md</code>'s "Docs: NumPy fundamentals — broadcasting" grouping, ~5 min) documents the <code>weights=</code> formula, the <code>returned=True</code> option, and the exact <code>ZeroDivisionError</code>/<code>TypeError</code> wording confirmed above.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>np.average()</code> is new today, added right after Lesson 113's <code>to_frame() / squeeze()</code> entry.<br>
+<strong>Next lesson:</strong> no standing candidate pre-committed — tomorrow's own fresh curriculum/glossary scan picks the next topic (today's own scan noticed <code>np.piecewise()</code> and <code>apply(result_type="expand")</code> still sitting unused, but per this course's convention neither is locked in).<br><br>
+💬 Anything unclear — the weighted-mean formula, the groupby().apply() path, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

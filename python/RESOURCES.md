@@ -77,6 +77,8 @@ authors for *why*. Cite inline; each lesson recommends exactly one primary sourc
   Use for: Day 92 — `weakref.ref()` for a reference that doesn't keep its target alive, `WeakValueDictionary`/`WeakKeyDictionary` for a self-cleaning cache keyed or valued by live objects, and `finalize()` for a once-only cleanup callback run on collection; `WeakSet` and `proxy()` are named but undemonstrated next steps.
 - [Docs: `sqlite3`](https://docs.python.org/3/library/sqlite3.html)
   Use for: Day 93 — `connect()`/`cursor()` and `?` parameterized queries for an embedded database with no server, `with con:` for transaction commit/rollback (not connection close), `sqlite3.Row` for lookup by column name, and `sqlite3.IntegrityError` for a violated schema constraint; named (`:name`) placeholders and custom row factories are undemonstrated next steps.
+- [Docs: `ast.literal_eval()`](https://docs.python.org/3/library/ast.html#ast.literal_eval)
+  Use for: Day 94 — parsing Python literal syntax (numbers, strings, bytes, bools, `None`, and literal lists/tuples/dicts/sets) safely, as the one correct alternative to `eval()` for untrusted or semi-trusted text; the function's own reference entry states the safe-subset guarantee directly, and the surrounding `ast` module page is the natural next step beyond today's single function.
 - [PEP 8 — Style Guide for Python Code](https://peps.python.org/pep-0008/)
   Use for: naming and layout conventions, so written code looks like the ecosystem's.
 

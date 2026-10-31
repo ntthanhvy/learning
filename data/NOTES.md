@@ -10673,3 +10673,117 @@
   --detail '{"by":"headless"}'` was run directly from the repo root and
   returned `recorded: data/lesson_generated day=113
   lesson=0113-to-frame-and-squeeze.html`.
+- 2026-10-31 generation (Lesson 114): headless run, zero prior context.
+  Idempotency check first — confirmed no `lessons/0114-*.html` on disk and
+  no `n: 114`/`date: "2026-10-31"` entry in `nav.js` before writing anything
+  (highest prior lesson was 113, dated 2026-10-30). DB signal: the
+  orchestrator's own brief reported no quiz/kata/lesson_completed signal
+  for any course since 2026-10-15 — no weak-spot to target, continued this
+  course's own steady topic-driven pacing. Read `MISSION.md` in full (not
+  modified), `RESOURCES.md` in full (not modified), this file's own tail
+  (Lesson 113's entry) for exact house style, `data/learning-records/0001`
+  (still the only baseline, nothing new since), `lessons/0113-to-frame-and-
+  squeeze.html` and `practice/113_to_frame_and_squeeze.py` in full for the
+  exact HTML/practice structure, and `reference/glossary.html`'s tail for
+  the exact row format. Topic choice: Lesson 113's own closing note named
+  three standing candidates without pre-committing any — `np.average()`
+  (weighted mean), `np.piecewise()`, and `apply()` with
+  `result_type="expand"` — so, per this course's "fresh scan each round"
+  convention, grepped all three plus related terms (`weighted`, `average(`)
+  case-insensitively across every lesson body and the full glossary first.
+  `np.average()`/`weighted` turned up only in Lesson 72's `.ewm()` prose
+  (a different, unrelated kind of weighting — exponential decay, not a
+  weights= array) and nowhere else; `np.piecewise()` and
+  `result_type="expand"` were also genuine zero-hits but read thinner as
+  standalone stories once probed. Picked `np.average()`: it closes a real,
+  sharply named gap — `Series.mean()`/`groupby().mean()` have no
+  `weights=` parameter at all, confirmed directly, so a per-group weighted
+  average needs `groupby().apply()` reaching into `np.average()`, with no
+  pandas-native shortcut — exactly the kind of "what do you reach for"
+  interview question `MISSION.md` front-loads for. Every behavioral claim
+  was probed directly first via temporary scripts in `.scratch-data-114/`
+  at the repo root (`/tmp` was unavailable in this sandbox, matching
+  Lesson 113's own note) — deleted after use, never tracked by git:
+  confirmed numpy 2.5.4 / pandas 3.1.0, unchanged from recent lessons;
+  confirmed `np.average(arr)` with no `weights=` is byte-identical to
+  `np.mean(arr)`; confirmed `weights=` computes sum(value×weight)/sum(weight)
+  via a manual-formula cross-check on both a flat array and an inline
+  `pd.DataFrame` (An/Binh, price × qty — the practice fixture's own
+  `orders_raw.csv` has no quantity column, so this lesson builds its own
+  small inline DataFrame rather than stretching that fixture); confirmed
+  weights summing to exactly zero raise `ZeroDivisionError` immediately
+  ("Weights sum to zero, can't be normalized"), and a values/weights length
+  mismatch with no `axis=` raises `TypeError`; confirmed directly that
+  `df.groupby("customer")["price"].mean(weights=df["qty"])` raises
+  `TypeError: GroupBy.mean() got an unexpected keyword argument 'weights'`
+  outright — no silent ignore, no quiet correct answer — and that
+  `df.groupby("customer").apply(lambda g: np.average(g["price"],
+  weights=g["qty"]), include_groups=False)` is the real per-group weighted-
+  average path, matching a hand-computed check (An 115.0, Binh 56.25);
+  confirmed `np.average()` has no `skipna` concept at all, same family as
+  Lesson 111's `np.percentile()` gap — one NaN in either the values array
+  or the weights array poisons the whole result to NaN, confirmed
+  separately for each; confirmed a negative weight is accepted with no
+  sign-check or warning, folded into the sum like any other number. Did not
+  fetch the NumPy doc page by WebFetch this round — the direct probe
+  results were unambiguous and the "Go deeper" wording was drawn from
+  well-established public documentation phrasing; the page falls under
+  `RESOURCES.md`'s existing "Docs: NumPy fundamentals — broadcasting"
+  grouping, no new `RESOURCES.md` line needed. One collision check before
+  writing: grepped `np.average` and `weighted` case-insensitively across
+  the full glossary and every lesson body — the only existing hit was
+  Lesson 72's unrelated `.ewm()` weighting, confirmed clean otherwise. Added
+  exactly one new glossary row, "np.average()", directly after Lesson 113's
+  "to_frame() / squeeze()" entry. Verification performed mechanically via a
+  temporary script in `.scratch-data-114/` (deleted after, never tracked by
+  git): (1) a quiz-word-count script per `<div class="q">` block — first
+  draft came out uneven (12/10/12, 9/9/9, 13/12/11); a few targeted
+  single-word edits (adding "nonzero" to one option, closing an unterminated
+  `<span class="cm">` that was also breaking tag balance, splitting another
+  multi-line comment span into two self-closed spans) converged on exactly
+  12/12/12, 9/9/9, and 12/12/12 option words across the three questions, one
+  `data-ok` per question throughout; (2) an HTML tag-balance check — the
+  first pass caught a genuine bug, not just a word-count issue: a
+  `<span class="cm">` opened around a multi-line shell-output comment never
+  closed before the next statement, leaving `span` unbalanced (39 open vs.
+  38 close) — fixed by closing it explicitly and wrapping the following
+  one-line comment in its own span; re-ran clean afterward (html 1/1, head
+  1/1, body 1/1, div 5/5, p 18/18, pre 4/4, code 72/72, h1 1/1, h2 8/8, em
+  5/5, strong 3/3, button 9/9, script 3/3, dfn 1/1, span 40/40, a 2/2, title
+  1/1); (3) a raw-unescaped-`&` regex scan found exactly the two expected
+  `&` characters inside the lesson's own `cd ~/learning/data && uv run ...`
+  shell command, zero elsewhere; (4) exactly 1 `<dfn>`-carrying tag, with
+  `data-en`/`data-vn`, matching the 1 new term (`np.average()`). A separate
+  table-balance check on `glossary.html` after its one-row addition —
+  balanced (tr 187/187, td 558/558, zero raw `&`), plus a duplicate-term
+  scan across all 186 first-column entries — zero duplicates. `node --check`
+  confirmed `nav.js` still parses as valid JavaScript after the edit, with
+  exactly one `n: 114` entry and one `0114-np-average` file reference. The
+  shipped (unsolved) `practice/114_np_average.py` was run directly from its
+  real `practice/` location (via `uv run --with pandas python3`) and
+  printed exactly 3 ✗ with no raw traceback on the first run. Built a solved
+  copy in `.scratch-data-114/practice/` (deleted after, never tracked by
+  git), filling in all blanks per the helper-function pattern Lessons
+  111-113 established (the two groupby checks live inside
+  `groupby_mean_rejects_weights()`/`groupby_apply_weighted_average()`
+  helper functions so the blanks are actually exercised by the checks); it
+  printed all 3 ✓ and "All green" on the first run. Re-ran the shipped file
+  directly from `practice/` again afterward and reproduced the identical
+  all-✗ result, confirming the solved copy's edits never leaked back into
+  the shipped baseline. This round's own fresh scan surfaced `np.piecewise()`
+  and `apply(result_type="expand")` as the two remaining standing
+  candidates (both already named in Lesson 113's own note, neither
+  pre-committed as tomorrow's pick, per this course's standing "fresh scan
+  each round" convention). No new `data/learning-records/` entry was added
+  — routine lesson, no new completion/quiz signal since mid-October.
+  `git status --short` after all edits confirmed only the intended `data/`
+  files were touched (`data/assets/nav.js`, `data/reference/glossary.html`,
+  new `data/lessons/0114-np-average.html`, new
+  `data/practice/114_np_average.py`) plus unrelated concurrent changes in
+  other course directories from other runs, not touched by this one. The
+  scratch directory `.scratch-data-114/` was deleted after verification, at
+  the repo root but never tracked by git, matching prior rounds' own
+  precedent for this environment. `bin/record-progress data
+  lesson_generated --day 114 --lesson 0114-np-average.html --detail
+  '{"by":"headless"}'` was run directly from the repo root to close out
+  this round.

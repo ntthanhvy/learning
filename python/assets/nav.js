@@ -194,6 +194,8 @@
       file: "lessons/0092-weakref-and-weak-references.html" },
     { n: 93, date: "2026-10-30", title: "sqlite3: a real database with no server to run",
       file: "lessons/0093-sqlite3-embedded-database.html" },
+    { n: 94, date: "2026-10-31", title: "ast.literal_eval: parsing Python literals safely",
+      file: "lessons/0094-ast-literal-eval.html" },
   ];
 
   const REFS = [

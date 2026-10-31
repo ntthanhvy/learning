@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 118 · Rate limiting, now in C# too</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 118 · ~20 min</p>
+<h1>Rate limiting, now in C# too</h1>
+<p class="byline">Lesson 11 covered rate limiting in Go: a hand-rolled token-bucket <code>struct</code>, one bucket per API key stored in a <code>sync.Map</code>, and a middleware function that checks the bucket before calling the next handler. That lesson never got a C# mirror, even though every other Go-only resilience mechanism from this course — retry, circuit breaker, bulkhead, worker pools, graceful shutdown, health checks — has been ported since Lesson 112. Today closes that gap: the same token-bucket algorithm, built from ASP.NET Core's own rate-limiting middleware instead of a hand-written bucket and <code>sync.Map</code>.</p>
+
+<h2>1 · Same algorithm, one middleware instead of a hand-rolled struct</h2>
+<p>Lesson 11's rule still holds exactly: a bucket holds up to N tokens, refills at a steady rate, and every request spends one token to proceed — an empty bucket means the request is rejected until it refills. What changes in ASP.NET Core is that nobody writes the bucket, the mutex, or the refill math by hand. The building block is <dfn data-en="the ASP.NET Core/.NET middleware package (Microsoft.AspNetCore.RateLimiting, built on the System.Threading.RateLimiting primitives) that implements fixed window, sliding window, token bucket, and concurrency limiting as framework middleware, registered with AddRateLimiter and applied with UseRateLimiter" data-vn="rate limiting middleware (giữ nguyên) — middleware có sẵn của ASP.NET Core/.NET (Microsoft.AspNetCore.RateLimiting, dựa trên System.Threading.RateLimiting), cài sẵn 4 kiểu giới hạn (fixed window, sliding window, token bucket, concurrency), đăng ký bằng AddRateLimiter, áp dụng bằng UseRateLimiter">rate limiting middleware</dfn>, and the specific algorithm Lesson 11 built by hand has its own extension method: <dfn data-en="the AddRateLimiter extension method used to register a named token-bucket policy, backed by TokenBucketRateLimiterOptions (TokenLimit, TokensPerPeriod, ReplenishmentPeriod, QueueLimit)" data-vn="AddTokenBucketLimiter() (giữ nguyên) — extension method của AddRateLimiter để đăng ký 1 policy token-bucket có tên, cấu hình qua TokenBucketRateLimiterOptions (TokenLimit, TokensPerPeriod, ReplenishmentPeriod, QueueLimit)">AddTokenBucketLimiter()</dfn>.</p>
+<pre><code><span class="kw">using</span> Microsoft.AspNetCore.RateLimiting;
+<span class="kw">using</span> System.Threading.RateLimiting;
+
+<span class="kw">var</span> builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddRateLimiter(options =&gt;
+{
+    options.AddTokenBucketLimiter(<span class="st">"per-api-key"</span>, opt =&gt;
+    {
+        opt.TokenLimit = <span class="dv">20</span>;                              <span class="cm">// bucket capacity -- same 20 as Lesson 11's struct literal</span>
+        opt.TokensPerPeriod = <span class="dv">10</span>;                         <span class="cm">// tokens added back each period</span>
+        opt.ReplenishmentPeriod = TimeSpan.FromSeconds(<span class="dv">1</span>);  <span class="cm">// -- 10/sec, matching Lesson 11's refillPerSec</span>
+        opt.QueueLimit = <span class="dv">0</span>;                               <span class="cm">// 0 == reject immediately, no queueing</span>
+        opt.AutoReplenishment = <span class="kw">true</span>;                     <span class="cm">// an internal timer refills; no manual TryReplenish() call needed</span>
+    });
+});
+
+<span class="kw">var</span> app = builder.Build();
+app.UseRateLimiter();
+
+app.MapGet(<span class="st">"/orders"</span>, () =&gt; <span class="st">"ok"</span>).RequireRateLimiting(<span class="st">"per-api-key"</span>);
+app.Run();</code></pre>
+<p>Per Microsoft's own docs: "rather than adding back the requests taken from the expired segment, a fixed number of tokens are added each replenishment period" — the exact refill rule Lesson 11's <code>allow()</code> method computed by hand with <code>time.Now().Sub(b.last)</code> and <code>math.Min(b.capacity, ...)</code> every call. Here that math lives inside the framework; the app only states the three numbers.</p>
+
+<h2>2 · Per-client buckets: a partition instead of a <code>sync.Map</code></h2>
+<p>Lesson 11's middleware kept one bucket per API key by storing them in a <code>sync.Map</code> keyed on the header value, created lazily with <code>LoadOrStore</code>. ASP.NET Core's equivalent is a <dfn data-en="a PartitionedRateLimiter built with a key-selector function, so each distinct partition key (such as an API key or user id) gets and caches its own independent limiter instance, created lazily on first use" data-vn="rate limiting partition (giữ nguyên) — PartitionedRateLimiter dựng từ 1 hàm chọn key, mỗi giá trị key riêng (API key, user id,...) được cấp và cache 1 limiter độc lập, tạo lười khi dùng lần đầu">partition</dfn>, built once as the global limiter:</p>
+<pre><code>options.GlobalLimiter = PartitionedRateLimiter.Create&lt;HttpContext, <span class="dt">string</span>&gt;(httpContext =&gt;
+    RateLimitPartition.GetTokenBucketLimiter(
+        partitionKey: httpContext.Request.Headers[<span class="st">"X-API-Key"</span>].ToString(),
+        factory: _ =&gt; <span class="kw">new</span> TokenBucketRateLimiterOptions
+        {
+            TokenLimit = <span class="dv">20</span>,
+            TokensPerPeriod = <span class="dv">10</span>,
+            ReplenishmentPeriod = TimeSpan.FromSeconds(<span class="dv">1</span>),
+            QueueLimit = <span class="dv">0</span>,
+            AutoReplenishment = <span class="kw">true</span>
+        }));</code></pre>
+<p>Same shape as Lesson 11's <code>buckets.LoadOrStore(key, &amp;bucket{...})</code>: the first request for a given key builds that key's limiter from the factory, every later request for the same key reuses it. The docs' own partitioning warning matches Lesson 11's implicit assumption too: partitioning on unbounded user-controlled input (an arbitrary header value, not an authenticated identity) risks a memory-exhaustion attack, since each distinct key caches its own limiter forever.</p>
+
+<div class="callout"><strong>The frontend equivalent you already own.</strong> Lesson 11 already named this: a token bucket is the server-side version of debouncing a search box — refusing to do more work than the system can sustain, rather than accepting everything and falling behind. Nothing about that mental model changes here; only who writes the bucket does.</div>
+
+<h2>3 · Rejection: <code>OnRejected</code> instead of a manual <code>WriteHeader</code> call</h2>
+<p>Lesson 11's middleware, on an empty bucket, set <code>Retry-After</code> by hand and called <code>w.WriteHeader(http.StatusTooManyRequests)</code> directly. ASP.NET Core exposes the same two facts — the status code and the retry hint — through <code>RateLimiterOptions.RejectionStatusCode</code> (defaults to <code>429</code> already) and an <code>OnRejected</code> callback:</p>
+<pre><code><span class="kw">using</span> System.Globalization;
+
+options.OnRejected = <span class="kw">async</span> (context, token) =&gt;
+{
+    <span class="kw">if</span> (context.Lease.TryGetMetadata(MetadataName.RetryAfter, <span class="kw">out</span> <span class="kw">var</span> retryAfter))
+        context.HttpContext.Response.Headers.RetryAfter =
+            ((<span class="dt">int</span>)retryAfter.TotalSeconds).ToString(NumberFormatInfo.InvariantInfo);
+
+    context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+    <span class="kw">await</span> context.HttpContext.Response.WriteAsync(<span class="st">"rate limit exceeded"</span>, token);
+};</code></pre>
+<p><code>context.Lease</code> is the token-bucket limiter's own lease object — the same "did this succeed, and if not, how long until it might" answer Lesson 11's <code>allow()</code> returned as a plain <code>bool</code> plus a hardcoded <code>"1"</code>-second <code>Retry-After</code>. Here the limiter itself computes the real wait, exposed as metadata rather than guessed.</p>
+
+<div class="cmp-wrap">
+<table class="cmp">
+<thead><tr><th></th><th>Lesson 11: Go</th><th>Lesson 118: C# / ASP.NET Core</th></tr></thead>
+<tbody>
+<tr><th>Bucket + refill math</th><td>hand-written <code>bucket</code> struct, <code>sync.Mutex</code>, manual <code>time.Now()</code> delta</td><td><code>AddTokenBucketLimiter()</code>, <code>TokenBucketRateLimiterOptions</code></td></tr>
+<tr><th>One bucket per client</th><td><code>sync.Map</code>, keyed by header, <code>LoadOrStore</code></td><td><code>PartitionedRateLimiter</code>, keyed by a selector function</td></tr>
+<tr><th>Wiring into the request path</th><td>hand-written middleware wrapping <code>http.Handler</code></td><td><code>UseRateLimiter()</code> + <code>RequireRateLimiting("policy")</code></td></tr>
+<tr><th>On rejection</th><td>manual <code>WriteHeader(429)</code> + hardcoded <code>Retry-After: 1</code></td><td><code>OnRejected</code> callback + lease metadata's real <code>RetryAfter</code></td></tr>
+<tr><th>Default rejection status</th><td>whatever the handler sets by hand</td><td><code>RejectionStatusCode</code>, already <code>429</code> by default</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers ASP.NET Core's rate-limiting middleware's token-bucket limiter — <code>AddRateLimiter()</code>, <code>AddTokenBucketLimiter()</code>/<code>TokenBucketRateLimiterOptions</code>, <code>UseRateLimiter()</code>, <code>RequireRateLimiting()</code>, <code>PartitionedRateLimiter</code> partitioning, and <code>OnRejected</code> — as the C# mirror of Lesson 11's Go token bucket. It does not cover the fixed-window, sliding-window, or concurrency limiter algorithms the same middleware also ships (different shapes, future lesson if needed); chaining multiple limiters with <code>CreateChained</code>; the <code>[EnableRateLimiting]</code>/<code>[DisableRateLimiting]</code> MVC attributes beyond naming that they exist; or multi-instance rate limiting across a fleet (the docs are explicit that counters are per-instance, in-memory, and out of scope here per MISSION.md's distributed-systems boundary). It does not cover Go's <code>select</code>-statement arbitration rules — still deferred; see this round's NOTES.md entry for why.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory, with no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Per the docs, the token bucket limiter adds a fixed number of tokens each replenishment period rather than recycling expired-segment requests the way the sliding window limiter does -- the exact refill rule Lesson 11's allow() method computed by hand on every call using time.Now() and math.Min.">
+    <p class="stem">What does ASP.NET Core's token bucket limiter do on each replenishment period?</p>
+    <button class="opt" data-ok>It adds a fixed token count back, capped at the limit</button>
+    <button class="opt">It permanently deletes every single token currently sitting in the bucket</button>
+    <button class="opt">It doubles the whole configured token limit itself once every period</button>
+    <button class="opt">It silently restarts the entire web application host process right now</button>
+  </div>
+  <div class="q" data-why="PartitionedRateLimiter.Create takes a key-selector function, and RateLimitPartition.GetTokenBucketLimiter gives each distinct partition key its own cached limiter instance, built lazily from the factory -- the direct equivalent of Lesson 11's sync.Map keyed by API key with LoadOrStore.">
+    <p class="stem">What gives each API key its own independent token bucket in ASP.NET Core?</p>
+    <button class="opt" data-ok>A PartitionedRateLimiter keyed by a selector, caching one limiter per key</button>
+    <button class="opt">Every single API key always shares just one global bucket together</button>
+    <button class="opt">A brand new WebApplication host gets built fresh for each key</button>
+    <button class="opt">The whole ASP.NET Core runtime restarts itself once per distinct key</button>
+  </div>
+  <div class="q" data-why="RateLimiterOptions.RejectionStatusCode already defaults to 429 Too Many Requests, and OnRejected can additionally copy the lease's real RetryAfter metadata into the response header -- unlike Lesson 11's Go middleware, which set a hardcoded Retry-After: 1 by hand regardless of the bucket's actual refill timing.">
+    <p class="stem">How does OnRejected improve on Lesson 11's hardcoded Retry-After header?</p>
+    <button class="opt" data-ok>It can copy the lease's own real RetryAfter value, never guess</button>
+    <button class="opt">It removes the whole Retry-After header from every single response now</button>
+    <button class="opt">It always forces one exact fixed five-second value every single time</button>
+    <button class="opt">It silently retries the original rejected request automatically, every time, forever</button>
+  </div>
+  <div class="q" data-why="The docs state plainly that rate limiting middleware keeps its counters in memory per app instance, so a policy allowing 100 requests per minute actually allows up to 300 per minute across three instances unless enforced at a shared layer like a gateway -- a distributed-systems concern this course tracks only at vocabulary level per MISSION.md.">
+    <p class="stem">Why doesn't a 100-req/min policy cap traffic at exactly 100/min across three instances?</p>
+    <button class="opt" data-ok>Counters live in memory per instance, each one enforcing its limit</button>
+    <button class="opt">ASP.NET Core automatically shares just one single counter across every instance</button>
+    <button class="opt">The configured limit quietly divides itself evenly among the running instances</button>
+    <button class="opt">Kestrel simply refuses to ever start more than one single instance</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://learn.microsoft.com/en-us/aspnet/core/performance/rate-limit">Microsoft Learn: Rate limiting middleware in ASP.NET Core</a> (~15 min) is the primary source for today's C# half, confirming verbatim <code>AddRateLimiter</code>/<code>UseRateLimiter</code>, the token bucket limiter's per-period replenishment rule, <code>PartitionedRateLimiter</code>/<code>RateLimitPartition</code> partitioning and its user-controlled-input memory-exhaustion warning, <code>RejectionStatusCode</code>'s <code>429</code> default, and the per-instance-counter caveat for apps running on multiple instances. Lesson 11's own OWASP Denial of Service Cheat Sheet citation still covers the token-bucket algorithm and the rate-limiting-vs-backpressure distinction itself in full, not duplicated here.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a>. Click any dotted term for a popup (English first, tiếng Việt second). Builds directly on Lesson 11's token-bucket rate limiting and Lesson 71's load-shedding material. <strong>Anything unclear? Ask your teacher</strong>, the agent that made this lesson. Ask in Vietnamese anytime. A good follow-up: "does our own ASP.NET Core service at work use AddRateLimiter, or something hand-rolled like Lesson 11's Go bucket?"</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

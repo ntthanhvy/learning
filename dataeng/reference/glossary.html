@@ -363,6 +363,12 @@
   <tr><td>all_done (trigger rule)</td><td>giữ nguyên "all_done" — 1 trong các trigger rule của Airflow: task được phép chạy ngay khi mọi upstream trực tiếp đã KẾT THÚC, bất kể thành công, lỗi, hay bị skip; dùng cho task kiểu health-check cần chạy dù run trước đó pass hay fail</td><td>An Airflow trigger rule letting a task run once every direct upstream task has finished, regardless of whether it succeeded, failed, or was skipped — used this round on a new <code>check_dead_letters</code> task so it reports a dead-letter count the same way whether <code>dbt_build</code> just passed or failed, confirmed live by reading the task's own <code>trigger_rule</code> attribute back as <code>TriggerRule.ALL_DONE</code>.</td></tr>
 </table>
 
+<h2 id="day46">Day 46 — Closing Day 45's TODO: a real dead-letter alert, not a print</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>alert threshold</td><td>giữ nguyên "alert threshold" — giới hạn số cố định 1 check so sánh với số đo thực tế để quyết định pass/fail; ở đây là số dòng dead-letter tối đa coi là bình thường giữa 2 lần check, vượt qua thì chính cái check này phải fail để báo vấn đề</td><td>A fixed numeric limit a monitoring check compares a live measurement against, deciding pass or fail by that comparison alone — here, the maximum number of dead-lettered rows considered normal between two checks before the check itself should fail and surface the problem. Confirmed this round with a mocked-cursor script exercising exactly the boundary the lesson argues for: a count equal to the threshold still passes, and only a count one past it raises.</td></tr>
+</table>
+
 <script src="../assets/nav.js"></script>
 </body>
 </html>

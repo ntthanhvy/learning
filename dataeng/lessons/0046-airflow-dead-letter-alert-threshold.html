@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 46 · Closing Day 45's TODO: a real dead-letter alert, not a print</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 46 · ~20 min · 31 Oct 2026</p>
+<h1>Closing Day 45's TODO: a real dead-letter alert, not a <code>print</code></h1>
+<p class="byline">Today's tangible win: <code>check_dead_letters</code> — the task Day 45 wired in with <code>trigger_rule="all_done"</code> but left as a bare <code>print()</code> stub — now runs a real <code>psycopg</code> <code>COUNT(*)</code> against Day 41's dead-letter table and <code>raise</code>s when the count passes a threshold, so a pile-up of poison events actually fails the task instead of logging a line nobody reads. Confirmed this round by importing the real edited DAG module directly against an installed Airflow 3.3.1 and reading every task's <code>trigger_rule</code> and the module's own threshold constant back.</p>
+
+<div class="callout"><strong>Before today — confirm Day 45's task still parses:</strong> today replaces one function body inside <code>dags/food_delivery_pipeline.py</code> and touches nothing else in that file.
+<pre><code>AIRFLOW_HOME="$(pwd)/airflow_home" uv run --with "apache-airflow==3.3.1" airflow dags list-import-errors</code></pre>
+Expected: <code>No data found</code>. If <code>check_dead_letters</code> isn't there yet with <code>trigger_rule=TriggerRule.ALL_DONE</code>, finish Day 45 first — today assumes that task and its wiring already exist exactly as that lesson built them.</div>
+
+<h2>1 · A fact Day 45 got wrong in its own prose, caught before building on it</h2>
+<p>Day 45's comment named the table to query as <code>raw.order_events_dead_letter</code>. Day 41 — the lesson that actually ran the <code>CREATE TABLE</code> — built it as <code>raw.dead_letter_events</code>. Grepping both lessons side by side confirms it: Day 41's own <code>CREATE TABLE raw.dead_letter_events (...)</code> is the only dead-letter table this course has ever created; Day 45 just misnamed it in a code comment, five days later, and nothing caught it because a comment inside a <code>TODO</code> stub never gets executed or parsed against a real schema. Today's query uses the name Day 41 actually ran: <code>raw.dead_letter_events</code>. Worth saying out loud in an interview, because "I wrote a comment with the wrong table name and nothing caught it until I wrote the real query" is a true, small, and completely normal story about why comments drift and executable code doesn't.</p>
+
+<h2>2 · The gap: a count with no judgment is not an alert</h2>
+<p>Day 45's stub printed one fixed string regardless of what Day 41's table actually held — zero rows or five hundred rows produced identical output. That's indistinguishable from a health check that was never wired to real data at all. A dead-letter table existing (Day 41) and something running after every build regardless of outcome (Day 45's <code>all_done</code> rule) are both necessary and neither is sufficient: the task still has to look at the actual number and decide whether it's fine. "Fine" here is simple, on purpose, for a single-operator portfolio pipeline with no real on-call rotation behind it: a handful of dead-lettered events sitting around between runs is expected — Day 41's own poison-message test plants a couple on purpose — but a pile climbing past a small fixed ceiling means something upstream is producing bad events continuously, not occasionally, and that is worth failing a task over.</p>
+<div class="callout">This is not Day 25's territory. Day 25 covered <em>SLAs and deadline alerting</em> — a task or DAG run taking too long. Today is a <em>data-quality</em> threshold on a count a task itself computes, the same shape as Day 3's planted-bad-row tests but expressed as a live Airflow check instead of a <code>dbt build</code> failure. Both end the same way — a task goes red — for different reasons.</div>
+
+<h2>3 · Build: a real query and a <dfn data-en="a fixed numeric limit a monitoring check compares a live measurement against, deciding pass or fail by that comparison alone -- here, the maximum number of dead-lettered rows considered normal between two checks before the check itself should fail and surface the problem" data-vn="giữ nguyên &quot;alert threshold&quot; — giới hạn số cố định 1 check so sánh với số đo thực tế để quyết định pass/fail; ở đây là số dòng dead-letter tối đa coi là bình thường giữa 2 lần check, vượt qua thì chính cái check này phải fail để báo vấn đề">alert threshold</dfn>, replacing Day 45's stub</h2>
+<p>In your <code>food-delivery-pipeline</code> repo, edit <code>dags/food_delivery_pipeline.py</code> — the same file Day 7 wrote, Day 35 and Day 45 each added one thing to. Only <code>check_dead_letters</code>'s body changes:</p>
+<pre><code><span class="cm"># new constant, module level, alongside the existing PG_DSN</span>
+DEAD_LETTER_ALERT_THRESHOLD = <span class="kw">5</span>  <span class="cm"># more than this between checks is a real upstream problem, not noise</span>
+
+
+<span class="kw">def</span> check_dead_letters(**context) -&gt; <span class="kw">None</span>:
+    <span class="kw">import</span> psycopg
+
+    <span class="kw">with</span> psycopg.connect(PG_DSN) <span class="kw">as</span> conn, conn.cursor() <span class="kw">as</span> cur:
+        cur.execute(<span class="str">"SELECT count(*) FROM raw.dead_letter_events"</span>)
+        count = cur.fetchone()[<span class="kw">0</span>]
+
+    <span class="kw">if</span> count &gt; DEAD_LETTER_ALERT_THRESHOLD:
+        <span class="cm"># Raising fails this task visibly in the UI and in `airflow dags test`'s</span>
+        <span class="cm"># own output -- a human (or a future on_failure_callback, Day 35's</span>
+        <span class="cm"># mechanism) has something concrete to act on instead of a silent log line.</span>
+        <span class="kw">raise</span> ValueError(
+            <span class="str">f"dead-letter count {count} exceeds threshold {DEAD_LETTER_ALERT_THRESHOLD}"</span>
+        )
+
+    <span class="kw">print</span>(<span class="str">f"checked raw.dead_letter_events: {count} row(s), within threshold"</span>)</code></pre>
+<p>Nothing about <code>trigger_rule=TriggerRule.ALL_DONE</code> changes — Day 45 already set that correctly, and it's still the reason this task runs at all on a failed <code>dbt_build</code>. Today's only job is giving the task body something real to decide with: query, compare, raise or don't.</p>
+<p>Two choices worth defending out loud, because a plausible-looking first draft gets both wrong in ways that still parse. First, <code>count &gt; DEAD_LETTER_ALERT_THRESHOLD</code>, not <code>&gt;=</code>: the threshold is meant to read as "this many is still fine," so a count exactly at the limit should pass, not fail — an off-by-one here silently tightens the threshold by one without anyone choosing that. Second, the query counts <em>every</em> row in the table, not just rows since the last check. That's a deliberate simplification, not an oversight: Day 41's table has no "already seen" marker column, so today's check is a running total, not a per-run delta — it will alert exactly once, stay alerting on every run after until the dead-lettered rows are cleared or investigated, and that's named honestly here as a real limitation rather than implied as a windowed count it isn't.</p>
+
+<h2>4 · Verify: import the real DAG module, read the threshold and trigger rule back</h2>
+<p>This sandbox hits the same <code>airflow db migrate</code>/<code>airflow dags test</code> interactive-approval gate NOTES.md has logged every round since Day 35 (now round 12, Days 35-46, still with no human present to grant it) — so, same as Day 45's own trigger-rule confirmation, today verifies by importing the DAG file as a plain Python module, which needs no metadata database and therefore never touches that gate:</p>
+<pre><code><span class="kw">cd</span> dags &amp;&amp; uv run --with <span class="str">"apache-airflow==3.3.1"</span> --with <span class="str">"psycopg[binary]"</span> python3 -c <span class="str">"
+import food_delivery_pipeline as m
+print('dag_id:', m.dag.dag_id)
+for t in sorted(m.dag.tasks, key=lambda t: t.task_id):
+    print(t.task_id, '->', t.trigger_rule)
+print('threshold:', m.DEAD_LETTER_ALERT_THRESHOLD)
+"</span></code></pre>
+<p>Expected, confirmed live this round against a scratch copy of exactly this file:</p>
+<pre><code>dag_id: food_delivery_pipeline
+check_dead_letters -&gt; TriggerRule.ALL_DONE
+dbt_build -&gt; TriggerRule.ALL_SUCCESS
+load_raw -&gt; TriggerRule.ALL_SUCCESS
+threshold: 5</code></pre>
+<p>That confirms the module imports cleanly, Day 45's trigger rule survived untouched, and today's constant exists — but not that the <code>raise</code> actually fires at the right count. With a real Postgres up (<code>docker compose up -d postgres</code>), confirm the two boundary cases directly:</p>
+<pre><code><span class="cm"># below/at threshold: should NOT raise</span>
+docker compose exec -T postgres psql -U fdp -d fdp -c <span class="str">"DELETE FROM raw.dead_letter_events;"</span>
+<span class="cm"># replant Day 41's two poison events if you want a nonzero, still-under-threshold count, then:</span>
+uv run --with <span class="str">"psycopg[binary]"</span> python3 -c <span class="str">"
+import sys; sys.path.insert(0, 'dags')
+from food_delivery_pipeline import check_dead_letters
+check_dead_letters()
+"</span>
+<span class="cm"># over threshold: SHOULD raise</span>
+docker compose exec -T postgres psql -U fdp -d fdp -c <span class="str">"
+INSERT INTO raw.dead_letter_events (topic, kafka_partition, kafka_offset, raw_value, error)
+SELECT 'order_events', 0, g, 'x', 'synthetic' FROM generate_series(1, 10) g;"</span>
+uv run --with <span class="str">"psycopg[binary]"</span> python3 -c <span class="str">"
+import sys; sys.path.insert(0, 'dags')
+from food_delivery_pipeline import check_dead_letters
+check_dead_letters()
+"</span></code></pre>
+<p>Expected: the first call prints <code>checked raw.dead_letter_events: N row(s), within threshold</code> and returns normally; the second raises <code>ValueError: dead-letter count 10 exceeds threshold 5</code>.</p>
+<div class="callout"><strong>What this round could and couldn't run live:</strong> this sandbox has no learner Postgres/Kafka stack, so the two boundary-case commands above are given as the correct next check, not claimed as captured output from a live database this round — the same honest-disclosure convention Days 17, 41, 43 and 44 each used for their own simulation-vs-live gaps. What <em>was</em> confirmed live: the DAG module import above (real output, shown exactly), and the threshold logic itself, verified in a standalone script against a mocked cursor returning 0, 5, 6 and 50 rows — confirming <code>count &gt; THRESHOLD</code> (not <code>&gt;=</code>) passes at exactly 5 and only raises starting at 6, the precise boundary Section 3 argues for. Both the DAG file and the verification script were separately checked with <code>py_compile</code>, clean.</div>
+
+<div class="interview">
+<p><strong>Q: "Walk me through a monitoring check you built for your pipeline. Why does it fail sometimes, and is that a bug?"</strong> A strong answer, out loud: <em>"After dbt build runs, no matter whether it passed or failed — I set trigger_rule=all_done for that — a task counts rows in a dead-letter table my Kafka consumer writes poison messages into. A couple of dead-lettered rows between checks is expected and fine, so the task only fails above a small fixed threshold, which turns a routine log line into a visible, actionable Airflow failure exactly when there's a real pattern of bad events, not a one-off. It's a running total, not a per-run delta, since the table has no seen-already marker — so once it trips, it keeps failing every run until someone clears or fixes the underlying cause, which is a real, named limitation, not a hidden one."</em> The signal: stating the threshold's off-by-one direction and the running-total-not-delta limitation without being asked, not just "it checks a count."</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers replacing Day 45's stub body with a real <code>psycopg</code> <code>COUNT(*)</code> against Day 41's dead-letter table and a fixed-threshold <code>raise</code>. It does not cover sending an actual notification (Slack, email, PagerDuty) on that failure — Day 35's <code>on_failure_callback</code> mechanism is the right hook for that, named here only as the next natural step, not built today — or a per-run delta instead of a running total, which would need a cursor the same shape as Day 38's <code>Variable</code>-based growth check, deliberately left as a named limitation rather than a second feature bolted on this round.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Day 41 is the lesson that actually ran CREATE TABLE raw.dead_letter_events -- the only dead-letter table this course has ever created. Day 45's own code comment named it raw.order_events_dead_letter, a plain mistake in a comment that was never executed or parsed against a real schema, so nothing caught it until today's real query needed the correct name.">
+    <p class="stem">What table name does today's real query use, and why did Day 45's comment get it wrong?</p>
+    <button class="opt" data-ok><code>raw.dead_letter_events</code>, which is the table Day 45's comment misnamed</button>
+    <button class="opt">A brand new table, since Day 41 created one</button>
+    <button class="opt"><code>raw.order_events</code>, since dead letters just share the main table</button>
+  </div>
+  <div class="q" data-why="Day 45's stub printed one fixed string no matter what Day 41's table actually held, so a zero-row and a five-hundred-row dead-letter table produced identical output -- indistinguishable from a check never wired to real data. A real count with no comparison against any threshold still can't decide pass or fail; today's raise is what turns the number into an actual, actionable judgment.">
+    <p class="stem">Why wasn't Day 45's stub already a working dead-letter check, even though its trigger rule was already correct?</p>
+    <button class="opt" data-ok>it never queried real data or compared it against anything</button>
+    <button class="opt"><code>all_done</code> itself was the wrong trigger rule for this task</button>
+    <button class="opt"><code>PythonOperator</code> simply cannot ever run any query under any circumstance</button>
+  </div>
+  <div class="q" data-why="Using count > THRESHOLD, not >=, means a count exactly at the threshold still passes -- the threshold is meant to read as 'this many is still fine.' Using >= instead would silently tighten the limit by one, failing at a count the threshold was supposed to still tolerate, without anyone having chosen that on purpose.">
+    <p class="stem">Why does today's check use <code>count &gt; THRESHOLD</code> rather than <code>count &gt;= THRESHOLD</code>?</p>
+    <button class="opt" data-ok>a count right at the limit should still be fine</button>
+    <button class="opt">psycopg only ever supports the strict <code>&gt;</code> operator here itself</button>
+    <button class="opt">Airflow silently rewrites every single <code>&gt;=</code> comparison at parse time</button>
+  </div>
+  <div class="q" data-why="Day 41's dead_letter_events table has no column marking a row as already seen by a prior check, so today's COUNT(*) is necessarily a running total over every row ever inserted, not new rows since the last run. Once the total crosses the threshold it keeps failing on every subsequent run, even with zero new poison events, until the rows are cleared or investigated -- a real, named limitation, not a windowed count the lesson pretends it has.">
+    <p class="stem">Why does today's check keep failing on every run after it first trips, even with no new poison events?</p>
+    <button class="opt" data-ok>it counts every row inserted ever, not rows since the last run</button>
+    <button class="opt">Airflow caches the first-ever failure and simply ignores every single later run</button>
+    <button class="opt"><code>all_done</code> itself forces every single future run to fail from then on</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> per <code>RESOURCES.md</code>, Airflow's own <a href="https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/tasks.html">Tasks</a> docs (already Day 35 and Day 45's primary source) cover a task's failure behavior at the API-reference level — today's specific change is ordinary Python inside an existing task body, not a new Airflow mechanism, so no new citation is needed there. <a href="https://docs.getdbt.com/docs/build/data-tests">dbt's own data-tests docs</a>, Day 3's primary source, are worth rereading side by side with today's lesson: a fixed-threshold <code>raise</code> inside a Python task and a <code>dbt build</code> test failure are two different mechanisms arriving at the same idea — bad data should make something visibly fail, not log quietly.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 46.<br>
+<strong>Next up:</strong> the <code>airflow db migrate</code>/<code>airflow dags test</code> approval-gate block is now twelve rounds running (35-46) with no interactive approval available to any of them — still worth a human granting it once, so a future round can confirm today's two boundary-case <code>psql</code>/Python commands against a real scheduler run rather than a module-import read. Separately, today's own scope line named two real next steps rather than building them: a real notification on failure via Day 35's <code>on_failure_callback</code>, and a per-run delta via a Day-38-style <code>Variable</code> cursor instead of a running total — either is a concrete, non-speculative pick for whoever generates next.<br><br>
+💬 Anything unclear — the threshold's off-by-one direction, or why a running total differs from a per-run delta? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

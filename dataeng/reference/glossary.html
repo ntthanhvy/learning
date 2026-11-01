@@ -369,6 +369,12 @@
   <tr><td>alert threshold</td><td>giữ nguyên "alert threshold" — giới hạn số cố định 1 check so sánh với số đo thực tế để quyết định pass/fail; ở đây là số dòng dead-letter tối đa coi là bình thường giữa 2 lần check, vượt qua thì chính cái check này phải fail để báo vấn đề</td><td>A fixed numeric limit a monitoring check compares a live measurement against, deciding pass or fail by that comparison alone — here, the maximum number of dead-lettered rows considered normal between two checks before the check itself should fail and surface the problem. Confirmed this round with a mocked-cursor script exercising exactly the boundary the lesson argues for: a count equal to the threshold still passes, and only a count one past it raises.</td></tr>
 </table>
 
+<h2 id="day47">Day 47 — Closing Day 46's other TODO: a per-run delta, not a running total</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>delta (monitoring check)</td><td>giữ nguyên "delta" — hiệu số giữa số đo hiện tại và số đo đã lưu lại lần check trước (qua 1 cursor), dùng để biết "có gì MỚI" từ lần trước đến giờ, khác với running total (tổng dồn từ đầu) vốn không bao giờ giảm lại sau khi vượt ngưỡng</td><td>The difference between a check's current measurement and the measurement it stored on its own last run (via a cursor), used to answer "what's new since last time" rather than "what's the total ever." Confirmed this round with a mocked cursor: a running total sitting at 50 with zero new rows since the prior check correctly produces a delta of 0 and no alert, whereas Day 46's running-total version would have kept alerting on that same table forever.</td></tr>
+</table>
+
 <script src="../assets/nav.js"></script>
 </body>
 </html>

@@ -9751,3 +9751,113 @@
   broadly), still deliberately out of scope per MISSION.md's "concepts first"
   rule; and the backfill-missing-Lesson-117-NOTES-entry gap flagged above,
   worth a deliberate look next round rather than left indefinitely unexplained.
+- 2026-11-01 generation (Lesson 119, headless run): idempotency check first —
+  confirmed no `lessons/0119-*.html` on disk and no `n: 119`/
+  `date: "2026-11-01"` entry in `nav.js` before writing anything (highest
+  prior lesson was 118, dated 2026-10-31), and no 2026-11-01 entry already in
+  this file. The orchestrator handed in confirmed context rather than a
+  pre-decided topic: `course_progress` had no `lesson_generated` row for
+  backend dated 2026-11-01 yet, and no quiz/kata/lesson_completed signal for
+  any course since 2026-10-15 (backend's own Lesson 102, all `ok:true`) — so
+  normal steady-paced fresh content was the call, not a review day. Topic
+  choice: reread every lesson title end to end for a Go-only resilience/
+  concurrency-control mechanism from the Lesson 11–50 stretch still missing
+  its C# mirror, the same gap-shape this run has now closed eight times
+  running (rate limiting/retry/circuit-breaker/bulkhead/worker-pools/
+  graceful-shutdown/health-checks, Lessons 112–118). Lesson 33's Postgres
+  version-column optimistic locking stood out as the next unclosed one.
+  Confirmed via case-insensitive grep across every lesson and the glossary
+  that `ConcurrencyCheck`/`RowVersion`/`IsRowVersion`/`DbUpdateConcurrencyException`/
+  `[Timestamp]` had zero hits anywhere outside today's own new content, and
+  that `optimistic lock`/`version column` existed only as Lesson 33's own
+  Go/Postgres-side material — a genuinely unaddressed gap, not a half-covered
+  one. Read `MISSION.md`, this file's tail (full run from 2026-10-28 through
+  2026-10-31), Lessons 33 and 118 in full for exact HTML/quiz/callout/
+  scope-line/comparison-table structure, and `nav.js`'s and `glossary.html`'s
+  tails, all before writing anything. Verified the C# half directly against a
+  fetched Microsoft Learn page before writing any prose: `WebFetch` against
+  `https://learn.microsoft.com/en-us/ef/core/saving/concurrency` returned the
+  full conceptual page cleanly (consistent with this run's standing finding
+  that `learn.microsoft.com` fetches reliably even when `go.dev` doesn't),
+  confirming verbatim the `[ConcurrencyCheck]`/`IsConcurrencyToken()`
+  (application-managed) and `[Timestamp]`/`IsRowVersion()`
+  (database-managed, e.g. SQL Server's `rowversion` column) configuration
+  pair, the generated `UPDATE ... WHERE [PersonId] = @p1 AND [Version] = @p2`
+  SQL shape — the exact mechanism Lesson 33's hand-written
+  `WHERE id = $2 AND version = $3` mirrors — `DbUpdateConcurrencyException`
+  being thrown from `SaveChanges()`/`SaveChangesAsync()` on conflicting
+  updates and deletes (but explicitly not inserts, which raise a
+  provider-specific unique-constraint exception instead), and the
+  current-values/original-values/database-values three-way resolution
+  pattern including `DbUpdateConcurrencyException.Entries`,
+  `entry.GetDatabaseValuesAsync()`, and `entry.OriginalValues.SetValues()`.
+  `dotnet --version` was attempted directly this round to check whether the
+  approval gate had lifted since Lesson 118's round — it still required
+  approval and was not re-attempted with a workaround, consistent with every
+  round since Lesson 103; the C# snippets were instead checked by hand
+  against the fetched docs' own code examples (the `[ConcurrencyCheck]`/
+  `[Timestamp]` attribute usage, the `catch (DbUpdateConcurrencyException)`
+  resolution block) and confirmed syntactically consistent — brace/semicolon
+  balance, correct `await`/`async` usage, no undeclared identifiers — though
+  this falls short of an actual compile and is flagged here as such. No Go
+  scaffold was written or changed this round since Lesson 33's existing
+  Go/Postgres snippet is only referenced for comparison, not modified, so
+  nothing new needed `go build`/`go vet`; no scratch toolchain directory was
+  needed for the same reason. Two new terms, each checked against the
+  glossary first via case-insensitive grep across the whole file — zero
+  collisions confirmed before writing: `concurrency token`,
+  `[Timestamp] / IsRowVersion()`. Added the two new rows immediately after
+  Lesson 118's `rate limiting partition` row, same Term/Tiếng Việt (dev-style)/
+  In software column order, confirmed by inspecting the file's actual last
+  row directly rather than assumed. Verification performed mechanically via
+  Node scripts run directly in this session, written with the `Write`/`Bash`
+  tools: (1) a quiz-word-count check scoped per `<div class="q">` block,
+  splitting every option both via `.split(/\s+/)` and `.split(" ")` — first
+  draft landed uneven across all four questions (spreads of 1-3 words per
+  option), fixed through several rewrite-and-recount cycles per option,
+  converged to exactly 11/11/11/11, 12/12/12/12, 12/12/12/12, and
+  12/12/12/12 across the four questions, both counting methods agreeing
+  exactly, exactly one `data-ok` and four options per question confirmed the
+  same way; (2) an HTML tag-balance check across div/p/code/button/script/
+  dfn/pre/h2/h1/em/strong/a/table/tr/th/td — clean (div 7/7, p 16/16, code
+  58/58, button 16/16, script 3/3, dfn 2/2, pre 4/4, h2 6/6, h1 1/1, em 0/0,
+  strong 3/3, a 2/2, table 1/1, tr 6/6, th 8/8, td 10/10); a separate table/
+  tr/td/p/div/html/head/body/title/script balance check on `glossary.html`
+  after its two-row addition — also balanced (tr 385/385, td 1152/1152),
+  plus a duplicate-term scan across all 384 first-column entries — zero
+  duplicates; (3) a raw-unescaped-`&` regex scan across both files — zero
+  hits; (4) the lesson's `<dfn` tags grepped and confirmed to carry both
+  `data-en=` and `data-vn=` — exactly 2 `dfn` tags, matching the 2 new terms,
+  no orphaned attribute; (5) `node --check` against `assets/nav.js`,
+  `assets/gloss.js`, and `assets/quiz.js` — all clean, both before and after
+  the `nav.js` edit; (6) a basic HTML well-formedness check (exactly one
+  `<!DOCTYPE html>`, one `<html>`/`</html>`, three script tags with
+  `gloss.js`/`quiz.js`/`nav.js` in that order) — clean; (7) a grep for stray
+  markdown-style backticks and `*emphasis*` left over from drafting — none
+  found. Registered Lesson 119 in `nav.js` (date 2026-11-01, today's actual
+  generation date) right after `n: 118`, confirmed exactly one matching
+  `n: 119` entry and exactly one matching `0119-*.html` file on disk
+  afterward. No new RESOURCES.md line added this round — the fetched EF Core
+  concurrency-conflicts page is Microsoft's own docs, same domain already
+  covered by the standing `learn.microsoft.com` entries' pattern, and
+  RESOURCES.md's existing per-topic grouping convention only adds a fresh
+  line per newly-cited URL; this round reused no prior URL and cites the
+  fetched page inline in the lesson's own "Go deeper" section instead,
+  consistent with how heavily-cited single-mechanism sources have been
+  handled before. `bin/record-progress` ran clean on the first attempt this
+  round (`recorded: backend/lesson_generated day=119
+  lesson=0119-optimistic-concurrency-efcore-rowversion.html`). No new
+  `learning-records/` file this round — the topic came from a fresh gap scan
+  of existing lesson titles, not a new surprise about the learner's baseline
+  or a quiz outcome. Candidates spotted but not picked this round, still
+  worth checking fresh next time: Go's `select`-statement arbitration rules,
+  now deferred for a ninth round running, same standing finding that the
+  blocker is the fetched page's own content truncation, not a permission
+  gate or URL/mirror choice; Polly (or a .NET resilience-library survey more
+  broadly), still deliberately out of scope per MISSION.md's "concepts
+  first" rule; Lesson 29's outbox pattern, Lesson 49's dead-letter queues,
+  and Lesson 26's idempotency keys, all still Go-only and unported, spotted
+  during this round's gap scan but optimistic locking was picked first as
+  the closer match to the Lesson 112–118 version-check-on-write family; and
+  the backfill-missing-Lesson-117-NOTES-entry gap flagged two rounds ago,
+  still not independently investigated.

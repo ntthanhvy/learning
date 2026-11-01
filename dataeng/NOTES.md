@@ -5408,3 +5408,107 @@ along the Phase 2 spine, adapted to the learning records.
   Day-38-style `Variable` cursor instead of a running total. Either is a
   direct pick; a fresh content audit (Days 38/39/41/42/43/44's method) or
   `PLAN.md` spine item remains the fallback if neither appeals by then.
+
+- 2026-11-01 (headless run, Day 47 generated): forty-seventh lesson,
+  `0047-airflow-dead-letter-delta-cursor.html`. Idempotency check first —
+  confirmed no `lessons/0047-*.html` on disk and no 2026-11-01 entry in this
+  file before writing anything (highest prior lesson was 46, dated
+  2026-10-31). No DB access attempted directly this round; the orchestrator's
+  own prior context found no `course_progress` row for dataeng dated
+  2026-11-01 and no quiz/kata/lesson_completed signal recorded recently, so
+  pacing continued steady/sequential on that context alone. Read `MISSION.md`
+  in full, `PLAN.md`, `RESOURCES.md`, `assets/nav.js`'s full `LESSONS` array,
+  and this file's own tail back through Day 46's close before picking a topic.
+  **Topic choice:** Day 46's own closing section named two concrete next steps
+  directly, not as a scan-for-a-gap exercise — a real `on_failure_callback`
+  notification on the dead-letter alert (Day 35's mechanism), or a per-run
+  delta via a Day-38-style `Variable` cursor instead of a running total. Took
+  the second: the notification path needs a real external target (Slack/
+  email/PagerDuty) this course's own no-paid-services constraint keeps out of
+  scope, while the delta path reuses a mechanism this course has already
+  built in full (Day 38's `check_order_events_grew`) against a different
+  table, with nothing new required to make it work.
+  **Content:** one new import (`Variable`, from `airflow.sdk`, alongside the
+  existing `psycopg` import inside `check_dead_letters`), one new constant
+  (`DEAD_LETTER_CURSOR_KEY = "dead_letter_last_count"`), and a rewritten
+  `check_dead_letters` body: reads `last_count` via `Variable.get(..., 
+  default="0")` cast to `int` (Day 38's exact pattern), computes
+  `new_since_last_check = current_count - last_count`, writes the Variable
+  forward unconditionally (before the `raise`, not after — the opposite order
+  from Day 38's own cursor, and defended explicitly in Section 3: today's
+  `COUNT(*)` is real and current regardless of whether it alerts, so the
+  cursor must still advance on an alerting run or the exact Day 46 bug
+  resurfaces in a new form), then raises only if the delta — not the running
+  total — exceeds `DEAD_LETTER_ALERT_THRESHOLD`. `trigger_rule=
+  TriggerRule.ALL_DONE` (Day 45) and the threshold constant itself (Day 46)
+  are both untouched. Section 2 named the one real asymmetry with Day 38
+  directly: Day 38's growth check raises on no-growth to suppress its own
+  `outlets=` Asset trigger (the only lever `outlets=` respects); today's task
+  has no outlet at all and raises on the opposite condition — too much new
+  bad data, not too little growth.
+  No pandas, no Python-language teaching, no re-derivation of backend
+  idempotency concepts — confirmed by a prose-only read before shipping; the
+  one explicit bridge is a single sentence pointing at Day 38's XCom-vs-
+  Variable argument by name rather than re-deriving it.
+  **Verification:** ran a six-case mocked-cursor script in a scratch dir at
+  the repo root (`.scratch-dataeng-1101/`, same `/tmp`-unavailable constraint
+  recent rounds hit), the same shape Day 46 used for its own threshold
+  boundary — `(last_count, current_count)` pairs covering first-check-zero,
+  first-check-at-threshold, first-check-over-threshold, a small later delta,
+  a large later delta, and the case that actually distinguishes today's fix
+  from Day 46's bug: `(50, 50)`, a large running total with zero new rows,
+  which correctly produced `delta=0, alert=False` — Day 46's version would
+  have alerted on that same state forever. All six matched the predicted
+  output exactly. Also wrote a full scratch copy of the edited
+  `check_dead_letters` plus a minimal DAG wrapper and ran `py_compile` against
+  `apache-airflow==3.3.1` (installed via `uv run --with`), clean. The
+  `airflow db migrate`/`airflow dags test` interactive-approval gate logged
+  every round since Day 35 blocked again this round (now fourteen rounds,
+  35-47) — confirmed before writing Section 4, not assumed from memory; the
+  three-run verify cycle (empty → 10 synthetic poison rows → immediate re-run
+  with nothing new) is given in the lesson as the correct next check, stated
+  honestly as not captured live this round, the same disclosure convention
+  Days 17, 38, 41, 43, 44 and 46 each used. Deleted the scratch directory
+  entirely afterward (confirmed via a directory-listing attempt finding
+  nothing).
+  Ran a Node tag-balance/bare-`&`/dfn-attribute script and a separate quiz
+  word-count check, same shape as recent rounds'. Tag balance passed on the
+  first pass: div 8/8, p 23/23, code 46/46, button 12/12, script 3/3, dfn
+  1/1, pre 6/6, h2 7/7, h1 1/1, em 10/10, strong 5/5, a 3/3, zero bare `&`.
+  The first quiz draft came up uneven on all four questions (12/10/9,
+  11/11/10, 15/11/13, 12/12/11) — rebalanced through several edit-and-recount
+  passes, computing word counts for candidate option text in a scratch Node
+  snippet before writing each final version into the file, to a final
+  10/10/10 three times over and 11/11/11 on the fourth. A separate pass on
+  `reference/glossary.html` after adding this round's new section confirmed
+  it stayed balanced too (h2 46/46, table 46/46, tr 178/178, td 396/396, th
+  138/138), zero bare `&`.
+  Added one new glossary term, `delta (monitoring check)`, under a new Day 47
+  section, after grepping case-insensitively first and confirming no existing
+  row covered it — `Variable` (Day 38), `all_done` (Day 45) and `alert
+  threshold` (Day 46) are all pure reuse of existing glossary rows, not
+  retaught. No new `RESOURCES.md` line added — today's Airflow citations
+  reuse Day 22/38's existing Variables-docs line and Day 35/45/46's existing
+  Tasks-docs line verbatim, since today's mechanism (Variable cursor, `raise`
+  inside a task body) is pure reuse of both, not a new Airflow feature.
+  Registered Lesson 47 in `assets/nav.js` right after the `n: 46` entry,
+  dated 2026-11-01 (`node --check` clean on `nav.js`, `gloss.js` and
+  `quiz.js`, the last two untouched but re-checked per habit). Ran
+  `bin/record-progress dataeng lesson_generated --day 47 --lesson
+  0047-airflow-dead-letter-delta-cursor.html --detail '{"by":"headless"}'`
+  from the repo root at the end of this round; succeeded.
+  `dataeng/learning-records/` was not touched this round — today's pick came
+  from directly executing Day 46's own named open loop, not a new durable
+  fact about the learner distinct from the single 2026-09-14 baseline record
+  on file.
+  **Next up:** the `airflow db migrate`/`airflow dags test` approval-gate
+  block is now fourteen rounds running (35-47) with no attempt made this
+  round specifically beyond the same already-logged live reconfirmation —
+  still worth a human granting it once for whoever next has one available.
+  Both of Day 46's named next steps are now resolved or clearly scoped: today
+  closed the per-run-delta half, and the notification half remains explicitly
+  out of scope pending a real external target. A future round most likely
+  needs a fresh gap-scan across `PLAN.md`'s spine (dbt, Kafka or Airflow)
+  rather than another TODO-closing round, since the TODO chain begun at Day
+  21/38 and continued at Day 45/46/47 has no further named loose end left in
+  this course's own lessons.

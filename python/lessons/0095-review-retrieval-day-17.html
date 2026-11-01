@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 95 · Review day 17: retrieval across Days 92-94</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 95 · ~20 min · 1 Nov 2026</p>
+<h1>Review day 17: retrieval across Days 92-94</h1>
+<p class="byline">Day 91 (review day 16) covered Days 88, 89, and 90. Since then, three fresh days ran in a row — Day 92 (<code>weakref</code>), Day 93 (<code>sqlite3</code>), Day 94 (<code>ast.literal_eval</code>) — and both Day 93's and Day 94's own next-day notes flagged this exact span as matching the course's settled three-fresh-lesson review trigger (Day 71 reviewed Days 68-70, Day 75 reviewed Days 72-74, Day 79 reviewed Days 76-78, Day 83 reviewed Days 80-82, Day 87 reviewed Days 84-86, Day 91 reviewed Days 88-90). This is that review — a seventeenth retrieval day, covering exactly Days 92, 93, and 94.</p>
+
+<div class="callout"><strong>Why today, specifically, and why not a fourth fresh day:</strong> a fresh-gap grep ran first anyway, matching every prior review day's own discipline — it searched all 94 lessons, every practice file, <code>reference/glossary.html</code>, and <code>RESOURCES.md</code> case-insensitively for stdlib corners named but not yet taught (<code>struct</code>, <code>getpass</code>, <code>string.Template</code>, <code>timeit</code>, <code>array</code>, <code>types.SimpleNamespace</code>, <code>importlib</code>, <code>locale</code>, plus <code>socket</code> and <code>threading</code> as modules in their own right — all still genuinely zero-hit, carried forward from Day 94's own notes). None is a strong enough standing candidate to override the cadence math, which already lands exactly on three fresh lessons since Day 91 — so today pays down retrieval on Days 92-94 instead, and the next fresh day starts its topic search from scratch (though it can re-check this list quickly first).</div>
+
+<h2>1 &middot; Three questions, in the original teaching order</h2>
+<p>Answer each out loud or on paper <em>before</em> reading the fold-out answer. If one is shaky, note it and go fix it in the practice file below rather than only rereading the old lesson.</p>
+
+<p><strong>Day 92 &mdash; <code>weakref</code>.</strong> After <code>r = weakref.ref(obj)</code> and then <code>del obj</code>, what does calling <code>r()</code> return, and why doesn't holding <code>r</code> itself keep <code>obj</code> alive?</p>
+<div class="callout">Fold-out answer: calling <code>r()</code> after <code>del obj</code> returns <code>None</code>, confirmed live — the object is collected the moment every <em>strong</em> reference to it is gone, and a <code>weakref.ref</code> never counts as one of those. Holding <code>r</code> only gives a way to ask "is it still alive, and if so, what is it" on demand; it adds no reference that the garbage collector would ever treat as a reason to keep <code>obj</code> around.</div>
+
+<p><strong>Day 93 &mdash; <code>sqlite3</code>.</strong> Why does a <code>?</code> placeholder protect a query against SQL injection where building the same query with an f-string does not, and what does <code>with con:</code> actually do to the connection once the block ends?</p>
+<div class="callout">Fold-out answer: a <code>?</code> placeholder passes the value through a separate argument, and <code>sqlite3</code> escapes it correctly as data no matter what it contains — a string like <code>"Ada' OR '1'='1"</code> is searched for literally, confirmed live, instead of changing what the query means the way pasting that same text into an f-string would. <code>with con:</code> only wraps the transaction — it commits on a clean exit or rolls back if an exception escapes — and does <strong>not</strong> close the connection; <code>con</code> is still fully open and usable for more queries right after the block ends.</div>
+
+<p><strong>Day 94 &mdash; <code>ast.literal_eval</code>.</strong> Why does <code>ast.literal_eval("1 + 2")</code> raise <code>ValueError</code> instead of quietly returning <code>3</code>, and what's the difference between that failure and what <code>ast.literal_eval("[1, 2,")</code> raises instead?</p>
+<div class="callout">Fold-out answer: <code>literal_eval</code> walks the parsed syntax tree and accepts only literal nodes — numbers, strings, bytes, <code>True</code>/<code>False</code>/<code>None</code>, and lists/tuples/dicts/sets built from those. <code>1 + 2</code> parses as a <code>BinOp</code> node, not a literal, so it's rejected with <code>ValueError</code> even though evaluating it would be completely harmless — the function checks syntax shape, not whether a result would be safe. <code>"[1, 2,"</code> isn't valid Python syntax at all (an unclosed bracket), so parsing itself fails first and raises <code>SyntaxError</code> instead — a parseable-but-disallowed expression and genuinely broken syntax are two different failure shapes, and code calling <code>literal_eval()</code> on uncontrolled input should catch both.</div>
+
+<div class="callout"><strong>Where pandas/NumPy go from here:</strong> nothing pandas- or NumPy-specific today &mdash; this review only revisits Days 92-94's object-lifetime mechanics, embedded-database SQL, and safe literal parsing, none of which needs a <code>DataFrame</code> or array to demonstrate.</div>
+
+<h2>2 &middot; Why these three, and why no new terms today</h2>
+<p>Same interleaving logic as every prior review day: a tool for letting an object be collected even while something still points at it, a tool for running real SQL with no server to stand up, and a tool for parsing Python-literal text without ever risking code execution &mdash; three different mental models pulled from three lessons, not one idea restated three ways. They also share a quieter throughline worth naming: all three are about a program refusing to trust something by default &mdash; a cache refusing to assume it should keep an object alive just because it saw it once, a query refusing to assume a value is safe to paste into SQL text, a parser refusing to assume a disallowed-but-parseable expression is harmless just because the result looks numeric. Recognizing which of those three "don't assume it's safe" shapes a given problem actually needs &mdash; not just recalling the function names &mdash; is the retrieval goal today.</p>
+<p>No new jargon is introduced today on purpose &mdash; every term revisited already has a glossary entry under its original day. The standing fresh-gap candidates remain on record from Day 94's own notes &mdash; <code>struct</code>, <code>getpass</code>, <code>string.Template</code>, <code>timeit</code>, <code>array</code>, <code>types.SimpleNamespace</code>, <code>importlib</code>, <code>locale</code>, plus <code>socket</code> and <code>threading</code> as modules in their own right &mdash; still genuinely zero-hit as of today's own scan, worth a quick re-check next round rather than a scan from scratch, though a fresh scan costs little and stays the safer default given how fast this list turns over.</p>
+
+<h2>Try it &mdash; self-checking practice (~20 min)</h2>
+<p>Open <code>practice/95_review_retrieval_day_17.py</code>, follow the TODOs, and re-run until every check prints &check;:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/95_review_retrieval_day_17.py</code></pre>
+<p>Standard library only &mdash; no <code>--with</code> flag needed. No new syntax: every mechanism below was taught in Days 92, 93, and 94. Exercises: building a <code>weakref.ref()</code> and a <code>WeakValueDictionary</code>-backed cache and confirming an entry disappears on its own once nothing strong holds it, running a parameterized <code>sqlite3</code> query and confirming an injection-shaped string is searched for literally instead of breaking the query, and using <code>ast.literal_eval()</code> to tell a parseable-but-disallowed expression apart from genuinely broken syntax.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory &mdash; no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A weak reference never counts toward keeping its target alive -- only strong references (a variable, a list/dict entry, an attribute) do that. Once every strong reference is gone the object is collected regardless of how many weakref.ref objects still point at it, and calling one afterward returns None instead of raising or returning stale data.">
+    <p class="stem">Why does <code>r()</code> return <code>None</code> once every strong reference to the object is gone?</p>
+    <button class="opt" data-ok>weak references never keep their own target object alive</button>
+    <button class="opt">weakref.ref objects always expire right after their one call</button>
+    <button class="opt">calling r() itself always deletes the object being watched</button>
+  </div>
+  <div class="q" data-why="sqlite3 escapes a ? placeholder's value correctly as data no matter what it contains, so a string like Ada' OR '1'='1 is searched for literally, never interpreted as SQL syntax. An f-string pastes the raw text straight into the query, so that same value could change what the query means entirely -- the textbook SQL injection shape a placeholder closes off.">
+    <p class="stem">Why does a <code>?</code> placeholder stop SQL injection where an f-string-built query does not?</p>
+    <button class="opt" data-ok>the placeholder's value is always escaped correctly as data</button>
+    <button class="opt">placeholders silently reject any non-numeric value that is given</button>
+    <button class="opt">f-strings cannot ever be used inside any execute call</button>
+  </div>
+  <div class="q" data-why="literal_eval walks the parsed syntax tree and only accepts literal nodes -- numbers, strings, bytes, True/False/None, and lists/tuples/dicts/sets built from those. 1 + 2 parses fine as a BinOp node, which is not a literal, so it raises ValueError even though the result would be harmless. An unclosed bracket like [1, 2, is not valid syntax at all, so parsing fails first and raises SyntaxError instead -- a different failure shape entirely.">
+    <p class="stem">Why do <code>ast.literal_eval("1 + 2")</code> and <code>ast.literal_eval("[1, 2,")</code> raise two different exception types?</p>
+    <button class="opt" data-ok>one here is parseable but disallowed; the other fails to parse</button>
+    <button class="opt">only the second input here actually contains any real syntax error</button>
+    <button class="opt">literal_eval simply alternates its own exception type on every single call</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> no single new source today &mdash; revisit each lesson's own citation (<a href="https://docs.python.org/3/library/weakref.html"><code>weakref</code></a> for Day 92, <a href="https://docs.python.org/3/library/sqlite3.html"><code>sqlite3</code></a> for Day 93, and <a href="https://docs.python.org/3/library/ast.html#ast.literal_eval"><code>ast.literal_eval()</code></a> for Day 94), all already listed in <code>RESOURCES.md</code>.</p>
+
+<p class="next">No new terms today &mdash; this is a review day, and every term revisited already has a glossary entry under its original day (<a href="../reference/glossary.html#day92">92</a>, <a href="../reference/glossary.html#day93">93</a>, <a href="../reference/glossary.html#day94">94</a>).<br>
+Standing fresh-gap candidates remain on record &mdash; <code>struct</code>, <code>getpass</code>, <code>string.Template</code>, <code>timeit</code>, <code>array</code>, <code>types.SimpleNamespace</code>, <code>importlib</code>, <code>locale</code>, <code>socket</code>, <code>threading</code> &mdash; worth a quick re-check next round rather than a scan from scratch.<br><br>
+&#128172; Anything unclear across any of today's three? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

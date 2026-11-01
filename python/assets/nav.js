@@ -196,6 +196,8 @@
       file: "lessons/0093-sqlite3-embedded-database.html" },
     { n: 94, date: "2026-10-31", title: "ast.literal_eval: parsing Python literals safely",
       file: "lessons/0094-ast-literal-eval.html" },
+    { n: 95, date: "2026-11-01", title: "Review day 17: retrieval across Days 92-94",
+      file: "lessons/0095-review-retrieval-day-17.html" },
   ];
 
   const REFS = [

@@ -59,6 +59,7 @@
     { n: 44, date: "2026-10-29", title: "dbt: testing an event sequence, not just a value", file: "lessons/0044-dbt-status-sequence-test.html" },
     { n: 45, date: "2026-10-30", title: "Airflow trigger rules: a task that runs even when dbt_build fails", file: "lessons/0045-airflow-trigger-rules.html" },
     { n: 46, date: "2026-10-31", title: "Closing Day 45's TODO: a real dead-letter alert, not a print", file: "lessons/0046-airflow-dead-letter-alert-threshold.html" },
+    { n: 47, date: "2026-11-01", title: "Closing Day 46's other TODO: a per-run delta, not a running total", file: "lessons/0047-airflow-dead-letter-delta-cursor.html" },
   ];
 
   const REFS = [

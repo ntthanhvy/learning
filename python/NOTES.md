@@ -11860,3 +11860,75 @@ fail *gracefully* so the learner sees which task failed.
   '{"by":"headless"}'` was run from the repo root at the end of this
   round and succeeded.
 
+- 2026-11-01 generation (Lesson 95, headless run): idempotency check first
+  — confirmed no `lessons/0095-*.html` on disk and no `n: 95`/
+  `date: "2026-11-01"` entry in `nav.js` before writing anything (highest
+  prior lesson was 94, dated 2026-10-31), and no 2026-11-01 entry already
+  in this file. The orchestrator's own DB query this round again found no
+  quiz/kata/lesson_completed signal recorded recently — no weak spot to
+  chase, steady sequential pacing continues. Read `MISSION.md` in full
+  (no-pandas/no-NumPy exclusion re-confirmed before writing a line),
+  `PLAN.md` in full, `RESOURCES.md` in full, and the tail of this file
+  (covering Days 91-94) rather than the whole file. Cadence state: Day 91
+  was a review closing the Days 88-90 cycle; Day 92 (`weakref`) was fresh
+  day 1, Day 93 (`sqlite3`) fresh day 2, Day 94 (`ast.literal_eval`) fresh
+  day 3 — both Day 93's and Day 94's own closing notes flagged Day 95 as
+  the review due on Days 92-94, continuing the settled three-fresh-then-
+  review rhythm every cycle since Day 71 has followed. Followed that
+  instruction rather than picking a fresh topic: built Lesson 95 as
+  "Review day 17," covering exactly Days 92-94, in the same structure as
+  Day 91 (review day 16) — a fresh-gap grep run first anyway (same
+  discipline every prior review day has followed) across all 94 lesson
+  titles, every practice file, `reference/glossary.html`, and
+  `RESOURCES.md`, re-confirming Day 94's own standing candidate list
+  (`struct`, `getpass`, `string.Template`, `timeit`, `array`,
+  `types.SimpleNamespace`, `importlib`, `locale`, `socket`, `threading`)
+  still genuinely zero-hit as taught topics, none strong enough to
+  override the cadence math pointing at a review day. No new jargon
+  today, by design — review days revisit, they don't introduce; the
+  glossary was not touched this round, and the lesson's closing line
+  links back to Days 92/93/94's existing glossary anchors instead of a
+  new one. Verification performed mechanically, from a dedicated script
+  in a scratch file at the repo root (deleted after): (1) an HTML
+  tag-balance check across div/p/code/button/script/dfn/pre/h2/h1/em/
+  strong/a on the new lesson — balanced (div 9/9, p 16/16, code 87/87,
+  button 9/9, script 3/3, dfn 0/0 as expected for a no-new-terms review
+  day, pre 1/1, h2 5/5, h1 1/1, em 2/2, strong 7/7, a 6/6); (2) a
+  raw-unescaped-`&` regex scan (excluding `&amp;`/`&quot;`/etc.) — zero
+  hits; (3) a word-count match per quiz question's three options,
+  extracted via regex and stripped of tags, printing each option's exact
+  text alongside its count rather than guessing by eye — first draft
+  mismatched on all three questions (Q1 9/8/9, Q2 8/7/10, Q3 12/10/8),
+  iterated option-by-option across several passes (e.g. "weakref.ref
+  objects always expire after one single call" → "...expire right after
+  their one call", "literal_eval alternates exception types on every
+  single call" → "literal_eval simply alternates its own exception type
+  on every single call") and recounted after every edit, until all three
+  landed on equal per-question counts: 9/9/9, 9/9/9, 11/11/11; (4) an
+  `html.parser.HTMLParser` full-document parse of the new lesson — no
+  parse errors; (5) `node --check` against `assets/nav.js` after the
+  edit — clean; (6) a case-insensitive `pandas|numpy|dataframe|pd\.|np\.`
+  grep across the new lesson and practice file — exactly one hit in the
+  lesson (the required "Where pandas/NumPy go from here" boundary
+  callout, confirming absence rather than demonstrating either library)
+  and zero hits in the practice file. No new `RESOURCES.md` line was
+  added — same as every prior review day, since no new module is taught.
+  Registered Lesson 95 in `nav.js` with today's date (2026-11-01) right
+  after the `n: 94` entry. The shipped (unsolved)
+  `practice/95_review_retrieval_day_17.py` was executed directly from its
+  real `practice/` location and printed exactly 3 ✗ with no raw
+  traceback. A solved copy built in a scratch directory (`.scratch95/` at
+  the repo root, deleted after; `uv run python3 unsolved.py` run twice
+  consecutively since this sandbox blocks direct `mktemp`/`/tmp` access)
+  printed all 3 ✓ and "All green" on both runs; the shipped file was
+  re-run afterward and reproduced the identical all-✗ result, confirming
+  no leakage back into the baseline. `python/learning-records/` was not
+  touched this round — following a fixed review-day instruction from the
+  prior two lessons' own notes, not a new durable fact about the learner
+  distinct from Day 1's baseline record. Cadence note for the next round:
+  Day 95 closes the Days 92-94 review cycle — Day 96 should resume fresh,
+  re-checking the standing candidate list above before a wider scan.
+  `bin/record-progress python lesson_generated --day 95 --lesson
+  0095-review-retrieval-day-17.html --detail '{"by":"headless"}'` was run
+  from the repo root at the end of this round and succeeded.
+

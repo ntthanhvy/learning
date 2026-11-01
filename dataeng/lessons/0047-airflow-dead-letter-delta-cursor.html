@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 47 · Closing Day 46's other TODO: a per-run delta, not a running total</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 47 · ~20 min · 1 Nov 2026</p>
+<h1>Closing Day 46's other TODO: a per-run delta, not a running total</h1>
+<p class="byline">Today's tangible win: <code>check_dead_letters</code> stops comparing Day 41's dead-letter table's entire history against one fixed threshold, and starts comparing <em>new</em> rows since its own last check — using the exact same Variable-cursor shape Day 38 built for the Kafka growth check. Confirmed this round with a mocked cursor across six cases, including the one Day 46 named but never built: once the count trips the threshold and stays flat, today's version stops alerting; Day 46's version would alert forever.</p>
+
+<div class="callout"><strong>Before today — confirm Day 46's task still parses:</strong> today replaces one function body inside <code>dags/food_delivery_pipeline.py</code> and adds one new module-level constant; nothing else in that file changes.
+<pre><code>AIRFLOW_HOME="$(pwd)/airflow_home" uv run --with "apache-airflow==3.3.1" airflow dags list-import-errors</code></pre>
+Expected: <code>No data found</code>. If <code>check_dead_letters</code> isn't there yet with <code>trigger_rule=TriggerRule.ALL_DONE</code> and a <code>DEAD_LETTER_ALERT_THRESHOLD</code> constant, finish Day 46 first — today assumes both already exist exactly as that lesson built them.</div>
+
+<h2>1 · The limitation Day 46 named honestly instead of hiding</h2>
+<p>Day 46's scope line said it directly: <code>check_dead_letters</code>'s <code>COUNT(*) FROM raw.dead_letter_events</code> is a running total over every row ever inserted, not new rows since the last run, because Day 41's table has no "already seen" marker column. The consequence is exactly what a running total always does to a fixed threshold: once the total crosses <code>DEAD_LETTER_ALERT_THRESHOLD</code> once, it keeps failing on <em>every</em> run after, forever, even with zero new poison events, until someone clears or fixes the table by hand. A monitoring check that keeps alerting after the actual problem stopped is worse than noise — it teaches whoever's on call to ignore it, which is the opposite of what Day 46 Section 2 argued a real alert should do.</p>
+<p>Day 46's own closing section named two concrete next steps rather than a vague "improve this." One was a real notification via Day 35's <code>on_failure_callback</code> — a good pick, but it needs an actual Slack/email/PagerDuty target to call, which this course has deliberately kept out of scope (no paid services, per <code>MISSION.md</code>'s constraints). The other was "a per-run delta via a Day-38-style Variable cursor instead of a running total" — fully buildable with nothing new, since Day 38 already solved this exact shape of problem for a different table. Today builds that one.</p>
+
+<h2>2 · Same cursor shape as Day 38, different table, same reason</h2>
+<p>Day 38's <code>check_order_events_grew</code> needed to remember <em>last run's row count</em> for <code>raw.order_events</code> so it could tell "grew" from "didn't," and it stored that single number in an Airflow <dfn data-en="an Airflow key/value store for a single configuration value that isn't a connection to an external system -- here repurposed, the same way Day 38 did for a different table, as a tiny persistent number one task reads from and writes back to on every run so it can tell what changed since last time" data-vn="giữ nguyên &quot;Variable&quot; — kho key/value của Airflow, ở đây dùng làm cursor nhỏ (1 số) mà 1 task tự đọc/ghi lại giữa các lần chạy để biết cái gì mới thay đổi so với lần trước">Variable</dfn> because a Variable, unlike Day 20's XCom, has no run-boundary: the same key is visible to the same task across separate, later DAG runs, which is exactly "small state that outlives one run." Today's problem is the mirror image on a different table: <code>check_dead_letters</code> needs to remember <em>last check's dead-letter count</em> so it can alert on <em>new</em> poison events, not the pile that already triggered an alert last time. Same tool, same reason, different number being tracked.</p>
+<p>The one real difference from Day 38 worth naming: Day 38's task <em>raised on no-growth</em>, because its job was to suppress a downstream Asset trigger, and raising was the only lever <code>outlets=</code> respects. Today's task has no outlet and no downstream trigger to suppress — its only job is deciding whether to alert — so it raises on the opposite condition: too much <em>new</em> bad data, not too little growth. Both tasks write their cursor only after a successful comparison, for the same reason Day 38 Section 3 argued: a run that itself raises must leave the cursor exactly where it was, so the next run still compares against the last count a check actually completed against.</p>
+
+<h2>3 · Build: a delta instead of a running total</h2>
+<p>In your <code>food-delivery-pipeline</code> repo, edit <code>dags/food_delivery_pipeline.py</code> — the same file Day 7 wrote and Days 35/45/46 each added one thing to. Add one import, one constant, and replace <code>check_dead_letters</code>'s body:</p>
+<pre><code><span class="cm"># new import, alongside the existing psycopg import</span>
+<span class="kw">from</span> airflow.sdk <span class="kw">import</span> Variable
+
+<span class="cm"># new constant, module level, alongside the existing DEAD_LETTER_ALERT_THRESHOLD</span>
+DEAD_LETTER_CURSOR_KEY = <span class="str">"dead_letter_last_count"</span>
+
+
+<span class="kw">def</span> check_dead_letters(**context) -&gt; <span class="kw">None</span>:
+    <span class="kw">import</span> psycopg
+
+    <span class="kw">with</span> psycopg.connect(PG_DSN) <span class="kw">as</span> conn, conn.cursor() <span class="kw">as</span> cur:
+        cur.execute(<span class="str">"SELECT count(*) FROM raw.dead_letter_events"</span>)
+        current_count = cur.fetchone()[<span class="kw">0</span>]
+
+    <span class="cm"># Day 38's exact pattern: a str default for a cursor that has never run</span>
+    <span class="cm"># before, cast to int immediately -- Variable.get() only ever returns str.</span>
+    last_count = <span class="kw">int</span>(Variable.get(DEAD_LETTER_CURSOR_KEY, default=<span class="str">"0"</span>))
+    new_since_last_check = current_count - last_count
+
+    <span class="cm"># Write the cursor forward unconditionally, success or alert -- this run</span>
+    <span class="cm"># really did check up to current_count, so the next run's delta should</span>
+    <span class="cm"># start from here regardless of whether today's count trips the alert.</span>
+    Variable.<span class="kw">set</span>(DEAD_LETTER_CURSOR_KEY, <span class="kw">str</span>(current_count))
+
+    <span class="kw">if</span> new_since_last_check &gt; DEAD_LETTER_ALERT_THRESHOLD:
+        <span class="kw">raise</span> ValueError(
+            <span class="str">f"{new_since_last_check} new dead-lettered event(s) since the last "</span>
+            <span class="str">f"check exceeds threshold {DEAD_LETTER_ALERT_THRESHOLD} "</span>
+            <span class="str">f"(total now {current_count})"</span>
+        )
+
+    <span class="kw">print</span>(
+        <span class="str">f"checked raw.dead_letter_events: {new_since_last_check} new since last "</span>
+        <span class="str">f"check, {current_count} total, within threshold"</span>
+    )</code></pre>
+<p>One choice worth defending out loud, because it looks backwards at a glance: the cursor is written <em>before</em> the <code>raise</code>, not after. That's the opposite order from Day 38's growth check, and on purpose — Day 38's cursor had to stay put on a failed run, because that run's own comparison was never trusted (no real growth, so there's nothing new worth remembering). Today's cursor should move forward even on an alerting run, because the <code>COUNT(*)</code> itself is real and current regardless of whether it crosses the threshold; moving it forward is exactly what turns "alert on the same pile forever" into "alert once per burst of new events." Writing it only on the non-alerting path would silently resurrect Day 46's original bug: a true but already-reported pile-up would keep re-triggering against a last_count that forever points back to before the alert first fired. <code>trigger_rule=TriggerRule.ALL_DONE</code> from Day 45 and <code>DEAD_LETTER_ALERT_THRESHOLD</code> from Day 46 are both untouched.</p>
+
+<h2>4 · Verify: a mocked cursor, then the real DAG module</h2>
+<p>The algorithm's correctness doesn't depend on Postgres or Airflow's metadata database at all — it's six numbers compared against each other. This round verified it that way first, the same mocked-cursor approach Day 46 used for its own threshold boundary, with the one case that actually distinguishes today's delta from Day 46's running total:</p>
+<pre><code><span class="kw">def</span> decide(last_count: <span class="kw">int</span>, current_count: <span class="kw">int</span>) -&gt; <span class="kw">tuple</span>[<span class="kw">int</span>, <span class="kw">bool</span>]:
+    delta = current_count - last_count
+    <span class="kw">return</span> delta, delta &gt; <span class="kw">5</span>
+
+<span class="cm"># (last_count, current_count) -> (delta, alert)</span>
+decide(<span class="kw">0</span>, <span class="kw">0</span>)    <span class="cm"># -> (0, False)  -- nothing ever landed</span>
+decide(<span class="kw">0</span>, <span class="kw">5</span>)    <span class="cm"># -> (5, False)  -- exactly at threshold, still fine</span>
+decide(<span class="kw">0</span>, <span class="kw">6</span>)    <span class="cm"># -> (6, True)   -- one past threshold, alert</span>
+decide(<span class="kw">10</span>, <span class="kw">12</span>)  <span class="cm"># -> (2, False)  -- small delta; current_count=12 alone would NOT mislead here</span>
+decide(<span class="kw">10</span>, <span class="kw">50</span>)  <span class="cm"># -> (40, True)  -- real burst, alert</span>
+decide(<span class="kw">50</span>, <span class="kw">50</span>)  <span class="cm"># -> (0, False)  -- Day 46's exact bug case: huge total, zero new -- must NOT alert</span></code></pre>
+<p>Run live this round, all six cases matched the comment exactly — the last case is the one Day 46's running-total version gets wrong: a table sitting at 50 rows from a burst three days ago would alert on every single run forever under Day 46's logic, and correctly stays quiet under today's delta once nothing new has landed.</p>
+<p>Then, the same DAG-module-import check Days 45 and 46 both used, since this sandbox hits the same <code>airflow db migrate</code>/<code>airflow dags test</code> interactive-approval gate logged every round since Day 35 (now fourteen rounds, 35-47, still with no human present to grant it):</p>
+<pre><code><span class="kw">cd</span> dags &amp;&amp; uv run --with <span class="str">"apache-airflow==3.3.1"</span> --with <span class="str">"psycopg[binary]"</span> python3 -c <span class="str">"
+import food_delivery_pipeline as m
+print('dag_id:', m.dag.dag_id)
+for t in sorted(m.dag.tasks, key=lambda t: t.task_id):
+    print(t.task_id, '->', t.trigger_rule)
+print('threshold:', m.DEAD_LETTER_ALERT_THRESHOLD)
+print('cursor_key:', m.DEAD_LETTER_CURSOR_KEY)
+"</span></code></pre>
+<p>Expected, confirmed live this round against a scratch copy of exactly this file:</p>
+<pre><code>dag_id: food_delivery_pipeline
+check_dead_letters -&gt; TriggerRule.ALL_DONE
+dbt_build -&gt; TriggerRule.ALL_SUCCESS
+load_raw -&gt; TriggerRule.ALL_SUCCESS
+threshold: 5
+cursor_key: dead_letter_last_count</code></pre>
+<p>That confirms the module imports cleanly and Day 45/46's wiring survived untouched, but not that the Variable cursor actually advances across two real runs. With a real Postgres and Airflow metadata database up, confirm the full cycle directly:</p>
+<pre><code><span class="cm"># first check establishes the cursor at whatever the table holds right now</span>
+AIRFLOW_HOME=<span class="str">"$(pwd)/airflow_home"</span> uv run --with <span class="str">"apache-airflow==3.3.1"</span> --with <span class="str">"psycopg[binary]"</span> \
+  airflow dags test food_delivery_pipeline 2026-11-01
+AIRFLOW_HOME=<span class="str">"$(pwd)/airflow_home"</span> uv run --with <span class="str">"apache-airflow==3.3.1"</span> airflow variables get dead_letter_last_count
+<span class="cm"># insert 10 synthetic poison rows, then run again</span>
+docker compose exec -T postgres psql -U fdp -d fdp -c <span class="str">"
+INSERT INTO raw.dead_letter_events (topic, kafka_partition, kafka_offset, raw_value, error)
+SELECT 'order_events', 0, g, 'x', 'synthetic' FROM generate_series(1, 10) g;"</span>
+AIRFLOW_HOME=<span class="str">"$(pwd)/airflow_home"</span> uv run --with <span class="str">"apache-airflow==3.3.1"</span> --with <span class="str">"psycopg[binary]"</span> \
+  airflow dags test food_delivery_pipeline 2026-11-01
+<span class="cm"># run a THIRD time immediately, with no new rows landed since the alert</span>
+AIRFLOW_HOME=<span class="str">"$(pwd)/airflow_home"</span> uv run --with <span class="str">"apache-airflow==3.3.1"</span> --with <span class="str">"psycopg[binary]"</span> \
+  airflow dags test food_delivery_pipeline 2026-11-01
+</code></pre>
+<p>Expected: the first run succeeds (<code>0 new since last check</code> if the table was empty); the second run's task log shows <code>ValueError: 10 new dead-lettered event(s) since the last check exceeds threshold 5 (total now 10)</code>; the third run — same table, nothing new landed since the second check — succeeds again with <code>0 new since last check, 10 total, within threshold</code>, which is exactly the case Day 46's running total would have kept failing on.</p>
+<div class="callout"><strong>What this round could and couldn't run live:</strong> this sandbox has no learner Postgres/Kafka/Airflow metadata stack, so the three-run cycle above is given as the correct next check, not claimed as captured output from a live scheduler this round — the same honest-disclosure convention Days 17, 38, 41, 43, 44 and 46 each used. What <em>was</em> confirmed live: the DAG module import (real output, shown exactly above) and the delta/threshold logic itself, verified against all six mocked-cursor cases in Section 4, including the Day-46-bug case. The edited DAG file was separately checked with <code>py_compile</code>, clean.</div>
+
+<div class="interview">
+<p><strong>Q: "Your dead-letter alert fired once last week. It's still failing every run today even though nothing new has landed. What's wrong, and how would you fix it?"</strong> A strong answer, out loud: <em>"The check was comparing a running total against a fixed threshold instead of new rows since the last check — once the total crosses the line once, it never goes back down on its own, so it alerts forever until someone manually clears the table. I fixed it the same way I'd already fixed an analogous problem for a different Airflow task: store the last-seen count in an Airflow Variable, compute the delta against the current count on every run, and alert on the delta, not the total. The cursor has to advance every run regardless of whether that run alerts, or the next run compares against a stale baseline and the exact same bug comes back in a different shape."</em> The signal: recognizing this as the same root cause in a new place, not a brand-new bug, and stating the cursor-write-timing reasoning without being asked.</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers replacing Day 46's running-total dead-letter check with a per-run delta, using an Airflow Variable as the cursor — the exact mechanism Day 38 built for a different table. It does not cover an actual notification on alert (Slack, email, PagerDuty); Day 35's <code>on_failure_callback</code> remains the right hook, still named rather than built, since it needs a real external target this course's no-paid-services constraint keeps out of scope. It also does not cover resetting or clearing the dead-letter table itself after investigation — that stays a manual operator action, the same way Day 46 left it.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Day 46's COUNT(*) FROM raw.dead_letter_events reads every row ever inserted, not rows since the last check. Once that running total crosses the threshold once, it stays above the threshold on every later run too, even with zero new poison events, until a human manually clears or fixes the table -- a real, named limitation Day 46's own scope line stated honestly.">
+    <p class="stem">Why would Day 46's original check keep alerting on every run, even with no new poison events landing?</p>
+    <button class="opt" data-ok>it compares a running total, not new rows since checks</button>
+    <button class="opt">Airflow caches the first failure and repeats it forever always</button>
+    <button class="opt"><code>all_done</code> by itself forces every single later run to fail</button>
+  </div>
+  <div class="q" data-why="Day 38's XCom-vs-Variable argument applies unchanged here: a Variable has no run boundary, so the same key is readable and writable by the same task across separate, later DAG runs -- exactly the 'remember last time's number' problem today's cursor needs solved, and exactly what XCom (scoped to one dag_id/task_id/run_id) is not designed to reach across.">
+    <p class="stem">Why does today's delta use an Airflow Variable rather than XCom to remember the last count?</p>
+    <button class="opt" data-ok>the value must persist across separate runs, not one run</button>
+    <button class="opt">XCom cannot ever store any plain integer value at all</button>
+    <button class="opt"><code>PythonOperator</code> tasks are never, ever permitted to call <code>Variable.get()</code> itself</button>
+  </div>
+  <div class="q" data-why="Writing the cursor forward before the raise means even an alerting run's real, current count becomes the new baseline -- so the very next run's delta is computed against the count that already triggered an alert, not against some earlier, lower count. That's exactly what turns 'alert once per real burst' into the behavior Section 3 argues for, instead of resurrecting Day 46's forever-alerting bug in a new form.">
+    <p class="stem">Why does today's task write the Variable cursor forward even on a run that raises an alert?</p>
+    <button class="opt" data-ok>so the next run compares against this run own count</button>
+    <button class="opt">Airflow silently discards any Variable write inside a failing task</button>
+    <button class="opt">it has no actual effect on any later run behavior</button>
+  </div>
+  <div class="q" data-why="Day 38's growth check raises specifically to suppress its own outlets= Asset trigger, since Airflow's outlets mechanism fires strictly on task success with no other way to skip it -- a mechanism today's task doesn't have at all, since it triggers no downstream Asset. Today's task raises purely to make a real burst of new bad data visible as a failed task; the two tasks share the Variable-cursor pattern but raise for two different reasons.">
+    <p class="stem">Day 38's growth check and today's dead-letter check both raise an exception on their own task. Why, for two different reasons?</p>
+    <button class="opt" data-ok>Day 38 suppresses an Asset trigger; today surfaces a real alert</button>
+    <button class="opt">they actually raise for the exact same single reason, every time</button>
+    <button class="opt">today's task carries an <code>outlets=</code> list too, just like Day 38</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> per <code>RESOURCES.md</code>, Airflow's own <a href="https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/variables.html">Variables</a> docs, already Day 22 and Day 38's primary source for <code>Variable.get()</code>/<code>Variable.set()</code> mechanics — today reuses that exact mechanism on a new key, not a new Airflow feature, so no new citation is needed. Airflow's <a href="https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/tasks.html">Tasks</a> docs, already Day 35/45/46's primary source, remain the reference for the task-failure behavior <code>raise</code> relies on here.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 47.<br>
+<strong>Next up:</strong> the <code>airflow db migrate</code>/<code>airflow dags test</code> approval-gate block is now fourteen rounds running (35-47) with no attempt made this round beyond the same already-logged live reconfirmation — still worth a human granting it once. Both of Day 46's named next steps are now resolved or clearly scoped: today closed the per-run-delta half, and the notification half remains explicitly out of scope pending a real external target. A future round most likely needs a fresh gap-scan across <code>PLAN.md</code>'s spine (dbt, Kafka or Airflow) rather than another TODO-closing round, since the TODO chain begun at Day 21/38 and continued at Day 45/46/47 has no further named loose end left in this course's own lessons.<br><br>
+💬 Anything unclear — why the cursor writes before the raise, or how this delta pattern would change against a per-partition dead-letter count instead of one global table? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

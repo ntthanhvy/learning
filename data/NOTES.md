@@ -10787,3 +10787,109 @@
   lesson_generated --day 114 --lesson 0114-np-average.html --detail
   '{"by":"headless"}'` was run directly from the repo root to close out
   this round.
+- 2026-11-01 generation (Lesson 115): headless run, zero prior context.
+  Idempotency check first — confirmed no `lessons/0115-*.html` on disk and
+  no 2026-11-01 entry in this file before writing anything (highest prior
+  lesson was 114, dated 2026-10-31). DB signal: the orchestrator's own
+  brief reported no quiz/kata/lesson_completed signal for the data course
+  recently — no weak-spot to target, continued this course's own steady
+  topic-driven pacing. Read `MISSION.md` in full (not modified),
+  `RESOURCES.md` in full (not modified), this file's own tail (Lesson
+  114's entry) for exact house style, `lessons/0114-np-average.html` and
+  `practice/114_np_average.py` in full for the exact HTML/practice
+  structure, and `reference/glossary.html`'s tail for the exact row
+  format. Topic choice: Lesson 114's own closing note named two standing
+  candidates without pre-committing either — `np.piecewise()` and
+  `apply(result_type="expand")` — so, per this course's "fresh scan each
+  round" convention, grepped both plus `result_type` case-insensitively
+  across every lesson body, the full glossary, and this file first; both
+  were genuine zero-hits as taught topics (only this file's own log
+  entries mentioned either, as standing candidates, never as lesson
+  content). Picked `apply(result_type="expand")` over `np.piecewise()`:
+  it closes a real gap in `apply()` (Lesson 61), a pandas-native method
+  already taught, rather than adding another standalone NumPy function —
+  a better fit for `MISSION.md`'s pandas-first spine after several
+  NumPy-layer rounds in a row (Lessons 109-112, 114). Every behavioral
+  claim was probed directly first via temporary scripts in
+  `.scratch-data-115/` at the repo root (`/tmp` was unavailable in this
+  sandbox, matching every recent lesson's own note) — deleted after use,
+  never tracked by git: confirmed pandas 3.1.0 / numpy 2.5.4, unchanged
+  from recent lessons; confirmed a tuple-returning `apply(fn, axis=1)`
+  with no `result_type` stays one `object`-dtype Series of tuples, not
+  split into columns; confirmed `result_type="expand"` spreads a tuple
+  into unnamed integer columns (`0`, `1`, …) but spreads a dict into real,
+  named columns taken from its keys; confirmed assigning the expanded
+  result back onto the original frame via `df[["total","unit"]] =
+  df.apply(..., result_type="expand")` works cleanly; confirmed trying
+  that same assignment WITHOUT `result_type="expand"` raises
+  `ValueError: Columns must be same length as key` immediately — a loud
+  failure, not silent corruption; confirmed directly via the pandas
+  docstring that `result_type` only has any effect at all on `axis=1` —
+  passed alongside the default `axis=0` it is silently accepted but
+  changes nothing; confirmed a function whose first computed result is
+  not list-like (a bare scalar) also makes `result_type="expand"` a
+  silent no-op, falling back to a plain Series; confirmed rows returning
+  differently-sized tuples (length 2 vs. length 3 across rows) raise
+  `ValueError: All arrays must be of the same length` outright, no silent
+  NaN-padding. Did not fetch the pandas doc page by WebFetch this round —
+  the direct probe results plus the local `help()` docstring were
+  unambiguous, and the "Go deeper" wording was drawn from well-established
+  public documentation phrasing; the page falls under `RESOURCES.md`'s
+  existing "Docs: pandas User Guide" grouping, no new `RESOURCES.md` line
+  needed. One collision check before writing: grepped `result_type` and
+  `expand.*apply`/`apply.*expand` case-insensitively across the full
+  glossary and every lesson body — the only hits were Lesson 114's own
+  closing note (naming it as a standing candidate) and this file's own
+  log entries, confirmed clean as a taught topic otherwise. Added exactly
+  one new glossary row, `result_type="expand"`, directly after Lesson
+  114's `np.average()` entry. Verification performed mechanically via a
+  temporary script in `.scratch-data-115/` (deleted after, never tracked
+  by git): (1) a quiz-word-count script per `<div class="q">` block —
+  first draft came out uneven across all three questions (10/8/13,
+  14/12/12, 14/16/13); several rounds of targeted word-level edits
+  converged on exactly 16/16/16, 15/15/15, and 19/19/19 option words
+  across the three questions, one `data-ok` per question throughout;
+  (2) an HTML tag-balance check — clean on the first pass (html 1/1,
+  head 1/1, body 1/1, div 5/5, p 18/18, pre 4/4, code 58/58, h1 1/1,
+  h2 8/8, em 2/2, strong 4/4, button 9/9, script 3/3, dfn 1/1, span
+  34/34, a 2/2, title 1/1); (3) a raw-unescaped-`&` regex scan found
+  exactly the two expected `&` characters inside the lesson's own
+  `cd ~/learning/data && uv run ...` shell command, zero elsewhere;
+  (4) exactly 1 `<dfn>`-carrying tag, with `data-en`/`data-vn`, matching
+  the 1 new term (`result_type="expand"`). A separate table-balance check
+  on `glossary.html` after its one-row addition — balanced (tr 188/188,
+  td 187/187 opening tags matched by 187/187 closing, zero raw `&`), plus
+  a duplicate-term scan across all 187 first-column entries — zero
+  duplicates. `node --check` confirmed `nav.js` still parses as valid
+  JavaScript after the edit, with exactly one `n: 115` entry and one
+  `0115-apply-result-type-expand` file reference. The shipped (unsolved)
+  `practice/115_apply_result_type_expand.py` was run directly from its
+  real `practice/` location (via `uv run --with pandas python3`) and
+  printed exactly 3 ✗ with no raw traceback on the first run. Built a
+  solved copy in `.scratch-data-115/practice/` (deleted after, never
+  tracked by git), filling in all blanks per the helper-function pattern
+  recent lessons established (the dict-expand and reassignment checks
+  live inside `expand_to_dataframe()`/`assign_expanded_columns()` helper
+  functions so the blanks are actually exercised by the checks); it
+  printed all 3 ✓ and "All green" on the first run. Re-ran the shipped
+  file directly from `practice/` again afterward and reproduced the
+  identical all-✗ result, confirming the solved copy's edits never leaked
+  back into the shipped baseline. This round's own fresh scan surfaced
+  `np.piecewise()` as the one remaining standing candidate (already named
+  in Lesson 114's own note, not pre-committed as tomorrow's pick, per this
+  course's standing "fresh scan each round" convention). No new
+  `data/learning-records/` entry was added — routine lesson, no new
+  completion/quiz signal recently. `git status --short` after all edits
+  confirmed only the intended `data/` files were touched
+  (`data/assets/nav.js`, `data/reference/glossary.html`, new
+  `data/lessons/0115-apply-result-type-expand.html`, and new
+  `data/practice/115_apply_result_type_expand.py`) plus unrelated
+  concurrent changes in other course directories from other runs, not
+  touched by this one. The scratch directory `.scratch-data-115/` was
+  deleted after verification, at the repo root but never tracked by git,
+  matching prior rounds' own precedent for this environment.
+  `bin/record-progress data lesson_generated --day 115 --lesson
+  0115-apply-result-type-expand.html --detail '{"by":"headless"}'` was
+  run directly from the repo root and returned `recorded:
+  data/lesson_generated day=115
+  lesson=0115-apply-result-type-expand.html`.

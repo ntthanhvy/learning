@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 119 · Optimistic locking, now in C# too</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 119 · ~20 min</p>
+<h1>Optimistic locking, now in C# too</h1>
+<p class="byline">Lesson 33 covered optimistic locking in Postgres: a hand-added <code>version</code> column, an <code>UPDATE</code> whose <code>WHERE</code> clause demands the version the caller last read, and a zero-rows-affected result that means someone else wrote first. That lesson never got a C# mirror, even though every other Go-only mechanism from the Lesson 11–50 stretch — rate limiting, retry, circuit breaker, bulkhead, worker pools, graceful shutdown, health checks — has been ported since Lesson 112. Today closes that gap: the same version-check-on-write idea, built from EF Core's own concurrency-token feature instead of a hand-written <code>WHERE version = $3</code>.</p>
+
+<h2>1 · Same idea, a column attribute instead of a WHERE clause</h2>
+<p>Lesson 33's rule still holds exactly: no lock on read, and the write only succeeds if the row hasn't changed since it was read. What changes in EF Core is that nobody writes the <code>WHERE version = $3</code> clause by hand. The building block is a <dfn data-en="an EF Core property configured so SaveChanges compares its value against the current database value before writing, failing the update or delete if they differ -- configured via the ConcurrencyCheck data annotation or the Fluent API's IsConcurrencyToken()" data-vn="concurrency token (giữ nguyên) — property của EF Core được cấu hình để SaveChanges so sánh giá trị nó với giá trị hiện có trong DB trước khi ghi, UPDATE/DELETE fail nếu khác nhau -- cấu hình bằng attribute ConcurrencyCheck hoặc Fluent API IsConcurrencyToken()">concurrency token</dfn>: a property EF Core loads and tracks like any other, but checks against the database's current value on every <code>SaveChanges()</code>.</p>
+<pre><code><span class="kw">public</span> <span class="kw">class</span> Profile
+{
+    <span class="kw">public</span> <span class="dt">int</span> Id { <span class="kw">get</span>; <span class="kw">set</span>; }
+    <span class="kw">public</span> <span class="dt">string</span> Bio { <span class="kw">get</span>; <span class="kw">set</span>; }
+
+    [ConcurrencyCheck]
+    <span class="kw">public</span> <span class="dt">int</span> Version { <span class="kw">get</span>; <span class="kw">set</span>; }  <span class="cm">// -- same role as Lesson 33's "version integer" column</span>
+}</code></pre>
+<p>Per Microsoft's own docs: "the concurrency token is loaded and tracked when an entity is queried — just like any other property. Then, when an update or delete operation is performed during <code>SaveChanges()</code>, the value of the concurrency token on the database is compared against the original value read by EF Core." That's Lesson 33's <code>WHERE id = $2 AND version = $3</code> — EF Core just generates it from the attribute instead of a hand-written query:</p>
+<pre><code><span class="kw">var</span> profile = <span class="kw">await</span> db.Profiles.SingleAsync(p =&gt; p.Id == <span class="dv">1</span>);
+profile.Bio = <span class="st">"new bio"</span>;
+profile.Version++;                 <span class="cm">// app-managed token: caller bumps it, same as Lesson 33's "+ 1"</span>
+<span class="kw">await</span> db.SaveChangesAsync();  <span class="cm">// EF emits: UPDATE ... WHERE Id = @p AND Version = @originalVersion</span></code></pre>
+
+<h2>2 · A second flavor: let the database generate the token</h2>
+<p>Lesson 33's version column only moves because the app's <code>SET version = version + 1</code> says so. EF Core also supports the database doing that work on its own, via <dfn data-en="an EF Core data annotation (or the Fluent API's IsRowVersion()) that maps a property to a database-native auto-updating concurrency column -- SQL Server's rowversion type is the canonical example, changing automatically on every row update with no application code setting it" data-vn="[Timestamp] / IsRowVersion() (giữ nguyên) — attribute (hoặc Fluent API IsRowVersion()) map property vào cột concurrency tự-cập-nhật của DB -- rowversion của SQL Server là ví dụ chuẩn, tự đổi mỗi lần row được update, app không cần tự set">[Timestamp]</dfn>:</p>
+<pre><code><span class="kw">public</span> <span class="kw">class</span> Profile
+{
+    <span class="kw">public</span> <span class="dt">int</span> Id { <span class="kw">get</span>; <span class="kw">set</span>; }
+    <span class="kw">public</span> <span class="dt">string</span> Bio { <span class="kw">get</span>; <span class="kw">set</span>; }
+
+    [Timestamp]
+    <span class="kw">public</span> <span class="dt">byte</span>[] Version { <span class="kw">get</span>; <span class="kw">set</span>; }  <span class="cm">// DB bumps this itself -- app never assigns it</span>
+}</code></pre>
+<p>This is the one piece with no Postgres equivalent named in Lesson 33: SQL Server's <code>rowversion</code> column type changes itself on every write, so there's nothing to increment by hand and nothing to forget to increment. Postgres has no built-in auto-incrementing row-version type — Lesson 33's app-managed integer column (or EF Core's <code>[ConcurrencyCheck]</code> flavor above) is the equivalent there, per the docs' own note that "the details... differ across databases, and some databases don't support these at all."</p>
+<div class="callout"><strong>The frontend equivalent you already own.</strong> Lesson 33 already named this: a version check on write is the server-side version of a form warning "this record changed since you opened it, reload?" instead of silently letting the second Save overwrite the first. Nothing about that mental model changes here; only who writes the version-matching <code>WHERE</code> clause does.</div>
+
+<h2>3 · The conflict: an exception instead of a row count</h2>
+<p>Lesson 33's Go code checked for zero rows affected (<code>sql.ErrNoRows</code> on the <code>RETURNING</code> clause) and returned a sentinel <code>ErrStaleUpdate</code>. EF Core surfaces the identical zero-rows-matched fact as a thrown exception instead:</p>
+<pre><code><span class="kw">try</span>
+{
+    <span class="kw">await</span> db.SaveChangesAsync();
+}
+<span class="kw">catch</span> (DbUpdateConcurrencyException ex)
+{
+    <span class="cm">// Same meaning as Lesson 33's zero-rows-affected: the UPDATE's own
+    // WHERE ... AND Version = @original matched no rows -- someone else
+    // already wrote and changed the token since this caller read the row.</span>
+    <span class="kw">foreach</span> (<span class="kw">var</span> entry <span class="kw">in</span> ex.Entries)
+    {
+        <span class="kw">var</span> databaseValues = <span class="kw">await</span> entry.GetDatabaseValuesAsync();
+        <span class="kw">if</span> (databaseValues == <span class="kw">null</span>)
+            <span class="kw">throw</span>; <span class="cm">// row was deleted, not just updated -- a different decision</span>
+
+        <span class="cm">// Lesson 33's three honest options apply unchanged here: tell the
+        // user (409 Conflict), retry if commutative, or merge. Whichever
+        // is chosen, re-arming the original values is what lets a retry
+        // pass the next concurrency check instead of failing again.</span>
+        entry.OriginalValues.SetValues(databaseValues);
+    }
+}</code></pre>
+<p><code>DbUpdateConcurrencyException.Entries</code> gives one entry per conflicting row; <code>entry.GetDatabaseValuesAsync()</code> fetches what's actually in the database right now — Lesson 33's "someone else already wrote and bumped the version" fact, available here as data instead of just a boolean. <code>entry.OriginalValues.SetValues(databaseValues)</code> is the retry-enabling step: without it, a second <code>SaveChangesAsync()</code> would compare against the same stale original value and fail again.</p>
+
+<div class="cmp-wrap">
+<table class="cmp">
+<thead><tr><th></th><th>Lesson 33: Postgres / Go</th><th>Lesson 119: C# / EF Core</th></tr></thead>
+<tbody>
+<tr><th>The version column itself</th><td>hand-added <code>version integer</code>, app increments it</td><td><code>[ConcurrencyCheck]</code> (app-managed) or <code>[Timestamp]</code> (DB-managed)</td></tr>
+<tr><th>The check on write</th><td>hand-written <code>WHERE id = $2 AND version = $3</code></td><td>generated by <code>SaveChanges()</code> from the token property</td></tr>
+<tr><th>Signal on conflict</th><td>zero rows affected, checked via <code>sql.ErrNoRows</code></td><td><code>DbUpdateConcurrencyException</code> thrown from <code>SaveChanges()</code></td></tr>
+<tr><th>Reading what actually won</th><td>a second <code>SELECT</code>, written by hand</td><td><code>entry.GetDatabaseValuesAsync()</code></td></tr>
+<tr><th>Clearing the way to retry</th><td>re-read, then retry the whole <code>UPDATE</code></td><td><code>entry.OriginalValues.SetValues(databaseValues)</code></td></tr>
+</tbody>
+</table>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers EF Core's optimistic-concurrency feature — <code>[ConcurrencyCheck]</code>/<code>IsConcurrencyToken()</code>, <code>[Timestamp]</code>/<code>IsRowVersion()</code>, <code>DbUpdateConcurrencyException</code>, and the <code>Entries</code>/<code>GetDatabaseValuesAsync()</code>/<code>OriginalValues.SetValues()</code> resolution pattern — as the C# mirror of Lesson 33's Postgres version column. It does not cover using transaction isolation levels (repeatable read / snapshot) as an alternative concurrency-control mechanism, which the same docs page discusses as a separate approach with its own trade-offs; multi-property concurrency tokens (checking several columns at once, briefly shown in the docs' merge example); or SQL Server's exact <code>rowversion</code> byte layout. It does not cover Go's <code>select</code>-statement arbitration rules — still deferred; see this round's NOTES.md entry for why.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory, with no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Per the docs, EF Core loads and tracks a concurrency token like any other property, then compares it against the database's current value during SaveChanges -- the update or delete fails if they differ. This is the same moment Lesson 33's WHERE version = $3 check happens, just generated rather than hand-written.">
+    <p class="stem">In EF Core, when does the concurrency-token comparison actually happen?</p>
+    <button class="opt" data-ok>During SaveChanges, when it compares the token against the current database</button>
+    <button class="opt">Immediately, the instant any single tracked entity gets first constructed here</button>
+    <button class="opt">Only once, the very first time the whole app process starts</button>
+    <button class="opt">Continuously, on a background timer thread polling every tracked open row</button>
+  </div>
+  <div class="q" data-why="[Timestamp] (or the Fluent API's IsRowVersion()) maps a property to a database-native auto-updating column, such as SQL Server's rowversion type, which changes itself on every row update with no application code ever assigning it -- unlike [ConcurrencyCheck], which the app must bump by hand, same as Lesson 33's version + 1.">
+    <p class="stem">What is distinctive about a property mapped with EF Core's <code>[Timestamp]</code> attribute?</p>
+    <button class="opt" data-ok>The database itself updates that one column value entirely on its own</button>
+    <button class="opt">The calling application must manually increment it by hand on every write</button>
+    <button class="opt">It silently disables every other configured concurrency check on that same row</button>
+    <button class="opt">It stores only the exact wall-clock time the row was first inserted</button>
+  </div>
+  <div class="q" data-why="DbUpdateConcurrencyException is EF Core's surfaced form of the same fact Lesson 33 checked as zero rows affected: the generated UPDATE's own WHERE clause, including the token comparison, matched no rows, meaning a concurrent writer already changed the row since this caller read it.">
+    <p class="stem">What does a thrown <code>DbUpdateConcurrencyException</code> actually mean happened?</p>
+    <button class="opt" data-ok>The generated UPDATE statement's own WHERE clause matched exactly zero database rows</button>
+    <button class="opt">The entire underlying database connection itself just failed outright for no reason</button>
+    <button class="opt">The configured concurrency token column itself simply does not exist on disk</button>
+    <button class="opt">A completely unrelated query running elsewhere in the very same request failed</button>
+  </div>
+  <div class="q" data-why="entry.OriginalValues.SetValues(databaseValues) re-arms the tracked entity's original values to match what is now actually in the database, so a following retried SaveChangesAsync() compares against current data instead of the same stale original value, which would just fail the identical check again.">
+    <p class="stem">Why call <code>entry.OriginalValues.SetValues(databaseValues)</code> before retrying <code>SaveChanges</code>?</p>
+    <button class="opt" data-ok>So the retry compares against current data, not the same stale original</button>
+    <button class="opt">So the retry completely skips running any concurrency check ever again now</button>
+    <button class="opt">So every other unrelated tracked entity gets permanently detached from the context</button>
+    <button class="opt">So the whole DbContext instance itself gets disposed of and recreated fresh</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://learn.microsoft.com/en-us/ef/core/saving/concurrency">Microsoft Learn: Handling Concurrency Conflicts — EF Core</a> (~15 min) is the primary source for today's C# half, confirming verbatim the <code>[ConcurrencyCheck]</code>/<code>IsConcurrencyToken()</code> and <code>[Timestamp]</code>/<code>IsRowVersion()</code> configuration pair, the generated <code>UPDATE ... WHERE ... AND [Version] = @p2</code> SQL shape, <code>DbUpdateConcurrencyException</code> being thrown from <code>SaveChanges()</code> on updates and deletes (but not inserts), and the current-values/original-values/database-values three-way resolution pattern including <code>entry.GetDatabaseValuesAsync()</code> and <code>entry.OriginalValues.SetValues()</code>. Lesson 33's own Designing Data-Intensive Applications (ch. 7) citation still covers the optimistic-vs-pessimistic concurrency-control concept itself in full, not duplicated here.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a>. Click any dotted term for a popup (English first, tiếng Việt second). Builds directly on Lesson 33's version-column optimistic locking and Lesson 6's lost-update race. <strong>Anything unclear? Ask your teacher</strong>, the agent that made this lesson. Ask in Vietnamese anytime. A good follow-up: "does our own EF Core code at work use [Timestamp]/rowversion, or a hand-rolled version column like Lesson 33's Go/Postgres example?"</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

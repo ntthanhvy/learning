@@ -236,6 +236,8 @@
       file: "lessons/0113-to-frame-and-squeeze.html" },
     { n: 114, date: "2026-10-31", title: "np.average(): the weighted mean pandas' own .mean() can't compute",
       file: "lessons/0114-np-average.html" },
+    { n: 115, date: "2026-11-01", title: "apply(result_type=\"expand\"): turning one row-function's tuple into real columns",
+      file: "lessons/0115-apply-result-type-expand.html" },
   ];
 
   const REFS = [

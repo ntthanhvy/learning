@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 115 · apply(result_type="expand"): turning one row-function's tuple into real columns</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 115 · ~20 min · 1 Nov 2026</p>
+<h1>apply(result_type="expand"): turning one row-function's tuple into real columns</h1>
+<p class="byline">Lesson 114's own closing note named two standing candidates — <code>np.piecewise()</code> and <code>apply(result_type="expand")</code> — without pre-committing either. A fresh scan of every lesson and the full glossary confirms both are still genuine zero-hits; <code>result_type="expand"</code> wins today because it closes a pandas-native gap in <code>apply()</code> (Lesson 61) rather than adding another standalone NumPy function.</p>
+
+<h2>1 · A row function that returns more than one value stays stuck in one column</h2>
+<p>A function passed to <code>df.apply(fn, axis=1)</code> can return anything — including a tuple or dict bundling several computed values per row. The problem: by default, that whole tuple or dict lands as a single object sitting inside one cell of a Series, not spread across real columns:</p>
+<pre><code>orders = pd.DataFrame({
+    <span class="str">"customer"</span>: [<span class="str">"An"</span>, <span class="str">"Binh"</span>, <span class="str">"Chi"</span>],
+    <span class="str">"price"</span>:    [<span class="kw">100.0</span>, <span class="kw">50.0</span>, <span class="kw">200.0</span>],
+    <span class="str">"qty"</span>:      [<span class="kw">2</span>, <span class="kw">3</span>, <span class="kw">1</span>],
+})
+
+<span class="kw">def</span> stats(row):
+    <span class="kw">return</span> (row[<span class="str">"price"</span>] * row[<span class="str">"qty"</span>], row[<span class="str">"price"</span>] / row[<span class="str">"qty"</span>])
+
+orders.apply(stats, axis=<span class="kw">1</span>)
+<span class="cm"># 0         (200.0, 50.0)
+# 1    (150.0, 16.666667)
+# 2        (200.0, 200.0)
+# dtype: object  -- ONE column of tuples, not two columns of numbers</span></code></pre>
+<p>Confirmed directly (pandas 3.1.0): the result is a plain <code>Series</code> of Python tuple objects, <code>dtype: object</code>. It ran without error and looks superficially fine in a quick print — the trap is assuming it already split into columns when it hasn't.</p>
+
+<h2>2 · result_type="expand" spreads a list-like return across columns</h2>
+<p><dfn data-en="a keyword on DataFrame.apply(..., axis=1) that, when the function's return value is list-like (a tuple, list, or dict), spreads it across REAL columns of the result instead of leaving it as one object per row; has NO effect if axis=0 (the default) or if the function's first computed result is not list-like -- confirmed directly, pandas falls back silently to a plain Series in both of those cases, no error, no warning" data-vn="giữ nguyên 'result_type=\"expand\"' — tham số của apply(..., axis=1), khi hàm trả về kiểu list-like (tuple, list, hoặc dict) thì tách nó ra thành các CỘT thật trong kết quả, thay vì giữ nguyên 1 object/dòng; KHÔNG có tác dụng gì nếu axis=0 (mặc định) hoặc nếu giá trị trả về đầu tiên không phải list-like -- đã kiểm tra trực tiếp, pandas tự lặng lẽ trả về Series bình thường trong cả 2 trường hợp đó, không báo lỗi, không cảnh báo gì cả">result_type="expand"</dfn> tells <code>apply()</code> to spread a list-like return value across the columns of the result DataFrame instead of leaving it bundled as one object:</p>
+<pre><code>orders.apply(stats, axis=<span class="kw">1</span>, result_type=<span class="str">"expand"</span>)
+<span class="cm">#        0           1
+# 0  200.0   50.000000   -- unnamed integer columns: 0, 1
+# 1  150.0   16.666667
+# 2  200.0  200.000000</span></code></pre>
+<p>Confirmed directly: a tuple or list return gets unnamed integer columns (<code>0</code>, <code>1</code>, …) — but a <strong>dict</strong> return carries its own column names straight through, which is the far more readable choice in practice:</p>
+<pre><code><span class="kw">def</span> stats_dict(row):
+    <span class="kw">return</span> {<span class="str">"total"</span>: row[<span class="str">"price"</span>] * row[<span class="str">"qty"</span>], <span class="str">"unit"</span>: row[<span class="str">"price"</span>] / row[<span class="str">"qty"</span>]}
+
+orders.apply(stats_dict, axis=<span class="kw">1</span>, result_type=<span class="str">"expand"</span>)
+<span class="cm">#    total        unit
+# 0  200.0   50.000000   -- real column names: "total", "unit"
+# 1  150.0   16.666667
+# 2  200.0  200.000000</span></code></pre>
+<p>Confirmed directly: assigning the expanded result straight back onto the original frame with <code>df[["total", "unit"]] = df.apply(stats, axis=1, result_type="expand")</code> works cleanly — this is the idiomatic way to add several computed columns from one row-function in a single pass, instead of calling <code>apply()</code> twice for two separate single-value functions.</p>
+
+<h2>3 · The footgun this closes: forgetting result_type raises, it doesn't silently misfire</h2>
+<p>Good news confirmed directly: trying to assign an un-expanded, tuple-returning <code>apply()</code> result onto two new columns does not corrupt data quietly — it raises <code>ValueError: Columns must be same length as key</code> immediately. The real trap is subtler: a quick, un-assigned <code>df.apply(stats, axis=1)</code> in a notebook cell prints what <em>looks</em> like it worked (a Series of tuples renders fine), so it's easy to walk away believing the row function already returns separate columns when it doesn't — until the very next line that tries to use one of those "columns" by name fails.</p>
+<div class="callout"><strong>The trap:</strong> confirmed directly via the pandas docstring itself — <code>result_type</code> only has any effect at all when <code>axis=1</code> (row-wise). Pass it with the default <code>axis=0</code> (column-wise) and it is silently accepted but does nothing differently. It is also a no-op, falling back to a plain Series with no error, if the function's first computed return value isn't list-like in the first place (e.g., a bare scalar) — confirmed directly, <code>result_type="expand"</code> on a scalar-returning function just returns the same plain Series <code>result_type=None</code> would have.</div>
+
+<h2>4 · Uneven-length returns across rows raise loudly, not silently</h2>
+<p>Confirmed directly: if the row function returns tuples of <em>different lengths</em> depending on the row (a length-2 tuple for one row, length-3 for another), <code>result_type="expand"</code> raises <code>ValueError: All arrays must be of the same length</code> — every row's list-like return must expand to the same number of columns. There is no silent padding with NaN.</p>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>result_type="expand"</code> on <code>axis=1</code> row-wise <code>apply()</code>: spreading tuple/list/dict returns into real columns, the dict-gives-named-columns behavior, the confirmed no-op cases (<code>axis=0</code>, non-list-like return), and the confirmed <code>ValueError</code> on uneven-length returns. It does not cover <code>result_type="reduce"</code> or <code>result_type="broadcast"</code> in depth (the opposite-direction and shape-preserving siblings, out of today's scope), nor <code>raw=True</code> or the <code>engine="numba"</code> performance options.</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/115_apply_result_type_expand.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/115_apply_result_type_expand.py</code></pre>
+<p>Exercise 1 confirms the default (no <code>result_type</code>) leaves a tuple-returning <code>apply()</code> as one object-dtype Series (Section 1). Exercise 2 confirms <code>result_type="expand"</code> spreads a dict return into real, named columns, and that assigning it back onto the original frame works (Section 2). Exercise 3 confirms the two no-op cases — <code>axis=0</code> and a scalar-returning function — change nothing (Section 3's callout).</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: with no result_type at all, a tuple- or dict-returning apply(fn, axis=1) stays as a single object-dtype Series -- one tuple/dict per row, not split into columns. It runs without error, which is exactly the trap: it looks fine in a quick print.">
+    <p class="stem">Calling <code>df.apply(fn, axis=1)</code>, where <code>fn</code> returns a two-item tuple, with no <code>result_type</code> argument at all returns what?</p>
+    <button class="opt" data-ok>just one plain Series, object dtype, holding one whole, unsplit tuple inside every single row still</button>
+    <button class="opt">a real, genuine two-column DataFrame, the exact same thing that passing result_type="expand" would already have produced</button>
+    <button class="opt">a loud ValueError, naming the exact row where that returned tuple could not be split apart</button>
+  </div>
+  <div class="q" data-why="Confirmed directly via the pandas docstring: result_type only changes behavior when axis=1 (row-wise). Passed alongside the default axis=0 (column-wise), it is silently accepted but has no effect at all -- no error, no warning.">
+    <p class="stem">Passing <code>result_type="expand"</code> to <code>df.apply(fn)</code> with no <code>axis=1</code> (so <code>axis=0</code>, the default) does what?</p>
+    <button class="opt" data-ok>nothing different at all there -- it is silently accepted but has zero real effect</button>
+    <button class="opt">it raises a loud TypeError immediately, since result_type always requires axis=1 to be passed too</button>
+    <button class="opt">it expands each column's own result the exact same way those row-wise results would expand</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: a function returning differently-sized tuples across different rows (length 2 for one row, length 3 for another) makes result_type=\"expand\" raise ValueError: All arrays must be of the same length -- no silent NaN-padding to force a common shape.">
+    <p class="stem">With <code>result_type="expand"</code>, a row function returning a length-2 tuple for one row and a length-3 tuple for another row does what?</p>
+    <button class="opt" data-ok>it raises ValueError immediately -- every single row's own return value must expand to that exact same column count</button>
+    <button class="opt">pads that one shorter tuple with a trailing NaN value so every single row ends up three columns wide</button>
+    <button class="opt">quietly keeps only the first two items of every single returned tuple, silently dropping any extra ones at all</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official pandas API reference for <a href="https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.apply.html"><code>DataFrame.apply()</code></a> (per <code>RESOURCES.md</code>'s "Docs: pandas User Guide" grouping, ~5 min) documents the full <code>result_type</code> parameter — <code>"expand"</code>, <code>"reduce"</code>, and <code>"broadcast"</code> — and the exact axis restriction confirmed above.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>result_type="expand"</code> is new today, added right after Lesson 114's <code>np.average()</code> entry.<br>
+<strong>Next lesson:</strong> no standing candidate pre-committed — tomorrow's own fresh curriculum/glossary scan picks the next topic (today's own scan noticed <code>np.piecewise()</code> still sitting unused, but per this course's convention it is not locked in).<br><br>
+💬 Anything unclear — the expand/reduce/broadcast distinction, the dict-vs-tuple column naming, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

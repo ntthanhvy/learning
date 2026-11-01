@@ -244,6 +244,8 @@
       file: "lessons/0117-health-checks-ihealthcheck-aspnet-core.html" },
     { n: 118, date: "2026-10-31", title: "Rate limiting, now in C# too",
       file: "lessons/0118-rate-limiting-aspnetcore-ratelimiter-middleware.html" },
+    { n: 119, date: "2026-11-01", title: "Optimistic locking, now in C# too",
+      file: "lessons/0119-optimistic-concurrency-efcore-rowversion.html" },
   ];
 
   const REFS = [

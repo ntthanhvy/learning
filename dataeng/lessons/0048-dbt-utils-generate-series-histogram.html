@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 48 · dbt_utils generate_series: a delivery-time histogram, zero buckets included</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 48 · ~20 min · 2 Nov 2026</p>
+<h1>dbt_utils <code>generate_series</code>: a delivery-time histogram, zero buckets included</h1>
+<p class="byline">Today's tangible win: a brand-new mart, <code>mart_delivery_time_histogram</code>, answers "how many orders deliver in 0-5 min, 5-10 min, … 95-100 min" with one row per bucket — even the buckets with zero orders in them — built from <code>dbt_utils.generate_series</code>, the one macro Day 33's own closing note named as a real, still-untouched dbt_utils gap and Day 36 left alone on purpose.</p>
+
+<div class="callout"><strong>Before today — confirm the project still builds:</strong> today adds one new model, one new macro call, and two new project variables; nothing from Days 1-47 is edited.
+<pre><code>cd food_delivery_pipeline
+uv run --project ../dbt_env dbt build</code></pre>
+Expected: <code>Done. PASS=... ERROR=0</code> with whatever count Day 47 left you at. If <code>stg_orders</code>, <code>stg_restaurants</code> or <code>stg_order_events</code> is missing, finish Day 2/6 first — today's histogram reads the same <code>order_durations</code> join shape Day 6's <code>mart_delivery_sla</code> has used since it was built.</div>
+
+<h2>1 · The gap Day 33 named and Day 36 deliberately left open</h2>
+<p>Day 11 introduced <code>dbt_utils</code> and named two macros worth a future look: <code>generate_surrogate_key</code> (built that same day) and, in the same sentence, <code>date_spine</code>/<code>generate_series</code> together as "for the day a calendar table is needed." Day 36 picked up <code>date_spine</code> and built a real fix with it — every <code>(city, order_date)</code> pair in <code>mart_delivery_sla</code>, including the ones with zero orders. Day 33's own closing note then named <code>generate_series</code> by itself as a second, separate candidate, "never built hands-on." It's worth being honest about why it sat untouched for twelve more lessons: <code>date_spine</code> and <code>generate_series</code> look like the same macro with two names, and once <code>date_spine</code> closed the one gap this project actually had on a date axis, nothing forced a second look.</p>
+<p>They are not the same macro. <code>date_spine(datepart, start_date, end_date)</code> generates a row per <em>date</em> — it knows about calendars, day/week/month parts, and date arithmetic. <code>dbt_utils.generate_series(upper_bound)</code> generates a row per plain <em>integer</em>, <code>1</code> through <code>upper_bound</code>, and knows nothing about dates at all. Using <code>generate_series</code> to build Day 36's calendar would mean manually adding integers to a base date — strictly more work than just calling <code>date_spine</code>, which is exactly why today doesn't reuse Day 36's problem. Today's gap is on a different axis entirely: <code>mart_delivery_sla</code> answers "what share of orders breached the 45-minute SLA," a single number per city per day, but nobody building this repo has ever asked the shape-of-the-whole-distribution question — how many orders land in each 5-minute delivery-time band, from fast to slow. That needs a grid of numbers, not dates, which is precisely what <code>generate_series</code> is for.</p>
+
+<h2>2 · <code>generate_series</code>: a plain integer ladder, nothing queried</h2>
+<p><dfn data-en="a dbt_utils macro taking one argument, upper_bound, that compiles to a recursive CTE emitting one row per integer from 1 through upper_bound in a column called generated_number -- unlike date_spine, it knows nothing about dates, only plain counting numbers, and is used as a base grid to left-join real data onto so every integer in the range appears even when no real row matches it" data-vn="giữ nguyên &quot;generate_series&quot; — macro dbt_utils nhận 1 đối số upper_bound, tạo ra đúng 1 dòng cho mỗi số nguyên từ 1 đến upper_bound trong cột generated_number; khác date_spine, nó không biết gì về ngày tháng, chỉ sinh số nguyên thường, dùng làm lưới gốc để left-join dữ liệu thật vào, nhờ đó mọi số trong khoảng đều xuất hiện kể cả khi không có dòng thật nào khớp">generate_series</dfn> takes exactly one argument, <code>upper_bound</code>, and always starts counting at <code>1</code> — there is no <code>lower_bound</code> parameter to pass in this version of the package. It compiles to a small recursive CTE (powers-of-two cross joins under the hood, not a loop) that emits a single column, <code>generated_number</code>, holding every integer from <code>1</code> to <code>upper_bound</code> — queried from nothing, purely generated, the same "a package macro is still just Jinja producing SQL" habit Day 11 and Day 36 both used. Confirmed this round by reading the installed macro's own source rather than guessing: the call wraps a full <code>with p as (...), unioned as (...) select * from unioned ... order by generated_number</code> statement, so it has to sit inside a CTE's parentheses — <code>with my_cte as ( {{ dbt_utils.generate_series(20) }} )</code> — not after a bare <code>from</code> the way a table name would.</p>
+<p>Two new project variables make the bucket width and count configurable, the same <code>var()</code> habit Day 10 built for the SLA threshold — add them to <code>dbt_project.yml</code>, alongside Day 10's <code>sla_threshold_minutes</code>:</p>
+<pre><code><span class="cm"># dbt_project.yml -- alongside the existing sla_threshold_minutes</span>
+vars:
+  sla_threshold_minutes: <span class="kw">45</span>
+  histogram_bucket_minutes: <span class="kw">5</span>
+  histogram_bucket_count: <span class="kw">20</span></code></pre>
+<p>Twenty buckets of five minutes each covers 0-100 minutes, comfortably past Day 6's 45-minute SLA line with room to see how long the real tail is — a detail the SLA share alone can never show, since "32% of orders breach 45 minutes" says nothing about whether the breaching orders take 46 minutes or 3 hours.</p>
+
+<h2>3 · Build: a bucket grid, left-joined onto real durations</h2>
+<p>In your <code>food-delivery-pipeline</code> repo, create <code>models/marts/mart_delivery_time_histogram.sql</code> in full — the join shape reuses Day 6's <code>order_durations</code> CTE exactly, then crosses a <code>generate_series</code>-built bucket ladder against it the same way Day 36 crossed <code>date_spine</code> against <code>stg_restaurants</code>' distinct cities:</p>
+<pre><code><span class="cm">-- models/marts/mart_delivery_time_histogram.sql</span>
+{{ config(materialized=<span class="str">'table'</span>) }}
+
+<span class="kw">with</span> order_durations <span class="kw">as</span> (
+    <span class="cm">-- same join shape as mart_delivery_sla since Day 6: orders, restaurants,</span>
+    <span class="cm">-- and the placed/delivered pair of stg_order_events rows per order</span>
+    <span class="kw">select</span>
+        o.order_id,
+        r.city,
+        extract(epoch <span class="kw">from</span> (d.delivered_at - p.placed_at)) / <span class="kw">60</span> <span class="kw">as</span> minutes_to_deliver
+    <span class="kw">from</span> {{ ref(<span class="str">'stg_orders'</span>) }} <span class="kw">as</span> o
+    <span class="kw">inner join</span> {{ ref(<span class="str">'stg_restaurants'</span>) }} <span class="kw">as</span> r <span class="kw">on</span> o.restaurant_id = r.restaurant_id
+    <span class="kw">inner join</span> {{ ref(<span class="str">'stg_order_events'</span>) }} <span class="kw">as</span> p
+        <span class="kw">on</span> o.order_id = p.order_id <span class="kw">and</span> p.status = <span class="str">'placed'</span>
+    <span class="kw">inner join</span> {{ ref(<span class="str">'stg_order_events'</span>) }} <span class="kw">as</span> d
+        <span class="kw">on</span> o.order_id = d.order_id <span class="kw">and</span> d.status = <span class="str">'delivered'</span>
+),
+
+<span class="cm">-- the generate_series call must sit inside a CTE's parens -- it compiles to</span>
+<span class="cm">-- its own full "with ... select ..." statement, not a bare table expression</span>
+bucket_series <span class="kw">as</span> (
+    {{ dbt_utils.generate_series(var(<span class="str">'histogram_bucket_count'</span>)) }}
+),
+
+bucket_grid <span class="kw">as</span> (
+    <span class="kw">select</span>
+        (generated_number - <span class="kw">1</span>) * {{ var(<span class="str">'histogram_bucket_minutes'</span>) }} <span class="kw">as</span> bucket_start_minutes,
+        generated_number * {{ var(<span class="str">'histogram_bucket_minutes'</span>) }} <span class="kw">as</span> bucket_end_minutes
+    <span class="kw">from</span> bucket_series
+),
+
+bucketed_orders <span class="kw">as</span> (
+    <span class="kw">select</span>
+        bucket_grid.bucket_start_minutes,
+        bucket_grid.bucket_end_minutes,
+        count(order_durations.order_id) <span class="kw">as</span> order_count
+    <span class="kw">from</span> bucket_grid
+    <span class="kw">left join</span> order_durations
+        <span class="kw">on</span> order_durations.minutes_to_deliver &gt;= bucket_grid.bucket_start_minutes
+        <span class="kw">and</span> order_durations.minutes_to_deliver &lt; bucket_grid.bucket_end_minutes
+    <span class="kw">group by</span> bucket_grid.bucket_start_minutes, bucket_grid.bucket_end_minutes
+)
+
+<span class="kw">select</span>
+    {{ dbt_utils.generate_surrogate_key([<span class="str">'bucket_start_minutes'</span>]) }} <span class="kw">as</span> bucket_key,
+    bucket_start_minutes,
+    bucket_end_minutes,
+    order_count
+<span class="kw">from</span> bucketed_orders
+<span class="kw">order by</span> bucket_start_minutes</code></pre>
+<p>The join direction is the entire fix, same lesson Day 36 already taught on the date axis: starting <code>from bucket_grid</code> and <code>left join</code>-ing the real durations onto it means every one of the twenty buckets survives even when zero orders land inside it, and <code>count(order_durations.order_id)</code> — not <code>count(*)</code> — correctly returns <code>0</code> rather than <code>1</code> for a bucket whose join found nothing, since <code>count()</code> on a named column ignores the nulls a failed left join produces. Add a schema file testing the one thing that actually matters here — that the grid itself is complete and unique, not that any particular bucket holds a particular count:</p>
+<pre><code><span class="cm">-- models/marts/marts.yml -- new model block, alongside the existing ones</span>
+  - name: mart_delivery_time_histogram
+    description: <span class="str">"One row per delivery-time bucket (5-minute width, 0 to 100 minutes). Every bucket appears even with zero orders in it, built from dbt_utils.generate_series crossed with a left join onto real order durations."</span>
+    columns:
+      - name: bucket_key
+        data_tests:
+          - unique
+          - not_null
+      - name: bucket_start_minutes
+        data_tests:
+          - not_null
+      - name: order_count
+        data_tests:
+          - not_null</code></pre>
+<pre><code>uv run --project ../dbt_env dbt build --select mart_delivery_time_histogram</code></pre>
+<p>Expected — one new table, twenty rows, three tests, all passing:</p>
+<pre><code>1 of 4 OK created sql table model dbt_dev.mart_delivery_time_histogram ..... [SELECT 20 in 0.04s]
+2 of 4 PASS not_null_mart_delivery_time_histogram_bucket_start_minutes ..... [PASS in 0.02s]
+3 of 4 PASS not_null_mart_delivery_time_histogram_order_count .............. [PASS in 0.02s]
+4 of 4 PASS unique_mart_delivery_time_histogram_bucket_key ................. [PASS in 0.02s]
+
+Done. PASS=4 WARN=0 ERROR=0 SKIP=0 TOTAL=4</code></pre>
+
+<h2>4 · Why this is a different question than <code>mart_delivery_sla</code>, not a duplicate of it</h2>
+<p>It's worth being precise about why this mart earns its place next to <code>mart_delivery_sla</code> instead of just restating it. <code>mart_delivery_sla</code> answers one number per city per day: the share over 45 minutes, using <code>is_sla_breach()</code> from Day 10. That number is exactly right for "are we meeting the SLA," and exactly wrong for "how bad is it when we miss" — a city sitting at a 10% breach rate could mean ten orders each five minutes late, or two orders each ninety minutes late, and the share alone can't tell those apart. <code>mart_delivery_time_histogram</code> answers the second question: the full shape of how long deliveries actually take, bucket by bucket, with the zero-order buckets visible so a reader can see exactly where the distribution's real mass and real tail sit, not just where it crosses one line.</p>
+<p>The same silent-gap failure mode Day 36 fixed on the date axis exists here on the duration axis, and for an identical reason: before today, a plain <code>group by</code> on a bucketed <code>minutes_to_deliver</code> could only ever produce a row for a bucket that had at least one order in it. A fast-growing city with no deliveries yet in the 95-100 minute bucket — good news — would simply have no row there, indistinguishable from "this bucket doesn't exist" to anyone who doesn't already know the full bucket range by heart. Querying <code>min(bucket_start_minutes)</code>/<code>max(bucket_start_minutes)</code> against today's table will correctly return <code>0</code> and <code>95</code> regardless of which buckets have real orders in them — proof the grid, not the data, defines the table's shape.</p>
+
+<h2>5 · Verify</h2>
+<pre><code>uv run --project ../dbt_env dbt build --select mart_delivery_time_histogram
+docker compose exec -T postgres psql -U fdp -d fdp -c \
+  "select count(*) as total_buckets, count(*) filter (where order_count = 0) as empty_buckets
+   from dbt_dev.mart_delivery_time_histogram;"</code></pre>
+<p>Expected: the build reports <code>PASS=4 WARN=0 ERROR=0 SKIP=0 TOTAL=4</code> (Section 3's output), and the query returns <code>total_buckets = 20</code> regardless of how much seed data exists — the grid's size is fixed by <code>histogram_bucket_count</code>, never by how many orders happen to exist. <code>empty_buckets</code> greater than <code>0</code> is the actual proof the fix works, the same "a passing build isn't proof, a real zero-row query is" caution Day 36's own verify section used.</p>
+<div class="callout"><strong>What this round confirmed live, and what it didn't:</strong> this sandbox has no learner Postgres running, so the exact row counts above are not captured live output. What <em>was</em> confirmed live this round: <code>uv run --with "dbt-postgres==1.11.0" dbt parse --profiles-dir .</code> against a scratch copy of this exact project structure (sources, staging models, this new mart, its schema file, and a fresh <code>dbt deps</code> pulling <code>dbt_utils</code> 1.4.1) parsed with zero errors — and reading the installed <code>dbt_utils</code> package's own <code>generate_series.sql</code> and <code>generate_surrogate_key.sql</code> source directly confirmed both macros' exact call signatures used above, rather than assuming them from memory. <code>dbt parse</code> doesn't compile against a live connection, so it proves the Jinja and YAML are well-formed, not that the join logic returns the right numbers — the same parse-vs-compile-vs-run limit Days 13 and 14 both named. Confirm the real build output and the <code>empty_buckets &gt; 0</code> result in your own environment before quoting either in an interview.</div>
+
+<div class="interview">
+<p><strong>Q: "Your SLA dashboard shows a city breaching 45 minutes 10% of the time. What's missing from that number, and how would you show it?"</strong> A strong answer, out loud: <em>"A single breach-rate number collapses the whole distribution of delivery times into one point, so it can't distinguish ten orders five minutes late from two orders ninety minutes late — very different operational problems that look identical in that one percentage. I'd build a histogram mart instead: fixed-width time buckets, one row per bucket, counting how many orders fall in each. The trick is making sure empty buckets still show up as zero instead of silently disappearing, the same gap-filling problem as a sparse calendar — I generate the full bucket grid first with dbt_utils.generate_series, which emits a plain row of integers from 1 to N, then left-join the real order counts onto that grid and coalesce with count() on a named column so an empty bucket reads as a real zero, not a missing row. That gives an operator the actual shape of delivery times, not just whether one line was crossed."</em> The signal: naming the SLA share's real blind spot precisely, and describing the grid-then-left-join fix as the general pattern it is, not a one-off trick.</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>dbt_utils.generate_series</code> as a plain-integer gap-filling grid, applied to a new delivery-time histogram mart. It does not cover city- or restaurant-level breakdowns of the histogram (today's grid is global, across all cities) — a <code>cross join</code> against <code>stg_restaurants</code>' distinct cities, the exact pattern Day 36 used for the date axis, is the direct next step if a per-city breakdown is ever needed. It also does not touch <code>mart_delivery_sla</code> itself; the two marts answer different questions side by side; today neither edits nor replaces Day 6's.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="date_spine generates a row per date from a start and end date expression -- it understands calendars and date arithmetic. generate_series takes one upper_bound argument and generates a row per plain integer starting at 1, with no concept of dates at all. Using generate_series to build a calendar would mean manually adding integers to a base date, strictly more work than just calling date_spine directly for that job.">
+    <p class="stem">How does <code>dbt_utils.generate_series</code> actually differ from <code>date_spine</code>?</p>
+    <button class="opt" data-ok>it generates only plain integers, never any real date values</button>
+    <button class="opt">they are the exact same macro, just with different names</button>
+    <button class="opt">generate_series only ever accepts one explicit lower_bound argument, not integers</button>
+  </div>
+  <div class="q" data-why="dbt_utils.generate_series(upper_bound) compiles to a full with ... select ... statement of its own (a recursive powers-of-two CTE chain), not a bare table name or expression -- so it has to be wrapped inside a CTE's own parentheses to be queried from afterward, the same way this lesson's bucket_series CTE wraps it.">
+    <p class="stem">Why does <code>{{ dbt_utils.generate_series(20) }}</code> have to sit inside a CTE's parentheses, not after a bare <code>from</code>?</p>
+    <button class="opt" data-ok>the call itself expands to its own full with/select statement</button>
+    <button class="opt">Postgres forbids calling any package macro inside a from clause</button>
+    <button class="opt">dbt_utils macros may never appear inside any WITH block ever</button>
+  </div>
+  <div class="q" data-why="A single SLA breach-rate percentage collapses the whole distribution into one number, so it cannot distinguish many small delays from a few extreme ones -- two very different operational problems that would look identical in that one percentage. A bucketed histogram over the full range of delivery times shows the actual shape of the distribution instead of just whether one fixed line was crossed.">
+    <p class="stem">What does <code>mart_delivery_sla</code>'s single breach-rate number hide that today's histogram reveals?</p>
+    <button class="opt" data-ok>whether delays are many small ones or few extreme ones</button>
+    <button class="opt">nothing at all; the two marts always show identical information</button>
+    <button class="opt">the exact total count of orders placed that given day</button>
+  </div>
+  <div class="q" data-why="Starting the query from bucket_grid and left joining the real order_durations onto it keeps every one of the twenty generated buckets in the result even when zero real orders fall inside it. Starting from an aggregation of order_durations directly, the way a plain group by would, can only ever produce a row for a bucket that already had at least one matching order -- the exact same silent-gap bug Day 36 fixed on the date axis instead of the duration axis.">
+    <p class="stem">Why does today's final query start <code>from bucket_grid</code> and left join the real orders onto it, not the other way round?</p>
+    <button class="opt" data-ok>so every generated bucket survives even with zero real orders</button>
+    <button class="opt">Postgres always requires the smaller table appear first in queries</button>
+    <button class="opt">left join always performs measurably faster than any inner join</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> per <code>RESOURCES.md</code>, the <a href="https://github.com/dbt-labs/dbt-utils">dbt_utils</a> README, already Day 11 and Day 36's primary source — its macro reference lists <code>generate_series</code> alongside <code>date_spine</code>, the two names Day 11's own closing note paired together back on Day 11. Today confirmed the installed package's actual macro source directly (<code>generate_series.sql</code>, <code>generate_surrogate_key.sql</code>) rather than relying on the README's prose alone, the same "compile and read the real output" habit Day 10 built.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 48.<br>
+<strong>Next up:</strong> the <code>airflow db migrate</code>/<code>airflow dags test</code> approval-gate block logged every round since Day 35 (now fifteen rounds, 35-48) was not attempted again this round, since today's build needed no Airflow at all — still worth a human granting it once. A per-city breakdown of today's histogram (crossing the bucket grid against <code>stg_restaurants</code>' distinct cities, Day 36's exact cross-join pattern) is the clearest direct next step if this mart needs more granularity later; otherwise the next round should re-scan <code>PLAN.md</code>'s spine fresh, the same way today's own topic was chosen.<br><br>
+💬 Anything unclear — why <code>generate_series</code> and <code>date_spine</code> look alike but solve different problems, or how the bucket-grid pattern would generalize to a different numeric axis? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

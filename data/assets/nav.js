@@ -238,6 +238,8 @@
       file: "lessons/0114-np-average.html" },
     { n: 115, date: "2026-11-01", title: "apply(result_type=\"expand\"): turning one row-function's tuple into real columns",
       file: "lessons/0115-apply-result-type-expand.html" },
+    { n: 116, date: "2026-11-02", title: "np.piecewise(): the conditional-branching sibling of np.select() — and the Series footgun hiding inside it",
+      file: "lessons/0116-np-piecewise.html" },
   ];
 
   const REFS = [

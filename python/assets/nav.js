@@ -198,6 +198,8 @@
       file: "lessons/0094-ast-literal-eval.html" },
     { n: 95, date: "2026-11-01", title: "Review day 17: retrieval across Days 92-94",
       file: "lessons/0095-review-retrieval-day-17.html" },
+    { n: 96, date: "2026-11-02", title: "struct: packing and unpacking binary data",
+      file: "lessons/0096-struct-packing-and-unpacking.html" },
   ];
 
   const REFS = [

@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 96 · struct: packing and unpacking binary data</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 96 · ~20 min · 2 Nov 2026</p>
+<h1><code>struct</code>: packing and unpacking binary data</h1>
+<p class="byline">Every format lesson so far has been text-shaped: CSV rows, JSON objects, Python literals. Some data isn't text at all — a sensor log, a network protocol header, a legacy file format — just a fixed sequence of raw bytes, no delimiters, no quotes. The <code>struct</code> module is the stdlib's answer to that: it <dfn data-en="Converts between Python values (ints, floats, fixed-length byte strings) and a compact, fixed-layout sequence of raw bytes, described by a short format string -- the reverse direction a C programmer calls 'casting a struct onto a buffer', hence the module's name." data-vn="giữ nguyên &quot;struct&quot; (module) — convert giữa giá trị Python (int, float, byte string độ dài cố định) và 1 dãy byte thô có layout cố định, mô tả bằng 1 format string ngắn; tên module lấy từ khái niệm &quot;struct&quot; trong C, nơi 1 vùng byte được map thẳng sang các field có kiểu rõ ràng.">packs</dfn> Python values into exact bytes, and <dfn data-en="The reverse of packing: reading a fixed-layout sequence of raw bytes back out as Python values, according to the same format string used to pack them." data-vn="giữ nguyên &quot;unpack&quot; — chiều ngược của pack: đọc 1 dãy byte thô có layout cố định trở lại thành giá trị Python, theo đúng format string đã dùng khi pack.">unpacks</dfn> them back, with byte-for-byte control over the layout.</p>
+
+<div class="callout"><strong>Why today, specifically:</strong> a fresh case-insensitive grep across every lesson title, every lesson body, every practice file, <code>reference/glossary.html</code>, and <code>RESOURCES.md</code> — re-checking Day 95's own carried-forward candidate list rather than trusting it blindly — confirmed <code>struct</code>, <code>getpass</code>, <code>string.Template</code>, <code>timeit</code>, <code>array</code>, <code>types.SimpleNamespace</code>, <code>importlib</code>, and <code>locale</code> are all still genuinely zero-hit as taught topics, alongside <code>socket</code> and <code>threading</code> as modules in their own right. Picked <code>struct</code> over the rest: every binary-data lesson so far (Day 59 <code>hashlib</code>, Day 72 <code>pickle</code>, Day 82 <code>base64</code>) treats bytes as an opaque blob to hash, serialize, or encode — none of them teaches how to build or read a byte layout with specific fields at specific offsets, which is the actual skill needed for a binary file header or a wire protocol. Zero pandas/NumPy surface: NumPy's own dtype system solves a related problem for arrays, but that is explicitly out of scope here.</div>
+
+<h2>1 · A format string describes the byte layout</h2>
+<p><code>struct.pack(fmt, *values)</code> takes a short format string and the values to encode, and returns a <code>bytes</code> object laid out exactly as the format says. <code>struct.unpack(fmt, data)</code> reverses it, always returning a tuple:</p>
+<pre><code><span class="kw">import</span> struct
+
+packed = struct.pack(<span class="str">">ihb"</span>, 1000, -5, 3)
+<span class="kw">print</span>(packed)              <span class="cm"># b'\x00\x00\x03\xe8\xff\xfb\x03' -- confirmed live, 7 raw bytes</span>
+<span class="kw">print</span>(struct.unpack(<span class="str">">ihb"</span>, packed))
+<span class="cm"># (1000, -5, 3) -- confirmed live, exact values back as a tuple</span></code></pre>
+<p>Each letter in <code>"ihb"</code> names one field's type and fixed width: <code>i</code> is a 4-byte signed int, <code>h</code> a 2-byte signed short, <code>b</code> a 1-byte signed char — the exact same single-letter codes C uses for these widths. The leading <code>&gt;</code> is a byte-order marker, covered next. <code>struct.calcsize(fmt)</code> answers "how many bytes will this format take?" without packing anything — <code>calcsize(">ihb")</code> returns <code>7</code>, matching the length of <code>packed</code> above exactly.</p>
+
+<h2>2 · Byte order: the same number, two different byte sequences</h2>
+<p>The same integer can be laid out two ways: most-significant byte first (<dfn data-en="A byte order where the most significant byte of a multi-byte value is stored first (at the lowest memory address) -- the order used by network protocols and struct's '>' prefix." data-vn="giữ nguyên &quot;big-endian&quot; — thứ tự byte lưu byte có giá trị lớn nhất trước (ở địa chỉ thấp nhất); dùng bởi hầu hết network protocol và prefix &quot;&gt;&quot; của struct.">big-endian</dfn>), or least-significant byte first (<dfn data-en="A byte order where the least significant byte of a multi-byte value is stored first -- the native order on x86/x86-64 CPUs and struct's '<' prefix." data-vn="giữ nguyên &quot;little-endian&quot; — thứ tự byte lưu byte có giá trị nhỏ nhất trước; là thứ tự gốc trên CPU x86/x86-64 và prefix &quot;&lt;&quot; của struct.">little-endian</dfn>). The same Python integer produces visibly different bytes depending on which one the format string picks:</p>
+<pre><code><span class="kw">print</span>(struct.pack(<span class="str">"&lt;i"</span>, 1))   <span class="cm"># b'\x01\x00\x00\x00' -- confirmed live, little-endian: low byte first</span>
+<span class="kw">print</span>(struct.pack(<span class="str">">i"</span>, 1))   <span class="cm"># b'\x00\x00\x00\x01' -- confirmed live, big-endian: high byte first</span></code></pre>
+<p>Network protocols and most file formats fix big-endian (<code>&gt;</code>) as "network byte order," precisely so two machines with different native byte orders still agree on what the bytes mean. Omitting the prefix uses the machine's own native order instead — fine for a file this same program will read back, risky for anything written on one machine and read on another.</p>
+
+<h2>3 · Native mode also adds padding — "=" turns it off</h2>
+<p>Leaving the prefix off doesn't just pick native byte order — it also lets the C compiler's alignment rules insert padding bytes between fields, the same padding a C <code>struct</code> gets for faster memory access. That padding can make the packed size bigger than the fields' widths add up to:</p>
+<pre><code><span class="kw">print</span>(struct.calcsize(<span class="str">"ci"</span>))    <span class="cm"># 8 -- confirmed live: 1-byte char + 3 padding bytes + 4-byte int</span>
+<span class="kw">print</span>(struct.calcsize(<span class="str">"=ci"</span>))   <span class="cm"># 5 -- confirmed live: "=" forces standard size, no padding at all</span></code></pre>
+<p>This is the detail easiest to get burned by: a format string that works while reading back a file on the same machine can silently include padding bytes a different machine's compiler wouldn't add. A format prefix — <code>&gt;</code>, <code>&lt;</code>, or <code>=</code> — always selects <dfn data-en="A struct format mode, selected by a leading '>', '<', or '=' character, that uses each type's fixed documented width with zero compiler-alignment padding between fields -- unlike the default native mode, which can insert padding and makes the packed size machine-dependent." data-vn="giữ nguyên &quot;standard size&quot; — mode của struct (chọn bằng ký tự &quot;&gt;&quot;, &quot;&lt;&quot;, hoặc &quot;=&quot; ở đầu) dùng đúng độ rộng cố định đã định nghĩa cho từng kiểu, không có padding chèn giữa field; khác với mode native (không có prefix) có thể chèn padding và làm kích thước phụ thuộc máy.">standard size</dfn> with no padding — any format string meant to be read back portably should always start with one of the three.</p>
+
+<h2>4 · A realistic shape: decoding a tiny binary record</h2>
+<p>Put together, this is enough to read a small fixed-layout record — a 4-byte magic tag, a version byte, a count, and a float average, the shape a simple binary log format might use:</p>
+<pre><code>FMT = <span class="str">">4sBHf"</span>   <span class="cm"># magic(4 bytes) + version(1) + count(2) + average(4), big-endian, no padding</span>
+<span class="kw">print</span>(struct.calcsize(FMT))   <span class="cm"># 11 -- confirmed live</span>
+
+record = struct.pack(FMT, <span class="str">b"TEMP"</span>, 1, 42, 21.5)
+magic, version, count, avg = struct.unpack(FMT, record)
+<span class="kw">print</span>(magic, version, count, avg)
+<span class="cm"># b'TEMP' 1 42 21.5 -- confirmed live, exact round trip</span></code></pre>
+<p><code>4s</code> means "4 raw bytes, fixed width" — not a Python string, a <code>bytes</code> slice padded or truncated to exactly that length. A mismatched buffer size is the most common failure here, and <code>struct</code> is explicit about it rather than returning silently wrong data:</p>
+<pre><code><span class="kw">try</span>:
+    struct.unpack(<span class="str">">i"</span>, <span class="str">b"\x00\x00"</span>)   <span class="cm"># only 2 bytes given, format needs 4</span>
+<span class="kw">except</span> struct.error <span class="kw">as</span> e:
+    <span class="kw">print</span>(<span class="str">"rejected:"</span>, e)
+<span class="cm"># rejected: unpack requires a buffer of 4 bytes -- confirmed live, struct.error, not silent garbage</span></code></pre>
+<p><code>struct.error</code> is the one exception type this module raises, for both a bad format string and a wrong-sized buffer — worth catching specifically around any <code>unpack()</code> call fed bytes read from a file or a socket, since real-world data gets truncated.</p>
+
+<div class="callout"><strong>Where pandas/NumPy go from here:</strong> NumPy has its own, much richer answer to "describe a fixed byte layout" — the <code>dtype</code> system backing every array, including structured dtypes with named fields. Not demonstrated here; building or reading one is <code>data/</code>'s job, and this is the only sentence in this lesson naming it.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/96_struct_packing_and_unpacking.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/96_struct_packing_and_unpacking.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: packing and unpacking a multi-field record with an explicit byte order, computing a format's exact size with <code>calcsize()</code>, and catching <code>struct.error</code> on a buffer that's the wrong size instead of letting it crash.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="The leading '>' or '<' in a struct format string sets byte order: big-endian stores the most significant byte first, little-endian stores the least significant byte first. The same integer 1 therefore comes out as b'\x00\x00\x00\x01' under '>' and b'\x01\x00\x00\x00' under '<', confirmed live -- same value, different byte sequence, with no randomness and nothing doubled.">
+    <p class="stem">Why does <code>struct.pack(">i", 1)</code> produce different bytes than <code>struct.pack("&lt;i", 1)</code> for the same integer?</p>
+    <button class="opt" data-ok>the format prefix sets which end holds the most significant bytes</button>
+    <button class="opt">the plus prefix doubles every byte before it gets packed in</button>
+    <button class="opt">pack always reorders the bytes randomly unless a seed is given</button>
+  </div>
+  <div class="q" data-why="Native mode (no prefix) follows the C compiler's alignment rules, which can insert padding bytes between fields for faster memory access -- confirmed live, calcsize('ci') returns 8: 1 byte for the char, 3 padding bytes, then 4 bytes for the int. The '=' prefix selects standard size, which uses each type's documented fixed width with zero padding, so calcsize('=ci') returns exactly 5.">
+    <p class="stem">Why does <code>struct.calcsize("ci")</code> return <code>8</code> while <code>struct.calcsize("=ci")</code> returns <code>5</code>?</p>
+    <button class="opt" data-ok>native mode inserts extra alignment padding between the fields that equals skips over</button>
+    <button class="opt">the equals prefix always doubles the total byte size of every character field</button>
+    <button class="opt">calcsize simply counts each format letter twice unless a byte mark appears there</button>
+  </div>
+  <div class="q" data-why="struct.error is the one exception type the module raises for both a malformed format string and a buffer that doesn't match the format's required size -- confirmed live, struct.unpack('>i', b'\x00\x00') (only 2 bytes for a 4-byte format) raises struct.error: unpack requires a buffer of 4 bytes, rather than returning any partial or wrong value. Catching it specifically around unpack() matters because real bytes read from a file or socket can arrive truncated.">
+    <p class="stem">Why should <code>struct.error</code> be caught around a call to <code>struct.unpack()</code> on bytes read from a file?</p>
+    <button class="opt" data-ok>a truncated or wrongly sized buffer raises that error instead of returning partial data</button>
+    <button class="opt">unpack always raises that very same error once per call regardless of input given</button>
+    <button class="opt">the error only fires when the file got opened in text mode, not binary</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the standard library's <a href="https://docs.python.org/3/library/struct.html"><code>struct</code></a> docs — the "Format Strings" section is the authoritative table of every type code and byte-order prefix; the module page also covers <code>Struct</code> objects for repeated packing with one pre-compiled format, and <code>pack_into()</code>/<code>unpack_from()</code> for working directly on an existing buffer, both left as the natural next step beyond today's single-shot <code>pack()</code>/<code>unpack()</code>.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day96">glossary</a> under Day 96.<br>
+💬 Anything unclear — why network protocols standardize on big-endian, or when a binary format beats JSON for a log file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

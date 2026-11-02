@@ -5512,3 +5512,135 @@ along the Phase 2 spine, adapted to the learning records.
   rather than another TODO-closing round, since the TODO chain begun at Day
   21/38 and continued at Day 45/46/47 has no further named loose end left in
   this course's own lessons.
+
+- 2026-11-02 (headless run, Day 48 generated): forty-eighth lesson,
+  `0048-dbt-utils-generate-series-histogram.html`. Idempotency check first —
+  confirmed no `lessons/0048-*.html` on disk, no `n: 48` entry in
+  `assets/nav.js`, and no 2026-11-02 entry in this file before writing
+  anything (highest prior lesson was 47, dated 2026-11-01). No DB access
+  attempted directly this round; the orchestrator's own prior
+  `course_progress` read found no lesson_completed/quiz/kata signal for any
+  course since 2026-10-15, so pacing continued steady/sequential on that
+  context alone. Read `MISSION.md` in full, `PLAN.md` in full, `RESOURCES.md`,
+  `assets/nav.js`'s full `LESSONS` array (all 47 titles), and this file's own
+  tail back through Day 47's close before picking a topic.
+  **Topic choice:** Day 47's own closing note said directly that the TODO
+  chain begun at Day 21/38 and continued through Day 45/46/47 had no further
+  named loose end, and that "a future round most likely needs a fresh
+  gap-scan across `PLAN.md`'s spine (dbt, Kafka, or Airflow) rather than
+  another TODO-closing round." Took that literally: dispatched a sub-agent to
+  check `PLAN.md`'s Phase 2 spine bullets (2a dbt, 2b Kafka, 2c Airflow, 2d
+  portfolio) against all 47 lesson titles and bodies, checking seven specific
+  candidate gaps (source freshness depth, Day 30's stream-processing scope,
+  Day 25's deferrable-operator concreteness, Day 14's exposure example, Day
+  9's snapshot-join worked example, Day 18's log-compaction demo, and
+  dbt_utils macro coverage). Six of seven came back "already covered in
+  depth, confirmed with file/line evidence" — including two that looked like
+  gaps at first glance but weren't (Day 9 already builds the exact
+  `dbt_valid_from`/`dbt_valid_to` join PLAN.md's snapshot bullet names, and
+  Day 18 already demonstrates a real `cleanup.policy=compact` topic, not just
+  vocabulary). The seventh, dbt_utils' `generate_series` macro, was real: Day
+  33's own closing note had named it directly as "never built hands-on," and
+  grepping every lesson body for `dbt_utils.generate_series` confirmed zero
+  hits anywhere in the project, even though Day 11 and Day 36 both named the
+  macro. A second sub-agent then checked whether `generate_series` was too
+  thin on its own to justify a full lesson (it's a 3-line integer-sequence
+  macro, versus `date_spine`'s real calendar-arithmetic depth) — the answer
+  was yes for a bare "here's the macro" lesson, but no for a lesson built
+  around a genuinely new, non-redundant use case: a delivery-time histogram,
+  bucketing `minutes_to_deliver` into fixed-width bands on a numeric axis
+  rather than `date_spine`'s date axis, with dedicated gap-filling logic of
+  its own (zero-order buckets must still appear, the exact same silent-gap
+  failure mode Day 36 fixed for dates, now on durations).
+  **Content:** one new mart, `mart_delivery_time_histogram.sql`, built from a
+  `bucket_series` CTE wrapping `{{ dbt_utils.generate_series(var(...)) }}`,
+  crossed into a `bucket_grid` CTE (`(generated_number - 1) * bucket_width`
+  and `generated_number * bucket_width`), left-joined onto a `order_durations`
+  CTE copied in shape from Day 6/Day 10's `mart_delivery_sla`, and keyed with
+  `dbt_utils.generate_surrogate_key(['bucket_start_minutes'])`, Day 11's exact
+  macro. Two new project variables, `histogram_bucket_minutes` (5) and
+  `histogram_bucket_count` (20), alongside Day 10's existing
+  `sla_threshold_minutes` in `dbt_project.yml`. Section 1 explicitly
+  disambiguates `generate_series` from `date_spine` (integers from 1, no
+  `lower_bound` parameter in the installed 1.4.1 version, vs. a full date
+  range) since the two are easy to conflate at a glance, which this round's
+  own research agent initially got wrong (guessed `generate_series` took a
+  `lower_bound` argument; the installed macro's real signature, confirmed by
+  reading `dbt_packages/dbt_utils/macros/sql/generate_series.sql` directly,
+  takes only `upper_bound` and always starts at 1). Section 4 argues why this
+  mart earns its place next to `mart_delivery_sla` rather than duplicating it:
+  a single breach-rate percentage can't distinguish many small delays from a
+  few extreme ones, which the full bucketed distribution can.
+  No pandas, no Python-language teaching, no re-derivation of backend
+  idempotency concepts — confirmed by a prose-only read before shipping; this
+  lesson has no Python at all, pure dbt/SQL, so no bridge sentence was forced
+  in where none was needed.
+  **Verification:** built a full scratch dbt project under
+  `.scratch-dataeng-48/` at the repo root (same `/tmp`-unavailable constraint
+  recent rounds hit) — `dbt_project.yml`, `profiles.yml`, `packages.yml`,
+  `models/staging/` (sources + three staging models mirroring Days 2/6), the
+  new `mart_delivery_time_histogram.sql` plus its `marts.yml`, and
+  `macros/is_sla_breach.sql`. Ran a real `uv run --with
+  "dbt-postgres==1.11.0" dbt deps --profiles-dir .`, which pulled
+  `dbt_utils` 1.4.1 live, then `dbt parse --profiles-dir .` against the full
+  project — clean on the first attempt structurally, though the first draft
+  of the model called `generate_series` incorrectly (`from {{
+  dbt_utils.generate_series(...) }} as series`, treating it like a bare table
+  expression) before reading the package's own integration test
+  (`test_generate_series.sql`) and the macro's actual compiled shape (a full
+  `with p as (...), unioned as (...) select ...` statement) and correcting it
+  to the right pattern — wrapping the call inside its own CTE
+  (`bucket_series as ( {{ dbt_utils.generate_series(...) }} )`), the exact
+  pattern the package's own tests use. Re-ran `dbt parse --profiles-dir .
+  --project-dir .` after the fix; output grepped for `Error` found none, only
+  dbt's own unrelated `[WARNING]` about an unused `intermediate:` config path
+  left over from the scratch project's own minimal `dbt_project.yml` (not
+  present in the real lesson, which only edits/adds marts files). No live
+  Postgres was available in this sandbox, so `dbt compile`/`dbt build`
+  against real data were not attempted — confirmed this honestly rather than
+  guessing exact row-count output, the same disclosure convention recent
+  rounds used, and the lesson's own callout names exactly what was and wasn't
+  confirmed live. Also independently read
+  `dbt_packages/dbt_utils/macros/sql/generate_surrogate_key.sql` to confirm
+  Day 11's `generate_surrogate_key(['bucket_start_minutes'])` call shape
+  matches the installed package exactly. Deleted the scratch directory
+  entirely afterward (confirmed via a directory-listing attempt finding
+  nothing).
+  Ran a Node tag-balance/bare-`&`/dfn-attribute script and a separate quiz
+  word-count script, same shape as recent rounds'. Tag balance passed on the
+  first pass: div 8/8, p 22/22, code 106/106, button 12/12, script 3/3, dfn
+  1/1, pre 7/7, h2 8/8, h1 1/1, em 4/4 (after fixing one mismatched
+  `<em>date</code>` typo caught by this same script's diff), strong 5/5, a
+  2/2, zero bare `&`, the one `<dfn>` tag carrying both `data-en=` and
+  `data-vn=`. The first quiz draft came up uneven on all four questions
+  (9/10/7, 9/10/10, 10/9/10, 10/9/9) — rebalanced through several
+  edit-and-recount passes in a scratch Node word-count script, to a final
+  10/10/10 across all four questions. A separate pass on
+  `reference/glossary.html` after adding this round's new section confirmed
+  it stayed balanced too (h2 47/47, table 47/47, tr 181/181, td 402/402, th
+  141/141), zero bare `&`.
+  Added two new glossary terms, `generate_series` and `bucket (histogram)`,
+  under a new Day 48 section, after grepping case-insensitively first and
+  confirming neither term nor "histogram" existed anywhere in the glossary
+  already. No new `RESOURCES.md` line added — today's primary source reuses
+  Day 11/36's existing `dbt_utils` README citation verbatim, since
+  `generate_series` is documented in the same README page as `date_spine` and
+  `generate_surrogate_key`, not a new source.
+  Registered Lesson 48 in `assets/nav.js` right after the `n: 47` entry,
+  dated 2026-11-02 (`node --check` clean on `nav.js`, `gloss.js` and
+  `quiz.js`). Ran `bin/record-progress dataeng lesson_generated --day 48
+  --lesson 0048-dbt-utils-generate-series-histogram.html --detail
+  '{"by":"headless"}'` from the repo root at the end of this round; succeeded.
+  `dataeng/learning-records/` was not touched this round — today's pick came
+  from a fresh gap-scan across `PLAN.md`'s spine, not a new durable fact
+  about the learner distinct from the single 2026-09-14 baseline record on
+  file.
+  **Next up:** the `airflow db migrate`/`airflow dags test` approval-gate
+  block is now fifteen rounds running (35-48) with no attempt made this round,
+  since today's build needed no Airflow at all — still worth a human granting
+  it once for whoever next has one available. A per-city breakdown of today's
+  histogram (crossing the bucket grid against `stg_restaurants`' distinct
+  cities, Day 36's exact cross-join pattern) is a real, named, buildable next
+  step if finer granularity is ever wanted. Otherwise the next round should
+  run a fresh `PLAN.md` gap-scan again, the same method that worked this
+  round, rather than assuming another named TODO exists to close.

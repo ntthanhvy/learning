@@ -9861,3 +9861,116 @@
   the closer match to the Lesson 112–118 version-check-on-write family; and
   the backfill-missing-Lesson-117-NOTES-entry gap flagged two rounds ago,
   still not independently investigated.
+- 2026-11-02 generation (Lesson 120, headless run): idempotency check first —
+  confirmed no `lessons/0120-*.html` on disk and no `n: 120`/
+  `date: "2026-11-02"` entry in `nav.js` before writing anything (highest
+  prior lesson was 119, dated 2026-11-01), and no 2026-11-02 entry already in
+  this file. Orchestrator-provided context: `course_progress` has had no
+  `lesson_completed`/quiz/kata signal for any course since 2026-10-15
+  (backend's own Lesson 102 quiz, all `ok:true`) — no weak spot to chase, so
+  steady sequential pacing continued rather than a review day. Topic choice:
+  re-ran the gap scan fresh rather than trusting Lesson 119's closing note
+  blindly. Case-insensitive grep across every lesson title/body and the
+  glossary confirmed all three candidates Lesson 119 named were still
+  genuinely Go-only: Lesson 29's outbox pattern, Lesson 49's dead-letter
+  queues, and Lesson 26's idempotency keys — zero hits anywhere for
+  `OutboxMessage`, `AutoTransactionBehavior`, `IExecutionStrategy`,
+  `ServiceBus`/`DeadLetter`, or any ASP.NET-side idempotency-key mechanism
+  outside their own Go-only lessons. Picked the outbox pattern over the
+  other two because it has the strongest, cleanest primary-source fit: EF
+  Core's own documented default `SaveChanges` implicit-transaction behavior
+  is a direct, well-documented mirror of Lesson 29's hand-written
+  `BeginTx`/`Commit` pair, whereas idempotency keys has no first-party
+  ASP.NET Core feature (only hand-rolled middleware or third-party NuGet
+  packages, which would mean teaching a library rather than a framework
+  building block) and dead-letter queues would need a specific message-
+  broker SDK (Azure Service Bus, etc.) that MISSION.md's "concepts first, no
+  deep framework-specific dives beyond what's already named" rule argues
+  against introducing fresh. Read `MISSION.md`, `RESOURCES.md`, this file's
+  tail (Lessons 117–119 in full), Lesson 119 in full as the structural
+  template, and `nav.js`'s and `glossary.html`'s tails, all before writing
+  anything. Verified the C# half directly against a fetched Microsoft Learn
+  page before writing any prose: `WebFetch` against
+  `https://learn.microsoft.com/en-us/ef/core/saving/transactions` returned
+  the full conceptual page cleanly (consistent with this run's standing
+  finding that `learn.microsoft.com` fetches reliably), confirming verbatim
+  the default behavior ("by default, if the database provider supports
+  transactions, all changes in a single call to `SaveChanges` are applied in
+  a transaction... `SaveChanges` is guaranteed to either completely succeed,
+  or leave the database unmodified if an error occurs"), the
+  `AutoTransactionBehavior` enum and its three values (`WhenNeeded` default,
+  `Always`, `Never`), and the documented warning that "manually controlling
+  transactions in this way is incompatible with implicitly invoked retrying
+  execution strategies" — used as the lesson's one flagged new trap rather
+  than expanded into its own `IExecutionStrategy` deep dive, keeping scope
+  tight per MISSION.md. `dotnet --version` was not re-attempted this round
+  (would have required approval with no user present, consistent with every
+  round since Lesson 103); the C# snippets were instead checked by hand
+  against the fetched docs' own code examples and Lesson 105's existing,
+  already-verified `IHostedService`/`BackgroundService` snippets — brace/
+  semicolon balance, correct `await`/`async` usage, no undeclared
+  identifiers — flagged here as falling short of an actual compile, same
+  caveat as every C#-port round since the gate first appeared. No Go
+  scaffold was written or changed since Lesson 29's existing Go/Postgres
+  snippet is only referenced for comparison; nothing needed `go build`/
+  `go vet`. One new term, checked against the glossary first via case-
+  insensitive grep across the whole file — zero collisions confirmed before
+  writing: `SaveChanges implicit transaction`. Deliberately did NOT wrap
+  `IHostedService`/`BackgroundService` in a second `<dfn>` even though the
+  relay section leans on both heavily — they already have glossary rows from
+  Lesson 105, so this lesson references them via plain `<code>` text instead,
+  avoiding the exact mis-wrap mistake Lessons 112, 115, and 118 each flagged
+  and fixed for reused terms. Added the one new row immediately after Lesson
+  119's `[Timestamp] / IsRowVersion()` row, same Term/Tiếng Việt (dev-style)/
+  In software column order, confirmed by inspecting the file's actual last
+  row directly rather than assumed. Verification performed mechanically via
+  two Node scripts written with the `Write` tool and run via `node`, deleted
+  after: (1) a quiz-word-count check scoped per `<div class="q">` block,
+  splitting every option both via `.split(/\s+/)` and `.split(" ")` — first
+  draft landed uneven on three of four questions (Q1 10/11/10/11, Q2
+  10/11/11/10, Q4 13/12/10/12), fixed through four rewrite-and-recount
+  passes, converged to exactly 11/11/11/11, 11/11/11/11, 10/10/10/10, and
+  13/13/13/13 across the four questions, both counting methods agreeing
+  exactly, exactly one `data-ok` and four options per question confirmed the
+  same way; (2) an HTML tag-balance check across div/p/code/button/script/
+  dfn/pre/h2/h1/em/strong/a/table/tr/th/td — clean on the first pass this
+  time (div 7/7, p 15/15, code 44/44, button 16/16, script 3/3, dfn 1/1, pre
+  2/2, h2 6/6, h1 1/1, em 0/0, strong 3/3, a 2/2, table 1/1, tr 6/6, th 8/8,
+  td 10/10); a separate table/tr/th/td/p/div/html/head/body/title/script
+  balance check on `glossary.html` after its one-row addition — also
+  balanced (tr 386/386, td 1155/1155), plus a duplicate-term scan across all
+  385 first-column entries — zero duplicates; (3) a raw-unescaped-`&` regex
+  scan across both files — zero hits; (4) the lesson's one `<dfn` tag grepped
+  and confirmed to carry both `data-en=` and `data-vn=`; (5) `node --check`
+  against `assets/nav.js`, `assets/gloss.js`, and `assets/quiz.js` — all
+  clean, both before and after the `nav.js` edit; (6) a basic HTML well-
+  formedness check (exactly one `<!DOCTYPE html>`, one `<html>`/`</html>`,
+  three script tags with `gloss.js`/`quiz.js`/`nav.js` in that order) —
+  clean; (7) a grep for stray markdown-style backticks and `*emphasis*` left
+  over from drafting — none found. Registered Lesson 120 in `nav.js` (date
+  2026-11-02, today's actual generation date) right after `n: 119`, confirmed
+  exactly one matching `n: 120` entry and exactly one matching `0120-*.html`
+  file on disk afterward. No new RESOURCES.md line added this round — the
+  fetched EF Core transactions page is Microsoft's own docs, same domain
+  already covered by the standing `learn.microsoft.com` entries' pattern,
+  and this round reused no prior URL; it's cited inline in the lesson's own
+  "Go deeper" section instead, consistent with how Lesson 119 handled its own
+  single fetched EF Core page. `bin/record-progress` ran clean on the first
+  attempt this round (`recorded: backend/lesson_generated day=120
+  lesson=0120-outbox-pattern-efcore-savechanges.html`). No new
+  `learning-records/` file this round — the topic came from a fresh gap scan
+  of existing lesson titles, not a new surprise about the learner's baseline
+  or a quiz outcome. Candidates spotted but not picked this round, still
+  worth checking fresh next time: Go's `select`-statement arbitration rules,
+  now deferred for a tenth round running, same standing finding that the
+  blocker is the fetched page's own content truncation, not a permission
+  gate or URL/mirror choice; Lesson 49's dead-letter queues and Lesson 26's
+  idempotency keys, both still Go-only and unported, deliberately passed
+  over this round for the primary-source-strength reason explained above —
+  idempotency keys in particular may need a different framing next time
+  (e.g. built from `IDistributedCache` plus a custom filter/middleware,
+  rather than a named first-party feature) if picked; Polly (or a .NET
+  resilience-library survey more broadly), still deliberately out of scope
+  per MISSION.md's "concepts first" rule; and the backfill-missing-
+  Lesson-117-NOTES-entry gap flagged three rounds ago, still not
+  independently investigated.

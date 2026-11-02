@@ -60,6 +60,7 @@
     { n: 45, date: "2026-10-30", title: "Airflow trigger rules: a task that runs even when dbt_build fails", file: "lessons/0045-airflow-trigger-rules.html" },
     { n: 46, date: "2026-10-31", title: "Closing Day 45's TODO: a real dead-letter alert, not a print", file: "lessons/0046-airflow-dead-letter-alert-threshold.html" },
     { n: 47, date: "2026-11-01", title: "Closing Day 46's other TODO: a per-run delta, not a running total", file: "lessons/0047-airflow-dead-letter-delta-cursor.html" },
+    { n: 48, date: "2026-11-02", title: "dbt_utils generate_series: a delivery-time histogram, zero buckets included", file: "lessons/0048-dbt-utils-generate-series-histogram.html" },
   ];
 
   const REFS = [

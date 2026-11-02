@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 120 · The outbox pattern, now in C# too</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 120 · ~20 min</p>
+<h1>The outbox pattern, now in C# too</h1>
+<p class="byline">Lesson 29 solved the dual-write problem in Postgres: insert the business row and an outbox row inside the same hand-written <code>BEGIN…COMMIT</code>, so a crash can't lose the event, only at-worst duplicate it. That lesson never got a C# mirror, even though the rest of the Lesson 11–50 resilience set — rate limiting, retry, circuit breaker, bulkhead, worker pools, graceful shutdown, health checks, optimistic locking — has been ported since Lesson 112. Today closes that gap: the same same-transaction trick, built from EF Core's own default <code>SaveChanges()</code> behavior instead of a hand-written transaction.</p>
+
+<h2>1 · Same idea, one call to SaveChanges instead of a hand-written transaction</h2>
+<p>Lesson 29's rule still holds exactly: the business row and the outbox row must commit or roll back together, or a crash between two separate writes either loses the event or risks duplicating it. What changes in EF Core is that nobody writes <code>BeginTx</code>/<code>Commit</code> by hand for the common case. Per Microsoft's own docs: "by default, if the database provider supports transactions, all changes in a single call to <code>SaveChanges</code> are applied in a transaction... <code>SaveChanges</code> is guaranteed to either completely succeed, or leave the database unmodified if an error occurs." Add both rows to the same tracked <code>DbContext</code> and call <code>SaveChangesAsync()</code> once:</p>
+<pre><code><span class="kw">public</span> <span class="kw">class</span> OutboxMessage
+{
+    <span class="kw">public</span> Guid Id { <span class="kw">get</span>; <span class="kw">set</span>; }
+    <span class="kw">public</span> <span class="dt">string</span> Topic { <span class="kw">get</span>; <span class="kw">set</span>; }
+    <span class="kw">public</span> <span class="dt">string</span> Payload { <span class="kw">get</span>; <span class="kw">set</span>; }   <span class="cm">// -- same role as Lesson 29's "payload" column</span>
+    <span class="kw">public</span> DateTime CreatedAt { <span class="kw">get</span>; <span class="kw">set</span>; }
+    <span class="kw">public</span> DateTime? ProcessedAt { <span class="kw">get</span>; <span class="kw">set</span>; }  <span class="cm">// null until the relay publishes it</span>
+}
+
+<span class="kw">public</span> <span class="kw">async</span> Task CreateOrderAsync(Order order)
+{
+    db.Orders.Add(order);
+    db.OutboxMessages.Add(<span class="kw">new</span> OutboxMessage
+    {
+        Id = Guid.NewGuid(),
+        Topic = <span class="st">"order.created"</span>,
+        Payload = JsonSerializer.Serialize(<span class="kw">new</span> { order.Id, order.CustomerId }),
+        CreatedAt = DateTime.UtcNow,
+    });
+
+    <span class="cm">// One call, one implicit transaction -- both rows commit or neither does.</span>
+    <span class="kw">await</span> db.SaveChangesAsync();
+}</code></pre>
+<p>This is Lesson 29's exact guarantee, from a different source: there is no window where the order row exists but the outbox row doesn't, or vice versa, because both inserts are two pending changes inside one <code>SaveChangesAsync()</code> call rather than two separate statements the application has to wrap itself.</p>
+
+<h2>2 · The building block: EF Core's implicit SaveChanges transaction</h2>
+<p>The mechanism behind that guarantee is a plain EF Core feature, not anything outbox-specific — it is the same <dfn data-en="EF Core's default behavior of wrapping every pending Add/Update/Remove across all tracked entities in a single call to SaveChanges or SaveChangesAsync in one implicit database transaction, so the whole batch commits together or rolls back together on any failure -- controlled via DbContext.Database.AutoTransactionBehavior (WhenNeeded by default, or Always/Never)" data-vn="SaveChanges implicit transaction (giữ nguyên) — hành vi mặc định của EF Core: mọi Add/Update/Remove đang pending trong 1 lần gọi SaveChanges/SaveChangesAsync được bọc trong 1 transaction ngầm, cả batch commit cùng nhau hoặc rollback cùng nhau -- chỉnh bằng DbContext.Database.AutoTransactionBehavior (mặc định WhenNeeded, hoặc Always/Never)">SaveChanges implicit transaction</dfn> any multi-entity save already relies on. It applies here because the outbox row and the order row are just two more pending changes on the same <code>DbContext</code> — EF Core doesn't know or care that one of them happens to be an event waiting for a relay.</p>
+<div class="callout"><strong>The one new rule it brings:</strong> the docs also flag that "manually controlling transactions... is incompatible with implicitly invoked retrying execution strategies" — if a resilient SQL provider retries a failed <code>SaveChanges</code> call under the hood, wrapping it in your own hand-written transaction can break that retry. The outbox write above avoids the problem entirely by staying inside the implicit default rather than opening a transaction by hand, same as Lesson 29's Go code did deliberately with its own explicit <code>BeginTx</code>.</div>
+
+<h2>3 · The relay: still a background job, same as Lesson 29's</h2>
+<p>Nothing about the relay's job changes crossing languages: poll the outbox table for unprocessed rows, publish each one, mark it processed. In C# the natural home for that loop is the <code>BackgroundService</code> base class already covered in Lesson 105 — a long-lived, timer-driven loop that starts with the host and is never called from inside a request:</p>
+<pre><code><span class="kw">public</span> <span class="kw">class</span> OutboxRelay : BackgroundService
+{
+    <span class="kw">protected</span> <span class="kw">override</span> <span class="kw">async</span> Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        <span class="kw">while</span> (!stoppingToken.IsCancellationRequested)
+        {
+            <span class="kw">var</span> batch = <span class="kw">await</span> db.OutboxMessages
+                .Where(m =&gt; m.ProcessedAt == <span class="kw">null</span>)
+                .OrderBy(m =&gt; m.CreatedAt)
+                .Take(<span class="dv">100</span>)
+                .ToListAsync(stoppingToken);
+
+            <span class="kw">foreach</span> (<span class="kw">var</span> m <span class="kw">in</span> batch)
+            {
+                <span class="cm">// At-least-once: dying between Publish and SaveChangesAsync below</span>
+                <span class="cm">// republishes this same row next poll -- same gap Lesson 29 named.</span>
+                <span class="kw">await</span> publisher.PublishAsync(m.Topic, m.Payload, stoppingToken);
+                m.ProcessedAt = DateTime.UtcNow;
+                <span class="kw">await</span> db.SaveChangesAsync(stoppingToken);
+            }
+
+            <span class="kw">await</span> Task.Delay(TimeSpan.FromSeconds(<span class="dv">5</span>), stoppingToken);
+        }
+    }
+}</code></pre>
+<p>Lesson 105's own vocabulary applies unchanged: this is an <code>IHostedService</code> (via the <code>BackgroundService</code> base class), registered once with <code>AddHostedService&lt;OutboxRelay&gt;()</code>, living for the process's whole lifetime rather than being created per request like a controller. The outbox table is still the queue, "unprocessed rows" is still the pending set, and the relay is still the worker — Lesson 29's framing, unchanged by which runtime is polling.</p>
+
+<div class="cmp-wrap">
+<table class="cmp">
+<thead><tr><th></th><th>Lesson 29: Postgres / Go</th><th>Lesson 120: C# / EF Core</th></tr></thead>
+<tbody>
+<tr><th>Outbox row + business row together</th><td>hand-written <code>BeginTx</code> ... two <code>INSERT</code>s ... <code>Commit</code></td><td>both added to the same <code>DbContext</code>, one <code>SaveChangesAsync()</code></td></tr>
+<tr><th>What guarantees they commit together</th><td>Postgres transaction opened and committed by hand</td><td>EF Core's default <code>SaveChanges</code> implicit transaction</td></tr>
+<tr><th>The relay's loop shape</th><td>hand-written <code>time.Ticker</code> + <code>select</code> loop</td><td><code>BackgroundService.ExecuteAsync</code> (Lesson 105's <code>IHostedService</code>)</td></tr>
+<tr><th>Marking a row processed</th><td><code>UPDATE outbox SET processed_at = now()</code></td><td><code>m.ProcessedAt = DateTime.UtcNow; SaveChangesAsync()</code></td></tr>
+<tr><th>Delivery guarantee to the subscriber</th><td>at-least-once; subscriber must tolerate duplicates</td><td>same — at-least-once, same subscriber requirement</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers EF Core's implicit <code>SaveChanges</code> transaction as the C# mechanism for Lesson 29's transactional outbox pattern, plus using Lesson 105's <code>BackgroundService</code> as the relay. It does not cover <code>DbContext.Database.AutoTransactionBehavior</code>'s <code>Always</code>/<code>Never</code> settings or manual <code>BeginTransactionAsync()</code> control in any depth — only the one documented incompatibility with retrying execution strategies, flagged because it is the one new trap this port introduces; savepoints, which the same docs page covers as a separate feature for recovering mid-<code>SaveChanges</code> errors; or any message-broker-specific relay library (e.g. Debezium-style CDC from Lesson 87, MassTransit's own outbox support) — those are a deeper dive this lesson deliberately leaves for later, per MISSION.md's concepts-first rule.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory, with no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Per the docs, by default all changes in a single call to SaveChanges are applied in one database transaction, so SaveChanges either completely succeeds or leaves the database unmodified -- the business row and the outbox row are both pending changes in that one call, so they commit together or not at all.">
+    <p class="stem">Why do the order row and the outbox row commit together in the EF Core version?</p>
+    <button class="opt" data-ok>Both rows are just pending changes inside one single SaveChanges call</button>
+    <button class="opt">EF Core automatically retries the outbox row until it finally lands</button>
+    <button class="opt">The outbox table itself always enforces atomicity via a database trigger</button>
+    <button class="opt">The two rows get written across two fully separate database connections</button>
+  </div>
+  <div class="q" data-why="The docs explicitly warn that manually controlling transactions yourself is incompatible with implicitly invoked retrying execution strategies -- staying inside SaveChanges's own default implicit transaction avoids that specific documented trap entirely.">
+    <p class="stem">What documented trap does staying inside the default implicit transaction avoid?</p>
+    <button class="opt" data-ok>A manually opened transaction conflicting with a retrying execution strategy itself</button>
+    <button class="opt">A manually opened transaction running noticeably slower than the default one</button>
+    <button class="opt">A manually opened transaction being entirely rejected by every SQL provider</button>
+    <button class="opt">A manually opened transaction silently disabling every configured concurrency check now</button>
+  </div>
+  <div class="q" data-why="Lesson 105 defined IHostedService/BackgroundService as a class the DI container starts once when the app starts and stops once when it shuts down, living for the whole process lifetime and never created per request -- the outbox relay fits that shape exactly, with the outbox table as its queue.">
+    <p class="stem">In Lesson 105's terms, what kind of component is the C# outbox relay?</p>
+    <button class="opt" data-ok>A long-lived background service started once when the host starts</button>
+    <button class="opt">A short-lived object newly created for each incoming HTTP request</button>
+    <button class="opt">A static method called directly from inside the order controller</button>
+    <button class="opt">A database trigger that fires automatically right before any commit</button>
+  </div>
+  <div class="q" data-why="If the relay dies after publisher.PublishAsync succeeds but before SaveChangesAsync marks the row processed, the next poll still sees ProcessedAt as null and republishes that same row -- the identical at-least-once gap Lesson 29 named for its Go relay, which is why the subscriber must tolerate duplicates either way.">
+    <p class="stem">If the C# relay crashes right after publishing but before marking a row processed, what happens?</p>
+    <button class="opt" data-ok>The very same outbox row simply gets published again on the next poll</button>
+    <button class="opt">That exact outbox row is skipped forever and never published at all again</button>
+    <button class="opt">The whole BackgroundService process itself just crashes hard and never restarts ever again</button>
+    <button class="opt">The order row connected to it gets automatically rolled back too somehow anyway</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://learn.microsoft.com/en-us/ef/core/saving/transactions">Microsoft Learn: Transactions — EF Core</a> (~10 min) is the primary source for today's C# half, confirming verbatim the default behavior ("all changes in a single call to <code>SaveChanges</code> are applied in a transaction... guaranteed to either completely succeed, or leave the database unmodified"), the <code>AutoTransactionBehavior</code> enum (<code>WhenNeeded</code>/<code>Always</code>/<code>Never</code>), and the documented warning that manual transaction control "is incompatible with implicitly invoked retrying execution strategies." Lesson 29's own Designing Data-Intensive Applications (ch. 11) citation still covers the dual-write problem and transactional outbox concept itself in full, not duplicated here.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a>. Click any dotted term for a popup (English first, tiếng Việt second). Builds directly on Lesson 29's transactional outbox and Lesson 105's <code>IHostedService</code>/<code>BackgroundService</code>. <strong>Anything unclear? Ask your teacher</strong>, the agent that made this lesson. Ask in Vietnamese anytime. A good follow-up: "does our own C# code at work use an outbox table anywhere, or does it dual-write directly to a message broker?"</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

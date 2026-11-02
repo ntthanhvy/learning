@@ -11932,3 +11932,106 @@ fail *gracefully* so the learner sees which task failed.
   0095-review-retrieval-day-17.html --detail '{"by":"headless"}'` was run
   from the repo root at the end of this round and succeeded.
 
+- 2026-11-02 generation (Lesson 96, headless run): idempotency check first
+  — confirmed no `lessons/0096-*.html` on disk, no `n: 96`/
+  `date: "2026-11-02"` entry in `nav.js`, and no 2026-11-02 entry already in
+  this file before writing anything (highest prior lesson was 95, dated
+  2026-11-01, a review day closing the Days 92-94 cycle). The orchestrator's
+  own DB check this round again found no lesson_completed/quiz/kata signal
+  for any course since 2026-10-15 — no weak spot to chase, steady sequential
+  pacing continues. Read `MISSION.md` in full (no-pandas/no-NumPy exclusion
+  re-confirmed before writing a line), `PLAN.md` and `RESOURCES.md` in full,
+  the tail of this file (covering Days 93-95), the tail of `nav.js`, and Day
+  94's lesson + practice file as the fresh-topic structural template (Day 95
+  was a review day, a different shape). Cadence state: Day 95's own closing
+  note named Day 96 as the day to resume fresh, re-checking the standing
+  candidate list before a wider scan — followed that instruction rather than
+  re-deriving it from scratch, but still re-ran the grep rather than trusting
+  the list blindly: a fresh case-insensitive search across every lesson
+  title, every lesson body, every practice file, `reference/glossary.html`,
+  and `RESOURCES.md` confirmed `struct`, `getpass`, `string.Template`,
+  `timeit`, `array`, `types.SimpleNamespace`, `importlib`, and `locale` are
+  all still genuinely zero-hit as taught topics, alongside `socket` and
+  `threading` as modules in their own right (both still only named in
+  passing). Picked `struct` over the rest: every prior binary-data lesson
+  (Day 59 `hashlib`, Day 72 `pickle`, Day 82 `base64`) treats bytes as an
+  opaque blob to hash, serialize, or encode, but none teaches how to
+  describe or read a byte layout with specific fields at specific offsets —
+  a sharp, well-scoped stdlib corner with zero pandas/NumPy surface (NumPy's
+  structured `dtype` is the nearest library equivalent, named once in a
+  boundary callout and never demonstrated). Probed real behavior directly in
+  a scratch dir at the repo root (`.scratch-python-96/`, deleted after; `uv
+  run python3 probe.py`/`probe2.py`) rather than trusting memory: confirmed
+  `pack()`/`unpack()` round-trip correctly on a multi-field format
+  (`">ihb"` → 7 bytes → back to `(1000, -5, 3)`); confirmed byte order
+  changes the actual bytes for the same integer (`pack("<i", 1)` →
+  `b'\x01\x00\x00\x00'` vs. `pack(">i", 1)` → `b'\x00\x00\x00\x01'`);
+  confirmed native-mode alignment padding is real and `=` turns it off
+  (`calcsize("ci")` → `8` vs. `calcsize("=ci")` → `5`); confirmed
+  `struct.error` (not a silent wrong value) on a short buffer
+  (`unpack(">i", b"\x00\x00")` → `unpack requires a buffer of 4 bytes`) and
+  on a bad format character; confirmed a realistic fixed-layout record
+  (`">4sBHf"`, a 4-byte magic tag + version + count + float average) packs
+  to exactly 11 bytes and round-trips exactly. Checked the glossary for a
+  collision before writing — grepped `endian`, `byte order`, `pack\(`,
+  `unpack\(`, and `calcsize` case-insensitively across the full
+  `glossary.html`, zero existing rows. **New jargon: 5 inline `<dfn>`s**
+  (pack, unpack, big-endian, little-endian, standard size) **folded into 3
+  glossary rows** (`struct.pack() / struct.unpack()` combined, "byte order
+  (endianness)" combined for big-/little-endian, and "standard size
+  (struct)"), the same combining pattern Day 94 used for its ValueError-vs-
+  SyntaxError row, added as a new `<h2 id="day96">` section directly after
+  Day 94's (Day 95 added no glossary section, being a review day).
+  Verification performed mechanically, from dedicated scripts in
+  `.scratch-python-96/` (deleted after): (1) an HTML tag-balance check
+  across div/p/code/button/script/dfn/pre/h2/h1/em/strong/a on the new
+  lesson — balanced on the first pass (div 6/6, p 19/19, code 66/66, button
+  9/9, script 3/3, dfn 5/5, pre 6/6, h2 7/7, h1 1/1, em 0/0, strong 3/3, a
+  2/2); (2) a raw-unescaped-`&` regex scan (excluding `&amp;`/`&quot;`/etc.)
+  on both the new lesson and the new glossary section — zero hits on both;
+  (3) a word-count match per quiz question's three options, extracted via
+  regex and stripped of tags, printing each option's exact text alongside
+  its count rather than guessing by eye — first draft mismatched on Q2 and
+  Q3 (various 10-16 splits across several iterations), iterated
+  option-by-option until all three questions landed on equal per-question
+  counts: 11/11/11, 13/13/13, 14/14/14; (4) an `html.parser.HTMLParser` full
+  parse of the new lesson — no parse errors; (5) a separate table/tr/th/td/
+  h2/p/div balance check on `glossary.html` after its new section, plus a
+  duplicate-`id="dayNN"` scan — balanced (table 81/81, tr 355/355, th
+  243/243, td 822/822, h2 81/81) with zero duplicates among 81 ids, `day96`
+  present exactly once; (6) `node --check` against `assets/nav.js`,
+  `assets/gloss.js`, and `assets/quiz.js` — all three clean. Added one new
+  `RESOURCES.md` line for `struct`, placed directly after Day 94's
+  `ast.literal_eval()` line and before the PEP 8 line, following the file's
+  chronological-by-day ordering. Registered Lesson 96 in `nav.js` with
+  today's date (2026-11-02) right after the `n: 95` entry. No-pandas rule:
+  grepped case-insensitively for `pandas|numpy|dataframe|pd\.|np\.` in the
+  new lesson and practice file — exactly two hits in the lesson (the "Why
+  today" callout's reference to the full candidate list, and the required
+  "Where pandas/NumPy go from here" boundary callout naming NumPy's
+  structured `dtype` as the nearest library equivalent, not demonstrated)
+  and zero hits in the practice file — no worked pandas/NumPy example
+  anywhere. The shipped (unsolved)
+  `practice/96_struct_packing_and_unpacking.py` was executed directly from
+  its real `practice/` location and printed exactly 4 ✗ with no raw
+  traceback. A solved copy built in `.scratch-python-96/` (copied from the
+  shipped file, then each `...`/TODO body filled in directly — never
+  editing the shipped file itself, deleted after) printed all 4 ✓ and "All
+  green" on two consecutive runs; the shipped file was re-run afterward and
+  reproduced the identical all-✗ result, confirming no leakage back into
+  the baseline. `python/learning-records/` was not touched this round — a
+  routine fresh-topic pick following the course's own settled cadence and
+  Day 95's own closing instruction, not a new durable fact about the
+  learner distinct from Day 1's baseline record. Cadence note for the next
+  round: Day 96 is fresh day 1 of a new cycle, following Day 95's review
+  that closed out Days 92-94 — Day 97 should continue fresh (day 2), with a
+  review of Days 96-98 due at Day 99 if the settled three-fresh-then-review
+  rhythm holds. Candidates left open, confirmed still genuinely untaught as
+  a dedicated lesson: `getpass`, `string.Template`, `timeit`, `array`,
+  `types.SimpleNamespace`, `importlib`, `locale`, plus `socket` and
+  `threading` as modules in their own right (both currently only named in
+  passing elsewhere). `bin/record-progress python lesson_generated --day 96
+  --lesson 0096-struct-packing-and-unpacking.html --detail
+  '{"by":"headless"}'` was run from the repo root at the end of this round
+  and succeeded.
+

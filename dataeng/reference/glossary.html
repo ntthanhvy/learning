@@ -375,6 +375,13 @@
   <tr><td>delta (monitoring check)</td><td>giữ nguyên "delta" — hiệu số giữa số đo hiện tại và số đo đã lưu lại lần check trước (qua 1 cursor), dùng để biết "có gì MỚI" từ lần trước đến giờ, khác với running total (tổng dồn từ đầu) vốn không bao giờ giảm lại sau khi vượt ngưỡng</td><td>The difference between a check's current measurement and the measurement it stored on its own last run (via a cursor), used to answer "what's new since last time" rather than "what's the total ever." Confirmed this round with a mocked cursor: a running total sitting at 50 with zero new rows since the prior check correctly produces a delta of 0 and no alert, whereas Day 46's running-total version would have kept alerting on that same table forever.</td></tr>
 </table>
 
+<h2 id="day48">Day 48 — dbt_utils generate_series: a delivery-time histogram, zero buckets included</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>generate_series</td><td>giữ nguyên "generate_series" — macro dbt_utils nhận 1 đối số upper_bound, sinh ra đúng 1 dòng cho mỗi số nguyên từ 1 đến upper_bound (cột generated_number); khác "date_spine" (sinh ngày), macro này chỉ sinh số nguyên thường, không biết gì về ngày tháng</td><td>A dbt_utils macro taking one argument, upper_bound, that compiles to a recursive CTE emitting one row per integer from 1 through upper_bound in a column called generated_number. Confirmed this round by reading the installed package's own macro source directly: the call expands to a full with/select statement of its own, so it must sit inside a CTE's parentheses, not after a bare from the way a table name would.</td></tr>
+  <tr><td>bucket (histogram)</td><td>giữ nguyên "bucket" — 1 khoảng giá trị liên tục cố định (ví dụ 5 phút) trong 1 lưới tạo trước, dùng để nhóm dữ liệu thật vào theo khoảng nó rơi vào; mọi bucket đều xuất hiện kể cả khi không có dữ liệu thật nào rơi vào, nhờ left join từ lưới xuống dữ liệu thay vì group by trực tiếp trên dữ liệu</td><td>A fixed, contiguous range of values (here, a 5-minute span of delivery time) in a pre-generated grid, used to group real data by which range it falls into. Every bucket appears even with zero real rows landing in it, because the query starts from the generated grid and left-joins real data onto it, rather than grouping directly on the real data the way a plain <code>group by</code> would.</td></tr>
+</table>
+
 <script src="../assets/nav.js"></script>
 </body>
 </html>

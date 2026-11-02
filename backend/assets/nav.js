@@ -246,6 +246,8 @@
       file: "lessons/0118-rate-limiting-aspnetcore-ratelimiter-middleware.html" },
     { n: 119, date: "2026-11-01", title: "Optimistic locking, now in C# too",
       file: "lessons/0119-optimistic-concurrency-efcore-rowversion.html" },
+    { n: 120, date: "2026-11-02", title: "The outbox pattern, now in C# too",
+      file: "lessons/0120-outbox-pattern-efcore-savechanges.html" },
   ];
 
   const REFS = [

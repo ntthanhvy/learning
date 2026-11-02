@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 116 · np.piecewise(): the conditional-branching sibling of np.select() — and the Series footgun hiding inside it</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 116 · ~20 min · 2 Nov 2026</p>
+<h1>np.piecewise(): the conditional-branching sibling of np.select() — and the Series footgun hiding inside it</h1>
+<p class="byline">Lesson 115's own closing note named <code>np.piecewise()</code> as the one remaining standing candidate, first surfaced in Lesson 113's note and carried forward through 114 and 115 without being picked. A fresh scan of every lesson, the full glossary, and this course's own notes confirms it is still a genuine zero-hit as taught content — today it closes that gap.</p>
+
+<h2>1 · np.select() picks a VALUE per branch; np.piecewise() runs a FUNCTION per branch</h2>
+<p>Lesson 24 already covers <code>np.where()</code> and <code>np.select()</code>: both pick, per element, a precomputed <em>value</em> from a parallel list of choices based on which condition matched. <dfn data-en="a NumPy function evaluating a different CALLABLE per branch, not a different precomputed value -- np.piecewise(x, condlist, funclist) applies funclist[i] to exactly the slice of x where condlist[i] is True, mathematically the piecewise function x appears in. Confirmed directly (numpy 2.5.4): a scalar in funclist is still accepted, turned into a constant function automatically, which makes it behave like np.select() in that one special case -- but it also accepts a genuine function, applied only to the matching slice, which np.select() cannot do at all" data-vn="giữ nguyên 'np.piecewise()' — hàm NumPy chạy 1 HÀM (callable) khác nhau cho mỗi nhánh, không phải 1 giá trị tính sẵn khác nhau như np.select(); np.piecewise(x, condlist, funclist) áp dụng funclist[i] CHỈ lên phần của x mà condlist[i] đúng (True) -- đúng kiểu hàm từng đoạn (piecewise function) trong toán; đã kiểm tra trực tiếp (numpy 2.5.4): truyền 1 số đơn (scalar) vào funclist vẫn được, NumPy tự biến nó thành hàm hằng số, lúc đó hành xử giống np.select() -- nhưng np.piecewise() còn nhận hàm thật, chỉ áp dụng lên đúng phần khớp điều kiện, điều np.select() không làm được">np.piecewise()</dfn> is the sibling that instead runs a different <em>function</em> on each matching slice of the input — closer to its actual mathematical namesake, a piecewise-defined function:</p>
+<pre><code><span class="kw">import</span> numpy <span class="kw">as</span> np
+
+x = np.array([-<span class="kw">5.0</span>, -<span class="kw">1.0</span>, <span class="kw">0.0</span>, <span class="kw">2.0</span>, <span class="kw">10.0</span>])
+
+<span class="cm"># Piecewise: square negatives, pass non-negatives through unchanged.</span>
+result = np.piecewise(x, [x < <span class="kw">0</span>, x >= <span class="kw">0</span>], [<span class="kw">lambda</span> v: v**<span class="kw">2</span>, <span class="kw">lambda</span> v: v])
+<span class="cm"># array([25.,  1.,  0.,  2., 10.])  -- lambda v: v**2 ran ONLY on [-5, -1], not the whole array</span></code></pre>
+<p>Confirmed directly (numpy 2.5.4): each function in <code>funclist</code> receives only the already-filtered subset of <code>x</code> matching its own condition — <code>v</code> inside the first lambda above is <code>array([-5., -1.])</code>, never the full five-element array. That is the core mechanical difference from <code>np.select()</code>, whose choice expressions are normally computed over the full array first and picked from afterward.</p>
+
+<h2>2 · Three small rules, confirmed directly, before the real trap</h2>
+<p>A scalar anywhere in <code>funclist</code> is accepted and quietly treated as a constant function (<code>np.piecewise(x, [x&lt;0, x&gt;=0], [-1, 1])</code> works, no lambda required). Passing <code>len(condlist) + 1</code> functions — one more function than conditions — makes that extra, final function the "otherwise" default, run wherever every condition was False. Elements covered by no condition and no default function are confirmed to come back as plain <code>0</code>, not NaN:</p>
+<pre><code>np.piecewise(x, [x < <span class="kw">-100</span>], [<span class="kw">lambda</span> v: -<span class="kw">1</span>])
+<span class="cm"># array([0., 0., 0., 0., 0.])  -- no element matched; default is 0, not NaN</span>
+
+np.piecewise(x, [x < <span class="kw">0</span>], [<span class="kw">lambda</span> v: -<span class="kw">1</span>, <span class="kw">99</span>])  <span class="cm"># 2 funcs, 1 cond -> 2nd is "else"</span>
+<span class="cm"># array([-1., -1., 99., 99., 99.])</span></code></pre>
+<p>A function-count that is neither <code>len(condlist)</code> nor <code>len(condlist) + 1</code> raises <code>ValueError</code> immediately, naming both counts — confirmed directly: <code>"with 1 condition(s), either 1 or 2 functions are expected"</code>.</p>
+
+<h2>3 · The footgun: a list of pandas Series conditions crashes with a confusing IndexError</h2>
+<div class="callout"><strong>The trap:</strong> confirmed directly (pandas 3.1.0, numpy 2.5.4) by reading the NumPy source after reproducing the failure — passing <code>condlist</code> as a Python list of <strong>pandas Series</strong> (the natural result of writing <code>[s &lt; 0, s &gt;= 0]</code> on a Series <code>s</code>) raises <code>IndexError: too many indices for array: array is 1-dimensional, but 2 were indexed</code>. This is not a dtype problem and not about <code>x</code> itself — <code>x</code> can be a Series with no issue. The cause is a heuristic inside <code>np.piecewise()</code> that decides whether <code>condlist</code> is "one condition" or "a list of several conditions" by checking <code>isinstance(condlist[0], (list, numpy.ndarray))</code>. A pandas Series is neither a <code>list</code> nor an <code>ndarray</code>, so the check misfires: the whole two-item list of Series gets wrongly treated as a single condition and wrapped in an extra layer, turning a shape that should be <code>(2, 5)</code> into <code>(1, 2, 5)</code> — a 2-D condition array ends up indexing a 1-D <code>x</code>, which is exactly what the IndexError reports.</div>
+<pre><code><span class="kw">import</span> pandas <span class="kw">as</span> pd
+
+s = pd.Series([-<span class="kw">5.0</span>, -<span class="kw">1.0</span>, <span class="kw">0.0</span>, <span class="kw">2.0</span>, <span class="kw">10.0</span>])
+np.piecewise(s, [s < <span class="kw">0</span>, s >= <span class="kw">0</span>], [<span class="kw">lambda</span> v: v**<span class="kw">2</span>, <span class="kw">lambda</span> v: v])
+<span class="cm"># IndexError: too many indices for array: array is 1-dimensional, but 2 were indexed</span>
+
+<span class="cm"># Fix: convert each CONDITION to a NumPy array (x itself may stay a Series).</span>
+np.piecewise(s, [(s < <span class="kw">0</span>).to_numpy(), (s >= <span class="kw">0</span>).to_numpy()], [<span class="kw">lambda</span> v: v**<span class="kw">2</span>, <span class="kw">lambda</span> v: v])
+<span class="cm"># array([25.,  1.,  0.,  2., 10.])  -- works; result is a plain ndarray, not a Series</span></code></pre>
+<p>Confirmed directly: the fix only needs each <em>condition</em> converted via <code>.to_numpy()</code> — <code>x</code> is free to stay a Series throughout, since <code>np.piecewise()</code> runs <code>np.asanyarray(x)</code> on it internally with no trouble. Also confirmed directly: the return value is always a plain <code>ndarray</code>, even when <code>x</code> was a Series going in — the result must be re-wrapped with <code>pd.Series(result, index=s.index)</code> to get the original labels back, the same "Index disappears" shape Lesson 111 found for <code>np.percentile()</code>.</p>
+
+<h2>4 · When a single bare condition is passed, the same "wrap in a list" logic is intentional</h2>
+<p>That promotion rule is not purely a bug — it is documented (if "undocumented" per the NumPy source's own comment) behavior for the genuinely common case of passing exactly <em>one</em> raw condition, not wrapped in a list at all. Confirmed directly: <code>np.piecewise(x, x &lt; 0, [lambda v: -1, 1])</code> — one bare boolean array, no outer list — works correctly, treated as a single condition needing the "+1 default function" form. The trap in Section 3 is specifically a <em>list</em> of Series being misidentified as if it were one bare condition, because Series fails the same <code>list</code>/<code>ndarray</code> type check a bare array would have passed.</p>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>np.piecewise()</code>'s core contract (callable per matching slice), the scalar-as-constant-function and <code>len(condlist)+1</code>-default rules, the confirmed default-to-<code>0</code> behavior for uncovered elements, the confirmed <code>ValueError</code> on a wrong function count, and the confirmed pandas-Series-list <code>IndexError</code> footgun with its <code>.to_numpy()</code> fix. It does not cover <code>numpy.polynomial</code>-style actual piecewise-polynomial fitting, nor <code>scipy.interpolate</code>'s spline-based piecewise tools — both out of this course's NumPy-only-what-pandas-needs scope per <code>MISSION.md</code>.</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/116_np_piecewise.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/116_np_piecewise.py</code></pre>
+<p>Exercise 1 confirms the core branching behavior on a plain array, including the <code>len(condlist)+1</code> default function (Sections 1-2). Exercise 2 confirms the uncovered-elements-default-to-0 and wrong-function-count <code>ValueError</code> rules (Section 2). Exercise 3 confirms the Series-list-of-conditions <code>IndexError</code> footgun and its <code>.to_numpy()</code> fix (Section 3).</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: each function in funclist runs ONLY on the slice of x where its matching condition is True, not on the full array -- that is the core difference from np.select(), whose choices are typically precomputed over the whole array first.">
+    <p class="stem">Inside <code>np.piecewise(x, [x < 0, x >= 0], [lambda v: v**2, lambda v: v])</code>, the first lambda actually receives what as its own argument <code>v</code>?</p>
+    <button class="opt" data-ok>only the negative slice of x, that one matching subset alone, never the whole five-item array at all</button>
+    <button class="opt">the entire original five-item array x itself unchanged, every single time, the same as any ordinary one-argument call</button>
+    <button class="opt">a single lone scalar value, the very first element of x alone, repeated across every single remaining call</button>
+  </div>
+  <div class="q" data-why="Confirmed directly via the NumPy source: condlist[0] being a pandas Series (not a list or ndarray) fails the internal isinstance check meant to detect a single bare condition, so the whole two-item list gets wrongly wrapped as if it were one condition -- producing a 2-D array that can't index the 1-D x, hence the IndexError.">
+    <p class="stem">Calling <code>np.piecewise(s, [s < 0, s >= 0], funcs)</code>, where <code>s</code> is a pandas Series and each condition stays an un-converted Series too, raises what?</p>
+    <button class="opt" data-ok>a confusing IndexError about too many indices, since that Series list gets wrongly treated as one single condition</button>
+    <button class="opt">nothing unusual whatsoever -- it just quietly runs fine, always giving back a properly labeled Series every time</button>
+    <button class="opt">a clear, loud TypeError stating directly that Series objects just aren't ever allowed inside any condlist at all</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: elements covered by no condition at all, with no extra default function supplied either, come back as plain 0 -- not NaN, and not left unchanged from whatever x originally held there."><p class="stem">An element of <code>x</code> matching none of the conditions in <code>condlist</code>, with no extra default function supplied, ends up as what in the result?</p>
+    <button class="opt" data-ok>plain 0 exactly, that specific fallback value always, never NaN and never x's own original value either</button>
+    <button class="opt">NaN exactly, matching very precisely how an unmatched row always behaves under np.select()'s own well-documented default handling</button>
+    <button class="opt">x's own original untouched value right there, carried straight through exactly as if no piecewise call ran</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official NumPy API reference for <a href="https://numpy.org/doc/stable/reference/generated/numpy.piecewise.html"><code>numpy.piecewise()</code></a> (per <code>RESOURCES.md</code>'s NumPy-fundamentals grouping, ~5 min) documents the full <code>condlist</code>/<code>funclist</code> contract, the scalar-as-constant-function shortcut, and the default-value rule confirmed above.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>np.piecewise()</code> is new today, added right after Lesson 115's <code>result_type="expand"</code> entry.<br>
+<strong>Next lesson:</strong> no standing candidate pre-committed — tomorrow's own fresh curriculum/glossary scan picks the next topic, per this course's standing convention.<br><br>
+💬 Anything unclear — the function-per-branch vs. value-per-branch distinction, the Series footgun, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

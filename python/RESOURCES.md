@@ -79,6 +79,8 @@ authors for *why*. Cite inline; each lesson recommends exactly one primary sourc
   Use for: Day 93 — `connect()`/`cursor()` and `?` parameterized queries for an embedded database with no server, `with con:` for transaction commit/rollback (not connection close), `sqlite3.Row` for lookup by column name, and `sqlite3.IntegrityError` for a violated schema constraint; named (`:name`) placeholders and custom row factories are undemonstrated next steps.
 - [Docs: `ast.literal_eval()`](https://docs.python.org/3/library/ast.html#ast.literal_eval)
   Use for: Day 94 — parsing Python literal syntax (numbers, strings, bytes, bools, `None`, and literal lists/tuples/dicts/sets) safely, as the one correct alternative to `eval()` for untrusted or semi-trusted text; the function's own reference entry states the safe-subset guarantee directly, and the surrounding `ast` module page is the natural next step beyond today's single function.
+- [Docs: `struct`](https://docs.python.org/3/library/struct.html)
+  Use for: Day 96 — `pack()`/`unpack()` for converting between Python values and a fixed byte layout described by a format string, the `>`/`<`/`=` byte-order prefixes and the native-mode alignment padding `=` turns off, and `struct.error` on a malformed format or wrong-sized buffer; `Struct` objects and `pack_into()`/`unpack_from()` are the natural next steps beyond today's single-shot calls.
 - [PEP 8 — Style Guide for Python Code](https://peps.python.org/pep-0008/)
   Use for: naming and layout conventions, so written code looks like the ecosystem's.
 

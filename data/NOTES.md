@@ -10893,3 +10893,128 @@
   run directly from the repo root and returned `recorded:
   data/lesson_generated day=115
   lesson=0115-apply-result-type-expand.html`.
+
+- 2026-11-02 generation (Lesson 116): headless run, zero prior context.
+  Idempotency check first — confirmed no `lessons/0116-*.html` on disk, no
+  `n: 116` entry in `nav.js`, and no 2026-11-02 entry in this file before
+  writing anything (highest prior lesson was 115, dated 2026-11-01). DB
+  signal: the orchestrator's own brief reported no lesson_completed/quiz/
+  kata signal for any course since 2026-10-15 — no weak-spot to chase,
+  continued this course's own steady sequential pacing. Read `MISSION.md`
+  in full (not modified), `RESOURCES.md` in full (not modified), this
+  file's own tail (Lessons 113-115) for exact house style, `nav.js`'s tail
+  for the exact entry format, and `lessons/0115-apply-result-type-expand.html`
+  plus `practice/115_apply_result_type_expand.py` in full as structural
+  templates. Topic choice: Lesson 115's own closing note named
+  `np.piecewise()` as the one remaining standing candidate, first surfaced
+  in Lesson 113's note and carried forward through 114 and 115 without
+  being picked — so, per this course's "fresh scan each round" convention,
+  grepped `piecewise` case-insensitively across every lesson body, the
+  full glossary, and this file first; the only hits were this file's own
+  log entries (113-115) naming it as a standing candidate, never as actual
+  lesson content — confirmed a genuine zero-hit gap. Also sanity-checked a
+  few other common pandas/NumPy interview topics (`np.select()`,
+  `np.where()`, `searchsorted()`, `digitize()`) to make sure nothing more
+  central was a bigger gap first — all already taught (Lessons 24, 75) or
+  not found as a better fit — before committing to `np.piecewise()`.
+  Every behavioral claim was probed directly first via temporary scripts
+  in `.scratch-data-116/` at the repo root (`/tmp` unavailable in this
+  sandbox, matching every recent lesson's own note) — deleted after use,
+  never tracked by git: confirmed pandas 3.1.0 / numpy 2.5.4, unchanged
+  from recent lessons; confirmed `np.piecewise(x, condlist, funclist)`
+  runs each function in `funclist` ONLY on the slice of `x` matching its
+  own condition (verified the lambda's own argument is the filtered
+  subset, not the full array) — the core mechanical difference from
+  `np.select()` (Lesson 24), which picks a precomputed value per branch
+  rather than running a function on a filtered slice; confirmed a scalar
+  in `funclist` is silently treated as a constant function; confirmed
+  `len(funclist) == len(condlist) + 1` makes the extra function the
+  "otherwise" default for unmatched elements; confirmed an element
+  matching no condition with no default supplied comes back as plain `0`,
+  never `NaN`; confirmed a function count matching neither `len(condlist)`
+  nor `len(condlist) + 1` raises `ValueError` immediately, with the exact
+  message text `"with N condition(s), either N or N+1 functions are
+  expected"`. Found and root-caused, via `inspect.getsource()` on the
+  real NumPy source after reproducing the failure, a genuine footgun not
+  previously known to this course: passing `condlist` as a Python list of
+  pandas Series (the natural result of writing `[s < 0, s >= 0]` on a
+  Series `s`) raises a confusing `IndexError: too many indices for array:
+  array is 1-dimensional, but 2 were indexed`. Traced the exact mechanism
+  step by step across several scratch scripts: `np.piecewise()` contains
+  an undocumented heuristic, `isscalar(condlist) or (not
+  isinstance(condlist[0], (list, ndarray)) and x.ndim != 0)`, meant to
+  detect when a single bare condition (not wrapped in a list) was passed
+  so it can promote it to a one-item list; a pandas Series fails the
+  `(list, ndarray)` isinstance check (it is neither), so a genuine
+  multi-item list of Series conditions gets wrongly treated as if it were
+  one single bare condition and wrapped in an extra list layer — turning
+  a condlist array that should be shape `(2, 5)` into `(1, 2, 5)`, so the
+  loop's own `cond = condlist[i]` ends up 2-D, and indexing the 1-D `x`
+  with a 2-D boolean array is exactly what raises the `IndexError`.
+  Confirmed directly that `x` itself is NOT the problem — `x` can stay a
+  Series throughout with no issue (`np.asanyarray()` handles it fine);
+  only the condlist's own elements need converting. Confirmed the fix:
+  calling `.to_numpy()` on each condition (not necessarily on `x`) avoids
+  the misfire, since `isinstance(ndarray_cond, (list, ndarray))` is then
+  True. Confirmed the return value is always a plain `ndarray`, never a
+  Series, even when `x` was a Series going in — the same "Index
+  disappears" shape Lesson 111 found for `np.percentile()`. Confirmed the
+  promotion heuristic is intentional, not purely a bug, for the genuinely
+  common case of passing exactly one bare condition not wrapped in a list
+  at all (`np.piecewise(x, x < 0, [f, g])` works correctly) — the trap is
+  specifically a *list* of Series being misidentified as if it were that
+  one-bare-condition case. Did not fetch the NumPy doc page by WebFetch
+  this round — the direct probe results plus `inspect.getsource()` on the
+  installed version were unambiguous and more precise than the docstring
+  itself (which doesn't mention the Series footgun at all, confirmed by
+  reading it directly); the page falls under `RESOURCES.md`'s existing
+  "Docs: NumPy fundamentals" grouping, no new `RESOURCES.md` line needed.
+  Added exactly one new glossary row, `np.piecewise()`, directly after
+  Lesson 115's `result_type="expand"` entry. Verification performed
+  mechanically via scratch scripts in `.scratch-data-116/` (deleted
+  after, never tracked by git): (1) a quiz-word-count script per
+  `<div class="q">` block — first draft came out uneven (18/16/17,
+  18/17/15, 17/14/17); several rounds of targeted word-level edits
+  converged on exactly 18/18/18, 18/18/18, and 17/17/17 option words
+  across the three questions, one `data-ok` per question throughout;
+  (2) an HTML tag-balance check — clean (html 1/1, head 1/1, body 1/1,
+  div 5/5, p 17/17, pre 4/4, code 72/72, h1 1/1, h2 8/8, em 5/5, strong
+  4/4, button 9/9, script 3/3, dfn 1/1, span 44/44, a 2/2, title 1/1);
+  (3) a raw-unescaped-`&` regex scan found exactly the two expected `&`
+  characters inside the lesson's own `cd ~/learning/data && uv run ...`
+  shell command, zero elsewhere; (4) exactly 1 `<dfn>`-carrying tag, with
+  `data-en`/`data-vn`, matching the 1 new term (`np.piecewise()`). A
+  separate table-balance check on `glossary.html` after its one-row
+  addition — balanced (tr 189/189, td 564/564, zero raw `&`), plus a
+  duplicate-term scan across all first-column entries — zero duplicates.
+  `node --check` confirmed `nav.js`, `gloss.js`, and `quiz.js` all still
+  parse as valid JavaScript, with exactly one `n: 116` entry and one
+  `0116-np-piecewise` file reference in `nav.js`. The shipped (unsolved)
+  `practice/116_np_piecewise.py` was run directly from its real
+  `practice/` location (via `uv run --with pandas python3`) and printed
+  exactly 3 ✗ with no raw traceback on the first run (confirmed the two
+  non-blank-dependent sub-checks — the `ValueError`/`IndexError`
+  demonstrations that don't depend on any `...` blank — already evaluate
+  True even unsolved, by design, while the blank-dependent sub-checks
+  correctly evaluate False). Built a solved copy in
+  `.scratch-data-116/practice/` (deleted after, never tracked by git),
+  filling in all blanks per the helper-function pattern recent lessons
+  established; it printed all 3 ✓ and "All green" on the first run.
+  Re-ran the shipped file directly from `practice/` again afterward and
+  reproduced the identical all-✗ result, confirming the solved copy's
+  edits never leaked back into the shipped baseline. This round's own
+  fresh scan found no new standing candidate worth naming for tomorrow —
+  unlike recent rounds, no obvious next-gap jumped out during this scan;
+  tomorrow's own fresh scan starts clean. `git status --short` after all
+  edits confirmed only the intended `data/` files were touched
+  (`data/assets/nav.js`, `data/reference/glossary.html`, new
+  `data/lessons/0116-np-piecewise.html`, and new
+  `data/practice/116_np_piecewise.py`) plus any unrelated concurrent
+  changes in other course directories from other runs, not touched by
+  this one. The scratch directory `.scratch-data-116/` was deleted after
+  verification, at the repo root but never tracked by git, matching prior
+  rounds' own precedent for this environment. `bin/record-progress data
+  lesson_generated --day 116 --lesson 0116-np-piecewise.html --detail
+  '{"by":"headless"}'` was run directly from the repo root and returned
+  `recorded: data/lesson_generated day=116
+  lesson=0116-np-piecewise.html`.

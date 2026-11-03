@@ -12035,3 +12035,103 @@ fail *gracefully* so the learner sees which task failed.
   '{"by":"headless"}'` was run from the repo root at the end of this round
   and succeeded.
 
+- 2026-11-03 generation (Lesson 97, headless run): idempotency check first
+  — confirmed no `lessons/0097-*.html` on disk, no `n: 97`/
+  `date: "2026-11-03"` entry in `nav.js`, and no 2026-11-03 entry already in
+  this file before writing anything (highest prior lesson was 96, dated
+  2026-11-02). The DB check this round again found no lesson_completed/
+  quiz/kata signal for any course since 2026-10-15 — no weak spot to chase,
+  steady sequential pacing continues. Read `MISSION.md` in full (no-pandas/
+  no-NumPy exclusion re-confirmed before writing a line), `PLAN.md` and
+  `RESOURCES.md` in full, the tail of this file (covering Days 95-96), the
+  tail of `nav.js`, and Day 96's lesson + practice file as the fresh-topic
+  structural template. Cadence state: Day 95 was a review closing the Days
+  92-94 cycle; Day 96 (`struct`) was fresh day 1 of the new cycle, and its
+  own closing note named Day 97 as fresh day 2 — followed that rather than
+  re-deriving it, with a review of Days 96-98 due at Day 99 if the settled
+  three-fresh-then-review rhythm holds. Still re-ran the grep rather than
+  trusting the carried-forward candidate list blindly: a fresh case-
+  insensitive search across every lesson title, every lesson body, every
+  practice file, `reference/glossary.html`, and `RESOURCES.md` confirmed
+  `getpass`, `string.Template`, `timeit`, `types.SimpleNamespace`,
+  `importlib`, and `locale` are all still genuinely zero-hit as dedicated
+  topics; `array`, `socket`, and `threading` turned up only as incidental
+  English-word or passing-mention hits (e.g. inside other lessons' prose,
+  this file's own candidate lists, or a practice filename), never as a
+  taught topic in its own right. Picked `getpass` over the rest: Day 93's
+  `sqlite3` lesson and Day 77's `secrets` lesson both assume a secret value
+  already exists in memory, but neither teaches how that secret gets from a
+  human's keyboard into the program safely in the first place — a short,
+  sharp, real gap, with zero pandas/NumPy surface (this is pure terminal
+  I/O, confirmed by grep to have no library surface at all). Probed real
+  behavior directly in a scratch dir (`.scratch-python-97/`, created inside
+  the repo since `/tmp` was blocked this round, deleted after; `uv run
+  python3 probe.py`) rather than trusting memory: confirmed
+  `inspect.signature(getpass.getpass)` reports `(prompt='Password: ',
+  stream=None)`; confirmed `getpass.getuser()` returns the OS login name
+  with no prompt; confirmed that redirecting `sys.stdin` to a `StringIO` (no
+  real tty) makes `getpass.getpass()` fall back to plain visible input and
+  raise `GetPassWarning` with message "Can not control echo on the
+  terminal."; confirmed `issubclass(getpass.GetPassWarning, UserWarning)` is
+  `True`. Checked the glossary for a collision before writing — grepped
+  `getpass` and `GetPassWarning` case-insensitively across the full
+  `glossary.html`, zero existing rows. **New jargon: 1 inline `<dfn>`**
+  (getpass, defined once in the byline) **folded into 3 glossary rows**
+  (`getpass module`, `GetPassWarning`, `getpass.getuser()`), added as a new
+  `<h2 id="day97">` section directly after Day 96's. Verification performed
+  mechanically, from dedicated scripts in `.scratch-python-97/` (deleted
+  after): (1) an HTML tag-balance check across div/p/code/button/script/
+  dfn/pre/h2/h1/em/strong/a on the new lesson — balanced (div 6/6, p 16/16,
+  code 62/62, button 9/9, script 3/3, dfn 2/2, pre 4/4, h2 6/6, h1 1/1, em
+  0/0, strong 3/3, a 2/2); (2) a raw-unescaped-`&` regex scan (excluding
+  `&amp;`/`&quot;`/etc.) on the new lesson — zero hits; (3) a word-count
+  match per quiz question's three options, cross-checked by two independent
+  extraction methods (a strip-tags-then-`.split()` regex pass, and a second
+  pass splitting on raw spaces after tag removal) — both agreed; first
+  draft mismatched on all three questions (Q1 12/12/10, Q2 16/11/11, Q3
+  14/14/12), iterated option-by-option across several passes until all
+  three landed on equal per-question counts: 12/12/12, 16/16/16, 14/14/14;
+  (4) an `html.parser.HTMLParser` full-document parse of the new lesson —
+  no parse errors; (5) a separate table/tr/th/td/h2/p/div balance check on
+  `glossary.html` after its new section, plus a duplicate-`id="dayNN"` scan
+  — balanced (table 82/82, tr 359/359, th 246/246, td 831/831, h2 82/82)
+  with zero duplicates among 82 ids, `day97` present exactly once; a
+  case-insensitive duplicate-term scan across the glossary's term column
+  flagged one pre-existing collision (`dependency`, used once for FastAPI's
+  `Depends()` concept and once for `graphlib`'s task-ordering concept,
+  both predating this round) — confirmed none of today's three new terms
+  (`getpass module`, `GetPassWarning`, `getpass.getuser()`) collide with
+  any existing row; (6) `node --check` against `assets/nav.js`,
+  `assets/gloss.js`, and `assets/quiz.js` — all three clean. Added one new
+  `RESOURCES.md` line for `getpass`, placed directly after Day 96's
+  `struct` line and before the PEP 8 line, following the file's
+  chronological-by-day ordering. Registered Lesson 97 in `nav.js` with
+  today's date (2026-11-03) right after the `n: 96` entry. No-pandas rule:
+  grepped case-insensitively for `pandas|numpy|dataframe|pd\.|np\.` in the
+  new lesson and practice file — exactly two hits in the lesson (the "Why
+  today" callout's reference to the full candidate list, and the required
+  "Where pandas/NumPy go from here" boundary callout stating plainly that
+  neither library touches terminal I/O at all) and zero hits in the
+  practice file — no worked pandas/NumPy example anywhere. The shipped
+  (unsolved) `practice/97_getpass_reading_secrets.py` was executed directly
+  from its real `practice/` location and printed exactly 4 ✗ with no raw
+  traceback. A solved copy built in `.scratch-python-97/` (copied from the
+  shipped file, then each `...`/TODO body filled in directly — never
+  editing the shipped file itself, deleted after) printed all 4 ✓ and "All
+  green" on two consecutive runs; the shipped file was re-run afterward and
+  reproduced the identical all-✗ result, confirming no leakage back into
+  the baseline. `python/learning-records/` was not touched this round — a
+  routine fresh-topic pick following the course's own settled cadence and
+  Day 96's own closing instruction, not a new durable fact about the
+  learner distinct from Day 1's baseline record. Cadence note for the next
+  round: Day 97 is fresh day 2 of the cycle Day 96 opened — Day 98 should
+  continue fresh (day 3), with a review of Days 96-98 due at Day 99 if the
+  settled three-fresh-then-review rhythm holds. Candidates left open,
+  confirmed still genuinely untaught as a dedicated lesson: `string.Template`,
+  `timeit`, `array`, `types.SimpleNamespace`, `importlib`, `locale`, `socket`,
+  and `threading` (the latter two still only named in passing, never as a
+  dedicated topic). `bin/record-progress python lesson_generated --day 97
+  --lesson 0097-getpass-reading-secrets-without-echo.html --detail
+  '{"by":"headless"}'` was run from the repo root at the end of this round
+  and succeeded.
+

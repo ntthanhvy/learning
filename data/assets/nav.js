@@ -240,6 +240,8 @@
       file: "lessons/0115-apply-result-type-expand.html" },
     { n: 116, date: "2026-11-02", title: "np.piecewise(): the conditional-branching sibling of np.select() — and the Series footgun hiding inside it",
       file: "lessons/0116-np-piecewise.html" },
+    { n: 117, date: "2026-11-03", title: "np.isclose() and np.allclose(): comparing floats without ever using ==",
+      file: "lessons/0117-np-isclose-allclose.html" },
   ];
 
   const REFS = [

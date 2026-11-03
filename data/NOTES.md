@@ -11018,3 +11018,132 @@
   '{"by":"headless"}'` was run directly from the repo root and returned
   `recorded: data/lesson_generated day=116
   lesson=0116-np-piecewise.html`.
+
+- 2026-11-03 (headless 06:00 run): headless run, zero prior context.
+  Idempotency check first — confirmed no `lessons/0117-*.html` on disk and
+  no `n: 117` entry in `nav.js` before writing anything (highest prior
+  lesson was 116, dated 2026-11-02). DB signal: the orchestrator's own
+  brief reported no lesson_completed/quiz/kata signal for any course
+  since 2026-10-15 — no weak-spot to chase, continued this course's own
+  steady sequential pacing. Read `MISSION.md` in full (not modified),
+  `RESOURCES.md` in full (not modified), this file's own tail (Lessons
+  115-116) for house style, `nav.js`'s tail for the exact entry format,
+  and Lesson 116's own lesson/practice files in full as structural
+  templates. Topic choice: Lesson 116's own closing note named no
+  standing candidate, so ran a fresh curriculum/glossary scan — grepped
+  ~45 candidate pandas/NumPy terms (`nlargest`, `np.lexsort`,
+  `argpartition`, `np.histogram`/`bincount`, `np.digitize`, `MultiIndex`
+  helpers, `np.isclose`/`np.allclose`, and others) case-insensitively
+  across every lesson body. Several genuine zero-hit gaps turned up, but
+  `np.isclose()`/`np.allclose()` stood out for two reasons: (1) this
+  file's own tail (the round that produced Lesson 102) had already named
+  it as a standing zero-hit candidate and it was never picked since, and
+  (2) Lesson 89's own note on `assert_frame_equal()` explicitly invoked
+  "the same idea as NumPy's allclose" when explaining its float
+  tolerance — the function was named in passing and never itself taught,
+  the same "used but not taught" lineage shape as Lesson 100
+  (`pd.concat()`'s raw-array layer) and Lesson 102 (`Series.clip()`'s
+  underlying `np.clip()`). Confirmed via grep this was a genuine zero-hit
+  across every lesson body and the glossary before committing to it.
+  Confirmed pandas 3.1.0 / numpy 2.5.4, unchanged from recent lessons.
+  Every behavioral claim was probed directly first via temporary scripts
+  in `.scratch-data-117/` at the repo root (`/tmp` unavailable in this
+  sandbox, matching every recent lesson's own note) — deleted after use,
+  never tracked by git: confirmed `0.1 + 0.2 == 0.3` is `False` (the
+  textbook float trap) while `np.isclose(0.1 + 0.2, 0.3)` is `True`;
+  confirmed `np.isclose()` is element-wise (returns a same-shape boolean
+  array) while `np.allclose()` is exactly that result run through
+  `.all()` — one single plain `bool`, confirmed via `isinstance` check;
+  confirmed the formula directly against the official docs by hand-coding
+  it in a scratch script and matching element-for-element:
+  `abs(a - b) <= atol + rtol * abs(b)`, default `rtol=1e-05`,
+  `atol=1e-08`; confirmed widening `atol=` on purpose lets a real
+  `0.01`-sized gap pass that the default tolerance rejects. Confirmed the
+  NaN trap directly: `np.isclose(nan, nan)` and `np.allclose()` on arrays
+  sharing a NaN position are both `False` by default — the same rule
+  plain `==` already follows for NaN, not a silent-pass trap — and
+  `equal_nan=True` flips exactly that one rule, confirmed not to disturb
+  any other comparison in the same array. Confirmed both functions work
+  directly on a pandas Series with no `.to_numpy()` conversion required
+  first, unlike the `AttributeError` traps Lessons 110/112 found calling
+  `cummax()`/`.ravel()` the other direction — `np.isclose()` on two
+  Series returns a plain `ndarray` (Index dropped, Lesson 111's "Index
+  disappears" family), `np.allclose()` returns a plain Python `bool`.
+  Confirmed shape-mismatched arrays raise `ValueError` immediately (the
+  same broadcasting rule as Lesson 30, no special-cased behavior of its
+  own), while a scalar target broadcasts cleanly against a whole Series —
+  checked by comparing a three-element Series against the plain float
+  `3.0`. Investigated whether `isclose()`/`allclose()` are truly symmetric
+  (swapping `a`/`b`) since the formula scales `rtol` by `abs(b)` only;
+  tried several example pairs (including NumPy's own docstring example)
+  looking for an asymmetric result worth teaching, found none that
+  actually flipped under the installed version with simple-enough numbers
+  to explain clearly in ~20 min — left this nuance out of the lesson
+  deliberately rather than risk a misleading simplified example; the
+  official docs' own API reference remains the pointer for anyone who
+  hits a genuine asymmetric edge case. Did not fetch the NumPy doc page
+  by WebFetch this round — the direct probe results were unambiguous and
+  match the documented formula exactly; the page falls under
+  `RESOURCES.md`'s existing "Docs: NumPy fundamentals" grouping, no new
+  `RESOURCES.md` line needed. Added exactly one new glossary row,
+  "np.isclose() / np.allclose()" (grouped under one row, same pattern as
+  Lesson 93's `np.argmax() / np.argmin()` row), directly after Lesson
+  116's `np.piecewise()` entry — confirmed via a case-insensitive scan of
+  every first-column term that no prior row already covered either name.
+  Verification performed mechanically via scratch scripts in
+  `.scratch-data-117/` (deleted after, never tracked by git): (1) two
+  independent quiz-word-count scripts (a regex-split method and a
+  line-by-line state-machine method) agreeing on exactly 12/12/12,
+  13/13/13, and 13/13/13 option words across the three questions, one
+  `data-ok` per question throughout — the first draft came out uneven
+  (10-13 word spread per question) before several rounds of targeted
+  edits converged; (2) an HTML tag-balance check caught one real bug on
+  the first pass — a stray `</p>` left inside the Section 4 `<div
+  class="callout">` with no matching opening `<p>` (the callout's own
+  text was written directly inside the div, following Lesson 116's own
+  pattern, but a leftover `</p>` from an earlier draft survived the
+  edit) — fixed by removing the stray closing tag; the re-run came back
+  fully balanced (html 1/1, head 1/1, body 1/1, div 5/5, p 19/19, pre
+  6/6, code 84/84, h1 1/1, h2 9/9, strong 3/3, button 9/9, script 3/3,
+  dfn 2/2, span 38/38, a 2/2, title 1/1, table 1/1, tr 3/3, th 3/3, td
+  6/6); (3) a raw-unescaped-`&` regex scan found exactly the two expected
+  `&` characters inside the lesson's own `cd ~/learning/data && uv run
+  ...` shell command, zero elsewhere; (4) exactly 2 `<dfn>`-carrying
+  tags, each with both `data-en`/`data-vn`, one for `np.isclose()` and
+  one for `np.allclose()`, matching the one combined glossary row added.
+  A separate table-balance check on `glossary.html` after its one-row
+  addition — balanced (tr 190/190, td 567/567, zero raw `&`), plus a
+  duplicate-term scan across all 189 first-column entries — zero
+  duplicates, and confirmed the new row's exact term string appears
+  exactly once. `node --check` confirmed `nav.js`, `gloss.js`, and
+  `quiz.js` all still parse as valid JavaScript, with exactly one
+  `n: 117` entry and one `0117-np-isclose-allclose` file reference in
+  `nav.js`. The shipped (unsolved) `practice/117_np_isclose_allclose.py`
+  was run directly from its real `practice/` location (via `uv run
+  --with pandas python3`) and printed exactly 3 ✗ with no raw traceback
+  on the first run. Built a solved copy in `.scratch-data-117/practice/`
+  (deleted after, never tracked by git), filling in all blanks per the
+  helper-function pattern recent lessons established; it printed all 3 ✓
+  and "All green" on the first run. Re-ran the shipped file directly from
+  `practice/` again afterward and reproduced the identical all-✗ result,
+  confirming the solved copy's edits never leaked back into the shipped
+  baseline. This round's own fresh scan surfaced several other standing
+  zero-hit candidates worth naming for tomorrow, none pre-committed per
+  this course's "fresh scan each round" convention: `np.lexsort()`,
+  `np.partition()`/`argpartition()`, `np.histogram()`/`np.bincount()`,
+  and `np.digitize()` (the raw-array layer under Lesson 18's `qcut()`
+  binning, a plausible next pick in the same "name the NumPy layer under
+  an already-taught pandas method" lineage as today). `git status
+  --short` after all edits confirmed only the intended `data/` files were
+  touched (`data/assets/nav.js`, `data/reference/glossary.html`, new
+  `data/lessons/0117-np-isclose-allclose.html`, and new
+  `data/practice/117_np_isclose_allclose.py`) plus unrelated concurrent
+  changes in other course directories from other runs, not touched by
+  this one. The scratch directory `.scratch-data-117/` was deleted after
+  verification, at the repo root but never tracked by git, matching
+  prior rounds' own precedent for this environment. `bin/record-progress
+  data lesson_generated --day 117 --lesson
+  0117-np-isclose-allclose.html --detail '{"by":"headless"}'` was run
+  directly from the repo root and returned `recorded:
+  data/lesson_generated day=117
+  lesson=0117-np-isclose-allclose.html`.

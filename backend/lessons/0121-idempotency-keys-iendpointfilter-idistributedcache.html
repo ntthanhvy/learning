@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 121 · Idempotency keys, now in C# too</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 121 · ~20 min</p>
+<h1>Idempotency keys, now in C# too</h1>
+<p class="byline">Lesson 26 built a hand-rolled Go middleware that checks an <code>Idempotency-Key</code> header before the real handler runs, and replays a stored response on a retry instead of running the handler twice. That lesson never got a C# mirror, unlike most of the Lesson 11-50 resilience set. Two first-party ASP.NET Core building blocks turn out to cover the exact same shape: an <code>IEndpointFilter</code> to intercept the call before the handler, and <code>IDistributedCache</code> as the key-to-response store.</p>
+
+<h2>1 · Same idea, two framework pieces instead of one hand-written map</h2>
+<p>Lesson 26's rule still holds exactly: the first request with a given key runs the real handler and remembers exactly what it returned; every later request with that same key gets the remembered response played back, and the handler never runs a second time. The Go version built both halves by hand — a mutex-guarded map, and a wrapper function around <code>http.HandlerFunc</code>. ASP.NET Core already ships a named piece for each half:</p>
+<pre><code><span class="kw">public</span> <span class="kw">class</span> IdempotencyFilter : IEndpointFilter
+{
+    <span class="kw">private</span> <span class="kw">readonly</span> IDistributedCache _cache;
+    <span class="kw">public</span> IdempotencyFilter(IDistributedCache cache) =&gt; _cache = cache;
+
+    <span class="kw">public</span> <span class="kw">async</span> ValueTask&lt;<span class="kw">object</span>?&gt; InvokeAsync(
+        EndpointFilterInvocationContext ctx, EndpointFilterDelegate next)
+    {
+        <span class="kw">var</span> key = ctx.HttpContext.Request.Headers[<span class="st">"Idempotency-Key"</span>].ToString();
+        <span class="kw">if</span> (<span class="dt">string</span>.IsNullOrEmpty(key))
+            <span class="kw">return</span> Results.Problem(<span class="st">"Idempotency-Key header required"</span>, statusCode: <span class="dv">400</span>);
+
+        <span class="kw">var</span> stored = <span class="kw">await</span> _cache.GetStringAsync(key);
+        <span class="kw">if</span> (stored != <span class="kw">null</span>)
+            <span class="kw">return</span> Results.Content(stored, <span class="st">"application/json"</span>); <span class="cm">// replay -- next() never runs</span>
+
+        <span class="kw">var</span> result = <span class="kw">await</span> next(ctx); <span class="cm">// first time: run the real handler</span>
+        <span class="kw">var</span> body = JsonSerializer.Serialize(result);
+        <span class="kw">await</span> _cache.SetStringAsync(key, body,
+            <span class="kw">new</span> DistributedCacheEntryOptions { AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(<span class="dv">24</span>) });
+        <span class="kw">return</span> result;
+    }
+}
+
+app.MapPost(<span class="st">"/orders"</span>, CreateOrderAsync).AddEndpointFilter&lt;IdempotencyFilter&gt;();</code></pre>
+<p>The handler, <code>CreateOrderAsync</code>, never learns about retries — exactly like Lesson 26's wrapped Go handler. A production version keys the cache entry per client, same as the Go version's scoping rule in section 5, and swaps the simplified <code>Results.Content</code> replay above for storing and replaying the real status code and headers too; elided here for space, same as Lesson 26's own elided <code>recordingWriter</code>.</p>
+
+<h2>2 · The building blocks: a short-circuiting filter, and a cache that isn't just in-process</h2>
+<p>The first piece is an <dfn data-en="an ASP.NET Core minimal-API interface with one method, InvokeAsync(context, next), that runs before (and optionally after) an endpoint handler and can short-circuit the pipeline by returning a result without ever calling next -- registered on a route with AddEndpointFilter<T>()" data-vn="IEndpointFilter (giữ nguyên) — interface của minimal API ASP.NET Core, có 1 method InvokeAsync(context, next), chạy trước (và có thể sau) handler, có thể chặn luôn pipeline bằng cách return kết quả mà không gọi next -- đăng ký vào route bằng AddEndpointFilter&lt;T&gt;()">IEndpointFilter</dfn>. Its shape is exactly what Lesson 26's hand-written <code>withIdempotency</code> wrapper did in Go: run code before the handler, and decide whether <code>next</code> (the handler) gets called at all. Returning early from <code>InvokeAsync</code> without awaiting <code>next(ctx)</code> is the C# version of the Go middleware's early <code>return</code> after <code>w.Write(rec.body)</code> — both skip the handler entirely on a replay.</p>
+<p>The second piece is <dfn data-en="an ASP.NET Core interface (Get/GetAsync, Set/SetAsync, Remove/RemoveAsync) for a cache that can live outside the current process -- Redis, SQL Server, or any other shared backing store -- storing values as byte arrays with a DistributedCacheEntryOptions controlling expiration, e.g. AbsoluteExpirationRelativeToNow" data-vn="IDistributedCache (giữ nguyên) — interface của ASP.NET Core (Get/GetAsync, Set/SetAsync, Remove/RemoveAsync) cho 1 cache có thể sống ngoài process hiện tại -- Redis, SQL Server, hoặc backing store chung khác -- lưu giá trị dạng byte array, hạn dùng chỉnh qua DistributedCacheEntryOptions, ví dụ AbsoluteExpirationRelativeToNow">IDistributedCache</dfn>. Lesson 26's own in-memory <code>map[string]idempotencyRecord</code> only works correctly on a single instance — exactly the "stateless server" problem Lesson 8 raised, since two instances behind a load balancer would each have their own map, and a retry landing on the other instance wouldn't find the first instance's stored response at all. <code>IDistributedCache</code> names that gap directly: it's an interface over a cache store shared across every instance (Redis in production, SQL Server, or an in-memory stand-in for local dev only), so the replay check works no matter which instance answers the retry.</p>
+<div class="callout"><strong>The one new rule it brings:</strong> <code>IDistributedCache</code> stores <code>byte[]</code> (or, via <code>GetStringAsync</code>/<code>SetStringAsync</code>, UTF-8 strings) — not arbitrary objects — so a stored response has to be serialized going in and deserialized coming out, same as any cache value that crosses a process boundary. <code>DistributedCacheEntryOptions.AbsoluteExpirationRelativeToNow</code> is the C# way to say what Lesson 26's own "expire after 24 hours, matching Stripe" rule said in Go: an entry that outlives its usefulness should age out on its own, not accumulate forever.</div>
+
+<h2>3 · What doesn't change crossing languages</h2>
+<p>Every correctness rule Lesson 26 named still applies untouched: the key must be generated once by the client per logical action, not per HTTP attempt; it must be scoped per client, never shared globally; a retried body that doesn't match the first one is a client bug worth flagging rather than silently replaying old data over new; and replaying the exact stored response — not re-running any part of the handler's logic — is still what avoids a second real side effect (a second charge, a second email) on a retry. None of that is Go-specific or C#-specific; <code>IEndpointFilter</code> and <code>IDistributedCache</code> are just the two named framework pieces that carry it out in ASP.NET Core instead of a hand-rolled map and wrapper function.</p>
+
+<div class="cmp-wrap">
+<table class="cmp">
+<thead><tr><th></th><th>Lesson 26: Go</th><th>Lesson 121: C#</th></tr></thead>
+<tbody>
+<tr><th>Intercepting the call before the handler</th><td>hand-written <code>withIdempotency</code> wrapping <code>http.HandlerFunc</code></td><td><code>IEndpointFilter.InvokeAsync</code>, registered via <code>AddEndpointFilter&lt;T&gt;()</code></td></tr>
+<tr><th>Key-to-response store</th><td>hand-written <code>map[string]idempotencyRecord</code> + mutex</td><td><code>IDistributedCache</code> (Redis/SQL Server-backed, shared across instances)</td></tr>
+<tr><th>Skipping the handler on replay</th><td>early <code>return</code> after writing the stored bytes</td><td>return from <code>InvokeAsync</code> without calling <code>next(ctx)</code></td></tr>
+<tr><th>Expiring old entries</th><td>manual TTL logic on the map (24h, matching Stripe)</td><td><code>DistributedCacheEntryOptions.AbsoluteExpirationRelativeToNow</code></td></tr>
+<tr><th>Works correctly across multiple instances?</th><td>no -- map is per-process, same Lesson 8 gap</td><td>yes -- cache store is shared, not per-process</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>IEndpointFilter</code> as the C# mechanism for intercepting a request before the handler runs, and <code>IDistributedCache</code> as the shared key-to-response store, for Lesson 26's idempotency-key pattern. It does not cover endpoint filter factories, controller-action filter registration, or the full set of <code>IDistributedCache</code> backing-store implementations (Redis setup, SQL Server cache tables) in any depth — only the two methods and the one options type this pattern needs. Lesson 26's own scoping, same-body, and expiry rules are not re-taught, only carried over unchanged.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory, with no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="An IEndpointFilter's InvokeAsync can return a result directly without ever calling next(ctx) -- when a stored response already exists for a key, the filter returns that stored response immediately, which is exactly how it skips the real handler on a replay.">
+    <p class="stem">How does an IEndpointFilter skip the real handler on a replay?</p>
+    <button class="opt" data-ok>it returns a result directly without calling next at all</button>
+    <button class="opt">it throws an exception the whole framework quietly ignores always</button>
+    <button class="opt">it sets the response status code to exactly zero always</button>
+    <button class="opt">it deletes the registered route from the whole app now</button>
+  </div>
+  <div class="q" data-why="Lesson 26's in-memory map only lives inside one process, so a retry landing on a different instance behind a load balancer would never see the first instance's stored response -- the same per-instance-state gap Lesson 8 raised about a plain in-memory session store.">
+    <p class="stem">Why does a per-process in-memory map fail across multiple server instances?</p>
+    <button class="opt" data-ok>a retry on another instance misses the first stored reply</button>
+    <button class="opt">a retry on another instance always times out instead quickly</button>
+    <button class="opt">a retry on another instance triggers an automatic schema rollback</button>
+    <button class="opt">a retry on another instance always gets a fresh response</button>
+  </div>
+  <div class="q" data-why="IDistributedCache stores values as byte arrays (or UTF-8 strings via the GetStringAsync/SetStringAsync helpers), not arbitrary .NET objects directly -- so a stored response has to be serialized before SetStringAsync and deserialized after GetStringAsync, same as any value crossing a process boundary into a shared cache.">
+    <p class="stem">What form does IDistributedCache actually store a value in?</p>
+    <button class="opt" data-ok>a byte array, or a string via helpers</button>
+    <button class="opt">a live reference straight to the original object</button>
+    <button class="opt">a brand new database table created automatically twice</button>
+    <button class="opt">a compiled delegate pointing back at the handler</button>
+  </div>
+  <div class="q" data-why="Lesson 26's rule still applies unchanged in the C# port: replaying the exact stored response avoids re-running any part of the handler's own logic, which is what prevents a second real side effect -- a second charge, a second email -- even though the framework pieces carrying it out are now IEndpointFilter and IDistributedCache instead of a hand-written wrapper and map.">
+    <p class="stem">Why replay the stored response instead of calling the handler again on a retry?</p>
+    <button class="opt" data-ok>re-running risks a second real side effect happening</button>
+    <button class="opt">re-running always costs noticeably more server process memory</button>
+    <button class="opt">re-running would fail minimal API model binding rules</button>
+    <button class="opt">re-running requires a brand new distributed cache instance</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://learn.microsoft.com/en-us/aspnet/core/fundamentals/minimal-apis/min-api-filters">Microsoft Learn: Filters in Minimal API apps</a> (~10 min) is the primary source for today's <code>IEndpointFilter</code> half, confirming the <code>InvokeAsync(context, next)</code> signature, that filter code can run "before and after the endpoint handler," and the registration pattern via <code>AddEndpointFilter&lt;T&gt;()</code>. <a href="https://learn.microsoft.com/en-us/aspnet/core/performance/caching/distributed">Microsoft Learn: Distributed caching in ASP.NET Core</a> covers the <code>IDistributedCache</code> half: its <code>Get</code>/<code>GetAsync</code>, <code>Set</code>/<code>SetAsync</code>, and <code>Remove</code>/<code>RemoveAsync</code> methods, the byte-array storage model, and <code>DistributedCacheEntryOptions</code>. Lesson 26's own Stripe Idempotent Requests citation still covers the pattern's scoping, same-body, and expiry rules in full, not duplicated here.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a>. Click any dotted term for a popup (English first, tiếng Việt second). Builds directly on Lesson 26's idempotency-key pattern and Lesson 8's stateless-server/per-instance-state gap. <strong>Anything unclear? Ask your teacher</strong>, the agent that made this lesson. Ask in Vietnamese anytime. A good follow-up: "does our own C# code at work use IDistributedCache anywhere, or just an in-memory cache that would break across instances?"</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

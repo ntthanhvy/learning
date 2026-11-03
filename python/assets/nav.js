@@ -200,6 +200,8 @@
       file: "lessons/0095-review-retrieval-day-17.html" },
     { n: 96, date: "2026-11-02", title: "struct: packing and unpacking binary data",
       file: "lessons/0096-struct-packing-and-unpacking.html" },
+    { n: 97, date: "2026-11-03", title: "getpass: reading a secret without echoing it",
+      file: "lessons/0097-getpass-reading-secrets-without-echo.html" },
   ];
 
   const REFS = [

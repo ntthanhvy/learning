@@ -248,6 +248,8 @@
       file: "lessons/0119-optimistic-concurrency-efcore-rowversion.html" },
     { n: 120, date: "2026-11-02", title: "The outbox pattern, now in C# too",
       file: "lessons/0120-outbox-pattern-efcore-savechanges.html" },
+    { n: 121, date: "2026-11-03", title: "Idempotency keys, now in C# too",
+      file: "lessons/0121-idempotency-keys-iendpointfilter-idistributedcache.html" },
   ];
 
   const REFS = [

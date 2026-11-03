@@ -5644,3 +5644,139 @@ along the Phase 2 spine, adapted to the learning records.
   step if finer granularity is ever wanted. Otherwise the next round should
   run a fresh `PLAN.md` gap-scan again, the same method that worked this
   round, rather than assuming another named TODO exists to close.
+
+- 2026-11-03 (headless 06:00 run): forty-ninth lesson,
+  `0049-dbt-histogram-by-city.html`. Idempotency check first — confirmed no
+  `lessons/0049-*.html` on disk, no `n: 49` entry in `assets/nav.js`, and no
+  2026-11-03 entry in this file before writing anything (highest prior lesson
+  was 48, dated 2026-11-02). No DB access attempted directly this round; the
+  orchestrator's own prior `course_progress` read found no
+  lesson_completed/quiz/kata signal for any course since 2026-10-15, so
+  pacing continued steady/sequential on that context alone. Read `MISSION.md`
+  in full, `PLAN.md` in full, `RESOURCES.md`, `assets/nav.js`'s full `LESSONS`
+  array (all 48 titles), the tail of this file back through Day 48's close,
+  and `learning-records/0001-baseline-sql-strong-pipeline-tools-new.md`
+  before picking a topic.
+  **Topic choice:** Day 48's own closing note said directly that every named
+  `PLAN.md` spine bullet (2a dbt, 2b Kafka, 2c Airflow, 2d portfolio) was
+  already covered, and that the next round should run a fresh gap-scan rather
+  than assume another named TODO exists. Dispatched a sub-agent to do exactly
+  that: cross-check every PLAN.md Phase 2 bullet against all 48 lesson titles
+  and, where ambiguous, the lesson bodies themselves. It confirmed every
+  single bullet across 2a/2b/2c/2d already has a named, covered lesson — no
+  thin or missing spine item anywhere — and that the only recurring named gap
+  left in the whole project is the `airflow db migrate`/`airflow dags test`
+  sandbox approval block (an environment limitation, not a content gap, now
+  logged fifteen rounds). Given the spine itself is exhausted, the agent's own
+  recommendation was to follow the Day 34/37/41 pattern: a real, non-redundant
+  extension of already-covered material rather than forcing a new spine
+  bullet that doesn't exist. Its top-ranked, most-buildable candidate was Day
+  48's own named next step verbatim — "a per-city breakdown of today's
+  histogram (crossing the bucket grid against `stg_restaurants`' distinct
+  cities, Day 36's exact cross-join pattern)" — since it needs no live
+  Kafka/Airflow, is pure dbt/SQL, and is verifiable via `dbt parse` alone.
+  Took that recommendation directly.
+  **Content:** one new mart, `mart_delivery_time_histogram_by_city.sql`,
+  built by crossing Day 36's `cities` CTE (`select distinct city from
+  stg_restaurants`) against Day 48's `bucket_series`/`bucket_grid` CTEs via a
+  newly-named `cross join` — introduced today as its own concept since Day 36
+  used the keyword without ever naming it, that lesson's point being join
+  *direction*, not join *type*. The resulting `city_bucket_grid` CTE has
+  exactly `(distinct cities) × 20` rows before any real order is involved;
+  `bucketed_orders` then left-joins real `order_durations` onto that grid
+  with a two-condition `on` clause (city match AND bucket-range match) where
+  Day 48's version needed only the bucket-range condition, since today's grid
+  has a second independent axis that must also line up. Surrogate key moves
+  from Day 48's `[bucket_start_minutes]` alone to `[city,
+  bucket_start_minutes]`, the same grain-widening Day 11's `sla_key` went
+  through once a per-city answer started mattering (Day 36). Section 4 argues
+  precisely why this earns a third mart rather than a `where city = ...`
+  filter bolted onto Day 48's existing one: a filter answers one city at a
+  time by hand and never changes the table's grain, so every other city stays
+  invisible until someone reruns the query, whereas today's mart lets a
+  dashboard facet by city natively — and why all three marts
+  (`mart_delivery_sla`, `mart_delivery_time_histogram`,
+  `mart_delivery_time_histogram_by_city`) coexist on purpose, answering
+  different questions at different grains, rather than one superseding
+  another.
+  No pandas, no Python-language teaching, no re-derivation of backend
+  idempotency concepts — confirmed by a grep for `pd.`/`pandas`/`np.`/`numpy`
+  (zero hits) and a prose-only read before shipping; this lesson has no
+  Python at all, pure dbt/SQL, so no bridge sentence was forced in where none
+  was needed.
+  **Verification:** built a full scratch dbt project under
+  `.scratch-dataeng-49/` at the repo root (same `/tmp`-unavailable constraint
+  every recent round has hit — confirmed again this round by a blocked
+  `mkdir` under `/tmp` before falling back to the repo-root scratch
+  convention) — `dbt_project.yml`, `profiles.yml`, `packages.yml`,
+  `models/staging/` (sources plus three staging models mirroring Days 2/6),
+  Day 48's own `mart_delivery_time_histogram.sql` reused verbatim as a
+  dependency, today's new `mart_delivery_time_histogram_by_city.sql`, a
+  shared `marts.yml` schema file covering both, and `macros/is_sla_breach.sql`
+  (unused by today's model directly but kept for parity with the real
+  project's macro directory). Ran a real `uv run --with
+  "dbt-postgres==1.11.0" dbt deps --profiles-dir .`, which pulled `dbt_utils`
+  1.4.1 live, then `dbt parse --profiles-dir .` — clean on the first attempt,
+  zero output lines matching `Error` under a case-insensitive grep. Followed
+  up with `dbt list --resource-type model` and `dbt list --resource-type
+  test`, confirming both marts and all 8 expected tests (4 per mart) resolve
+  by name exactly as named in the lesson's own expected-output blocks,
+  including `unique_mart_delivery_time_histogram_by_city_bucket_key` and the
+  new `not_null_mart_delivery_time_histogram_by_city_city` test. No live
+  Postgres was available in this sandbox, so `dbt compile`/`dbt build`
+  against real data were not attempted — the lesson's own callout names this
+  honestly, the same disclosure convention recent rounds used, and the "4
+  distinct cities, 80 rows" figure in Section 3 is flagged as illustrative,
+  following this project's own established seed shape from earlier days
+  rather than a fresh live query. Deleted the scratch directory entirely
+  afterward (confirmed via a directory-listing grep finding nothing under
+  that name, while leaving an unrelated `.scratch-data-117/` directory from a
+  different course's round untouched).
+  Ran a Node tag-balance/bare-`&`/dfn-attribute script and a separate quiz
+  word-count script using two independent extraction methods (a regex
+  capturing each `.q` block's full body, and a line-by-line scan keyed on the
+  `class="q" data-why"` marker), same shape as recent rounds'. Tag balance
+  passed: div 7/7, p 21/21, code 81/81, button 9/9, script 3/3, dfn 1/1, pre
+  6/6, h2 8/8, h1 1/1, em 6/6, strong 5/5, a 2/2, zero bare `&`, the one
+  `<dfn>` carrying both `data-en=` and `data-vn=`. The first quiz draft came
+  up uneven on two of three questions (11/10/11, 14/11/8, 13/11/6) — both
+  methods agreed on the same uneven counts before any fix, then agreed again
+  after several edit-and-recount passes, to a final 12/12/12, 12/12/12 and
+  13/13/13 across the three questions. A separate pass on
+  `reference/glossary.html` after adding this round's new section confirmed
+  it stayed balanced too (h2 48/48, table 48/48, tr 183/183, td 405/405, th
+  144/144), zero bare `&`.
+  Added one new glossary term, `cross join`, under a new Day 49 section,
+  after grepping case-insensitively first and confirming zero existing
+  occurrences anywhere in the glossary — Day 36 used the SQL keyword itself
+  without ever naming it as a standalone concept, so this is genuinely new
+  vocabulary, not reuse. No new `RESOURCES.md` line added — today's primary
+  source citation reuses Day 11/36/48's existing `dbt_utils` README line
+  verbatim for `generate_series`/`generate_surrogate_key`, and explicitly
+  notes `cross join` itself is plain Postgres SQL needing no package-specific
+  source.
+  Registered Lesson 49 in `assets/nav.js` right after the `n: 48` entry,
+  dated 2026-11-03 (`node --check` clean on `nav.js`, `gloss.js` and
+  `quiz.js`). Ran `bin/record-progress dataeng lesson_generated --day 49
+  --lesson 0049-dbt-histogram-by-city.html --detail '{"by":"headless"}'` from
+  the repo root at the end of this round via the direct relative-path
+  invocation; succeeded on the first attempt (`recorded:
+  dataeng/lesson_generated day=49 lesson=0049-dbt-histogram-by-city.html`).
+  `dataeng/learning-records/` was not touched this round — today's pick came
+  from a fresh gap-scan confirming the `PLAN.md` spine is exhausted, plus
+  directly executing Day 48's own named next step, not a new durable fact
+  about the learner distinct from the single 2026-09-14 baseline record on
+  file.
+  **Next up:** the `airflow db migrate`/`airflow dags test` approval-gate
+  block is now sixteen rounds running (35-49) with no attempt made this
+  round, since today's build needed no Airflow at all — still worth a human
+  granting it once for whoever next has one available. A per-restaurant or
+  per-courier breakdown of either histogram mart (identical cross-join
+  pattern, a different `select distinct` source) is a real, named, buildable
+  next step if that finer granularity is ever wanted — but with `PLAN.md`'s
+  spine now confirmed exhausted twice in a row (Day 48 and Day 49 both found
+  this independently), the next round most likely needs either a fresh
+  gap-scan with a wider lens than the literal spine text, or a genuinely new
+  angle in whichever of dbt/Kafka/Airflow has had the least recent attention
+  — Kafka specifically has had no new lesson since Day 41, the longest gap
+  of the three at this point.

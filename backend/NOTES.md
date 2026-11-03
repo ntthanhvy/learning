@@ -9974,3 +9974,111 @@
   per MISSION.md's "concepts first" rule; and the backfill-missing-
   Lesson-117-NOTES-entry gap flagged three rounds ago, still not
   independently investigated.
+- 2026-11-03 (headless 06:00 run): idempotency check first — confirmed no
+  `lessons/0121-*.html` on disk and no `n: 121`/`date: "2026-11-03"` entry in
+  `nav.js` before writing anything (highest prior lesson was 120, dated
+  2026-11-02), and no 2026-11-03 entry already in this file.
+  Orchestrator-provided context: `course_progress` has had no
+  `lesson_completed`/quiz/kata signal for any course since 2026-10-15
+  (backend's own Lesson 102 quiz, all `ok:true`) — no weak spot to chase, so
+  steady sequential pacing continued. Topic choice: re-ran the gap scan
+  rather than trusting the last two rounds' closing notes blindly, which
+  both flagged the same two Go-only candidates — Lesson 49's dead-letter
+  queues and Lesson 26's idempotency keys — deliberately deferred twice for
+  weak C#-side primary-source fit (no first-party ASP.NET Core feature named
+  for either, only hand-rolled middleware or a specific message-broker SDK).
+  Resolved the idempotency-keys half of that blocker this round: `WebFetch`
+  against a .NET HTTP-headers reference page confirmed no first-party
+  idempotency-key feature exists, but a second `WebFetch` against
+  `https://learn.microsoft.com/en-us/aspnet/core/fundamentals/minimal-apis/min-api-filters`
+  surfaced `IEndpointFilter` — a minimal-API interface whose `InvokeAsync`
+  can return a result without calling `next`, i.e. short-circuit before the
+  handler runs, which is exactly Lesson 26's Go middleware shape — and a
+  third fetch against
+  `https://learn.microsoft.com/en-us/aspnet/core/performance/caching/distributed`
+  confirmed `IDistributedCache`'s `Get/GetAsync`, `Set/SetAsync`,
+  `Remove/RemoveAsync` surface, its byte-array storage model, and
+  `DistributedCacheEntryOptions.AbsoluteExpirationRelativeToNow` for expiry —
+  together a genuine first-party pair, not a third-party library, resolving
+  the exact primary-source-strength objection both prior rounds raised.
+  Picked idempotency keys over dead-letter queues because this pair fully
+  resolved the blocker, whereas dead-letter queues still has no first-party
+  ASP.NET Core angle (would need a specific broker SDK, e.g. Azure Service
+  Bus) and remains deferred. Read `MISSION.md`, `RESOURCES.md`, this file's
+  tail (Lessons 119–120 in full), Lesson 26 (the Go original) and Lesson 120
+  (the most recent C#-port lesson, as structural template) in full, and
+  `nav.js`'s and `glossary.html`'s tails, all before writing anything. Both
+  Microsoft Learn pages fetched cleanly in full, consistent with this run's
+  standing finding that `learn.microsoft.com` fetches reliably. No Go
+  scaffold was written or changed — Lesson 26's existing Go snippet is only
+  referenced for comparison; nothing needed `go build`/`go vet`. `dotnet
+  --version` was not attempted (would need approval with no user present,
+  consistent with every round since Lesson 103); the C# snippet was checked
+  by hand against the two fetched docs pages' own code examples (the
+  `IEndpointFilter`/`InvokeAsync(context, next)` signature, the
+  `IDistributedCache` `GetStringAsync`/`SetStringAsync`/
+  `DistributedCacheEntryOptions` usage) and confirmed syntactically
+  consistent — brace/semicolon balance, correct `await`/`async` usage, no
+  undeclared identifiers — though this falls short of an actual compile,
+  flagged here as such, same caveat as every C#-port round. Two new terms,
+  each checked against the glossary first via case-insensitive grep across
+  the whole file — zero collisions confirmed before writing: `IEndpointFilter`,
+  `IDistributedCache`. Added both rows immediately after Lesson 120's
+  `SaveChanges implicit transaction` row, same Term/Tiếng Việt (dev-style)/In
+  software column order, confirmed by inspecting the file's actual last row
+  directly rather than assumed. Verification performed mechanically via two
+  throwaway Node scripts written with the `Write` tool and run via `node`
+  (not deleted, since they live in `/tmp` which this sandbox blocks `rm` on
+  — outside the repo and untracked by git either way, so harmless): (1) a
+  quiz-word-count check scoped per `<div class="q">` block, splitting every
+  option both via `.split(/\s+/)` and `.split(" ")` — first draft landed
+  uneven on all four questions (Q1 8/8/9/9, Q2 11/11/10/11, Q3 10/9/9/9, Q4
+  8/7/8/8), fixed through two rewrite-and-recount passes per option (using a
+  small standalone word-counter script to check candidate phrasings before
+  committing them), converged to exactly 10/10/10/10, 10/10/10/10, 8/8/8/8,
+  and 8/8/8/8 across the four questions, both counting methods agreeing
+  exactly, exactly one `data-ok` and four options per question confirmed the
+  same way; (2) an HTML tag-balance check across div/p/code/button/script/
+  dfn/pre/h2/h1/em/strong/a/table/tr/th/td — clean (div 7/7, p 15/15, code
+  47/47, button 16/16, script 3/3, dfn 2/2, pre 1/1, h2 6/6, h1 1/1, em 0/0,
+  strong 3/3, a 3/3, table 1/1, tr 6/6, th 8/8, td 10/10); the first dfn-attribute
+  regex pass flagged a false positive caused by the `<T>` inside
+  `AddEndpointFilter<T>()` inside the `data-en` attribute value confusing a
+  naive `[^>]*` tag matcher — fixed by matching the full
+  `data-en="..." data-vn="...">` span instead, then confirmed both `dfn` tags
+  genuinely carry both attributes by direct grep of the raw tag text; a
+  separate table/tr/th/td/p/div/html/head/body/title/script balance check on
+  `glossary.html` after its two-row addition — also balanced (tr 388/388, td
+  1161/1161), plus a duplicate-term scan across all 387 first-column entries
+  — zero duplicates; (3) a raw-unescaped-`&` regex scan across both files —
+  zero hits; (4) `node --check` against `assets/nav.js`, `assets/gloss.js`,
+  and `assets/quiz.js` — all clean, both before and after the `nav.js` edit;
+  (5) a basic HTML well-formedness check (exactly one `<!DOCTYPE html>`, one
+  `<html>`/`</html>`, three script tags with `gloss.js`/`quiz.js`/`nav.js`
+  in that order) — clean; (6) a grep for stray markdown-style backticks and
+  `*emphasis*` left over from drafting — none found. Registered Lesson 121
+  in `nav.js` (date 2026-11-03, today's actual generation date) right after
+  `n: 120`, confirmed exactly one matching `n: 121` entry and exactly one
+  matching `0121-*.html` file on disk afterward. No new RESOURCES.md line
+  added this round — both fetched pages are Microsoft's own docs, same
+  domain already covered by the standing `learn.microsoft.com` entries'
+  pattern, and this round reused no prior URL; both are cited inline in the
+  lesson's own "Go deeper" section instead, consistent with how every prior
+  C#-port round has handled a freshly-fetched same-domain page. `bin/record-progress`
+  ran clean on the first attempt this round (`recorded: backend/lesson_generated
+  day=121 lesson=0121-idempotency-keys-iendpointfilter-idistributedcache.html`).
+  No new `learning-records/` file this round — the topic came from a fresh
+  gap scan of existing lesson titles plus resolving a standing deferred-topic
+  blocker, not a new surprise about the learner's baseline or a quiz
+  outcome. Candidates spotted but not picked this round, still worth
+  checking fresh next time: Go's `select`-statement arbitration rules, now
+  deferred for an eleventh round running, same standing finding that the
+  blocker is the fetched page's own content truncation, not a permission
+  gate or URL/mirror choice; Lesson 49's dead-letter queues, still deferred —
+  still no first-party ASP.NET Core angle found, would need a specific
+  message-broker SDK (e.g. Azure Service Bus's own dead-letter queue
+  feature), which is a bigger scope jump than this round's `IEndpointFilter`/
+  `IDistributedCache` pair was; Polly (or a .NET resilience-library survey
+  more broadly), still deliberately out of scope per MISSION.md's "concepts
+  first" rule; and the backfill-missing-Lesson-117-NOTES-entry gap flagged
+  four rounds ago, still not independently investigated.

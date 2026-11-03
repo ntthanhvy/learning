@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 49 · A per-city delivery-time histogram: crossing two grids, not one</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 49 · ~20 min · 3 Nov 2026</p>
+<h1>A per-city delivery-time histogram: crossing two grids, not one</h1>
+<p class="byline">Today's tangible win: a new mart, <code>mart_delivery_time_histogram_by_city</code>, answers "how many orders in Hanoi deliver in 0-5 min, 5-10 min, …" per city — the exact direct next step Day 48's own closing note named, built by crossing <code>generate_series</code>' bucket ladder against the same distinct-cities list Day 36 already pulled from <code>stg_restaurants</code>, instead of adding a city filter to a mart that was never built to carry one.</p>
+
+<div class="callout"><strong>Before today — confirm the project still builds:</strong> today adds one new model, one new schema block, and edits nothing from Days 1-48.
+<pre><code>cd food_delivery_pipeline
+uv run --project ../dbt_env dbt build</code></pre>
+Expected: <code>Done. PASS=... ERROR=0</code> with whatever count Day 48 left you at, including <code>mart_delivery_time_histogram</code> and its 4 tests. If that model is missing, finish Day 48 first — today reuses its exact <code>bucket_series</code>/<code>bucket_grid</code> CTEs verbatim.</div>
+
+<h2>1 · The gap Day 48 named directly, not a new idea</h2>
+<p>Day 48's own closing line was explicit: "a per-city breakdown of today's histogram … is the clearest direct next step if this mart needs more granularity later." That mart answers one global question — across every city combined, how many orders land in each 5-minute delivery-time band. A real operator asking "is Hanoi's distribution different from Da Nang's" can't get that answer from a single global histogram, the same way Day 36's original <code>mart_delivery_sla</code> couldn't answer "which specific city is breaching" until it carried <code>city</code> as part of its grain. Today gives the histogram that same per-city grain.</p>
+<p>The naive fix — add <code>group by city</code> to Day 48's final query — would reintroduce exactly the bug Day 48 and Day 36 each already fixed once: a <code>group by</code> can only ever emit a row for a <code>(city, bucket)</code> pair that already had at least one order in it. A city with a fast, tight distribution — zero orders past the 40-minute bucket, genuinely good news — would simply have no rows there, indistinguishable from "this bucket was never checked for this city" to anyone reading the table cold. The fix has to be the same grid-first, left-join-second shape both of those lessons used, just crossed over two generated axes instead of one.</p>
+
+<h2>2 · <dfn data-en="a SQL join that pairs every row of one table or set with every row of another, with no join condition at all -- the result has exactly (rows in A) times (rows in B) rows; used here to build a full two-axis grid (every city paired with every bucket) before any real data is joined onto it" data-vn="giữ nguyên &quot;cross join&quot; — join SQL ghép MỖI dòng của 1 bảng với MỖI dòng của bảng khác, không có điều kiện join nào cả; kết quả có đúng (số dòng A) nhân (số dòng B) dòng; ở đây dùng để tạo lưới 2 chiều đầy đủ (mỗi city ghép với mỗi bucket) trước khi join dữ liệu thật vào">cross join</dfn>: the SQL keyword for "every combination," named explicitly</h2>
+<p>Day 36 already wrote a cross join — <code>cities cross join dim_dates</code> — without ever naming the keyword as its own concept, since that lesson's point was the join <em>direction</em>, not the join <em>type</em>. Today names it directly, because today's grid genuinely needs two independent axes crossed for the first time in this course: every city paired with every one of Day 48's twenty buckets, <code>N</code> cities times <code>20</code> buckets rows, before a single real order is involved. <code>cross join</code> has no <code>on</code> clause at all — there's nothing to match, because the whole point is pairing everything with everything, the base grid a left join can then be anchored onto.</p>
+<p>Build it from pieces that already exist: Day 36's <code>cities</code> CTE shape (<code>select distinct city from stg_restaurants</code>) and Day 48's <code>bucket_grid</code> CTE, unchanged.</p>
+
+<h2>3 · Build: cities × buckets, then the real orders left-joined on top</h2>
+<p>In your <code>food-delivery-pipeline</code> repo, create <code>models/marts/mart_delivery_time_histogram_by_city.sql</code> in full:</p>
+<pre><code><span class="cm">-- models/marts/mart_delivery_time_histogram_by_city.sql</span>
+{{ config(materialized=<span class="str">'table'</span>) }}
+
+<span class="kw">with</span> order_durations <span class="kw">as</span> (
+    <span class="cm">-- identical to Day 48's CTE of the same name -- orders, restaurants,</span>
+    <span class="cm">-- and the placed/delivered pair of stg_order_events rows per order</span>
+    <span class="kw">select</span>
+        o.order_id,
+        r.city,
+        extract(epoch <span class="kw">from</span> (d.delivered_at - p.placed_at)) / <span class="kw">60</span> <span class="kw">as</span> minutes_to_deliver
+    <span class="kw">from</span> {{ ref(<span class="str">'stg_orders'</span>) }} <span class="kw">as</span> o
+    <span class="kw">inner join</span> {{ ref(<span class="str">'stg_restaurants'</span>) }} <span class="kw">as</span> r <span class="kw">on</span> o.restaurant_id = r.restaurant_id
+    <span class="kw">inner join</span> {{ ref(<span class="str">'stg_order_events'</span>) }} <span class="kw">as</span> p
+        <span class="kw">on</span> o.order_id = p.order_id <span class="kw">and</span> p.status = <span class="str">'placed'</span>
+    <span class="kw">inner join</span> {{ ref(<span class="str">'stg_order_events'</span>) }} <span class="kw">as</span> d
+        <span class="kw">on</span> o.order_id = d.order_id <span class="kw">and</span> d.status = <span class="str">'delivered'</span>
+),
+
+<span class="cm">-- Day 36's exact CTE shape, reused verbatim</span>
+cities <span class="kw">as</span> (
+    <span class="kw">select distinct</span> city <span class="kw">from</span> {{ ref(<span class="str">'stg_restaurants'</span>) }}
+),
+
+<span class="cm">-- Day 48's exact bucket_series/bucket_grid CTEs, reused verbatim</span>
+bucket_series <span class="kw">as</span> (
+    {{ dbt_utils.generate_series(var(<span class="str">'histogram_bucket_count'</span>)) }}
+),
+
+bucket_grid <span class="kw">as</span> (
+    <span class="kw">select</span>
+        (generated_number - <span class="kw">1</span>) * {{ var(<span class="str">'histogram_bucket_minutes'</span>) }} <span class="kw">as</span> bucket_start_minutes,
+        generated_number * {{ var(<span class="str">'histogram_bucket_minutes'</span>) }} <span class="kw">as</span> bucket_end_minutes
+    <span class="kw">from</span> bucket_series
+),
+
+<span class="cm">-- new today: the two grids crossed into one, N cities x 20 buckets rows,</span>
+<span class="cm">-- before any real order is involved</span>
+city_bucket_grid <span class="kw">as</span> (
+    <span class="kw">select</span>
+        cities.city,
+        bucket_grid.bucket_start_minutes,
+        bucket_grid.bucket_end_minutes
+    <span class="kw">from</span> cities
+    <span class="kw">cross join</span> bucket_grid
+),
+
+bucketed_orders <span class="kw">as</span> (
+    <span class="kw">select</span>
+        city_bucket_grid.city,
+        city_bucket_grid.bucket_start_minutes,
+        city_bucket_grid.bucket_end_minutes,
+        count(order_durations.order_id) <span class="kw">as</span> order_count
+    <span class="kw">from</span> city_bucket_grid
+    <span class="kw">left join</span> order_durations
+        <span class="kw">on</span> order_durations.city = city_bucket_grid.city
+        <span class="kw">and</span> order_durations.minutes_to_deliver &gt;= city_bucket_grid.bucket_start_minutes
+        <span class="kw">and</span> order_durations.minutes_to_deliver &lt; city_bucket_grid.bucket_end_minutes
+    <span class="kw">group by</span> city_bucket_grid.city, city_bucket_grid.bucket_start_minutes, city_bucket_grid.bucket_end_minutes
+)
+
+<span class="kw">select</span>
+    {{ dbt_utils.generate_surrogate_key([<span class="str">'city'</span>, <span class="str">'bucket_start_minutes'</span>]) }} <span class="kw">as</span> bucket_key,
+    city,
+    bucket_start_minutes,
+    bucket_end_minutes,
+    order_count
+<span class="kw">from</span> bucketed_orders
+<span class="kw">order by</span> city, bucket_start_minutes</code></pre>
+<p>Two join conditions carry today's entire fix. The <code>cross join</code> in <code>city_bucket_grid</code> builds the full <code>city × bucket</code> grid with no filtering at all — exactly <code>(distinct city count) × 20</code> rows, independent of whether any order exists yet. Then <code>bucketed_orders</code> starts <code>from city_bucket_grid</code> and <code>left join</code>s the real durations onto it with <em>both</em> a city match and a bucket-range match in the <code>on</code> clause — not just the bucket-range condition Day 48 used alone, since today's grid has a second axis that has to line up too. <code>count(order_durations.order_id)</code>, not <code>count(*)</code>, is Day 48's same habit for the same reason: it reads a failed left join's nulls as a true <code>0</code>, never a <code>1</code>.</p>
+<p>Add a schema block testing the grid's shape, not any particular count:</p>
+<pre><code><span class="cm">-- models/marts/marts.yml -- new model block, alongside the existing ones</span>
+  - name: mart_delivery_time_histogram_by_city
+    description: <span class="str">"One row per (city, delivery-time bucket) pair, 5-minute buckets, 0 to 100 minutes. Every city-bucket pair appears even with zero orders in it, via a cities cross join bucket_grid base, left-joined onto real order durations."</span>
+    columns:
+      - name: bucket_key
+        data_tests:
+          - unique
+          - not_null
+      - name: city
+        data_tests:
+          - not_null
+      - name: order_count
+        data_tests:
+          - not_null</code></pre>
+<pre><code>uv run --project ../dbt_env dbt build --select mart_delivery_time_histogram_by_city</code></pre>
+<p>Expected — one new table, <code>(distinct cities) × 20</code> rows, three tests, all passing. With this project's seed data carrying 4 distinct cities, that's 80 rows:</p>
+<pre><code>1 of 4 OK created sql table model dbt_dev.mart_delivery_time_histogram_by_city  [SELECT 80 in 0.05s]
+2 of 4 PASS not_null_mart_delivery_time_histogram_by_city_city ............ [PASS in 0.02s]
+3 of 4 PASS not_null_mart_delivery_time_histogram_by_city_order_count ..... [PASS in 0.02s]
+4 of 4 PASS unique_mart_delivery_time_histogram_by_city_bucket_key ........ [PASS in 0.02s]
+
+Done. PASS=4 WARN=0 ERROR=0 SKIP=0 TOTAL=4</code></pre>
+
+<h2>4 · Why this needed a new mart, not a <code>city</code> filter bolted onto the old one</h2>
+<p>It's worth being precise about why today is a third mart next to <code>mart_delivery_sla</code> and <code>mart_delivery_time_histogram</code>, not an edit to either. Adding a <code>where city = 'hanoi'</code> filter on top of Day 48's existing model would answer one city at a time, by hand, for whoever happens to type the filter — it would not change the mart's grain, and every other city would stay invisible unless someone re-ran the query once per city. Changing the grain itself, from "one row per bucket" to "one row per city per bucket," is a different table with a different surrogate key (<code>[city, bucket_start_minutes]</code> today, versus Day 48's <code>[bucket_start_minutes]</code> alone) — the same reason Day 11's <code>sla_key</code> had to become <code>(city, order_date)</code> rather than staying a bare date. A dashboard built on today's mart can facet by city natively; a dashboard built on a hand-filtered query cannot facet by anything it wasn't specifically asked for.</p>
+<p>This also means the two histogram marts coexist on purpose, not as a stale duplicate: <code>mart_delivery_time_histogram</code> is still the right table for "what does delivery time look like platform-wide," a single clean distribution with no city noise in it, while <code>mart_delivery_time_histogram_by_city</code> is the right table the moment the question becomes "is one city different from the others." Keeping both, rather than deleting Day 48's in favor of today's, is the same judgment call Section 4 of Day 48 itself made about <code>mart_delivery_sla</code>: different questions earn separate marts instead of forcing one table to answer everything through filters.</p>
+
+<h2>5 · Verify</h2>
+<pre><code>uv run --project ../dbt_env dbt build --select mart_delivery_time_histogram_by_city
+docker compose exec -T postgres psql -U fdp -d fdp -c \
+  "select city, count(*) as buckets, count(*) filter (where order_count = 0) as empty_buckets
+   from dbt_dev.mart_delivery_time_histogram_by_city
+   group by city order by city;"</code></pre>
+<p>Expected: the build reports <code>PASS=4 WARN=0 ERROR=0 SKIP=0 TOTAL=4</code> (Section 3's output), and the query returns exactly <code>20</code> under <code>buckets</code> for every single city, regardless of how many real orders that city has — the grid's per-city size is fixed by <code>histogram_bucket_count</code>, never by that city's own order volume. A new city with only two seeded orders still shows <code>buckets = 20</code> with most of its <code>empty_buckets</code> count near 18 or 19, not a short, missing table — the same "a passing build isn't proof, a real zero-row query is" check Day 36 and Day 48 each ended on.</p>
+<div class="callout"><strong>What this round confirmed live, and what it didn't:</strong> this sandbox has no learner Postgres running, so the exact row counts and city names above are illustrative, not captured live output — the "4 distinct cities" figure in Section 3 follows this project's own established seed shape from earlier days, not a fresh query. What <em>was</em> confirmed live this round: a full scratch dbt project (sources, staging models mirroring Days 2/6, both histogram marts, and a fresh <code>dbt deps</code> pulling <code>dbt_utils</code> 1.4.1) parsed cleanly via <code>uv run --with "dbt-postgres==1.11.0" dbt parse --profiles-dir .</code> — grepping the output for <code>Error</code> found none. <code>dbt parse</code> proves the Jinja and YAML are well-formed, not that the join logic returns the right numbers against real data — the same parse-vs-compile-vs-run limit Days 13, 14, 36 and 48 have each already named. Confirm the real build output, the actual distinct-city count, and the per-city <code>buckets = 20</code> result in your own environment before quoting any of it in an interview.</div>
+
+<div class="interview">
+<p><strong>Q: "You've got a platform-wide delivery-time histogram. The VP asks whether Hanoi's distribution looks different from the rest. What do you build, and why not just filter the existing table?"</strong> A strong answer, out loud: <em>"Filtering the existing histogram by city answers one city at a time, by hand, and nobody else's distribution shows up until someone re-runs the query with a different filter — it doesn't change what the table actually represents. The real fix is changing the grain: instead of one row per time bucket, one row per city per time bucket. I build that by crossing two grids — a cross join of the distinct cities with the generated bucket ladder — before any real order touches the query, so every city gets all twenty buckets whether or not it has orders in every one. Then I left-join the real per-city, per-bucket order counts onto that grid, matching on both city and bucket range, and keep count() on a named column so an empty cell reads as a true zero. The surrogate key moves from just the bucket to the pair of city and bucket, the same way an SLA mart's key had to grow from just a date to city-plus-date once a per-city answer mattered. I'd keep the platform-wide histogram too — it's still the right table for a different question — rather than deleting it in favor of the new one."</em> The signal: naming the grain change as the actual fix, describing the two-grid cross join precisely, and justifying keeping both marts instead of treating the new one as a strict upgrade.</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers crossing two generated/looked-up grids (<code>cities</code> and Day 48's bucket ladder) via <code>cross join</code> to build a per-city delivery-time histogram. It does not add a per-restaurant or per-courier breakdown (same pattern, a different <code>select distinct</code> source, left for whenever that granularity is actually asked for), and it does not touch Day 48's global histogram or Day 6's <code>mart_delivery_sla</code> — all three marts stay in the project side by side, answering different questions at different grains.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="A cross join pairs every row of one set with every row of another with no join condition at all, producing exactly (rows in A) times (rows in B) rows. Today's city_bucket_grid CTE cross joins N distinct cities against 20 generated buckets to get the full N-times-20 grid before any real order is involved, which is exactly what a grid needing two independent axes crossed requires.">
+    <p class="stem">What does a SQL <code>cross join</code> actually produce, and why does today's grid need one?</p>
+    <button class="opt" data-ok>every combination of both sides' rows, with absolutely no condition at all</button>
+    <button class="opt">only the rows that happen to match on every shared column name</button>
+    <button class="opt">exactly one combined row per each distinct city in the source table</button>
+  </div>
+  <div class="q" data-why="Changing the mart's grain from one row per bucket to one row per city per bucket means every other city becomes visible at once, and a dashboard can facet by city natively. A where filter bolted onto the old mart only ever answers one city at a time, by hand, and does not change what the table itself represents -- every unfiltered city stays invisible until someone reruns the query.">
+    <p class="stem">Why build a new mart with a new grain instead of adding a <code>where city = ...</code> filter to Day 48's existing histogram?</p>
+    <button class="opt" data-ok>a filter only shows one city; the grain itself must change instead</button>
+    <button class="opt">Postgres simply forbids any where clause on a table built from generate_series</button>
+    <button class="opt">dbt always materializes filtered queries and unfiltered queries in a different way</button>
+  </div>
+  <div class="q" data-why="The left join's on clause today needs both a city match and a bucket-range match, because the grid being joined onto now has two independent axes instead of one. Matching on bucket range alone, the way Day 48 did, would pair every city's real orders against every other city's buckets too, since nothing would stop an order from one city satisfying another city's row purely on time range.">
+    <p class="stem">Why does <code>bucketed_orders</code>' left join need <em>two</em> conditions in its <code>on</code> clause, where Day 48's version needed only one?</p>
+    <button class="opt" data-ok>the grid now has two axes, city and bucket range, both must match</button>
+    <button class="opt">Postgres always requires at least two join conditions on any given left join</button>
+    <button class="opt">count(order_durations.order_id) all by itself alone only ever works just fine with two-column joins</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> per <code>RESOURCES.md</code>, the <a href="https://github.com/dbt-labs/dbt-utils">dbt_utils</a> README remains the right citation for <code>generate_series</code> and <code>generate_surrogate_key</code>'s exact signatures, both reused verbatim today — nothing about either macro changes when crossed against a second axis. The <code>cross join</code> mechanism itself is plain Postgres SQL, not a dbt or package feature, so no new source is needed for it beyond standard SQL join semantics.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 49.<br>
+<strong>Next up:</strong> the <code>airflow db migrate</code>/<code>airflow dags test</code> approval-gate block logged every round since Day 35 (now sixteen rounds, 35-49) was not attempted again this round, since today's build needed no Airflow at all — still worth a human granting it once. A per-restaurant or per-courier breakdown of either histogram (same cross-join pattern, a different <code>select distinct</code> source) is a real, buildable next step if that granularity is ever asked for. Otherwise the next round should run a fresh <code>PLAN.md</code> gap-scan again, the same method that chose today's topic, since every named Phase 2 spine bullet is now covered and today's own pick came from a lesson's closing note rather than the spine itself.<br><br>
+💬 Anything unclear — why a <code>cross join</code> needs no condition at all, or how today's two-condition left join differs from Day 48's one-condition version? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

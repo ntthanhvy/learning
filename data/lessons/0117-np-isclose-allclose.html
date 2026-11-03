@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 117 · np.isclose() and np.allclose(): comparing floats without ever using ==</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 117 · ~20 min · 3 Nov 2026</p>
+<h1>np.isclose() and np.allclose(): comparing floats without ever using ==</h1>
+<p class="byline">Lesson 89's own note on <code>assert_frame_equal()</code> mentioned "the same idea as NumPy's <code>allclose</code>" in passing — and a fresh curriculum/glossary scan today confirms that comparison, the tool actually named, has never itself been taught: zero hits for <code>np.isclose()</code>/<code>np.allclose()</code> across every lesson body and the glossary, first flagged as a standing candidate back in the round that produced Lesson 102 and left unpicked since. The gap it closes: comparing two floats with plain <code>==</code> is an interview red flag — today is the NumPy-layer tool that replaces it, underneath <code>.equals()</code>, <code>assert_frame_equal()</code>, and <code>np.allclose()</code>-style test assertions alike.</p>
+
+<h2>1 · Why == fails on floats that are "the same" number</h2>
+<p>SQL and plain Python both let a learner reach for <code>==</code> on two numbers without a second thought — until floating-point arithmetic itself gets involved. Confirmed directly (numpy 2.5.4, pandas 3.1.0): <code>0.1 + 0.2 == 0.3</code> is <code>False</code>, not because pandas or NumPy did anything wrong, but because <code>0.1</code>, <code>0.2</code>, and <code>0.3</code> have no exact binary floating-point representation — the tiny rounding error from adding the first two never lines up bit-for-bit with the rounding error baked into the literal <code>0.3</code>:</p>
+<pre><code><span class="kw">import</span> numpy <span class="kw">as</span> np
+
+<span class="kw">0.1</span> + <span class="kw">0.2</span> == <span class="kw">0.3</span>
+<span class="cm"># False  -- exact equality check, and floats are almost never exactly equal</span>
+
+np.isclose(<span class="kw">0.1</span> + <span class="kw">0.2</span>, <span class="kw">0.3</span>)
+<span class="cm"># True  -- "close enough" within a small default tolerance</span></code></pre>
+<p><dfn data-en="a NumPy function comparing two numbers or arrays element-by-element for 'close enough' rather than exact equality, returning a boolean array the same shape as the input -- np.isclose(a, b) is True wherever abs(a - b) <= atol + rtol * abs(b), confirmed directly (numpy 2.5.4) against the official formula; default rtol=1e-05, atol=1e-08" data-vn="giữ nguyên 'np.isclose()' — so sánh 2 số hoặc 2 mảng từng phần tử theo kiểu 'đủ gần' (không phải bằng tuyệt đối), trả về mảng boolean cùng shape với đầu vào; np.isclose(a, b) ra True khi abs(a - b) <= atol + rtol * abs(b) — đã kiểm tra trực tiếp (numpy 2.5.4) đúng công thức chính thức; mặc định rtol=1e-05, atol=1e-08">np.isclose()</dfn> is the element-wise fix: instead of asking "are these bit-for-bit identical," it asks "are these within a small, deliberate tolerance of each other," which is almost always the actually-correct question after any floating-point arithmetic.</p>
+
+<h2>2 · isclose() returns an array; allclose() collapses it to one bool</h2>
+<p>Confirmed directly: <code>np.isclose()</code> is element-wise — given two arrays, it returns a same-shape boolean array, one <code>True</code>/<code>False</code> per pair of elements compared. <dfn data-en="a NumPy function that is np.isclose() followed immediately by .all() -- returns one single plain Python bool, True only if every single element-pair in the two arrays is 'close enough,' not an array at all" data-vn="giữ nguyên 'np.allclose()' — chính là np.isclose() rồi gọi .all() luôn; trả về đúng 1 giá trị bool (True/False) duy nhất, True chỉ khi TẤT CẢ cặp phần tử đều đủ gần, không phải mảng">np.allclose()</dfn> is simply that result run through <code>.all()</code> — one single <code>True</code>/<code>False</code> for the whole comparison, the natural choice when the question is "do these two whole arrays/columns match," not "which specific elements differ":</p>
+<pre><code>a = np.array([<span class="kw">1.0</span>, <span class="kw">2.0</span>, <span class="kw">3.0</span>])
+b = np.array([<span class="kw">1.0</span> + <span class="kw">1e-9</span>, <span class="kw">2.0</span>, <span class="kw">3.00001</span>])
+
+np.isclose(a, b)
+<span class="cm"># array([ True,  True,  True])  -- element-wise, one bool per position</span>
+
+np.allclose(a, b)
+<span class="cm"># True  -- np.isclose(a, b).all(), one single bool for the whole pair</span></code></pre>
+<p>Confirmed directly: both functions work the same way on a pandas Series as on a plain NumPy array — no <code>.to_numpy()</code> conversion is required first, unlike the <code>AttributeError</code> traps Lessons 110/112 found for <code>cummax()</code>/<code>.ravel()</code> called the other direction. <code>np.isclose()</code> on two Series returns a plain <code>ndarray</code> (the Index is dropped, same family as <code>np.percentile()</code>'s behavior in Lesson 111); <code>np.allclose()</code> on two Series returns a plain Python <code>bool</code>.</p>
+
+<h2>3 · Both tolerance knobs, and how they combine</h2>
+<p>The formula, confirmed directly against the official NumPy docs and matched element-for-element with a hand-written version in a scratch script: <code>abs(a - b) &lt;= atol + rtol * abs(b)</code>. Two separate knobs combine additively, each catching a different failure mode:</p>
+<table class="gloss">
+  <tr><th>Keyword</th><th>Default</th><th>What it controls</th></tr>
+  <tr><td><code>atol=</code></td><td><code>1e-08</code></td><td>A flat, absolute cushion — matters most when comparing numbers near zero, where a relative tolerance alone would demand near-perfect precision.</td></tr>
+  <tr><td><code>rtol=</code></td><td><code>1e-05</code></td><td>Scales with the size of <code>b</code> — matters most for comparing large numbers, where a fixed absolute tolerance would be far too strict (or too loose).</td></tr>
+</table>
+<p>Confirmed directly: widening <code>atol=</code> is exactly how a real rounding-sized difference (e.g. <code>0.01</code> off, the kind a re-aggregation bug produces) can be deliberately let through if a test genuinely needs a looser bar — the same deliberate-tolerance idea Lesson 89 found inside <code>assert_frame_equal()</code>'s own default float handling:</p>
+<pre><code>e = np.array([<span class="kw">1.0</span>, <span class="kw">2.0</span>])
+f = np.array([<span class="kw">1.01</span>, <span class="kw">2.0</span>])
+
+np.isclose(e, f)
+<span class="cm"># array([False,  True])  -- 0.01 off is too much for the default atol</span>
+
+np.isclose(e, f, atol=<span class="kw">0.02</span>)
+<span class="cm"># array([ True,  True])  -- widened on purpose; now within tolerance</span></code></pre>
+
+<h2>4 · The NaN trap: isclose() says NaN != NaN by default, same as ==</h2>
+<div class="callout"><strong>Confirmed directly:</strong> <code>np.isclose(np.nan, np.nan)</code> is <code>False</code> by default — matching plain <code>==</code>'s own "NaN never equals anything, not even itself" rule, not a silent-pass trap. This default is almost never what a data-wrangling test actually wants: two columns that both have a missing value in the exact same spot should usually count as matching there, not as a difference. <code>equal_nan=True</code> flips that one rule, treating a NaN-vs-NaN position as a match while leaving every other comparison exactly as before:</div>
+<pre><code>c = np.array([np.nan, <span class="kw">1.0</span>])
+d = np.array([np.nan, <span class="kw">1.0</span>])
+
+np.allclose(c, d)
+<span class="cm"># False  -- the NaN position counts as a mismatch by default</span>
+
+np.allclose(c, d, equal_nan=<span class="kw">True</span>)
+<span class="cm"># True  -- NaN-vs-NaN now counts as matching; the 1.0-vs-1.0 pair was never the issue</span></code></pre>
+<p>This is the one behavior worth naming out loud in an interview: a learner who reaches for <code>np.allclose()</code> to validate a cleaned numeric column against an expected one, where both are allowed to carry missing values in the same places, needs <code>equal_nan=True</code> or the check fails for a reason that has nothing to do with the actual values.</p>
+
+<h2>5 · Shape mismatch still raises — no silent broadcasting surprise beyond the usual rules</h2>
+<p>Confirmed directly: two arrays of genuinely incompatible shapes raise <code>ValueError</code> immediately, the same broadcasting rule Lesson 30 already covers for ordinary arithmetic — <code>np.isclose()</code> introduces no new shape behavior of its own, it is comparison riding on top of standard broadcasting. A scalar compared against a whole Series, by contrast, broadcasts cleanly — the common real case of checking whether every value in a column is close to one target number:</p>
+<pre><code><span class="kw">import</span> pandas <span class="kw">as</span> pd
+
+s = pd.Series([<span class="kw">2.9999999999</span>, <span class="kw">3.0</span>, <span class="kw">3.0000001</span>])
+np.allclose(s, <span class="kw">3.0</span>)
+<span class="cm"># True  -- scalar broadcasts against every element, all three within tolerance</span></code></pre>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>np.isclose()</code>'s element-wise contract and its <code>.all()</code>-collapsed sibling <code>np.allclose()</code>, the confirmed <code>atol=</code>/<code>rtol=</code> formula and how the two combine, the confirmed NaN-never-matches-by-default trap and its <code>equal_nan=True</code> fix, and the confirmed clean broadcasting behavior (shape-mismatch <code>ValueError</code>, scalar-vs-Series broadcast). It does not cover <code>math.isclose()</code> (the plain-Python standard-library equivalent, scalar-only, with a different default <code>rel_tol</code>) nor re-derive <code>assert_frame_equal()</code>'s own tolerance knobs, already taught in full in Lesson 89 — today only names the NumPy function that idea was always standing on.</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/117_np_isclose_allclose.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/117_np_isclose_allclose.py</code></pre>
+<p>Exercise 1 confirms the core <code>0.1 + 0.2 == 0.3</code> float trap and that <code>np.isclose()</code>/<code>np.allclose()</code> correctly call it close (Sections 1-2). Exercise 2 confirms the <code>atol=</code> widening behavior from Section 3. Exercise 3 confirms the Section 4 NaN-vs-NaN default mismatch and the <code>equal_nan=True</code> fix.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: 0.1 + 0.2 == 0.3 is False because of ordinary binary floating-point rounding, not a pandas or NumPy bug -- np.isclose() exists specifically to replace == for this exact situation, comparing within a small tolerance instead of bit-for-bit.">
+    <p class="stem">Why does plain Python's <code>0.1 + 0.2 == 0.3</code> evaluate to <code>False</code>?</p>
+    <button class="opt" data-ok>ordinary binary floating point rounding means the two sides are not identical</button>
+    <button class="opt">Python silently rounds every float literal down before any one comparison runs</button>
+    <button class="opt">the plus operator always returns a plain string, blocking any direct comparison</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: np.allclose() is np.isclose() immediately followed by .all() -- one single plain bool for the whole array pair, while np.isclose() itself stays element-wise, returning one bool per compared position.">
+    <p class="stem">What is the real relationship between <code>np.isclose()</code> and <code>np.allclose()</code>?</p>
+    <button class="opt" data-ok>allclose is isclose followed right by all: one single bool, never an array</button>
+    <button class="opt">they are two fully unrelated functions here, using completely different tolerance math entirely</button>
+    <button class="opt">allclose only ever works on plain Python lists, isclose only on real arrays</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: np.isclose()/np.allclose() treat a NaN-vs-NaN position as a mismatch by default, the same rule plain == already follows for NaN -- equal_nan=True is required to make a shared-NaN position count as matching instead.">
+    <p class="stem">By default, what does <code>np.allclose(np.array([np.nan]), np.array([np.nan]))</code> return?</p>
+    <button class="opt" data-ok>False, since NaN never once counts as matching NaN unless equal_nan gets set</button>
+    <button class="opt">True, since two missing values in the same position always count as matching</button>
+    <button class="opt">it raises TypeError immediately, since a NaN can never be compared at all</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official NumPy API reference for <a href="https://numpy.org/doc/stable/reference/generated/numpy.isclose.html"><code>numpy.isclose()</code></a> (per <code>RESOURCES.md</code>'s NumPy-fundamentals grouping, ~5 min) documents the full <code>atol=</code>/<code>rtol=</code> formula, <code>equal_nan=</code>, and <code>np.allclose()</code>'s exact relationship to it, confirmed above.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>np.isclose()</code> / <code>np.allclose()</code> is new today, added right after Lesson 116's <code>np.piecewise()</code> entry.<br>
+<strong>Next lesson:</strong> no standing candidate pre-committed — tomorrow's own fresh curriculum/glossary scan picks the next topic, per this course's standing convention.<br><br>
+💬 Anything unclear — the atol/rtol formula, the equal_nan trap, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

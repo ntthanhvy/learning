@@ -382,6 +382,12 @@
   <tr><td>bucket (histogram)</td><td>giữ nguyên "bucket" — 1 khoảng giá trị liên tục cố định (ví dụ 5 phút) trong 1 lưới tạo trước, dùng để nhóm dữ liệu thật vào theo khoảng nó rơi vào; mọi bucket đều xuất hiện kể cả khi không có dữ liệu thật nào rơi vào, nhờ left join từ lưới xuống dữ liệu thay vì group by trực tiếp trên dữ liệu</td><td>A fixed, contiguous range of values (here, a 5-minute span of delivery time) in a pre-generated grid, used to group real data by which range it falls into. Every bucket appears even with zero real rows landing in it, because the query starts from the generated grid and left-joins real data onto it, rather than grouping directly on the real data the way a plain <code>group by</code> would.</td></tr>
 </table>
 
+<h2 id="day49">Day 49 — A per-city delivery-time histogram: crossing two grids, not one</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>cross join</td><td>giữ nguyên "cross join" — join SQL ghép MỖI dòng của 1 bảng/set với MỖI dòng của bảng/set khác, không có điều kiện join nào; kết quả có đúng (số dòng A) nhân (số dòng B) dòng; dùng để tạo lưới 2 chiều đầy đủ (mỗi city ghép với mỗi bucket) trước khi join dữ liệu thật vào</td><td>A SQL join that pairs every row of one table or set with every row of another, with no join condition at all — the result has exactly (rows in A) times (rows in B) rows. Confirmed this round via a live <code>dbt parse</code> against a scratch project: <code>cities cross join bucket_grid</code> compiles and resolves cleanly as the base grid a left join is then anchored onto, with no <code>on</code> clause required or accepted.</td></tr>
+</table>
+
 <script src="../assets/nav.js"></script>
 </body>
 </html>

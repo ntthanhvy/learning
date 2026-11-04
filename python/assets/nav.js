@@ -202,6 +202,8 @@
       file: "lessons/0096-struct-packing-and-unpacking.html" },
     { n: 97, date: "2026-11-03", title: "getpass: reading a secret without echoing it",
       file: "lessons/0097-getpass-reading-secrets-without-echo.html" },
+    { n: 98, date: "2026-11-04", title: "string.Template: substitution without evaluation",
+      file: "lessons/0098-string-template.html" },
   ];
 
   const REFS = [

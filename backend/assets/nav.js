@@ -250,6 +250,8 @@
       file: "lessons/0120-outbox-pattern-efcore-savechanges.html" },
     { n: 121, date: "2026-11-03", title: "Idempotency keys, now in C# too",
       file: "lessons/0121-idempotency-keys-iendpointfilter-idistributedcache.html" },
+    { n: 122, date: "2026-11-04", title: "Webhook signature verification, now in C# too",
+      file: "lessons/0122-webhook-signature-verification-hmacsha256-fixedtimeequals.html" },
   ];
 
   const REFS = [

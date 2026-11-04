@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 118 · np.digitize(): the raw-array layer under cut() and qcut()</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 118 · ~20 min · 4 Nov 2026</p>
+<h1>np.digitize(): the raw-array layer under cut() and qcut()</h1>
+<p class="byline">Yesterday's lesson closed with four standing candidates from a fresh curriculum/glossary scan: <code>np.lexsort()</code>, <code>np.partition()</code>/<code>argpartition()</code>, <code>np.histogram()</code>/<code>np.bincount()</code>, and <code>np.digitize()</code> — named as "the raw-array layer under Lesson 18's <code>qcut()</code> binning." Today picks that one: it continues the same "name the NumPy function underneath an already-taught pandas method" lineage as Lessons 93, 100, 102, 109-112, 114, and 117, and today's own probe turned up a genuinely undocumented silent trap worth flagging.</p>
+
+<h2>1 · Same binning job as cut(), one layer closer to the metal</h2>
+<p>Lesson 12's <code>pd.cut()</code> sorts numeric values into fixed value-edge buckets. <dfn data-en="a NumPy function that takes an array of values and a sorted list of bin edges, returning an integer array of bin indices -- one per input value -- with 0 meaning 'below the first edge' and len(bins) meaning 'above the last edge'; the raw-array primitive pd.cut() is built on top of" data-vn="giữ nguyên 'np.digitize()' — nhận 1 mảng giá trị và 1 danh sách mốc chia (bins) đã sắp xếp, trả về mảng số nguyên là chỉ số bin — mỗi giá trị 1 chỉ số; 0 nghĩa là 'dưới mốc đầu tiên', len(bins) nghĩa là 'trên mốc cuối cùng'; đây là hàm NumPy thô mà pd.cut() được xây dựng dựa trên">np.digitize()</dfn> is the plain-array function doing that same edge-comparison underneath: given a sorted list of bin edges, it returns one integer bin index per input value, with no labels, no Series, no Index — just a NumPy array of bin numbers. Confirmed directly (numpy 2.5.4, pandas 3.1.0), reusing Lesson 18's own <code>amount</code> slice (An/120.0, Binh/35.5, Binh2/180.0, An2/42.0) and Lesson 12's exact bin edges:</p>
+<pre><code><span class="kw">import</span> numpy <span class="kw">as</span> np
+<span class="kw">import</span> pandas <span class="kw">as</span> pd
+
+amounts = np.array([<span class="kw">120.0</span>, <span class="kw">35.5</span>, <span class="kw">180.0</span>, <span class="kw">42.0</span>])
+bins = [<span class="kw">0</span>, <span class="kw">40</span>, <span class="kw">100</span>, <span class="kw">200</span>]
+
+np.digitize(amounts, bins)
+<span class="cm"># array([3, 1, 3, 2])  -- one bin index per value, no labels attached</span>
+
+pd.cut(pd.Series(amounts), bins=bins, labels=<span class="kw">False</span>)
+<span class="cm"># 0    2
+# 1    0
+# 2    2
+# 3    1
+# dtype: int64  -- SAME buckets, but 0-indexed instead of 1-indexed</span></code></pre>
+<p>Confirmed directly: <code>np.digitize(x, bins) - 1</code> is element-for-element identical to <code>pd.cut(x, bins=bins, labels=False)</code> on every in-range value — <code>pd.cut()</code> really is <code>np.digitize()</code> wrapped with a category dtype, 0-indexed labels, and (as Section 4 shows) real missing-value handling layered on top.</p>
+
+<h2>2 · The index convention: 0 and len(bins) are reserved for out-of-range</h2>
+<p>Confirmed directly: with <code>bins = [0, 40, 100, 200]</code> (4 edges, 3 intervals), an in-range value gets index 1, 2, or 3 — bin 1 is "between edges 0 and 1" (<code>0 &lt;= x &lt; 40</code>), and so on. Index <code>0</code> is reserved for "below every edge," and <code>len(bins)</code> (here, 4) is reserved for "above every edge" — not an error, a real sentinel value that the index can legitimately take:</p>
+<pre><code>np.digitize(np.array([-<span class="kw">5.0</span>]), bins)
+<span class="cm"># array([0])  -- below the first edge (0)</span>
+
+np.digitize(np.array([<span class="kw">250.0</span>]), bins)
+<span class="cm"># array([4])  -- above the last edge (200); len(bins) == 4</span></code></pre>
+<p>This is the first thing worth saying out loud in an interview: unlike <code>pd.cut()</code>, which returns <code>NaN</code> for any value outside every bin's range, <code>np.digitize()</code> never returns a missing marker for an out-of-range value — it always returns a valid-looking integer, which downstream code must know how to interpret.</p>
+
+<h2>3 · right=: which edge of each bin is inclusive</h2>
+<p>Confirmed directly against the official NumPy docs: <code>right=False</code> (the default) treats each bin as <code>bins[i-1] &lt;= x &lt; bins[i]</code> — the left edge included, the right edge excluded. <code>right=True</code> flips it to <code>bins[i-1] &lt; x &lt;= bins[i]</code> — right edge included instead. The two only disagree exactly at a boundary value:</p>
+<pre><code>np.digitize(np.array([<span class="kw">40.0</span>]), bins)
+<span class="cm"># array([2])  -- right=False (default): 40 is "&gt;= 40", so it joins the NEXT bin up</span>
+
+np.digitize(np.array([<span class="kw">40.0</span>]), bins, right=<span class="kw">True</span>)
+<span class="cm"># array([1])  -- right=True: 40 is "&lt;= 40", so it stays in the bin ENDING at 40</span></code></pre>
+<p>Confirmed directly: <code>bins</code> must be monotonically increasing <em>or</em> monotonically decreasing (descending edges are explicitly supported, reversing the index order) — anything else raises <code>ValueError: bins must be monotonically increasing or decreasing</code> immediately, no silent misbehavior.</p>
+
+<h2>4 · The trap: NaN gets a real bin index, silently, with no warning</h2>
+<div class="callout"><strong>Confirmed directly, and confirmed absent from the official docs page (no mention of NaN handling at all):</strong> a NaN value passed to <code>np.digitize()</code> is silently placed in the "above every edge" bucket (<code>len(bins)</code>), the same code a genuinely huge number would get — no exception, no warning, no distinguishable marker:
+<pre><code>vals = np.array([np.nan, <span class="kw">50.0</span>])
+
+np.digitize(vals, bins)
+<span class="cm"># array([4, 2])  -- the NaN silently lands in bin 4, same code as a too-large value</span>
+
+pd.cut(pd.Series(vals), bins=bins, labels=<span class="kw">False</span>)
+<span class="cm"># 0    NaN
+# 1    1.0
+# dtype: float64  -- pd.cut() correctly keeps NaN as NaN, no fake bin assignment</span></code></pre>
+</div>
+<p>This is the sharp, genuinely interview-relevant gotcha: every comparison against NaN is <code>False</code> (the same rule Lesson 117's <code>np.isclose()</code> traded on), so NaN never satisfies "less than this edge" for any edge — it falls through every comparison and lands in the final, catch-all bucket by construction, indistinguishable from a legitimately huge value. Anyone hand-rolling a binning pass with <code>np.digitize()</code> on real data (which always has some missing values) must check for NaN <em>before</em> calling it, or filter/mask bin index <code>len(bins)</code> afterward knowing it might mean "missing" rather than "huge" — <code>pd.cut()</code> (built on top of this exact function) is the one that already handles this correctly, which is reason enough to reach for <code>pd.cut()</code> directly whenever labels or NaN-safety matter and drop to <code>np.digitize()</code> only when a plain NumPy pipeline has no pandas involved at all.</p>
+
+<h2>5 · Works directly on a Series, same as recent lessons' NumPy functions</h2>
+<p>Confirmed directly: <code>np.digitize()</code> accepts a pandas Series for <code>x</code> with no <code>.to_numpy()</code> conversion needed first (same ease as <code>np.isclose()</code> in Lesson 117, unlike the <code>AttributeError</code> traps Lessons 110/112 found calling <code>cummax()</code>/<code>.ravel()</code> the other direction) — and, like <code>np.percentile()</code> (Lesson 111) and <code>np.piecewise()</code> (Lesson 116), it always hands back a plain <code>ndarray</code>, dropping the Index entirely:</p>
+<pre><code>s = pd.Series([<span class="kw">120.0</span>, <span class="kw">35.5</span>, <span class="kw">180.0</span>, <span class="kw">42.0</span>], index=[<span class="kw">"An"</span>, <span class="kw">"Binh"</span>, <span class="kw">"Binh2"</span>, <span class="kw">"An2"</span>])
+
+np.digitize(s, bins)
+<span class="cm"># array([3, 1, 3, 2])  -- plain ndarray; the "An"/"Binh"/... Index is gone</span></code></pre>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>np.digitize()</code>'s bin-index contract, the confirmed 0-and-<code>len(bins)</code> out-of-range sentinel convention, the confirmed <code>right=</code> boundary flip and the monotonic-bins requirement, the confirmed and undocumented NaN-silently-joins-the-last-bin trap (contrasted with <code>pd.cut()</code>'s correct <code>NaN</code>-stays-<code>NaN</code> behavior), and the confirmed Series-in/ndarray-out shape. It does not cover <code>np.searchsorted()</code> (Lesson 75's own topic, the more general sorted-array search <code>np.digitize()</code> is itself built on internally) nor <code>np.histogram()</code>'s bin-counting (a separate standing candidate, left for a future round).</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/118_np_digitize.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/118_np_digitize.py</code></pre>
+<p>Exercise 1 confirms the core bin-index contract and the <code>np.digitize() - 1 == pd.cut(labels=False)</code> relationship from Sections 1-2. Exercise 2 confirms the Section 3 <code>right=</code> boundary flip at an exact edge value. Exercise 3 confirms the Section 4 NaN trap against <code>pd.cut()</code>'s correct handling.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: np.digitize() reserves index 0 for values below every bin edge and index len(bins) for values above every edge -- these are valid, expected integer outputs, not an error condition of any kind.">
+    <p class="stem">What does <code>np.digitize()</code> return for a value above every bin edge in <code>bins</code>?</p>
+    <button class="opt" data-ok>the valid integer index len(bins), reserved for values out of range</button>
+    <button class="opt">a ValueError, since every single value must fall inside given edges</button>
+    <button class="opt">the string "out of range", silently replacing the numeric bin index</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: right=False (default) treats each bin as bins[i-1] <= x < bins[i], so a value exactly equal to an edge joins the bin starting there. right=True flips it to bins[i-1] < x <= bins[i], so that same edge value joins the bin ending there instead.">
+    <p class="stem">With the default <code>right=False</code>, which bin does a value exactly equal to an edge join?</p>
+    <button class="opt" data-ok>the bin starting at that edge, since the left side counts as inclusive</button>
+    <button class="opt">the bin ending at that edge, since the right side counts as inclusive</button>
+    <button class="opt">neither bin at all, since an exact edge match always raises an error</button>
+  </div>
+  <div class="q" data-why="Confirmed directly, and confirmed absent from the official docs: a NaN value fails every less-than comparison against every bin edge, so it silently falls through to the final catch-all bucket (index len(bins)) -- the same code a genuinely huge value gets, with no warning or distinct marker. pd.cut(), built on top of this function, correctly returns NaN instead.">
+    <p class="stem">What does <code>np.digitize()</code> silently do with a NaN value in the input array?</p>
+    <button class="opt" data-ok>silently places it in the last bucket, same code a huge value gets</button>
+    <button class="opt">it immediately raises a TypeError, refusing to process the whole array at all</button>
+    <button class="opt">it quietly skips that one position, shrinking the length of the returned array</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official NumPy API reference for <a href="https://numpy.org/doc/stable/reference/generated/numpy.digitize.html"><code>numpy.digitize()</code></a> (per <code>RESOURCES.md</code>'s NumPy-fundamentals grouping, ~5 min) documents the full index convention and the <code>right=</code> flip with a worked example, confirmed above; it does not mention NaN behavior at all, which is exactly the gap today's lesson fills by direct probe.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>np.digitize()</code> is new today, added right after Lesson 117's <code>np.isclose()</code>/<code>np.allclose()</code> entry.<br>
+<strong>Next lesson:</strong> three standing candidates remain from yesterday's scan, none pre-committed per this course's "fresh scan each round" convention — <code>np.lexsort()</code>, <code>np.partition()</code>/<code>argpartition()</code>, and <code>np.histogram()</code>/<code>np.bincount()</code> (the bin-counting sibling of today's bin-assigning function, and Lesson 68's own passing, never-taught mention).<br><br>
+💬 Anything unclear — the out-of-range sentinel convention, the right= flip, or the NaN trap? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

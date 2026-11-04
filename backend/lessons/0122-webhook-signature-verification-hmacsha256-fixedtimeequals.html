@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 122 · Webhook signature verification, now in C# too</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 122 · ~20 min</p>
+<h1>Webhook signature verification, now in C# too</h1>
+<p class="byline">Lesson 30 built the HMAC verification check in Go: recompute a tag over the raw request body with a shared secret, compare it to the sender's tag in constant time, and only then parse the body. That lesson never got a C# mirror. Unlike Lesson 121's pair, this one doesn't need a framework feature at all — the whole mechanism lives in the base class library, in <code>System.Security.Cryptography</code>, the same place .NET keeps every other cryptographic primitive.</p>
+
+<h2>1 · Same two steps, now with BCL types instead of stdlib ones</h2>
+<p>Lesson 30's rule still holds exactly: verify the signature against the exact raw bytes before any JSON parsing, and compare tags in constant time, never with plain equality. Go's version reached for <code>crypto/hmac</code> and <code>crypto/sha256</code> from the standard library; C#'s version reaches for <code>HMACSHA256</code> and <code>CryptographicOperations</code> from the base class library — not a NuGet package, not a framework feature, just the BCL's own cryptography namespace.</p>
+<pre><code><span class="kw">public</span> <span class="kw">static</span> <span class="kw">class</span> WebhookVerifier
+{
+    <span class="cm">// webhookSecret: Lesson 21's "a secret is config too", loaded once at startup.</span>
+    <span class="kw">private</span> <span class="kw">static</span> <span class="kw">readonly</span> <span class="dt">byte</span>[] WebhookSecret =
+        Encoding.UTF8.GetBytes(Environment.GetEnvironmentVariable(<span class="st">"WEBHOOK_SECRET"</span>)!);
+
+    <span class="cm">// VerifySignature recomputes the HMAC-SHA256 over the raw body using the</span>
+    <span class="cm">// shared secret, then compares it to the signature the sender attached --</span>
+    <span class="cm">// in fixed time, so a timing side-channel can't leak the right value one</span>
+    <span class="cm">// byte at a time.</span>
+    <span class="kw">public</span> <span class="kw">static</span> <span class="dt">bool</span> VerifySignature(<span class="dt">byte</span>[] body, <span class="dt">string</span> gotSignatureHex)
+    {
+        <span class="dt">byte</span>[] want = HMACSHA256.HashData(WebhookSecret, body);
+
+        <span class="dt">byte</span>[] got;
+        <span class="kw">try</span> { got = Convert.FromHexString(gotSignatureHex); }
+        <span class="kw">catch</span> (FormatException) { <span class="kw">return</span> <span class="kw">false</span>; }
+
+        <span class="kw">return</span> CryptographicOperations.FixedTimeEquals(want, got); <span class="cm">// NOT want.SequenceEqual(got)</span>
+    }
+}
+
+app.MapPost(<span class="st">"/webhooks/payments"</span>, <span class="kw">async</span> (HttpRequest req) =&gt;
+{
+    <span class="kw">using</span> <span class="kw">var</span> ms = <span class="kw">new</span> MemoryStream();
+    <span class="kw">await</span> req.Body.CopyToAsync(ms);
+    <span class="dt">byte</span>[] body = ms.ToArray();
+
+    <span class="dt">string</span> signature = req.Headers[<span class="st">"X-Webhook-Signature"</span>].ToString();
+    <span class="kw">if</span> (<span class="dt">string</span>.IsNullOrEmpty(signature) || !WebhookVerifier.VerifySignature(body, signature))
+        <span class="kw">return</span> Results.Unauthorized(); <span class="cm">// unverified -- never reaches JsonSerializer.Deserialize</span>
+
+    <span class="cm">// only now is it safe to parse and act on the body</span>
+    <span class="kw">var</span> evt = JsonSerializer.Deserialize&lt;PaymentEvent&gt;(body);
+    <span class="kw">return</span> Results.Ok();
+});</code></pre>
+<p>The handler reads the body as raw bytes first — <code>req.Body.CopyToAsync</code> into a buffer — for the exact reason Lesson 30 named in section 3: ASP.NET Core's own model binding would parse the JSON for you, but parsing and re-serializing can shift whitespace, key order, or number formatting, producing different bytes than what the sender actually signed. Verify first, parse second, same order as the Go version, same reason.</p>
+
+<h2>2 · The building blocks: a static hash method, and a comparison that can't leak timing</h2>
+<p>The first piece is <dfn data-en="a BCL class computing a Hash-based Message Authentication Code using SHA-256; its static HashData(key, data) method takes the secret key and the message as byte arrays and returns the HMAC tag directly, with no instance to construct or dispose for a single one-shot computation" data-vn="HMACSHA256 (giữ nguyên) — class trong BCL tính HMAC dùng SHA-256; static method HashData(key, data) nhận secret key và message dạng byte array, trả tag luôn, không cần tạo instance riêng cho 1 lần tính">HMACSHA256</dfn>. Go's version built the tag in three explicit steps — construct an <code>hmac.New</code> hasher, <code>Write</code> the body into it, <code>Sum</code> to get the bytes out. <code>HMACSHA256.HashData</code> collapses that into one static call: hand it the key and the body, get the tag back, no hasher object to construct, write into, or dispose. The class still supports the Go-style streaming shape too (an instance plus <code>ComputeHash</code>) for large payloads read incrementally, but a webhook body is already fully buffered in memory by the time it's verified, so the one-shot static method is the right fit here, not the streaming one.</p>
+<p>The second piece is <dfn data-en="a BCL method that compares two byte sequences for equality in an amount of time depending only on their length, never their contents, so it never leaks a timing signal about how many leading bytes matched -- the one documented exception being that it short-circuits only on a length mismatch" data-vn="CryptographicOperations.FixedTimeEquals (giữ nguyên) — method trong BCL so sánh 2 byte sequence bằng nhau hay không, thời gian chạy chỉ phụ thuộc độ dài, không phụ thuộc nội dung -- không rò thông tin timing, chỉ thoát sớm duy nhất khi 2 độ dài khác nhau</dfn>. This is the C# twin of Go's <code>hmac.Equal</code>, down to the same one documented exception: Microsoft's own reference confirms it "will short-circuit and return false only if left and right have different lengths," with "fixed-time behavior... guaranteed in all other cases" — exactly Go's own carve-out for mismatched lengths.</p>
+<div class="callout"><strong>The one easy-to-miss detail, same as Lesson 30's:</strong> <code>want.SequenceEqual(got)</code> or <code>want == got</code> compiles, looks correct, and passes every functional test — and is exactly the naive comparison Lesson 30 warned about, since LINQ's <code>SequenceEqual</code> returns as soon as it finds a mismatched byte. <code>CryptographicOperations.FixedTimeEquals</code> is the one call that actually closes the timing side-channel; nothing else in the BCL's ordinary equality tooling does.</div>
+
+<h2>3 · What doesn't change crossing languages</h2>
+<p>Every correctness rule Lesson 30 named still applies untouched: the signature is computed over the exact raw bytes, not a reserialized copy; verification happens before parsing, never after; a mismatched signature is rejected outright with no partial trust; and real providers' concrete shapes — Stripe's <code>timestamp + "." + body</code> construction, GitHub's raw-body-only <code>X-Hub-Signature-256</code> — are unchanged by which language receives them. None of that is Go-specific or C#-specific; <code>HMACSHA256</code> and <code>CryptographicOperations.FixedTimeEquals</code> are just the two BCL pieces that carry it out in .NET instead of <code>crypto/hmac</code> and <code>hmac.Equal</code>.</p>
+
+<div class="cmp-wrap">
+<table class="cmp">
+<thead><tr><th></th><th>Lesson 30: Go</th><th>Lesson 122: C#</th></tr></thead>
+<tbody>
+<tr><th>Computing the tag</th><td><code>hmac.New(sha256.New, secret)</code> + <code>Write</code> + <code>Sum</code></td><td><code>HMACSHA256.HashData(secret, body)</code>, one static call</td></tr>
+<tr><th>Decoding the sender's hex tag</th><td><code>hex.DecodeString(gotSignatureHex)</code></td><td><code>Convert.FromHexString(gotSignatureHex)</code></td></tr>
+<tr><th>Constant-time comparison</th><td><code>hmac.Equal(want, got)</code></td><td><code>CryptographicOperations.FixedTimeEquals(want, got)</code></td></tr>
+<tr><th>Naive trap to avoid</th><td><code>want == string(got)</code> or a hand-rolled loop</td><td><code>want.SequenceEqual(got)</code> or <code>==</code></td></tr>
+<tr><th>Where the code lives</th><td>Go standard library (<code>crypto/...</code>)</td><td>.NET base class library (<code>System.Security.Cryptography</code>)</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>HMACSHA256.HashData</code> as the C# mechanism for computing an HMAC tag, and <code>CryptographicOperations.FixedTimeEquals</code> as the constant-time comparison, for Lesson 30's webhook-signature pattern. It does not cover the streaming <code>HMACSHA256</code> instance API, other hash algorithms, or key management/rotation in any depth — only the one static method and one comparison method this pattern needs. Lesson 30's own raw-bytes-first, provider-envelope, and replay-timestamp rules are not re-taught, only carried over unchanged.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory, with no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="HMACSHA256.HashData(key, data) is a static method that takes the secret key and the message bytes directly and returns the computed tag in one call -- no HMACSHA256 instance needs to be constructed, written to, or disposed for a single one-shot computation, unlike the streaming hasher shape Go's hmac.New/Write/Sum uses.">
+    <p class="stem">What does HMACSHA256.HashData let you skip, compared to building a hasher step by step?</p>
+    <button class="opt" data-ok>constructing, writing to, and disposing a hasher object right now here</button>
+    <button class="opt">reading the whole request body off the network socket itself now</button>
+    <button class="opt">storing the shared secret somewhere inside the server config file now</button>
+    <button class="opt">sending the final HTTP response back to the original sender now</button>
+  </div>
+  <div class="q" data-why="CryptographicOperations.FixedTimeEquals runs in an amount of time that depends only on the length of the two sequences, never their contents, so it never reveals through timing how many leading bytes matched -- its one documented exception is that it short-circuits only when the two lengths differ.">
+    <p class="stem">What does CryptographicOperations.FixedTimeEquals guarantee about its running time?</p>
+    <button class="opt" data-ok>it depends only on the sequence length, never on their content</button>
+    <button class="opt">it depends only on which thread pool thread runs it next</button>
+    <button class="opt">it depends only on how the secret key was first generated</button>
+    <button class="opt">it depends only on the server own current total CPU load</button>
+  </div>
+  <div class="q" data-why="want.SequenceEqual(got) looks correct and passes every functional test, but it returns as soon as it finds the first mismatched byte -- exactly the naive comparison Lesson 30 warned about in Go, since measuring response time then reveals how many leading bytes were guessed correctly.">
+    <p class="stem">Why is want.SequenceEqual(got) the wrong way to compare two HMAC tags?</p>
+    <button class="opt" data-ok>it exits early on a mismatch, leaking timing information back out</button>
+    <button class="opt">it always throws an exception on any byte array input given</button>
+    <button class="opt">it silently converts both byte arrays into plain text strings now</button>
+    <button class="opt">it only compares the very first byte of the array given</button>
+  </div>
+  <div class="q" data-why="Verification must happen against the raw bytes the sender actually signed. ASP.NET Core's own model binding would parse and could reserialize the JSON with different whitespace, key order, or number formatting, producing bytes that no longer match what was signed -- so the handler reads and buffers the raw body first, verifies it, and only then deserializes.">
+    <p class="stem">Why does the C# handler read the raw body itself instead of letting model binding parse it first?</p>
+    <button class="opt" data-ok>reparsed JSON bytes can differ from the signed bytes seen here</button>
+    <button class="opt">model binding cannot accept any POST request body sent at all</button>
+    <button class="opt">model binding always strips every custom header that was sent here</button>
+    <button class="opt">model binding permanently disables the registered route handler for it now</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://learn.microsoft.com/en-us/dotnet/api/system.security.cryptography.hmacsha256">Microsoft Learn: HMACSHA256 Class</a> (~10 min) confirms the <code>HashData(byte[] key, byte[] data)</code> static overload and that the class "accepts keys of any size, and produces a hash sequence 256 bits in length." <a href="https://learn.microsoft.com/en-us/dotnet/api/system.security.cryptography.cryptographicoperations.fixedtimeequals">Microsoft Learn: CryptographicOperations.FixedTimeEquals Method</a> confirms the exact constant-time guarantee quoted in section 2. Lesson 30's own OWASP and Stripe citations still cover the pattern's trust-boundary reasoning and provider envelope shapes in full, not duplicated here.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a>. Click any dotted term for a popup (English first, tiếng Việt second). Builds directly on Lesson 30's webhook-signature pattern and Lesson 21's config-vs-code secret handling. <strong>Anything unclear? Ask your teacher</strong>, the agent that made this lesson. Ask in Vietnamese anytime. A good follow-up: "nếu secret bị lộ thì phải xoay (rotate) nó thế nào mà không làm đứt các webhook đang chờ xác minh?"</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

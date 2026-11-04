@@ -242,6 +242,8 @@
       file: "lessons/0116-np-piecewise.html" },
     { n: 117, date: "2026-11-03", title: "np.isclose() and np.allclose(): comparing floats without ever using ==",
       file: "lessons/0117-np-isclose-allclose.html" },
+    { n: 118, date: "2026-11-04", title: "np.digitize(): the raw-array layer under cut() and qcut()",
+      file: "lessons/0118-np-digitize.html" },
   ];
 
   const REFS = [

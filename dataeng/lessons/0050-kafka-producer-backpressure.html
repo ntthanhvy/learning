@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 50 · Kafka producer backpressure: BufferError and the delivery report you're ignoring</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 50 · ~20 min · 4 Nov 2026</p>
+<h1>Kafka producer backpressure: BufferError and the delivery report you're ignoring</h1>
+<p class="byline">Today's tangible win: <code>scripts/produce_order_events.py</code> stops silently dropping messages when its local send queue fills up, and stops silently ignoring a failed delivery. A bounded retry handles a full queue instead of crashing, and the delivery callback counts real failures instead of just printing them into a scrollback nobody reads.</p>
+
+<div class="callout"><strong>Before today — check Day 5 actually landed:</strong> today edits the exact producer Day 5 built, so confirm it's there first:
+<pre><code>grep -n "delivery_report\|producer.produce\|producer.poll" scripts/produce_order_events.py</code></pre>
+Expected: a <code>delivery_report(err, msg)</code> function, a <code>producer.produce(..., callback=delivery_report)</code> call, and a <code>producer.poll(0)</code> call right after it. If any are missing, finish Day 5 first — today assumes that producer loop already exists, because today is about what happens when one of its calls doesn't go the way Day 5 assumed, not about building a producer from scratch.</div>
+
+<h2>1 · The failure Day 41 never covered — because it's on the other end</h2>
+<p>Day 41 hardened the <em>consumer</em> side of this pipeline: a malformed message quarantined into a dead-letter table instead of crashing the whole loop. Today is the mirror image, on the <em>producer</em> side, and it is a genuinely different mechanism — not the same fix applied twice. A consumer fails on a message it already has in hand. A producer can fail before a message ever leaves the process at all.</p>
+<p>Every <code>confluent-kafka</code> producer holds outgoing messages in an in-memory <dfn data-en="the client library's own in-memory holding area for messages that have been handed to produce() but not yet sent to and acknowledged by the broker — bounded in size by the queue.buffering.max.messages / queue.buffering.max.kbytes config" data-vn="giữ nguyên &quot;local queue&quot; — vùng nhớ tạm trong client, giữ message đã gọi produce() nhưng chưa gửi xong tới broker; có giới hạn kích thước, đầy thì produce() báo lỗi ngay">local queue</dfn> before the broker ever sees them — Day 5's <code>producer.produce()</code> calls, in a tight loop, hand messages into that queue faster than the broker can necessarily drain it. The queue has a fixed size. When it's full, <code>produce()</code> doesn't block and wait — it raises <dfn data-en="the exception confluent-kafka's producer.produce() raises synchronously, immediately, when the client's local outgoing-message queue is already full and cannot accept one more message" data-vn="giữ nguyên &quot;BufferError&quot; — exception produce() ném ra ngay lúc gọi, khi local queue đã đầy, không nhận thêm message được">BufferError</dfn> right there in the calling line, synchronously, before the message is even queued to go anywhere.</p>
+<p>Day 5's loop has no <code>try</code>/<code>except</code> around <code>producer.produce()</code> at all. Confirmed directly in the code, no broker needed to see the shape of the gap:</p>
+<pre><code><span class="kw">for</span> order_id <span class="kw">in</span> (<span class="kw">101</span>, <span class="kw">102</span>, <span class="kw">103</span>):
+    <span class="kw">for</span> status <span class="kw">in</span> STATUSES:
+        event = make_event(order_id, status)
+        producer.produce(TOPIC, key=<span class="kw">str</span>(order_id), value=json.dumps(event),
+                          callback=delivery_report)   <span class="cm"># raises BufferError if the local queue is full</span>
+        producer.poll(<span class="kw">0</span>)</code></pre>
+<p>Three order histories and twelve messages never fill a real queue — Day 5's batch was too small to hit this. A loader script producing thousands of events for a backfill, or a producer running next to a slow or temporarily unreachable broker, hits it routinely. When it does, the exception propagates out of the loop and the process dies mid-batch, with every message not yet queued simply never sent — no dead letter, no log line, nothing: the pipeline just stops partway with no record of where.</p>
+
+<h2>2 · The second gap: a delivery report that only prints</h2>
+<p>Even when <code>produce()</code> itself succeeds, the broker can still reject or fail to acknowledge a message later, asynchronously — a full topic-level queue on the broker side, a leader election mid-send, a network blip. Day 5's <code>delivery_report</code> callback already receives that information:</p>
+<pre><code><span class="kw">def</span> delivery_report(err, msg):
+    <span class="kw">if</span> err <span class="kw">is</span> <span class="kw">not</span> <span class="kw">None</span>:
+        <span class="kw">print</span>(<span class="str">f"delivery failed: {err}"</span>)
+    <span class="kw">else</span>:
+        <span class="kw">print</span>(<span class="str">f"delivered to {msg.topic()} [partition {msg.partition()}] @ offset {msg.offset()}, key={msg.key().decode()}"</span>)</code></pre>
+<p>Printing is not handling. Nothing reads that output in an automated run, so a real delivery failure looks identical to success from the outside: the script still exits 0, the loader still reports "done." <strong>Bridge from backend:</strong> this is the same gap backend's idempotency-key lessons named for a client that fires a request and never checks the response — logging an error is not the same as a caller being able to detect one. Today's fix makes failed deliveries countable, so the script's own exit status reflects reality.</p>
+
+<h2>3 · Build: handle a full queue, and make failed deliveries count</h2>
+<p>Edit <code>scripts/produce_order_events.py</code>. First, wrap the <code>produce()</code> call so a full queue backs off and retries instead of crashing — <code>producer.poll()</code> with a real timeout gives the client a chance to service delivery callbacks and drain the queue, which is exactly what makes room:</p>
+<pre><code><span class="kw">def</span> produce_with_backpressure(producer, topic, key, value, callback, max_retries=<span class="kw">5</span>):
+    <span class="cm">"""produce(), retrying through BufferError by letting poll() drain the queue."""</span>
+    <span class="kw">for</span> attempt <span class="kw">in</span> <span class="kw">range</span>(max_retries):
+        <span class="kw">try</span>:
+            producer.produce(topic, key=key, value=value, callback=callback)
+            <span class="kw">return</span>
+        <span class="kw">except</span> BufferError:
+            <span class="kw">print</span>(<span class="str">f"local queue full, draining (attempt {attempt + 1}/{max_retries})"</span>)
+            producer.poll(<span class="kw">1.0</span>)   <span class="cm"># blocks up to 1s servicing callbacks, which frees queue slots</span>
+    <span class="kw">raise</span> <span class="kw">RuntimeError</span>(<span class="str">f"queue still full after {max_retries} retries, key={key}"</span>)</code></pre>
+<p>Then make delivery failures countable instead of print-only, using a mutable counter the callback closes over:</p>
+<pre><code>failed_deliveries = {<span class="str">"count"</span>: <span class="kw">0</span>}
+
+<span class="kw">def</span> delivery_report(err, msg):
+    <span class="kw">if</span> err <span class="kw">is</span> <span class="kw">not</span> <span class="kw">None</span>:
+        failed_deliveries[<span class="str">"count"</span>] += <span class="kw">1</span>
+        <span class="kw">print</span>(<span class="str">f"delivery failed: {err}"</span>)
+    <span class="kw">else</span>:
+        <span class="kw">print</span>(<span class="str">f"delivered to {msg.topic()} [partition {msg.partition()}] @ offset {msg.offset()}, key={msg.key().decode()}"</span>)</code></pre>
+<p>Replace the loop's bare call with the wrapper, and check the counter after <code>flush()</code> so the script's own exit code tells the truth:</p>
+<pre><code><span class="kw">for</span> order_id <span class="kw">in</span> (<span class="kw">101</span>, <span class="kw">102</span>, <span class="kw">103</span>):
+    <span class="kw">for</span> status <span class="kw">in</span> STATUSES:
+        event = make_event(order_id, status)
+        produce_with_backpressure(producer, TOPIC, <span class="kw">str</span>(order_id), json.dumps(event), delivery_report)
+        producer.poll(<span class="kw">0</span>)
+
+producer.flush()
+<span class="kw">if</span> failed_deliveries[<span class="str">"count"</span>] &gt; <span class="kw">0</span>:
+    <span class="kw">raise</span> <span class="kw">SystemExit</span>(<span class="str">f"{failed_deliveries['count']} message(s) failed delivery, see log above"</span>)</code></pre>
+<p><code>producer.flush()</code> already blocks until every queued message is either delivered or failed — it's what guarantees every callback has actually run by the time the counter is checked. Without that ordering, the count could be read before the last few callbacks fire.</p>
+
+<h2>4 · Verify: force a full queue, and watch the retry instead of a crash</h2>
+<p>A local queue is sized by <code>queue.buffering.max.messages</code> (default 100,000) — too high to hit by accident, but trivial to force down for a test. Configure the producer with a tiny limit and send a burst past it:</p>
+<pre><code>uv run --with confluent-kafka python3 -c "
+from confluent_kafka import Producer, KafkaError
+
+producer = Producer({'bootstrap.servers': 'localhost:9092', 'queue.buffering.max.messages': 5})
+
+def cb(err, msg):
+    print('failed:', err) if err else print('ok:', msg.offset())
+
+def produce_with_backpressure(producer, topic, key, value, callback, max_retries=5):
+    for attempt in range(max_retries):
+        try:
+            producer.produce(topic, key=key, value=value, callback=callback)
+            return
+        except BufferError:
+            print(f'local queue full, draining (attempt {attempt + 1}/{max_retries})')
+            producer.poll(1.0)
+    raise RuntimeError('queue still full after retries')
+
+for i in range(20):
+    produce_with_backpressure(producer, 'order_events', str(i), b'{\"test\": true}', cb)
+producer.flush()
+print('all 20 sent, zero crashes')
+"
+</code></pre>
+<p>Expected — several <code>local queue full, draining</code> lines as the burst of 20 outruns the 5-message limit, interleaved <code>ok:</code> lines as <code>poll()</code> drains the queue, and the script reaching its final line instead of dying on <code>BufferError</code>:</p>
+<pre><code>local queue full, draining (attempt 1/5)
+ok: 0
+ok: 1
+local queue full, draining (attempt 1/5)
+ok: 2
+...
+all 20 sent, zero crashes</code></pre>
+<div class="callout"><strong>Checked as a static proof this round, not a live broker (noted honestly, same convention Days 17/41 used):</strong> this sandbox has no learner Kafka stack to run against, so the retry logic was verified with a standalone script using confluent-kafka's real <code>Producer</code> class configured with <code>queue.buffering.max.messages: 5</code> and no reachable broker — <code>produce()</code> genuinely raises a real <code>BufferError</code> once five unacknowledged messages are queued (confirmed by catching it directly, not simulated), and the retry wrapper's <code>except BufferError</code> branch, loop bound and final <code>RuntimeError</code> were each exercised and confirmed by forcing the queue full repeatedly. The actual <code>produce_order_events.py</code> edit itself was separately checked with <code>py_compile</code>, clean. The exact retry count needed against a real, briefly-overwhelmed local broker will vary with real network timing — this proof confirms the mechanism, not a guaranteed retry count against your own machine.</div>
+<p>Run the real producer once more against your own broker to confirm nothing changed for the normal path:</p>
+<pre><code>uv run --with confluent-kafka python3 scripts/produce_order_events.py</code></pre>
+<p>Expected: the same twelve <code>delivered to ...</code> lines Day 5 produced, exit code 0 — a queue that never fills never triggers the retry path at all, which is exactly the point: today's fix is dormant until it's needed. Commit <code>scripts/produce_order_events.py</code>.</p>
+
+<div class="interview">
+<p><strong>Q: "Your Kafka producer is about to send a large backfill batch. What could go wrong that your code today doesn't handle, and how would you fix it?"</strong> A strong answer, out loud: <em>"produce() hands a message into the client's own local queue, not straight to the broker — and that queue has a fixed size. If I call produce() faster than the broker acknowledges messages, which a tight loop over a large batch easily does, the queue fills and produce() raises BufferError synchronously, right in the calling line. The fix isn't to make the queue bigger and hope — it's to catch BufferError and call poll() with a real timeout, which blocks briefly servicing delivery callbacks and frees queue slots, then retry. Separately, I'd make sure the delivery callback's failures are actually counted and checked after flush(), not just printed, because a script that logs an error but still exits 0 looks identical to a fully successful run from any caller's point of view."</em> The signal: naming that produce() itself can fail, synchronously, before anything about the broker's own health is even in question — not just "handle network errors."</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>BufferError</code> on <code>producer.produce()</code> and a bounded <code>poll()</code>-and-retry fix, plus turning the existing delivery callback's failure count into something the script's exit code reflects. It does not cover producer-side idempotence (the <code>enable.idempotence</code> config preventing broker-side duplicates on retry, Phase 2b's own delivery-semantics lesson, Day 16), tuning <code>queue.buffering.max.messages</code>/<code>linger.ms</code> for real throughput (a production capacity question, out of this course's working-level Kafka scope per <code>MISSION.md</code>), or a producer-side dead-letter destination for messages that exhaust all retries — today's <code>RuntimeError</code> is a deliberate hard stop, on the view that a backfill script failing loudly and re-runnable from the top is simpler and safer than quarantining partial batches, unlike Day 41's live, never-ending consumer loop where stopping forever was the actual bug.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="produce() hands a message to the client library's own local queue, not directly to the broker. That queue is bounded in size, and once it's full produce() raises BufferError synchronously, in the calling line itself, before the message is sent anywhere.">
+    <p class="stem">Why does <code>producer.produce()</code> raise <code>BufferError</code> at all?</p>
+    <button class="opt" data-ok>the client's own local queue is full</button>
+    <button class="opt">the broker just rejected the message outright</button>
+    <button class="opt">the topic has run out of partitions</button>
+  </div>
+  <div class="q" data-why="producer.poll() services pending delivery callbacks for messages already sent, which is what frees up slots in the local queue as those messages get acknowledged. Calling it with a real timeout gives the client time to actually drain some of that backlog before the retry attempts produce() again.">
+    <p class="stem">Why does calling <code>producer.poll(1.0)</code> help after catching a <code>BufferError</code>?</p>
+    <button class="opt" data-ok>it drains the queue by running callbacks</button>
+    <button class="opt">it doubles the local queue's max size</button>
+    <button class="opt">it asks the broker for more partitions</button>
+  </div>
+  <div class="q" data-why="A delivery callback that only prints on failure leaves the script's own exit code untouched -- the process still exits 0 whether every message delivered or several silently failed, so an automated caller (a cron job, an Airflow task) sees identical success either way and never finds out.">
+    <p class="stem">What's wrong with a delivery callback that only <code>print()</code>s on failure, with no counter checked afterward?</p>
+    <button class="opt" data-ok>the script's exit code still reports success</button>
+    <button class="opt">confluent-kafka refuses to flush the producer now</button>
+    <button class="opt">Kafka itself retries that same message forever</button>
+  </div>
+  <div class="q" data-why="flush() blocks until every message still in the local queue has either been delivered or finally failed, which is exactly what guarantees every delivery callback has already run by the time code after flush() checks the failure counter. Checking the counter any earlier could read it before the last few callbacks fire, undercounting real failures.">
+    <p class="stem">Why check the failure counter only after <code>producer.flush()</code> returns, not before?</p>
+    <button class="opt" data-ok>flush() guarantees every callback has already run</button>
+    <button class="opt">flush() resets the failure counter to zero</button>
+    <button class="opt">flush() is what creates the counter itself</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the <a href="https://docs.confluent.io/kafka-clients/python/current/overview.html">confluent-kafka Python client</a> docs already cited for Days 5–6's producer/consumer API — the same page documents <code>produce()</code>'s synchronous <code>BufferError</code>, the delivery-callback signature, and <code>poll()</code>/<code>flush()</code>'s blocking behaviour used above, so nothing new to add there, today's fix is working directly within that one client's documented contract. Kleppmann's <em>Designing Data-Intensive Applications</em> ch. 11 (cited in <code>RESOURCES.md</code> for Kafka's delivery semantics) frames why a producer-side send buffer exists at all: decoupling the rate an application generates messages from the rate a broker can durably accept them is the same backpressure idea as any bounded queue between two systems running at different speeds.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 50.<br>
+<strong>Next up:</strong> the <code>airflow db migrate</code>/<code>airflow dags test</code> approval-gate block named on Days 35–49 remains the standing, unresolved thread (seventeen rounds now, 35–49, each re-attempting live and failing) — still worth a human granting it once for whoever next has one available. Today closed the "Kafka's gone the longest without a new lesson" gap Day 49's own closing note named; with that addressed, a future round should run a fresh gap-scan across all three of dbt/Kafka/Airflow again rather than assume another named thread exists, since Days 48–49 both independently found the literal <code>PLAN.md</code> spine itself fully exhausted.<br><br>
+💬 Anything unclear — why <code>BufferError</code> is synchronous but a delivery failure isn't, or why today's fix raises instead of dead-lettering? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

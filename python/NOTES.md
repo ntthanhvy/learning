@@ -12135,3 +12135,115 @@ fail *gracefully* so the learner sees which task failed.
   '{"by":"headless"}'` was run from the repo root at the end of this round
   and succeeded.
 
+- 2026-11-04 generation (Lesson 98, headless run): idempotency check first
+  — confirmed no `lessons/0098-*.html` on disk (highest prior lesson was 97,
+  dated 2026-11-03), no `n: 98`/`date: "2026-11-04"` entry in `nav.js`, and
+  no 2026-11-04 entry already in this file before writing anything. Progress
+  DB reads require interactive approval unavailable in this headless
+  sandbox, so this round fell back to `python/learning-records/` instead —
+  only one record exists (`0001-baseline-reads-python-writes-little.md`,
+  2026-07-29) and it was re-read in full; nothing in it calls for a change
+  of pace or a recall focus beyond the course's own settled cadence, so no
+  new record was written. Read `MISSION.md` in full (no-pandas/no-NumPy
+  exclusion re-confirmed before writing a line), `PLAN.md` and
+  `RESOURCES.md` in full, the tail of this file (covering Days 96-97), the
+  tail of `nav.js`, and Day 97's lesson + practice file as the fresh-topic
+  structural template. Cadence state: Day 96 (`struct`) opened the current
+  cycle as fresh day 1, Day 97 (`getpass`) continued it as fresh day 2 and
+  named Day 98 as fresh day 3 — followed that rather than re-deriving it,
+  with a review of Days 96-98 due at Day 99 if the settled
+  three-fresh-then-review rhythm holds. Still re-ran the grep rather than
+  trusting the carried-forward candidate list blindly: a fresh
+  case-insensitive search across every lesson title, every lesson body,
+  every practice file, `reference/glossary.html`, and `RESOURCES.md`
+  confirmed `string.Template`, `timeit`, `array`, `types.SimpleNamespace`,
+  `importlib`, and `locale` are all still genuinely zero-hit as dedicated
+  topics; `socket` and `threading` turned up only as passing mentions
+  (named, never taught as a module in its own right). Picked
+  `string.Template` over the rest: Day 46 built real f-string/format-spec
+  fluency, but by design never addressed a template whose *text itself*
+  isn't trusted Python source (a config file, a DB row, a user-editable
+  email template) — f-strings' `{}` evaluates a real expression, unsafe to
+  build dynamically from such text, while `Template`'s `$name` syntax has
+  no expression grammar at all. A short, sharp, security-relevant gap tied
+  directly to a named prior lesson, with zero pandas/NumPy surface (string
+  substitution has no library equivalent). Probed real behavior directly in
+  a scratch dir (`.scratch-python-98/`, created inside the repo, deleted
+  after; `uv run python3 probe.py`) rather than trusting memory: confirmed
+  `Template("Hello $name, balance $$${amount}.").substitute(name="Alice",
+  amount="42.00")` renders `'Hello Alice, balance $42.00.'` (the `$$`
+  escape producing a literal `$`); confirmed `.substitute()` raises
+  `KeyError: 'amount'` when a required placeholder is missing; confirmed
+  `.safe_substitute()` leaves an unfillable placeholder untouched in the
+  output instead of raising; confirmed the braces form
+  (`${name}suffix`) is needed only to mark where an identifier ends before
+  adjacent literal text, reading back as `'xsuffix'` for `name="x"`;
+  confirmed `.get_identifiers()` (3.11+) returns `['name', 'amount']` for
+  the balance template, and `.is_valid()` returns `True` for it and `False`
+  for a malformed `$1name`; confirmed no code-execution path exists by
+  substituting a plain string value into a template built from
+  "untrusted" text and observing it comes back as inert text, never
+  evaluated. Checked the glossary for a collision before writing — grepped
+  `string.Template`, `safe_substitute`, and `${` case-insensitively across
+  the full `glossary.html`, zero existing rows. **New jargon: 1 inline
+  `<dfn>`** (string.Template, defined once in the byline) **folded into 3
+  glossary rows** (`string.Template` itself, `substitute()` /
+  `safe_substitute()` combined, and `get_identifiers()` / `is_valid()`
+  combined), added as a new `<h2 id="day98">` section directly after Day
+  97's. Verification performed mechanically, from dedicated scripts in
+  `.scratch-python-98/` (deleted after): (1) an HTML tag-balance check
+  across div/p/code/button/script/dfn/pre/h2/h1/em/strong/a on the new
+  lesson — balanced (div 6/6, p 16/16, code 69/69, button 9/9, script 3/3,
+  dfn 1/1, pre 4/4, h2 6/6, h1 1/1, em 1/1, strong 3/3, a 2/2); (2) a
+  raw-unescaped-`&` regex scan (excluding `&amp;`/`&quot;`/etc.) on the new
+  lesson and the new glossary section — zero hits on both; (3) a word-count
+  match per quiz question's three options, extracted via regex and stripped
+  of tags, printing each option's exact text and count rather than
+  guessing by eye — first draft mismatched on all three questions (various
+  10-14 splits), iterated option-by-option across several passes until all
+  three landed on equal per-question counts: 12/12/12, 12/12/12, 13/13/13;
+  (4) an `html.parser.HTMLParser` full-document parse of the new lesson and
+  of `glossary.html` — no parse errors on either; (5) a separate
+  table/tr/th/td/h2/p/div balance check on `glossary.html` after its new
+  section, plus a duplicate-`id="dayNN"` scan — balanced (table 83/83, tr
+  363/363, th 249/249, td 840/840, h2 83/83) with zero duplicates among 83
+  ids, `day98` present exactly once; a case-insensitive duplicate-term scan
+  across the glossary's term column reproduced the one pre-existing
+  collision already on record (`dependency`, predating this round) and
+  confirmed none of today's three new terms collide with it or any other
+  existing row; (6) `node --check` against `assets/nav.js`, `assets/gloss.js`,
+  and `assets/quiz.js` — all three clean. Added one new `RESOURCES.md` line
+  for `string.Template`, placed directly after Day 97's `getpass` line and
+  before the PEP 8 line, following the file's chronological-by-day
+  ordering. Registered Lesson 98 in `nav.js` with today's date
+  (2026-11-04) right after the `n: 97` entry. No-pandas rule: grepped
+  case-insensitively for `pandas|numpy|dataframe|pd\.|np\.` in the new
+  lesson and practice file — exactly two hits in the lesson (the "Why
+  today" callout's reference to the full candidate list, and the required
+  "Where pandas/NumPy go from here" boundary callout noting a
+  `Template`-filled row from a pandas `DataFrame` as the realistic next
+  step, not demonstrated) and zero hits in the practice file — no worked
+  pandas/NumPy example anywhere. The shipped (unsolved)
+  `practice/98_string_template.py` was executed directly from its real
+  `practice/` location and printed exactly 4 ✗ with no raw traceback. A
+  solved copy built in `.scratch-python-98/` (copied from the shipped file,
+  then each `...`/TODO body filled in directly — never editing the shipped
+  file itself, deleted after) printed all 4 ✓ and "All green" on two
+  consecutive runs; the shipped file was re-run afterward and reproduced
+  the identical all-✗ result, confirming no leakage back into the
+  baseline. `python/learning-records/` was not touched this round — the DB
+  being unreachable in this headless sandbox, the single existing baseline
+  record was re-read in full as the fallback signal per this file's own
+  convention, found nothing requiring a new record, and a routine
+  fresh-topic pick followed the course's own settled cadence and Day 97's
+  own closing instruction instead. Cadence note for the next round: Day 98
+  is fresh day 3 of the cycle Day 96 opened — Day 99 should be a review day
+  covering Days 96-98, per the settled three-fresh-then-review rhythm.
+  Candidates left open, confirmed still genuinely untaught as a dedicated
+  lesson: `timeit`, `array`, `types.SimpleNamespace`, `importlib`, `locale`,
+  `socket`, and `threading` (the latter two still only named in passing,
+  never as a dedicated topic). `bin/record-progress python
+  lesson_generated --day 98 --lesson 0098-string-template.html --detail
+  '{"by":"headless"}'` was run from the repo root at the end of this round
+  and succeeded.
+

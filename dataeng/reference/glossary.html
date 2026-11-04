@@ -388,6 +388,13 @@
   <tr><td>cross join</td><td>giữ nguyên "cross join" — join SQL ghép MỖI dòng của 1 bảng/set với MỖI dòng của bảng/set khác, không có điều kiện join nào; kết quả có đúng (số dòng A) nhân (số dòng B) dòng; dùng để tạo lưới 2 chiều đầy đủ (mỗi city ghép với mỗi bucket) trước khi join dữ liệu thật vào</td><td>A SQL join that pairs every row of one table or set with every row of another, with no join condition at all — the result has exactly (rows in A) times (rows in B) rows. Confirmed this round via a live <code>dbt parse</code> against a scratch project: <code>cities cross join bucket_grid</code> compiles and resolves cleanly as the base grid a left join is then anchored onto, with no <code>on</code> clause required or accepted.</td></tr>
 </table>
 
+<h2 id="day50">Day 50 — Kafka producer backpressure: BufferError and the delivery report you're ignoring</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>local queue</td><td>giữ nguyên "local queue" — vùng nhớ tạm trong client Kafka, giữ message đã gọi produce() nhưng chưa gửi xong/được broker ack; có giới hạn kích thước (queue.buffering.max.messages), đầy thì produce() báo lỗi ngay, không phải lỗi từ broker</td><td>The client library's own in-memory holding area for messages that have been handed to <code>produce()</code> but not yet sent to and acknowledged by the broker — bounded in size by the <code>queue.buffering.max.messages</code>/<code>queue.buffering.max.kbytes</code> config. Confirmed live this round: configuring a real <code>Producer</code> with <code>queue.buffering.max.messages: 5</code> and no reachable broker made direct <code>produce()</code> calls raise a genuine <code>BufferError</code> 15 times out of 20 attempts, since nothing was ever acknowledged to free a slot.</td></tr>
+  <tr><td>BufferError</td><td>giữ nguyên "BufferError" — exception produce() của confluent-kafka ném ra NGAY LÚC GỌI (synchronous), khi local queue đã đầy, không nhận thêm message được; khác lỗi delivery (báo qua callback, bất đồng bộ, sau khi gửi)</td><td>The exception confluent-kafka's <code>producer.produce()</code> raises synchronously, immediately, when the client's local outgoing-message queue is already full and cannot accept one more message — distinct from a delivery failure, which arrives later, asynchronously, through the delivery callback. Confirmed live this round by catching a real instance directly against a <code>Producer</code> with an artificially small <code>queue.buffering.max.messages</code> and no broker to drain it.</td></tr>
+</table>
+
 <script src="../assets/nav.js"></script>
 </body>
 </html>

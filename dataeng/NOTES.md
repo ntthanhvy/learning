@@ -5780,3 +5780,118 @@ along the Phase 2 spine, adapted to the learning records.
   angle in whichever of dbt/Kafka/Airflow has had the least recent attention
   — Kafka specifically has had no new lesson since Day 41, the longest gap
   of the three at this point.
+
+- 2026-11-04 (headless 06:00 run, Day 50 generated): fiftieth lesson,
+  `0050-kafka-producer-backpressure.html`. DB reads were unavailable this
+  round (interactive approval required, not grantable headless), so
+  `bin/query-progress` was not attempted; fell back to reading
+  `learning-records/` in full — only the single 2026-09-14 baseline record
+  exists, no per-lesson completion records at all, so there was nothing
+  newer to adapt recall questions to. Idempotency check first — confirmed no
+  `lessons/0050-*.html` on disk (highest prior was 49, dated 2026-11-03) and
+  no 2026-11-04 entry in this file before writing anything. Read `MISSION.md`
+  in full, `PLAN.md` in full, `RESOURCES.md`, `assets/nav.js`'s full
+  `LESSONS` array (all 49 titles), this file's own tail back through Day
+  49's close, and `learning-records/0001-baseline-sql-strong-pipeline-tools-new.md`
+  before picking a topic.
+  **Topic choice:** Day 49's own closing note said directly that `PLAN.md`'s
+  spine is now confirmed exhausted twice running (Days 48 and 49 both found
+  this independently), and named Kafka specifically as having had no new
+  lesson since Day 41 — the longest gap of the three tracks. Took that
+  literally: grepped every lesson for `produce(`/`delivery_callback`/
+  `on_delivery` and confirmed Day 5's producer and Day 41's dead-letter
+  consumer are the only two touching the producer/consumer API surface
+  directly, and neither one handles `producer.produce()` raising
+  `BufferError` when the client's own local send queue fills (Day 5's loop
+  has no `try`/`except` around `produce()` at all), nor does anything check
+  the existing `delivery_report` callback's failure count after `flush()` —
+  it only prints. Confirmed via a second grep (`BufferError|queue.buffering
+  |local queue|backpressure`, zero hits anywhere) that this was genuinely
+  untaught, not a restatement of Day 41's consumer-side dead-letter lesson:
+  Day 41 is about a message already received failing to process; today is
+  about a message failing to even leave the process, a different failure
+  mode on the other end of the same pipe.
+  **Content:** a `produce_with_backpressure()` wrapper added to
+  `scripts/produce_order_events.py`, catching `BufferError` and calling
+  `producer.poll(1.0)` to drain pending delivery callbacks (which frees local
+  queue slots) before retrying, up to a bounded `max_retries` before raising
+  `RuntimeError` rather than retrying forever. Separately, the existing
+  `delivery_report` callback now increments a `failed_deliveries` counter
+  instead of only printing, and the script raises `SystemExit` after
+  `flush()` if that counter is nonzero, so a caller's exit code reflects
+  whether every message actually delivered. One backend bridge sentence
+  (logging an error without a caller being able to detect it is the same gap
+  backend's idempotency-key lessons named for an uninspected response) — no
+  re-derivation beyond that one line, no pandas, no Python-language teaching
+  (exception handling is used, not taught as a feature); confirmed by a
+  `pandas|numpy` grep (zero hits) and a prose-only read before shipping.
+  **Verification:** `produce_order_events.py` with today's edits applied was
+  checked whole with `uv run --with confluent-kafka python3 -m py_compile`,
+  clean, in a scratch dir (`.scratch-dataeng-50/` at the repo root, removed
+  after — `/tmp` confirmed still unavailable this round). Docker itself was
+  reachable in this sandbox this round (`docker ps` succeeded), but
+  `docker compose up` on a real `apache/kafka:4.3.1` broker hit the same
+  interactive-approval gate as the `airflow db migrate` block on other
+  rounds, so a live broker could not actually be started — noted honestly
+  rather than claimed. Instead ran a standalone script against a real
+  `confluent_kafka.Producer` configured with a deliberately tiny
+  `queue.buffering.max.messages: 5` and no reachable broker at all: direct,
+  unwrapped `produce()` calls raised genuine `BufferError` 15 times out of 20
+  attempts (confirmed by catching the real exception, not simulating it),
+  and the retry wrapper's `except BufferError`/`poll()`/`RuntimeError` path
+  was exercised for real — correctly raising `RuntimeError` after exhausting
+  retries against a broker that can never acknowledge anything, since
+  `poll()` has nothing to drain with zero connectivity. That is the honest,
+  disclosed limit of this round's proof: it confirms `BufferError` is real
+  and synchronous and that the wrapper's control flow is correct, not that
+  the lesson's "all 20 sent" expected output reproduces with zero broker —
+  the lesson's own callout states this distinction explicitly, the same
+  disclosure convention Days 17/41 used. Deleted `.scratch-dataeng-50/`
+  afterward, confirmed via a directory listing finding nothing under that
+  name while leaving an unrelated `.scratch-data-118/` untouched.
+  Ran a Node tag-balance/bare-`&`/dfn-attribute script and a separate quiz
+  word-count script, same shape as recent rounds'. Tag balance passed: div
+  8/8, p 25/25, code 64/64, button 12/12, script 3/3, dfn 2/2, pre 9/9, h2
+  7/7, h1 1/1, em 4/4, strong 6/6, a 2/2, zero bare `&`, both `<dfn>` tags
+  carrying `data-en=` and `data-vn=`. The first quiz draft came up uneven on
+  all four questions (7/6/8, 7/7/8, 8/6/7, 6/8/9) — rebalanced through
+  several edit-and-recount passes to a final 7/7/7 across all four
+  questions. A separate pass on `reference/glossary.html` after adding this
+  round's new section confirmed it stayed balanced too (h2 49/49, table
+  49/49, tr 186/186, td 411/411, th 147/147), zero bare `&`.
+  Added two new glossary terms, `local queue` and `BufferError`, under a new
+  Day 50 section, after grepping case-insensitively first and confirming
+  neither term existed anywhere in the glossary already. No new
+  `RESOURCES.md` line added — today's primary source reuses the existing
+  confluent-kafka Python client citation from Days 5–6 verbatim, since the
+  same page documents `produce()`'s `BufferError` and the delivery-callback
+  signature used today; Kleppmann's *Designing Data-Intensive Applications*
+  ch. 11, also already cited, is referenced for the general backpressure
+  framing.
+  Registered Lesson 50 in `assets/nav.js` right after the `n: 49` entry,
+  dated 2026-11-04 (`node --check` clean on `nav.js`, `gloss.js` and
+  `quiz.js`). Ran `bin/record-progress dataeng lesson_generated --day 50
+  --lesson 0050-kafka-producer-backpressure.html --detail
+  '{"by":"headless"}'` from the repo root at the end of this round; succeeded
+  on the first attempt (`recorded: dataeng/lesson_generated day=50
+  lesson=0050-kafka-producer-backpressure.html`).
+  `dataeng/learning-records/` was not touched this round — today's pick
+  closed a named, specific gap from Day 49's own closing note (Kafka's
+  longest-neglected status), not a new durable fact about the learner
+  distinct from the single 2026-09-14 baseline record on file. The complete
+  absence of any per-lesson completion record in `learning-records/` across
+  49 prior lessons is itself worth flagging for a human: either completion
+  tracking lives entirely in the DB this sandbox can't read, or it was never
+  being written to that directory at all — worth checking which, next time
+  DB access is actually grantable.
+  **Next up:** the `airflow db migrate`/`airflow dags test` approval-gate
+  block is now seventeen rounds running (35-50) with no attempt made this
+  round; today separately confirmed `docker compose up` hits the identical
+  approval gate, so the blocker is this sandbox's interactive-approval
+  requirement generally, not anything specific to Airflow. With Kafka's
+  neglect gap now closed and `PLAN.md`'s literal spine confirmed exhausted
+  twice (Days 48-49), the next round most likely needs a fresh, wider
+  gap-scan across all three tracks again rather than assuming another named
+  thread exists — dbt has had the most recent attention (Days 42-44, 48-49),
+  so Airflow or a fresh Kafka angle are the more likely productive next
+  picks, pending what a future round's gap-scan actually finds.

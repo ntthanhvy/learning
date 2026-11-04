@@ -11147,3 +11147,126 @@
   directly from the repo root and returned `recorded:
   data/lesson_generated day=117
   lesson=0117-np-isclose-allclose.html`.
+
+- 2026-11-04 (headless 06:00 run): headless run, zero prior context.
+  Idempotency check first — confirmed no `lessons/0118-*.html` on disk and
+  no `n: 118` entry in `nav.js` before writing anything (highest prior
+  lesson was 117, dated 2026-11-03); `git log -1 --format=%ad --date=short
+  -- data/lessons data/learning-records` returned 2026-11-03, consistent
+  with no lesson generated yet today. DB signal: `bin/query-progress`
+  reads require interactive approval unavailable in this headless sandbox
+  — treated the DB as unreachable for this round and fell back to reading
+  every file in `data/learning-records/` (only one exists:
+  `0001-baseline-sql-strong-python-basic.md`, the course-creation
+  baseline, nothing more recent to react to) — no weak-spot signal to
+  chase, continued this course's own steady sequential pacing. Read
+  `MISSION.md` in full (not modified), `RESOURCES.md` in full (not
+  modified), `nav.js`'s tail for the exact registration format, and
+  Lesson 117's own lesson/practice files in full as structural templates.
+  Topic choice: Lesson 117's own closing note named four standing
+  candidates from that round's fresh scan — `np.lexsort()`,
+  `np.partition()`/`argpartition()`, `np.histogram()`/`np.bincount()`,
+  and `np.digitize()` (named explicitly as "the raw-array layer under
+  Lesson 18's `qcut()` binning"). Confirmed via grep each was still a
+  genuine zero-hit across every lesson body and the glossary before
+  picking; `np.bincount()` turned up one passing, never-taught mention
+  inside Lesson 68's own `factorize()` text (`np.bincount(codes)`, used
+  as a one-off illustration, not itself explained), the same "used but
+  not taught" lineage shape as Lesson 100/102/117. Picked
+  `np.digitize()` over the others: it continues that same lineage most
+  directly (explicitly named as the layer under an already-taught pandas
+  method, `pd.cut()`/`pd.qcut()` from Lessons 12/18) and a first probe
+  turned up a genuinely undocumented NaN-handling trap worth teaching on
+  its own, a stronger single-lesson hook than the other three candidates
+  offered on inspection. Confirmed pandas 3.1.0 / numpy 2.5.4, unchanged
+  from recent lessons. Every behavioral claim was probed directly first
+  via temporary scripts in `.scratch-data-118/` at the repo root (no
+  `/tmp` access in this sandbox, matching every recent lesson's own
+  note) — deleted after use, never tracked by git: confirmed
+  `np.digitize(x, bins) - 1` is element-for-element identical to
+  `pd.cut(x, bins=bins, labels=False)` on the same in-range values;
+  confirmed the index convention directly — `0` for below every edge,
+  `len(bins)` for above every edge, both valid outputs, never an error;
+  confirmed the `right=` boundary flip at an exact edge value (`40.0`
+  against `bins=[0,40,100,200]`: index `2` by default, index `1` with
+  `right=True`), matching the official docs' own worked example exactly;
+  confirmed non-monotonic bins raise `ValueError` immediately, and that
+  descending (monotonically decreasing) bins are explicitly supported,
+  not an error case. Confirmed the NaN trap directly and repeatably: a
+  NaN value fails every comparison against every bin edge (same rule
+  plain `==` already follows for NaN) and silently lands in bin
+  `len(bins)` — identical to the code a genuinely huge value would get,
+  no exception and no warning even with Python's own warnings-as-errors
+  mode enabled around the call — while `pd.cut()` on the identical input
+  correctly returns real `NaN`. Fetched the official NumPy API reference
+  page via WebFetch specifically to check whether NaN handling is
+  documented anywhere on it: confirmed it is not mentioned at all,
+  describing only the `0`/`len(bins)` out-of-range convention and the
+  `right=` flip with its own worked example — today's lesson states this
+  documentation gap explicitly rather than implying NumPy silently
+  endorses the behavior. Confirmed `np.digitize()` accepts a pandas
+  Series directly for `x` with no `.to_numpy()` conversion required
+  first, and always returns a plain `ndarray`, dropping the Index — the
+  same "Index disappears" family as `np.percentile()` (Lesson 111) and
+  `np.piecewise()` (Lesson 116). Added exactly one new glossary row,
+  "np.digitize()", directly after Lesson 117's "np.isclose() /
+  np.allclose()" entry — confirmed via a case-insensitive scan of every
+  first-column term that no prior row already covered this name.
+  Verification performed mechanically via scratch scripts in
+  `.scratch-data-118/` (deleted after, never tracked by git): (1) a
+  quiz-word-count script confirming exactly 11/11/11, 13/13/13, and
+  13/13/13 option words across the three questions, one `data-ok` per
+  question throughout — the first draft came out uneven (9-14 word
+  spread per question, including one pass where `np.True_`/`np.bool_`
+  silently broke an `is True` identity check inside the practice file's
+  own verification logic, caught only by actually running the solved
+  copy) before several rounds of targeted edits converged; (2) an HTML
+  tag-balance check caught one real bug on the first pass — a stray
+  `</p>` left inside the Section 4 `<div class="callout">` with no
+  matching opening `<p>` (the exact same mistake, and the exact same
+  fix, Lesson 117's own round made and caught) — fixed by removing the
+  stray closing tag; the re-run came back fully balanced (html 1/1, head
+  1/1, body 1/1, div 5/5, p 19/19, pre 6/6, code 80/80, h1 1/1, h2 9/9,
+  strong 3/3, em 2/2, button 9/9, script 3/3, dfn 1/1, span 37/37, a
+  2/2, title 1/1); (3) a raw-unescaped-`&` regex scan found exactly the
+  two expected `&` characters inside the lesson's own `cd
+  ~/learning/data && uv run ...` shell command, zero elsewhere; (4)
+  exactly 1 `<dfn>`-carrying tag, with both `data-en`/`data-vn`, matching
+  the 1 new glossary row added. A separate table-balance check on
+  `glossary.html` after its one-row addition — balanced (tr 191/191, td
+  570/570, zero raw `&`), plus a duplicate-term scan across all 190
+  first-column entries — zero duplicates, and confirmed the new row's
+  exact term string appears exactly once. `node --check` confirmed
+  `nav.js`, `gloss.js`, and `quiz.js` all still parse as valid
+  JavaScript, with exactly one `n: 118` entry and one `0118-np-digitize`
+  file reference in `nav.js`. The shipped (unsolved)
+  `practice/118_np_digitize.py` was run directly from its real
+  `practice/` location (via `uv run --with pandas python3`) and printed
+  exactly 3 ✗ with no raw traceback on the first run, after the
+  `np.bool_`/`is True` fix described above (the first unfixed draft also
+  showed 3 ✗ unsolved, since the bug only manifested once the blanks
+  were filled in — caught by actually running the solved copy, not by
+  the unsolved run alone, which is why both states are always checked).
+  Built a solved copy in `.scratch-data-118/practice/` (deleted after,
+  never tracked by git), filling in all blanks per the helper-function
+  pattern recent lessons established; after the `bool(...)` fix it
+  printed all 3 ✓ and "All green" on the first run. Re-ran the shipped
+  file directly from `practice/` again afterward and reproduced the
+  identical all-✗ result, confirming the solved copy's edits never
+  leaked back into the shipped baseline. This round's own fresh look
+  leaves three standing candidates for tomorrow, none pre-committed per
+  this course's "fresh scan each round" convention: `np.lexsort()`,
+  `np.partition()`/`argpartition()`, and `np.histogram()`/`np.bincount()`
+  (the bin-counting sibling of today's bin-assigning function, and
+  Lesson 68's own passing, never-taught mention, same lineage shape as
+  today's pick). `git status --short` after all edits confirmed only the
+  intended `data/` files were touched (`data/assets/nav.js`,
+  `data/reference/glossary.html`, new `data/lessons/0118-np-digitize.html`,
+  and new `data/practice/118_np_digitize.py`) plus unrelated concurrent
+  changes in other course directories from other runs, not touched by
+  this one. The scratch directory `.scratch-data-118/` was deleted after
+  verification, at the repo root but never tracked by git, matching
+  prior rounds' own precedent for this environment. `bin/record-progress
+  data lesson_generated --day 118 --lesson 0118-np-digitize.html --detail
+  '{"by":"headless"}'` was run directly from the repo root and returned
+  its own confirmation line, reproduced below.

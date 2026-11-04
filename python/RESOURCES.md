@@ -83,6 +83,8 @@ authors for *why*. Cite inline; each lesson recommends exactly one primary sourc
   Use for: Day 96 — `pack()`/`unpack()` for converting between Python values and a fixed byte layout described by a format string, the `>`/`<`/`=` byte-order prefixes and the native-mode alignment padding `=` turns off, and `struct.error` on a malformed format or wrong-sized buffer; `Struct` objects and `pack_into()`/`unpack_from()` are the natural next steps beyond today's single-shot calls.
 - [Docs: `getpass`](https://docs.python.org/3/library/getpass.html)
   Use for: Day 97 — `getpass()` for reading a line from the terminal without echoing it, the `stream=` parameter for redirecting where the prompt itself is written, the exact fallback conditions behind `GetPassWarning` when no real tty is available, and `getuser()`'s environment-variable lookup order for a default (not authenticated) identity.
+- [Docs: `string.Template`](https://docs.python.org/3/library/string.html#template-strings)
+  Use for: Day 98 — `substitute()`/`safe_substitute()` for filling `$identifier`/`${identifier}` placeholders by plain key lookup (never evaluating a Python expression, unlike an f-string's `{}`), the `$$` escape for a literal dollar sign, and `get_identifiers()`/`is_valid()` (3.11+) for validating a template loaded from outside the program before substituting anything into it.
 - [PEP 8 — Style Guide for Python Code](https://peps.python.org/pep-0008/)
   Use for: naming and layout conventions, so written code looks like the ecosystem's.
 

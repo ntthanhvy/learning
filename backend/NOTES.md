@@ -10082,3 +10082,109 @@
   more broadly), still deliberately out of scope per MISSION.md's "concepts
   first" rule; and the backfill-missing-Lesson-117-NOTES-entry gap flagged
   four rounds ago, still not independently investigated.
+- 2026-11-04 (headless 06:00 run): idempotency check first — confirmed no
+  `lessons/0122-*.html` on disk and no `n: 122`/`date: "2026-11-04"` entry in
+  `nav.js` before writing anything (highest prior lesson was 121, dated
+  2026-11-03), and no 2026-11-04 entry already in this file. Orchestrator-
+  provided context: the Neon DB (`course_progress` reads and `psql`) was
+  unreachable again this round — interactive approval required, no user
+  present in this headless run — so progress history came instead from
+  reading all of `learning-records/` (0001-0003, all already read in full by
+  prior rounds; still no `lesson_completed`/quiz/kata signal for any course
+  recorded there since backend's own Lesson 102 quiz, consistent with every
+  round since). No new weak spot to chase, so steady sequential pacing
+  continued. Topic choice: ran a fresh gap scan across lessons 20-50 (the
+  original resilience/runtime-pattern range most of the recent C#-port
+  streak has been draining) rather than reflexively grabbing Lesson 49's
+  dead-letter queues off the prior two rounds' closing notes — that topic
+  remains correctly deferred, since Azure Service Bus's own DLQ feature (the
+  only first-party-equivalent angle) is a specific message-broker SDK, a
+  bigger scope jump than MISSION.md's "concepts first" rule wants. Picked
+  Lesson 30's webhook signature verification (HMAC) instead: unlike every
+  other candidate still on the deferred list, its C# mirror needed no
+  framework feature and no external package at all — `HMACSHA256` and
+  `CryptographicOperations.FixedTimeEquals` both live in the .NET base class
+  library itself (`System.Security.Cryptography`), the same place Go's
+  `crypto/hmac`/`crypto/sha256` sit in its standard library. Confirmed this
+  with two `WebFetch` calls before writing anything:
+  `https://learn.microsoft.com/en-us/dotnet/api/system.security.cryptography.hmacsha256`
+  returned the full class reference cleanly, confirming the static
+  `HashData(byte[] key, byte[] data)` overload and that the class "accepts
+  keys of any size, and produces a hash sequence 256 bits in length"; and
+  `https://learn.microsoft.com/en-us/dotnet/api/system.security.cryptography.cryptographicoperations.fixedtimeequals`
+  confirmed the exact constant-time guarantee quoted in the lesson —
+  "determines the equality of two byte sequences in an amount of time that
+  depends on the length of the sequences, but not their values," short-
+  circuiting "only if left and right have different lengths" — both
+  consistent with this run's standing finding that `learn.microsoft.com`
+  fetches reliably. Read `MISSION.md`, `RESOURCES.md`, this file's tail
+  (Lessons 120-121 in full), Lesson 30 (the Go original) and Lesson 121 (the
+  most recent C#-port lesson, as structural template) in full, and `nav.js`'s
+  and `glossary.html`'s tails, all before writing anything. No Go scaffold
+  was written or changed — Lesson 30's existing Go snippet is only
+  referenced for comparison; nothing needed `go build`/`go vet`. `dotnet
+  --version` was not attempted (would need approval with no user present,
+  consistent with every round since Lesson 103); the C# snippet was checked
+  by hand against the two fetched docs pages' own reference material (the
+  `HMACSHA256.HashData(key, data)` static-method signature, the
+  `CryptographicOperations.FixedTimeEquals(ReadOnlySpan<byte>,
+  ReadOnlySpan<byte>)` signature and return type, `Convert.FromHexString` as
+  a real BCL method) and confirmed syntactically consistent — brace count 5/5,
+  paren count 20/20, correct `await`/`async` usage in the minimal-API
+  handler, no undeclared identifiers — though this falls short of an actual
+  compile, flagged here as such, same caveat as every C#-port round. Two new
+  terms, each checked against the glossary first via case-insensitive grep
+  across the whole file — zero collisions confirmed before writing:
+  `HMACSHA256`, `CryptographicOperations.FixedTimeEquals`. Added both rows
+  immediately after Lesson 121's `IDistributedCache` row, same Term/Tiếng
+  Việt (dev-style)/In software column order, confirmed by inspecting the
+  file's actual last row directly rather than assumed. Verification performed
+  mechanically via a throwaway Node script run via `node -e` (not written to
+  a file, so nothing to delete): (1) a quiz-word-count check scoped per
+  `<div class="q">` block, splitting every option both via `.split(/\s+/)`
+  and `.split(" ")` — first draft landed uneven on all four questions (Q1
+  8/8/8/9, Q2 9/10/10/10, Q3 8/10/9/11, Q4 9/10/8/8), fixed through several
+  rewrite-and-recount passes per option (checking candidate phrasings in the
+  same script before committing them), converged to exactly 11/11/11/11
+  across all four questions, both counting methods agreeing exactly, exactly
+  one `data-ok` and four options per question confirmed the same way; (2) an
+  HTML tag-balance check across div/p/code/button/script/dfn/pre/h2/h1/em/
+  strong/a/table/tr/th/td — clean on the first pass (div 7/7, p 15/15, code
+  40/40, button 16/16, script 3/3, dfn 2/2, pre 1/1, h2 6/6, h1 1/1, em 0/0,
+  strong 3/3, a 3/3, table 1/1, tr 6/6, th 8/8, td 10/10); both `dfn` tags
+  confirmed to carry both `data-en=` and `data-vn=` by direct regex match on
+  the full tag span; a separate table/tr/th/td/p/div/html/head/body/title/
+  script balance check on `glossary.html` after its two-row addition — also
+  balanced (tr 390/390, td 1167/1167), plus a duplicate-term scan across all
+  389 first-column entries — zero duplicates; (3) a raw-unescaped-`&` regex
+  scan across both files — zero hits; (4) `node --check` against
+  `assets/nav.js`, `assets/gloss.js`, and `assets/quiz.js` — all clean, both
+  before and after the `nav.js` edit; (5) a basic HTML well-formedness check
+  (exactly one `<!DOCTYPE html>`, one `<html>`/`</html>`, three script tags
+  with `gloss.js`/`quiz.js`/`nav.js` in that order) — clean; (6) a grep for
+  stray markdown-style backticks and `*emphasis*` left over from drafting —
+  none found. Registered Lesson 122 in `nav.js` (date 2026-11-04, today's
+  actual generation date) right after `n: 121`, confirmed exactly one
+  matching `n: 122` entry and exactly one matching `0122-*.html` file on disk
+  afterward. No new `RESOURCES.md` line added this round — both fetched
+  pages are Microsoft's own docs, same domain already covered by the
+  standing `learn.microsoft.com` entries' pattern, and this round reused no
+  prior URL; both are cited inline in the lesson's own "Go deeper" section
+  instead, consistent with how every prior C#-port round has handled a
+  freshly-fetched same-domain page. No new `learning-records/` file this
+  round — the topic came from a fresh gap scan of existing lesson titles,
+  not a new surprise about the learner's baseline or a quiz outcome.
+  Candidates spotted but not picked this round, still worth checking fresh
+  next time: Go's `select`-statement arbitration rules, now deferred for a
+  twelfth round running, same standing finding that the blocker is the
+  fetched page's own content truncation, not a permission gate or URL/mirror
+  choice; Lesson 49's dead-letter queues, still deferred — still no first-
+  party ASP.NET Core angle found, would need a specific message-broker SDK
+  (e.g. Azure Service Bus's own dead-letter queue feature); Lesson 31's
+  service-to-service auth, a plausible next C#-port candidate (API keys,
+  mTLS, or a service-to-service OAuth client-credentials flow all have
+  first-party ASP.NET Core/.NET angles, not yet checked in depth); Polly (or
+  a .NET resilience-library survey more broadly), still deliberately out of
+  scope per MISSION.md's "concepts first" rule; and the backfill-missing-
+  Lesson-117-NOTES-entry gap flagged four rounds ago, still not
+  independently investigated.

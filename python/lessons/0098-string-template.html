@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 98 · string.Template: substitution without evaluation</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 98 · ~20 min · 4 Nov 2026</p>
+<h1><code>string.Template</code>: substitution without evaluation</h1>
+<p class="byline">Day 46 taught the f-string format spec — but an f-string's <code>{...}</code> part is a real Python expression, evaluated by the interpreter. That's fine when the programmer writes the template string in the source file. It stops being fine the moment the <em>template itself</em> comes from somewhere else — a config file, a database row, a user-editable email template — because an f-string-shaped string built from untrusted text and fed back through <code>eval()</code> or <code>.format_map()</code> on attacker-controlled data can run arbitrary expressions. The standard-library <dfn data-en="A standard-library class for substituting $-prefixed placeholders into a string using only plain string lookup -- no Python expression is ever evaluated, unlike an f-string's {} or str.format()'s {}. Built for templates that come from outside the program's own source code." data-vn="giữ nguyên &quot;string.Template&quot; — class chuẩn thay placeholder dạng $name vào string, chỉ bằng tra cứu string thuần (dict lookup), KHÔNG evaluate expression Python nào cả — khác f-string {} hay str.format() {}; dùng cho template lấy từ bên ngoài source code (config file, DB, email mẫu do user sửa).">string.Template</dfn> class is the tool for exactly that case: placeholders only, never code.</p>
+
+<div class="callout"><strong>Why today, specifically:</strong> a fresh case-insensitive grep across every lesson title, every lesson body, every practice file, <code>reference/glossary.html</code>, and <code>RESOURCES.md</code> confirmed <code>string.Template</code>, <code>timeit</code>, <code>array</code>, <code>types.SimpleNamespace</code>, <code>importlib</code>, and <code>locale</code> are all still genuinely zero-hit as dedicated topics, alongside <code>socket</code> and <code>threading</code> as modules in their own right (both only named in passing). Picked <code>string.Template</code> over the rest: Day 46 built real fluency with f-strings and the format spec but, by design, never addressed a template whose text isn't trusted Python source — a gap that's sharp, short, and ties directly back to a named prior lesson, with zero pandas/NumPy surface (string substitution has no library equivalent either course touches).</div>
+
+<h2>1 · <code>$name</code> placeholders, filled by plain lookup</h2>
+<p><code>Template(text)</code> wraps a string containing <code>$identifier</code> or <code>${identifier}</code> placeholders. <code>.substitute(**values)</code> (or a single mapping) fills them in by looking each name up — nothing after the <code>$</code> is ever evaluated as code, it is only ever matched against the keys given:</p>
+<pre><code><span class="kw">from</span> string <span class="kw">import</span> Template
+
+t = Template(<span class="str">"Hello $name, your balance is $$${amount}."</span>)
+<span class="kw">print</span>(t.substitute(name=<span class="str">"Alice"</span>, amount=<span class="str">"42.00"</span>))
+<span class="cm"># 'Hello Alice, your balance is $42.00.' -- confirmed live</span>
+<span class="cm"># note the doubled $$ above: that's how a literal dollar sign is escaped</span></code></pre>
+<p>The braces form, <code>${name}</code>, exists only to mark where the identifier ends when it would otherwise run into the next character — <code>${name}suffix</code> substitutes correctly and reads back as <code>"xsuffix"</code> for <code>name="x"</code>, whereas <code>$namesuffix</code> would be parsed as one long (and missing) identifier <code>namesuffix</code>.</p>
+
+<h2>2 · Missing a key is loud by default — unless you ask it not to be</h2>
+<p><code>.substitute()</code> raises <code>KeyError</code> the moment a placeholder has no matching value, the same fail-loud behavior Day 8 taught for exceptions in general. <code>.safe_substitute()</code> is the deliberate escape hatch: any placeholder it can't fill is left in the output untouched instead of raising:</p>
+<pre><code>t = Template(<span class="str">"Hello $name, your balance is $$${amount}."</span>)
+<span class="kw">try</span>:
+    t.substitute(name=<span class="str">"Bob"</span>)  <span class="cm"># no 'amount' given</span>
+<span class="kw">except</span> KeyError <span class="kw">as</span> e:
+    <span class="kw">print</span>(<span class="str">"KeyError:"</span>, e)          <span class="cm"># KeyError: 'amount' -- confirmed live</span>
+
+<span class="kw">print</span>(t.safe_substitute(name=<span class="str">"Carol"</span>))
+<span class="cm"># 'Hello Carol, your balance is $${amount}.' -- confirmed live, nothing raised</span></code></pre>
+<p>Reach for <code>safe_substitute()</code> only when a half-filled result is genuinely useful (a preview, a draft) — reaching for it just to silence an error hides a real bug the same way a bare <code>except: pass</code> would.</p>
+
+<h2>3 · Why this exists when f-strings already do substitution</h2>
+<p>An f-string's <code>{...}</code> is a Python expression slot, evaluated by the interpreter at the point the f-string appears in source code — that's exactly what makes it powerful (any expression, any name in scope) and exactly why it must never be built dynamically from text that didn't come from a trusted developer. <code>Template</code> solves a narrower problem on purpose: its <code>$name</code> syntax has no expression grammar at all, so substituting into attacker- or user-supplied template text is safe in a way an f-string built the same way never is:</p>
+<pre><code><span class="kw">from</span> string <span class="kw">import</span> Template
+
+<span class="cm"># this text could have come from a config file or a database row</span>
+untrusted_template_text = <span class="str">"User said: $msg"</span>
+t3 = Template(untrusted_template_text)
+<span class="kw">print</span>(t3.substitute(msg=<span class="str">"just a string value, no code runs here"</span>))
+<span class="cm"># 'User said: just a string value, no code runs here' -- confirmed live,</span>
+<span class="cm"># there is no way to smuggle a function call or attribute lookup through $msg</span></code></pre>
+<p><code>t.get_identifiers()</code> (confirmed live, Python 3.11+) lists every placeholder name a template expects — <code>['name', 'amount']</code> for the balance template above — and <code>t.is_valid()</code> reports whether the template's <code>$</code> syntax parses at all, without needing any values yet. Both are useful for validating a template that was itself loaded from outside the program before ever trying to fill it in.</p>
+
+<div class="callout"><strong>Where pandas/NumPy go from here:</strong> nowhere directly — this is plain string substitution, a layer below either library. A realistic shape is a <code>Template</code>-based email or report body filled in per row of a pandas <code>DataFrame</code> during a <code>data/</code>-course pipeline, but that row-iteration half is <code>data/</code>'s job and isn't shown here.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/98_string_template.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/98_string_template.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: building a <code>Template</code> and filling it with <code>.substitute()</code>, catching the <code>KeyError</code> a missing placeholder raises, using <code>.safe_substitute()</code> to leave an unfillable placeholder untouched, and reading a template's required names back with <code>.get_identifiers()</code> before ever substituting into it.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="An f-string's {...} is a real Python expression evaluated by the interpreter at the point the f-string appears in source -- powerful, but unsafe to build dynamically from text that didn't come from a trusted developer. Template's $name syntax has no expression grammar at all: substitute() only ever does a plain key lookup, confirmed live, so there is no way to smuggle a function call or attribute lookup through a placeholder.">
+    <p class="stem">Why is <code>string.Template</code> safer than an f-string for a template whose text comes from outside the program's source code?</p>
+    <button class="opt" data-ok>its placeholders only do plain key lookup, never evaluating a Python expression</button>
+    <button class="opt">it automatically escapes every single quote character seen before substitution ever begins</button>
+    <button class="opt">it runs noticeably slower on purpose, which stops untrusted input from executing</button>
+  </div>
+  <div class="q" data-why="substitute() raises KeyError the instant a placeholder has no matching value in the arguments given, confirmed live (KeyError: 'amount'). safe_substitute() is the deliberate opposite choice: any placeholder it can't fill is left in the output exactly as written instead of raising anything at all.">
+    <p class="stem">What happens when <code>Template("$name owes $amount").substitute(name="Bob")</code> runs, with no <code>amount</code> given?</p>
+    <button class="opt" data-ok>it raises a KeyError naming the missing placeholder, right away, every time</button>
+    <button class="opt">it quietly fills the missing placeholder in using an empty string value</button>
+    <button class="opt">it returns the original text completely untouched, with no placeholders filled in</button>
+  </div>
+  <div class="q" data-why="${name} and $name both substitute the same way when nothing follows the identifier directly. The braces exist to mark exactly where the identifier name ends when another character would otherwise run into it -- confirmed live, ${name}suffix with name='x' reads back as 'xsuffix', while $namesuffix would be parsed as one long, missing identifier called namesuffix.">
+    <p class="stem">Why would <code>Template("${name}suffix")</code> use the braced form instead of plain <code>$name</code>?</p>
+    <button class="opt" data-ok>so the identifier's end gets marked clearly before the literal text that follows</button>
+    <button class="opt">braces are strictly required around every single placeholder name, with absolutely no exceptions</button>
+    <button class="opt">braces make the whole substitution step run measurably faster than it otherwise would</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the standard library's <a href="https://docs.python.org/3/library/string.html#template-strings"><code>string.Template</code></a> docs — short, covers <code>substitute()</code>/<code>safe_substitute()</code>, the exact <code>$identifier</code>/<code>${identifier}</code>/<code>$$</code> grammar, and the <code>get_identifiers()</code>/<code>is_valid()</code> helpers used today in more depth than this lesson needed.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day98">glossary</a> under Day 98.<br>
+💬 Anything unclear — why <code>.format_map()</code> on an untrusted mapping is a different risk than this, or how <code>Template</code> compares to Day 46's format spec for a real report-generation script? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

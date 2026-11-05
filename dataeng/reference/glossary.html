@@ -395,6 +395,12 @@
   <tr><td>BufferError</td><td>giữ nguyên "BufferError" — exception produce() của confluent-kafka ném ra NGAY LÚC GỌI (synchronous), khi local queue đã đầy, không nhận thêm message được; khác lỗi delivery (báo qua callback, bất đồng bộ, sau khi gửi)</td><td>The exception confluent-kafka's <code>producer.produce()</code> raises synchronously, immediately, when the client's local outgoing-message queue is already full and cannot accept one more message — distinct from a delivery failure, which arrives later, asynchronously, through the delivery callback. Confirmed live this round by catching a real instance directly against a <code>Producer</code> with an artificially small <code>queue.buffering.max.messages</code> and no broker to drain it.</td></tr>
 </table>
 
+<h2 id="day51">Day 51 — Airflow TaskGroups: the thing Cosmos was using all along</h2>
+<table class="gloss">
+  <tr><th>Term</th><th>Tiếng Việt (dev-style)</th><th>In software</th></tr>
+  <tr><td>TaskGroup</td><td>giữ nguyên "TaskGroup" — cách Airflow nhóm các task liên quan lại trong 1 DAG; task khai báo trong context manager của TaskGroup tự động có task_id thêm tiền tố group_id, và UI Graph view gộp cả nhóm thành 1 ô cho tới khi người dùng bấm mở ra; không đổi gì về lịch chạy hay trigger_rule, chỉ là tổ chức/hiển thị</td><td>An Airflow construct for organizing related tasks together inside one DAG — tasks declared inside a <code>TaskGroup</code>'s own context manager get their <code>task_id</code> automatically prefixed with the group's <code>group_id</code>, and the Airflow UI's Graph view collapses the whole group into one box until a user clicks to expand it. Confirmed live this round via a real <code>DagBag</code> parse: an outside edge wired to or from the whole group resolves to that group's actual root or leaf task(s) specifically, not to every task inside it, and grouping changes neither a task's <code>trigger_rule</code> nor its retry settings — Cosmos's own <code>DbtTaskGroup</code> (Day 24) is confirmed to be a real subclass of this same class.</td></tr>
+</table>
+
 <script src="../assets/nav.js"></script>
 </body>
 </html>

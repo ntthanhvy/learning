@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 51 · Airflow TaskGroups: the thing Cosmos was using all along</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 51 · ~20 min · 5 Nov 2026</p>
+<h1>Airflow TaskGroups: the thing Cosmos was using all along</h1>
+<p class="byline">Today's tangible win: the real <code>food_delivery_pipeline</code> DAG's three dbt-shaped tasks get wrapped in a <code>TaskGroup</code>, confirmed live against an installed Airflow 3.3.1 that grouping changes each task's own <code>task_id</code> (gaining a <code>group_id.</code> prefix) and, critically, that wiring <code>load_raw &gt;&gt; dbt_models &gt;&gt; check_dead_letters</code> resolves to real edges only against the group's roots and leaves — not against every task inside it.</p>
+
+<div class="callout"><strong>Before today — confirm Day 45's DAG still parses:</strong> today edits <code>dags/food_delivery_pipeline.py</code> again, right after Day 45's <code>check_dead_letters</code> task.
+<pre><code>AIRFLOW_HOME="$(pwd)/airflow_home" uv run --with "apache-airflow==3.3.1" airflow dags list-import-errors</code></pre>
+Expected: <code>No data found</code>. Fix that first if it prints anything else — today assumes <code>load_raw</code>, <code>dbt_build</code> and <code>check_dead_letters</code> are already three separate tasks wired in that order.</div>
+
+<h2>1 · The name for something Day 24 already showed without naming it</h2>
+<p>Day 24's Cosmos task IDs looked like <code>dbt_models.stg_restaurants_run</code> and <code>dbt_models.dim_restaurants_run</code> — every one of them prefixed with <code>dbt_models.</code>. That prefix was never explained at the time, because Cosmos generates it as a side effect of a mechanism this course hadn't covered yet: a <dfn data-en="an Airflow construct for organizing related tasks together inside one DAG -- tasks declared inside a TaskGroup's own context manager get their task_id automatically prefixed with the group's group_id, and the Airflow UI's Graph view collapses the whole group into one box until a user clicks to expand it" data-vn="giữ nguyên &quot;TaskGroup&quot; — cách Airflow nhóm các task liên quan lại trong 1 DAG; task khai báo trong context manager của TaskGroup tự động có task_id thêm tiền tố group_id, và UI Graph view gộp cả nhóm thành 1 ô cho tới khi người dùng bấm mở ra">TaskGroup</dfn>. Cosmos's <code>DbtTaskGroup</code>, confirmed this round by reading its own import, is literally a subclass of Airflow's plain <code>TaskGroup</code> — Day 24 was already looking at this mechanism, just through a package that builds one automatically instead of a DAG author writing one by hand.</p>
+<p>The <code>food_delivery_pipeline</code> DAG has grown three real tasks since Day 7 — <code>load_raw</code>, <code>dbt_build</code>, <code>check_dead_letters</code> — and will likely grow more (Day 45's own closing note named a real threshold check as the next open loop on that same task). A flat list of a dozen tasks in the Airflow UI's Graph view is unreadable at a glance; a <code>TaskGroup</code> around the dbt-shaped tasks keeps the warehouse-build step visually and logically together without changing what actually runs.</p>
+
+<h2>2 · Confirmed live: grouping changes task_id, and dependency edges resolve to roots and leaves only</h2>
+<p>Built a scratch DAG shaped like a slightly larger version of this course's own — <code>load_raw</code>, a <code>TaskGroup</code> named <code>dbt_models</code> holding four tasks (<code>stg_orders</code>, <code>stg_restaurants</code> both feeding <code>fct_orders</code>, which feeds <code>mart_delivery_sla</code>), then <code>check_dead_letters</code> — and parsed it for real with Airflow's own <code>DagBag</code>:</p>
+<pre><code>all task ids:
+  check_dead_letters
+  dbt_models.fct_orders
+  dbt_models.mart_delivery_sla
+  dbt_models.stg_orders
+  dbt_models.stg_restaurants
+  load_raw
+
+check_dead_letters upstream ids: ['dbt_models.mart_delivery_sla']
+fct_orders upstream ids: ['dbt_models.stg_orders', 'dbt_models.stg_restaurants']</code></pre>
+<p>Two things confirmed directly, not assumed from the docs: every task inside the <code>with TaskGroup(group_id="dbt_models") as dbt_models:</code> block really does gain a <code>dbt_models.</code> prefix on its own <code>task_id</code> — exactly Day 24's <code>dbt_models.stg_restaurants_run</code> shape. And wiring <code>load_raw &gt;&gt; dbt_models &gt;&gt; check_dead_letters</code> at the DAG level does <em>not</em> make <code>check_dead_letters</code> depend on all four tasks inside the group — it resolves to a dependency on <code>mart_delivery_sla</code> alone, because that is the group's only task with no downstream edge inside the group (its one <em>leaf</em>). Airflow walks a group's internal graph to find its real roots (what <code>load_raw</code> actually points at) and leaves (what <code>check_dead_letters</code> actually waits on), and wires the outside edges to those specific tasks, not to the group as a monolithic unit.</p>
+<div class="callout">This matters for exactly the dead-letter check Day 45 built. If <code>check_dead_letters</code> needs to run after the <em>whole</em> warehouse build, not just after one mart, the group's <em>leaf</em> is what it should actually depend on — today's grouping doesn't change which task that is, it only changes how the graph is drawn and labelled.</div>
+
+<h2>3 · Build: wrap the DAG's dbt-shaped tasks in a TaskGroup</h2>
+<p>In your <code>food-delivery-pipeline</code> repo, edit <code>dags/food_delivery_pipeline.py</code> once more. Today only changes <code>dbt_build</code>'s placement — nothing about Day 35's <code>on_retry_callback</code> or Day 45's <code>trigger_rule</code> changes:</p>
+<pre><code><span class="cm"># new import, alongside the existing DAG and operator imports</span>
+<span class="kw">from</span> airflow.sdk <span class="kw">import</span> TaskGroup
+
+<span class="cm"># inside the existing `with DAG(...) as dag:` block, replacing the bare</span>
+<span class="cm"># dbt_build = BashOperator(...) with the same task wrapped in a group:</span>
+<span class="kw">with</span> TaskGroup(group_id=<span class="str">"dbt_models"</span>) <span class="kw">as</span> dbt_models:
+    dbt_build = BashOperator(
+        task_id=<span class="str">"dbt_build"</span>,
+        bash_command=<span class="str">f"cd {REPO_DIR}/warehouse &amp;&amp; uv run --with 'dbt-postgres==1.11.0' dbt build --profiles-dir ."</span>,
+        retries=<span class="kw">3</span>,
+        retry_delay=timedelta(minutes=<span class="kw">2</span>),
+        on_retry_callback=on_retry_callback,  <span class="cm"># Day 35, unchanged</span>
+    )
+
+<span class="cm"># the DAG's own dependency line is unchanged in form -- dbt_models now</span>
+<span class="cm"># stands in for dbt_build, but resolves to the same single task either way</span>
+load_raw &gt;&gt; dbt_models &gt;&gt; check_dead_letters_task</code></pre>
+<p>With only one task inside the group today, this round's change is mostly cosmetic — the real payoff is that <code>check_dead_letters_task</code> already depends on the group's one leaf, <code>dbt_build</code>, exactly as before, and adding a second dbt-shaped task later (a real per-model split, or a second <code>dbt build --select</code> step) slots into the same group without touching <code>check_dead_letters_task</code>'s own wiring at all.</p>
+
+<h2>4 · Verify: the task_id prefix and the UI grouping, both for real</h2>
+<pre><code>AIRFLOW_HOME="$(pwd)/airflow_home" uv run --with "apache-airflow==3.3.1" python3 -c "
+from airflow.models import DagBag
+bag = DagBag(dag_folder='dags', include_examples=False)
+dag = bag.get_dag('food_delivery_pipeline')
+for t in sorted(dag.tasks, key=lambda t: t.task_id):
+    print(t.task_id, '-> group:', t.task_group.group_id)
+print('check_dead_letters upstream:', sorted(dag.get_task('check_dead_letters').upstream_task_ids))
+"</code></pre>
+<p>Expected:</p>
+<pre><code>check_dead_letters -> group: None
+dbt_models.dbt_build -> group: dbt_models
+load_raw -> group: None
+check_dead_letters upstream: ['dbt_models.dbt_build']</code></pre>
+<p>That confirms the parse. To see the actual payoff — the Graph view collapsing the group into one clickable box — start the webserver (<code>airflow api-server</code> in Airflow 3) and open the DAG's Graph tab; the <code>dbt_models</code> group renders as a single node with an expand arrow, exactly like Day 24's Cosmos group did, except today's version was declared by hand rather than generated by a package. Commit <code>dags/food_delivery_pipeline.py</code>.</p>
+
+<div class="interview">
+<p><strong>Q: "Your DAG has grown to a dozen tasks across ingestion, transformation and monitoring. How do you keep the Airflow UI readable without changing what actually runs?"</strong> A strong answer, out loud: <em>"I'd group related tasks with a TaskGroup — it's purely an organizational and visual layer, not a scheduling one. Tasks inside the group get their task_id prefixed with the group_id, and the Graph view collapses the whole group into one expandable box. The part that actually matters for correctness is that an edge drawn to or from the group resolves to the group's real roots and leaves, not to every task inside it — so wrapping tasks in a group never silently changes a dependency that was already correct, it just makes the graph legible."</em> The signal: naming that a TaskGroup changes presentation and the task_id namespace, not scheduling semantics — and that root/leaf resolution is the one behavior worth actually confirming rather than assuming.</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers a plain Airflow <code>TaskGroup</code>: the <code>task_id</code> prefix it applies and how an outside edge resolves to its roots and leaves. It does not cover nested TaskGroups (a group inside a group — the same root/leaf resolution applies recursively, vocabulary only), <code>@task_group</code>'s TaskFlow-decorator form (a thin wrapper over the same context-manager class, not a different mechanism), or Cosmos's own <code>DbtTaskGroup</code> internals beyond the subclass relationship already named in Section 1 — Day 24 is still the primary source for what Cosmos itself builds.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed this round via a live DagBag parse: a task declared inside a with TaskGroup(group_id='dbt_models') block gets its own task_id automatically prefixed, so a task named dbt_build inside that group is actually registered and addressed as dbt_models.dbt_build -- exactly the dbt_models.stg_restaurants_run shape Day 24's Cosmos tasks already showed.">
+    <p class="stem">What happens to a task's own <code>task_id</code> once it's declared inside a <code>TaskGroup</code>?</p>
+    <button class="opt" data-ok>it gains the group's own id as a prefix</button>
+    <button class="opt">it is replaced entirely by the group's own id</button>
+    <button class="opt">nothing at all; grouping is purely visual, UI-only metadata</button>
+  </div>
+  <div class="q" data-why="Confirmed this round: wiring load_raw >> dbt_models >> check_dead_letters does not make check_dead_letters depend on every task inside dbt_models. Airflow resolves the group to its real roots and leaves -- the one task inside the group with no further downstream task inside that same group -- and wires the outside edge to that specific task.">
+    <p class="stem">When a task is wired downstream of a whole <code>TaskGroup</code> (<code>group &gt;&gt; next_task</code>), what does it actually depend on?</p>
+    <button class="opt" data-ok>only the group's own leaf task, not every task inside it</button>
+    <button class="opt">every single task that was ever declared inside that one group</button>
+    <button class="opt">nothing at all, until each inner task is wired by hand</button>
+  </div>
+  <div class="q" data-why="Day 24 showed Cosmos producing task IDs like dbt_models.stg_restaurants_run without explaining the mechanism. DbtTaskGroup is confirmed this round to be a subclass of Airflow's own plain TaskGroup -- Cosmos was always using this same grouping mechanism, just generating it automatically from a dbt project's ref() graph instead of a DAG author writing with TaskGroup(...) by hand.">
+    <p class="stem">How does today's plain <code>TaskGroup</code> relate to Day 24's Cosmos <code>DbtTaskGroup</code>?</p>
+    <button class="opt" data-ok><code>DbtTaskGroup</code> really is in fact a subclass of plain <code>TaskGroup</code></button>
+    <button class="opt">they are entirely unrelated classes that just share a name</button>
+    <button class="opt">Cosmos has now fully replaced plain <code>TaskGroup</code> inside Airflow 3</button>
+  </div>
+  <div class="q" data-why="A TaskGroup changes only the task_id namespace and the Graph view's rendering (collapsing grouped tasks into one expandable box) -- it does not change trigger rules, retries, or any scheduling decision. Day 45's trigger_rule and Day 35's on_retry_callback both keep working exactly as before once their task is wrapped in a group.">
+    <p class="stem">Does wrapping <code>dbt_build</code> in a <code>TaskGroup</code> change its <code>trigger_rule</code> or retry behaviour?</p>
+    <button class="opt" data-ok>no, grouping only changes task naming and the UI view</button>
+    <button class="opt">yes, every single grouped task now defaults to all_done always</button>
+    <button class="opt">yes, a grouped task always loses its own retries setting</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> Airflow's <a href="https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/index.html">Core Concepts</a> docs (already cited for Day 7/19-20) cover <code>TaskGroup</code> under the DAGs section as the UI-organization construct it is; today's specific claims — the <code>task_id</code> prefixing and the roots/leaves edge resolution — were confirmed directly against the installed <code>apache-airflow==3.3.1</code> package via a live <code>DagBag</code> parse, the same read-the-real-install approach Days 20-22, 25, 35 and 45 already used, since no working <code>WebFetch</code> tool was available this round either (the same recurring gap those days each noted).</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 51.<br>
+<strong>Next up:</strong> the <code>airflow db migrate</code>/<code>airflow dags test</code> approval-gate block named since Day 35 is now eighteen rounds running (35-51) with no interactive approval available to any of them — still worth a human granting it once, so a future round can confirm the Graph-view screenshot's exact collapsed-box rendering against a real running webserver rather than a DAG-parse read. Separately, Day 45's own closing note named <code>check_dead_letters</code>'s TODO (a real <code>psycopg</code> count query, with Day 46-47's threshold-and-delta logic already built standalone) as still not wired into the live DAG task itself — a concrete, named next step if Airflow is picked again before a fresh gap-scan.<br><br>
+💬 Anything unclear — why grouping doesn't change scheduling, or how root/leaf resolution would work with a nested group? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

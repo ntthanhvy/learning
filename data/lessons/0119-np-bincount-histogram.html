@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 119 · np.bincount() / np.histogram(): the counting siblings of digitize()</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 119 · ~20 min · 5 Nov 2026</p>
+<h1>np.bincount() / np.histogram(): the counting siblings of digitize()</h1>
+<p class="byline">Yesterday's lesson closed with three standing candidates from a fresh curriculum/glossary scan: <code>np.lexsort()</code>, <code>np.partition()</code>/<code>argpartition()</code>, and <code>np.histogram()</code>/<code>np.bincount()</code> — the latter named explicitly as "the bin-counting sibling of today's bin-assigning function" and as Lesson 68's own passing, never-taught mention. Today picks that one: it continues the same "name the NumPy function underneath an already-taught pandas idiom" lineage as Lessons 93, 100, 102, 109-112, 114, and 117-118, and ties directly back to yesterday's <code>np.digitize()</code> lesson with a confirmed exact-equivalence chain.</p>
+
+<h2>1 · bincount(): the fast tally underneath factorize() + count</h2>
+<p>Lesson 68's <code>factorize()</code> turns repeated labels into small dense integer codes. <dfn data-en="a NumPy function that counts how many times each non-negative integer appears in an array, returning an array of counts indexed by the integer value itself -- the fast integer-keyed tally underneath a factorize()-based count" data-vn="giữ nguyên 'np.bincount()' — đếm số lần xuất hiện của mỗi số nguyên không âm trong 1 mảng, trả về mảng số lượng mà chỉ số (index) của mảng kết quả chính là giá trị số nguyên đó; đây là cách đếm nhanh bằng số nguyên thô, nằm dưới factorize() + đếm">np.bincount()</dfn> is the raw-array primitive doing that tally: given an array of non-negative integer codes, it returns one count per distinct code value, indexed by the code itself. Confirmed directly (numpy 2.5.4, pandas 3.1.1), reusing Lesson 68's own <code>factorize()</code> shape on a small name column:</p>
+<pre><code><span class="kw">import</span> numpy <span class="kw">as</span> np
+<span class="kw">import</span> pandas <span class="kw">as</span> pd
+
+s = pd.Series([<span class="kw">"An"</span>, <span class="kw">"Binh"</span>, <span class="kw">"Binh"</span>, <span class="kw">"Chi"</span>, <span class="kw">"An"</span>, <span class="kw">"An"</span>])
+codes, uniques = pd.factorize(s)
+<span class="cm"># codes   = array([0, 1, 1, 2, 0, 0])
+# uniques = Index(['An', 'Binh', 'Chi'])</span>
+
+np.bincount(codes)
+<span class="cm"># array([3, 2, 1])  -- 3 "An"(code 0), 2 "Binh"(code 1), 1 "Chi"(code 2)</span>
+
+s.value_counts().reindex(uniques)
+<span class="cm"># An      3
+# Binh    2
+# Chi     1
+# dtype: int64  -- SAME counts, reindexed to match factorize()'s code order</span></code></pre>
+<p>Confirmed directly: <code>np.bincount(codes)</code> matches <code>value_counts()</code> exactly once both are lined up to the same order — but <code>bincount()</code> works on raw integer codes only, with none of <code>value_counts()</code>'s label bookkeeping. <code>minlength=</code> pads the output with trailing zeros when the highest code might not appear in every batch (useful when counts get accumulated across chunks):</p>
+<pre><code>np.bincount(np.array([<span class="kw">0</span>, <span class="kw">2</span>]), minlength=<span class="kw">5</span>)
+<span class="cm"># array([1, 0, 1, 0, 0])  -- codes 3 and 4 never occurred, padded with 0 instead of omitted</span></code></pre>
+
+<h2>2 · weights=: bincount() doubles as a hand-rolled groupby sum</h2>
+<p>Confirmed directly: passing <code>weights=</code> (an array the same length as the codes) switches <code>bincount()</code> from counting occurrences to summing weights per code — the exact shape of a <code>groupby().sum()</code>, done without pandas:</p>
+<pre><code>weights = np.array([<span class="kw">10.0</span>, <span class="kw">20.0</span>, <span class="kw">5.0</span>, <span class="kw">1.0</span>, <span class="kw">2.0</span>, <span class="kw">3.0</span>])
+
+np.bincount(codes, weights=weights)
+<span class="cm"># array([15., 25.,  1.])  -- sum of weights where code==0, code==1, code==2</span>
+
+pd.DataFrame({<span class="kw">"code"</span>: codes, <span class="kw">"w"</span>: weights}).groupby(<span class="kw">"code"</span>)[<span class="kw">"w"</span>].sum()
+<span class="cm"># code
+# 0    15.0
+# 1    25.0
+# 2     1.0
+# Name: w, dtype: float64  -- SAME totals, via pandas groupby instead</span></code></pre>
+<p>This is the sharpest interview-relevant fact about <code>bincount()</code>: it only ever accepts non-negative integers for its main array — a float input raises <code>TypeError: Cannot cast array data from dtype('float64') to dtype('int64')</code>, and a negative integer raises <code>ValueError</code> immediately. There is no silent coercion either way; both error cases are confirmed loud, not silent.</p>
+
+<h2>3 · histogram(): the same bin-edge idea as digitize(), but counting instead of assigning</h2>
+<p>Yesterday's <code>np.digitize(x, bins)</code> returned one bin <em>index</em> per value. <dfn data-en="a NumPy function that takes an array of values and bin edges, returning the COUNT of values falling in each bin (not a per-value index) plus the edges themselves -- confirmed to equal np.bincount() applied to np.digitize(x, bins) - 1" data-vn="giữ nguyên 'np.histogram()' — nhận mảng giá trị + mốc chia (bins), trả về SỐ LƯỢNG giá trị rơi vào mỗi bin (không phải chỉ số từng giá trị) cùng với các mốc chia; xác nhận trực tiếp bằng đúng np.bincount() áp lên np.digitize(x, bins) - 1">np.histogram()</dfn> instead returns the <em>count</em> of values landing in each bin directly, plus the edges — skipping the per-value index step entirely. Confirmed directly: chaining yesterday's two functions reproduces <code>histogram()</code>'s counts exactly, on the same <code>amount</code> values and bin edges as Lessons 12/118:</p>
+<pre><code>amounts = np.array([<span class="kw">120.0</span>, <span class="kw">35.5</span>, <span class="kw">180.0</span>, <span class="kw">42.0</span>, <span class="kw">40.0</span>])
+bins = [<span class="kw">0</span>, <span class="kw">40</span>, <span class="kw">100</span>, <span class="kw">200</span>]
+
+counts, edges = np.histogram(amounts, bins=bins)
+<span class="cm"># counts = array([1, 2, 2]), edges = array([  0,  40, 100, 200])</span>
+
+np.bincount(np.digitize(amounts, bins) - <span class="kw">1</span>, minlength=<span class="kw">len</span>(bins) - <span class="kw">1</span>)
+<span class="cm"># array([1, 2, 2])  -- IDENTICAL: histogram() == bincount() chained onto digitize() - 1</span></code></pre>
+<p>Confirmed directly against the official docs: every bin except the last is half-open (<code>[edge, next)</code>, right excluded) — the same convention as yesterday's <code>digitize()</code> default — but the <em>last</em> bin is closed on both sides (<code>[edge, last]</code>, right included), the one asymmetry <code>digitize()</code> itself does not have.</p>
+
+<h2>4 · The trap: out-of-range values, and NaN most of all, vanish with no warning</h2>
+<div class="callout"><strong>Confirmed directly, and confirmed absent from the official docs page (no mention of NaN handling at all):</strong> any value outside every bin edge — and a NaN value always counts as outside, since every comparison against it is <code>False</code> — is silently dropped from every bin's count, with the total across all bins coming up short of the input length and no exception, no warning:
+<pre><code>vals = np.array([np.nan, <span class="kw">50.0</span>, <span class="kw">120.0</span>])
+
+counts, edges = np.histogram(vals, bins=bins)
+<span class="cm"># counts = array([0, 1, 1])  -- sums to 2, but len(vals) is 3: the NaN is just gone</span>
+
+pd.cut(pd.Series(vals), bins=bins).value_counts(dropna=<span class="kw">False</span>)
+<span class="cm"># (0.0, 40.0]       0
+# (40.0, 100.0]     1
+# (100.0, 200.0]    1
+# NaN               1
+# Name: count, dtype: int64  -- pd.cut() keeps the NaN as its OWN visible row</span></code></pre>
+</div>
+<p>This is the sharp, genuinely interview-relevant gotcha, and it is the same root cause as yesterday's <code>np.digitize()</code> trap wearing a different costume: <code>np.digitize()</code> at least gives NaN a (wrong-looking) valid index to investigate; <code>np.histogram()</code> gives it nothing at all — the count total simply comes up short, which is easy to miss if nobody is comparing it against the array's own length. Anyone hand-rolling a histogram pass on real data (which always has some missing values) must check <code>counts.sum() == len(x)</code> explicitly, or drop/flag NaN before calling it — <code>pd.cut(...).value_counts(dropna=False)</code> is the pandas-native alternative that already surfaces the missing count as its own row.</p>
+
+<h2>5 · bins as an integer: histogram()'s other common call shape</h2>
+<p>Confirmed directly: calling <code>np.histogram(x)</code> with no <code>bins=</code> (or <code>bins=</code> as a plain integer) auto-computes that many <em>equal-width</em> bins spanning <code>x</code>'s own min/max — a quick distribution shape check with zero manual edge-picking, the same auto-binning role <code>pd.cut(x, bins=10)</code> (an integer, not a list) plays back in Lesson 12:</p>
+<pre><code>np.histogram(amounts)  <span class="cm"># default bins=10, auto edges from amounts.min() to amounts.max()</span>
+<span class="cm"># counts = array([2, 0, 0, 0, 0, 1, 0, 0, 0, 1])
+# edges  = array([ 35.5 ,  49.95,  64.4 ,  78.85,  93.3 , 107.75, 122.2 ,
+#                  136.65, 151.1 , 165.55, 180.  ])</span></code></pre>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>np.bincount()</code>'s integer-code tally and its <code>weights=</code>/<code>minlength=</code> parameters, the confirmed loud (not silent) errors on negative or float input, <code>np.histogram()</code>'s bin-edge counting contract and its confirmed exact equivalence to <code>bincount()</code> chained onto yesterday's <code>digitize() - 1</code>, the confirmed last-bin-closed asymmetry, the confirmed and undocumented silent-drop trap for out-of-range values and NaN specifically, and the integer-<code>bins=</code> auto-width call shape. It does not cover <code>np.histogram2d()</code>/<code>np.histogramdd()</code> (multi-dimensional extensions, out of scope per <code>MISSION.md</code>'s "deep NumPy" exclusion) nor plotting a histogram visually (visualization libraries are explicitly out of scope).</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/119_np_bincount_histogram.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/119_np_bincount_histogram.py</code></pre>
+<p>Exercise 1 confirms <code>bincount()</code>'s basic tally against <code>value_counts()</code>, plus its <code>weights=</code> groupby-sum equivalence from Sections 1-2. Exercise 2 confirms the Section 3 exact-equivalence chain between <code>histogram()</code> and <code>bincount(digitize(x, bins) - 1)</code>. Exercise 3 confirms the Section 4 silent-drop trap for NaN against <code>pd.cut().value_counts(dropna=False)</code>'s correct count.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly: np.bincount() only accepts non-negative integers for its main array. A float array raises TypeError (cannot safely cast float64 to int64) and a negative integer raises ValueError -- both loud, immediate errors, never a silent coercion.">
+    <p class="stem">What happens when <code>np.bincount()</code> is called on an array containing a float value like <code>1.5</code>?</p>
+    <button class="opt" data-ok>it raises TypeError right away, refusing the unsafe cast</button>
+    <button class="opt">it silently truncates every float down to its floor</button>
+    <button class="opt">it silently rounds every float to its nearest whole</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: np.bincount(np.digitize(x, bins) - 1, minlength=len(bins) - 1) reproduces np.histogram(x, bins=bins)'s counts exactly -- histogram() is bincount() chained onto digitize()'s per-value bin index, minus the manual index step.">
+    <p class="stem">Chaining which two functions together reproduces <code>np.histogram()</code>'s per-bin counts exactly?</p>
+    <button class="opt" data-ok>bincount(), chained onto digitize()'s own per-value bin index minus one</button>
+    <button class="opt">digitize(), chained onto bincount()'s own per-value bin index minus one</button>
+    <button class="opt">piecewise(), chained onto isclose()'s own per-value boolean mask result too</button>
+  </div>
+  <div class="q" data-why="Confirmed directly, and confirmed absent from the official docs: np.histogram() silently drops any out-of-range value, and NaN always counts as out-of-range since every comparison against it is False. The returned counts sum to less than the input length with no exception or warning at all.">
+    <p class="stem">What does <code>np.histogram()</code> silently do with a NaN value in the input array?</p>
+    <button class="opt" data-ok>drops it from every bin count, with the total falling short</button>
+    <button class="opt">raises a ValueError right away, refusing to process the whole array</button>
+    <button class="opt">places it in its own extra bin, appended past the edge</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official NumPy API reference for <a href="https://numpy.org/doc/stable/reference/generated/numpy.bincount.html"><code>numpy.bincount()</code></a> and <a href="https://numpy.org/doc/stable/reference/generated/numpy.histogram.html"><code>numpy.histogram()</code></a> (per <code>RESOURCES.md</code>'s NumPy-fundamentals grouping, ~8 min combined) document the integer-only/<code>weights=</code> contract and the half-open-except-last-bin convention, both confirmed above; neither page mentions NaN behavior at all, which is exactly the gap today's lesson fills by direct probe.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>np.bincount()</code> and <code>np.histogram()</code> are new today, added right after Lesson 118's <code>np.digitize()</code> entry.<br>
+<strong>Next lesson:</strong> two standing candidates remain from recent scans, none pre-committed per this course's "fresh scan each round" convention — <code>np.lexsort()</code> and <code>np.partition()</code>/<code>argpartition()</code>.<br><br>
+💬 Anything unclear — the bincount()/histogram() split, the weights= groupby-sum trick, or the silent-drop trap? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

@@ -11270,3 +11270,109 @@
   data lesson_generated --day 118 --lesson 0118-np-digitize.html --detail
   '{"by":"headless"}'` was run directly from the repo root and returned
   its own confirmation line, reproduced below.
+
+- 2026-11-05 (headless 06:00 run): headless run, zero prior context.
+  Idempotency check first — confirmed no `lessons/0119-*.html` on disk and
+  no `n: 119` entry in `nav.js` before writing anything (highest prior
+  lesson was 118, dated 2026-11-04). Read `MISSION.md` in full (not
+  modified), `RESOURCES.md` in full (not modified), `NOTES.md`'s own tail,
+  and Lesson 118's lesson/practice files as structural templates. Topic
+  choice: Lesson 118's own closing note named three standing candidates —
+  `np.lexsort()`, `np.partition()`/`argpartition()`, and
+  `np.histogram()`/`np.bincount()` (named explicitly as "the bin-counting
+  sibling of today's bin-assigning function," and Lesson 68's own passing,
+  never-taught mention). Confirmed via grep each was still a genuine
+  zero-hit across every lesson body and the glossary before picking;
+  confirmed `np.bincount(codes)` in Lesson 68's own `factorize()` text was
+  used as a one-off illustration, never itself taught — same "used but not
+  taught" lineage shape as Lessons 100/102/117/118. Picked
+  `np.histogram()`/`np.bincount()` over the other two: it is the direct
+  sibling of yesterday's `np.digitize()` (counting vs. assigning), ties
+  back to it with a confirmed exact-equivalence chain, and a first probe
+  turned up a genuinely undocumented silent-drop trap worth teaching on its
+  own — the strongest single-lesson hook of the three. Confirmed pandas
+  bumped to 3.1.1 (from 3.1.0 the last few rounds) and numpy still 2.5.4;
+  the version bump changed nothing behaviorally in any probe run. No
+  `/tmp` access in this sandbox (confirmed again by a blocked `mkdir`) —
+  every behavioral claim was probed directly first via temporary scripts
+  in `.scratch-data-119/` at the repo root, deleted after use, never
+  tracked by git, matching every recent lesson's own note. Confirmed
+  directly: `np.bincount(codes)` matches `value_counts()` reindexed to the
+  same code order exactly; `weights=` switches it to a weighted sum per
+  code, confirmed identical to `groupby(...).sum()`; a float array raises
+  `TypeError` and a negative integer raises `ValueError`, both loud and
+  immediate, never a silent coercion; `minlength=` pads trailing
+  zero-counts rather than omitting them. Confirmed the full equivalence
+  chain directly: `np.histogram(x, bins=bins)`'s counts are byte-identical
+  to `np.bincount(np.digitize(x, bins) - 1, minlength=len(bins) - 1)` —
+  histogram() is bincount() chained onto yesterday's digitize() output,
+  skipping the manual per-value index step. Confirmed against the official
+  docs (fetched via WebFetch) that every bin except the last is half-open,
+  but the last bin is closed on both sides — the one asymmetry digitize()
+  itself does not have. Confirmed the NaN/out-of-range trap directly and
+  repeatably: any out-of-range value, NaN included (since every comparison
+  against NaN is False), is silently dropped from every bin's count with
+  no exception and no warning — `counts.sum()` comes up short of
+  `len(x)`, confirmed on `[nan, 50.0, 120.0]` giving counts summing to 2,
+  not 3 — while `pd.cut(...).value_counts(dropna=False)` correctly
+  surfaces the missing count as its own `NaN` row. Fetched both official
+  NumPy API reference pages for `bincount()` and `histogram()` via
+  WebFetch specifically to check NaN handling: confirmed neither page
+  mentions it at all, so today's lesson states that documentation gap
+  explicitly, continuing the same pattern Lessons 117/118 established.
+  Added exactly one new glossary row, "np.bincount() / np.histogram()"
+  (a combined row for two tightly-paired functions, same precedent as
+  Lesson 117's combined "np.isclose() / np.allclose()" row), directly
+  after Lesson 118's "np.digitize()" entry — confirmed via a
+  case-insensitive scan of every first-column term that no prior row
+  already covered either name. Verification performed mechanically via
+  scratch scripts (deleted after, never tracked by git): (1) a
+  quiz-word-count script confirming exactly 9/9/9, 10/10/10, and 11/11/11
+  option words across the three questions after several rounds of
+  targeted edits — the first draft came out uneven (8-14 word spread per
+  question) before converging, one `data-ok` per question throughout;
+  (2) an HTML tag-balance check came back fully balanced on the first
+  pass (html 1/1, head 1/1, body 1/1, div 5/5, p 19/19, pre 7/7, code
+  76/76, h1 1/1, h2 9/9, strong 3/3, em 4/4, button 9/9, script 3/3, dfn
+  2/2, span 50/50, a 3/3, title 1/1); (3) a raw-unescaped-`&` regex scan
+  found exactly the two expected `&` characters inside the lesson's own
+  `cd ~/learning/data && uv run ...` shell command, zero elsewhere; (4)
+  exactly 2 `<dfn>`-carrying tags (one for `np.bincount()`, one for
+  `np.histogram()`), both with `data-en`/`data-vn`, mapped to the 1
+  combined new glossary row added, same ratio as Lesson 117's own combined
+  row. A separate table-balance check on `glossary.html` after its one-row
+  addition — balanced (tr 192/192, td 573/573, zero raw `&`), plus a
+  duplicate-term scan across all 191 first-column entries — zero
+  duplicates, and confirmed the new row's exact term string appears
+  exactly once. `node --check` confirmed `nav.js`, `gloss.js`, and
+  `quiz.js` all still parse as valid JavaScript, with exactly one
+  `n: 119` entry and one `0119-np-bincount-histogram` file reference in
+  `nav.js`. The shipped (unsolved) `practice/119_np_bincount_histogram.py`
+  was run directly from its real `practice/` location (via `uv run --with
+  pandas python3`) and printed exactly 3 ✗ with no raw traceback. Built a
+  solved copy in `.scratch-data-119/practice/` (deleted after, never
+  tracked by git), filling in all blanks per the helper-function pattern
+  recent lessons established; it printed all 3 ✓ and "All green" on the
+  first run after one simplification (dropped an overcomplicated,
+  unreachable fallback branch in the Exercise 3 NaN-row check once testing
+  showed `CategoricalIndex.__contains__` already handles `np.nan`
+  correctly on its own) applied identically to both the solved and shipped
+  copies to keep them in sync. Re-ran the shipped file directly from
+  `practice/` again afterward and reproduced the identical all-✗ result,
+  confirming the solved copy's edits never leaked back into the shipped
+  baseline. This round's own fresh scan leaves two standing candidates for
+  tomorrow, none pre-committed per this course's "fresh scan each round"
+  convention: `np.lexsort()` and `np.partition()`/`argpartition()`.
+  `git status --short` after all edits confirmed only the intended
+  `data/` files were touched (`data/assets/nav.js`,
+  `data/reference/glossary.html`, new
+  `data/lessons/0119-np-bincount-histogram.html`, and new
+  `data/practice/119_np_bincount_histogram.py`) plus unrelated concurrent
+  changes in other course directories from other runs, not touched by
+  this one. The scratch directory `.scratch-data-119/` was deleted after
+  verification, at the repo root but never tracked by git, matching prior
+  rounds' own precedent for this environment. `bin/record-progress data
+  lesson_generated --day 119 --lesson 0119-np-bincount-histogram.html
+  --detail '{"by":"headless"}'` was run directly from the repo root and
+  returned `recorded: data/lesson_generated day=119
+  lesson=0119-np-bincount-histogram.html`.

@@ -10188,3 +10188,109 @@
   scope per MISSION.md's "concepts first" rule; and the backfill-missing-
   Lesson-117-NOTES-entry gap flagged four rounds ago, still not
   independently investigated.
+- 2026-11-05 (headless 06:00 run): idempotency check first — confirmed no
+  `lessons/0123-*.html` on disk and no `n: 123`/`date: "2026-11-05"` entry in
+  `nav.js` before writing anything (highest prior lesson was 122, dated
+  2026-11-04), and no 2026-11-05 entry already in this file. Orchestrator-
+  provided context: `course_progress` showed no `lesson_completed`/quiz/kata
+  signal for any course since 2026-10-15 (backend's own Lesson 102 quiz, all
+  `ok: true`) — no weak spot to chase, so steady sequential pacing
+  continued. Topic choice: picked up the prior round's own closing note
+  directly rather than running a fresh gap scan from scratch — Lesson 122's
+  notes flagged Lesson 31's service-to-service auth (static API key, OAuth
+  client credentials, mTLS) as "a plausible next C#-port candidate... not
+  yet checked in depth." Checked it in depth this round via two `WebFetch`
+  calls before writing anything:
+  `https://learn.microsoft.com/en-us/aspnet/core/security/authentication/certauth`
+  confirmed `Microsoft.AspNetCore.Authentication.Certificate` as a genuine
+  first-party ASP.NET Core package, its `AddAuthentication(...).AddCertificate()`
+  wiring, the `CertificateAuthenticationOptions` surface
+  (`ValidateCertificateUse`, `ValidateValidityPeriod`, `RevocationMode`), and
+  the vivid, easy-to-miss detail that a failed check returns `403 Forbidden`
+  rather than `401 Unauthorized` "because it expects authentication to occur
+  during the initial TLS connection... there's no way to upgrade the
+  connection from an anonymous connection to one with a certificate"; and
+  `https://learn.microsoft.com/en-us/aspnet/core/security/authentication/jwt-authn`
+  confirmed `Microsoft.AspNetCore.Authentication.JwtBearer` as a first-party
+  Microsoft package and its `AddAuthentication("Bearer").AddJwtBearer()`
+  wiring. Both resolve Lesson 31's two stronger-than-API-key options (OAuth
+  client credentials' receiving side, and mTLS) with genuine first-party
+  mechanisms rather than a third-party package — the static-API-key third
+  of Lesson 31 was deliberately not re-ported, since Lesson 122's own
+  `CryptographicOperations.FixedTimeEquals` already covers the one C#
+  mechanism that option needs. Read `MISSION.md`, `RESOURCES.md`, this
+  file's tail (Lessons 120–122 in full), Lesson 31 (the Go original) and
+  Lesson 122 (the most recent C#-port lesson, as structural template) in
+  full, and `nav.js`'s and `glossary.html`'s tails, all before writing
+  anything. Both Microsoft Learn pages fetched cleanly in full, consistent
+  with this run's standing finding that `learn.microsoft.com` fetches
+  reliably. `which dotnet` found a real binary at `/usr/bin/dotnet` this
+  round (unlike every prior round since Lesson 103), but `dotnet --version`
+  itself still hit the same interactive-approval gate with no user present
+  in this headless run, so no actual compile happened — the two C# snippets
+  were instead checked by hand against the two fetched docs pages' own
+  reference material (the exact `AddAuthentication(...).AddCertificate(options => ...)`
+  and `AddAuthentication("Bearer").AddJwtBearer()` call shapes, the
+  `CertificateAuthenticationOptions`/`CertificateAuthenticationEvents`
+  members used, `JwtBearerOptions.Authority`/`Audience`) and confirmed
+  syntactically consistent — brace count 1/1 and 4/4, paren count 10/10 and
+  6/6 across the two blocks, correct `async`/delegate usage in the
+  `OnCertificateValidated` callback, no undeclared identifiers — though this
+  falls short of an actual compile, flagged here as such, same caveat as
+  every C#-port round. Two new terms, each checked against the glossary
+  first via case-insensitive grep across the whole file — zero collisions
+  confirmed before writing: `AddJwtBearer`, `AddCertificate`. Added both
+  rows immediately after Lesson 122's `CryptographicOperations.FixedTimeEquals`
+  row, same Term/Tiếng Việt (dev-style)/English column order, confirmed by
+  inspecting the file's actual last row directly rather than assumed.
+  Verification performed mechanically via throwaway Node one-liners run with
+  `node -e` (nothing written to a file, so nothing to delete): (1) a
+  quiz-word-count check scoped per `<div class="q">` block, splitting every
+  option both via `.split(/\s+/)` and `.split(" ")` — first draft landed
+  uneven on all four questions (Q1 8/9/8/8, Q2 8/10/10/10, Q3 11/10/12/9, Q4
+  8/9/10/8), fixed through several rewrite-and-recount passes per option
+  (checking candidate phrasings in the same script before committing them),
+  converged to exactly 9/9/9/9, 11/11/11/11, 11/11/11/11, and 10/10/10/10
+  across the four questions, both counting methods agreeing exactly, exactly
+  one `data-ok` and four options per question confirmed the same way; (2) an
+  HTML tag-balance check across div/p/code/button/script/dfn/pre/h2/h1/em/
+  strong/a/table/tr/th/td — clean (div 7/7, p 15/15, code 27/27, button
+  16/16, script 3/3, dfn 2/2, pre 2/2, h2 6/6, h1 1/1, em 0/0, strong 3/3, a
+  3/3, table 1/1, tr 6/6, th 8/8, td 10/10); both `dfn` tags confirmed to
+  carry both `data-en=` and `data-vn=` by direct regex match on the full tag
+  span; a separate table/tr/td/p/div/html/head/body/title/script balance
+  check on `glossary.html` after its two-row addition — also balanced (tr
+  392/392, td 1173/1173), plus a duplicate-term scan across all 391 rows —
+  zero duplicates; (3) a raw-unescaped-`&` regex scan across both files —
+  zero hits; (4) `node --check` against `assets/nav.js`, `assets/gloss.js`,
+  and `assets/quiz.js` — all clean, both before and after the `nav.js` edit;
+  (5) a basic HTML well-formedness check (exactly one `<!DOCTYPE html>`, one
+  `<html>`/`</html>`, three script tags with `gloss.js`/`quiz.js`/`nav.js`
+  in that order) — clean; (6) a grep for stray markdown-style backticks and
+  `*emphasis*` left over from drafting — caught and fixed one genuine hit
+  (a leftover `*validation*` in section 1's prose, converted to plain text).
+  Registered Lesson 123 in `nav.js` (date 2026-11-05, today's actual
+  generation date) right after `n: 122`, confirmed exactly one matching
+  `n: 123` entry and exactly one matching `0123-*.html` file on disk
+  afterward. No new `RESOURCES.md` line added this round — both fetched
+  pages are Microsoft's own docs, same domain already covered by the
+  standing `learn.microsoft.com` entries' pattern, and this round reused no
+  prior URL; both are cited inline in the lesson's own "Go deeper" section
+  instead, consistent with how every prior C#-port round has handled a
+  freshly-fetched same-domain page. `bin/record-progress` ran clean on the
+  first attempt this round (`recorded: backend/lesson_generated day=123
+  lesson=0123-service-to-service-auth-addcertificate-addjwtbearer.html`). No
+  new `learning-records/` file this round — the topic came from resolving a
+  standing deferred-topic candidate flagged by the prior round's own closing
+  note, not a new surprise about the learner's baseline or a quiz outcome.
+  Candidates spotted but not picked this round, still worth checking fresh
+  next time: Go's `select`-statement arbitration rules, now deferred for a
+  thirteenth round running, same standing finding that the blocker is the
+  fetched page's own content truncation, not a permission gate or URL/mirror
+  choice; Lesson 49's dead-letter queues, still deferred — still no
+  first-party ASP.NET Core angle found, would need a specific message-broker
+  SDK (e.g. Azure Service Bus's own dead-letter queue feature); Polly (or a
+  .NET resilience-library survey more broadly), still deliberately out of
+  scope per MISSION.md's "concepts first" rule; and the backfill-missing-
+  Lesson-117-NOTES-entry gap flagged four rounds ago, still not
+  independently investigated.

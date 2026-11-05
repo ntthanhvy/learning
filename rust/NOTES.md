@@ -1804,3 +1804,31 @@ by the user there; they apply here identically.
   note --detail '{"by":"headless","day":"post-week-2026-11-04","action":
   "verified-unchanged"}'` succeeded on the first attempt. No new learning
   record beyond the Day-1 baseline.
+- 2026-11-05 (headless 06:00 run; verified by the orchestrator directly
+  rather than a delegated agent, since this course needs no new content):
+  same as every prior post-week day — verified `daily.html`,
+  `assets/srs.js`, and `assets/quiz-bank.js` are all present and untouched
+  (8 textual `id: "k` matches in `quiz-bank.js` — the 7 real kata entries
+  `k1`-`k7` plus the commented-out example line, `day:` tags still running
+  1-7 only; `assets/nav.js` still has exactly 7 `file: "lessons` entries,
+  the 7 Jul 8-14 lessons only). Still the correct "daily quiz+kata" for
+  this post-week phase per PLAN.md, so nothing new was generated. DB reads
+  succeeded this round via the `node`/`execFileSync('psql', [process.env.
+  LEARNING_DB_URL, ...])` workaround (scratch file at repo root, deleted
+  immediately after) — a literal `psql "$LEARNING_DB_URL" ...` typed
+  directly was not attempted since the workaround is already established.
+  The last 40 `course_progress` rows and a separate quiz/kata/
+  lesson_completed-filtered query showed no signal for any course since
+  2026-10-15 (backend's 0102 quiz row, all `"ok": true`) — no scope-change
+  signal for rust and no weak-spot signal anywhere, so pacing stayed
+  steady/sequential everywhere. `bin/record-progress rust note --detail
+  '{"by":"headless","day":"post-week-2026-11-05","action":
+  "verified-unchanged"}'` succeeded on the first attempt via a plain
+  relative-path call. No new learning record beyond the Day-1 baseline.
+  Backend Lesson 123 (C# service-to-service auth via `AddJwtBearer`/
+  `AddCertificate`), data Lesson 119 (`np.bincount()`/`np.histogram()`),
+  python Day 99 (a scheduled review/retrieval day covering Days 96-98),
+  and dataeng Lesson 51 (Airflow TaskGroups) were all generated this round
+  via delegated agents — see their own NOTES.md entries for detail. Go
+  remains skipped per its own window close, now one hundred and eight
+  days past it.

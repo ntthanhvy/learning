@@ -63,6 +63,7 @@
     { n: 48, date: "2026-11-02", title: "dbt_utils generate_series: a delivery-time histogram, zero buckets included", file: "lessons/0048-dbt-utils-generate-series-histogram.html" },
     { n: 49, date: "2026-11-03", title: "A per-city delivery-time histogram: crossing two grids, not one", file: "lessons/0049-dbt-histogram-by-city.html" },
     { n: 50, date: "2026-11-04", title: "Kafka producer backpressure: BufferError and the delivery report you're ignoring", file: "lessons/0050-kafka-producer-backpressure.html" },
+    { n: 51, date: "2026-11-05", title: "Airflow TaskGroups: the thing Cosmos was using all along", file: "lessons/0051-airflow-task-groups.html" },
   ];
 
   const REFS = [

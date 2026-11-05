@@ -244,6 +244,8 @@
       file: "lessons/0117-np-isclose-allclose.html" },
     { n: 118, date: "2026-11-04", title: "np.digitize(): the raw-array layer under cut() and qcut()",
       file: "lessons/0118-np-digitize.html" },
+    { n: 119, date: "2026-11-05", title: "np.bincount() / np.histogram(): the counting siblings of digitize()",
+      file: "lessons/0119-np-bincount-histogram.html" },
   ];
 
   const REFS = [

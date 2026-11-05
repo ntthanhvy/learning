@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 123 · Service-to-service auth, now in C# too</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 123 · ~20 min</p>
+<h1>Service-to-service auth, now in C# too</h1>
+<p class="byline">Lesson 31 covered three ways one backend proves its identity to another with no human and no browser involved: a static API key compared in constant time, an OAuth client credentials grant, and mutual TLS. That lesson never got a C# mirror. Today ports the two stronger options — both genuinely first-party ASP.NET Core authentication handlers, not third-party packages bolted on afterward.</p>
+
+<h2>1 · The token side: AddJwtBearer validates what client credentials hands back</h2>
+<p>Lesson 31's client credentials grant exchanges a long-lived secret for a short-lived access token, typically a JWT, sent on every call after that. Go's version left token validation unshown; ASP.NET Core's answer is <dfn data-en="a first-party Microsoft NuGet package (Microsoft.AspNetCore.Authentication.JwtBearer) providing an authentication handler that fetches the token issuer's signing keys and validates a bearer token's signature, expiry, issuer, and audience on every request, wired in with AddAuthentication(...).AddJwtBearer(options => ...)" data-vn="AddJwtBearer (giữ nguyên) — package chính chủ của Microsoft (Microsoft.AspNetCore.Authentication.JwtBearer), cung cấp authentication handler tự lấy signing key của issuer rồi validate signature/expiry/issuer/audience của bearer token mỗi request, gắn vào bằng AddAuthentication(...).AddJwtBearer(options => ...)">AddJwtBearer</dfn>, a first-party Microsoft package wired in with two calls:</p>
+<pre><code>builder.Services.AddAuthentication(<span class="st">"Bearer"</span>)
+    .AddJwtBearer(options =&gt;
+    {
+        <span class="cm">// options.Authority / Audience point at the issuer the calling</span>
+        <span class="cm">// service got its token from -- the authorization server Lesson 31</span>
+        <span class="cm">// named as client credentials' one extra moving part.</span>
+        options.Authority = <span class="st">"https://auth.internal.example.com"</span>;
+        options.Audience  = <span class="st">"billing-service"</span>;
+    });
+
+builder.Services.AddAuthorization();
+
+<span class="kw">var</span> app = builder.Build();
+app.UseAuthentication();
+app.UseAuthorization();
+
+app.MapPost(<span class="st">"/charge"</span>, (ClaimsPrincipal caller) =&gt; Results.Ok())
+    .RequireAuthorization();  <span class="cm">// no valid bearer token -&gt; 401, handler never runs</span></code></pre>
+<p>Nothing about the grant itself changes crossing languages — the calling service still exchanges its own client id and secret for a token out-of-band, same as Lesson 31 described. What C# adds is the receiving half: <code>AddJwtBearer</code> is a prebuilt handler that fetches the issuer's signing keys, validates the token's signature, expiry, issuer, and audience on every request, and populates a <code>ClaimsPrincipal</code> — all before <code>RequireAuthorization()</code> lets the request reach the handler at all.</p>
+
+<h2>2 · The building block: AddCertificate, mTLS as a first-party authentication handler</h2>
+<p>Lesson 31's mTLS section named the strongest option and then stopped at Go's raw <code>tls.Config</code>, since Go has no higher-level abstraction for it. ASP.NET Core does: <dfn data-en="a first-party ASP.NET Core authentication handler (Microsoft.AspNetCore.Authentication.Certificate) that validates a client certificate already presented during the TLS handshake and turns it into a ClaimsPrincipal via an events callback -- it does not perform the TLS handshake itself, only the validation and claims-mapping step after Kestrel has already required and received the certificate" data-vn="AddCertificate (giữ nguyên) — authentication handler có sẵn của ASP.NET Core (Microsoft.AspNetCore.Authentication.Certificate), validate client certificate đã được trình trong lúc bắt tay TLS rồi map thành ClaimsPrincipal qua callback events -- bản thân handler không làm TLS handshake, chỉ validate + map claims sau khi Kestrel đã yêu cầu và nhận certificate">AddCertificate</dfn>:</p>
+<pre><code>builder.Services.AddAuthentication(
+        CertificateAuthenticationDefaults.AuthenticationScheme)
+    .AddCertificate(options =&gt;
+    {
+        <span class="cm">// Both on by default -- named here because Lesson 31's Go version</span>
+        <span class="cm">// left them implicit inside tls.Config instead of spelled out.</span>
+        options.ValidateCertificateUse    = <span class="kw">true</span>;  <span class="cm">// client-auth EKU, or none</span>
+        options.ValidateValidityPeriod    = <span class="kw">true</span>;  <span class="cm">// rechecked every request</span>
+        options.RevocationMode            = X509RevocationMode.Online;
+
+        options.Events = <span class="kw">new</span> CertificateAuthenticationEvents
+        {
+            OnCertificateValidated = context =&gt;
+            {
+                <span class="cm">// Lesson 31's "resolve the certificate to an identity" step --</span>
+                <span class="cm">// here mapped from the cert's subject to a billing-service claim.</span>
+                <span class="kw">var</span> claims = <span class="kw">new</span>[] { <span class="kw">new</span> Claim(ClaimTypes.Name,
+                    context.ClientCertificate.Subject) };
+                context.Principal = <span class="kw">new</span> ClaimsPrincipal(
+                    <span class="kw">new</span> ClaimsIdentity(claims, context.Scheme.Name));
+                context.Success();
+                <span class="kw">return</span> Task.CompletedTask;
+            }
+        };
+    });</code></pre>
+<p>Kestrel itself still has to be told to request a client certificate during the handshake — the same <code>tls.Config{ClientAuth: tls.RequireAndVerifyClientCert}</code> job Go's version did by hand, configured in C# via Kestrel's own <code>HttpsConnectionAdapterOptions.ClientCertificateMode</code>. <code>AddCertificate</code> picks up from there: it never performs the handshake, only validates the certificate the handshake already collected and turns it into the claims the rest of the pipeline reads.</p>
+<div class="callout"><strong>The one easy-to-miss detail, straight from Microsoft's own docs:</strong> "If authentication fails, this handler returns a <code>403 (Forbidden)</code> response rather than a <code>401 (Unauthorized)</code>... because it expects authentication to occur during the initial TLS connection. By the time it reaches the handler, it's too late. There's no way to upgrade the connection from an anonymous connection to one with a certificate." A caller debugging a failed mTLS call that expects a <code>401</code>, the usual "you're not authenticated" code, will be confused by a <code>403</code> instead — worth knowing before it shows up in a log.</div>
+
+<h2>3 · What doesn't change crossing languages</h2>
+<p>Lesson 31's rule of thumb still applies untouched: static API key for a handful of internal services you fully control; client credentials when a third party or many independent callers need short-lived, revocable tokens; mTLS when the platform already provides certificate infrastructure or the bar genuinely requires no secret in the request at all. None of the three is "more secure" in the abstract — each trades complexity for a different guarantee, same verdict either language.</p>
+
+<div class="cmp-wrap">
+<table class="cmp">
+<thead><tr><th></th><th>Lesson 31: Go</th><th>Lesson 123: C#</th></tr></thead>
+<tbody>
+<tr><th>Static key comparison</th><td><code>subtle.ConstantTimeCompare</code></td><td><code>CryptographicOperations.FixedTimeEquals</code> (Lesson 122)</td></tr>
+<tr><th>Validating a client-credentials token</th><td>hand-rolled JWT parsing/verification</td><td><code>AddJwtBearer</code>, a prebuilt handler</td></tr>
+<tr><th>mTLS: requesting the client cert</th><td><code>tls.Config{ClientAuth: RequireAndVerifyClientCert}</code></td><td>Kestrel's <code>ClientCertificateMode</code></td></tr>
+<tr><th>mTLS: validating + mapping to identity</th><td>hand-written after the handshake completes</td><td><code>AddCertificate</code>, a prebuilt handler</td></tr>
+<tr><th>Failed-mTLS status code</th><td>whatever the handler author chose</td><td><code>403</code> always, by the handler's own design</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>AddJwtBearer</code> as the C# mechanism for validating a client-credentials token, and <code>AddCertificate</code> as the C# mechanism for mTLS identity validation after the TLS handshake. It does not cover Kestrel's own <code>HttpsConnectionAdapterOptions</code> certificate-request configuration in depth, token issuance (running your own authorization server), or certificate-authority/rotation infrastructure — Lesson 31 already scoped certificate-management infrastructure itself as out of bounds per MISSION.md, and that line holds here too. The static-API-key option is not re-ported; Lesson 122's <code>CryptographicOperations.FixedTimeEquals</code> already covers the C# constant-time comparison that option needs.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory, with no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="AddJwtBearer is a prebuilt ASP.NET Core authentication handler that fetches the issuer's signing keys and validates a bearer token's signature, expiry, issuer, and audience on every request -- the calling service still does its own client-credentials exchange out-of-band beforehand, same as Lesson 31 described; only the receiving-side validation is new here.">
+    <p class="stem">What does AddJwtBearer actually validate on each incoming request?</p>
+    <button class="opt" data-ok>the bearer token's own signature, expiry, issuer, and audience</button>
+    <button class="opt">the raw TCP connection's own source IP address only</button>
+    <button class="opt">the calling service's own original static shared API key</button>
+    <button class="opt">the calling service's own internal database schema version now</button>
+  </div>
+  <div class="q" data-why="Per Microsoft's own docs, AddCertificate never performs the TLS handshake itself -- Kestrel already requested and received the client certificate during that handshake. The handler's job starts after that: validating the already-presented certificate and mapping it to a ClaimsPrincipal via its events callback.">
+    <p class="stem">What does the AddCertificate handler itself actually perform?</p>
+    <button class="opt" data-ok>validating an already-presented certificate and mapping its own claims right now</button>
+    <button class="opt">performing the entire TLS handshake from the very start itself now</button>
+    <button class="opt">generating a brand new client certificate for the caller itself now</button>
+    <button class="opt">issuing a short-lived bearer token back to the original caller now</button>
+  </div>
+  <div class="q" data-why="Microsoft's own docs state the handler returns 403 Forbidden rather than 401 Unauthorized on failure, because authentication was supposed to happen during the initial TLS connection -- by the time the handler runs, there's no way to upgrade an anonymous connection into one with a certificate.">
+    <p class="stem">Why does a failed AddCertificate check return 403, not the usual 401?</p>
+    <button class="opt" data-ok>the connection cannot be upgraded with a certificate after the fact</button>
+    <button class="opt">403 is simply the ASP.NET Core framework's one universal default always</button>
+    <button class="opt">401 is a status code fully reserved for expired bearer tokens</button>
+    <button class="opt">the client certificate itself was somehow already marked as revoked now</button>
+  </div>
+  <div class="q" data-why="Lesson 31's rule of thumb is unchanged by language: a static key suits a small number of fully-controlled internal services, client credentials suits third parties or many independent callers needing short-lived revocable tokens, and mTLS suits a platform that already provides certificate infrastructure or a bar requiring no secret in the request at all -- none is 'more secure' in the abstract.">
+    <p class="stem">Per Lesson 31's rule of thumb, what actually decides which of the three mechanisms fits?</p>
+    <button class="opt" data-ok>caller count, trust level, and existing platform infrastructure right now</button>
+    <button class="opt">whichever single mechanism is the newest one released recently now</button>
+    <button class="opt">whichever single mechanism needs the fewest total lines of code</button>
+    <button class="opt">whichever single mechanism some particular benchmark ranks fastest right now</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://learn.microsoft.com/en-us/aspnet/core/security/authentication/certauth">Microsoft Learn: Configure certificate authentication in ASP.NET Core</a> (~10 min) is the primary source for section 2, confirming the <code>AddCertificate</code> options shown, the "happens at the TLS level before it ever gets to ASP.NET Core" framing, and the exact 403-not-401 quote. <a href="https://learn.microsoft.com/en-us/aspnet/core/security/authentication/jwt-authn">Microsoft Learn: JWT authentication in ASP.NET Core</a> (~10 min) confirms the <code>AddAuthentication("Bearer").AddJwtBearer()</code> wiring in section 1. Lesson 31's own OWASP Authentication Cheat Sheet citation still covers the three-mechanism trade-off and the client-credentials-grant concept itself in full, not duplicated here.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a>. Click any dotted term for a popup (English first, tiếng Việt second). Builds directly on Lesson 31's static-key/OAuth/mTLS trio and Lesson 122's <code>CryptographicOperations.FixedTimeEquals</code>. <strong>Anything unclear? Ask your teacher</strong>, the agent that made this lesson. Ask in Vietnamese anytime. A good follow-up: "nếu Kestrel của mình đứng sau 1 load balancer, ai thực sự là bên giữ handshake TLS để xin client certificate?"</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

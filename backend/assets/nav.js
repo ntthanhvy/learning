@@ -252,6 +252,8 @@
       file: "lessons/0121-idempotency-keys-iendpointfilter-idistributedcache.html" },
     { n: 122, date: "2026-11-04", title: "Webhook signature verification, now in C# too",
       file: "lessons/0122-webhook-signature-verification-hmacsha256-fixedtimeequals.html" },
+    { n: 123, date: "2026-11-05", title: "Service-to-service auth, now in C# too",
+      file: "lessons/0123-service-to-service-auth-addcertificate-addjwtbearer.html" },
   ];
 
   const REFS = [

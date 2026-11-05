@@ -12246,4 +12246,66 @@ fail *gracefully* so the learner sees which task failed.
   lesson_generated --day 98 --lesson 0098-string-template.html --detail
   '{"by":"headless"}'` was run from the repo root at the end of this round
   and succeeded.
+- 2026-11-05 generation (Lesson 99, headless run): idempotency check first
+  — confirmed no `lessons/0099-*.html` on disk (highest prior lesson was 98,
+  dated 2026-11-04), no `n: 99`/`date: "2026-11-05"` entry in `nav.js`, and
+  no 2026-11-05 entry already in this file before writing anything. Read
+  `MISSION.md` in full (no-pandas/no-NumPy exclusion re-confirmed before
+  writing a line), `PLAN.md`'s Phase 2 spine, `RESOURCES.md`, the tail of
+  this file (through Day 98's own closing notes), and Lessons 95-98 for
+  recent topics and structure. Day 98's own closing note flagged the exact
+  trigger this round acts on: three fresh lessons ran since Day 95's review
+  (Day 96 `struct`, Day 97 `getpass`, Day 98 `string.Template`), matching
+  the course's settled three-fresh-then-review rhythm — so Day 99 is the
+  eighteenth retrieval/review day, covering exactly Days 96-98, following
+  Day 95's own review-day shape and section order (three fold-out Q&A
+  pairs in teaching order, a combined "why these three" synthesis
+  paragraph, a no-new-terms callout, and a quiz drawn from the same three
+  questions) rather than picking a new topic — review days pre-empt a fresh
+  topic search by design. No new jargon introduced today on purpose; every
+  term revisited already has a glossary entry under Day 96, 97, or 98, so
+  `reference/glossary.html` was not touched this round. Verification
+  performed mechanically, from dedicated scripts in `.scratch-python-99/`
+  (created inside the repo per this file's own established convention
+  since `/tmp` scratch paths are blocked by the sandbox, deleted after):
+  (1) a per-question option word-count check, extracted via regex and
+  stripped of tags — first draft mismatched on all three questions (12/13/13,
+  15/14/15, 13/11/12), iterated option-by-option across several passes
+  until all three landed on equal per-question counts: 14/14/14, 15/15/15,
+  14/14/14; (2) an HTML tag-balance check across
+  div/p/code/button/script/dfn/pre/h2/h1/em/strong/a on the new lesson —
+  balanced (div 9/9, p 16/16, code 76/76, button 9/9, script 3/3, dfn 0/0,
+  pre 1/1, h2 5/5, h1 1/1, em 1/1, strong 6/6, a 6/6); (3) a
+  raw-unescaped-`&` regex scan (excluding `&amp;`/`&mdash;`/`&middot;`/etc.)
+  on the new lesson — zero hits; (4) an `html.parser.HTMLParser` full-
+  document parse of the new lesson — no parse errors; (5) a case-
+  insensitive `pandas|numpy|dataframe|pd\.|np\.` grep on the new lesson —
+  exactly the one required "Where pandas/NumPy go from here" callout noting
+  neither library is needed to demonstrate Days 96-98's binary layouts,
+  terminal-echo suppression, or string substitution, and zero hits in the
+  practice file — no worked pandas/NumPy example anywhere; (6)
+  `node --check` against `assets/nav.js`, `assets/gloss.js`, and
+  `assets/quiz.js` — all three clean; (7) a duplicate `n:` scan across
+  `nav.js`'s `LESSONS` array — zero duplicates. The shipped (unsolved)
+  `practice/99_review_retrieval_day_18.py` was executed directly from its
+  real `practice/` location and printed exactly 3 ✗ with no raw traceback.
+  A solved copy built in `.scratch-python-99/` (copied from the shipped
+  file, then each TODO body filled in directly — never editing the shipped
+  file itself, deleted after) printed all 3 ✓ and "All green" on the run
+  (the expected `Warning: Password input may be echoed.` line from Day 97's
+  `getpass` fallback printed to stderr alongside it, not an error); the
+  unsolved file was re-run afterward and reproduced the identical all-✗
+  result, confirming no leakage back into the baseline. Registered Lesson
+  99 in `nav.js` with today's date (2026-11-05) right after the `n: 98`
+  entry. `python/learning-records/` was not touched this round — no
+  quiz/kata/lesson_completed signal since 2026-10-15 calls for a change of
+  pace, so a routine review-day follow-through was the right call per the
+  course's own settled cadence. Cadence note for the next round: Day 99
+  closes this review cycle — Day 100 should resume the fresh-topic search
+  from the standing candidate list carried forward since Day 98 (`timeit`,
+  `array`, `types.SimpleNamespace`, `importlib`, `locale`, `socket`,
+  `threading`), with a fresh gap-grep run first per every prior fresh day's
+  own discipline. `bin/record-progress python lesson_generated --day 99
+  --lesson 0099-review-retrieval-day-18.html --detail '{"by":"headless"}'`
+  was run from the repo root at the end of this round and succeeded.
 

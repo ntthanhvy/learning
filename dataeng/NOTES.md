@@ -5895,3 +5895,112 @@ along the Phase 2 spine, adapted to the learning records.
   thread exists — dbt has had the most recent attention (Days 42-44, 48-49),
   so Airflow or a fresh Kafka angle are the more likely productive next
   picks, pending what a future round's gap-scan actually finds.
+
+- 2026-11-05 (headless 06:00 run, Day 51 generated): fifty-first lesson,
+  `0051-airflow-task-groups.html`. Idempotency check first — confirmed no
+  `lessons/0051-*.html` on disk (highest prior was 50, dated 2026-11-04) and
+  no 2026-11-05 entry in this file or `n: 51` row in `assets/nav.js` before
+  writing anything. DB reads (`bin/query-progress`) were not attempted this
+  round — the orchestrator's own context already confirmed the latest row
+  (Day 50, 2026-11-04) and no quiz/kata signal since 2026-10-15, so there
+  was nothing to gain from re-querying. Read `MISSION.md` in full, `PLAN.md`
+  in full, `RESOURCES.md`, all of `assets/nav.js`'s `LESSONS` array, this
+  file's tail back through Day 50's close, and Days 46/47/48/49/50 in full
+  for style and recent-topic coverage before picking anything.
+  **Topic choice:** Day 50's own closing note said the next round should run
+  a fresh, wider gap-scan across dbt/Kafka/Airflow rather than assume a
+  named thread, since Kafka's neglect gap had just closed and dbt had the
+  most recent attention (42-44, 48-49). Airflow's own last *new* lesson (not
+  a TODO-closing one) was Day 45's trigger rules; Days 46-47 only closed
+  `check_dead_letters`'s own TODOs. Grepped every lesson for
+  `task.?group|TaskGroup` (case-insensitive) and found exactly one hit, Day
+  24's Cosmos lesson, which uses `DbtTaskGroup` and shows real task IDs like
+  `dbt_models.stg_restaurants_run` but never once explains *why* that prefix
+  exists — Day 24 explicitly deferred the mechanism, since Cosmos was the
+  day's own topic, not plain Airflow grouping. Confirmed via a second grep
+  (`TaskGroup` anywhere in `reference/glossary.html`) that it was never
+  defined as its own standalone term either, only mentioned inside Day 24's
+  `Cosmos`/`DbtTaskGroup` entries — genuinely untaught, working-level
+  Airflow vocabulary that a three-task real DAG (as of Day 45) is already a
+  believable reason to reach for.
+  **Content:** a plain `TaskGroup` wraps `dbt_build` inside the real
+  `food_delivery_pipeline` DAG (`dags/food_delivery_pipeline.py`), two claims
+  confirmed live rather than asserted: (1) a task declared inside a
+  `TaskGroup` gets its own `task_id` prefixed with the group's `group_id`
+  (confirmed via a scratch `DagBag` parse: tasks came back as
+  `dbt_models.stg_orders`, `dbt_models.fct_orders`, etc.), and (2) wiring
+  `load_raw >> dbt_models >> check_dead_letters` resolves to a dependency on
+  the group's actual *leaf* task only (`mart_delivery_sla` in the scratch
+  four-task group, `dbt_build` in the real one-task group), not on every
+  task inside it — confirmed by reading `upstream_task_ids` back off the
+  parsed DAG in both the four-task scratch version and the real DAG's own
+  one-task version. Explicitly ties back to Day 24: `DbtTaskGroup` is a real
+  subclass of plain `TaskGroup` (confirmed by reading Cosmos's own import),
+  so Day 24 was already exercising this mechanism without naming it. No
+  pandas, no Python-language teaching (`with`/context-manager syntax is used
+  as plumbing to wire the DAG, not taught as a language feature — confirmed
+  by a `pandas|numpy` grep, zero hits, and a prose-only read before
+  shipping).
+  **Verification:** built two scratch DAGs with a locally-installed
+  `apache-airflow==3.3.1` (`uv run --with`, no `/tmp` available, same
+  constraint recent rounds hit — scratch files written and run directly at
+  the repo root, deleted immediately after each check). First script: a
+  2-task group (`stg_orders`, `fct_orders`) under `load_raw`, confirming the
+  `task_id` prefix lands as `dbt_models.stg_orders` etc. and ungrouped tasks
+  report `task_group.group_id` as `None`. Second script: the realistic
+  4-task group (`stg_orders`, `stg_restaurants` feeding `fct_orders`, feeding
+  `mart_delivery_sla`) plus `check_dead_letters` downstream of the whole
+  group, confirming `check_dead_letters.upstream_task_ids` comes back as
+  exactly `['dbt_models.mart_delivery_sla']` — the group's one leaf — not
+  all four inner tasks. The `.py` snippet shown in the lesson's own Section 4
+  verify block was separately checked whole with `uv run python3 -m
+  py_compile`, clean. Both scratch `.py` files and the `py_compile` check's
+  own file were deleted after; confirmed via a directory listing that
+  nothing named `scratch` beyond the pre-existing, untouched
+  `.scratch-data-119/` remained at the repo root. `docker compose up` /
+  `airflow dags test` against a live scheduler was not attempted again this
+  round — today's two claims needed only a `DagBag` parse, no running
+  scheduler, so the standing approval-gate block was irrelevant to this
+  round's own proof rather than newly confirmed blocked again.
+  Ran a Node tag-balance/bare-`&`/dfn-attribute script: div 8/8, p 19/19,
+  code 82/82, button 12/12, script 3/3, dfn 1/1, pre 5/5, h2 7/7, h1 1/1, em
+  5/5, strong 4/4, a 2/2, zero bare `&`, the one `<dfn>` carrying both
+  `data-en=` and `data-vn=`. The quiz word-count script came up uneven on
+  the first draft on all four questions — rebalanced through several
+  edit-and-recount passes (word-for-word substitutions, not padding with
+  filler that would change an answer's meaning) to a final, fully equal
+  9/9/9, 11/11/11, 10/10/10, 10/10/10 across the four questions. A separate
+  pass on `reference/glossary.html` after appending Day 51's new section
+  confirmed it stayed balanced too (h2 50/50, table 50/50, tr 188/188, td
+  414/414, th 150/150), zero bare `&`.
+  Added one new glossary term, `TaskGroup`, under a new Day 51 section,
+  after confirming via grep it had never been defined as its own term before
+  (only ever appearing inside Day 24's `Cosmos`/`DbtTaskGroup` rows). No new
+  `RESOURCES.md` line added — today's primary source reuses the existing
+  Airflow Core Concepts citation from Days 7/19-20 verbatim, since that page
+  already covers `TaskGroup` under its DAGs section; today's specific claims
+  (prefixing, root/leaf edge resolution) were confirmed against the
+  installed package directly rather than a live fetch, the same gap Days
+  17/20-22/25/26/31/34/35/45 all hit (no working `WebFetch` tool this round
+  either).
+  Registered Lesson 51 in `assets/nav.js` right after the `n: 50` entry,
+  dated 2026-11-05 (`node --check` clean on `nav.js`, `gloss.js` and
+  `quiz.js`). Ran `bin/record-progress dataeng lesson_generated --day 51
+  --lesson 0051-airflow-task-groups.html --detail '{"by":"headless"}'` from
+  the repo root at the end of this round; succeeded on the first attempt
+  (`recorded: dataeng/lesson_generated day=51
+  lesson=0051-airflow-task-groups.html`).
+  `dataeng/learning-records/` was not touched this round — today's pick came
+  from a fresh, named gap-scan (the `task.?group` grep) per Day 50's own
+  closing instruction, not a new durable fact about the learner distinct
+  from the single 2026-09-14 baseline record on file.
+  **Next up:** the `airflow db migrate`/`airflow dags test` approval-gate
+  block is now eighteen rounds running (35-51) with no interactive approval
+  granted to any of them — still worth a human granting it once, so a future
+  round can confirm the Graph-view's collapsed-group rendering against a
+  real running webserver rather than a `DagBag`-parse read. Separately, Day
+  45's `check_dead_letters` TODO (wiring Day 46-47's threshold-and-delta
+  logic into the live task, still just a `print`) remains open and named
+  across three lessons now (45, 46, 47 all left it for "next time it's
+  picked up") — a concrete, already-designed next step if Airflow is picked
+  again before a fresh gap-scan is needed.

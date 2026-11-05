@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 99 · Review day 18: retrieval across Days 96-98</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 99 · ~20 min · 5 Nov 2026</p>
+<h1>Review day 18: retrieval across Days 96-98</h1>
+<p class="byline">Day 95 (review day 17) covered Days 92, 93, and 94. Since then, three fresh days ran in a row — Day 96 (<code>struct</code>), Day 97 (<code>getpass</code>), Day 98 (<code>string.Template</code>) — and Day 98's own closing notes flagged this exact span as matching the course's settled three-fresh-lesson review trigger (Day 71 reviewed Days 68-70, Day 75 reviewed Days 72-74, Day 79 reviewed Days 76-78, Day 83 reviewed Days 80-82, Day 87 reviewed Days 84-86, Day 91 reviewed Days 88-90, Day 95 reviewed Days 92-94). This is that review — an eighteenth retrieval day, covering exactly Days 96, 97, and 98.</p>
+
+<div class="callout"><strong>Why today, specifically, and why not a fourth fresh day:</strong> a fresh-gap grep ran first anyway, matching every prior review day's own discipline — it searched all 98 lessons, every practice file, <code>reference/glossary.html</code>, and <code>RESOURCES.md</code> case-insensitively for stdlib corners named but not yet taught (<code>timeit</code>, <code>array</code>, <code>types.SimpleNamespace</code>, <code>importlib</code>, <code>locale</code>, plus <code>socket</code> and <code>threading</code> as modules in their own right — all still genuinely zero-hit, carried forward from Day 98's own notes). None is a strong enough standing candidate to override the cadence math, which already lands exactly on three fresh lessons since Day 95 — so today pays down retrieval on Days 96-98 instead, and the next fresh day starts its topic search from scratch (though it can re-check this list quickly first).</div>
+
+<h2>1 &middot; Three questions, in the original teaching order</h2>
+<p>Answer each out loud or on paper <em>before</em> reading the fold-out answer. If one is shaky, note it and go fix it in the practice file below rather than only rereading the old lesson.</p>
+
+<p><strong>Day 96 &mdash; <code>struct</code>.</strong> Why does <code>struct.calcsize("ci")</code> return <code>8</code> while <code>struct.calcsize("=ci")</code> returns <code>5</code>, and why should a format string meant to be read back on a different machine always start with <code>&gt;</code>, <code>&lt;</code>, or <code>=</code>?</p>
+<div class="callout">Fold-out answer: leaving the prefix off selects native mode, which follows the C compiler's own alignment rules and can insert padding bytes between fields for faster memory access — confirmed live, a 1-byte char plus a 4-byte int costs 8 bytes natively (3 padding bytes hidden inside), but only 5 under <code>"=ci"</code>, which forces standard size with zero padding. Native mode's padding rules (and sometimes its byte order) are compiler- and machine-dependent, so a file packed on one machine and unpacked on another can silently disagree about the layout unless the format string pins down <code>&gt;</code>, <code>&lt;</code>, or <code>=</code> explicitly instead of trusting the default.</div>
+
+<p><strong>Day 97 &mdash; <code>getpass</code>.</strong> Why does <code>getpass.getpass()</code> fall back to plain, visible input instead of raising an error when <code>stdin</code> is redirected from a file, and what warns that the fallback happened?</p>
+<div class="callout">Fold-out answer: suppressing terminal echo is something only a real terminal (a tty) can do — there's no OS-level echo setting to turn off on a redirected file or pipe. Rather than crash outright, <code>getpass.getpass()</code> falls back to reading the line visibly, the same way <code>input()</code> would, confirmed live with <code>stdin</code> swapped for a <code>StringIO</code>. <code>GetPassWarning</code> — a real, catchable subclass of <code>UserWarning</code> — fires at that moment specifically so calling code can notice the silent downgrade and react, rather than assuming a password was hidden when it wasn't.</div>
+
+<p><strong>Day 98 &mdash; <code>string.Template</code>.</strong> Why is <code>Template("$name owes $amount")</code> safe to fill with text that came from outside the program, in a way an f-string built the same way is not?</p>
+<div class="callout">Fold-out answer: an f-string's <code>{...}</code> slot is a real Python expression, evaluated by the interpreter — powerful when a developer writes it, dangerous when the template text itself is untrusted. <code>Template</code>'s <code>$name</code> syntax has no expression grammar at all: <code>.substitute()</code> only ever does a plain key lookup against the names given, confirmed live by feeding "untrusted" template text through it and watching a plain string value come back inert — there is no way to smuggle a function call or attribute lookup through a placeholder, which is exactly the gap an f-string can't close.</div>
+
+<div class="callout"><strong>Where pandas/NumPy go from here:</strong> nothing pandas- or NumPy-specific today &mdash; this review only revisits Days 96-98's binary byte layouts, terminal-echo suppression, and safe string substitution, none of which needs a <code>DataFrame</code> or array to demonstrate.</div>
+
+<h2>2 &middot; Why these three, and why no new terms today</h2>
+<p>Same interleaving logic as every prior review day: a tool for describing an exact byte layout when data isn't text-shaped at all, a tool for getting a secret from a human's keyboard into a running program without it ever appearing on screen, and a tool for filling a template with untrusted text without ever risking code execution &mdash; three different mental models pulled from three lessons, not one idea restated three ways. They also share a quieter throughline worth naming: all three are about a program being explicit instead of trusting a convenient default &mdash; <code>struct</code> refusing to assume native padding travels safely between machines, <code>getpass</code> refusing to silently claim a password was hidden when the fallback made it visible, <code>Template</code> refusing to treat a placeholder as anything more than a plain string lookup. Recognizing which of those three "say what you mean, don't assume" shapes a given problem actually needs &mdash; not just recalling the function names &mdash; is the retrieval goal today.</p>
+<p>No new jargon is introduced today on purpose &mdash; every term revisited already has a glossary entry under its original day. The standing fresh-gap candidates remain on record from Day 98's own notes &mdash; <code>timeit</code>, <code>array</code>, <code>types.SimpleNamespace</code>, <code>importlib</code>, <code>locale</code>, plus <code>socket</code> and <code>threading</code> as modules in their own right &mdash; still genuinely zero-hit as of today's own scan, worth a quick re-check next round rather than a scan from scratch, though a fresh scan costs little and stays the safer default given how fast this list turns over.</p>
+
+<h2>Try it &mdash; self-checking practice (~20 min)</h2>
+<p>Open <code>practice/99_review_retrieval_day_18.py</code>, follow the TODOs, and re-run until every check prints &check;:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/99_review_retrieval_day_18.py</code></pre>
+<p>Standard library only &mdash; no <code>--with</code> flag needed. No new syntax: every mechanism below was taught in Days 96, 97, and 98. Exercises: packing and unpacking a multi-field binary record with an explicit byte order and catching <code>struct.error</code> on a wrong-sized buffer, confirming <code>getpass.GetPassWarning</code> is a catchable <code>UserWarning</code> subclass without needing a real terminal, and filling a <code>string.Template</code> with <code>.safe_substitute()</code> so a missing placeholder is left untouched instead of raising.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory &mdash; no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Native mode (no format prefix) follows the C compiler's alignment rules, which can insert padding bytes between fields for faster memory access -- confirmed live, calcsize('ci') returns 8: 1 byte for the char, 3 padding bytes, then 4 bytes for the int. The '=' prefix selects standard size, which uses each type's documented fixed width with zero padding, so calcsize('=ci') returns exactly 5 -- and that same native-mode padding is exactly why a format string meant to travel between machines should always pin down a prefix.">
+    <p class="stem">Why does <code>struct.calcsize("ci")</code> return <code>8</code> while <code>struct.calcsize("=ci")</code> returns <code>5</code>?</p>
+    <button class="opt" data-ok>native mode inserts extra alignment padding between the fields that equals always skips over</button>
+    <button class="opt">the equals prefix always doubles the total byte size of every character field given</button>
+    <button class="opt">calcsize simply counts each given format letter twice unless a byte mark appears first</button>
+  </div>
+  <div class="q" data-why="Suppressing terminal echo needs a real terminal (tty) to control -- without one, stdin redirected from a file or pipe, confirmed live, getpass can't turn echo off at all, so it falls back to plain visible input instead of crashing outright, and raises GetPassWarning (a real UserWarning subclass) so that silent downgrade isn't missed by calling code.">
+    <p class="stem">Why does <code>getpass.getpass()</code> fall back to visible input instead of raising an error when <code>stdin</code> has no real terminal behind it?</p>
+    <button class="opt" data-ok>it cannot suppress echo without a real terminal, so it falls back instead of crashing</button>
+    <button class="opt">redirected stdin always raises that very same loud warning even with a real terminal present</button>
+    <button class="opt">getpass simply refuses to run at all once stdin stops being a live terminal device</button>
+  </div>
+  <div class="q" data-why="An f-string's {...} is a real Python expression evaluated by the interpreter at the point it appears in source -- powerful, but unsafe to build dynamically from untrusted text. Template's $name syntax has no expression grammar at all: substitute() only ever does a plain key lookup, confirmed live by feeding 'untrusted' template text through it and getting back an inert string, so there is no way to smuggle a function call or attribute lookup through a placeholder the way an f-string-shaped eval could.">
+    <p class="stem">Why is <code>string.Template</code> safe to fill with text that came from outside the program's own source code, unlike an f-string built the same way?</p>
+    <button class="opt" data-ok>its placeholders only ever do a plain key lookup, never evaluating any real expression</button>
+    <button class="opt">it automatically strips out every single quote character before substitution even begins right now</button>
+    <button class="opt">it refuses outright to substitute any value that was sourced from outside the program</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> no single new source today &mdash; revisit each lesson's own citation (<a href="https://docs.python.org/3/library/struct.html"><code>struct</code></a> for Day 96, <a href="https://docs.python.org/3/library/getpass.html"><code>getpass</code></a> for Day 97, and <a href="https://docs.python.org/3/library/string.html#template-strings"><code>string.Template</code></a> for Day 98), all already listed in <code>RESOURCES.md</code>.</p>
+
+<p class="next">No new terms today &mdash; this is a review day, and every term revisited already has a glossary entry under its original day (<a href="../reference/glossary.html#day96">96</a>, <a href="../reference/glossary.html#day97">97</a>, <a href="../reference/glossary.html#day98">98</a>).<br>
+Standing fresh-gap candidates remain on record &mdash; <code>timeit</code>, <code>array</code>, <code>types.SimpleNamespace</code>, <code>importlib</code>, <code>locale</code>, <code>socket</code>, <code>threading</code> &mdash; worth a quick re-check next round rather than a scan from scratch.<br><br>
+&#128172; Anything unclear across any of today's three? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

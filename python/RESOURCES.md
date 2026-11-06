@@ -85,6 +85,8 @@ authors for *why*. Cite inline; each lesson recommends exactly one primary sourc
   Use for: Day 97 — `getpass()` for reading a line from the terminal without echoing it, the `stream=` parameter for redirecting where the prompt itself is written, the exact fallback conditions behind `GetPassWarning` when no real tty is available, and `getuser()`'s environment-variable lookup order for a default (not authenticated) identity.
 - [Docs: `string.Template`](https://docs.python.org/3/library/string.html#template-strings)
   Use for: Day 98 — `substitute()`/`safe_substitute()` for filling `$identifier`/`${identifier}` placeholders by plain key lookup (never evaluating a Python expression, unlike an f-string's `{}`), the `$$` escape for a literal dollar sign, and `get_identifiers()`/`is_valid()` (3.11+) for validating a template loaded from outside the program before substituting anything into it.
+- [Docs: `timeit`](https://docs.python.org/3/library/timeit.html)
+  Use for: Day 100 — `timeit()`/`repeat()` and the `Timer` class for measuring how long a small snippet takes, the default `number=1_000_000` and total-not-average return value, `setup=` for excluding one-time data construction from the timed total, `globals=` for opting into the calling scope's names, and why `repeat()`'s `min()` is the trustworthy statistic over its average or last value.
 - [PEP 8 — Style Guide for Python Code](https://peps.python.org/pep-0008/)
   Use for: naming and layout conventions, so written code looks like the ecosystem's.
 

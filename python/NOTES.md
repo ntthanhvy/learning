@@ -12308,4 +12308,120 @@ fail *gracefully* so the learner sees which task failed.
   own discipline. `bin/record-progress python lesson_generated --day 99
   --lesson 0099-review-retrieval-day-18.html --detail '{"by":"headless"}'`
   was run from the repo root at the end of this round and succeeded.
+- 2026-11-06 generation (Lesson 100, headless run): idempotency check first —
+  confirmed no `lessons/0100-*.html` on disk (highest prior lesson was 99,
+  dated 2026-11-05), no `n: 100` entry in `nav.js`, and no 2026-11-06 entry
+  already in this file before writing anything. Read `MISSION.md` in full
+  (no-pandas/no-NumPy exclusion re-confirmed before writing a line),
+  `PLAN.md`'s Phase 2 spine, `RESOURCES.md`, the tail of this file (through
+  Day 99's own closing note), and Lesson 98's lesson + practice file as the
+  structural template for a fresh-topic day (Day 99 was a review-day shape,
+  deliberately not templated off). Day 99's own closing note confirmed the
+  cadence directly: Day 99 closed the review cycle covering Days 96-98, so
+  Day 100 resumes the fresh-topic search as fresh day 1 of a new
+  three-lesson cycle, per the course's settled three-fresh-then-review
+  rhythm. Re-ran the fresh-gap grep across every lesson title/body, every
+  practice file, `glossary.html`, and `RESOURCES.md` rather than trusting
+  the carried-forward candidate list blindly: `timeit`, `array`,
+  `types.SimpleNamespace`, `importlib`, and `locale` were all still
+  genuinely zero-hit as dedicated topics. `socket` is also still a genuine
+  gap. `threading`, however, turned out to be a stale candidate — Day 73's
+  `concurrent.futures` lesson already gives it a full dedicated section
+  (section 5: race conditions, `threading.Lock`, plus a quiz question
+  built on its GIL discussion), so it no longer qualifies despite being
+  carried forward as "only named in passing" by earlier rounds; verified
+  by reading that section directly before ruling it out. Picked `timeit`
+  over the remaining candidates: Day 73 asserted a real, falsifiable
+  performance claim (threading helps I/O-bound work, not CPU-bound work)
+  and Day 2 asserted another (comprehensions read better and are usually
+  at least as fast as a manual loop) — neither was ever actually measured,
+  so `timeit` closes two live, named claims at once rather than opening an
+  unrelated topic, with zero pandas/NumPy surface (benchmarking a plain
+  Python snippet has no library equivalent either course touches). Probed
+  every real behavioral claim directly in a scratch dir (`.scratch-python-
+  100/`, created inside the repo per this file's established convention
+  since `/tmp` scratch paths are unavailable in this sandbox, deleted
+  after; `uv run python3 probe.py`) rather than trusting memory: confirmed
+  `timeit.timeit("x = 1 + 1", number=100_000)` returns a total (not
+  per-call average) float, measured at ~0.00093s for 100,000 runs;
+  confirmed a plain callable (no string, no quoting) works directly as
+  `stmt`; confirmed `setup=` runs exactly once per `timeit()` call, not
+  once per repetition, with its result staying available to `stmt` without
+  being counted in the timed total (sorting a 1000-element list measured
+  ~0.0053s for 1000 repeats, with list construction excluded); confirmed a
+  list comprehension (`[x * 2 for x in range(1000)]`) measured faster than
+  the equivalent manual `append()` loop over 1000 repeats, settling Day 2's
+  long-open but unmeasured claim; confirmed `timeit.repeat(..., repeat=5)`
+  returns a list of exactly 5 floats, not a single number; confirmed via
+  `inspect.signature(timeit.timeit)` that the real default is
+  `number=1_000_000`; confirmed a name from the calling scope is invisible
+  inside `stmt`/`setup` by default (`NameError` raised) until
+  `globals=globals()` is passed explicitly, at which point the same lookup
+  succeeds; confirmed `timeit.Timer(stmt).timeit(number=...)` is the
+  lower-level call `timeit.timeit()` wraps, giving the same shape of
+  result. Checked the glossary for a collision before writing — grepped
+  `Timer`, `repeat(`, `setup=`, `number=`, and `globals=` case-
+  insensitively across the full `glossary.html`, zero existing rows.
+  **New jargon: 1 inline `<dfn>`** (timeit module, defined once in the
+  byline) **folded into 3 glossary rows** (`timeit` module itself,
+  `setup=`/`globals=` combined, and `timeit.repeat()`), added as a new
+  `<h2 id="day100">` section directly after Day 98's (there is no Day 99
+  section since the review day introduced no new jargon). Verification
+  performed mechanically, from dedicated scripts in `.scratch-python-100/`
+  (deleted after): (1) an HTML tag-balance check across
+  div/p/code/button/script/dfn/pre/h2/h1/em/strong/a on the new lesson —
+  balanced (div 6/6, p 16/16, code 62/62, button 9/9, script 3/3, dfn 1/1,
+  pre 5/5, h2 6/6, h1 1/1, em 1/1, strong 5/5, a 2/2); (2) a
+  raw-unescaped-`&` regex scan on the new lesson and the new glossary
+  section — zero hits on both; (3) a per-question quiz option word-count
+  check via two independent methods (a regex-strip-tags extraction and a
+  separate `html.parser.HTMLParser`-based extraction) agreeing on every
+  count — first draft mismatched on all three questions (11/12/12,
+  13/14/12, 13/13/14), iterated option-by-option until all three landed on
+  equal per-question counts, both methods agreeing: 12/12/12, 13/13/13,
+  14/14/14; (4) an `html.parser.HTMLParser` full-document parse of the new
+  lesson and of `glossary.html` — no parse errors on either; (5) a
+  table/tr/th/td/h2/p/div balance check on `glossary.html` after its new
+  section, plus a duplicate-`id="dayNN"` scan — balanced (table 84/84, tr
+  367/367, th 252/252, td 849/849, h2 84/84) with zero duplicates among 84
+  ids, `day100` present exactly once; a case-insensitive duplicate-term
+  scan across the glossary's term column reproduced the one pre-existing
+  collision already on record (`dependency`, predating this round) and
+  confirmed none of today's three new terms collide with it or any other
+  existing row; (6) `node --check` against `assets/nav.js`,
+  `assets/gloss.js`, and `assets/quiz.js` — all three clean; (7) a
+  case-insensitive `pandas|numpy|dataframe|pd\.|np\.` grep on the new
+  lesson — exactly two hits, both inside the required "Why today" grep-
+  scope mention and the required "Where pandas/NumPy go from here" boundary
+  callout (noting a pandas-vectorized-vs-loop comparison as the realistic
+  next use of `timeit`, not demonstrated), and zero hits in the practice
+  file or in the new glossary section — no worked pandas/NumPy example
+  anywhere. The shipped (unsolved) `practice/100_timeit_benchmarking.py`
+  was executed directly from its real `practice/` location and printed
+  exactly 4 ✗ with no raw traceback. A solved copy built in
+  `.scratch-python-100/` (copied from the shipped file, then each TODO
+  body filled in directly — never editing the shipped file itself, deleted
+  after) printed all 4 ✓ and "All green" on two consecutive runs; the
+  shipped file was re-run afterward and reproduced the identical all-✗
+  result, confirming no leakage back into the baseline. Added one new
+  `RESOURCES.md` line for `timeit`, placed directly after Day 98's
+  `string.Template` line and before the PEP 8 line, following the file's
+  chronological-by-day ordering. Registered Lesson 100 in `nav.js` with
+  today's date (2026-11-06) right after the `n: 99` entry.
+  `python/learning-records/` was not touched this round — no
+  quiz/kata/lesson_completed signal since 2026-10-15 (re-confirmed by the
+  orchestrator via the DB before this round started) calls for a change of
+  pace, so a routine fresh-topic pick following the course's own settled
+  cadence was the right call, same fallback this file's own convention has
+  used in recent rounds. Cadence note for the next round: Day 100 is fresh
+  day 1 of the new cycle this round opened — Day 101 should be fresh day 2,
+  and Day 102 fresh day 3, before a Day 103 review covering Days 100-102.
+  Standing fresh-gap candidates still open going into Day 101: `array`,
+  `types.SimpleNamespace`, `importlib`, `locale`, and `socket` —
+  `threading` should be dropped from this list going forward, confirmed
+  already fully taught in Day 73's section 5, not merely "named in
+  passing." `bin/record-progress python lesson_generated --day 100
+  --lesson 0100-timeit-benchmarking-small-code.html --detail
+  '{"by":"headless"}' was run from the repo root at the end of this round
+  and succeeded.
 

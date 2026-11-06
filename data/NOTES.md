@@ -11376,3 +11376,123 @@
   --detail '{"by":"headless"}'` was run directly from the repo root and
   returned `recorded: data/lesson_generated day=119
   lesson=0119-np-bincount-histogram.html`.
+
+- 2026-11-06 (headless 06:00 run): headless run, zero prior context.
+  Idempotency check first — confirmed no `lessons/0120-*.html` on disk, no
+  `n: 120` entry in `nav.js`, and no `2026-11-06` entry already in this file
+  before writing anything (highest prior lesson was 119, dated 2026-11-05).
+  Read `MISSION.md` in full (not modified), `RESOURCES.md` in full (not
+  modified), this file's own tail, `nav.js`'s tail for registration format,
+  and Lessons 118-119's lesson/practice files as structural templates.
+  Direct DB/progress reads were not attempted this round per the
+  orchestrator's own note that they are unreliable in this sandbox (hard
+  content-level block) — the orchestrator had already confirmed via the DB
+  no `lesson_completed`/quiz/kata signal for any course since 2026-10-15, so
+  no weak-spot to chase; continued steady sequential pacing instead.
+  `learning-records/` still has only the single 2026-07 baseline record,
+  confirmed again, nothing newer. Topic choice: Lesson 119's own closing
+  note named two standing candidates — `np.lexsort()` and
+  `np.partition()`/`argpartition()`. A fresh grep of every lesson, every
+  practice file, and the glossary (case-insensitive) reconfirmed both are
+  still genuine zero-hits, appearing nowhere except inside the standing-
+  candidate sentences of Lessons 118 and 119 themselves. Picked
+  `np.lexsort()`: it is the direct multi-key sibling of Lesson 73's
+  single-key `argsort()` (confirmed via a full read of Lesson 73 as a
+  second template, beyond 118/119) — the exact "name the NumPy function
+  underneath/alongside an already-taught idiom" lineage this course has run
+  since Lessons 93, 100, 102, 109-112, 114, and 117-119 — and a first probe
+  turned up a parameter-order convention sharp enough to get backwards
+  without ever triggering an error, a stronger single-lesson hook than
+  `np.partition()`/`argpartition()` offered on a first look (deferred,
+  standing candidate below). Confirmed pandas 3.1.1 and numpy 2.5.4 are
+  still current, unchanged from Lesson 119's own bump. No `/tmp` access in
+  this sandbox (a bare `cd`-and-write compound command was blocked by the
+  harness's own path-safety check, consistent with every recent round's
+  note) — every behavioral claim below was probed directly first via
+  temporary scripts in `.scratch-data-120/` at the repo root, deleted after
+  use, never tracked by git. Confirmed directly: `np.lexsort((first_name,
+  last_name))` sorts primarily by `last_name` — the LAST item in the tuple,
+  not the first — with ties broken by `first_name`; swapping the tuple
+  order flips which column becomes primary, with no error either way, only
+  a silently wrong sort. Fetched the official NumPy API reference page for
+  `numpy.lexsort()` via WebFetch specifically to confirm this: it states,
+  verbatim, "the last key in the sequence is used for the primary sort
+  order; ties are broken by the second-to-last key, and so on," and its own
+  worked example (surnames/first-names) matches today's lesson's own setup
+  almost exactly, independently arrived at before the fetch. Confirmed
+  directly that building the tuple in reverse order (primary key last)
+  reproduces `DataFrame.sort_values(by=["last_name", "first_name"])`'s own
+  row positions exactly, byte for byte. Confirmed directly: wrapping a
+  single array in a one-element tuple, `np.lexsort((x,))`, is byte-
+  identical to plain `np.argsort(x)` on that same array — `lexsort()` is a
+  strict generalization of `argsort()`, not a different algorithm.
+  Confirmed directly: like `argsort()` (Lesson 73), `lexsort()` has no
+  `ascending=` parameter at all — passing one raises `TypeError`. Lesson
+  73's negation trick for descending `argsort()` output fails outright on a
+  string key (`UFuncTypeError`, negation undefined for text); confirmed the
+  working alternative directly: `pd.factorize(..., sort=True)` (Lesson 68)
+  turns the string key into sorted dense integer codes first, and negating
+  those codes instead reproduces `sort_values(by=[...],
+  ascending=[False, True])`'s exact row positions. Confirmed directly,
+  across two separate probes: a NaN in any key sorts to the END of that
+  key's order, matching `argsort()`'s own NaN-last placement (Lesson 73)
+  and `sort_values()`'s own default NaN placement exactly on both a single-
+  key and a two-key (primary/secondary) test array — unlike Lessons
+  118/119's NaN findings, this is not an undocumented trap, since all three
+  functions already agree; stated so explicitly in the lesson rather than
+  implying a trap that isn't actually there. Confirmed directly:
+  mismatched key lengths raise `ValueError: all keys need to be the same
+  shape` immediately, never a silent broadcast. A secondary probe also
+  found that passing a bare 1-D array (not wrapped in a tuple) to
+  `lexsort()` is accepted but produces a degenerate, confusing result
+  (each array element treated as its own 0-D key) — judged too deep a
+  side-trail for a ~20-min lesson and left out of scope, not written up.
+  Added exactly one new glossary row, "np.lexsort()", directly after Lesson
+  119's "np.bincount() / np.histogram()" entry — confirmed via a case-
+  insensitive scan of every first-column term that no prior row already
+  covered this name. Verification performed mechanically via scratch
+  scripts in `.scratch-data-120/` (deleted after, never tracked by git):
+  (1) a quiz-word-count script, cross-checked by two independent extraction
+  methods (a regex-block split and a stdlib `HTMLParser` subclass) that
+  agreed exactly — confirmed exactly 12/12/12, 10/10/10, and 12/12/12 option
+  words across the three questions, one `data-ok` per question throughout;
+  the first draft came out uneven (9-12 word spread per question) before
+  three rounds of small wording tweaks converged both methods to the same
+  even counts; (2) an HTML tag-balance check came back fully balanced on
+  every pass (html 1/1, head 1/1, body 1/1, div 5/5, p 20/20, pre 7/7, code
+  63/63, h1 1/1, h2 9/9, strong 3/3, em 3/3, button 9/9, script 3/3, dfn
+  1/1, span 52/52, a 2/2, title 1/1); (3) a raw-unescaped-`&` regex scan
+  found exactly the two expected `&` characters inside the lesson's own
+  `cd ~/learning/data && uv run ...` shell command, zero elsewhere; (4)
+  exactly 1 `<dfn>`-carrying tag, with both `data-en`/`data-vn`, matching
+  the 1 new glossary row added. A separate table-balance check on
+  `glossary.html` after its one-row addition — balanced (tr 193/193, td
+  576/576, zero raw `&`), plus a duplicate-term scan across all 192
+  first-column entries — zero duplicates, and confirmed the new row's
+  exact term string, `np.lexsort()`, appears exactly once. `node --check`
+  confirmed `nav.js`, `gloss.js`, and `quiz.js` all still parse as valid
+  JavaScript, with exactly one `n: 120` entry and one `0120-np-lexsort`
+  file reference in `nav.js`. The shipped (unsolved)
+  `practice/120_np_lexsort.py` was run directly from its real `practice/`
+  location (via `uv run --with pandas python3`) and printed exactly 3 ✗
+  with no raw traceback. Built a solved copy in
+  `.scratch-data-120/practice/` (deleted after, never tracked by git),
+  filling in all blanks per the helper-function pattern recent lessons
+  established; it printed all 3 ✓ and "All green" on the first run, no
+  further fixes needed. Re-ran the shipped file directly from `practice/`
+  again afterward and reproduced the identical all-✗ result, confirming
+  the solved copy's edits never leaked back into the shipped baseline.
+  This round's own fresh scan leaves one standing candidate for tomorrow,
+  not pre-committed per this course's "fresh scan each round" convention:
+  `np.partition()`/`argpartition()`. `git status --short` after all edits
+  confirmed only the intended `data/` files were touched
+  (`data/assets/nav.js`, `data/reference/glossary.html`, new
+  `data/lessons/0120-np-lexsort.html`, new `data/practice/120_np_lexsort.py`,
+  and this file) plus any unrelated concurrent changes in other course
+  directories from other runs, not touched by this one. The scratch
+  directory `.scratch-data-120/` was deleted after verification, at the
+  repo root but never tracked by git, matching prior rounds' own precedent
+  for this environment. `bin/record-progress data lesson_generated --day
+  120 --lesson 0120-np-lexsort.html --detail '{"by":"headless"}'` was run
+  directly from the repo root and returned `recorded: data/lesson_generated
+  day=120 lesson=0120-np-lexsort.html`.

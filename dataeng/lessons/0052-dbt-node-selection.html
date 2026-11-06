@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 52 · dbt node selection: --select, --exclude &amp; the +/@ graph operators</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 52 · ~20 min · 6 Nov 2026</p>
+<h1>dbt node selection: <code>--select</code>, <code>--exclude</code> &amp; the <code>+</code>/<code>@</code> graph operators</h1>
+<p class="byline">Today's tangible win: a real local dev loop in <code>food_delivery_pipeline</code> — editing <code>stg_orders.sql</code> and rebuilding only that model plus everything downstream of it (<code>dbt build --select stg_orders+</code>), instead of every single model and test in the project every time. Confirmed live this round against a six-model scratch project shaped like the real one: five distinct selection expressions, each checked with <code>dbt list</code> against the exact node set the docs say it should return.</p>
+
+<div class="callout"><strong>Before today — confirm the project still parses clean:</strong> today runs selection commands against your own <code>food_delivery_pipeline/</code> project; it changes no model file at all.
+<pre><code>cd food_delivery_pipeline &amp;&amp; uv run --with "dbt-postgres==1.11.0" dbt parse --profiles-dir .</code></pre>
+Expected: no line containing the word <code>Error</code>, case-insensitive. If anything else shows up, fix that first — today's commands assume the project already parses, same as every lesson since Day 2.</div>
+
+<h2>1 · The gap: every lesson so far has run the whole project</h2>
+<p>Every build command this course has shown — <code>dbt run</code>, <code>dbt build</code>, Day 7's Airflow <code>BashOperator</code> — has selected every single model and test in the project, every time. That was fine at six models. It stops being fine the moment one edit to <code>stg_orders.sql</code> means waiting on <code>dim_restaurants</code>, three histogram marts, two snapshots and a dozen tests that have nothing to do with the line that just changed. Day 15 already used a narrower selection once, <code>state:modified+</code>, to keep CI fast — but that lesson treated <code>+</code> as a detail of one specific selector, not as the general mechanism it actually is. Today is that mechanism, on its own, for the loop that matters most day to day: a human, at a terminal, wanting to rebuild <em>exactly</em> what one edit touched.</p>
+<p>Every <code>--select</code> (and <code>--exclude</code>) argument is a <dfn data-en="a dbt command-line argument, built from one or more method:value expressions combined with graph operators, that resolves to a specific set of nodes (models, tests, sources, snapshots) in the project's dependency graph -- the mechanism behind --select and --exclude on every dbt run/build/test/list/seed command" data-vn="giữ nguyên &quot;node selection&quot; — cú pháp dbt dùng cho --select/--exclude, gồm 1 hay nhiều biểu thức method:value kết hợp bằng graph operator, resolve ra 1 tập node (model, test, source, snapshot) cụ thể trong graph phụ thuộc của project">node selection</dfn> expression, not a filename glob. A bare model name (<code>stg_orders</code>) is the simplest form — it selects exactly that one model — but the real power is the handful of <dfn data-en="a symbol placed before and/or after a node name inside a --select expression that walks the dependency graph outward from that node -- + for ancestors/descendants, @ for a node plus its descendants plus every ancestor of those descendants -- rather than selecting the named node alone" data-vn="giữ nguyên &quot;graph operator&quot; — ký hiệu đặt trước/sau tên node trong biểu thức --select, đi dọc theo graph phụ thuộc từ node đó ra (+ cho ancestor/descendant, @ cho node cộng descendant cộng mọi ancestor của descendant đó), thay vì chỉ chọn đúng node được gọi tên">graph operators</dfn> and methods layered on top of it.</p>
+
+<h2>2 · Confirmed live: five expressions, five exact node sets</h2>
+<p>Built a scratch project shaped exactly like the real one — <code>stg_orders</code>, <code>stg_restaurants</code>, <code>stg_couriers</code> feeding <code>fct_orders</code>, <code>dim_restaurants</code>, which both feed <code>mart_delivery_sla</code> — with <code>+tags: ["hourly"]</code> on every staging model and <code>+tags: ["nightly"]</code> on every mart, set once in <code>dbt_project.yml</code> the same way Day 31 configured <code>generate_schema_name</code> at the folder level. Ran <code>dbt list --select "&lt;expr&gt;" --resource-type model</code> for each, reading the resolved set back directly rather than trusting the docs' prose alone:</p>
+<table class="gloss">
+<tr><th>Expression</th><th>Resolves to (confirmed live)</th><th>Reading it</th></tr>
+<tr><td><code>stg_orders+</code></td><td><code>stg_orders</code>, <code>fct_orders</code>, <code>mart_delivery_sla</code></td><td><code>stg_orders</code> plus everything <em>downstream</em> of it</td></tr>
+<tr><td><code>+fct_orders</code></td><td><code>stg_orders</code>, <code>fct_orders</code> (plus the <code>raw.orders</code> source)</td><td>everything <em>upstream</em> of <code>fct_orders</code>, plus itself</td></tr>
+<tr><td><code>+mart_delivery_sla+</code></td><td>all five models</td><td><code>+</code> on both sides: every ancestor and every descendant</td></tr>
+<tr><td><code>tag:nightly</code></td><td><code>fct_orders</code>, <code>dim_restaurants</code>, <code>mart_delivery_sla</code></td><td>every node carrying that tag, inherited from the folder config — no graph walk at all</td></tr>
+<tr><td><code>@stg_orders</code></td><td><code>stg_orders</code>, <code>fct_orders</code>, <code>mart_delivery_sla</code>, <code>dim_restaurants</code>, <code>stg_restaurants</code></td><td><code>stg_orders</code> + its descendants + every ancestor of <em>those descendants</em> — see Section 3</td></tr>
+</table>
+<p>The last row is the one worth slowing down on, because it's the row most likely to surprise someone who assumes <code>@</code> is just a fancier <code>+</code>. <code>stg_orders+</code> (row 1) stays strictly downstream of <code>stg_orders</code> — three nodes, no <code>dim_restaurants</code>, no <code>stg_restaurants</code>. <code>@stg_orders</code> pulls in two more nodes neither of those is related to by any direct ancestor/descendant path from <code>stg_orders</code> alone: <code>mart_delivery_sla</code> (a descendant of <code>stg_orders</code>) also depends on <code>dim_restaurants</code> and <code>stg_restaurants</code>, and <code>@</code>'s whole job is to also pull in every ancestor of every descendant it finds — so building <code>mart_delivery_sla</code> for real means also having a fresh <code>dim_restaurants</code> underneath it, and <code>@</code> is the operator that guarantees that, where plain <code>+</code> does not.</p>
+<div class="callout">Confirmed the inverse too: <code>--exclude "tag:nightly"</code> combined with <code>--select "stg_orders+"</code> resolved to just <code>stg_orders</code> alone — <code>fct_orders</code> and <code>mart_delivery_sla</code> both carry the <code>nightly</code> tag inherited from the marts folder, and <code>--exclude</code> removes a node (and anything that node's own tests depend on) from whatever <code>--select</code> already produced, the same AND-NOT logic a Python <code>set</code> difference would give.</div>
+
+<h2>3 · Why <code>@</code> exists at all: a build that references a stale table is not the same as a correct one</h2>
+<p>The gap <code>@</code> closes is a real correctness bug, not a style preference. Say an edit lands in <code>stg_orders.sql</code> and the dev loop runs <code>dbt build --select "stg_orders+"</code> — the honest, minimal selection for "rebuild what I touched and its descendants." <code>mart_delivery_sla</code> gets rebuilt in that run, correctly, as a fresh <code>select</code> over <code>fct_orders</code> and <code>dim_restaurants</code> — but <code>dim_restaurants</code> itself was <em>not</em> selected, so its table in the warehouse is whatever was last built, possibly days ago, possibly before a restaurant's <code>commission_rate</code> changed. <code>mart_delivery_sla</code> runs cleanly and reports success; the row it produces can still be wrong, built against a stale dimension <code>+</code> never thought to touch because <code>dim_restaurants</code> isn't downstream of <code>stg_orders</code> at all — it's a sibling ancestor of the same descendant.</p>
+<p><code>@stg_orders</code> is the expression that actually guarantees a correct rebuild of everything <code>stg_orders</code>'s change could affect: every descendant, and every ancestor those descendants need to be built correctly, recursively. It is less commonly reached for than plain <code>+</code> because it rebuilds more — the trade this course has made in every prior lesson (Day 15's CI, every manual <code>dbt build</code>) has been "rebuild everything" exactly to sidestep this exact gap, at the cost of speed. <code>@</code> is the one operator that keeps the speed of a narrow selection without reintroducing it.</p>
+
+<h2>4 · Build: a Makefile target that uses this for real</h2>
+<p>In your <code>food-delivery-pipeline</code> repo, add one target to the <code>Makefile</code> Day 26 already created, right alongside <code>demo</code>:</p>
+<pre><code><span class="kw">build-changed</span>: <span class="cm"># usage: make build-changed MODEL=stg_orders</span>
+	<span class="kw">cd</span> food_delivery_pipeline &amp;&amp; uv run --with <span class="str">"dbt-postgres==1.11.0"</span> dbt build --select <span class="str">"@$(MODEL)"</span> --profiles-dir .</code></pre>
+<p>This is deliberately the <code>@</code> form, not <code>$(MODEL)+</code> — a dev-loop target whose whole job is "rebuild everything a change to this one model could affect, correctly" should default to the operator that actually guarantees that, the same reasoning Section 3 just walked through. A faster, narrower <code>stg_orders+</code>-style run is still one plain <code>dbt build --select "..."</code> away any time the full correctness guarantee isn't needed — today's target is the safe default, not the only option.</p>
+
+<h2>5 · Verify: run it against your own project</h2>
+<pre><code>cd food_delivery_pipeline
+uv run --with "dbt-postgres==1.11.0" dbt list --select "stg_orders+" --resource-type model --profiles-dir .
+uv run --with "dbt-postgres==1.11.0" dbt list --select "@stg_orders" --resource-type model --profiles-dir .
+</code></pre>
+<p>Expected, against this course's real project shape (your own model list may differ slightly if you've added Day 48/49's histogram marts): the first command prints <code>stg_orders</code> and everything downstream of it; the second prints that same set plus <code>dim_restaurants</code> and <code>stg_restaurants</code> — the two nodes <code>mart_delivery_sla</code> needs that <code>+</code> alone doesn't reach. If your project's actual graph has <code>mart_delivery_sla</code> depending on more than one sibling ancestor by now, <code>@</code> will pull in all of them; that's the operator working as designed, not a bug in today's example. Then run the new target for real:</p>
+<pre><code>make build-changed MODEL=stg_orders</code></pre>
+<p>Expected: a normal <code>dbt build</code> run, ending the same way Day 14's did, but with fewer lines — only the nodes <code>@stg_orders</code> resolved to, not all six-plus models and their tests:</p>
+<pre><code>Done. PASS=N WARN=0 ERROR=0 SKIP=0 NO-OP=0 REUSED=0 TOTAL=N</code></pre>
+<p>Commit the <code>Makefile</code> change.</p>
+
+<div class="interview">
+<p><strong>Q: "Your dbt project has grown past 100 models. How do you avoid rebuilding all of them every time you touch one file locally?"</strong> A strong answer, out loud: <em>"dbt's node selection syntax lets --select and --exclude take graph operators, not just model names. model+ selects a model and everything downstream of it — the obvious first move for a local edit. But the operator I actually default to for 'did my change break anything' is @model: it also pulls in every ancestor of each descendant it finds, which matters because a descendant with a second parent I didn't touch still needs that second parent freshly built to be correct, not just present. model+ can report a clean build on a mart that's secretly still reading a stale sibling table — @model is the one that doesn't let that happen. I only reach for the narrower, faster form when I specifically don't need that guarantee, like a quick syntax check on one model alone."</em> The signal: naming @ as solving a real correctness gap plain + leaves open, not just "a faster version of the same thing."</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>--select</code>/<code>--exclude</code>, the <code>+</code> and <code>@</code> graph operators, and the <code>tag:</code> method, confirmed live against a scratch project shaped like this course's own. It does not cover every selection method dbt ships (<code>path:</code>, <code>source:</code>, <code>config:</code>, <code>test_type:</code>, and others — vocabulary only, same pattern as any method not hands-on this round), selector YAML files (<code>selectors.yml</code>, for naming a reusable expression once instead of retyping it — a real convenience at a scale this six-model project hasn't hit), or <code>state:</code> itself, which Day 15 already covered in depth as its own selector built specifically for CI, not today's local dev-loop angle.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed live this round: dbt list --select 'stg_orders+' resolved to stg_orders plus fct_orders and mart_delivery_sla -- every node downstream of stg_orders in the dependency graph, with the + operator placed after the model name reaching forward through the graph from that node.">
+    <p class="stem">What does <code>dbt build --select "stg_orders+"</code> actually rebuild?</p>
+    <button class="opt" data-ok><code>stg_orders</code> itself plus every single thing downstream of it</button>
+    <button class="opt">only the single named model <code>stg_orders</code> by itself alone</button>
+    <button class="opt">every single model in the whole project, exactly unchanged</button>
+  </div>
+  <div class="q" data-why="Confirmed live this round: @stg_orders resolved to five nodes, not three -- it included dim_restaurants and stg_restaurants because mart_delivery_sla (a real descendant of stg_orders) also depends on them, and @ pulls in every ancestor of every descendant it finds, not just the nodes strictly downstream of the named model.">
+    <p class="stem">Why did <code>@stg_orders</code> resolve to more nodes than plain <code>stg_orders+</code> in today's scratch project?</p>
+    <button class="opt" data-ok>it also pulls in ancestors that a descendant still depends on</button>
+    <button class="opt"><code>@</code> and <code>+</code> are simply two names for one identical operator</button>
+    <button class="opt">the scratch project's own <code>dbt_project.yml</code> file was configured wrong by accident</button>
+  </div>
+  <div class="q" data-why="This is the exact correctness gap Section 3 walked through: stg_orders+ rebuilds mart_delivery_sla as a fresh query over fct_orders and dim_restaurants, but dim_restaurants itself was never selected, so its underlying table could still be stale -- the build reports success while the mart's own output can still be wrong, built against an old dimension table nothing in that run touched.">
+    <p class="stem">Why can <code>dbt build --select "stg_orders+"</code> finish with zero errors, yet still produce a mart built against stale data?</p>
+    <button class="opt" data-ok>a sibling ancestor the mart also needs was never rebuilt</button>
+    <button class="opt">the <code>+</code> operator is fundamentally broken inside every dbt version</button>
+    <button class="opt"><code>dbt build</code> never actually checks any test on the node</button>
+  </div>
+  <div class="q" data-why="Confirmed live this round: tag:nightly resolved to every model carrying that tag -- fct_orders, dim_restaurants and mart_delivery_sla -- inherited from a single +tags config on the marts folder in dbt_project.yml, with no graph traversal involved at all; it is a label lookup, not an ancestor/descendant walk the way + and @ both are.">
+    <p class="stem">How does <code>tag:nightly</code> differ from a graph operator like <code>+</code> or <code>@</code>?</p>
+    <button class="opt" data-ok>it matches a label, with no graph walk at all</button>
+    <button class="opt">it is actually one more graph operator, just spelled differently</button>
+    <button class="opt">tags can only ever be set once per model file</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> dbt's <a href="https://docs.getdbt.com/reference/node-selection/methods">Node selection: methods</a> and <a href="https://docs.getdbt.com/reference/node-selection/graph-operators">Graph operators</a> docs — already cited in <code>RESOURCES.md</code> for Day 15's <code>state:</code> selector — are the same pages today's <code>+</code>/<code>@</code>/<code>tag:</code> claims come from; today reads them as the general mechanism Day 15 only used once, narrowly. Every claim above was also confirmed directly against a live <code>dbt list</code>, not taken from the docs' prose alone, the same discipline Days 48-49 used for <code>dbt_utils</code> macros.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 52.<br>
+<strong>Next up:</strong> a correction worth flagging plainly: Day 51's own closing note (and this file's NOTES.md entry) repeated a claim that <code>check_dead_letters</code> "remains... still just a print" — that's stale. Days 46 and 47 already replaced the stub with a real <code>psycopg</code> query, a fixed threshold, and a per-run delta cursor, confirmed live in both of those rounds. That thread is genuinely closed; nothing further is owed there. The <code>airflow db migrate</code>/<code>airflow dags test</code> approval-gate block remains the standing, unresolved environment limitation (now nineteen-plus rounds, 35-52) — still worth a human granting it once. Otherwise, today's own scope line names three real next steps if dbt selection is picked up again: <code>selectors.yml</code> for naming a reusable expression, the <code>path:</code>/<code>source:</code>/<code>config:</code> methods named but not built today, or wiring today's <code>@</code>-based <code>make build-changed</code> target into a pre-commit or pre-push hook so the safe default runs without anyone having to remember the command.<br><br>
+💬 Anything unclear — why <code>@</code> rebuilds more than <code>+</code>, or when the extra cost of <code>@</code> isn't worth paying? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

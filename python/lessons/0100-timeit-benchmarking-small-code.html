@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 100 · timeit: benchmarking small code correctly</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 100 · ~20 min · 6 Nov 2026</p>
+<h1><code>timeit</code>: benchmarking small code correctly</h1>
+<p class="byline">Day 73's <code>concurrent.futures</code> lesson drew a hard line between I/O-bound code (threads help) and CPU-bound code (threads don't) — but that line was asserted from GIL theory, never measured. The obvious next move, wrapping a snippet in <code>time.time()</code> calls, is a trap: one run is noisy — a stray OS scheduling hiccup or a cold cache can swing a single measurement by a large factor, making a slower piece of code look faster by pure chance. The standard-library <dfn data-en="The standard-library module for measuring how long a small piece of Python code takes to run, designed to avoid the common timing mistakes a hand-rolled time.time() measurement falls into -- it runs the snippet many times, uses a monotonic high-resolution clock, and (via Timer.repeat()) encourages reporting the minimum of several repeated measurements rather than trusting any single one." data-vn="giữ nguyên &quot;timeit module&quot; — module chuẩn đo thời gian chạy 1 đoạn code Python nhỏ, được thiết kế để tránh các lỗi đo thời gian phổ biến khi tự viết bằng time.time() -- nó chạy đoạn code nhiều lần, dùng clock monotonic độ phân giải cao, và (qua Timer.repeat()) khuyến khích báo cáo giá trị nhỏ nhất trong nhiều lần đo lặp lại thay vì tin vào 1 lần đo duy nhất.">timeit</dfn> module exists to measure this correctly instead of guessing.</p>
+
+<div class="callout"><strong>Why today, specifically:</strong> a fresh case-insensitive grep across every lesson title, every lesson body, every practice file, <code>reference/glossary.html</code>, and <code>RESOURCES.md</code> confirmed <code>timeit</code>, <code>array</code>, <code>types.SimpleNamespace</code>, <code>importlib</code>, and <code>locale</code> are all still genuinely zero-hit as dedicated topics. <code>socket</code> remains a genuine gap too, but checking the two modules named only "in passing" on the standing candidate list first: Day 73's own section 5 already gives <code>threading</code> a full dedicated treatment (race conditions, <code>threading.Lock</code>, a quiz question on the GIL) — so it is no longer an open gap, despite the label carried forward from an earlier round. Picked <code>timeit</code> over the remaining candidates: Day 73 made a real, falsifiable performance claim (I/O-bound threading helps, CPU-bound doesn't) and Day 2's comprehension-vs-loop lesson made another (comprehensions read better and are usually at least as fast) — neither was ever actually measured, so this closes two live claims at once with zero pandas/NumPy surface (benchmarking a snippet of plain Python has no library equivalent either course touches).</div>
+
+<h2>1 · <code>timeit.timeit()</code>: run a snippet many times, get a total</h2>
+<p><code>timeit.timeit(stmt, setup=..., number=...)</code> runs <code>stmt</code> <code>number</code> times back to back and returns the <em>total</em> elapsed seconds as a plain <code>float</code> — not a per-call average, and not wall-clock time for one run:</p>
+<pre><code><span class="kw">import</span> timeit
+
+t = timeit.timeit(<span class="str">"x = 1 + 1"</span>, number=100_000)
+<span class="kw">print</span>(t)
+<span class="cm"># 0.000927... -- confirmed live: total seconds for all 100,000 runs combined</span>
+<span class="cm"># divide by number yourself for a per-call average: t / 100_000</span></code></pre>
+<p>Running the snippet thousands of times on purpose is the point: any single run is swamped by noise from the OS scheduler, so the total over many runs is what actually separates "fast" from "slow." A callable works too, with no string-quoting needed — handy for timing a real function instead of a one-line expression:</p>
+<pre><code><span class="kw">def</span> work():
+    <span class="kw">return</span> <span class="kw">sum</span>(<span class="kw">range</span>(100))
+
+t2 = timeit.timeit(work, number=1000)
+<span class="cm"># 0.000696... -- confirmed live, no quotes, no setup needed for a self-contained function</span></code></pre>
+
+<h2>2 · <code>setup=</code>: build the data once, without timing the building</h2>
+<p>Timing <code>sorted(data)</code> is meaningless if building <code>data</code> itself is included in every one of the thousand runs — that would measure list construction, not sorting. <code>setup=</code> runs once per call to <code>timeit()</code> (not once per repetition) and its result stays available to <code>stmt</code> without being counted:</p>
+<pre><code>t3 = timeit.timeit(
+    <span class="str">"sorted(data)"</span>,
+    setup=<span class="str">"data = list(range(1000, 0, -1))"</span>,
+    number=1000,
+)
+<span class="cm"># 0.00528... -- confirmed live, only sorted() itself is in the timed total</span></code></pre>
+<p>By default, <code>stmt</code> and <code>setup</code> run in a fresh, isolated namespace — a name defined in the calling code is <strong>not</strong> visible by default, confirmed live by a plain variable reference raising <code>NameError</code> until <code>globals=globals()</code> is passed explicitly to open that namespace up. This isolation is deliberate: it stops a benchmark from accidentally depending on unrelated state left over in the calling scope.</p>
+
+<h2>3 · Answering Day 73's and Day 2's open claims</h2>
+<p>Comparing two snippets under identical <code>number=</code> settles which one is actually faster, instead of trusting an assumption about comprehensions reading better than a loop:</p>
+<pre><code>t_comp = timeit.timeit(<span class="str">"[x * 2 for x in range(1000)]"</span>, number=1000)
+t_loop = timeit.timeit(
+    <span class="str">"result = []\nfor x in range(1000):\n    result.append(x * 2)"</span>,
+    number=1000,
+)
+<span class="cm"># confirmed live: t_comp &lt; t_loop -- the comprehension is also measurably faster here,</span>
+<span class="cm"># not only more idiomatic, closing the claim Day 2 left asserted but unmeasured</span></code></pre>
+<p>A single <code>timeit()</code> call is still one measurement of a total, and totals can vary run to run. <code>timeit.repeat(stmt, number=..., repeat=...)</code> runs the whole <code>number</code>-times measurement <code>repeat</code> times over and returns a list of totals — confirmed live, a 5-repeat call returns a list of exactly 5 floats. The documented recommendation is to trust the <strong>minimum</strong> of that list, not the average: the minimum is the closest any run got to an uninterrupted measurement, while slower entries mostly reflect noise (another process briefly stealing the CPU) rather than the code actually being slower sometimes.</p>
+
+<div class="callout"><strong>Where pandas/NumPy go from here:</strong> nowhere directly — benchmarking a plain Python snippet is a layer below either library. Comparing a pandas vectorized operation against a manual Python loop over a <code>DataFrame</code> is a realistic next use of this same module, but that comparison is <code>data/</code>'s job and isn't demonstrated here.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/100_timeit_benchmarking.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/100_timeit_benchmarking.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: timing a snippet with <code>timeit.timeit()</code> and a given <code>number=</code>, using <code>setup=</code> so the timed total excludes data construction, comparing two snippets to find which one is faster, and reading the minimum out of a <code>timeit.repeat()</code> list rather than trusting a single total.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="timeit.timeit() returns the total elapsed seconds for running stmt number times back to back, confirmed live (0.000927s total for number=100_000, not 0.000927s per call). Dividing the returned total by number gives a per-call average; the function itself never does that division.">
+    <p class="stem">What does <code>timeit.timeit("x = 1 + 1", number=100_000)</code> actually return?</p>
+    <button class="opt" data-ok>the total elapsed seconds for all 100,000 runs added up together now</button>
+    <button class="opt">the average elapsed seconds for just one single run, already divided out</button>
+    <button class="opt">the count of runs that finished before some fixed time limit expired</button>
+  </div>
+  <div class="q" data-why="setup= runs exactly once per call to timeit(), before any timed repetition begins, and its result (like the data list here) stays available to stmt without being counted toward the timed total -- confirmed live, only sorted() itself showed up in the measured 0.00528s, not the list construction.">
+    <p class="stem">Why pass <code>setup="data = list(range(1000, 0, -1))"</code> instead of just writing <code>"data = list(range(1000, 0, -1)); sorted(data)"</code> as the whole <code>stmt</code>?</p>
+    <button class="opt" data-ok>so building the list only happens once, excluded from the timed sort total</button>
+    <button class="opt">setup is strictly required syntax any time a stmt string refers to name</button>
+    <button class="opt">it makes the sort itself run using some noticeably different algorithm choice here</button>
+  </div>
+  <div class="q" data-why="timeit.repeat() runs the full number-times measurement repeat separate times and returns a list of totals, confirmed live as exactly 5 floats for repeat=5. The documented guidance is to trust the minimum of that list: it sits closest to an uninterrupted measurement, while higher entries mostly reflect outside noise -- a stray scheduling hiccup -- rather than the code genuinely running slower on those particular repeats.">
+    <p class="stem">Given the list of totals <code>timeit.repeat(..., repeat=5)</code> returns, which value should actually be trusted as the benchmark result?</p>
+    <button class="opt" data-ok>the minimum value in the list, since it's closest to a noise-free run here</button>
+    <button class="opt">the maximum value in the list, since slower totals are the safest estimate here</button>
+    <button class="opt">the very last value in the list, since later runs always warm up caches</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the standard library's <a href="https://docs.python.org/3/library/timeit.html"><code>timeit</code></a> docs — short, covers <code>timeit()</code>/<code>repeat()</code>/the <code>Timer</code> class directly, the default <code>number=1_000_000</code> and <code>globals=</code> isolation this lesson relied on, and the command-line <code>python -m timeit</code> entry point not demonstrated here.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day100">glossary</a> under Day 100.<br>
+💬 Anything unclear — why <code>timeit</code> uses <code>time.perf_counter()</code> instead of plain <code>time.time()</code>, or how to benchmark something that needs actual I/O instead of pure computation? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

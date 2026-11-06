@@ -6004,3 +6004,128 @@ along the Phase 2 spine, adapted to the learning records.
   across three lessons now (45, 46, 47 all left it for "next time it's
   picked up") — a concrete, already-designed next step if Airflow is picked
   again before a fresh gap-scan is needed.
+
+- 2026-11-06 (headless run, Day 52 generated): fifty-second lesson,
+  `0052-dbt-node-selection.html`. Idempotency check first — confirmed no
+  `lessons/0052-*.html` on disk (highest prior was 51, dated 2026-11-05), no
+  `n: 52` row in `assets/nav.js`, and no 2026-11-06 entry in this file before
+  writing anything. DB reads were not attempted (`psql`/`bin/query-progress`
+  are flagged unreliable in this sandbox per standing instructions, and the
+  orchestrator had already confirmed no completion/quiz/kata signal since
+  2026-10-15 — nothing to gain from a repeat attempt). Read `MISSION.md` and
+  `PLAN.md` in full, `RESOURCES.md` in full, this file's tail through Day
+  51's close, `assets/nav.js`'s full `LESSONS` array, `reference/glossary.html`'s
+  tail, and Lessons 45-51 in full (not just 50-51) for style and recent-topic
+  coverage before picking anything.
+  **Topic choice:** Day 51's own closing note named a concrete next step —
+  wiring Day 46-47's dead-letter threshold/delta logic "into the live task,
+  still just a `print`." Read Days 45-47 in full specifically to check this
+  claim before building on it, and it does not hold: Day 46 already replaced
+  `check_dead_letters`'s `print` stub with a real `psycopg` `COUNT(*)` and a
+  fixed-threshold `raise`, and Day 47 already replaced that running total
+  with a per-run `Variable`-cursor delta — both edits landed directly in
+  `dags/food_delivery_pipeline.py`'s real task body, confirmed by rereading
+  Day 47 Section 3's code block, which *is* the live task. Day 51's note (and
+  the NOTES.md entry that generated it) appears to have carried forward a
+  stale claim rather than rereading 46-47 before writing it. Flagged this
+  correction directly inside today's own lesson (closing section) rather
+  than silently following a stale instruction, and did not attempt to edit
+  Days 45/46/47/51 themselves, since the brief is append-only.
+  With that thread confirmed already closed, fell back to the fresh gap-scan
+  Day 47's and Day 50's own closing notes both named as the right move once
+  no concrete named thread survives scrutiny. Listed every lesson title
+  (`grep -H -m1 "<title>" *.html`) and grepped for coverage of several
+  candidate dbt topics: `generate_surrogate_key` (found, Day 11, done in
+  depth), `accepted_range`/`relationships` (found, Days 3/11/12/14/27/42,
+  done), source freshness (found, woven through Days 2/3/4/6/15/26/27/30/33,
+  not a standalone gap), and node-selection syntax beyond `state:modified+`
+  (`--select`/`--exclude`/`tag:`/graph operators `+`/`@`) — found only inside
+  Day 15's narrow `state:` context, never taught as the general mechanism it
+  actually is. Confirmed via a second grep (`--select|selector|tag:` across
+  all lessons) that no lesson teaches `+`/`@`/`tag:` on their own terms. This
+  is dbt's deepest-weighted track (50% per `PLAN.md`) and the single most
+  used command-line skill in a real local dev loop — a materially more
+  load-bearing pick than a third histogram variant, and a genuine extension
+  of Day 15 rather than a re-teach of it.
+  **Content:** `--select`/`--exclude`, the `+` and `@` graph operators, and
+  `tag:`, taught against a scratch project shaped exactly like this course's
+  real one (three staging models feeding `fct_orders`/`dim_restaurants`,
+  both feeding `mart_delivery_sla`). The core claim, confirmed live rather
+  than assumed from the docs: `model+` stays strictly downstream, while
+  `@model` additionally pulls in every ancestor of every descendant it
+  finds — a real correctness gap, not just a syntax variant, since a plain
+  `+`-selected rebuild can report success while a mart still reads a stale
+  sibling-ancestor table `+` never reached. Ends with a `make build-changed
+  MODEL=...` Makefile target (alongside Day 26's `demo` target) that
+  defaults to the `@`-form specifically because of that gap. Bridges to
+  Day 15's `state:modified+` explicitly (same `+` operator, narrower prior
+  use) rather than re-teaching it. No pandas, no Python-language teaching,
+  no API/idempotency re-derivation — confirmed via a `pandas|numpy` grep
+  (zero hits) and a prose read before shipping.
+  **Verification:** built a full scratch dbt project at
+  `.scratch-dataeng-52/` (repo root; `/tmp` unavailable, matching recent
+  rounds) — `dbt_project.yml` with folder-level `+tags` (`hourly` on
+  staging, `nightly` on marts), `profiles.yml`, three staging models, three
+  marts, `sources.yml` and `schema.yml` with `unique`/`not_null` tests on
+  `fct_orders.order_id` and `dim_restaurants.restaurant_id`. Ran `uv run
+  --with "dbt-postgres==1.11.0" dbt parse --profiles-dir .` twice (once per
+  scratch build, since the first was deleted and rebuilt to double-check the
+  exact Verify-section commands): both clean, zero case-insensitive `error`
+  hits (checked by rereading full command output directly, console pipes to
+  `grep` being blocked by this sandbox's own approval rules this round).
+  Ran `dbt list --select "<expr>" --resource-type model/test` for five
+  expressions and confirmed every resolved node set against the docs'
+  stated semantics by reading the output directly: `stg_orders+` → 3 models
+  (strictly downstream); `+fct_orders` → upstream only, plus the source;
+  `+mart_delivery_sla+` → all 5 models; `tag:nightly` → the 3
+  tag-inherited marts, no graph walk; `@stg_orders` → 5 models, confirmed
+  to include `dim_restaurants`/`stg_restaurants` that plain `stg_orders+`
+  does not. Also confirmed `--select "stg_orders+" --exclude "tag:nightly"`
+  nets out to `stg_orders` alone, and `dbt list --resource-type test`
+  resolves all four test names cleanly. Deleted `.scratch-dataeng-52/` (and
+  its rebuild) after; confirmed via a directory listing that nothing named
+  `scratch-dataeng` remained at the repo root (two unrelated sibling
+  scratch dirs from other courses' concurrent runs were left untouched).
+  Quiz word counts verified by two independent methods: manual token
+  counting while drafting, then `printf '%s\n' "<option text>" | wc -w` run
+  against the final file text for every one of the 12 options, iterating
+  several options to reach an exact match — final counts 9/9/9, 11/11/11,
+  10/10/10, 10/10/10 across the four questions. HTML structure verified via
+  paired open/close Grep counts on every tag that appears (`div` 8/8, `p`
+  22/22, `code` 41/41, `button` 12/12, `script` 3/3, `dfn` 2/2 — both
+  carrying `data-en=`/`data-vn=` — `pre` 5/5, `h2` 8/8, `h1` 1/1, `em` 6/6,
+  `strong` 4/4, `a` 2/2, `table` 1/1, `tr` 6/6, `td` 5/5, `th` 1/1) and a
+  bare-`&` regex scan (zero hits, case-insensitive-irrelevant since the
+  pattern is punctuation). `reference/glossary.html` re-checked after
+  appending Day 52's section: `h2` 51/51, `table` 51/51, `tr` 191/191, `td`
+  420/420 (verified by `-o` occurrence count after Grep's line-count mode
+  undercounted multi-`<td>` lines — same false alarm worth remembering next
+  round), zero bare `&`. `node --check` clean on `nav.js`, `gloss.js` and
+  `quiz.js`, both before and after today's `nav.js` edit.
+  Added two new glossary terms, `node selection` and `graph operator`, under
+  a new Day 52 section, after confirming via case-insensitive grep that
+  neither term (nor "selector") had ever been defined before. No new
+  `RESOURCES.md` line added — today's primary sources (dbt's Node selection:
+  methods and Graph operators pages) were already cited under Day 15's
+  `state:` entry; today just reads them as the general mechanism rather
+  than adding a new citation.
+  Registered Lesson 52 in `assets/nav.js` right after the `n: 51` entry,
+  dated 2026-11-06.
+  `dataeng/learning-records/` was not touched this round — today's pick came
+  from a fresh gap-scan after Day 51's named thread was checked and found
+  already closed, not a new durable fact about the learner distinct from
+  the single 2026-09-14 baseline record on file.
+  **Next up:** the `airflow db migrate`/`airflow dags test` approval-gate
+  block remains the standing, unresolved environment limitation (now
+  nineteen-plus rounds, 35-52) — still worth a human granting it once.
+  `check_dead_letters`'s TODO chain (Days 45-47) is genuinely closed as of
+  this round's correction — no further action owed there regardless of what
+  any single prior closing note claims; reread the actual lesson body, not
+  just the most recent note, before trusting a "still open" claim again.
+  Today's own scope line names three concrete next steps if dbt selection is
+  picked up again: `selectors.yml` for naming a reusable expression,
+  the `path:`/`source:`/`config:` methods named but not hands-on this round,
+  or wiring the new `@`-based `make build-changed` target into a pre-commit
+  hook. Otherwise, a fresh gap-scan across Kafka or Airflow is the more
+  likely next pick, since dbt has now had the most recent attention (48,
+  49, 52).

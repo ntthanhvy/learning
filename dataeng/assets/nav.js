@@ -64,6 +64,7 @@
     { n: 49, date: "2026-11-03", title: "A per-city delivery-time histogram: crossing two grids, not one", file: "lessons/0049-dbt-histogram-by-city.html" },
     { n: 50, date: "2026-11-04", title: "Kafka producer backpressure: BufferError and the delivery report you're ignoring", file: "lessons/0050-kafka-producer-backpressure.html" },
     { n: 51, date: "2026-11-05", title: "Airflow TaskGroups: the thing Cosmos was using all along", file: "lessons/0051-airflow-task-groups.html" },
+    { n: 52, date: "2026-11-06", title: "dbt node selection: --select, --exclude & the +/@ graph operators", file: "lessons/0052-dbt-node-selection.html" },
   ];
 
   const REFS = [

@@ -254,6 +254,8 @@
       file: "lessons/0122-webhook-signature-verification-hmacsha256-fixedtimeequals.html" },
     { n: 123, date: "2026-11-05", title: "Service-to-service auth, now in C# too",
       file: "lessons/0123-service-to-service-auth-addcertificate-addjwtbearer.html" },
+    { n: 124, date: "2026-11-06", title: "Password hashing, now in C# too",
+      file: "lessons/0124-password-hashing-identity-passwordhasher.html" },
   ];
 
   const REFS = [

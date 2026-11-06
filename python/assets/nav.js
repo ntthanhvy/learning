@@ -206,6 +206,8 @@
       file: "lessons/0098-string-template.html" },
     { n: 99, date: "2026-11-05", title: "Review day 18: retrieval across Days 96-98",
       file: "lessons/0099-review-retrieval-day-18.html" },
+    { n: 100, date: "2026-11-06", title: "timeit: benchmarking small code correctly",
+      file: "lessons/0100-timeit-benchmarking-small-code.html" },
   ];
 
   const REFS = [

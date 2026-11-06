@@ -10294,3 +10294,123 @@
   scope per MISSION.md's "concepts first" rule; and the backfill-missing-
   Lesson-117-NOTES-entry gap flagged four rounds ago, still not
   independently investigated.
+- 2026-11-06 (headless 06:00 run): idempotency check first — confirmed no
+  `lessons/0124-*.html` on disk and no `n: 124`/`date: "2026-11-06"` entry in
+  `nav.js` before writing anything (highest prior lesson was 123, dated
+  2026-11-05), and no 2026-11-06 entry already in this file. Orchestrator-
+  provided context: the Neon DB (`course_progress`/`psql`) remained
+  unreachable for direct reads this round (hard-blocked by sandbox static
+  analysis), and the orchestrator had already confirmed via the DB that no
+  `lesson_completed`/quiz/kata signal has been recorded for any course since
+  2026-10-15 (backend's own Lesson 102 quiz, all `ok: true`) — no weak spot
+  to chase, so steady sequential pacing continued. Read all three
+  `learning-records/` files in full (0001 baseline, 0002 concurrency-
+  vocabulary gap, 0003 mission's .NET addition) — no new durable fact about
+  the learner surfaced beyond what prior rounds already captured. Topic
+  choice: ran a fresh gap scan across all 123 lesson titles rather than
+  carrying forward a stale candidate list, cross-referencing which Go
+  originals (Lessons 1-102) already have a C#-port lesson (103-123) against
+  ones that don't. Several candidates surfaced — Lesson 35's upsert/ON
+  CONFLICT, Lesson 51's ETags/conditional requests, Lesson 83's Problem
+  Details RFC 7807 — but picked Lesson 48's password hashing: unlike
+  bcrypt's hand-rolled Go pattern, ASP.NET Core Identity ships a genuine
+  first-party class, `PasswordHasher<TUser>`, that does the whole job, and
+  it surfaces one mechanism Go's `bcrypt` package never offered at all —
+  `PasswordVerificationResult.SuccessRehashNeeded`, a built-in "this hash is
+  on outdated settings, upgrade it now" signal, where Go's
+  `bcrypt.CompareHashAndPassword` returns only a binary correct/incorrect
+  with no such signal. Confirmed this in depth via four `WebFetch` calls
+  before writing anything: `.../security/data-protection/consumer-apis/password-hashing`
+  confirmed the lower-level `KeyDerivation.Pbkdf2` primitive and, critically,
+  its own explicit warning that it "shouldn't be used in new apps that
+  support password-based sign in and which need to store hashed passwords,"
+  pointing instead at `PasswordHasher<TUser>` — confirming the higher-level
+  class was the right pick, not the primitive; `.../microsoft.aspnetcore.identity.passwordhasher-1`
+  confirmed the `HashPassword(TUser, string)`/`VerifyHashedPassword(TUser,
+  string, string)` method pair; `.../microsoft.aspnetcore.identity.passwordverificationresult`
+  confirmed the exact three-way enum wording quoted in the lesson (`Failed`
+  = 0, `Success` = 1, `SuccessRehashNeeded` = 2, "the password was encoded
+  using a deprecated algorithm and should be rehashed and updated"); and
+  `.../microsoft.aspnetcore.identity.passwordhasheroptions` confirmed the
+  default `IterationCount` of 100,000 and that `CompatibilityMode` defaults
+  to "ASP.NET Identity version 3" (matching the PBKDF2/HMACSHA256/128-bit-
+  salt/256-bit-subkey parameters the first fetch's own code sample showed).
+  All four `learn.microsoft.com` fetches returned cleanly in full,
+  consistent with this run's standing finding that this domain fetches
+  reliably. Read `MISSION.md`, `RESOURCES.md`, this file's tail (Lessons
+  120-123 in full), Lesson 48 (the Go original), Lesson 51 and Lesson 83
+  (two other candidates, read in full to compare strength before picking),
+  and Lesson 122/123 (the two most recent C#-port lessons, as structural
+  templates) in full, and `nav.js`'s and `glossary.html`'s tails, all before
+  writing anything. `dotnet --version` was not attempted this round
+  (consistent with every round since Lesson 103's finding that it hits an
+  interactive-approval gate with no user present); the C# snippets were
+  checked by hand against all four fetched docs pages' own reference
+  material (the exact `HashPassword`/`VerifyHashedPassword` signatures, the
+  `PasswordVerificationResult` enum's three named members and values, a
+  `PasswordHasher<AppUser>` field declaration and construction) and
+  confirmed syntactically consistent — brace count 9/9, paren count 19/19
+  across the two C# blocks, correct pattern-matching (`is ... or ...`) and
+  tuple-return syntax, no undeclared identifiers — though this falls short
+  of an actual compile, flagged here as such, same caveat as every C#-port
+  round. Two new terms, each checked against the glossary first via case-
+  insensitive grep across the whole file — zero collisions confirmed before
+  writing: `PasswordHasher<TUser>`, `PasswordVerificationResult`. Added both
+  rows immediately after Lesson 123's `AddCertificate` row, same
+  Term/Tiếng Việt (dev-style)/English column order, confirmed by inspecting
+  the file's actual last row directly rather than assumed. Verification
+  performed mechanically via throwaway Node scripts run with `node -e`
+  (nothing written to a file, so nothing to delete): (1) a quiz-word-count
+  check scoped per `<div class="q">` block, splitting every option both via
+  `.split(/\s+/)` and `.split(" ")` — first draft landed uneven on all four
+  questions (Q1 8/10/10/9, Q2 11/10/10/10, Q3 11/13/9/12, Q4 9/10/8/8), fixed
+  through several rewrite-and-recount passes per option (checking candidate
+  phrasings in the same script before committing them, including one pass
+  that overshot and needed a second correction on Q3), converged to exactly
+  10/10/10/10, 10/10/10/10, 12/12/12/12, and 11/11/11/11 across the four
+  questions, both counting methods agreeing exactly, exactly one `data-ok`
+  and four options per question confirmed the same way; (2) an HTML
+  tag-balance check across div/p/code/button/script/dfn/pre/h2/h1/em/
+  strong/a/table/tr/th/td — clean on the first pass (div 7/7, p 15/15, code
+  38/38, button 16/16, script 3/3, dfn 2/2, pre 2/2, h2 6/6, h1 1/1, em 0/0,
+  strong 3/3, a 5/5, table 1/1, tr 6/6, th 8/8, td 10/10); both `dfn` tags
+  confirmed to carry both `data-en=` and `data-vn=` by direct regex match on
+  the full tag span; a separate table/tr/th/td/p/div/html/head/body/title/
+  script balance check on `glossary.html` after its two-row addition — also
+  balanced (tr 394/394, td 1179/1179), plus a duplicate-term scan across all
+  393 first-column entries — zero duplicates; (3) a raw-unescaped-`&` regex
+  scan across both files — zero hits; (4) `node --check` against
+  `assets/nav.js`, `assets/gloss.js`, and `assets/quiz.js` — all clean, both
+  before and after the `nav.js` edit; (5) a basic HTML well-formedness check
+  (exactly one `<!DOCTYPE html>`, one `<html>`/`</html>`, three script tags
+  with `gloss.js`/`quiz.js`/`nav.js` in that order) — clean; (6) a grep for
+  stray markdown-style backticks and `*emphasis*` left over from drafting —
+  none found. Registered Lesson 124 in `nav.js` (date 2026-11-06, today's
+  actual generation date) right after `n: 123`, confirmed exactly one
+  matching `n: 124` entry and exactly one matching `0124-*.html` file on
+  disk afterward. No new `RESOURCES.md` line added this round — all four
+  fetched pages are Microsoft's own docs, same domain already covered by
+  the standing `learn.microsoft.com` entries' pattern, and this round reused
+  no prior URL; all four are cited inline in the lesson's own "Go deeper"
+  section instead, consistent with how every prior C#-port round has
+  handled freshly-fetched same-domain pages. No new `learning-records/`
+  file this round — the topic came from a fresh gap scan of existing lesson
+  titles, not a new surprise about the learner's baseline or a quiz
+  outcome. Candidates spotted but not picked this round, still worth
+  checking fresh next time: Go's `select`-statement arbitration rules, now
+  deferred for a fourteenth round running, same standing finding that the
+  blocker is the fetched page's own content truncation, not a permission
+  gate or URL/mirror choice; Lesson 49's dead-letter queues, still
+  deferred — still no first-party ASP.NET Core angle found, would need a
+  specific message-broker SDK (e.g. Azure Service Bus's own dead-letter
+  queue feature); Lesson 35's upsert/ON CONFLICT (Postgres-native, likely no
+  clean C# BCL/EF-Core-first-party angle, not yet checked in depth); Lesson
+  51's ETags/conditional requests (a strong candidate, HTTP-native rather
+  than language-native, so may not need a "C# port" framing at all — worth
+  checking whether ASP.NET Core has first-party ETag middleware); Lesson
+  83's Problem Details RFC 7807 (ASP.NET Core has first-party
+  `ProblemDetails`/`IProblemDetailsService` support, a strong candidate, not
+  yet checked in depth); Polly (or a .NET resilience-library survey more
+  broadly), still deliberately out of scope per MISSION.md's "concepts
+  first" rule; and the backfill-missing-Lesson-117-NOTES-entry gap flagged
+  four rounds ago, still not independently investigated.

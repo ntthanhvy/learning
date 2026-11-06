@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 120 · np.lexsort(): multi-key sort positions, keys passed in a backwards-looking order</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 120 · ~20 min · 6 Nov 2026</p>
+<h1>np.lexsort(): multi-key sort positions, keys passed in a backwards-looking order</h1>
+<p class="byline">Lesson 119 closed with two standing candidates from a fresh curriculum/glossary scan: <code>np.lexsort()</code> and <code>np.partition()</code>/<code>argpartition()</code>. A fresh grep of every lesson, practice file, and the glossary reconfirms both are still genuinely untaught — today picks <code>np.lexsort()</code>: it is the direct multi-key sibling of Lesson 73's single-key <code>argsort()</code>, and a first probe turned up a parameter-order convention sharp enough to get backwards in an interview without ever triggering an error.</p>
+
+<h2>1 · The gap: argsort() answers "where" for one key, lexsort() answers it for several</h2>
+<p>Lesson 73's <code>argsort()</code> returns the positions that would sort a single array. Real sorting tasks often need a tiebreaker — sort by last name, and within matching last names, by first name. <dfn data-en="a NumPy function returning the integer POSITIONS that would sort data by multiple keys at once, with ties on the primary key broken by the next key, and so on -- the direct multi-key sibling of argsort(), which only ever handles a single key" data-vn="giữ nguyên 'np.lexsort()' — trả về DÃY VỊ TRÍ để sắp dữ liệu theo NHIỀU khóa (key) cùng lúc, khóa đầu dùng để sắp chính, trùng (tie) thì mới xét khóa kế tiếp để phân định tiếp; là phiên bản nhiều khóa của argsort() (argsort() chỉ xử lý được 1 khóa)">np.lexsort()</dfn> is that function — it takes a tuple of same-length key arrays and returns one array of positions, exactly like <code>argsort()</code>, but resolving ties across however many keys are given. Confirmed directly (numpy 2.5.4), sorting a small name table by last name, then first name as tiebreaker:</p>
+<pre><code><span class="kw">import</span> numpy <span class="kw">as</span> np
+<span class="kw">import</span> pandas <span class="kw">as</span> pd
+
+last_name  = np.array([<span class="kw">"Tran"</span>, <span class="kw">"Tran"</span>, <span class="kw">"Le"</span>, <span class="kw">"Le"</span>])
+first_name = np.array([<span class="kw">"Binh"</span>, <span class="kw">"An"</span>, <span class="kw">"Chi"</span>, <span class="kw">"An"</span>])
+
+order = np.lexsort((first_name, last_name))
+<span class="cm"># order = array([3, 2, 1, 0])</span>
+last_name[order]   <span class="cm"># array(['Le', 'Le', 'Tran', 'Tran'])</span>
+first_name[order]  <span class="cm"># array(['An', 'Chi', 'An', 'Binh'])  -- within "Le": "An" before "Chi"</span></code></pre>
+<p>The result groups both "Le" rows together, both "Tran" rows together, and breaks the "Le" tie correctly by first name ("An" before "Chi") — exactly the split-ties-by-the-next-key behavior a multi-column sort needs.</p>
+
+<h2>2 · The sharp catch: the LAST key passed is the PRIMARY sort key</h2>
+<div class="callout"><strong>Confirmed directly against the official NumPy docs, matching its own worked example exactly:</strong> <code>np.lexsort((first_name, last_name))</code> sorted by <code>last_name</code> first — but <code>last_name</code> was the <em>second</em> item in the tuple, not the first. The rule, stated plainly in the official docs: <em>"the last key in the sequence is used for the primary sort order; ties are broken by the second-to-last key, and so on."</em> The tuple order is backwards from how most people would guess reading it left to right. Confirmed directly by swapping the tuple order and watching the sort key flip:</p>
+<pre><code><span class="cm"># swapped tuple order: first_name is now LAST -&gt; first_name becomes PRIMARY</span>
+wrong_for_our_goal = np.lexsort((last_name, first_name))
+first_name[wrong_for_our_goal]  <span class="cm"># array(['An', 'An', 'Binh', 'Chi'])  -- sorted by FIRST name now, not last</span></code></pre>
+<p>Confirmed directly, this exact tuple order matches <code>pandas.DataFrame.sort_values(by=[...])</code>'s own left-to-right reading exactly — once the tuple is built right-to-left (primary key last):</p>
+<pre><code>df = pd.DataFrame({<span class="kw">"last_name"</span>: last_name, <span class="kw">"first_name"</span>: first_name})
+sv = df.sort_values(by=[<span class="kw">"last_name"</span>, <span class="kw">"first_name"</span>])
+sv.index.tolist()        <span class="cm"># [3, 2, 1, 0]</span>
+order.tolist()            <span class="cm"># [3, 2, 1, 0]  -- IDENTICAL positions</span></code></pre>
+<p><code>sort_values(by=["last_name", "first_name"])</code> reads primary-first, left to right — the natural order. <code>np.lexsort((first_name, last_name))</code> needs the identical two keys passed in the opposite order to produce the same result. Getting this backwards never raises an error; it silently sorts by the wrong column first, which is exactly what makes it an interview-worthy trap rather than a one-line footnote.</div>
+
+<h2>3 · Single key: lexsort() collapses to exactly argsort()</h2>
+<p>Confirmed directly: wrapping a single array in a one-element tuple gives byte-identical output to Lesson 73's <code>argsort()</code> on that same array — <code>lexsort()</code> is a strict generalization, not a different algorithm:</p>
+<pre><code>x = np.array([<span class="kw">30.0</span>, <span class="kw">10.0</span>, <span class="kw">20.0</span>])
+
+np.lexsort((x,))   <span class="cm"># array([1, 2, 0])</span>
+np.argsort(x)        <span class="cm"># array([1, 2, 0])  -- IDENTICAL</span></code></pre>
+<p>The trailing comma inside <code>(x,)</code> is required — Python's own single-element-tuple syntax, not a <code>lexsort()</code> quirk — since <code>lexsort()</code> always expects a sequence of keys, even a sequence of one.</p>
+
+<h2>4 · No ascending= keyword, and strings can't use argsort()'s negation trick</h2>
+<p>Confirmed directly: like <code>argsort()</code>, <code>lexsort()</code> takes no <code>ascending=</code> parameter at all — passing one raises <code>TypeError: lexsort() got an unexpected keyword argument 'ascending'</code>. Lesson 73's fix for <code>argsort()</code> was negating the numeric values first. That trick fails outright on strings: <code>-last_name</code> raises <code>UFuncTypeError</code>, since negation has no meaning for text. The confirmed working alternative for a string key: <code>pd.factorize(..., sort=True)</code> turns the strings into sorted dense integer codes first (Lesson 68), and <em>those</em> codes negate cleanly:</p>
+<pre><code>codes, uniques = pd.factorize(last_name, sort=<span class="kw">True</span>)
+<span class="cm"># codes = array([1, 1, 0, 0]), uniques = Index(['Le', 'Tran'])</span>
+
+order_desc = np.lexsort((first_name, -codes))   <span class="cm"># descending last_name, ascending first_name tiebreak</span>
+last_name[order_desc]   <span class="cm"># array(['Tran', 'Tran', 'Le', 'Le'])</span>
+first_name[order_desc]  <span class="cm"># array(['An', 'Binh', 'An', 'Chi'])</span>
+
+df.sort_values(by=[<span class="kw">"last_name"</span>, <span class="kw">"first_name"</span>], ascending=[<span class="kw">False</span>, <span class="kw">True</span>]).index.tolist()
+<span class="cm"># [1, 0, 3, 2]  -- IDENTICAL positions to order_desc above</span></code></pre>
+
+<h2>5 · NaN sorts to the end, matching sort_values() exactly — and mismatched shapes raise ValueError</h2>
+<p>Confirmed directly, and confirmed absent from the official docs page (no mention of NaN handling at all): a NaN in any key sorts to the end of that key's ordering, the same placement <code>argsort()</code> already uses (Lesson 73) and the same placement <code>DataFrame.sort_values()</code> uses by default — all three agree, so this is not a trap the way Lessons 118/119's NaN findings were:</p>
+<pre><code>primary = np.array([<span class="kw">1.0</span>, np.nan, <span class="kw">1.0</span>, np.nan, <span class="kw">2.0</span>])
+secondary = np.array([<span class="kw">5</span>, <span class="kw">1</span>, <span class="kw">3</span>, <span class="kw">9</span>, <span class="kw">0</span>])
+
+np.lexsort((secondary, primary)).tolist()   <span class="cm"># [2, 0, 4, 1, 3]</span>
+pd.DataFrame({<span class="kw">"primary"</span>: primary, <span class="kw">"secondary"</span>: secondary}) \
+  .sort_values(by=[<span class="kw">"primary"</span>, <span class="kw">"secondary"</span>]).index.tolist()
+<span class="cm"># [2, 0, 4, 1, 3]  -- IDENTICAL, NaN rows pushed last in both</span></code></pre>
+<p>Confirmed directly: keys of mismatched length raise <code>ValueError: all keys need to be the same shape</code> immediately — never a silent broadcast or truncation.</p>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>np.lexsort()</code>'s multi-key position-returning contract, the confirmed last-key-is-primary parameter order and its exact match to <code>sort_values(by=[...])</code> once the tuple is reversed, its confirmed collapse to plain <code>argsort()</code> on a single key, the confirmed absence of an <code>ascending=</code> parameter plus the <code>factorize(sort=True)</code>-then-negate workaround for string keys, and the confirmed NaN-sorts-last placement matching <code>sort_values()</code>. It does not cover <code>np.lexsort()</code>'s <code>axis=</code> parameter on multi-dimensional keys (out of scope per <code>MISSION.md</code>'s "deep NumPy" exclusion — this course's data is tabular, not N-dimensional) nor <code>np.partition()</code>/<code>argpartition()</code> (a separate standing candidate, deferred below).</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/120_np_lexsort.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/120_np_lexsort.py</code></pre>
+<p>Exercise 1 confirms the Section 2 last-key-is-primary rule, cross-checked against <code>sort_values(by=[...])</code>. Exercise 2 confirms the Section 3 single-key collapse to <code>argsort()</code>. Exercise 3 confirms the Section 5 NaN-last placement, cross-checked against <code>sort_values()</code>'s own NaN handling.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly against the official NumPy docs: the LAST key in the tuple passed to np.lexsort() is the PRIMARY sort key, with ties broken by the second-to-last key, and so on -- backwards from the left-to-right reading most people expect, and from pandas' own sort_values(by=[...]) order.">
+    <p class="stem">In <code>np.lexsort((first_name, last_name))</code>, which array is the PRIMARY sort key?</p>
+    <button class="opt" data-ok>last_name, since lexsort() treats the last tuple item as the primary key</button>
+    <button class="opt">first_name, since lexsort() treats the first tuple item as the primary key</button>
+    <button class="opt">neither one alone, since lexsort() always just averages every key together first</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: wrapping one array in a one-element tuple, np.lexsort((x,)), gives output byte-identical to np.argsort(x). lexsort() is a strict generalization of argsort() to multiple keys, not a different algorithm under the hood.">
+    <p class="stem">What does <code>np.lexsort((x,))</code> return, for a single array <code>x</code>?</p>
+    <button class="opt" data-ok>output identical to plain np.argsort(x) run on that same array</button>
+    <button class="opt">a TypeError, since lexsort() always requires at least two keys</button>
+    <button class="opt">output identical to np.sort(x), the actual real sorted values themselves</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: np.lexsort() has no ascending= parameter, same gap as argsort(). Negating a numeric key works for descending order, but strings can't be negated (UFuncTypeError). The confirmed working fix is pd.factorize(..., sort=True) to turn the string key into sorted integer codes first, then negate those codes instead.">
+    <p class="stem">How do you sort DESCENDING by a string key with <code>np.lexsort()</code>, which has no <code>ascending=</code> parameter and can't negate strings directly?</p>
+    <button class="opt" data-ok>factorize the string key into sorted codes first, then negate those codes</button>
+    <button class="opt">negate the string key directly, the same trick argsort() uses on numbers</button>
+    <button class="opt">reverse the final output array with slicing, the same trick argsort() uses</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official NumPy API reference for <a href="https://numpy.org/doc/stable/reference/generated/numpy.lexsort.html"><code>numpy.lexsort()</code></a> (per <code>RESOURCES.md</code>'s NumPy-fundamentals grouping, ~5 min) states the last-key-is-primary rule explicitly in its own words and gives a worked surname/first-name example matching today's lesson's own setup; it does not mention NaN behavior at all, which is exactly the gap today's lesson fills by direct probe.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>np.lexsort()</code> is new today, added right after Lesson 119's <code>np.bincount() / np.histogram()</code> entry.<br>
+<strong>Next lesson:</strong> one standing candidate remains from recent scans, not pre-committed per this course's "fresh scan each round" convention — <code>np.partition()</code>/<code>argpartition()</code>.<br><br>
+💬 Anything unclear — the backwards key order, the factorize()-then-negate descending trick, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

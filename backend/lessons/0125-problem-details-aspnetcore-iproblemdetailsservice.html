@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 125 · Problem Details, now in C# too</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<p class="kicker">Backend Foundations · Lesson 125 · ~20 min</p>
+<h1>Problem Details, now in C# too</h1>
+<p class="byline">Lesson 83 covered RFC 7807/9457 Problem Details as a standard, language-agnostic JSON error shape — five fields, a registered media type, nothing tied to any one framework. ASP.NET Core happens to ship a first-party implementation of that exact standard: a <code>ProblemDetails</code> class, a service that writes it onto a response automatically, and middleware wiring that turns on by default. This lesson is that implementation, not a new concept.</p>
+
+<h2>1 · The same five fields, now a real class</h2>
+<p>Lesson 83's JSON shape (<code>type</code>, <code>title</code>, <code>status</code>, <code>detail</code>, <code>instance</code>) maps one-to-one onto <dfn data-en="a class in Microsoft.AspNetCore.Mvc (and Microsoft.AspNetCore.Http) with five properties -- Type, Title, Status, Detail, Instance -- matching RFC 9110/9457's Problem Details fields exactly, plus an Extensions dictionary for any additional members an API wants to add" data-vn="ProblemDetails (giữ nguyên) — class trong Microsoft.AspNetCore.Mvc (và Microsoft.AspNetCore.Http), có 5 property Type, Title, Status, Detail, Instance khớp đúng 5 field chuẩn RFC 9110/9457, cộng dictionary Extensions để thêm field riêng nếu API cần">ProblemDetails</dfn>, a plain C# class the framework ships:</p>
+<pre><code><span class="kw">public</span> <span class="kw">class</span> ProblemDetails
+{
+    <span class="kw">public</span> <span class="dt">string</span>? Type { <span class="kw">get</span>; <span class="kw">set</span>; }
+    <span class="kw">public</span> <span class="dt">string</span>? Title { <span class="kw">get</span>; <span class="kw">set</span>; }
+    <span class="kw">public</span> <span class="dt">int</span>? Status { <span class="kw">get</span>; <span class="kw">set</span>; }
+    <span class="kw">public</span> <span class="dt">string</span>? Detail { <span class="kw">get</span>; <span class="kw">set</span>; }
+    <span class="kw">public</span> <span class="dt">string</span>? Instance { <span class="kw">get</span>; <span class="kw">set</span>; }
+    <span class="kw">public</span> IDictionary&lt;<span class="dt">string</span>, <span class="dt">object</span>?&gt; Extensions { <span class="kw">get</span>; }
+}</code></pre>
+<p>Every name lines up with Lesson 83's table exactly — <code>Type</code> is still the stable category URI that never has to resolve to a real page, <code>Detail</code> is still the per-occurrence human text, and <code>Extensions</code> is the class's version of Lesson 83's "extensible" escape hatch: an <code>IDictionary&lt;string, object?&gt;</code> an API populates with its own fields, serialized alongside the standard five rather than replacing them.</p>
+
+<h2>2 · Turning it on: AddProblemDetails and two middlewares</h2>
+<p>Having the class is not the same as using it on every error response. ASP.NET Core writes a <code>ProblemDetails</code> body automatically only once a service is registered and the right middleware runs, through the <dfn data-en="the interface ASP.NET Core's problem-details feature is built around -- its one method, TryWriteAsync, attempts to write a ProblemDetails response for the current HttpContext and returns false if it couldn't (for example, an Accept header the registered writer doesn't support), so the caller can fall back to something else" data-vn="IProblemDetailsService (giữ nguyên) — interface trung tâm của tính năng problem-details trong ASP.NET Core -- có 1 method TryWriteAsync, cố viết response ProblemDetails cho HttpContext hiện tại, trả về false nếu không viết được (ví dụ header Accept mà writer đang đăng ký không hỗ trợ), để caller tự fallback cách khác">IProblemDetailsService</dfn> interface, registered with <code>AddProblemDetails()</code>:</p>
+<pre><code><span class="kw">var</span> builder = WebApplication.CreateBuilder(args);
+builder.Services.AddProblemDetails();
+
+<span class="kw">var</span> app = builder.Build();
+
+<span class="cm">// Catches unhandled exceptions and writes a ProblemDetails body instead</span>
+<span class="cm">// of a bare 500 with no content.</span>
+app.UseExceptionHandler();
+
+<span class="cm">// Catches client/server responses that already have a status code but</span>
+<span class="cm">// no body yet (e.g. a bare Results.BadRequest()) and fills in a body.</span>
+app.UseStatusCodePages();
+
+app.MapGet(<span class="st">"/orders/{id:int}"</span>, (<span class="dt">int</span> id) =&gt;
+    id &lt;= 0 ? Results.BadRequest() : Results.Ok(<span class="kw">new</span> { id }));
+
+app.Run();</code></pre>
+<p>Both middlewares only act on a response that has a status code set but an empty body — a handler that already wrote its own JSON is left alone. <code>UseExceptionHandler()</code> covers the "an exception escaped the handler" case (where Lesson 7's rule about not leaking a stack trace to the client still applies); <code>UseStatusCodePages()</code> covers the "a handler returned a bare status code with no body" case, including routing failures like an unmatched 404. Minimal APIs and controllers wire this up the same way; controllers additionally auto-generate <code>ProblemDetails</code> for model-validation failures without any of this middleware, via MVC's built-in client-error handling.</p>
+
+<h2>3 · Extensions in practice: Lesson 83's "add your own code field," now typed</h2>
+<p>Lesson 83 showed a hand-written JSON body with an extra <code>code</code>, <code>available</code>, and <code>requested</code> field sitting next to the standard five. The C# equivalent populates <code>Extensions</code> from a <dfn data-en="an options callback, configured via AddProblemDetails(options => options.CustomizeProblemDetails = ...), that runs just before any ProblemDetails response is written, receiving the HttpContext and the in-progress ProblemDetails object so the API can set Type/Title/Detail or add its own Extensions entries based on what actually went wrong" data-vn="CustomizeProblemDetails (giữ nguyên) — callback cấu hình qua AddProblemDetails(options => options.CustomizeProblemDetails = ...), chạy ngay trước khi bất kỳ response ProblemDetails nào được viết ra, nhận HttpContext và object ProblemDetails đang xây để API set Type/Title/Detail hoặc thêm field riêng vào Extensions dựa theo lỗi thực tế">CustomizeProblemDetails</dfn> hook, run right before the body is written:</p>
+<pre><code><span class="kw">public</span> <span class="kw">class</span> StockErrorFeature
+{
+    <span class="kw">public</span> <span class="dt">int</span> ProductId { <span class="kw">get</span>; <span class="kw">set</span>; }
+    <span class="kw">public</span> <span class="dt">int</span> Available { <span class="kw">get</span>; <span class="kw">set</span>; }
+    <span class="kw">public</span> <span class="dt">int</span> Requested { <span class="kw">get</span>; <span class="kw">set</span>; }
+}
+
+builder.Services.AddProblemDetails(options =&gt;
+{
+    options.CustomizeProblemDetails = context =&gt;
+    {
+        <span class="kw">var</span> feature = context.HttpContext.Features.Get&lt;StockErrorFeature&gt;();
+        <span class="kw">if</span> (feature <span class="kw">is</span> <span class="kw">null</span>) <span class="kw">return</span>;
+
+        context.ProblemDetails.Type = <span class="st">"https://example.com/errors/insufficient-stock"</span>;
+        context.ProblemDetails.Title = <span class="st">"Insufficient stock"</span>;
+        context.ProblemDetails.Detail =
+            $<span class="st">"Only {feature.Available} units of product {feature.ProductId} remain, {feature.Requested} were requested."</span>;
+
+        <span class="cm">// Lesson 83's extra fields, now strongly placed in Extensions --</span>
+        <span class="cm">// still serialized alongside type/title/status/detail/instance, not</span>
+        <span class="cm">// instead of them.</span>
+        context.ProblemDetails.Extensions[<span class="st">"code"</span>] = <span class="st">"insufficient_stock"</span>;
+        context.ProblemDetails.Extensions[<span class="st">"available"</span>] = feature.Available;
+        context.ProblemDetails.Extensions[<span class="st">"requested"</span>] = feature.Requested;
+    };
+});</code></pre>
+<p>This is Lesson 83's exact closing argument, now with a concrete hook: adopting Problem Details in ASP.NET Core doesn't mean giving up a short, stable, switch-on-able <code>code</code> field — it means that field moves into <code>Extensions</code>, still riding alongside the standard envelope and still served as <code>application/problem+json</code> by the registered <code>IProblemDetailsWriter</code>.</p>
+<div class="callout"><strong>Default behavior worth knowing:</strong> once <code>AddProblemDetails()</code> is registered, these middlewares only respond with a <code>ProblemDetails</code> body when the request's <code>Accept</code> header is <code>application/json</code>, <code>application/problem+json</code>, or a wildcard like <code>*/*</code>. A request asking for <code>text/html</code> or <code>application/xml</code> gets a fallback instead — the framework won't force a JSON shape onto a client that explicitly asked for something else.</div>
+
+<h2>4 · What doesn't change crossing the port</h2>
+<p>Lesson 83's full argument still holds: Problem Details standardizes the envelope and the <code>Content-Type</code> signal, not a domain's vocabulary, and it earns its keep once errors cross an organizational boundary rather than staying inside one team's closed API. The C# mechanism is new; the judgment call about whether to bother adopting the RFC at all is identical to Lesson 83's — and ASP.NET Core choosing to auto-generate this shape for its own built-in validation and routing errors is itself evidence of where Microsoft judged that boundary to sit: inside the framework and its ecosystem of API clients, gateways, and OpenAPI tooling, not just one team's frontend.</p>
+
+<div class="cmp-wrap">
+<table class="cmp">
+<thead><tr><th></th><th>Lesson 83: the standard</th><th>Lesson 125: ASP.NET Core</th></tr></thead>
+<tbody>
+<tr><th>The five fields</th><td>JSON keys you write by hand</td><td><code>ProblemDetails</code> class properties: <code>Type</code>, <code>Title</code>, <code>Status</code>, <code>Detail</code>, <code>Instance</code></td></tr>
+<tr><th>Writing the body</th><td>whatever your own handler does</td><td><code>IProblemDetailsService</code>, registered via <code>AddProblemDetails()</code></td></tr>
+<tr><th>Turning it on for errors</th><td>no equivalent — one-off per API</td><td><code>UseExceptionHandler()</code> / <code>UseStatusCodePages()</code> middleware</td></tr>
+<tr><th>Your own extra fields</th><td>extra JSON keys beside the standard five</td><td><code>ProblemDetails.Extensions</code> dictionary, set via <code>CustomizeProblemDetails</code></td></tr>
+<tr><th>Content negotiation</th><td><code>application/problem+json</code> media type, by convention</td><td>same media type, auto-selected by the registered <code>IProblemDetailsWriter</code> based on <code>Accept</code></td></tr>
+</tbody>
+</table>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers the <code>ProblemDetails</code> class, <code>IProblemDetailsService</code>/<code>AddProblemDetails()</code>, the <code>UseExceptionHandler()</code>/<code>UseStatusCodePages()</code> pair, and <code>CustomizeProblemDetails</code> as the C# mechanism for Lesson 83's standard. It does not cover MVC's separate <code>ProblemDetailsFactory</code> extension point, <code>ValidationProblemDetails</code>'s model-validation-specific shape, or <code>ApiBehaviorOptions.ClientErrorMapping</code> — all real, all controller-specific refinements of the same idea, out of scope for a first pass.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory, with no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="ProblemDetails's five properties -- Type, Title, Status, Detail, Instance -- map one-to-one onto RFC 9457's five standard fields; the class is ASP.NET Core's first-party C# implementation of the exact shape Lesson 83 taught as a language-agnostic JSON standard.">
+    <p class="stem">How do ProblemDetails's five properties relate to Lesson 83's standard fields?</p>
+    <button class="opt" data-ok>they map one-to-one onto the five standard fields exactly</button>
+    <button class="opt">they replace those fields with five entirely unrelated ones</button>
+    <button class="opt">they cover only two of the five fields defined</button>
+    <button class="opt">they exist only inside unit tests, never in responses</button>
+  </div>
+  <div class="q" data-why="UseExceptionHandler() and UseStatusCodePages() only act on a response that already has a status code set but no body content yet -- a handler that already wrote its own JSON body is left untouched by either middleware.">
+    <p class="stem">When do UseExceptionHandler() and UseStatusCodePages() actually write a ProblemDetails body?</p>
+    <button class="opt" data-ok>only when a response has a status code, empty body</button>
+    <button class="opt">on every single response the whole application itself always sends</button>
+    <button class="opt">only during requests sent while running inside one test project</button>
+    <button class="opt">never, unless a developer calls one by name in code</button>
+  </div>
+  <div class="q" data-why="ProblemDetails.Extensions is an IDictionary<string, object?> an API populates with its own fields -- the C# version of Lesson 83's point that Problem Details is extensible, so a short stable code plus domain-specific detail can still ride alongside the standard five fields rather than replacing them.">
+    <p class="stem">What is the ProblemDetails.Extensions dictionary actually for?</p>
+    <button class="opt" data-ok>adding fields an API wants alongside the five standard ones</button>
+    <button class="opt">permanently deleting one of the five required standard fields now</button>
+    <button class="opt">storing a copy of the request raw unparsed body bytes</button>
+    <button class="opt">configuring which port the web server listens on at startup</button>
+  </div>
+  <div class="q" data-why="Once AddProblemDetails() is registered, the default IProblemDetailsWriter only responds with a ProblemDetails body for an Accept header of application/json, application/problem+json, or a wildcard -- a request asking for text/html or application/xml gets a fallback instead, since the framework won't force JSON onto a client that asked for something else.">
+    <p class="stem">What happens if a request's Accept header asks for text/html instead of JSON?</p>
+    <button class="opt" data-ok>the default writer skips it and a fallback response runs</button>
+    <button class="opt">the server crashes immediately with an unrecoverable startup error now</button>
+    <button class="opt">ProblemDetails gets returned anyway, silently relabeled there as plain HTML</button>
+    <button class="opt">the request hangs forever waiting on a reply that never</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> <a href="https://learn.microsoft.com/en-us/aspnet/core/fundamentals/error-handling-api">Microsoft Learn: Handle errors in ASP.NET Core APIs</a> (~10 min) confirms <code>AddProblemDetails()</code>, <code>IProblemDetailsService</code>, the <code>UseExceptionHandler()</code>/<code>UseStatusCodePages()</code> pair, the <code>Accept</code>-header content-negotiation fallback behavior (the default writer supporting <code>application/json</code>, <code>application/problem+json</code>, and wildcard types, falling back on anything else), and the <code>CustomizeProblemDetails</code> example this lesson's section 3 is drawn from. <a href="https://learn.microsoft.com/en-us/dotnet/api/microsoft.aspnetcore.mvc.problemdetails">Microsoft Learn: ProblemDetails Class</a> confirms the exact five properties (<code>Type</code>, <code>Title</code>, <code>Status</code>, <code>Detail</code>, <code>Instance</code>) plus the <code>Extensions</code> dictionary and its own doc comment ("Problem type definitions MAY extend the problem details object with additional members"). Lesson 83's own RFC 9457 citation still covers the standard itself in full, not duplicated here.</p>
+
+<p class="next">All new terms are in the <a href="../reference/glossary.html">glossary</a>. Click any dotted term for a popup (English first, tiếng Việt second). Builds directly on Lesson 83's Problem Details standard. <strong>Anything unclear? Ask your teacher</strong>, the agent that made this lesson. Ask in Vietnamese anytime. A good follow-up: "CustomizeProblemDetails chạy mỗi request hay chỉ chạy khi có lỗi thật, và nó có thấy được exception gốc không?"</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

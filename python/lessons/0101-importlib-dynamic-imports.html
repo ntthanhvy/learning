@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 101 · importlib: imports as data, not syntax</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Python Intensive · Lesson 101 · ~20 min · 7 Nov 2026</p>
+<h1><code>importlib</code>: imports as data, not syntax</h1>
+<p class="byline">Day 9 fixed one thing about every <code>import</code> statement so far: the module name is written literally in the source, decided before the program ever runs. A plugin system, a CLI that loads a handler by name from a config file, or a FastAPI app picking a database driver by an environment variable all need the opposite — the name arrives as a plain string <em>while the program is running</em>, and <code>import whatever_the_string_says</code> is not legal Python syntax. <dfn data-en="the standard-library module that exposes Python's own import machinery as ordinary functions -- import_module(name) imports a module given its name as a runtime string, instead of the import statement's fixed, written-in-the-source name" data-vn="giữ nguyên &quot;importlib&quot; — module chuẩn expose chính cơ chế import của Python ra dạng hàm gọi được; import_module(name) import 1 module theo tên là string lúc chạy, khác với lệnh import cố định viết sẵn trong source">importlib</dfn> is the module that closes that gap.</p>
+
+<div class="callout"><strong>Why today, specifically:</strong> a fresh case-insensitive grep across every lesson title, every lesson body, every practice file, <code>reference/glossary.html</code>, and <code>RESOURCES.md</code> confirmed <code>importlib</code> is still genuinely zero-hit as a dedicated topic (Day 100's own gap list carried it forward alongside <code>array</code>, <code>types.SimpleNamespace</code>, <code>locale</code>, and <code>socket</code>). Day 9 taught <code>import</code>/packages/<code>__name__</code> thoroughly but only the static form, written as source code before the program runs — this lesson is the direct continuation, not a new unrelated corner, and every behavior below was confirmed live in a scratch run rather than assumed. Zero pandas/NumPy surface: dynamic module loading is a language mechanism, not a library either course teaches.</div>
+
+<h2>1 · <code>importlib.import_module()</code>: the name is a runtime string</h2>
+<p><code>import json</code> only works because <code>json</code> is typed literally in the source. <code>importlib.import_module(name)</code> takes that same name as an ordinary string value — anything that can produce a string at runtime (a config file, a CLI argument, a dict lookup) can now choose the module:</p>
+<pre><code><span class="kw">import</span> importlib
+
+name = <span class="str">"json"</span>          <span class="cm"># could just as easily come from a config file or argv</span>
+mod = importlib.import_module(name)
+mod.dumps({<span class="str">"a"</span>: 1})     <span class="cm"># '{"a": 1}' -- confirmed live, mod is the real json module</span></code></pre>
+<p>It returns the actual module object, exactly like <code>import json</code> would bind to the name <code>json</code> — there is nothing special about the result, only about how its name was decided. A name that doesn't exist raises the same <dfn data-en="the exception Python's import machinery raises when no module matching the given name can be found anywhere on the import path -- the same exception a plain `import nonexistent` statement would raise" data-vn="giữ nguyên &quot;ModuleNotFoundError&quot; — exception mà cơ chế import của Python raise khi không tìm được module nào khớp tên trên import path; giống hệt lỗi 1 lệnh import thường gặp phải khi module không tồn tại">ModuleNotFoundError</dfn> a plain <code>import</code> statement would:</p>
+<pre><code><span class="kw">try</span>:
+    importlib.import_module(<span class="str">"definitely_not_a_real_module"</span>)
+<span class="kw">except</span> ModuleNotFoundError <span class="kw">as</span> e:
+    <span class="kw">print</span>(<span class="kw">type</span>(e).__name__)   <span class="cm"># ModuleNotFoundError -- confirmed live</span></code></pre>
+<p>Once a module is loaded this way, pulling out a specific function is a plain attribute lookup — <code>getattr(mod, "mean")</code> works exactly like <code>mod.mean</code>, except the attribute name <code>"mean"</code> can also be a runtime string. That pairing — pick the module by string, pick the function by string — is the whole mechanism behind a plugin registry: a dict mapping short names (<code>"csv"</code>, <code>"json"</code>) to a module+function pair, built entirely from data instead of a chain of <code>if</code>/<code>elif</code> on every known option.</p>
+
+<h2>2 · Checking before loading: <code>importlib.util.find_spec()</code></h2>
+<p>Calling <code>import_module()</code> on a name that might not exist means catching <code>ModuleNotFoundError</code> every time — reasonable for one lookup, noisy for scanning many candidate names. <code>importlib.util.find_spec(name)</code> asks "would this import succeed?" without actually running the module's code, returning <code>None</code> when the answer is no:</p>
+<pre><code><span class="kw">import</span> importlib.util
+
+spec = importlib.util.find_spec(<span class="str">"os"</span>)
+<span class="kw">print</span>(spec <span class="kw">is</span> <span class="kw">None</span>)              <span class="cm"># False -- confirmed live, os is found</span>
+
+missing = importlib.util.find_spec(<span class="str">"definitely_not_a_real_module"</span>)
+<span class="kw">print</span>(missing)                    <span class="cm"># None -- confirmed live, no exception raised</span></code></pre>
+<p>A found <code>spec</code> is a small object describing where the module lives and how it would be loaded — rarely inspected directly, but its mere existence (or <code>None</code>) is enough to decide, cleanly, whether a later <code>import_module()</code> call is worth making.</p>
+
+<h2>3 · <code>importlib.reload()</code>: re-running an already-imported module</h2>
+<p>Day 9 established that a module's top-level code runs exactly once, no matter how many times it's imported — the second <code>import</code> reuses the cached result. <code>importlib.reload(module)</code> is the deliberate escape hatch: it re-runs that module's code in place and returns the same module object, updated:</p>
+<pre><code><span class="kw">import</span> math
+<span class="kw">import</span> importlib
+
+refreshed = importlib.reload(math)
+<span class="kw">print</span>(refreshed <span class="kw">is</span> math)        <span class="cm"># True -- confirmed live, same object, re-run in place</span></code></pre>
+<p>This matters almost exclusively in long-lived interactive sessions or a dev server picking up an edited file without a full restart — reaching for it inside normal application code is rare and usually a sign something else (a factory function, a fresh object per request) would be the more direct fix.</p>
+
+<h2>4 · <code>importlib.metadata</code>: reading a package's own version</h2>
+<p>A FastAPI app that logs its dependency versions at startup, or a CLI's <code>--version</code> flag, needs installed-package metadata — not the module's code, but data <em>about</em> it. <code>importlib.metadata.version(name)</code> reads that straight from what <code>uv</code>/<code>pip</code> already recorded when the package was installed, no import of the package's own code required:</p>
+<pre><code><span class="kw">import</span> importlib.metadata <span class="kw">as</span> metadata
+
+<span class="kw">print</span>(metadata.version(<span class="str">"pip"</span>))   <span class="cm"># e.g. "24.0" -- confirmed live, read from install metadata</span></code></pre>
+<p>An unknown distribution name raises <code>importlib.metadata.PackageNotFoundError</code> rather than <code>ModuleNotFoundError</code> — a different exception on purpose, because "no such installed package" and "no such importable module" are genuinely different failures (a package can ship multiple importable module names, or none matching its own distribution name).</p>
+
+<div class="callout"><strong>Where pandas/NumPy go from here:</strong> nowhere directly — <code>importlib</code> is how Python loads <em>any</em> package, pandas and NumPy included, but neither library changes how the mechanism itself works. The one realistic crossover, a plugin system that dynamically loads either a stdlib parser or a pandas reader by name, is <code>data/</code>'s territory and isn't demonstrated here.</div>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/101_importlib_dynamic_imports.py</code>, follow the TODOs, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/python &amp;&amp; uv run python3 practice/101_importlib_dynamic_imports.py</code></pre>
+<p>Standard library only — no <code>--with</code> flag needed. Exercises: loading a module by a runtime string name with <code>import_module()</code>, calling a function on it found by name with <code>getattr()</code>, using <code>find_spec()</code> to check importability without raising, and handling <code>ModuleNotFoundError</code> for a name that doesn't exist.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="importlib.import_module(name) takes the module name as a plain runtime string -- confirmed live, name = 'json' (a variable that could come from anywhere) passed to import_module() returns the real json module, something a plain `import json` statement can never do since its name is fixed in the source.">
+    <p class="stem">What can <code>importlib.import_module(name)</code> do that a plain <code>import json</code> statement cannot?</p>
+    <button class="opt" data-ok>accept the module's name as an ordinary runtime string value</button>
+    <button class="opt">skip Python's normal module search path lookup step entirely, always</button>
+    <button class="opt">import a module permanently without using any memory at all</button>
+  </div>
+  <div class="q" data-why="importlib.util.find_spec(name) returns None when no module matches the given name, confirmed live for a nonexistent name -- no exception is raised at all. import_module() on the same missing name instead raises ModuleNotFoundError, confirmed live by catching it.">
+    <p class="stem">What does <code>importlib.util.find_spec("nonexistent_name")</code> return when no such module exists?</p>
+    <button class="opt" data-ok>plain None, with no exception raised during that whole check</button>
+    <button class="opt">the exact same ModuleNotFoundError that import_module itself would raise instead</button>
+    <button class="opt">an empty spec object representing some totally blank module here</button>
+  </div>
+  <div class="q" data-why="Day 9 established a module's top-level code runs exactly once, cached on first import; importlib.reload(module) is the deliberate exception -- confirmed live, it re-runs that module's code in place and returns the same module object, rather than creating a second separate one.">
+    <p class="stem">What does <code>importlib.reload(math)</code> actually do differently from a second <code>import math</code> statement?</p>
+    <button class="opt" data-ok>it re-runs that module's own code again, unlike the normal cached reuse</button>
+    <button class="opt">it deletes that module entirely so nothing can ever import it again</button>
+    <button class="opt">functionally nothing new at all — both always behave identically here too</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the standard library's <a href="https://docs.python.org/3/library/importlib.html"><code>importlib</code></a> docs — covers <code>import_module()</code>, <code>reload()</code>, <code>util.find_spec()</code>, and <code>metadata</code> directly, plus the full lower-level finder/loader protocol behind every <code>import</code> statement this lesson didn't need to open.</p>
+
+<p class="next">New terms today are in the <a href="../reference/glossary.html#day101">glossary</a> under Day 101.<br>
+💬 Anything unclear — building a real plugin registry from this, or why <code>reload()</code> can leave old object instances holding onto pre-reload class definitions? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

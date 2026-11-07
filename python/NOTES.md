@@ -12424,4 +12424,89 @@ fail *gracefully* so the learner sees which task failed.
   --lesson 0100-timeit-benchmarking-small-code.html --detail
   '{"by":"headless"}' was run from the repo root at the end of this round
   and succeeded.
+- 2026-11-07 generation (Lesson 101, headless run): per Day 100's own
+  cadence note, Day 101 is fresh day 2 of the new three-fresh-then-review
+  cycle (Day 99 closed the prior cycle; Day 103 should be the next review,
+  covering Days 100-102) — confirmed not a review day by that note rather
+  than guessing. Read `MISSION.md` (no-pandas/no-NumPy exclusion
+  re-confirmed), `NOTES.md` (this file) in full, `PLAN.md`, the sole file
+  in `learning-records/`, and skimmed Lessons 96-100 plus their practice
+  files for continuity. Re-ran the fresh-gap grep across every lesson
+  title/body, every practice file, `glossary.html`, and `RESOURCES.md`
+  rather than trusting Day 100's carried-forward list blindly: `importlib`,
+  `array`, `types.SimpleNamespace`, `locale`, and `socket` were all still
+  genuinely zero-hit as dedicated topics (the handful of grep hits on
+  "array"/"importlib"/etc. were all passing mentions inside other lessons'
+  own "Why today" gap-list callouts, not actual teaching). Picked
+  `importlib` over the remaining candidates: Day 9 already taught the
+  static `import` statement, `__name__`, and packages thoroughly but only
+  the form where the module name is fixed in source — `importlib` is the
+  direct, motivated continuation (dynamic/runtime-string imports, the
+  mechanism behind plugin systems and config-driven module selection) and
+  is squarely language/stdlib with zero pandas/NumPy surface. Probed every
+  behavioral claim live in a scratch dir (`.scratch-python-101/`, created
+  inside the repo, deleted after; `uv run python3 probe.py`) rather than
+  trusting memory: confirmed `importlib.import_module("json")` with the
+  name held in a variable returns the real `json` module and its `dumps()`
+  works; confirmed `import_module()` on a nonexistent name raises
+  `ModuleNotFoundError`, the same exception a plain `import` statement
+  would raise; confirmed `importlib.util.find_spec("os")` returns a
+  non-None spec while `find_spec()` on a nonexistent name returns plain
+  `None` with no exception; confirmed `importlib.reload(math) is math`
+  returns `True` (same object, re-run in place); confirmed
+  `importlib.metadata.version("pip")` returns a real version string read
+  from install metadata, no code import needed; confirmed `getattr()` on a
+  dynamically-loaded module (`statistics.mean` found by string) works as a
+  plugin-dispatch pattern. Checked the glossary for term collisions before
+  writing — grepped `importlib`, `find_spec`, `reload`, and `metadata`
+  case-insensitively across the full `glossary.html`, zero existing rows.
+  **New jargon: 2 inline `<dfn>`** (importlib module in the byline,
+  ModuleNotFoundError in section 1) **folded into 5 glossary rows**
+  (`importlib`, `ModuleNotFoundError` (importlib-specific framing),
+  `find_spec()`, `reload()`, and `importlib.metadata`), added as a new
+  `<h2 id="day101">` section directly after Day 100's. Verification
+  performed mechanically: (1) an HTML tag-balance check across
+  div/p/code/button/script/dfn/pre/h2/h1/em/strong/a on the new lesson —
+  balanced (div 6/6, p 19/19, code 70/70, button 9/9, script 3/3, dfn 2/2,
+  pre 6/6, h2 7/7, h1 1/1, em 3/3, strong 3/3, a 2/2); (2) a
+  raw-unescaped-`&` regex scan on the new lesson — zero hits; (3) a
+  per-question quiz option word-count check — first draft mismatched on
+  all three questions (11/9/9, 9/7/9, 11/11/10), iterated option-by-option
+  until all three landed on equal per-question counts: 10/10/10, 10/10/10,
+  12/12/12; (4) a case-insensitive `pandas|numpy|dataframe|pd\.|np\.` grep
+  on the new lesson — 7 hits total, all confirmed by direct line lookup to
+  sit inside the required "Why today" scope-grep mention and the required
+  "Where pandas/NumPy go from here" boundary callout (naming a
+  plugin-system crossover as `data/`'s territory, not demonstrated), and
+  zero hits in the practice file — no worked pandas/NumPy example
+  anywhere; (5) `node --check` against `assets/nav.js`, `assets/gloss.js`,
+  and `assets/quiz.js` — all three clean; (6) a duplicate `n:` scan across
+  `nav.js`'s `LESSONS` array — 101 entries, zero duplicates; (7) a
+  case-insensitive duplicate-term scan across the glossary's term column —
+  reproduced the one pre-existing collision already on record
+  (`dependency`), confirmed none of today's five new terms collide with it
+  or any other existing row. The shipped (unsolved)
+  `practice/101_importlib_dynamic_imports.py` was executed directly from
+  its real `practice/` location and printed exactly 4 ✗ with no raw
+  traceback. A solved copy built in `.scratch-python-101/` (copied from
+  the shipped file, then each TODO body filled in directly — never editing
+  the shipped file itself, deleted after) printed all 4 ✓ and "All green";
+  the shipped file was re-run afterward and reproduced the identical
+  all-✗ result, confirming no leakage back into the baseline. Added one
+  new `RESOURCES.md` line for `importlib`, placed directly after Day 100's
+  `timeit` line and before the PEP 8 line, following the file's
+  chronological-by-day ordering. Registered Lesson 101 in `nav.js` with
+  today's date (2026-11-07) right after the `n: 100` entry.
+  `python/learning-records/` was not touched this round — still no
+  quiz/kata/lesson_completed signal since 2026-10-15, so a routine
+  fresh-topic pick following the course's own settled cadence was the
+  right call again. Cadence note for the next round: Day 101 is fresh day
+  2 of the current cycle — Day 102 should be fresh day 3, then Day 103 a
+  review covering Days 100-102. Standing fresh-gap candidates still open
+  going into Day 102: `array`, `types.SimpleNamespace`, `locale`, and
+  `socket` — `importlib` should be dropped from this list going forward,
+  now fully taught. `bin/record-progress python lesson_generated --day 101
+  --lesson 0101-importlib-dynamic-imports.html --detail
+  '{"by":"headless"}' was run from the repo root at the end of this round
+  and succeeded.
 

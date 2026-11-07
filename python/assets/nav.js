@@ -208,6 +208,8 @@
       file: "lessons/0099-review-retrieval-day-18.html" },
     { n: 100, date: "2026-11-06", title: "timeit: benchmarking small code correctly",
       file: "lessons/0100-timeit-benchmarking-small-code.html" },
+    { n: 101, date: "2026-11-07", title: "importlib: imports as data, not syntax",
+      file: "lessons/0101-importlib-dynamic-imports.html" },
   ];
 
   const REFS = [

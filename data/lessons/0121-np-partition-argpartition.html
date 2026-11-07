@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 121 · np.partition() / np.argpartition(): the fast "top N" primitive under nlargest()</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Wrangling · Lesson 121 · ~20 min · 7 Nov 2026</p>
+<h1>np.partition() / np.argpartition(): the fast "top N" primitive under nlargest()</h1>
+<p class="byline">Lesson 120 closed with one standing candidate from a fresh curriculum/glossary scan: <code>np.partition()</code>/<code>argpartition()</code>. Today picks it up — it is the NumPy-level mechanism underneath Lesson 10's <code>nlargest()</code>/<code>nsmallest()</code> and Lesson 73's <code>argsort()</code>, named out loud for the first time, with a genuinely different performance story and a sharp nuance about exactly how "unsorted" its output really is.</p>
+
+<h2>1 · The gap: argsort() and sort() do more work than "give me the top N" needs</h2>
+<p>Lesson 73's <code>np.argsort()</code> fully sorts an array to get positions; Lesson 10's <code>nlargest(n)</code> answers "top N" for a pandas Series or DataFrame. Both work by fully ordering the data, even when the actual question only needs the N smallest or N largest values, not every value's exact rank. <dfn data-en="a NumPy function that rearranges an array so the element at one chosen position equals what it would be in a FULLY sorted array, with every smaller element to its left and every larger element to its right -- but neither side is actually sorted internally, which is the whole point: it does less work than a full sort" data-vn="giữ nguyên 'np.partition()' — sắp xếp MỘT PHẦN mảng: phần tử ở vị trí k cho ra ĐÚNG giá trị mà nó sẽ có nếu sắp xếp toàn phần (sorted), mọi phần tử nhỏ hơn nằm bên trái, lớn hơn nằm bên phải — nhưng bên trái/bên phải KHÔNG hề được sắp xếp bên trong, đây chính là lý do nó nhanh hơn sort() toàn phần">np.partition(arr, k)</dfn> is the primitive that skips that extra work: it only guarantees the value at index <code>k</code> is correct, not the whole array. Confirmed directly (numpy 2.5.4) on a small array:</p>
+<pre><code><span class="kw">import</span> numpy <span class="kw">as</span> np
+<span class="kw">import</span> pandas <span class="kw">as</span> pd
+
+x = np.array([<span class="kw">7</span>, <span class="kw">2</span>, <span class="kw">9</span>, <span class="kw">4</span>, <span class="kw">1</span>, <span class="kw">8</span>, <span class="kw">3</span>])
+k = <span class="kw">2</span>
+
+part = np.partition(x, k)
+<span class="cm"># part == array([1, 2, 3, 4, 7, 8, 9])  -- looks fully sorted here, but that's a coincidence of this tiny array</span>
+part[k]              <span class="cm"># 3</span>
+np.sort(x)[k]        <span class="cm"># 3  -- IDENTICAL: index k always holds the true k-th smallest value</span></code></pre>
+<p>On a small array like this one, the output happens to come out fully ordered — easy to mistake for a coincidence of "small arrays get fully sorted anyway." Section 2 confirms directly that this is <em>not</em> what the guarantee actually promises once the array gets bigger.</p>
+
+<h2>2 · The real guarantee: only the pivot position is exact — neither side is sorted</h2>
+<div class="callout"><strong>Confirmed directly on a 2,000-element array of random integers:</strong> <code>np.partition(x, k)</code> only promises three things about its output: (1) the value at index <code>k</code> equals <code>np.sort(x)[k]</code> exactly; (2) every value to the left of index <code>k</code> is <code>&lt;=</code> that pivot value; (3) every value to the right is <code>&gt;=</code> it. Confirmed directly that neither side is internally sorted:</p>
+<pre><code>rng = np.random.default_rng(<span class="kw">42</span>)
+big = rng.integers(<span class="kw">0</span>, <span class="kw">100_000</span>, size=<span class="kw">2000</span>)
+k = <span class="kw">500</span>
+part = np.partition(big, k)
+
+part[k] == np.sort(big)[k]                                 <span class="cm"># True -- the one guaranteed position</span>
+np.all(part[:k] &lt;= part[k])                                 <span class="cm"># True -- left side, but unordered within itself</span>
+np.all(part[k+<span class="kw">1</span>:] &gt;= part[k])                               <span class="cm"># True -- right side, same story</span>
+list(part[:k]) == sorted(part[:k])                          <span class="cm"># False -- left side is NOT internally sorted</span>
+np.array_equal(part, np.sort(big))                          <span class="cm"># False -- the full output is NOT a sorted array</span></code></pre>
+<p>This is the whole reason <code>partition()</code> exists: it does less work than a full sort (an <code>introselect</code> algorithm, confirmed via the official docs, average linear time vs. a sort's linearithmic time), and it can only do that by giving up the guarantee that everything besides the pivot position is in order. Treating its output as "basically sorted" is the trap — it is only correct at exactly one index.</p>
+</div>
+
+<h2>3 · argpartition() + slicing: the actual "top N" idiom, and why it's faster</h2>
+<p><code>np.argpartition()</code> is to <code>np.partition()</code> what Lesson 73's <code>np.argsort()</code> is to <code>np.sort()</code> — it returns positions instead of values. The classic interview use: get the <em>indices</em> of the N largest values, unordered among themselves, without paying for a full sort:</p>
+<pre><code>N = <span class="kw">10</span>
+top_n_idx = np.argpartition(big, -N)[-N:]    <span class="cm"># last N positions after partitioning on the Nth-from-end</span>
+sorted({*big[top_n_idx]}) == sorted({*np.sort(big)[-N:]})   <span class="cm"># True -- same SET of values, order not guaranteed</span></code></pre>
+<p>Confirmed directly, timing a full sort against a partition for "top 10 of 2 million" on this machine: <code>np.partition()</code> ran roughly <strong>6.5x faster</strong> than <code>np.sort()</code> for that same array and <code>k</code> — the gap that makes this worth knowing by name rather than always reaching for <code>sort()</code>/<code>argsort()</code> out of habit. Lesson 10's pandas-level <code>Series.nlargest(n)</code>/<code>nsmallest(n)</code> already gives the same top-N answer at the DataFrame/Series level with the groupby-aware, NaN-safe ergonomics pandas adds on top; <code>np.partition()</code>/<code>argpartition()</code> is the lower-level, allocation-light primitive pandas itself leans on for exactly this job on raw arrays.</p>
+
+<h2>4 · Edge cases: negative kth, multiple kth, out-of-bounds, ties, NaN</h2>
+<p>Confirmed directly, four behaviors worth knowing cold:</p>
+<pre><code><span class="cm"># 1) negative kth counts from the end, same convention as ordinary indexing</span>
+np.partition(x, -<span class="kw">2</span>)[-<span class="kw">2</span>]  == np.sort(x)[-<span class="kw">2</span>]      <span class="cm"># True -- 2nd-largest lands at position -2</span>
+
+<span class="cm"># 2) a list of kth values partitions correctly at EACH position simultaneously</span>
+np.partition(x, [<span class="kw">1</span>, <span class="kw">3</span>])[<span class="kw">1</span>] == np.sort(x)[<span class="kw">1</span>]   <span class="cm"># True</span>
+np.partition(x, [<span class="kw">1</span>, <span class="kw">3</span>])[<span class="kw">3</span>] == np.sort(x)[<span class="kw">3</span>]   <span class="cm"># True -- both positions exact at once, one pass</span>
+
+<span class="cm"># 3) kth past the array's own bounds raises ValueError immediately</span>
+np.partition(np.array([<span class="kw">1</span>, <span class="kw">2</span>, <span class="kw">3</span>]), <span class="kw">5</span>)
+<span class="cm"># ValueError: kth(=5) out of bounds (3)</span>
+
+<span class="cm"># 4) NaN sorts to the end, matching np.sort() exactly -- not a separate trap this time</span>
+xn = np.array([<span class="kw">5.0</span>, np.nan, <span class="kw">1.0</span>, <span class="kw">3.0</span>, np.nan, <span class="kw">2.0</span>])
+np.partition(xn, <span class="kw">2</span>)   <span class="cm"># array([1., 2., 3., 5., nan, nan])</span>
+np.sort(xn)          <span class="cm"># array([1., 2., 3., 5., nan, nan])  -- IDENTICAL NaN placement</span></code></pre>
+<p>Confirmed directly: tied values partition correctly too — duplicates land wherever the <code>&lt;=</code>/<code>&gt;=</code> rule allows, with no special-casing needed. On a 2-D array, the default <code>axis=-1</code> partitions each row independently, the same per-row default <code>np.sort()</code> already uses.</p>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>np.partition()</code>'s exact guarantee (pivot position correct, neither side internally sorted), <code>np.argpartition()</code>'s index-returning sibling and the confirmed top-N-via-slicing idiom, the confirmed ~6.5x speed advantage over a full sort at scale, and confirmed edge-case behavior for negative/multiple <code>kth</code>, out-of-bounds <code>kth</code>, ties, and NaN placement. It does not cover the <code>introselect</code> algorithm's internals (out of scope per <code>MISSION.md</code>'s "deep NumPy / C-level internals" exclusion) nor <code>np.partition()</code>'s <code>order=</code> parameter for structured arrays (this course's data is tabular via pandas, not NumPy structured dtypes).</p>
+
+<h2>Try it — self-checking practice (~20 min)</h2>
+<p>Open <code>practice/121_np_partition_argpartition.py</code>, replace each <code>...</code>, and re-run until every check prints ✓:</p>
+<pre><code>cd ~/learning/data && uv run --with pandas python3 practice/121_np_partition_argpartition.py</code></pre>
+<p>Exercise 1 confirms the Section 2 pivot guarantee on a larger array, including that neither side ends up internally sorted. Exercise 2 confirms the Section 3 top-N-via-argpartition idiom matches <code>Series.nlargest()</code>'s own result set. Exercise 3 confirms the Section 4 NaN-last placement, cross-checked against <code>np.sort()</code>.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed directly on a 2,000-element array: np.partition(x, k) only guarantees the value at index k matches a true full sort at that position, plus everything left is <= it and everything right is >= it. Neither side ends up internally sorted -- that's the whole reason it's faster than a full sort.">
+    <p class="stem">What does <code>np.partition(x, k)</code> actually guarantee about its output array?</p>
+    <button class="opt" data-ok>only index k holds the true kth-smallest value; neither side ends up sorted</button>
+    <button class="opt">the entire output array ends up fully sorted, exactly identical to plain np.sort(x)</button>
+    <button class="opt">only values left of k get fully sorted; the right side stays as-is</button>
+  </div>
+  <div class="q" data-why="Confirmed directly, timing top-10-of-2-million: np.partition() ran roughly 6.5x faster than a full np.sort() for the same array and k. It skips the extra work of ordering values that aren't near the pivot position, which a full sort cannot avoid doing.">
+    <p class="stem">Why reach for <code>np.argpartition()</code> instead of <code>np.argsort()</code> for a "top N" question on a huge array?</p>
+    <button class="opt" data-ok>it avoids a full sort's extra work, confirmed roughly 6.5x faster at scale</button>
+    <button class="opt">argpartition() always returns the actual values directly, never any index positions at all</button>
+    <button class="opt">argsort() cannot handle any duplicate values at all, raising an error on ties</button>
+  </div>
+  <div class="q" data-why="Confirmed directly: a NaN in the input sorts to the very end of np.partition()'s output, byte-identical to where np.sort() places it. Unlike several recent NumPy findings (digitize(), bincount()/histogram()), this is not an undocumented trap -- both functions already agree on NaN placement.">
+    <p class="stem">Where does a NaN end up in <code>np.partition()</code>'s output, confirmed against <code>np.sort()</code>?</p>
+    <button class="opt" data-ok>at the very end, in the identical position np.sort() would also place it</button>
+    <button class="opt">always lands exactly at the pivot index k, regardless of any other values</button>
+    <button class="opt">raises a ValueError immediately, since a NaN value cannot be ordered at all</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> the official NumPy API reference for <a href="https://numpy.org/doc/stable/reference/generated/numpy.partition.html"><code>numpy.partition()</code></a> (per <code>RESOURCES.md</code>'s NumPy-fundamentals grouping, ~5 min) states the introselect algorithm and the pivot-only guarantee directly; it does not spell out NaN placement, which is exactly the gap today's lesson filled by direct probe against <code>np.sort()</code>.</p>
+
+<p class="next">All glossed terms are collected in the <a href="../reference/glossary.html">glossary</a> — <code>np.partition() / np.argpartition()</code> is new today, added right after Lesson 120's <code>np.lexsort()</code> entry.<br>
+<strong>Next lesson:</strong> no standing candidate pre-committed per this course's "fresh scan each round" convention — the next session picks after a fresh scan of what's still untaught.<br><br>
+💬 Anything unclear — the pivot-only guarantee, the top-N-via-argpartition idiom, or the practice file? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

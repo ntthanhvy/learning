@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Day 53 · dbt selectors.yml: naming a selection expression once</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+
+<p class="kicker">Data Pipelines · Day 53 · ~20 min · 7 Nov 2026</p>
+<h1>dbt <code>selectors.yml</code>: naming a selection expression once</h1>
+<p class="byline">Today's tangible win: <code>food_delivery_pipeline/selectors.yml</code> gives Day 52's longest, most load-bearing selection expressions real names — <code>dbt build --selector build_changed_orders</code> instead of retyping <code>--select "@stg_orders"</code> — and today's own <code>Makefile</code> target, <code>make build-changed</code>, calls the named selector instead of the raw string. Confirmed live against a scratch project: a YAML selector using <code>method: fqn</code> plus <code>childrens_parents: true</code> resolves to the identical five-node set the CLI's own <code>@stg_orders</code> resolved to on Day 52.</p>
+
+<div class="callout"><strong>Before today — confirm Day 52 landed:</strong> today extends Day 52's <code>Makefile</code> target; it does not replace it.
+<pre><code>cd food_delivery_pipeline &amp;&amp; grep -A1 "^build-changed" Makefile</code></pre>
+Expected: a <code>build-changed</code> target whose recipe line contains <code>--select "@$(MODEL)"</code>. If that target doesn't exist yet, go back and finish <a href="0052-dbt-node-selection.html">Day 52</a> first — today edits that exact line.</div>
+
+<h2>1 · The gap: a correct expression is still something to remember and retype</h2>
+<p>Day 52 ended with a real, working dev-loop command: <code>dbt build --select "@stg_orders"</code>, and the reasoning for why <code>@</code> specifically is the safe default. That reasoning doesn't change today. What's missing is durability — the expression lives only inside one <code>Makefile</code> recipe line and inside whoever's head remembers why <code>@</code> and not <code>+</code>. A second person on this project (or the same person in six months) has no way to discover that reasoning from the CLI alone, and a long or multi-part expression — several <code>tag:</code> methods, an <code>--exclude</code>, a graph operator — gets error-prone to retype correctly every time. dbt's answer is a <dfn data-en="a YAML file (selectors.yml, at the dbt project's root) that gives a node-selection expression a name, invoked with --selector <name> on any dbt run/build/test/list/seed command instead of retyping the raw --select/--exclude expression -- the file is version-controlled, so the expression's own reasoning can live in a description field next to the team that maintains it" data-vn="giữ nguyên &quot;selectors.yml&quot; — file YAML (đặt ở gốc dbt project) đặt tên cho 1 biểu thức node-selection, gọi bằng --selector <tên> trên bất kỳ lệnh dbt run/build/test/list/seed nào thay vì gõ lại --select/--exclude thô; file này được version-control, nên lý do chọn biểu thức đó có thể nằm ngay trong trường description cạnh người duy trì">selectors.yml</dfn>: one file, at the project root, where a selection expression gets a name and a <code>description</code> field explaining why it's shaped the way it is.</p>
+
+<h2>2 · Confirmed live: the YAML shape is not the CLI string</h2>
+<p>The natural first guess — paste <code>"@stg_orders"</code> straight into a YAML <code>value:</code> field — fails at <code>dbt parse</code> with a real compilation error, confirmed this round:</p>
+<pre><code>Compilation Error
+  Could not render @{{ var('changed_model') }}: Required var 'changed_model' not found in config</code></pre>
+<p>That error came from a different, broken attempt (templating the model name via <code>var()</code> inside the selector), but the underlying lesson holds either way: <code>selectors.yml</code>'s <code>definition:</code> block is a structured object, not a string dbt re-parses as CLI syntax. A graph operator becomes its own key, sitting next to <code>method</code> and <code>value</code> rather than folded into either of them. The table below is dbt's actual mapping from CLI syntax to YAML keys, every row confirmed by running the equivalent <code>dbt list</code> both ways and diffing the node sets:</p>
+<table class="gloss">
+<tr><th>CLI syntax</th><th>YAML <code>definition:</code> equivalent</th><th>Confirmed resolves to</th></tr>
+<tr><td><code>stg_orders</code></td><td><code>method: fqn</code><br><code>value: stg_orders</code></td><td>just that one model</td></tr>
+<tr><td><code>stg_orders+</code></td><td>add <code>children: true</code></td><td><code>stg_orders</code> plus its descendants</td></tr>
+<tr><td><code>+stg_orders</code></td><td>add <code>parents: true</code></td><td><code>stg_orders</code> plus its ancestors</td></tr>
+<tr><td><code>@stg_orders</code></td><td>add <code>childrens_parents: true</code></td><td><code>stg_orders</code>, its descendants, and every ancestor those descendants need</td></tr>
+<tr><td><code>tag:nightly</code></td><td><code>method: tag</code><br><code>value: nightly</code></td><td>every node carrying that tag</td></tr>
+</table>
+<p>Built <code>food_delivery_pipeline/selectors.yml</code> against the same scratch project shaped like this course's real one (Day 52's six models), naming the two expressions actually worth keeping around:</p>
+<pre><code><span class="kw">selectors</span>:
+  - <span class="kw">name</span>: build_changed_orders
+    <span class="kw">description</span>: <span class="str">"Rebuild stg_orders's full correctness closure: it, every descendant, and every ancestor those descendants need."</span>
+    <span class="kw">definition</span>:
+      <span class="kw">method</span>: fqn
+      <span class="kw">value</span>: stg_orders
+      <span class="kw">childrens_parents</span>: <span class="kw">true</span>
+
+  - <span class="kw">name</span>: nightly_marts
+    <span class="kw">description</span>: <span class="str">"Every model tagged nightly -- the marts, rebuilt together after order_events lands for the day."</span>
+    <span class="kw">definition</span>:
+      <span class="kw">method</span>: tag
+      <span class="kw">value</span>: nightly</code></pre>
+<p>Running <code>dbt list --selector build_changed_orders --resource-type model</code> against the scratch project printed exactly the five nodes Day 52's <code>@stg_orders</code> printed — <code>stg_orders</code>, <code>fct_orders</code>, <code>mart_delivery_sla</code>, <code>dim_restaurants</code>, <code>stg_restaurants</code> — confirming the YAML form and the CLI form are the same selection, just named.</p>
+
+<div class="callout"><strong>A real trap, confirmed live:</strong> <code>--selector</code> and <code>--select</code>/<code>--exclude</code> cannot be combined. Passing both — <code>dbt list --selector build_changed_orders --exclude "tag:nightly"</code> — doesn't error; it silently keeps the selector's result and drops the <code>--exclude</code> entirely, logging only <code>The --select and --exclude arguments are being ignored for node selection because --selector is provided</code> at the default log level, easy to miss in a long CI log. If an expression needs a narrower cut than a named selector provides, that narrowing belongs inside the selector's own YAML (a second selector, or dbt's <code>union</code>/<code>intersection</code> composition — vocabulary only here, not built today), not bolted onto the CLI call.</div>
+
+<h2>3 · Build: name it, then point the Makefile target at the name</h2>
+<p>In your <code>food-delivery-pipeline</code> repo, add <code>food_delivery_pipeline/selectors.yml</code> with the two selectors above, adjusted to this project's real shape if Day 48/49's histogram marts changed which models carry the <code>nightly</code> tag. Then edit Day 52's <code>build-changed</code> target to call the name instead of the raw string:</p>
+<pre><code><span class="kw">build-changed</span>: <span class="cm"># usage: make build-changed MODEL=stg_orders</span>
+	<span class="kw">cd</span> food_delivery_pipeline &amp;&amp; uv run --with <span class="str">"dbt-postgres==1.11.0"</span> dbt build --selector build_changed_<span class="str">$(MODEL)</span> --profiles-dir .</code></pre>
+<p>This trades flexibility for discoverability on purpose: the old target worked for any model name via <code>$(MODEL)</code>; a named selector is fixed to exactly the model it was written for. That's the right trade once an expression is reused often enough to be worth a name — today's repo has exactly one model whose change ripples wide enough to matter this way, <code>stg_orders</code>, so one named selector plus the still-flexible raw <code>--select "@$(MODEL)"</code> form (keep both, per the TODO below) covers it without overbuilding.</p>
+<p><strong>TODO (today's actual skill):</strong> add a third selector, <code>nightly_marts_without_sla</code>, that reuses <code>nightly_marts</code>'s <code>tag:nightly</code> match but excludes <code>mart_delivery_sla</code> specifically — useful for rebuilding the two simpler marts without the join-heavy SLA mart while iterating on <code>dim_restaurants</code> alone. dbt's selector YAML supports exactly this via a boolean composition key (<code>exclude:</code>, nested under <code>definition:</code>, listing one or more selection blocks to subtract) — read the <a href="https://docs.getdbt.com/reference/node-selection/yaml-selectors">YAML selectors doc</a>'s own "Checking if a node is matched by a selector" and "Combining methods" sections before writing it, and confirm with <code>dbt list --selector nightly_marts_without_sla --resource-type model</code> that <code>mart_delivery_sla</code> is the one name missing from the three <code>nightly</code>-tagged nodes.</p>
+
+<h2>4 · Verify: run it against your own project</h2>
+<pre><code>cd food_delivery_pipeline
+uv run --with "dbt-postgres==1.11.0" dbt parse --profiles-dir .
+uv run --with "dbt-postgres==1.11.0" dbt list --selector build_changed_orders --resource-type model --profiles-dir .
+uv run --with "dbt-postgres==1.11.0" dbt list --selector nightly_marts --resource-type model --profiles-dir .
+</code></pre>
+<p>Expected: the parse prints no line containing <code>Error</code>; the first <code>list</code> prints <code>stg_orders</code> plus everything Day 52's <code>@stg_orders</code> printed; the second prints every model carrying the <code>nightly</code> tag in your real project (at minimum <code>fct_orders</code>, <code>dim_restaurants</code> and <code>mart_delivery_sla</code>, plus Day 48/49's histogram marts if they inherited the same folder-level tag). Then run the updated target:</p>
+<pre><code>make build-changed MODEL=orders</code></pre>
+<pre><code>Done. PASS=N WARN=0 ERROR=0 SKIP=0 NO-OP=0 REUSED=0 TOTAL=N</code></pre>
+<p>Commit <code>selectors.yml</code> and the edited <code>Makefile</code>.</p>
+
+<div class="interview">
+<p><strong>Q: "What's a dbt selectors.yml for, and when would you actually reach for one?"</strong> A strong answer, out loud: <em>"It names a --select/--exclude expression in a YAML file at the project root, invoked with --selector <name> instead of retyping the raw string. The shape isn't the same as the CLI string, though — a graph operator like @ or + becomes its own boolean key next to method and value, like childrens_parents: true, not text folded into the value field; I confirmed that the hard way, pasting a literal @ into a value string fails to parse. I reach for one once an expression is long enough, or load-bearing enough, that retyping it correctly every time is a real risk, and the description field lets me write down why it's shaped that way right next to the team that maintains it — version-controlled reasoning, not something living only in one person's head or one Makefile comment. One real trap worth knowing: --selector can't be combined with --select or --exclude on the same command; passing both silently drops the extra flag with only a log line, not an error, so any narrowing has to live inside the selector's own YAML instead."</em> The signal: naming the YAML-vs-CLI shape mismatch as something confirmed, not assumed, and surfacing the silent --selector/--select conflict as a real operational trap rather than treating selectors.yml as pure syntactic sugar.</p>
+</div>
+
+<h2>Scope line</h2>
+<p>This lesson covers <code>selectors.yml</code>'s basic shape (<code>method</code>, <code>value</code>, the three graph-operator boolean keys) and the <code>--selector</code> flag, confirmed live against a scratch project. It does not cover dbt's full selector composition syntax (<code>union</code>, <code>intersection</code>, multi-block <code>exclude</code> beyond today's TODO, <code>default: true</code> for a selector that runs without being named at all) — read as vocabulary in the primary source below, not built today — nor the <code>path:</code>/<code>source:</code>/<code>config:</code> selection methods Day 52 also named but left unbuilt, which remain open for a future round.</p>
+
+<h2>Check yourself</h2>
+<p>Answer from memory — no scrolling up. Retrieval is the point.</p>
+
+<div class="quiz">
+  <div class="q" data-why="Confirmed live this round: pasting the literal CLI string @stg_orders into a YAML value: field fails dbt parse with a real Compilation Error. selectors.yml's definition: block is a structured object -- a graph operator becomes its own boolean key (childrens_parents: true for @, children: true for a trailing +, parents: true for a leading +) sitting next to method and value, not text embedded inside either field.">
+    <p class="stem">Why does pasting <code>"@stg_orders"</code> straight into a <code>selectors.yml</code> <code>value:</code> field fail?</p>
+    <button class="opt" data-ok>graph operators need their own separate boolean key, not inline text</button>
+    <button class="opt">YAML files simply cannot ever contain the <code>@</code> character at all</button>
+    <button class="opt"><code>selectors.yml</code> only ever accepts a single bare model name, nothing more</button>
+  </div>
+  <div class="q" data-why="Confirmed live this round: dbt list --selector build_changed_orders printed the same five nodes as Day 52's dbt list --select '@stg_orders' -- stg_orders, fct_orders, mart_delivery_sla, dim_restaurants and stg_restaurants -- because method: fqn, value: stg_orders, childrens_parents: true is the YAML encoding of exactly the @ operator Day 52 already confirmed.">
+    <p class="stem">What does <code>dbt list --selector build_changed_orders</code> resolve to, given today's YAML definition?</p>
+    <button class="opt" data-ok>the same five nodes Day 52's raw <code>@stg_orders</code> expression resolved to</button>
+    <button class="opt">only the one single model named inside the YAML <code>value</code> field</button>
+    <button class="opt">every single model and test across the whole project at once</button>
+  </div>
+  <div class="q" data-why="Confirmed live this round: dbt list --selector build_changed_orders --exclude 'tag:nightly' did not error -- it logged 'The --select and --exclude arguments are being ignored for node selection because --selector is provided' and returned the selector's own five-node result unchanged, dropping the --exclude silently rather than combining the two.">
+    <p class="stem">What actually happens when <code>--selector</code> and <code>--exclude</code> are both passed on one command?</p>
+    <button class="opt" data-ok>the extra flag is silently dropped, logged only, never an error</button>
+    <button class="opt">dbt immediately refuses to just run and exits with an error</button>
+    <button class="opt">the two flags then quietly combine into one single, narrower selection</button>
+  </div>
+</div>
+
+<h2>Go deeper</h2>
+<p><strong>Primary source:</strong> dbt's <a href="https://docs.getdbt.com/reference/node-selection/yaml-selectors">YAML selectors</a> doc — new today, alongside the <a href="https://docs.getdbt.com/reference/node-selection/methods">Node selection: methods</a> and <a href="https://docs.getdbt.com/reference/node-selection/graph-operators">Graph operators</a> pages already cited for Days 15 and 52 — is the authoritative mapping from CLI selection syntax to the YAML <code>definition:</code> shape, including the composition keys (<code>union</code>, <code>intersection</code>, <code>exclude</code>) today's scope line leaves for later. Every claim above was confirmed directly against a live <code>dbt parse</code>/<code>dbt list</code> run in a scratch project, not taken from the docs' prose alone, the same discipline Days 48-49 and 52 used.</p>
+
+<p class="next">New terms today are added to the <a href="../reference/glossary.html">glossary</a> under Day 53.<br>
+<strong>Next up:</strong> today's own scope line names three real next steps: the <code>exclude</code>/<code>union</code>/<code>intersection</code> composition keys for a selector more precise than today's two, a <code>default: true</code> selector so a bare <code>dbt build</code> with no flags at all runs something narrower than everything, or finally building the <code>path:</code>/<code>source:</code>/<code>config:</code> methods Day 52 named but left as vocabulary. The <code>airflow db migrate</code>/<code>airflow dags test</code> approval-gate block remains the standing, unresolved environment limitation (now twenty-plus rounds, 35-52) — still worth a human granting it once.<br><br>
+💬 Anything unclear — why the YAML shape differs from the CLI string, or when a named selector is worth the fixed-model trade-off against a flexible <code>$(MODEL)</code> target? Ask your teacher (the agent) in a session; the next lesson adapts to it. Hỏi bằng tiếng Việt cũng được.</p>
+
+<script src="../assets/gloss.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/nav.js"></script>
+</body>
+</html>

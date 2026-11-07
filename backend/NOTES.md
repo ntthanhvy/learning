@@ -10414,3 +10414,90 @@
   broadly), still deliberately out of scope per MISSION.md's "concepts
   first" rule; and the backfill-missing-Lesson-117-NOTES-entry gap flagged
   four rounds ago, still not independently investigated.
+- 2026-11-07 generation (Lesson 125, headless run): idempotency check first —
+  confirmed no `lessons/0125-*.html` on disk and no `n: 125`/today's date
+  entry in `nav.js` before writing anything (highest prior lesson was 124,
+  dated 2026-11-06). Orchestrator-provided context: no `lesson_completed`/
+  quiz/kata signal recorded for any course since 2026-10-15 (backend's own
+  Lesson 102 quiz, all correct), so no weak spot to chase — steady
+  sequential pacing continued. Read `MISSION.md`, `RESOURCES.md`, this
+  file's tail (Lessons 120-124), all three `learning-records/` files, and
+  skimmed Lessons 120-124 on disk for structural/style calibration before
+  picking a topic. Topic choice: Lesson 124's own round had already flagged
+  Lesson 83's Problem Details (RFC 7807/9457) as a strong, not-yet-checked
+  C#-port candidate, since ASP.NET Core ships genuine first-party support
+  rather than requiring a third-party package — confirmed this via two
+  `WebFetch` calls before writing anything: `.../fundamentals/error-handling-api`
+  confirmed `AddProblemDetails()`, the `IProblemDetailsService` interface,
+  the `UseExceptionHandler()`/`UseStatusCodePages()` middleware pair, the
+  `Accept`-header content-negotiation fallback (default writer supports
+  `application/json`, `application/problem+json`, wildcard types; anything
+  else falls back), and the `CustomizeProblemDetails` options-callback
+  example this lesson's section 3 is drawn from almost verbatim (adapted
+  from the fetched page's own `MathErrorFeature`/division-by-zero example
+  to Lesson 83's own insufficient-stock scenario for continuity);
+  `.../microsoft.aspnetcore.mvc.problemdetails` confirmed the exact five
+  properties (`Type`, `Title`, `Status`, `Detail`, `Instance`) plus the
+  `Extensions` IDictionary and its own doc comment about extension members,
+  matching Lesson 83's five-field table exactly. `which dotnet` found a
+  `dotnet` binary on PATH this round (unlike every prior round's assumption
+  it would be absent), but `dotnet --version` itself hit an interactive-
+  approval gate with no user present to approve, same class of block as
+  every round since Lesson 103 — so the three C# snippets (the
+  `ProblemDetails` class shape, the minimal-API `AddProblemDetails`/
+  `UseExceptionHandler`/`UseStatusCodePages` wiring, and the
+  `CustomizeProblemDetails` callback with an inline `StockErrorFeature`
+  stand-in type, added specifically so the snippet has no undeclared
+  identifiers) were checked by hand against both fetched docs pages'
+  exact signatures instead, consistent with every prior C#-port round's
+  fallback. Three new terms, each checked against the glossary first via
+  grep — zero collisions: `ProblemDetails`, `IProblemDetailsService`,
+  `CustomizeProblemDetails`. Added all three rows immediately after Lesson
+  124's `PasswordVerificationResult` row, same Term/Tiếng Việt (dev-style)/
+  English column order. Verification performed via throwaway `node -e`
+  scripts (nothing written to a file): (1) a quiz-word-count check per
+  `<div class="q">` block — first draft landed uneven (Q1 9/9/11/10, Q2
+  13/9/10/11, Q3 10/9/10/10, Q4 11/9/9/11), fixed through several rewrite-
+  and-recount passes to exactly 9/9/9/9, 10/10/10/10, 10/10/10/10, and
+  10/10/10/10 across the four questions, exactly one `data-ok` and four
+  options per question confirmed the same way; (2) an HTML tag-balance
+  check across div/p/code/button/script/dfn/pre/h2/h1/em/strong/a/table/
+  tr/th/td — clean (div 7/7, p 17/17, code 73/73, button 16/16, script
+  3/3, dfn 3/3, pre 3/3, h2 7/7, h1 1/1, strong 3/3, a 3/3, table 1/1, tr
+  6/6, th 8/8, td 10/10), all three `dfn` tags confirmed via a corrected
+  regex to carry both `data-en=` and `data-vn=` (a naive first regex
+  misfired on one `dfn` whose attribute text contains a literal `=>`,
+  confirmed a false alarm — `>` inside a quoted HTML attribute value is
+  valid and `gloss.js` reads via `dataset.en`/`dataset.vn`, unaffected);
+  (3) a brace/paren balance check on all three `<pre><code>` blocks after
+  stripping syntax-highlighting spans — all balanced (7/7, 2/2 braces and
+  12/12 parens, 9/9 braces and 3/3 parens); (4) a raw-unescaped-`&` scan
+  across the lesson — zero hits; (5) a table/tr/th/td/p/div/html/head/
+  body/title/script balance check on `glossary.html` after its three-row
+  addition — balanced (tr 397/397, td 1188/1188), plus a duplicate-term
+  scan across all 396 first-column entries — zero duplicates; (6)
+  `node --check` against `nav.js`, `gloss.js`, `quiz.js` — all clean,
+  before and after the `nav.js` edit; (7) a basic HTML well-formedness
+  check (one `<!DOCTYPE html>`, one `<html>`/`</html>`, three script tags
+  in gloss/quiz/nav order) — clean. Registered Lesson 125 in `nav.js`
+  (date 2026-11-07) right after `n: 124`, confirmed exactly one matching
+  `n: 125` entry and exactly one matching `0125-*.html` file on disk
+  afterward. No new `RESOURCES.md` line added — both fetched pages are
+  `learn.microsoft.com`, the same domain already covered by this file's
+  standing entries' pattern; both cited inline in the lesson's own "Go
+  deeper" section instead, consistent with every prior C#-port round. No
+  new `learning-records/` file — the topic came from a prior round's own
+  flagged candidate list, not a new surprise about the learner. `bin/
+  record-progress backend lesson_generated --day 125 --lesson
+  0125-problem-details-aspnetcore-iproblemdetailsservice.html --detail
+  '{"by":"headless"}'` ran directly and succeeded, no approval blocker.
+  Candidates spotted but not picked this round, still worth checking:
+  Lesson 51's ETags/conditional requests (HTTP-native, worth checking for
+  ASP.NET Core first-party ETag middleware specifically); Lesson 35's
+  upsert/ON CONFLICT (Postgres-native, likely no clean C# BCL/EF-Core-
+  first-party angle); Go's `select`-statement arbitration rules, still
+  deferred many rounds running on fetched-page-truncation grounds; Lesson
+  49's dead-letter queues, still deferred pending a first-party ASP.NET
+  Core angle; Polly/.NET resilience libraries, still deliberately out of
+  scope; and the backfill-missing-Lesson-117-NOTES-entry gap, still not
+  independently investigated.

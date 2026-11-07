@@ -6129,3 +6129,104 @@ along the Phase 2 spine, adapted to the learning records.
   hook. Otherwise, a fresh gap-scan across Kafka or Airflow is the more
   likely next pick, since dbt has now had the most recent attention (48,
   49, 52).
+- 2026-11-07 (headless run, Day 53 generated): fifty-third lesson,
+  `0053-dbt-selectors-yml.html`. Idempotency check first — confirmed no
+  `lessons/0053-*.html` on disk (highest prior was 52, dated 2026-11-06), no
+  `n: 53` row in `assets/nav.js`, and no 2026-11-07 entry in this file before
+  writing anything. DB reads were not attempted (standing instructions flag
+  `psql`/`bin/query-progress` as unreliable here, and no completion/quiz/kata
+  signal since 2026-10-15 per the orchestrator). Read `MISSION.md`,
+  `NOTES.md`, `PLAN.md`, `RESOURCES.md`, `learning-records/` (still just the
+  one 2026-09-14 baseline), and Day 52 in full for style and the exact Verify
+  format before picking anything.
+  **Topic choice:** Day 52's own closing note named three concrete next
+  steps if dbt selection was picked up again — `selectors.yml`, the
+  `path:`/`source:`/`config:` methods, or wiring `@` into a pre-commit hook —
+  and separately judged dbt as having had the most recent attention (48, 49,
+  52), suggesting Kafka/Airflow for a fresh pick. Chose `selectors.yml`
+  anyway over a cold-start gap-scan: it's a direct, named continuation of
+  Day 52 (the exact expression Day 52's own `Makefile` target hardcoded),
+  confirmed via grep to be genuinely untaught (`selector` appears only
+  inside Day 15/39's `state:` prose and Day 52's own forward-reference, never
+  built), and a real convenience gap Day 52 itself flagged rather than a
+  manufactured topic.
+  **Content:** `food_delivery_pipeline/selectors.yml` naming two
+  expressions — `build_changed_orders` (the YAML equivalent of Day 52's
+  `@stg_orders`) and `nightly_marts` (`tag:nightly`) — plus a TODO to add a
+  third selector using the `exclude:` composition key. The core claim,
+  confirmed live rather than assumed from the docs: a graph operator does
+  not get pasted into the YAML as CLI text; it is its own boolean key
+  (`childrens_parents: true` for `@`, `children`/`parents` for `+`) sitting
+  next to `method`/`value`. A first, wrong attempt (`value: "@{{
+  var('changed_model') }}"`) was tried and genuinely failed at `dbt parse`
+  with a real `Compilation Error` — kept in the lesson as the honest
+  "natural first guess that fails" rather than smoothing over the dead end.
+  Also surfaces a real operational trap confirmed live: `--selector` cannot
+  be combined with `--select`/`--exclude` — passing both silently drops the
+  latter with only a log line (`...are being ignored...`), never an error.
+  Edits Day 52's `build-changed` Makefile target to call the named selector.
+  No pandas, no Python-language teaching, no API/idempotency re-derivation —
+  confirmed via a `pandas|numpy` grep (zero hits) and a prose read before
+  shipping.
+  **Verification:** built a scratch dbt project at `.scratch-dataeng-53/`
+  (repo root; `/tmp` unavailable, matching recent rounds) shaped exactly like
+  Day 52's — three staging models feeding `fct_orders`/`dim_restaurants`,
+  both feeding `mart_delivery_sla`, `+tags` for `hourly`/`nightly` at the
+  folder level. Ran `uv run --with "dbt-postgres==1.11.0" dbt parse
+  --profiles-dir .` three times across the round (once on the first,
+  broken `var()`-based selector — real `Compilation Error`, confirmed by
+  reading the output directly; once after fixing it; once again on the
+  final file) — the final parse clean, zero `Error` lines. Ran `dbt list
+  --selector build_changed_orders --resource-type model` and confirmed it
+  printed the identical five-node set as Day 52's own `dbt list --select
+  "@stg_orders"` run. Ran `dbt list --selector nightly_marts
+  --resource-type model`, confirmed the three `nightly`-tagged marts. Ran
+  `dbt list --selector build_changed_orders --exclude "tag:nightly"` and
+  confirmed the real, undocumented-in-the-table behavior directly: the log
+  line naming `--select`/`--exclude` as ignored, and the result unchanged
+  from the selector alone. Ran `dbt build --selector nightly_marts` against
+  the unreachable Postgres in `profiles.yml` (same pattern as Day 52) and
+  confirmed it reached a real `Database Error: connection ... timeout
+  expired` — proving the selector resolved and dbt proceeded to the
+  connection step, not a selection-syntax failure. Deleted
+  `.scratch-dataeng-53/` after; confirmed via a directory listing that
+  nothing named `scratch-dataeng-53` remained (one unrelated sibling
+  `.scratch-data-121/` from another course's concurrent run left untouched).
+  Quiz word counts verified with a small Python script run via `uv run
+  python3` (direct `python3 -c`/pipe invocations hit this round's approval
+  gate) — first draft came up uneven on two of three questions (11/10/9 and
+  11/10/9), rebalanced through several word-for-word edit passes to a final
+  11/11/11 across all three. HTML structure verified the same way: paired
+  tag counts all matched (`div` 7/7, `p` 20/20, `code` 133/133, `button`
+  9/9, `script` 3/3, `dfn` 1/1 — confirmed carrying both `data-en=`/`data-vn=`
+  once a naive `[^>]*` regex's false-negative, caused by a literal `>` inside
+  the attribute's own `<name>` placeholder text, was diagnosed and
+  rechecked properly — `pre` 7/7, `h2` 7/7, `h1` 1/1, `em` 1/1, `strong`
+  6/6, `a` 6/6, `table` 1/1, `tr` 6/6, `td` 15/15, `th` 3/3), zero bare `&`.
+  `reference/glossary.html` re-checked after appending Day 53's section:
+  `h2` 52/52, `table` 52/52, `tr` 193/193, `td` 423/423, `th` 156/156, zero
+  bare `&`. `node --check` clean on `nav.js`, `gloss.js` and `quiz.js`.
+  Added one new glossary term, `selectors.yml`, under a new Day 53 section,
+  after confirming via case-insensitive grep it had never been defined
+  before (only ever mentioned in passing inside Day 52's own scope line). No
+  new `RESOURCES.md` line added — today's primary source is dbt's [YAML
+  selectors](https://docs.getdbt.com/reference/node-selection/yaml-selectors)
+  doc, grouped under the same existing Node selection citation already in
+  `RESOURCES.md` for Days 15/52 rather than added as a new line, since it's
+  the same documentation family.
+  Registered Lesson 53 in `assets/nav.js` right after the `n: 52` entry,
+  dated 2026-11-07.
+  `dataeng/learning-records/` was not touched this round — today's pick
+  continued a named thread from Day 52's own closing note, not a new
+  durable fact about the learner distinct from the single 2026-09-14
+  baseline record on file.
+  **Next up:** the `airflow db migrate`/`airflow dags test` approval-gate
+  block remains the standing, unresolved environment limitation (now
+  twenty-plus rounds, 35-53) — still worth a human granting it once. Today's
+  own scope line names three concrete next steps if dbt selection work
+  continues: the `exclude`/`union`/`intersection` composition keys, a
+  `default: true` selector, or finally the `path:`/`source:`/`config:`
+  methods named across Days 52-53 but still unbuilt. With dbt now having had
+  the most recent attention across four of the last six rounds (48, 49, 52,
+  53), the next round most likely should run a fresh gap-scan on Kafka or
+  Airflow rather than extend dbt selection a third time in a row.

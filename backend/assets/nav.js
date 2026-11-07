@@ -256,6 +256,8 @@
       file: "lessons/0123-service-to-service-auth-addcertificate-addjwtbearer.html" },
     { n: 124, date: "2026-11-06", title: "Password hashing, now in C# too",
       file: "lessons/0124-password-hashing-identity-passwordhasher.html" },
+    { n: 125, date: "2026-11-07", title: "Problem Details, now in C# too",
+      file: "lessons/0125-problem-details-aspnetcore-iproblemdetailsservice.html" },
   ];
 
   const REFS = [

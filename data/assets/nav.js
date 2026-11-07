@@ -248,6 +248,8 @@
       file: "lessons/0119-np-bincount-histogram.html" },
     { n: 120, date: "2026-11-06", title: "np.lexsort(): multi-key sort positions, keys passed in a backwards-looking order",
       file: "lessons/0120-np-lexsort.html" },
+    { n: 121, date: "2026-11-07", title: "np.partition() / np.argpartition(): the fast \"top N\" primitive under nlargest()",
+      file: "lessons/0121-np-partition-argpartition.html" },
   ];
 
   const REFS = [

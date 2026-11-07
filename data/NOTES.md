@@ -11496,3 +11496,98 @@
   120 --lesson 0120-np-lexsort.html --detail '{"by":"headless"}'` was run
   directly from the repo root and returned `recorded: data/lesson_generated
   day=120 lesson=0120-np-lexsort.html`.
+- 2026-11-07 (headless run): zero prior context. Confirmed no
+  `lessons/0121-*.html` on disk, no `n: 121` entry in `nav.js`, and no
+  `2026-11-07` journal entry already present before writing anything
+  (highest prior lesson was 120, dated 2026-11-06). Read `MISSION.md`
+  (unmodified), this file's own conventions block plus the tail (Lesson
+  120's own journal entry, which named `np.partition()`/`argpartition()`
+  as its one standing candidate), and Lessons 119-120's lesson/practice
+  files as structural templates. `learning-records/` still has only the
+  single 2026-07 baseline; no quiz/kata signal recorded for any course
+  since 2026-10-15 — no weak-spot to chase, continued steady sequential
+  pacing. Topic: `np.partition()`/`np.argpartition()`, picking up Lesson
+  120's own named candidate — confirmed via grep across every lesson,
+  practice file, and the glossary that it was still genuinely untaught.
+  It is the primitive underneath Lesson 10's `nlargest()`/`nsmallest()`
+  and Lesson 73's `argsort()`, the same "name the NumPy function
+  underneath an already-taught idiom" lineage this course has run since
+  Lessons 93, 100, 102, 109-112, 114, and 117-120. Confirmed pandas 3.1.1
+  and numpy 2.5.4, unchanged from Lesson 120's own bump. No `/tmp` access
+  in this sandbox, consistent with every prior round's note — every claim
+  below was probed directly first via temporary scripts in
+  `.scratch-data-121/` at the repo root, deleted after use, never tracked
+  by git. Confirmed directly: on a small (7-element) array,
+  `np.partition(x, k)` happened to come out fully sorted, which could be
+  mistaken for the actual contract; confirmed directly on a 2,000-element
+  array of random integers that this is not the real guarantee — only
+  the value at index `k` is exact (matches `np.sort(x)[k]`), the left
+  side is all `<=` it and the right side all `>=` it, but neither side
+  ends up internally sorted (`list(part[:k]) == sorted(...)` is False).
+  Confirmed directly, timing top-10-of-2,000,000 on this machine:
+  `np.partition()` ran roughly 6.5x faster than a full `np.sort()` for
+  the same array and `k` — the performance hook that justifies the
+  function's existence over always reaching for a full sort. Confirmed
+  directly the classic interview idiom, `np.argpartition(arr, -N)[-N:]`,
+  returns the N largest values' indices (order not guaranteed among
+  themselves), matching the same *set* of values as
+  `Series.nlargest(N)` (Lesson 10) exactly on a 30-element random array.
+  Confirmed directly: a negative `kth` counts from the end like ordinary
+  indexing; a list of `kth` values (e.g. `[1, 3]`) partitions correctly
+  at every listed position in one call; an out-of-bounds `kth` raises
+  `ValueError: kth(=5) out of bounds (3)` immediately. Confirmed directly
+  a NaN sorts to the very end, byte-identical to `np.sort()`'s own
+  placement — not a separate undocumented trap this time, unlike
+  Lessons 118/119's findings. Added exactly one new glossary row,
+  "np.partition() / np.argpartition()", directly after Lesson 120's
+  "np.lexsort()" entry — confirmed via a case-insensitive scan of every
+  first-column term that no prior row already covered this name.
+  Verification performed mechanically via scratch scripts in
+  `.scratch-data-121/` (deleted after, never tracked by git): (1) a
+  quiz-word-count script confirmed exactly 13/13/13 option words across
+  all three questions after several rounds of wording tweaks, one
+  `data-ok` per question throughout; (2) an HTML tag-balance check came
+  back fully balanced on every pass (html 1/1, head 1/1, body 1/1, div
+  5/5, p 19/19 matching Lesson 120's own precedent for one unopened `<p>`
+  inside a `.callout` div, pre 5/5, code 60/60, h1 1/1, h2 8/8, strong
+  4/4, em 2/2, button 9/9, script 3/3, dfn 1/1, span 59/59, a 2/2, title
+  1/1); (3) a raw-unescaped-`&` regex scan found exactly the two expected
+  `&` characters inside the lesson's own `cd ~/learning/data && uv run
+  ...` shell command, zero elsewhere; (4) exactly 1 `<dfn>`-carrying tag,
+  with both `data-en`/`data-vn`, matching the 1 new glossary row added. A
+  separate table-balance check on `glossary.html` after its one-row
+  addition — balanced (tr 194/194, td 579/579, zero raw `&`), plus a
+  duplicate-term scan across all 193 first-column entries — zero
+  duplicates, confirmed the new row's exact term string appears exactly
+  once. `node --check` confirmed `nav.js`, `gloss.js`, and `quiz.js` all
+  still parse as valid JavaScript, with exactly one `n: 121` entry and
+  one `0121-np-partition-argpartition` file reference in `nav.js`. The
+  shipped (unsolved) `practice/121_np_partition_argpartition.py` was run
+  directly from its real `practice/` location (via `uv run --with
+  pandas python3`) and printed exactly 3 ✗ with no raw traceback. Built a
+  solved copy in `.scratch-data-121/practice/` (deleted after, never
+  tracked by git); the first run surfaced a real bug, not just an
+  unfilled blank — `ex1_pivot_matches = ex1_part[k] == ex1_sorted[k]`
+  produced a `numpy.bool_`, which fails Python's `is True` identity
+  check used by the later assertion, so Exercise 1 printed ✗ even once
+  correctly solved. Fixed by wrapping in `bool(...)` in both the shipped
+  file and the scratch solved copy; re-ran both afterward — the solved
+  copy then printed all 3 ✓ and "All green", and the shipped file,
+  re-run again directly from `practice/`, still reproduced the identical
+  all-✗ result, confirming the solved copy's edits never leaked back
+  into the shipped baseline. This round's own fresh scan leaves no
+  standing candidate pre-committed for tomorrow, per this course's
+  "fresh scan each round" convention. `git status --short` after all
+  edits confirmed only the intended `data/` files were touched
+  (`data/assets/nav.js`, `data/reference/glossary.html`, new
+  `data/lessons/0121-np-partition-argpartition.html`, new
+  `data/practice/121_np_partition_argpartition.py`, and this file) plus
+  unrelated concurrent changes in other course directories from other
+  runs, not touched by this one. The scratch directory
+  `.scratch-data-121/` was deleted after verification, at the repo root
+  but never tracked by git, matching prior rounds' own precedent for
+  this environment. `bin/record-progress data lesson_generated --day 121
+  --lesson 0121-np-partition-argpartition.html --detail
+  '{"by":"headless"}'` was run directly from the repo root and returned
+  `recorded: data/lesson_generated day=121
+  lesson=0121-np-partition-argpartition.html`.
